@@ -1,0 +1,48 @@
+name: Deploy and Run FUTOI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy-run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p "${{ secrets.SERVER_PORT }}" "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Rsync project to server
+        run: |
+          rsync -az --delete \
+            --exclude=".git" \
+            --exclude=".github" \
+            -e "ssh -p ${{ secrets.SERVER_PORT }}" \
+            ./ ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/www/moex-robot/
+
+      - name: Run script on server
+        run: |
+          ssh -p "${{ secrets.SERVER_PORT }}" "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" << 'EOF'
+          set -e
+          cd /var/www/moex-robot
+          # Убедимся, что есть Python 3
+          if ! command -v python3 >/dev/null 2>&1; then
+            if command -v apt >/dev/null 2>&1; then
+              sudo apt update && sudo apt install -y python3
+            elif command -v yum >/dev/null 2>&1; then
+              sudo yum install -y python3
+            fi
+          fi
+          echo "Running scripts/get_futoi.py ..."
+          python3 scripts/get_futoi.py | head -n 80
+          EOF
