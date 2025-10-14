@@ -1,61 +1,131 @@
-name: Deploy and Run FUTOI
+#!/usr/bin/env python3
+import os
+import sys
+import json
+from datetime import datetime, timezone
+from urllib.request import urlopen, Request
+from urllib.parse import urlencode
 
-on:
-  workflow_dispatch:
-  push:
-    branches: [ main ]
+# Конфигурация через переменные окружения
+SYMBOL = os.getenv("FUTOI_SYMBOL", "Si")
+LIMIT = int(os.getenv("FUTOI_LIMIT", "100"))
+OUT_DIR = os.getenv("FUTOI_OUT_DIR", "data")
+OUT_FILE = os.getenv("FUTOI_OUT_FILE", f"futoi_{SYMBOL}.jsonl")
 
-jobs:
-  deploy-run:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+BASE = "https://moexalgo.github.io/api/rest/futoi"
+URL = f"{BASE}?{urlencode({'symbol': SYMBOL, 'limit': LIMIT})}"
 
-      - name: Setup SSH agent
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+def log(msg):
+    ts = datetime.now(timezone.utc).isoformat()
+    print(f"[{ts}] {msg}", file=sys.stderr)
 
-      - name: Add host to known_hosts
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -p "${{ secrets.SERVER_PORT }}" "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+def fetch():
+    req = Request(URL, headers={"User-Agent": "moex-robot/0.1"})
+    with urlopen(req, timeout=30) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"HTTP {resp.status}")
+        return resp.read().decode("utf-8")
 
-      - name: Ensure target directory exists (in HOME)
-        env:
-          SSH_USER: ${{ secrets.SERVER_USER }}
-          SSH_HOST: ${{ secrets.SERVER_HOST }}
-          SSH_PORT: ${{ secrets.SERVER_PORT }}
-        run: |
-          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "mkdir -p ~/apps/moex-robot"
+def ensure_dir(path):
+    os.makedirs(path, exist_ok=True)
 
-      - name: Rsync project to server (HOME path)
-        env:
-          SSH_USER: ${{ secrets.SERVER_USER }}
-          SSH_HOST: ${{ secrets.SERVER_HOST }}
-          SSH_PORT: ${{ secrets.SERVER_PORT }}
-        run: |
-          rsync -az --delete \
-            --exclude=".git" \
-            --exclude=".github" \
-            -e "ssh -p $SSH_PORT" \
-            ./ "$SSH_USER@$SSH_HOST:~/apps/moex-robot/"
+def normalize_records(raw_text):
+    """
+    Ожидаем JSON. Если придет текст — вернем одну строку как есть.
+    Приводим к списку записей (dict).
+    """
+    try:
+        data = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return [{"raw": raw_text}]
 
-      - name: Run script on server
-        env:
-          SSH_USER: ${{ secrets.SERVER_USER }}
-          SSH_HOST: ${{ secrets.SERVER_HOST }}
-          SSH_PORT: ${{ secrets.SERVER_PORT }}
-        run: |
-          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" << 'EOF'
-          set -e
-          cd ~/apps/moex-robot
-          # Проверим Python 3 в PATH
-          if ! command -v python3 >/dev/null 2>&1; then
-            echo "python3 not found in PATH. Please install Python 3 on the server."
-            exit 1
-          fi
-          echo "Running scripts/get_futoi.py ..."
-          python3 scripts/get_futoi.py | head -n 80
-          EOF
+    # Универсально: если словарь — оборачиваем в список
+    if isinstance(data, dict):
+        # Попробуем найти поле с записями
+        for key in ("data", "items", "rows", "records"):
+            if key in data and isinstance(data[key], list):
+                return data[key]
+        return [data]
+    elif isinstance(data, list):
+        return data
+    else:
+        return [{"value": data}]
+
+def load_existing_keys(path):
+    """
+    Для идемпотентности: собираем множество уникальных ключей записей, чтобы не дублировать.
+    Ключ строим по полям ts/ts_event/ts_server + symbol + oi, если есть.
+    """
+    keys = set()
+    if not os.path.exists(path):
+        return keys
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            key = make_key(obj)
+            if key:
+                keys.add(key)
+    return keys
+
+def make_key(obj):
+    candidates = []
+    for k in ("ts", "timestamp", "ts_event", "ts_server", "time"):
+        if k in obj:
+            candidates.append(str(obj[k]))
+    if "symbol" in obj:
+        candidates.append(str(obj["symbol"]))
+    if "oi" in obj:
+        candidates.append(str(obj["oi"]))
+    if not candidates:
+        return None
+    return "|".join(candidates)
+
+def main():
+    log(f"Fetching: {URL}")
+    raw = fetch()
+    records = normalize_records(raw)
+    log(f"Records fetched: {len(records)}")
+
+    ensure_dir(OUT_DIR)
+    out_path = os.path.join(OUT_DIR, OUT_FILE)
+
+    existing = load_existing_keys(out_path)
+    written = 0
+
+    with open(out_path, "a", encoding="utf-8") as f:
+        for rec in records:
+            # добавляем служебные поля, если их нет
+            rec.setdefault("symbol", SYMBOL)
+            rec.setdefault("_fetched_at", datetime.now(timezone.utc).isoformat())
+
+            key = make_key(rec)
+            # если ключа нет, всё равно пишем (неидеальные данные), иначе — проверяем дубликаты
+            if key and key in existing:
+                continue
+
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            written += 1
+            if key:
+                existing.add(key)
+
+    log(f"Wrote: {written} lines → {out_path}")
+    # Для CI выведем первые строки для видимости
+    try:
+        with open(out_path, "r", encoding="utf-8") as f:
+            head = [next(f).rstrip() for _ in range(5)]
+        print("\n".join(head))
+    except Exception:
+        pass
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        log(f"ERROR: {e}")
+        sys.exit(1)
