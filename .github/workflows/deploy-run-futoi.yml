@@ -22,6 +22,10 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -p "${{ secrets.SERVER_PORT }}" "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
 
+      - name: Ensure target directory exists on server
+        run: |
+          ssh -p "${{ secrets.SERVER_PORT }}" "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" "sudo mkdir -p /var/www/moex-robot && sudo chown -R ${USER:-$LOGNAME} /var/www/moex-robot || true"
+
       - name: Rsync project to server
         run: |
           rsync -az --delete \
@@ -35,7 +39,6 @@ jobs:
           ssh -p "${{ secrets.SERVER_PORT }}" "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" << 'EOF'
           set -e
           cd /var/www/moex-robot
-          # Убедимся, что есть Python 3
           if ! command -v python3 >/dev/null 2>&1; then
             if command -v apt >/dev/null 2>&1; then
               sudo apt update && sudo apt install -y python3
