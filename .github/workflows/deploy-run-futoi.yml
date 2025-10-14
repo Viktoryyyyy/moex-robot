@@ -22,29 +22,39 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -p "${{ secrets.SERVER_PORT }}" "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
 
-      - name: Ensure target directory exists on server
+      - name: Ensure target directory exists (in HOME)
+        env:
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
         run: |
-          ssh -p "${{ secrets.SERVER_PORT }}" "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" "sudo mkdir -p /var/www/moex-robot && sudo chown -R ${USER:-$LOGNAME} /var/www/moex-robot || true"
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "mkdir -p ~/apps/moex-robot"
 
-      - name: Rsync project to server
+      - name: Rsync project to server (HOME path)
+        env:
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
         run: |
           rsync -az --delete \
             --exclude=".git" \
             --exclude=".github" \
-            -e "ssh -p ${{ secrets.SERVER_PORT }}" \
-            ./ ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/var/www/moex-robot/
+            -e "ssh -p $SSH_PORT" \
+            ./ "$SSH_USER@$SSH_HOST:~/apps/moex-robot/"
 
       - name: Run script on server
+        env:
+          SSH_USER: ${{ secrets.SERVER_USER }}
+          SSH_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_PORT: ${{ secrets.SERVER_PORT }}
         run: |
-          ssh -p "${{ secrets.SERVER_PORT }}" "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" << 'EOF'
+          ssh -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" << 'EOF'
           set -e
-          cd /var/www/moex-robot
+          cd ~/apps/moex-robot
+          # Проверим Python 3 в PATH
           if ! command -v python3 >/dev/null 2>&1; then
-            if command -v apt >/dev/null 2>&1; then
-              sudo apt update && sudo apt install -y python3
-            elif command -v yum >/dev/null 2>&1; then
-              sudo yum install -y python3
-            fi
+            echo "python3 not found in PATH. Please install Python 3 on the server."
+            exit 1
           fi
           echo "Running scripts/get_futoi.py ..."
           python3 scripts/get_futoi.py | head -n 80
