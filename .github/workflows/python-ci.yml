@@ -22,15 +22,11 @@ jobs:
 
       - name: Syntax check (py_compile)
         run: |
-          python - <<'PY'
-import compileall, sys
-ok = compileall.compile_dir('.', force=True, quiet=1)
-sys.exit(0 if ok else 1)
-PY
+          python -c "import compileall, sys; ok=compileall.compile_dir('.', force=True, quiet=1); sys.exit(0 if ok else 1)"
 
       - name: Smoke tests (help/version)
         run: |
           set -e
           for f in fetch_tradestats.py fetch_obstats.py fetch_futoi.py pivot_futoi_apply.py fetch_hi2.py merge_5m.py run_today.py run_backfill.py signal_mr1.py loop_signal_mr1.py; do
-            [ -f "$f" ] && (python "$f" --help >/dev/null 2>&1 || true)
+            if [ -f \"$f\" ]; then python \"$f\" --help >/dev/null 2>&1 || true; fi
           done
