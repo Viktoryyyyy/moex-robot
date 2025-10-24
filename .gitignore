@@ -1,9 +1,24 @@
-venv/
-__pycache__/
-*.pyc
+# Секреты
 .env
+config.ini
+
+# Данные и артефакты
 *.csv
 !README*.csv
 data/
 logs/
+
+# Кэш/служебные файлы Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Виртуальные окружения
+venv/
+env/
+.venv/
+
+# IDE/системные
+.idea/
 .DS_Store
