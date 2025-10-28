@@ -5,8 +5,8 @@ from dotenv import load_dotenv
 
 def main():
     load_dotenv()
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+    token = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.getenv("CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID", "")
     if not token:
         raise SystemExit("Нет TELEGRAM_BOT_TOKEN в .env")
     if not chat_id:

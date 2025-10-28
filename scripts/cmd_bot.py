@@ -31,7 +31,7 @@ def send_message(token: str, chat_id: int, text: str):
 
 def main():
     load_dotenv()
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    token = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN", "")
     admin_id = int(os.getenv("ADMIN_USER_ID", "0"))
     if not token or not admin_id:
         raise SystemExit("Нужны TELEGRAM_BOT_TOKEN и ADMIN_USER_ID в .env")
