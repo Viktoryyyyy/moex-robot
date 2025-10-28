@@ -103,12 +103,18 @@ def save_state(d):
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     STATE_PATH.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
 
+from config_utils import load_config
+
 def main():
     ap = argparse.ArgumentParser(description="Сформировать и (опц.) отправить сообщение MR-1 по последней свече Si 5m.")
     ap.add_argument("--send", action="store_true", help="Отправить сообщение в Telegram (по умолчанию только печать).")
     ap.add_argument("--ignore-liq", action="store_true", help="Игнорировать фильтр ликвидности при отправке.")
     ap.add_argument("--force", action="store_true", help="Игнорировать антидубликат и отправить в любом случае.")
     args = ap.parse_args()
+
+    # конфиг по умолчанию (HUB)
+    cfg = load_config()
+
 
     path = pick_latest_si_csv()
     if not path:
@@ -159,9 +165,10 @@ def main():
     liq_reason = "OK"
     # приоритет: liq_smooth (старый конвейер)
     if "liq_smooth" in df.columns:
+        liq_thr = float(cfg.get("liq_threshold", 0.5))
         try:
-            liq_ok = float(row.get("liq_smooth")) < 0.5
-            liq_reason = f"liq_smooth={float(row.get('liq_smooth')):.3f}"
+            liq_ok = float(row.get("liq_smooth")) < liq_thr
+            liq_reason = f"liq_smooth={float(row.get('liq_smooth')):.3f} < {liq_thr:.2f}"
         except Exception:
             pass
     # fallback: liq_flag_low (0 — ликвидно, 1 — низкая ликвидность)
