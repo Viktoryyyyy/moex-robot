@@ -53,6 +53,7 @@ def main():
 
     try:
         while True:
+        wait_until_next_bar(5)
             if stop_path.exists():
                 print(f"🛑 Обнаружен стоп-файл: {stop_path}. Останавливаюсь.")
                 break
