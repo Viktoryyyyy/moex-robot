@@ -4,10 +4,10 @@ import os, re, glob, sys
 import pandas as pd
 from datetime import datetime
 
-TIME_CANDIDATES = ["datetime","end","timestamp","ts","DATETIME","TRADEDATE","date","TIME","TRADETIME","time"]
-CLOSE_CANDIDATES = ["CLOSE","close","Close","LAST","PRICECLOSE","PRICE_CLOSE","LAST_PRICE","PRICE"]
+TIME_CANDIDATES = ["timestamp","datetime","end","DATETIME","ts_SYSTIME","ts_tradedate","ts_tradetime","TRADEDATE","TIME","TRADETIME","date","time"]
+CLOSE_CANDIDATES = ["ts_pr_close","ts_sec_pr_close","CLOSE","close","LAST","PRICECLOSE","LAST_PRICE","PRICE"]
 SIG_CANDIDATES = ["mr1_signal", "signal_mr1", "signal"]
-AUX_FIELDS = ["liq_smooth","VOL","volume","OPENPOSITION","PREVOPENPOSITION","oi","openinterest"]
+AUX_FIELDS = ["ts_vol","VOL","volume","ts_oi_close","OPENPOSITION","openinterest","liq_flag_low"]
 
 def extract_date_from_name(path: str):
     m = re.search(r"si_5m_(\\d{4}-\\d{2}-\\d{2})\\.csv$", os.path.basename(path), re.IGNORECASE)
