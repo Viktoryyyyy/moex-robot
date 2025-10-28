@@ -3,6 +3,7 @@
 import os, time, json, requests
 from pathlib import Path
 from dotenv import load_dotenv
+from config_utils import load_config, save_config
 
 OFFSET_FILE = Path(".state/cmd_bot.offset")
 STOP_FILE   = Path(".state/stop_mr1")
@@ -96,7 +97,7 @@ def main():
                     send_message(token, chat_id, "ℹ️ Статус: " + "; ".join(parts))
 
                 else:
-                    send_message(token, chat_id, "Команды: /start — включить; /stop — выключить; /status — статус.")
+                    send_message(token, chat_id, "Команды: /signal — разовая отправка; /auto_on — включить рассылку; /auto_off — выключить; /status — статус; /setk <k>; /setliq <thr>.")
 
             if last_update_id is not None:
                 save_offset(last_update_id)
