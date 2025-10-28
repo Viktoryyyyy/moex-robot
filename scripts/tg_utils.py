@@ -14,9 +14,16 @@ def send_message(text: str) -> dict:
 
     r = requests.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
-        json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True, "parse_mode": "HTML"},
+        json={"chat_id": chat_id, "text": text, "disable_web_page_preview": True},
         timeout=10
     )
-    r.raise_for_status()
+    try:
+        r.raise_for_status()
+    except Exception as e:
+        try:
+            print(f"Telegram error: {r.status_code} {r.text}")
+        except Exception:
+            pass
+        raise
     return r.json()
 

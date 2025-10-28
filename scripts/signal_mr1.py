@@ -174,6 +174,11 @@ def main():
     print("-"*60)
     print(msg)
     print("Источник:", path)
+    # логируем сигнал (dry)
+    try:
+        log_signal(str(ts), sig_str, float(close_val) if "close_val" in locals() else None, path, "dry")
+    except Exception as e:
+        print(f"⚠️ Ошибка записи лога: {e}")
     # --- фильтр ликвидности ---
     liq_ok = True
     liq_reason = "OK"
@@ -212,7 +217,7 @@ def main():
 
     if args.send and should_send:
         # HTML-формат: слегка подчистим строку
-        html_msg = (
+        text_msg = (
             f"<b>MOEX Bot — MR-1</b>\n"
             f"{sig_str}\n"
             f"Инструмент: <b>Si (5m)</b>\n"
@@ -222,13 +227,22 @@ def main():
             + (f"\nЛиквидность: <code>{liq_reason}</code>")
         )
         from tg_utils import send_message
-        resp = send_message(html_msg)
-        ok = resp.get("ok")
+        try:
+            resp = send_message(text_msg)
+            ok = resp.get("ok")
+        except Exception as e:
+            ok = False
+            print(f"✖️ Ошибка отправки: {e}")
         mid = (resp.get("result") or {}).get("message_id")
         print(f"Telegram отправка: OK={ok}, message_id={mid}")
         if ok:
             state["last_sent"] = key_curr
             save_state(state)
+        # логируем исход независимо от успеха
+        try:
+            log_signal(str(ts), sig_str, float(close_val) if "close_val" in locals() else None, path, "sent" if ok else "error")
+        except Exception as e:
+            print(f"⚠️ Ошибка записи лога: {e}")
     elif args.send and not should_send:
         print("ℹ️ Отправка отключена из-за антидубликата.")
     else:
