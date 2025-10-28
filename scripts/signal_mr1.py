@@ -4,8 +4,8 @@ import os, re, glob, sys
 import pandas as pd
 from datetime import datetime
 
-TIME_CANDIDATES = ["datetime", "end", "timestamp", "TRADEDATE", "date", "time"]
-CLOSE_CANDIDATES = ["close", "CLOSE", "Close"]
+TIME_CANDIDATES = ["datetime","end","timestamp","ts","end_time","DATETIME","TRADEDATE","date","time","TIME","TRADETIME","SYSTIME","begin","open_time"]
+CLOSE_CANDIDATES = ["close","CLOSE","Close","C","LAST","last","PRICECLOSE","PRICE_CLOSE","close_price","CLOSE_PRICE","LAST_PRICE","PRICE"]
 SIG_CANDIDATES = ["mr1_signal", "signal_mr1", "signal"]
 AUX_FIELDS = ["liq_smooth", "volume", "VOL", "oi", "OPENINTEREST", "openinterest"]
 
@@ -32,6 +32,26 @@ def first_existing(df, candidates):
     for c in candidates:
         if c in df.columns:
             return c
+    return None
+
+def combine_date_time(df):
+    """
+    Если есть TRADEDATE и TIME/TRADETIME — создаём столбец 'timestamp' ISO.
+    Возвращаем имя столбца времени, который стоит использовать.
+    """
+    import pandas as pd
+    date_cols = [c for c in df.columns if c.upper() in ("TRADEDATE","TRADE_DATE","DATE")]
+    time_cols = [c for c in df.columns if c.upper() in ("TIME","TRADETIME","TRADE_TIME")]
+    if date_cols and time_cols:
+        dcol = date_cols[0]
+        tcol = time_cols[0]
+        try:
+            ts = pd.to_datetime(df[dcol].astype(str) + " " + df[tcol].astype(str), errors="coerce")
+            if ts.notna().any():
+                df["timestamp"] = ts
+                return "timestamp"
+        except Exception:
+            pass
     return None
 
 def normalize_time(val):
