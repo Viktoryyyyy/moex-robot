@@ -105,6 +105,20 @@ def save_state(d):
 
 from config_utils import load_config
 
+
+LOG_FILE = Path(".state/signal_log.csv")
+
+def log_signal(ts: str, sig: str, close: float, path: str, status: str):
+    """Записывает строку лога в .state/signal_log.csv"""
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    import csv
+    with LOG_FILE.open("a", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        if f.tell() == 0:
+            w.writerow(["timestamp","signal","close","file","status"])
+        w.writerow([ts, sig, close, path, status])
+
+
 def main():
     ap = argparse.ArgumentParser(description="Сформировать и (опц.) отправить сообщение MR-1 по последней свече Si 5m.")
     ap.add_argument("--send", action="store_true", help="Отправить сообщение в Telegram (по умолчанию только печать).")
