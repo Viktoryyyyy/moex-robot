@@ -22,3 +22,4 @@ env/
 # IDE/системные
 .idea/
 .DS_Store
+.state/
