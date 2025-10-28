@@ -4,10 +4,10 @@ import os, re, glob, sys
 import pandas as pd
 from datetime import datetime
 
-TIME_CANDIDATES = ["datetime","end","timestamp","ts","end_time","DATETIME","TRADEDATE","date","time","TIME","TRADETIME","SYSTIME","begin","open_time"]
-CLOSE_CANDIDATES = ["close","CLOSE","Close","C","LAST","last","PRICECLOSE","PRICE_CLOSE","close_price","CLOSE_PRICE","LAST_PRICE","PRICE"]
+TIME_CANDIDATES = ["datetime","end","timestamp","ts","DATETIME","TRADEDATE","date","TIME","TRADETIME","time"]
+CLOSE_CANDIDATES = ["CLOSE","close","Close","LAST","PRICECLOSE","PRICE_CLOSE","LAST_PRICE","PRICE"]
 SIG_CANDIDATES = ["mr1_signal", "signal_mr1", "signal"]
-AUX_FIELDS = ["liq_smooth", "volume", "VOL", "oi", "OPENINTEREST", "openinterest"]
+AUX_FIELDS = ["liq_smooth","VOL","volume","OPENPOSITION","PREVOPENPOSITION","oi","openinterest"]
 
 def extract_date_from_name(path: str):
     m = re.search(r"si_5m_(\\d{4}-\\d{2}-\\d{2})\\.csv$", os.path.basename(path), re.IGNORECASE)
@@ -29,9 +29,12 @@ def pick_latest_si_csv():
     return max(files, key=lambda p: os.path.getmtime(p))
 
 def first_existing(df, candidates):
+    low = {c.lower(): c for c in df.columns}
     for c in candidates:
         if c in df.columns:
             return c
+        if c.lower() in low:
+            return low[c.lower()]
     return None
 
 def combine_date_time(df):
@@ -116,6 +119,8 @@ def main():
         print(f"⚠️ Файл пуст: {path}")
         sys.exit(0)
 
+    time_cols = [c for c in ["timestamp","datetime","DATETIME","end"] if c in df.columns]
+    df = df.sort_values(by=time_cols or df.columns.tolist(), ascending=True)
     row = df.tail(1).iloc[0]
     t_col = first_existing(df, TIME_CANDIDATES)
     c_col = first_existing(df, CLOSE_CANDIDATES)
