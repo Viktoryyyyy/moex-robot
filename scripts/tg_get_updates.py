@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 def main():
     load_dotenv()
-    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    token = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN", "")
     if not token:
         raise SystemExit("Нет TELEGRAM_BOT_TOKEN в .env — скопируйте .env.example в .env и заполните токен")
 
