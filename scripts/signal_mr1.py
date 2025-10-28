@@ -106,6 +106,7 @@ def save_state(d):
 def main():
     ap = argparse.ArgumentParser(description="Сформировать и (опц.) отправить сообщение MR-1 по последней свече Si 5m.")
     ap.add_argument("--send", action="store_true", help="Отправить сообщение в Telegram (по умолчанию только печать).")
+    ap.add_argument("--ignore-liq", action="store_true", help="Игнорировать фильтр ликвидности при отправке.")
     ap.add_argument("--force", action="store_true", help="Игнорировать антидубликат и отправить в любом случае.")
     args = ap.parse_args()
 
@@ -151,6 +152,28 @@ def main():
     print("-"*60)
     print(msg)
     print("Источник:", path)
+    # --- фильтр ликвидности ---
+    liq_ok = True
+    liq_reason = "OK"
+    # приоритет: liq_smooth (старый конвейер)
+    if "liq_smooth" in df.columns:
+        try:
+            liq_ok = float(row.get("liq_smooth")) < 0.5
+            liq_reason = f"liq_smooth={float(row.get('liq_smooth')):.3f}"
+        except Exception:
+            pass
+    # fallback: liq_flag_low (0 — ликвидно, 1 — низкая ликвидность)
+    elif "liq_flag_low" in df.columns:
+        try:
+            liq_ok = float(row.get("liq_flag_low")) == 0.0
+            liq_reason = f"liq_flag_low={float(row.get('liq_flag_low')):.3f}"
+        except Exception:
+            pass
+
+    if args.send and not args.ignore_liq and not liq_ok:
+        print(f"🚫 Ликвидность не проходит фильтр: {liq_reason}. Отправка отключена.")
+        return
+
     print("-"*60)
 
     # --- антидубликат ---
@@ -171,7 +194,9 @@ def main():
             f"{sig_str}\n"
             f"Инструмент: <b>Si (5m)</b>\n"
             f"Время бара: <code>{ts}</code>\n"
-            f"Close: <b>{close_str}</b>" + (extras_str and f" | <code>{extras_str[3:]}</code>") # без " | "
+            f"Close: <b>{close_str}</b>"
+            + (extras_str and f" | <code>{extras_str[3:]}</code>")
+            + (f"\nЛиквидность: <code>{liq_reason}</code>")
         )
         from tg_utils import send_message
         resp = send_message(html_msg)
