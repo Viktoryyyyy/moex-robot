@@ -1,0 +1,23 @@
+# MOEX Bot — Telegram сигналы (bootstrap)
+
+## Быстрый старт
+1. Создайте бота через @BotFather и получите TELEGRAM_BOT_TOKEN.
+2. Скопируйте .env.example → .env и заполните TELEGRAM_BOT_TOKEN.
+3. Напишите любое сообщение своему боту (в личку/группу/канал), чтобы появился chat_id.
+4. Получите chat_id (утилиту добавим в следующем шаге) и пропишите TELEGRAM_CHAT_ID в .env.
+5. Убедитесь, что зависимости установлены:
+   source venv/bin/activate
+   pip install -r requirements.txt
+6. Отправьте тестовое сообщение (скрипт добавим в следующем шаге).
+
+## Структура
+- .env.example — шаблон переменных окружения (секреты не храним в Git).
+- requirements.txt — зависимости (requests, python-dotenv).
+- scripts/ — утилиты Telegram (будут добавлены следующим шагом).
+- .state/ — локальное состояние/кэш (игнорируется Git).
+
+## Дальше
+- Добавим утилиты:
+  - scripts/tg_get_updates.py — получить chat_id.
+  - scripts/tg_send.py — отправить тестовое сообщение.
+- Затем — генератор сообщений MR-1 и антидубликаты.
