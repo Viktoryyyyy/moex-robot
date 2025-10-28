@@ -6,7 +6,7 @@ from datetime import datetime
 
 TIME_CANDIDATES = ["timestamp","datetime","end","DATETIME","ts_SYSTIME","ts_tradedate","ts_tradetime","TRADEDATE","TIME","TRADETIME","date","time"]
 CLOSE_CANDIDATES = ["ts_pr_close","ts_sec_pr_close","CLOSE","close","LAST","PRICECLOSE","LAST_PRICE","PRICE"]
-SIG_CANDIDATES = ["mr1_signal", "signal_mr1", "signal"]
+SIG_CANDIDATES = ["mr1_signal","signal_mr1","signal","side","mr1","mr_1","trade_signal","SIG","Sig","SIGNAL"]
 AUX_FIELDS = ["ts_vol","VOL","volume","ts_oi_close","OPENPOSITION","openinterest","liq_flag_low"]
 
 def extract_date_from_name(path: str):
@@ -131,6 +131,8 @@ def main():
     close_val = row[c_col] if c_col else None
     close_str = "N/A" if pd.isna(close_val) else f"{float(close_val):.2f}"
     sig_str = map_signal(row[s_col]) if s_col else "🟦 NO SIGNAL"
+    if s_col:
+        print(f"🔎 Использован столбец сигнала: {s_col}")
 
     extras = []
     for f in AUX_FIELDS:
