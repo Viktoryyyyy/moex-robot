@@ -63,7 +63,29 @@ def map_signal(sig_val):
     if s in ("0","NONE","NO","FLAT","HOLD"): return "🟦 NO SIGNAL"
     return f"🟦 {s}"
 
+import json, argparse
+from pathlib import Path
+
+STATE_PATH = Path(".state/mr1_last.json")
+
+def load_state():
+    if STATE_PATH.exists():
+        try:
+            return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+def save_state(d):
+    STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STATE_PATH.write_text(json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8")
+
 def main():
+    ap = argparse.ArgumentParser(description="Сформировать и (опц.) отправить сообщение MR-1 по последней свече Si 5m.")
+    ap.add_argument("--send", action="store_true", help="Отправить сообщение в Telegram (по умолчанию только печать).")
+    ap.add_argument("--force", action="store_true", help="Игнорировать антидубликат и отправить в любом случае.")
+    args = ap.parse_args()
+
     path = pick_latest_si_csv()
     if not path:
         print("⚠️ Не найдено файлов si_5m_*.csv в текущей директории.")
@@ -105,6 +127,39 @@ def main():
     print(msg)
     print("Источник:", path)
     print("-"*60)
+
+    # --- антидубликат ---
+    # Ключ = (ts, sig_str, close_str). Если совпадает с прошлым — не шлём (если нет --force).
+    state = load_state()
+    key_curr = {"ts": ts, "sig": sig_str, "close": close_str}
+    key_prev = state.get("last_sent")
+
+    should_send = True
+    if not args.force and key_prev == key_curr:
+        should_send = False
+        print("🔁 Антидубликат: содержимое не изменилось — отправка пропущена. (Добавь --force для принудительной отправки)")
+
+    if args.send and should_send:
+        # HTML-формат: слегка подчистим строку
+        html_msg = (
+            f"<b>MOEX Bot — MR-1</b>\n"
+            f"{sig_str}\n"
+            f"Инструмент: <b>Si (5m)</b>\n"
+            f"Время бара: <code>{ts}</code>\n"
+            f"Close: <b>{close_str}</b>" + (extras_str and f" | <code>{extras_str[3:]}</code>") # без " | "
+        )
+        from tg_utils import send_message
+        resp = send_message(html_msg)
+        ok = resp.get("ok")
+        mid = (resp.get("result") or {}).get("message_id")
+        print(f"Telegram отправка: OK={ok}, message_id={mid}")
+        if ok:
+            state["last_sent"] = key_curr
+            save_state(state)
+    elif args.send and not should_send:
+        print("ℹ️ Отправка отключена из-за антидубликата.")
+    else:
+        print("ℹ️ Режим dry-run: отправка выключена.")
 
 if __name__ == "__main__":
     main()
