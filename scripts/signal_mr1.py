@@ -119,6 +119,27 @@ def log_signal(ts: str, sig: str, close: float, path: str, status: str):
         w.writerow([ts, sig, close, path, status])
 
 
+
+def resolve_latest_daily_csv() -> str:
+    import os
+    files = list(Path('.').glob('si_5m_20*.csv'))
+    valid = []
+    for f in files:
+        name = f.name
+        # только одиночная дата, без подстроки _features и без двойных диапазонов
+        if '_features' in name or re.search(r'\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}', name):
+            continue
+        if re.search(r'\d{4}-\d{2}-\d{2}', name):
+            valid.append(f)
+    if not valid:
+        return None
+    # сортируем по имени (в нём дата) и берём последний
+    valid.sort(key=lambda x: x.name)
+    latest = valid[-1]
+    print(f"[resolve] Используем {latest.name}")
+    return str(latest)
+
+
 def main():
     ap = argparse.ArgumentParser(description="Сформировать и (опц.) отправить сообщение MR-1 по последней свече Si 5m.")
     ap.add_argument("--send", action="store_true", help="Отправить сообщение в Telegram (по умолчанию только печать).")
@@ -163,13 +184,19 @@ def main():
                 extras.append(f"{f}={row[f]}")
 
     extras_str = (" | " + " ".join(extras)) if extras else ""
-    msg = (
-        f"MOEX Bot — MR-1\\n"
-        f"{sig_str}\\n"
-        f"Инструмент: Si (5m)\\n"
-        f"Время бара: {ts}\\n"
-        f"Close: {close_str}{extras_str}"
-    )
+    
+msg = (
+    f"📊 MOEX Bot — MR-1 (Mean Reversion)\n"
+    f"──────────────────────────────\n"
+    f"Инструмент: {symbol}\n"
+    f"⏱ Бар: {ts} (МСК)\n"
+    f"💰 Close: {close_val:,.0f} ₽\n"
+    f"📦 Объём: {ts_vol:,.0f}  OI: {ts_oi_close:,.0f}\n"
+    f"💧 Ликвидность: {'OK' if liq_flag_low==0 else 'LOW'} ({liq_flag_low:.3f})\n"
+    f"📁 Источник: {path}\n"
+    f"──────────────────────────────\n"
+    f"{sig_str}"
+)
 
     print("-"*60)
     print(msg)
@@ -217,18 +244,24 @@ def main():
 
     if args.send and should_send:
         # HTML-формат: слегка подчистим строку
-        text_msg = (
-            f"<b>MOEX Bot — MR-1</b>\n"
-            f"{sig_str}\n"
-            f"Инструмент: <b>Si (5m)</b>\n"
-            f"Время бара: <code>{ts}</code>\n"
-            f"Close: <b>{close_str}</b>"
-            + (extras_str and f" | <code>{extras_str[3:]}</code>")
+        text_
+msg = (
+    f"📊 MOEX Bot — MR-1 (Mean Reversion)\n"
+    f"──────────────────────────────\n"
+    f"Инструмент: {symbol}\n"
+    f"⏱ Бар: {ts} (МСК)\n"
+    f"💰 Close: {close_val:,.0f} ₽\n"
+    f"📦 Объём: {ts_vol:,.0f}  OI: {ts_oi_close:,.0f}\n"
+    f"💧 Ликвидность: {'OK' if liq_flag_low==0 else 'LOW'} ({liq_flag_low:.3f})\n"
+    f"📁 Источник: {path}\n"
+    f"──────────────────────────────\n"
+    f"{sig_str}"
+)
             + (f"\nЛиквидность: <code>{liq_reason}</code>")
         )
         from tg_utils import send_message
         try:
-            resp = send_message(text_msg)
+            resp = send_message(msg)
             ok = resp.get("ok")
         except Exception as e:
             ok = False
