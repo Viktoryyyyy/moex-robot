@@ -1,23 +1,38 @@
-# MOEX Bot — Telegram сигналы (bootstrap)
+# MOEX Bot — API база (Futures)
 
-## Быстрый старт
-1. Создайте бота через @BotFather и получите BOT_TOKEN.
-2. Скопируйте .env.example → .env и заполните BOT_TOKEN.
-3. Напишите любое сообщение своему боту (в личку/группу/канал), чтобы появился chat_id.
-4. Получите chat_id (утилиту добавим в следующем шаге) и пропишите CHAT_ID в .env.
-5. Убедитесь, что зависимости установлены:
-   source venv/bin/activate
-   pip install -r requirements.txt
-6. Отправьте тестовое сообщение (скрипт добавим в следующем шаге).
+Базовые утилиты для получения котировок фьючерсов с Московской биржи
+(через https://apim.moex.com) по ключевому слову — например "Si", "CNY", "RTS".
 
-## Структура
-- .env.example — шаблон переменных окружения (секреты не храним в Git).
-- requirements.txt — зависимости (requests, python-dotenv).
-- scripts/ — утилиты Telegram (будут добавлены следующим шагом).
-- .state/ — локальное состояние/кэш (игнорируется Git).
+## Окружение
+```bash
+cd ~/moex_bot
+source venv/bin/activate
+set -a; source .env; set +a
+```
 
-## Дальше
-- Добавим утилиты:
-  - scripts/tg_get_updates.py — получить chat_id.
-  - scripts/tg_send.py — отправить тестовое сообщение.
-- Затем — генератор сообщений MR-1 и антидубликаты.
+## 1) fo_snapshot.py — текущие котировки
+Получение актуального last, bid/ask, спреда, объёма.
+
+```bash
+FO_KEY=CNY python fo_snapshot.py
+FO_KEY=Si  python fo_snapshot.py
+```
+
+## 2) fo_5m_day.py — 5-минутные свечи за день
+По умолчанию — сегодня (МСК).
+
+```bash
+FO_KEY=CNY python fo_5m_day.py
+FO_KEY=Si  FO_DAY=2025-10-23 python fo_5m_day.py
+```
+
+## 3) fo_5m_period.py — 5-минутные свечи за период
+По умолчанию — последние 7 календарных дней.
+
+```bash
+FO_KEY=CNY python fo_5m_period.py
+FO_KEY=Si  FO_FROM=2025-10-20 FO_TILL=2025-10-31 python fo_5m_period.py
+```
+
+Все утилиты используют lib_moex_api.py с функцией resolve_fut_by_key(key),
+которая автоматически подбирает актуальный тикер по подстроке ("CNY", "Si", "RTS" и др.).

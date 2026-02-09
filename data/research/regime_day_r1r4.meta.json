@@ -1,0 +1,31 @@
+{
+  "name": "si_day_regime_r1r4",
+  "input_master_glob": "data/master/master_5m_si_cny_futoi_obstats_*.csv",
+  "d1_source_cols": [
+    "end",
+    "open_fo",
+    "high_fo",
+    "low_fo",
+    "close_fo",
+    "asset_code"
+  ],
+  "timezone": "Europe/Moscow",
+  "atr_window": 20,
+  "thresholds": {
+    "range_ratio_large_ge": 1.25,
+    "range_ratio_small_le": 0.85,
+    "pos_dir_hi_ge": 0.7,
+    "pos_dir_lo_le": 0.3,
+    "pos_mid_lo_ge": 0.4,
+    "pos_mid_hi_le": 0.6,
+    "body_ratio_strong_ge": 0.6
+  },
+  "rules_order": [
+    "R1: range_ratio<=0.85 and 0.40<=pos<=0.60",
+    "R2: range_ratio>=1.25 and (pos>=0.70 or pos<=0.30) and body_ratio>=0.60",
+    "R3: range_ratio>=1.25 and 0.40<=pos<=0.60",
+    "R4: else"
+  ],
+  "output_csv": "data/research/regime_day_r1r4.csv",
+  "script": "src/research/regimes/build_si_day_regime_r1r4.py"
+}

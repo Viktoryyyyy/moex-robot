@@ -1,0 +1,15 @@
+{
+  "bars_count": 148125,
+  "ema_fast": 80196.06358336227,
+  "ema_slow": 80183.356776568,
+  "entry_price": 80124.0,
+  "last_bar_end": "2025-12-01T23:50:00+03:00",
+  "last_signal": "LONG",
+  "pnl_cum_net_pts": -399447.0,
+  "position": 1,
+  "ready_for_exec": true,
+  "regime_yday": "GOOD",
+  "trade_date": "2025-12-01",
+  "trade_id_last": 11383,
+  "trade_today_flag": 1
+}

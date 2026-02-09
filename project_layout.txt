@@ -1,0 +1,801 @@
+===== PROJECT TREE (dirs + files) =====
+.
+  src
+    misc
+      cny_driver_step4_track_ema.py
+      lib_moex_v3.py
+      fetch_futoi_moexstyle.py
+      concat_history.py
+      fetch_obstats.py
+      online_signal_mr1.py
+      connector.py
+      cny_driver_step4_track.py
+      merge_5m_strict.py
+      fetch_cnyrub_1m_to_5m.py
+      strategy.py
+      cny_driver_step2_lags.py
+      __init__.py
+      config_utils.py
+      probe_obstats.py
+      fetch_futoi_strict.py
+      check_api_access.py
+      api_online.py
+      tg_utils.py
+      fetch_tradestats.py
+      tg_get_updates.py
+      attach_hi2.py
+      fetch_futoi.py
+      diag_backfill_ytd.py
+      preview_endpoints.py
+      probe_hi2.py
+      get_futoi.py
+      mcp_moex_server.py
+      analyze_si_volume_day.py
+      mcp_moex_client.py
+      main.py
+      tg_send.py
+      fetch_si_candles_1m_to_5m_public.py
+      normalize_5m_last3.py
+      merge_si_cny_5m.py
+      cleanup_temp_files.py
+      fetch_cnyrub_trades_to_5m.py
+      probe_tradestats.py
+      fetch_si_trades_to_5m.py
+      fetch_si_tradestats_5m.py
+      config.py
+      merge_5m.py
+      fetch_obstats_strict.py
+      diag_orderbook_once.py
+      normalize_5m_last3_v2.py
+      tradestats_export.py
+      fetch_hi2.py
+      lib_moex.py
+      inspect_csv_cols.py
+      pivot_futoi_apply.py
+      fetch_tradestats_strict.py
+    pipeline
+      enrich
+      fo
+      update_obstats_from_fo.py
+      update_master_si_cny_futoi_obstats.py
+      merge
+        master_merge_5m.py
+        fo_fx_merge_5m.py
+        __pycache__
+          master_merge_5m.cpython-312.pyc
+          fo_fx_merge_5m.cpython-312.pyc
+      fx
+    infra
+      trade_logger.py
+      single_instance.py
+      __pycache__
+        trade_logger.cpython-312.pyc
+        single_instance.cpython-312.pyc
+    __init__.py
+    cli
+      run_backfill_expiry.py
+      export_cny_fut_today_auto.py
+      loop_merge_l1_l2.py
+      debug_ema_5_12_regime.py
+      loop_orderbook_5m.py
+      moex_cli.py
+      loop_oi_5m.py
+      build_day_regime_ema_5_12.py
+      run_backfill_week.py
+      export_cny_fut_today.py
+      loop_futoi_5m.py
+      run_merge_one_day.py
+      loop_signal_mr1.py
+      export_fo_5m_by_key.py
+      loop_trades_5m.py
+      loop_ema_5_12_realtime.py
+      run_one_day_v3.py
+      archive
+        loop_ema_5_12_realtime_old.py
+      run_backfill.py
+      export_fx_5m_by_key.py
+      run_fx_today.py
+      run_backfill_year.py
+      __pycache__
+        loop_ema_5_12_realtime.cpython-312.pyc
+        debug_ema_5_12_regime.cpython-312.pyc
+        build_day_regime_ema_5_12.cpython-312.pyc
+      export_fx_5m_unified.py
+      loop_cnyrub_5m.py
+      loop_merge_full_plus_oi.py
+      loop_marketdata_5m.py
+      run_today.py
+    research
+      regimes
+        __pycache__
+          build_gb_day_labels.cpython-312.pyc
+        build_gb_day_labels.py
+    bot
+      cmd_bot.py
+    api
+      __init__.py
+      utils
+        __pycache__
+          lib_moex_api.cpython-312.pyc
+          fx_lib_api.cpython-312.pyc
+        fx_lib_api.py
+        lib_moex_api.py
+      __pycache__
+        __init__.cpython-312.pyc
+      futures
+        fo_feed_intraday.py
+        fo_tradestats_coverage_probe.py
+        futoi_coverage_probe.py
+        fo_enriched_5m_period.py
+        fo_tradestats_chain.py
+        futoi_5m_period.py
+        fo_5m_period.py
+        __init__.py
+        futoi_5m_full_from_master.py
+        fo_5m_day.py
+        fo_tradestats_backfill.py
+        fo_probe_securities.py
+        obstats_probe_fields.py
+        obstats_5m_full_from_master.py
+        fo_5m_chain.py
+        fo_fx_merge_5m.py
+        futoi_probe_fields.py
+        futoi_filter_strict.py
+        obstats_5m_day.py
+        hi2_check.py
+        fo_snapshot.py
+        fo_enriched_5m_day.py
+        fo_5m_period_generic.py
+        __pycache__
+          fo_feed_intraday.cpython-312.pyc
+          __init__.cpython-312.pyc
+          futoi_day.cpython-312.pyc
+        futoi_export_joined.py
+        futoi_day.py
+      fx
+        fx_tail_lastbars.py
+        fx_fut_merge_today.py
+        fx_probe_fields.py
+        fx_snapshot.py
+        fx_5m_chain_cny.py
+        fx_5m_day.py
+        fx_5m_period.py
+    strategy
+      mr1
+        signal_mr1.py
+      ema
+        __pycache__
+          ema_5_12_core.cpython-312.pyc
+        ema_5_12_core.py
+      realtime
+        ema_5_12
+          __init__.py
+          logger_ema_5_12.py
+          feed_ema_5_12.py
+          executor_ema_5_12.py
+          state_ema_5_12.py
+          archive
+          session_state.py
+          __pycache__
+            runner_ema_5_12.cpython-312.pyc
+            regime_day_loader.cpython-312.pyc
+            signals_ema_5_12.cpython-312.pyc
+            executor_ema_5_12.cpython-312.pyc
+            logger_ema_5_12.cpython-312.pyc
+            config_ema_5_12.cpython-312.pyc
+            feed_ema_5_12.cpython-312.pyc
+            __init__.cpython-312.pyc
+            state_ema_5_12.cpython-312.pyc
+            session_state.cpython-312.pyc
+          regime_day_loader.py
+          runner_ema_5_12.py
+          signals_ema_5_12.py
+          config_ema_5_12.py
+      ma
+        ma_grid_2024_2025.py
+        __pycache__
+          ma_grid_2024_2025.cpython-312.pyc
+    __pycache__
+      __init__.cpython-312.pyc
+  dirlist.txt
+  .gitignore
+  .env.bad.1764229008
+  obstats_si_5m_2025-12-05_2025-12-08.csv
+  logs
+    pipeline
+    errors
+    ema_5_12_2025-12-01.log
+    bot
+  PROJECT_HUB.md
+  futoi_si_5m_2020-01-03_2025-11-27.csv
+  futoi_si_5m_2025-11-28_2025-12-03.csv
+  fx_5m_2025-11-27_2025-11-27_cnyrub_tom.csv
+  futoi_si_5m_2025-12-04_2025-12-05.csv
+  scripts
+    run_ema_5_12_tmux.sh
+    Futoi_work.sh
+    _archive
+    .gitkeep
+  si_5m_2025-12-05_2025-12-08.csv
+  requirements.txt
+  futoi_si_5m_2025-12-05_2025-12-08.csv
+  futoi_si_5m_2025-11-13_2025-11-27.csv
+  si_5m_2025-11-28_2025-12-03.csv
+  fx_5m_2025-12-03_2025-12-05_cnyrub_tom.csv
+  si_5m_2025-12-04_2025-12-05.csv
+  project_layout.txt
+  .env.backup.1764229435
+  notebooks
+  obstats_si_5m_2025-11-27_2025-11-28.csv
+  project_tree.txt
+  data
+    signals
+      ema_5_12_realtime_2025-12-02.csv
+      archive
+        ema_5_12_realtime_2025-12-01_old2.csv
+        ema_5_12_realtime_2025-12-01_old.csv
+      signal_log.csv
+      ema_5_12_realtime_2025-12-01.csv
+    master
+      si_chain_5m_2025-01-01_2025-11-13.csv
+      obstats_si_5m_2020-01-03_2025-11-27.csv
+      si_cny_5m_2020-01-01_2025-12-04.csv
+      si_cny_5m_2020-01-01_2025-11-27.csv
+      futoi_si_5m_2020-01-03_2025-11-27.csv
+      si_cny_5m_2020-01-01_2025-11-28.csv
+      obstats_si_5m_2020-01-03_2025-12-04.csv
+      futoi_si_5m_2020-01-03_2025-11-28.csv
+      master_5m_si_cny_futoi_obstats_2020-01-03_2025-12-05.csv
+      fx_5m_2020-01-01_2025-11-13_cnyrub_tom.csv
+      master_5m_si_cny_futoi_obstats_2020-01-03_2025-11-13.csv
+      si_cny_5m_2020-01-01_2025-12-03.csv
+      futoi_si_5m_2020-01-03_2025-11-13.csv
+      master_5m_si_cny_futoi_obstats_2020-01-03_2025-11-28_with_ema_regime.csv
+      master_5m_si_cny_futoi_obstats_2025-12-04_2025-12-05.csv
+      futoi_si_5m_2020-01-03_2025-12-04.csv
+      master_5m_si_cny_futoi_obstats_2020-01-03_2025-11-28.csv
+      obstats_si_5m_2020-01-03_2025-11-28.csv
+      futoi_si_5m_2020-01-03_2025-12-03.csv
+      si_cny_5m_2020-01-01_2025-11-13.csv
+      master_5m_si_cny_futoi_obstats_2020-01-03_2025-11-13_with_regime.csv
+      master_5m_si_cny_futoi_obstats_2020-01-03_2025-12-04.csv
+      obstats_si_5m_2020-01-03_2025-12-08.csv
+      si_cny_5m_2020-01-01_2025-12-08.csv
+      si_cny_5m_2020-01-01_2025-12-05.csv
+      master_5m_si_cny_futoi_obstats_2025-12-05_2025-12-08.csv
+      master_5m_si_cny_futoi_obstats_2025-12-03_2025-12-04.csv
+      master_5m_si_cny_futoi_obstats_2020-01-03_2025-11-27.csv
+      futoi_si_5m_2020-01-03_2025-12-08.csv
+      obstats_si_5m_2020-01-03_2025-12-03.csv
+      master_5m_si_cny_futoi_obstats_2020-01-03_2025-12-03.csv
+      master_5m_si_cny_futoi_obstats_2020-01-03_2025-12-08.csv
+      obstats_si_5m_2020-01-03_2025-12-05.csv
+      futoi_si_5m_2020-01-03_2025-12-05.csv
+      master_5m_si_cny_futoi_obstats_2024-01-03_2025-12-03.csv
+      obstats_si_5m_2020-01-03_2025-11-13.csv
+    research
+      ema_5_12_regime_2025.csv
+      dd_daily_2024.csv
+      ema_hysteresis_2024_2025.csv
+      ema_5_12_regime_2025-09_10.csv
+      ema_5_12_filtered_by_20_50_2025.csv
+      ema_5_12_regime_2025-11.csv
+      dd_daily_2025.csv
+      ema_5_12_regime_2024.csv
+      regime_day_ema20_50_2025.csv
+      ema_regimes_monthly.csv
+      ema_filters_2025_fullscan.csv
+    fo
+      si_5m_2020-01-01_2025-12-03.csv
+      si_5m_2020-01-01_2025-11-13.csv
+      si_5m_2020-01-01_2025-11-28.csv
+      si_5m_2020-01-01_2025-12-04.csv
+      si_5m_2020-01-01_2025-11-27.csv
+      si_5m_2020-01-01_2025-12-05.csv
+      si_5m_2020-01-01_2025-12-08.csv
+    raw
+      obstats
+        obstats_SiZ5_2025-10-27.csv
+        obstats_SiZ5_2025-10-28.csv
+        obstats_SiZ5_2025-11-17.csv
+        obstats_SiZ5_2025-11-08.csv
+        obstats_SiZ5_2025-10-22.csv
+        obstats_SiZ5_2025-10-29.csv
+        obstats_SiZ5_2025-11-13.csv
+      fo
+        siz5_5m_2025-03-04.csv
+        si_5m_2020-01-01_2025-11-13.csv
+        si_5m_2025-10-27_hi2.csv
+        si_5m_enriched_2025-11-10_2025-11-13.csv
+        siz5_5m_enriched_2025-11-13.csv
+        ri_5m_2025-09-15_2025-09-20.csv
+        si_5m_enriched_2024-01-10_2024-01-20.csv
+        si_5m_week_2025-10-27_2025-10-31.csv
+        si_5m_2025-10-29_hi2.csv
+        si_5m_2025-01-01_2025-10-31.csv
+        si_5m_2025-10.csv
+      futoi
+        futoi_coverage_2024_si.csv
+      fx
+        ri_cnyrub_5m_2025-09-15_2025-09-20.csv
+        merge_5m_CNYRUB_TOM_SiZ5_2025-11-12.csv
+    futoi
+    state
+      ema_5_12_2025-12-02.lock
+      ema_5_12_state_2025-12-01.json
+      ema_5_12_state_2025-12-02.json
+    archive
+      oi_5m_2025-10-31.csv
+      tradestats_SiZ5_2025-10-22.csv
+      si_live_5m_2025-10-30.csv
+      tradestats_SiZ5_2025-10-29.csv
+      riz5_5m_2025-11-10_2025-11-13.csv
+      tradestats_SiZ5_2025-11-08.csv
+      si_live_5m_full_2025-10-31.csv
+      tradestats_SiZ5_2025-10-28.csv
+      si_live_5m_full_oi_2025-10-31.csv
+      si_ob_5m_2025-10-31.csv
+      fo_tradestats_coverage_2025.csv
+      fo_tradestats_coverage_2025-03.csv
+      si_live_5m_2025-10-31.csv
+      sih6_5m_2025-01-01_2025-11-13.csv
+      tradestats_SiZ5_2025-10-27.csv
+    interim
+      fo_fx
+      enriched
+    fx
+      fx_5m_2020-01-01_2025-12-04_cnyrub_tom.csv
+      fx_5m_2020-01-01_2025-12-05_cnyrub_tom.csv
+      fx_5m_2020-01-01_2025-11-13_cnyrub_tom.csv
+      fx_5m_2020-01-01_2025-12-03_cnyrub_tom.csv
+      fx_5m_2020-01-01_2025-11-28_cnyrub_tom.csv
+      fx_5m_2025-11-10_2025-11-13_cnyrub_tom.csv
+      fx_5m_2020-01-01_2025-12-08_cnyrub_tom.csv
+      fx_5m_2020-01-01_2025-11-27_cnyrub_tom.csv
+  fx_5m_2025-11-14_2025-11-27_cnyrub_tom.csv
+  .github
+    workflows
+  move_code.sh
+  .env.backup.1764228903
+  robot
+  fx_5m_2025-11-27_2025-12-04_cnyrub_tom.csv
+  .state
+    cmd_bot.offset
+    .gitkeep
+  si_5m_2025-11-27_2025-11-28.csv
+  obstats_si_5m_2025-11-27_2025-11-27.csv
+  obstats_si_5m_2025-12-03_2025-12-04.csv
+  fx_5m_2025-12-02_2025-12-04_cnyrub_tom.csv
+  si_5m_2025-11-27_2025-11-27.csv
+  obstats_si_5m_2025-11-28_2025-12-03.csv
+  fx_5m_2025-12-05_2025-12-08_cnyrub_tom.csv
+  futoi_si_5m_2025-11-27_2025-11-27.csv
+  config
+    mr1_last.json
+    python-ci.yml
+    test-ssh.yml
+    ema_5_12_state.json
+    deploy-run-futoi.yml
+  futoi_si_5m_2025-11-27_2025-11-28.csv
+  ma_grid_ema2_15_2024_2025.csv
+  tests
+    .gitkeep
+  fx_5m_2025-11-27_2025-11-28_cnyrub_tom.csv
+  .env.example
+  clean_moex_bot.sh
+  si_5m_2025-11-14_2025-11-27.csv
+  .env
+  archive_csv
+    si_5m_2025-03-25_2025-10-23_features.csv
+    si_5m_2025-06-25_2025-10-23_features.csv
+    si_5m_2025-03-25_2025-10-23.csv
+  fx_5m_2025-11-28_2025-12-03_cnyrub_tom.csv
+  filelist.txt
+  si_5m_2025-12-03_2025-12-04.csv
+  obstats_si_5m_2025-12-04_2025-12-05.csv
+  README.md
+  futoi_si_5m_2025-12-03_2025-12-04.csv
+  ma_grid_2024_2025.csv
+
+===== DIRECTORIES (full paths) =====
+.
+./archive_csv
+./config
+./data
+./data/archive
+./data/fo
+./data/futoi
+./data/fx
+./data/interim
+./data/interim/enriched
+./data/interim/fo_fx
+./data/master
+./data/raw
+./data/raw/fo
+./data/raw/futoi
+./data/raw/fx
+./data/raw/obstats
+./data/research
+./data/signals
+./data/signals/archive
+./data/state
+./.git
+./.github
+./.github/workflows
+./logs
+./logs/bot
+./logs/errors
+./logs/pipeline
+./notebooks
+./robot
+./scripts
+./scripts/_archive
+./src
+./src/api
+./src/api/futures
+./src/api/futures/__pycache__
+./src/api/fx
+./src/api/__pycache__
+./src/api/utils
+./src/api/utils/__pycache__
+./src/bot
+./src/cli
+./src/cli/archive
+./src/cli/__pycache__
+./src/infra
+./src/infra/__pycache__
+./src/misc
+./src/pipeline
+./src/pipeline/enrich
+./src/pipeline/fo
+./src/pipeline/fx
+./src/pipeline/merge
+./src/pipeline/merge/__pycache__
+./src/__pycache__
+./src/research
+./src/research/regimes
+./src/research/regimes/__pycache__
+./src/strategy
+./src/strategy/ema
+./src/strategy/ema/__pycache__
+./src/strategy/ma
+./src/strategy/ma/__pycache__
+./src/strategy/mr1
+./src/strategy/realtime
+./src/strategy/realtime/ema_5_12
+./src/strategy/realtime/ema_5_12/archive
+./src/strategy/realtime/ema_5_12/__pycache__
+./.state
+./tests
+./venv
+
+===== FILES (full paths) =====
+./archive_csv/si_5m_2025-03-25_2025-10-23.csv
+./archive_csv/si_5m_2025-03-25_2025-10-23_features.csv
+./archive_csv/si_5m_2025-06-25_2025-10-23_features.csv
+./clean_moex_bot.sh
+./config/deploy-run-futoi.yml
+./config/ema_5_12_state.json
+./config/mr1_last.json
+./config/python-ci.yml
+./config/test-ssh.yml
+./data/archive/fo_tradestats_coverage_2025-03.csv
+./data/archive/fo_tradestats_coverage_2025.csv
+./data/archive/oi_5m_2025-10-31.csv
+./data/archive/riz5_5m_2025-11-10_2025-11-13.csv
+./data/archive/sih6_5m_2025-01-01_2025-11-13.csv
+./data/archive/si_live_5m_2025-10-30.csv
+./data/archive/si_live_5m_2025-10-31.csv
+./data/archive/si_live_5m_full_2025-10-31.csv
+./data/archive/si_live_5m_full_oi_2025-10-31.csv
+./data/archive/si_ob_5m_2025-10-31.csv
+./data/archive/tradestats_SiZ5_2025-10-22.csv
+./data/archive/tradestats_SiZ5_2025-10-27.csv
+./data/archive/tradestats_SiZ5_2025-10-28.csv
+./data/archive/tradestats_SiZ5_2025-10-29.csv
+./data/archive/tradestats_SiZ5_2025-11-08.csv
+./data/fo/si_5m_2020-01-01_2025-11-13.csv
+./data/fo/si_5m_2020-01-01_2025-11-27.csv
+./data/fo/si_5m_2020-01-01_2025-11-28.csv
+./data/fo/si_5m_2020-01-01_2025-12-03.csv
+./data/fo/si_5m_2020-01-01_2025-12-04.csv
+./data/fo/si_5m_2020-01-01_2025-12-05.csv
+./data/fo/si_5m_2020-01-01_2025-12-08.csv
+./data/fx/fx_5m_2020-01-01_2025-11-13_cnyrub_tom.csv
+./data/fx/fx_5m_2020-01-01_2025-11-27_cnyrub_tom.csv
+./data/fx/fx_5m_2020-01-01_2025-11-28_cnyrub_tom.csv
+./data/fx/fx_5m_2020-01-01_2025-12-03_cnyrub_tom.csv
+./data/fx/fx_5m_2020-01-01_2025-12-04_cnyrub_tom.csv
+./data/fx/fx_5m_2020-01-01_2025-12-05_cnyrub_tom.csv
+./data/fx/fx_5m_2020-01-01_2025-12-08_cnyrub_tom.csv
+./data/fx/fx_5m_2025-11-10_2025-11-13_cnyrub_tom.csv
+./data/master/futoi_si_5m_2020-01-03_2025-11-13.csv
+./data/master/futoi_si_5m_2020-01-03_2025-11-27.csv
+./data/master/futoi_si_5m_2020-01-03_2025-11-28.csv
+./data/master/futoi_si_5m_2020-01-03_2025-12-03.csv
+./data/master/futoi_si_5m_2020-01-03_2025-12-04.csv
+./data/master/futoi_si_5m_2020-01-03_2025-12-05.csv
+./data/master/futoi_si_5m_2020-01-03_2025-12-08.csv
+./data/master/fx_5m_2020-01-01_2025-11-13_cnyrub_tom.csv
+./data/master/master_5m_si_cny_futoi_obstats_2020-01-03_2025-11-13.csv
+./data/master/master_5m_si_cny_futoi_obstats_2020-01-03_2025-11-13_with_regime.csv
+./data/master/master_5m_si_cny_futoi_obstats_2020-01-03_2025-11-27.csv
+./data/master/master_5m_si_cny_futoi_obstats_2020-01-03_2025-11-28.csv
+./data/master/master_5m_si_cny_futoi_obstats_2020-01-03_2025-11-28_with_ema_regime.csv
+./data/master/master_5m_si_cny_futoi_obstats_2020-01-03_2025-12-03.csv
+./data/master/master_5m_si_cny_futoi_obstats_2020-01-03_2025-12-04.csv
+./data/master/master_5m_si_cny_futoi_obstats_2020-01-03_2025-12-05.csv
+./data/master/master_5m_si_cny_futoi_obstats_2020-01-03_2025-12-08.csv
+./data/master/master_5m_si_cny_futoi_obstats_2024-01-03_2025-12-03.csv
+./data/master/master_5m_si_cny_futoi_obstats_2025-12-03_2025-12-04.csv
+./data/master/master_5m_si_cny_futoi_obstats_2025-12-04_2025-12-05.csv
+./data/master/master_5m_si_cny_futoi_obstats_2025-12-05_2025-12-08.csv
+./data/master/obstats_si_5m_2020-01-03_2025-11-13.csv
+./data/master/obstats_si_5m_2020-01-03_2025-11-27.csv
+./data/master/obstats_si_5m_2020-01-03_2025-11-28.csv
+./data/master/obstats_si_5m_2020-01-03_2025-12-03.csv
+./data/master/obstats_si_5m_2020-01-03_2025-12-04.csv
+./data/master/obstats_si_5m_2020-01-03_2025-12-05.csv
+./data/master/obstats_si_5m_2020-01-03_2025-12-08.csv
+./data/master/si_chain_5m_2025-01-01_2025-11-13.csv
+./data/master/si_cny_5m_2020-01-01_2025-11-13.csv
+./data/master/si_cny_5m_2020-01-01_2025-11-27.csv
+./data/master/si_cny_5m_2020-01-01_2025-11-28.csv
+./data/master/si_cny_5m_2020-01-01_2025-12-03.csv
+./data/master/si_cny_5m_2020-01-01_2025-12-04.csv
+./data/master/si_cny_5m_2020-01-01_2025-12-05.csv
+./data/master/si_cny_5m_2020-01-01_2025-12-08.csv
+./data/raw/fo/ri_5m_2025-09-15_2025-09-20.csv
+./data/raw/fo/si_5m_2020-01-01_2025-11-13.csv
+./data/raw/fo/si_5m_2025-01-01_2025-10-31.csv
+./data/raw/fo/si_5m_2025-10-27_hi2.csv
+./data/raw/fo/si_5m_2025-10-29_hi2.csv
+./data/raw/fo/si_5m_2025-10.csv
+./data/raw/fo/si_5m_enriched_2024-01-10_2024-01-20.csv
+./data/raw/fo/si_5m_enriched_2025-11-10_2025-11-13.csv
+./data/raw/fo/si_5m_week_2025-10-27_2025-10-31.csv
+./data/raw/fo/siz5_5m_2025-03-04.csv
+./data/raw/fo/siz5_5m_enriched_2025-11-13.csv
+./data/raw/futoi/futoi_coverage_2024_si.csv
+./data/raw/fx/merge_5m_CNYRUB_TOM_SiZ5_2025-11-12.csv
+./data/raw/fx/ri_cnyrub_5m_2025-09-15_2025-09-20.csv
+./data/raw/obstats/obstats_SiZ5_2025-10-22.csv
+./data/raw/obstats/obstats_SiZ5_2025-10-27.csv
+./data/raw/obstats/obstats_SiZ5_2025-10-28.csv
+./data/raw/obstats/obstats_SiZ5_2025-10-29.csv
+./data/raw/obstats/obstats_SiZ5_2025-11-08.csv
+./data/raw/obstats/obstats_SiZ5_2025-11-13.csv
+./data/raw/obstats/obstats_SiZ5_2025-11-17.csv
+./data/research/dd_daily_2024.csv
+./data/research/dd_daily_2025.csv
+./data/research/ema_5_12_filtered_by_20_50_2025.csv
+./data/research/ema_5_12_regime_2024.csv
+./data/research/ema_5_12_regime_2025-09_10.csv
+./data/research/ema_5_12_regime_2025-11.csv
+./data/research/ema_5_12_regime_2025.csv
+./data/research/ema_filters_2025_fullscan.csv
+./data/research/ema_hysteresis_2024_2025.csv
+./data/research/ema_regimes_monthly.csv
+./data/research/regime_day_ema20_50_2025.csv
+./data/signals/archive/ema_5_12_realtime_2025-12-01_old2.csv
+./data/signals/archive/ema_5_12_realtime_2025-12-01_old.csv
+./data/signals/ema_5_12_realtime_2025-12-01.csv
+./data/signals/ema_5_12_realtime_2025-12-02.csv
+./data/signals/signal_log.csv
+./data/state/ema_5_12_2025-12-02.lock
+./data/state/ema_5_12_state_2025-12-01.json
+./data/state/ema_5_12_state_2025-12-02.json
+./dirlist.txt
+./.env
+./.env.backup.1764228903
+./.env.backup.1764229435
+./.env.bad.1764229008
+./.env.example
+./filelist.txt
+./futoi_si_5m_2020-01-03_2025-11-27.csv
+./futoi_si_5m_2025-11-13_2025-11-27.csv
+./futoi_si_5m_2025-11-27_2025-11-27.csv
+./futoi_si_5m_2025-11-27_2025-11-28.csv
+./futoi_si_5m_2025-11-28_2025-12-03.csv
+./futoi_si_5m_2025-12-03_2025-12-04.csv
+./futoi_si_5m_2025-12-04_2025-12-05.csv
+./futoi_si_5m_2025-12-05_2025-12-08.csv
+./fx_5m_2025-11-14_2025-11-27_cnyrub_tom.csv
+./fx_5m_2025-11-27_2025-11-27_cnyrub_tom.csv
+./fx_5m_2025-11-27_2025-11-28_cnyrub_tom.csv
+./fx_5m_2025-11-27_2025-12-04_cnyrub_tom.csv
+./fx_5m_2025-11-28_2025-12-03_cnyrub_tom.csv
+./fx_5m_2025-12-02_2025-12-04_cnyrub_tom.csv
+./fx_5m_2025-12-03_2025-12-05_cnyrub_tom.csv
+./fx_5m_2025-12-05_2025-12-08_cnyrub_tom.csv
+./.gitignore
+./logs/ema_5_12_2025-12-01.log
+./ma_grid_2024_2025.csv
+./ma_grid_ema2_15_2024_2025.csv
+./move_code.sh
+./obstats_si_5m_2025-11-27_2025-11-27.csv
+./obstats_si_5m_2025-11-27_2025-11-28.csv
+./obstats_si_5m_2025-11-28_2025-12-03.csv
+./obstats_si_5m_2025-12-03_2025-12-04.csv
+./obstats_si_5m_2025-12-04_2025-12-05.csv
+./obstats_si_5m_2025-12-05_2025-12-08.csv
+./PROJECT_HUB.md
+./project_layout.txt
+./project_tree.txt
+./README.md
+./requirements.txt
+./scripts/Futoi_work.sh
+./scripts/.gitkeep
+./scripts/run_ema_5_12_tmux.sh
+./si_5m_2025-11-14_2025-11-27.csv
+./si_5m_2025-11-27_2025-11-27.csv
+./si_5m_2025-11-27_2025-11-28.csv
+./si_5m_2025-11-28_2025-12-03.csv
+./si_5m_2025-12-03_2025-12-04.csv
+./si_5m_2025-12-04_2025-12-05.csv
+./si_5m_2025-12-05_2025-12-08.csv
+./src/api/futures/fo_5m_chain.py
+./src/api/futures/fo_5m_day.py
+./src/api/futures/fo_5m_period_generic.py
+./src/api/futures/fo_5m_period.py
+./src/api/futures/fo_enriched_5m_day.py
+./src/api/futures/fo_enriched_5m_period.py
+./src/api/futures/fo_feed_intraday.py
+./src/api/futures/fo_fx_merge_5m.py
+./src/api/futures/fo_probe_securities.py
+./src/api/futures/fo_snapshot.py
+./src/api/futures/fo_tradestats_backfill.py
+./src/api/futures/fo_tradestats_chain.py
+./src/api/futures/fo_tradestats_coverage_probe.py
+./src/api/futures/futoi_5m_full_from_master.py
+./src/api/futures/futoi_5m_period.py
+./src/api/futures/futoi_coverage_probe.py
+./src/api/futures/futoi_day.py
+./src/api/futures/futoi_export_joined.py
+./src/api/futures/futoi_filter_strict.py
+./src/api/futures/futoi_probe_fields.py
+./src/api/futures/hi2_check.py
+./src/api/futures/__init__.py
+./src/api/futures/obstats_5m_day.py
+./src/api/futures/obstats_5m_full_from_master.py
+./src/api/futures/obstats_probe_fields.py
+./src/api/futures/__pycache__/fo_feed_intraday.cpython-312.pyc
+./src/api/futures/__pycache__/futoi_day.cpython-312.pyc
+./src/api/futures/__pycache__/__init__.cpython-312.pyc
+./src/api/fx/fx_5m_chain_cny.py
+./src/api/fx/fx_5m_day.py
+./src/api/fx/fx_5m_period.py
+./src/api/fx/fx_fut_merge_today.py
+./src/api/fx/fx_probe_fields.py
+./src/api/fx/fx_snapshot.py
+./src/api/fx/fx_tail_lastbars.py
+./src/api/__init__.py
+./src/api/__pycache__/__init__.cpython-312.pyc
+./src/api/utils/fx_lib_api.py
+./src/api/utils/lib_moex_api.py
+./src/api/utils/__pycache__/fx_lib_api.cpython-312.pyc
+./src/api/utils/__pycache__/lib_moex_api.cpython-312.pyc
+./src/bot/cmd_bot.py
+./src/cli/archive/loop_ema_5_12_realtime_old.py
+./src/cli/build_day_regime_ema_5_12.py
+./src/cli/debug_ema_5_12_regime.py
+./src/cli/export_cny_fut_today_auto.py
+./src/cli/export_cny_fut_today.py
+./src/cli/export_fo_5m_by_key.py
+./src/cli/export_fx_5m_by_key.py
+./src/cli/export_fx_5m_unified.py
+./src/cli/loop_cnyrub_5m.py
+./src/cli/loop_ema_5_12_realtime.py
+./src/cli/loop_futoi_5m.py
+./src/cli/loop_marketdata_5m.py
+./src/cli/loop_merge_full_plus_oi.py
+./src/cli/loop_merge_l1_l2.py
+./src/cli/loop_oi_5m.py
+./src/cli/loop_orderbook_5m.py
+./src/cli/loop_signal_mr1.py
+./src/cli/loop_trades_5m.py
+./src/cli/moex_cli.py
+./src/cli/__pycache__/build_day_regime_ema_5_12.cpython-312.pyc
+./src/cli/__pycache__/debug_ema_5_12_regime.cpython-312.pyc
+./src/cli/__pycache__/loop_ema_5_12_realtime.cpython-312.pyc
+./src/cli/run_backfill_expiry.py
+./src/cli/run_backfill.py
+./src/cli/run_backfill_week.py
+./src/cli/run_backfill_year.py
+./src/cli/run_fx_today.py
+./src/cli/run_merge_one_day.py
+./src/cli/run_one_day_v3.py
+./src/cli/run_today.py
+./src/infra/__pycache__/single_instance.cpython-312.pyc
+./src/infra/__pycache__/trade_logger.cpython-312.pyc
+./src/infra/single_instance.py
+./src/infra/trade_logger.py
+./src/__init__.py
+./src/misc/analyze_si_volume_day.py
+./src/misc/api_online.py
+./src/misc/attach_hi2.py
+./src/misc/check_api_access.py
+./src/misc/cleanup_temp_files.py
+./src/misc/cny_driver_step2_lags.py
+./src/misc/cny_driver_step4_track_ema.py
+./src/misc/cny_driver_step4_track.py
+./src/misc/concat_history.py
+./src/misc/config.py
+./src/misc/config_utils.py
+./src/misc/connector.py
+./src/misc/diag_backfill_ytd.py
+./src/misc/diag_orderbook_once.py
+./src/misc/fetch_cnyrub_1m_to_5m.py
+./src/misc/fetch_cnyrub_trades_to_5m.py
+./src/misc/fetch_futoi_moexstyle.py
+./src/misc/fetch_futoi.py
+./src/misc/fetch_futoi_strict.py
+./src/misc/fetch_hi2.py
+./src/misc/fetch_obstats.py
+./src/misc/fetch_obstats_strict.py
+./src/misc/fetch_si_candles_1m_to_5m_public.py
+./src/misc/fetch_si_tradestats_5m.py
+./src/misc/fetch_si_trades_to_5m.py
+./src/misc/fetch_tradestats.py
+./src/misc/fetch_tradestats_strict.py
+./src/misc/get_futoi.py
+./src/misc/__init__.py
+./src/misc/inspect_csv_cols.py
+./src/misc/lib_moex.py
+./src/misc/lib_moex_v3.py
+./src/misc/main.py
+./src/misc/mcp_moex_client.py
+./src/misc/mcp_moex_server.py
+./src/misc/merge_5m.py
+./src/misc/merge_5m_strict.py
+./src/misc/merge_si_cny_5m.py
+./src/misc/normalize_5m_last3.py
+./src/misc/normalize_5m_last3_v2.py
+./src/misc/online_signal_mr1.py
+./src/misc/pivot_futoi_apply.py
+./src/misc/preview_endpoints.py
+./src/misc/probe_hi2.py
+./src/misc/probe_obstats.py
+./src/misc/probe_tradestats.py
+./src/misc/strategy.py
+./src/misc/tg_get_updates.py
+./src/misc/tg_send.py
+./src/misc/tg_utils.py
+./src/misc/tradestats_export.py
+./src/pipeline/merge/fo_fx_merge_5m.py
+./src/pipeline/merge/master_merge_5m.py
+./src/pipeline/merge/__pycache__/fo_fx_merge_5m.cpython-312.pyc
+./src/pipeline/merge/__pycache__/master_merge_5m.cpython-312.pyc
+./src/pipeline/update_master_si_cny_futoi_obstats.py
+./src/pipeline/update_obstats_from_fo.py
+./src/__pycache__/__init__.cpython-312.pyc
+./src/research/regimes/build_gb_day_labels.py
+./src/research/regimes/__pycache__/build_gb_day_labels.cpython-312.pyc
+./src/strategy/ema/ema_5_12_core.py
+./src/strategy/ema/__pycache__/ema_5_12_core.cpython-312.pyc
+./src/strategy/ma/ma_grid_2024_2025.py
+./src/strategy/ma/__pycache__/ma_grid_2024_2025.cpython-312.pyc
+./src/strategy/mr1/signal_mr1.py
+./src/strategy/realtime/ema_5_12/config_ema_5_12.py
+./src/strategy/realtime/ema_5_12/executor_ema_5_12.py
+./src/strategy/realtime/ema_5_12/feed_ema_5_12.py
+./src/strategy/realtime/ema_5_12/__init__.py
+./src/strategy/realtime/ema_5_12/logger_ema_5_12.py
+./src/strategy/realtime/ema_5_12/__pycache__/config_ema_5_12.cpython-312.pyc
+./src/strategy/realtime/ema_5_12/__pycache__/executor_ema_5_12.cpython-312.pyc
+./src/strategy/realtime/ema_5_12/__pycache__/feed_ema_5_12.cpython-312.pyc
+./src/strategy/realtime/ema_5_12/__pycache__/__init__.cpython-312.pyc
+./src/strategy/realtime/ema_5_12/__pycache__/logger_ema_5_12.cpython-312.pyc
+./src/strategy/realtime/ema_5_12/__pycache__/regime_day_loader.cpython-312.pyc
+./src/strategy/realtime/ema_5_12/__pycache__/runner_ema_5_12.cpython-312.pyc
+./src/strategy/realtime/ema_5_12/__pycache__/session_state.cpython-312.pyc
+./src/strategy/realtime/ema_5_12/__pycache__/signals_ema_5_12.cpython-312.pyc
+./src/strategy/realtime/ema_5_12/__pycache__/state_ema_5_12.cpython-312.pyc
+./src/strategy/realtime/ema_5_12/regime_day_loader.py
+./src/strategy/realtime/ema_5_12/runner_ema_5_12.py
+./src/strategy/realtime/ema_5_12/session_state.py
+./src/strategy/realtime/ema_5_12/signals_ema_5_12.py
+./src/strategy/realtime/ema_5_12/state_ema_5_12.py
+./.state/cmd_bot.offset
+./.state/.gitkeep
+./tests/.gitkeep
