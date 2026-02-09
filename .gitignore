@@ -35,3 +35,11 @@ project_tree.txt
 clean_moex_bot.sh
 move_code.sh
 scripts/run_ema_5_12_tmux.sh
+
+# local scratch
+dirlist.txt
+filelist.txt
+project_tree.txt
+clean_moex_bot.sh
+move_code.sh
+scripts/run_ema_5_12_tmux.sh
