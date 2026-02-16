@@ -1,0 +1,95 @@
+{
+  "manifest_version": "1.0",
+  "generated_policy": "manual_canonical_only",
+  "paths": [
+    {
+      "key": "master_5m_si_cny_futoi_obstats",
+      "path": "data/master/master_5m_si_cny_futoi_obstats_2020-01-03_2026-02-03.csv",
+      "scope": "server_only",
+      "type": "dataset",
+      "owner": "pipeline",
+      "notes": "Full enriched 5m master dataset (Si+CNY+FUTOI+OBSTATS)"
+    },
+    {
+      "key": "regime_day_r1r4",
+      "path": "data/research/regime_day_r1r4.csv",
+      "scope": "in_git",
+      "type": "dataset",
+      "owner": "research",
+      "notes": "Canonical D1 regime classification R1-R4"
+    },
+    {
+      "key": "levels_events_v2",
+      "path": "data/research/level_events_v2.csv",
+      "scope": "in_git",
+      "type": "artifact",
+      "owner": "research",
+      "notes": "Canonical D1 levels interaction events (v2)"
+    },
+    {
+      "key": "lib_moex_api",
+      "path": "src/api/utils/lib_moex_api.py",
+      "scope": "in_git",
+      "type": "code",
+      "owner": "api"
+    },
+    {
+      "key": "fo_snapshot",
+      "path": "src/api/futures/fo_snapshot.py",
+      "scope": "in_git",
+      "type": "code",
+      "owner": "api"
+    },
+    {
+      "key": "fo_5m_day",
+      "path": "src/api/futures/fo_5m_day.py",
+      "scope": "in_git",
+      "type": "code",
+      "owner": "api"
+    },
+    {
+      "key": "fo_5m_period",
+      "path": "src/api/futures/fo_5m_period.py",
+      "scope": "in_git",
+      "type": "code",
+      "owner": "api"
+    },
+    {
+      "key": "fx_snapshot",
+      "path": "src/api/fx/fx_snapshot.py",
+      "scope": "in_git",
+      "type": "code",
+      "owner": "api"
+    },
+    {
+      "key": "fx_5m_day",
+      "path": "src/api/fx/fx_5m_day.py",
+      "scope": "in_git",
+      "type": "code",
+      "owner": "api"
+    },
+    {
+      "key": "fx_5m_period",
+      "path": "src/api/fx/fx_5m_period.py",
+      "scope": "in_git",
+      "type": "code",
+      "owner": "api"
+    },
+    {
+      "key": "phase_transition_state_dir",
+      "path": "data/state/",
+      "scope": "server_only",
+      "type": "state",
+      "owner": "pipeline",
+      "notes": "Runtime state storage"
+    },
+    {
+      "key": "phase_transition_logs_dir",
+      "path": "logs/",
+      "scope": "server_only",
+      "type": "log",
+      "owner": "pipeline",
+      "notes": "Runtime logs directory"
+    }
+  ]
+}
