@@ -90,7 +90,14 @@
       "type": "log",
       "owner": "pipeline",
       "notes": "Runtime logs directory"
+    },
+    {
+      "key": "level_probs_v1",
+      "path": "data/research/level_probs_v1.csv",
+      "scope": "in_git",
+      "type": "artifact",
+      "owner": "research",
+      "notes": "Canonical Levels v1 probability table"
     }
-  ],
-  "level_probs_v1": "data/research/level_probs_v1.csv"
+  ]
 }
