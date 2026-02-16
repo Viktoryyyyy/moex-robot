@@ -91,5 +91,6 @@
       "owner": "pipeline",
       "notes": "Runtime logs directory"
     }
-  ]
+  ],
+  "level_probs_v1": "data/research/level_probs_v1.csv"
 }
