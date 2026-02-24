@@ -98,6 +98,12 @@
       "type": "artifact",
       "owner": "research",
       "notes": "Canonical Levels v1 probability table"
+    },
+    {
+      "key": "levels_si_d1_events",
+      "path": "data/research/levels_si_d1_events.csv",
+      "scope": "git_managed",
+      "description": "Canonical D1 breakout events dataset for Si futures (2020–2025)"
     }
   ]
 }
