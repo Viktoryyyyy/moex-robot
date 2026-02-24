@@ -22,7 +22,11 @@ def main() -> None:
     # =============================
     # Gate preflight (FAIL-CLOSED)
     # =============================
-    gate = preflight()
+    try:
+        gate = preflight()
+    except Exception as e:
+        print("[Gate] status=BLOCK reason=" + str(e))
+        raise SystemExit(2)
     if gate.risk == 1:
         print("[Gate] status=BLOCK reason=phase_transition_risk==1")
         raise SystemExit(2)
