@@ -89,7 +89,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--master", required=True)
     ap.add_argument("--levels", default="data/research/levels_v1.csv")
-    ap.add_argument("--events", default="data/research/level_events_v1.csv")
+    ap.add_argument("--events", default="data/research/levels_si_d1_events.csv")
     ap.add_argument("--regime", default="data/research/regime_day_r1r4.csv")
     ap.add_argument("--out", default="data/research/level_events_v2.csv")
     ap.add_argument("--N", type=int, default=10)

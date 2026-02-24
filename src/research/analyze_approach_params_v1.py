@@ -81,7 +81,7 @@ def classify_approach(d1: pd.DataFrame, t_idx: int, L: float, direction: str, N:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--master", required=True)
-    ap.add_argument("--events", default="data/research/level_events_v1.csv")
+    ap.add_argument("--events", default="data/research/levels_si_d1_events.csv")
     ap.add_argument("--regime", default="data/research/regime_day_r1r4.csv")
     ap.add_argument("--out", default="data/research/approach_param_grid_v1.csv")
     ap.add_argument("--alpha", type=float, default=2.0)

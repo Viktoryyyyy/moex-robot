@@ -5,7 +5,7 @@ import pandas as pd
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--events", default="data/research/level_events_v1.csv", help="level_events_v1.csv")
+    ap.add_argument("--events", default="data/research/levels_si_d1_events.csv", help="level_events_v1.csv")
     ap.add_argument("--out", default="data/research/level_probs_v1.csv", help="output csv")
     ap.add_argument("--alpha", type=float, default=2.0, help="Bayes prior alpha")
     ap.add_argument("--beta", type=float, default=2.0, help="Bayes prior beta")
