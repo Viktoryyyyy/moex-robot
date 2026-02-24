@@ -52,7 +52,16 @@ def main() -> None:
         session = load_session_state(trade_date)
 
         while True:
-            bars = load_fo_5m_day(secid=SECID, trade_date=trade_date)
+            
+            try:
+                bars = load_fo_5m_day(secid=SECID, trade_date=trade_date)
+            except Exception as e:
+                if "401" in str(e):
+                    print("[CRIT] MOEX 401 Unauthorized")
+                    raise SystemExit(2)
+                raise
+
+
 
             if not bars:
                 time.sleep(5)
@@ -81,10 +90,3 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 
-    # =============================
-    # Infra pre-checks
-    # =============================
-    import os
-    if not os.getenv("MOEX_API_KEY"):
-        print("[CRIT] MOEX_API_KEY missing")
-        raise SystemExit(2)
