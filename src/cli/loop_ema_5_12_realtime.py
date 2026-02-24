@@ -16,6 +16,14 @@ SECID = "Si"
 
 def main() -> None:
     # =============================
+    # Infra pre-checks (FAIL-CLOSED)
+    # =============================
+    import os
+    if not os.getenv("MOEX_API_KEY"):
+        print("[CRIT] MOEX_API_KEY missing")
+        raise SystemExit(2)
+
+    # =============================
     # Gate preflight (FAIL-CLOSED)
     # =============================
     gate = preflight()
@@ -72,3 +80,11 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+    # =============================
+    # Infra pre-checks
+    # =============================
+    import os
+    if not os.getenv("MOEX_API_KEY"):
+        print("[CRIT] MOEX_API_KEY missing")
+        raise SystemExit(2)
