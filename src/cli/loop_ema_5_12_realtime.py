@@ -45,8 +45,8 @@ def main() -> None:
 
     lock = acquire_lock("ema_5_12_realtime")
     try:
-        ensure_ema_5_12_file()
         trade_date = date.today()
+        ensure_ema_5_12_file(trade_date)
         session = load_session_state(trade_date)
 
         while True:
@@ -71,7 +71,7 @@ def main() -> None:
             )
 
             if signal is not None:
-                append_trade_ema_5_12(signal)
+                append_trade_ema_5_12(trade_date, signal)
 
             save_session_state(trade_date, session)
             time.sleep(5)
