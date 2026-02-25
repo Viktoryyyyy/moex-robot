@@ -45,8 +45,8 @@ def main() -> None:
 
     lock = acquire_lock("ema_5_12_realtime")
     try:
-        ensure_ema_5_12_file()
         trade_date = date.today()
+        ensure_ema_5_12_file(trade_date)
         session = load_session_state(trade_date)
 
         while True:
