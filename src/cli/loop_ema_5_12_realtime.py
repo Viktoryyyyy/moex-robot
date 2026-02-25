@@ -63,17 +63,15 @@ def main() -> None:
                 continue
 
             last_bar = bars[-1]
-            signal = execute_on_bar(
+            session, signal = execute_on_bar(
                 bar=last_bar,
-                session=session,
-                fast_window=EMA_FAST_WINDOW,
-                slow_window=EMA_SLOW_WINDOW,
+                state=session,
             )
 
             if signal is not None:
-                append_trade_ema_5_12(signal)
+                append_trade_ema_5_12(trade_date, signal)
 
-            save_session_state(trade_date, session)
+            save_session_state(session)
             time.sleep(5)
 
     finally:
