@@ -234,7 +234,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     print(
         "DATE={d} YDAY={y} rr={rr:.6g} tr={tr:.6g} vz={vz:.6g} thr=({ttr:.6g},{trr:.6g},{tvz:.6g}) risk={risk}".format(
-            d=payload["date"],
+            d=payload.get("asof_date", payload.get("date")),
             y=dm.yday_date.isoformat(),
             rr=dm.rel_range,
             tr=dm.trend_ratio,
