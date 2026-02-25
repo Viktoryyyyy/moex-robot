@@ -213,7 +213,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ) else 0
 
     payload = {
-        "date": date.today().isoformat(),
+        "asof_date": dm.yday_date.isoformat(),
         "phase_transition_risk": int(risk),
         "inputs": {
             "yday_date": dm.yday_date.isoformat(),
@@ -227,7 +227,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             "p10_vol_z": thr["p10_vol_z"],
         },
         "source": "MOEX->daily_metrics_builder->day_metrics_D-1.csv",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00","Z"),
     }
 
     atomic_write_text(args.out_json, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
