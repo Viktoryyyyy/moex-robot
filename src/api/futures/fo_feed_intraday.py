@@ -8,12 +8,12 @@ This module hides MOEX ISS/APIM details from strategy code.
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 
-from src.api.utils.lib_moex_api import get_json
+from src.api.utils.lib_moex_api import get_json, blocks, to_rows, resolve_fut_by_key
 
 
-def load_fo_5m_day(secid: str, trade_date: date) -> List[Dict[str, Any]]:
+def load_fo_5m_day(secid: str, trade_date: Union[str, date] = "AUTO") -> List[Dict[str, Any]]:
     """
     Load 5m bars for given futures SECID and trade_date from MOEX datashop/fo/tradestats.
 
@@ -27,7 +27,38 @@ def load_fo_5m_day(secid: str, trade_date: date) -> List[Dict[str, Any]]:
     if not secid:
         return []
 
-    day_str = trade_date.isoformat()
+    if isinstance(trade_date, date):
+        day_str = trade_date.isoformat()
+    else:
+        td = str(trade_date).strip()
+        if td.upper() == "AUTO":
+            from datetime import timedelta
+            today = (datetime.utcnow() + timedelta(hours=3)).date()
+            day_str = None
+            for d in [today, today - timedelta(days=1), today - timedelta(days=2), today - timedelta(days=3)]:
+                ds = d.isoformat()
+                sec = resolve_fut_by_key(secid, limit_probe_day=ds)
+                if not sec:
+                    continue
+                try:
+                    j0 = get_json(f"/iss/datashop/algopack/fo/tradestats/{sec}.json", {"from": ds, "till": ds}, timeout=15.0)
+                    b0 = j0.get("data") or {}
+                    if isinstance(b0, dict) and b0.get("data"):
+                        day_str = ds
+                        break
+                except Exception:
+                    continue
+            if not day_str:
+                print("[FO_FEED] AUTO trade_date resolve failed (no tradestats in last 4 days)")
+                return []
+        else:
+            day_str = td
+
+    resolved = resolve_fut_by_key(secid, limit_probe_day=day_str)
+    if not resolved:
+        print("[FO_FEED] resolve_fut_by_key failed for key=" + str(secid) + " day=" + str(day_str))
+        return []
+    secid = resolved
 
     try:
         j = get_json(
