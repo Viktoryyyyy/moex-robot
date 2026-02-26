@@ -123,8 +123,15 @@ def main():
     ap.add_argument("--out-day", required=True)
     args = ap.parse_args()
 
-    if args.date != "D-1":
-        die("Only --date D-1 supported")
+    if args.date == "D-1":
+        trade_date_override = None
+    else:
+        try:
+            from datetime import date as _date
+            _date.fromisoformat(args.date)
+        except Exception:
+            die("Invalid --date, expected D-1 or YYYY-MM-DD")
+        trade_date_override = args.date
 
     ensure_dirs()
     check_api_key()
@@ -135,7 +142,7 @@ def main():
     if not secid:
         die(f"No futures found for key={args.key}")
 
-    trade_date = resolve_trade_date(get_json, secid)
+    trade_date = trade_date_override or resolve_trade_date(get_json, secid)
 
     secid2 = resolve_fut_by_key(args.key, board="rfud", limit_probe_day=trade_date)
     if secid2:
