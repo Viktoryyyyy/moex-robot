@@ -10,7 +10,7 @@ from contextlib import redirect_stdout, redirect_stderr
 
 MIN_DAYS = 60
 MAX_LOOKBACK_DAYS = 365
-HISTORY_PATH = Path("data/gate/rel_range_history.csv")
+HISTORY_PATH = Path("data/state/rel_range_history.csv")
 
 def _die(msg: str, code: int = 2) -> None:
     print("[CRIT] " + msg)

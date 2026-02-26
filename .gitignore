@@ -16,7 +16,7 @@ venv/
 *.key
 
 logs/
-state/
+/state/
 
 data/raw/
 data/interim/
@@ -43,3 +43,5 @@ project_tree.txt
 clean_moex_bot.sh
 move_code.sh
 scripts/run_ema_5_12_tmux.sh
+
+!data/state/rel_range_history.csv
