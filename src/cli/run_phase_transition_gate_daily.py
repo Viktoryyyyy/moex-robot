@@ -86,7 +86,7 @@ def main() -> None:
     out_payload = "data/gate/phase_transition_gate_payload.json"
     out_5m = "data/gate/si_5m_D-1.csv"
     out_day = "data/gate/day_metrics_D-1.csv"
-    hist = "data/state/rel_range_history.csv"
+    hist = "data/gate/rel_range_history.csv"
     stamp = "data/gate/phase_transition_gate_daily.last_success.json"
     hist_before = _read_history_last_date(hist)
     try:

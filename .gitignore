@@ -45,3 +45,5 @@ move_code.sh
 scripts/run_ema_5_12_tmux.sh
 
 !data/state/rel_range_history.csv
+!data/gate/
+!data/gate/rel_range_history.csv

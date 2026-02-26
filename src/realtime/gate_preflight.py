@@ -105,7 +105,7 @@ def preflight(path: str = "data/gate/phase_transition_risk.json") -> GateResult:
     if stamp_asof != asof:
         _die("gate daily stamp asof mismatch: stamp_asof=" + stamp_asof + " gate_asof=" + asof)
 
-    hist_path = "data/state/rel_range_history.csv"
+    hist_path = "data/gate/rel_range_history.csv"
     hist_last = _history_last_date(hist_path)
     if hist_last != asof:
         _die("history last_date mismatch: hist_last=" + hist_last + " gate_asof=" + asof)
