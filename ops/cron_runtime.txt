@@ -1,0 +1,1 @@
+30 8 * * * /bin/bash -lc 'cd /home/trader/moex_bot/moex-robot && mkdir -p logs data/state data/gate data/realtime && set -a; source .env; set +a; /home/trader/moex_bot/moex-robot/venv/bin/python -m src.cli.run_phase_transition_gate_daily' >> /home/trader/moex_bot/moex-robot/logs/morning_gate.log 2>&1
