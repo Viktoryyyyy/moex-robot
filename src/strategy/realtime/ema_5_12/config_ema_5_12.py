@@ -26,5 +26,3 @@ STATE_PATH = Path("config") / "ema_5_12_state.json"
 # Daily regime file (R1: trading today is decided by yesterday's regime).
 # Expected lightweight CSV with columns:
 #   TRADEDATE, regime_day_ema_5_12_D5000
-DAY_REGIME_CSV = Path("data") / "master" / "day_regime_ema_5_12_D5000.csv"
-FO_R1_SECID = "SiZ5"

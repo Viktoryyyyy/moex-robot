@@ -48,7 +48,7 @@ def _default_state(trade_date: date) -> Dict[str, Any]:
 
     The state is flat, with zero PnL and BAD/0 regime by default.
     Regime and trade_today_flag should be updated by runner after
-    calling regime_day_loader.
+    calling legacy day gate removed.
     """
     state: Dict[str, Any] = {}
 
