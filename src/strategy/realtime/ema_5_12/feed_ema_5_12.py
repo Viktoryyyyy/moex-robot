@@ -32,7 +32,7 @@ from typing import Any, Dict, Iterable, Iterator, Mapping, Optional
 
 import pandas as pd
 
-from api.utils.lib_moex_api import get_json, resolve_fut_by_key
+from src.api.utils.lib_moex_api import get_json, resolve_fut_by_key
 from .config_ema_5_12 import FO_KEY
 
 

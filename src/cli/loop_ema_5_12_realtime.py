@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import time
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime
 
 from src.realtime.gate_preflight import preflight
 from src.infra.trade_logger import append_trade_ema_5_12, ensure_ema_5_12_file
@@ -10,49 +11,46 @@ from src.infra.single_instance import acquire_lock, release_lock
 SECID = "Si"
 
 
-def _bar_ts(bar):
-    try:
-        if isinstance(bar, dict):
-            return bar.get("end") or bar.get("ts") or bar.get("datetime")
-        return getattr(bar, "end", None) or getattr(bar, "ts", None) or getattr(bar, "datetime", None)
-    except Exception:
-        return None
+@dataclass(frozen=True)
+class Bar:
+    end: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
 
 
-def _bar_price(bar):
-    try:
-        if isinstance(bar, dict):
-            return bar.get("close") or bar.get("CLOSE") or bar.get("price")
-        return getattr(bar, "close", None) or getattr(bar, "CLOSE", None) or getattr(bar, "price", None)
-    except Exception:
-        return None
+def _to_dt(value):
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(str(value))
 
 
-def _signal_side(signal):
-    side = getattr(signal, "side_exec", None)
-    if side == "BUY":
-        return "LONG"
-    if side == "SELL":
-        return "SHORT"
-    if side is None:
-        return ""
-    return str(side)
+def _signal_state_from_session(session):
+    if session.pos > 0:
+        last_signal = "LONG"
+    elif session.pos < 0:
+        last_signal = "SHORT"
+    else:
+        last_signal = "NONE"
+    return {
+        "ema_fast": session.ema_fast,
+        "ema_slow": session.ema_slow,
+        "bars_count": session.ema_bars_seen,
+        "position": session.pos,
+        "last_signal": last_signal,
+        "trade_today_flag": 1,
+    }
 
 
 def main() -> None:
-    # =============================
-    # Infra pre-checks (FAIL-CLOSED)
-    # =============================
     import os
+
     if not os.getenv("MOEX_API_KEY"):
         print("[CRIT] MOEX_API_KEY missing")
         raise SystemExit(2)
 
-    shadow_mode = str(os.getenv("EMA_SHADOW_MODE", "0")).strip() == "1"
-
-    # =============================
-    # Gate preflight (FAIL-CLOSED)
-    # =============================
     try:
         gate = preflight()
     except Exception as e:
@@ -62,23 +60,15 @@ def main() -> None:
         print("[Gate] status=BLOCK reason=phase_transition_risk==1")
         raise SystemExit(2)
 
-    # Import API + EMA only AFTER Gate PASS and risk==0
     from src.api.futures.fo_feed_intraday import load_fo_5m_day
-    from src.strategy.realtime.ema_5_12.config_ema_5_12 import (
-        EMA_FAST_WINDOW,
-        EMA_SLOW_WINDOW,
-    )
     from src.strategy.realtime.ema_5_12.executor_ema_5_12 import execute_on_bar
-    from src.strategy.realtime.ema_5_12.session_state import (
-        load_session_state,
-        save_session_state,
-    )
+    from src.strategy.realtime.ema_5_12.signals_ema_5_12 import SIGNAL_NO_TRADE, process_bar
+    from src.strategy.realtime.ema_5_12.session_state import load_session_state, save_session_state
 
     lock = acquire_lock("ema_5_12_realtime")
     try:
         trade_date = date.today()
-        if not shadow_mode:
-            ensure_ema_5_12_file(trade_date)
+        ensure_ema_5_12_file(trade_date)
         session = load_session_state(trade_date)
 
         while True:
@@ -95,19 +85,42 @@ def main() -> None:
                 continue
 
             last_bar = bars[-1]
+            last_bar_end = _to_dt(last_bar["end"])
+
+            if session.last_bar_end is not None and last_bar_end <= session.last_bar_end:
+                time.sleep(5)
+                continue
+
             session, signal = execute_on_bar(
                 bar=last_bar,
                 state=session,
             )
 
+            signal_state = _signal_state_from_session(session)
+            signal_bar = Bar(
+                end=last_bar_end,
+                open=float(last_bar["open"]),
+                high=float(last_bar["high"]),
+                low=float(last_bar["low"]),
+                close=float(last_bar["close"]),
+                volume=float(last_bar["volume"]),
+            )
+            signal_state, sig = process_bar(signal_state, signal_bar)
+
+            session.ema_fast = signal_state["ema_fast"]
+            session.ema_slow = signal_state["ema_slow"]
+            session.ema_bars_seen = signal_state["bars_count"]
+
+            print("[EMA] fast=%.2f slow=%.2f" % (session.ema_fast or 0, session.ema_slow or 0))
+
+            if sig["type"] != SIGNAL_NO_TRADE:
+                session.pending_target_pos = int(sig["target_pos"])
+                session.pending_signal_bar_end = last_bar_end
+                session.pending_signal_price = float(last_bar["close"])
+                session.pending_reason = str(sig["type"]) + ":" + str(sig["cross_type"])
+
             if signal is not None:
-                if shadow_mode:
-                    ts = _bar_ts(last_bar)
-                    px = _bar_price(last_bar)
-                    sig = _signal_side(signal)
-                    print("[SHADOW] ts=" + str(ts) + " price=" + str(px) + " signal=" + str(sig))
-                else:
-                    append_trade_ema_5_12(trade_date, signal)
+                append_trade_ema_5_12(trade_date, signal)
 
             save_session_state(session)
             time.sleep(5)
