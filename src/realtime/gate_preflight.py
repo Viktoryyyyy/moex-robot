@@ -12,7 +12,7 @@ class GateResult:
     payload: Dict[str, Any]
 
 
-def preflight(path: str = "data/gate/phase_transition_risk.json") -> GateResult:
+def preflight(path: str = "data/state/phase_transition_risk.json") -> GateResult:
     if not os.path.exists(path):
         raise RuntimeError("gate file not found: " + path)
     try:
