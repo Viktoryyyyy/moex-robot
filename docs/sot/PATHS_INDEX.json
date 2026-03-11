@@ -104,12 +104,6 @@
       "path": "data/research/levels_si_d1_events.csv",
       "scope": "git_managed",
       "description": "Canonical D1 breakout events dataset for Si futures (2020–2025)"
-    },
-    {
-      "key": "phase_transition_risk",
-      "path": "data/gate/phase_transition_risk.json",
-      "scope": "git_managed",
-      "description": "D-1 PhaseTransition Gate decision artifact (0/1). Mandatory for EMA activation."
     }
   ]
 }
