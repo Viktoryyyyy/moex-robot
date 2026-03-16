@@ -169,6 +169,78 @@ def upsert_history(path: str, yday: date, rel_range_yday: float) -> Tuple[bool, 
     return True, items
 
 
+
+def validate_canonical_master_for_bootstrap(master_path, yday):
+    import csv
+    from datetime import timedelta
+    if not os.path.exists(master_path):
+        die("FAIL_CLOSED: canonical master not found: " + master_path)
+    with open(master_path, "r", encoding="utf-8", newline="") as f:
+        r = csv.DictReader(f)
+        if r.fieldnames is None:
+            die("FAIL_CLOSED: canonical master empty header: " + master_path)
+        req = {"end", "high", "low", "close"}
+        got = set(r.fieldnames)
+        if not req.issubset(got):
+            die("FAIL_CLOSED: canonical master columns missing: required=" + str(sorted(req)) + " got=" + str(sorted(got)) + " path=" + master_path)
+        daily = {}
+        for row in r:
+            try:
+                end_ts = (row.get("end") or "").strip()
+                d = date.fromisoformat(end_ts[:10])
+                hi = float((row.get("high") or "").strip())
+                lo = float((row.get("low") or "").strip())
+                cl = float((row.get("close") or "").strip())
+            except Exception:
+                die("FAIL_CLOSED: invalid canonical master row: " + str(row) + " path=" + master_path)
+            cur = daily.get(d)
+            if cur is None:
+                daily[d] = {"high": hi, "low": lo, "close": cl, "end": end_ts}
+            else:
+                cur["high"] = max(float(cur["high"]), hi)
+                cur["low"] = min(float(cur["low"]), lo)
+                if end_ts >= str(cur["end"]):
+                    cur["close"] = cl
+                    cur["end"] = end_ts
+    if not daily:
+        die("FAIL_CLOSED: canonical master has no rows: " + master_path)
+    all_days = sorted(daily.keys())
+    required_last_day = yday - timedelta(days=1)
+    freshest_day = all_days[-1]
+    if freshest_day < required_last_day:
+        die("FAIL_CLOSED: canonical master stale for gate bootstrap: freshest=" + freshest_day.isoformat() + " required>=" + required_last_day.isoformat() + " path=" + master_path)
+    if required_last_day not in daily:
+        die("FAIL_CLOSED: canonical master missing required D-1 day for gate bootstrap: required=" + required_last_day.isoformat() + " path=" + master_path)
+    history_days = [d for d in all_days if d < yday]
+    if len(history_days) < MIN_HISTORY_DAYS:
+        die("FAIL_CLOSED: canonical master coverage insufficient for gate bootstrap: have=" + str(len(history_days)) + " required>=" + str(MIN_HISTORY_DAYS) + " yday=" + yday.isoformat() + " path=" + master_path)
+    return daily
+
+def seed_history_from_canonical_master(path, daily, yday):
+    rows = []
+    for d in sorted(daily.keys()):
+        if d >= yday:
+            break
+        hi = float(daily[d]["high"])
+        lo = float(daily[d]["low"])
+        cl = float(daily[d]["close"])
+        rr = 0.0 if cl == 0.0 else (hi - lo) / cl
+        rows.append({"date": d.isoformat(), "rel_range": str(rr)})
+    atomic_write_csv(path, ["date", "rel_range"], rows)
+
+def resolve_canonical_master_path():
+    mp = os.getenv("MASTER_PATH", "").strip()
+    if not mp:
+        die("FAIL_CLOSED: history file missing and MASTER_PATH is not set")
+    return mp
+
+def ensure_history_seeded(path, yday):
+    if os.path.exists(path):
+        return
+    mp = resolve_canonical_master_path()
+    daily = validate_canonical_master_for_bootstrap(mp, yday)
+    seed_history_from_canonical_master(path, daily, yday)
+
 def compute_vol_z(yday: date, rel_range_yday: float, items: List[Tuple[date, float]]) -> float:
     hist = [rr for d, rr in items if d < yday]
     if len(hist) < MIN_HISTORY_DAYS:
@@ -199,6 +271,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     dm = parse_day_metrics(args.in_day)
     thr = load_thresholds(args.config)
+
+    ensure_history_seeded(args.in_history, dm.yday_date)
 
     existed, items = upsert_history(args.in_history, dm.yday_date, dm.rel_range)
     if not existed:
