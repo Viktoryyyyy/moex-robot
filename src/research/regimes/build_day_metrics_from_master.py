@@ -1,8 +1,12 @@
 import glob
+import os
 import numpy as np
 import pandas as pd
 
-MASTER_GLOB = "data/master/*.csv"
+def resolve_canonical_master_glob() -> str:
+    return os.path.expanduser("~/moex_bot/data/master/master_5m_si_cny_futoi_obstats_*.csv")
+
+
 OUT_PATH = "data/research/day_metrics_from_master.csv"
 
 def detect_col(cols, candidates):
@@ -26,9 +30,10 @@ def detect_ohlc(cols):
     return None
 
 def pick_master_with_ohlc():
-    files = sorted(glob.glob(MASTER_GLOB))
+    master_glob = resolve_canonical_master_glob()
+    files = sorted(glob.glob(master_glob))
     if not files:
-        raise SystemExit(f"No master CSV found: {MASTER_GLOB}")
+        raise SystemExit(f"No canonical external master CSV found: {master_glob}")
 
     skipped = []
     for path in files:
