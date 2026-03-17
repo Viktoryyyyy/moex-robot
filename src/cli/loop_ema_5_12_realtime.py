@@ -51,6 +51,15 @@ def main() -> None:
 
         while True:
             try:
+                gate = preflight()
+            except Exception as e:
+                print("[Gate] status=BLOCK reason=" + str(e))
+                raise SystemExit(2)
+            if gate.risk == 1:
+                print("[Gate] status=BLOCK reason=phase_transition_risk==1")
+                raise SystemExit(2)
+
+            try:
                 bars = load_fo_5m_day(secid=SECID, trade_date=trade_date)
             except Exception as e:
                 if "401" in str(e):
