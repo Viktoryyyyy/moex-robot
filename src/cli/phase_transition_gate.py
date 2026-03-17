@@ -216,30 +216,29 @@ def validate_canonical_master_for_bootstrap(master_path, yday):
         die("FAIL_CLOSED: canonical master coverage insufficient for gate bootstrap: have=" + str(len(history_days)) + " required>=" + str(MIN_HISTORY_DAYS) + " yday=" + yday.isoformat() + " path=" + master_path)
     return daily
 
-def seed_history_from_canonical_master(path, daily, yday):
-    rows = []
-    for d in sorted(daily.keys()):
-        if d >= yday:
-            break
-        hi = float(daily[d]["high"])
-        lo = float(daily[d]["low"])
-        cl = float(daily[d]["close"])
-        rr = 0.0 if cl == 0.0 else (hi - lo) / cl
-        rows.append({"date": d.isoformat(), "rel_range": str(rr)})
-    atomic_write_csv(path, ["date", "rel_range"], rows)
-
 def resolve_canonical_master_path():
     mp = os.getenv("MASTER_PATH", "").strip()
     if not mp:
-        die("FAIL_CLOSED: history file missing and MASTER_PATH is not set")
+        die("FAIL_CLOSED: MASTER_PATH is not set")
     return mp
 
-def ensure_history_seeded(path, yday):
-    if os.path.exists(path):
-        return
-    mp = resolve_canonical_master_path()
-    daily = validate_canonical_master_for_bootstrap(mp, yday)
-    seed_history_from_canonical_master(path, daily, yday)
+def validate_history_completeness(path, daily, yday):
+    if not os.path.exists(path):
+        die("FAIL_CLOSED: rel_range_history.csv missing: " + path)
+
+    _, items = read_history(path)
+    required_days = {d for d in daily.keys() if d < yday}
+    history_days = {d for d, _ in items if d < yday}
+    missing_days = sorted(required_days - history_days)
+    if missing_days:
+        die(
+            "FAIL_CLOSED: rel_range_history.csv incomplete for canonical master trading days: "
+            + "missing=" + str(len(missing_days))
+            + " first_missing=" + missing_days[0].isoformat()
+            + " last_missing=" + missing_days[-1].isoformat()
+            + " yday=" + yday.isoformat()
+            + " path=" + path
+        )
 
 def compute_vol_z(yday: date, rel_range_yday: float, items: List[Tuple[date, float]]) -> float:
     hist = [rr for d, rr in items if d < yday]
@@ -272,7 +271,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     dm = parse_day_metrics(args.in_day)
     thr = load_thresholds(args.config)
 
-    ensure_history_seeded(args.in_history, dm.yday_date)
+    mp = resolve_canonical_master_path()
+    daily = validate_canonical_master_for_bootstrap(mp, dm.yday_date)
+    validate_history_completeness(args.in_history, daily, dm.yday_date)
 
     existed, items = upsert_history(args.in_history, dm.yday_date, dm.rel_range)
     if not existed:
