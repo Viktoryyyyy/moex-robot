@@ -58,7 +58,12 @@ def run(cmd, env=None):
     subprocess.run(cmd, check=True, env=env)
 
 
-def update_fo(start_fixed: date, end_target: date):
+def update_fo(
+    start_fixed: date,
+    end_target: date,
+    min_from: date | None = None,
+    bounded_tail_refresh: bool = False,
+):
     """
     FO: инкрементальное обновление si_5m_2020-01-01_<END>.csv.
 
@@ -92,6 +97,11 @@ def update_fo(start_fixed: date, end_target: date):
             from_date = last_day
         else:
             from_date = end_target
+
+    if bounded_tail_refresh and min_from is not None:
+        from_date = min_from
+    elif min_from and from_date < min_from:
+        from_date = min_from
 
     if from_date > end_target:
         print("FO: from_date > end_target, обновление не требуется")
@@ -161,7 +171,12 @@ def update_fo(start_fixed: date, end_target: date):
     return out, True
 
 
-def update_fx(start_fixed: date, end_target: date) -> Path:
+def update_fx(
+    start_fixed: date,
+    end_target: date,
+    min_from: date | None = None,
+    bounded_tail_refresh: bool = False,
+) -> Path:
     """
     FX: инкрементальное обновление fx_5m_2020-01-01_<END>_cnyrub_tom.csv.
 
@@ -186,6 +201,11 @@ def update_fx(start_fixed: date, end_target: date) -> Path:
             from_date = last_day
         else:
             from_date = end_target
+
+    if bounded_tail_refresh and min_from is not None:
+        from_date = min_from
+    elif min_from and from_date < min_from:
+        from_date = min_from
 
     if from_date > end_target:
         print("FX: from_date > end_target, обновление не требуется")
@@ -301,7 +321,11 @@ def build_skeleton(fo_path: Path, fx_path: Path) -> Path:
     return out
 
 
-def build_futoi(master_path: Path) -> Path:
+def build_futoi(
+    master_path: Path,
+    min_from: date | None = None,
+    bounded_tail_refresh: bool = False,
+) -> Path:
     """
     FUTOI: инкрементальный режим.
 
@@ -351,6 +375,11 @@ def build_futoi(master_path: Path) -> Path:
         from_date = last_day
     else:
         from_date = end_target
+
+    if bounded_tail_refresh and min_from is not None:
+        from_date = min_from
+    elif min_from and from_date < min_from:
+        from_date = min_from
 
     if from_date > end_target:
         print("FUTOI: from_date > end_target, обновление не требуется")
@@ -410,7 +439,11 @@ def build_futoi(master_path: Path) -> Path:
     return dest
 
 
-def build_obstats(fo_path: Path) -> Path:
+def build_obstats(
+    fo_path: Path,
+    min_from: date | None = None,
+    bounded_tail_refresh: bool = False,
+) -> Path:
     """
     OBSTATS: инкрементальный режим.
 
@@ -464,6 +497,10 @@ def build_obstats(fo_path: Path) -> Path:
         return obstats_existing
 
     from_date = last_day
+    if bounded_tail_refresh and min_from is not None:
+        from_date = min_from
+    elif min_from and from_date < min_from:
+        from_date = min_from
     print("OBSTATS update from_date:", from_date)
 
     mask_tail = fo["end"].dt.date >= from_date
@@ -520,7 +557,12 @@ def build_obstats(fo_path: Path) -> Path:
     return dest
 
 
-def build_master_all(skeleton_path: Path, futoi_path: Path, obstats_path: Path) -> Path:
+def build_master_all(
+    skeleton_path: Path,
+    futoi_path: Path,
+    obstats_path: Path,
+    out_master_path: Path | None = None,
+) -> Path:
     """
     Итоговый master: merge skeleton + FUTOI + OBSTATS по end.
     """
@@ -538,7 +580,7 @@ def build_master_all(skeleton_path: Path, futoi_path: Path, obstats_path: Path) 
     end_str = df["end"].max().date().isoformat()
 
     out_name = "master_5m_si_cny_futoi_obstats_" + start_str + "_" + end_str + ".csv"
-    out = DATA_MASTER / out_name
+    out = out_master_path if out_master_path is not None else (DATA_MASTER / out_name)
     out.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(out, index=False)
 
@@ -560,24 +602,63 @@ def main() -> None:
         "--end",
         help="Конечная дата YYYY-MM-DD (по умолчанию — сегодняшняя)",
     )
+    parser.add_argument(
+        "--from",
+        dest="from_date",
+        help="Нижняя граница пересчёта YYYY-MM-DD для bounded tail-refresh",
+    )
+    parser.add_argument(
+        "--bounded-tail-refresh",
+        action="store_true",
+        help="Форсировать пересчёт хвоста с --from на всех слоях (FO/FX/FUTOI/OBSTATS)",
+    )
+    parser.add_argument(
+        "--out-master-path",
+        help="Явный путь для итогового master CSV",
+    )
     args = parser.parse_args()
 
     start_fixed = date(2020, 1, 1)
     end_target = date.fromisoformat(args.end) if args.end else resolve_default_end()
+    min_from = date.fromisoformat(args.from_date) if args.from_date else None
+    out_master_path = Path(args.out_master_path) if args.out_master_path else None
 
     print("ROOT:", ROOT)
     print("Target end date:", end_target)
 
-    fo_path, fo_ok = update_fo(start_fixed, end_target)
+    fo_path, fo_ok = update_fo(
+        start_fixed,
+        end_target,
+        min_from=min_from,
+        bounded_tail_refresh=args.bounded_tail_refresh,
+    )
     if not fo_ok:
         print("FO update failed (MOEX timeout/No data). Master не пересобирается.")
         return
 
-    fx_path = update_fx(start_fixed, end_target)
+    fx_path = update_fx(
+        start_fixed,
+        end_target,
+        min_from=min_from,
+        bounded_tail_refresh=args.bounded_tail_refresh,
+    )
     skeleton_path = build_skeleton(fo_path, fx_path)
-    futoi_path = build_futoi(skeleton_path)
-    obstats_path = build_obstats(fo_path)
-    build_master_all(skeleton_path, futoi_path, obstats_path)
+    futoi_path = build_futoi(
+        skeleton_path,
+        min_from=min_from,
+        bounded_tail_refresh=args.bounded_tail_refresh,
+    )
+    obstats_path = build_obstats(
+        fo_path,
+        min_from=min_from,
+        bounded_tail_refresh=args.bounded_tail_refresh,
+    )
+    build_master_all(
+        skeleton_path,
+        futoi_path,
+        obstats_path,
+        out_master_path=out_master_path,
+    )
 
 
 if __name__ == "__main__":

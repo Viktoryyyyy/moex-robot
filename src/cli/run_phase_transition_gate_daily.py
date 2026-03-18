@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from dotenv import load_dotenv
@@ -18,6 +19,10 @@ def run(cmd):
 
 def main():
     load_dotenv()
+    master_path = os.getenv('MASTER_PATH')
+    if not master_path:
+        raise SystemExit('MASTER_PATH is required for canonical tail refresh')
+    run([sys.executable,'-m','src.cli.refresh_canonical_master_tail','--master-path',master_path,'--lookback-days','7'])
     run([sys.executable,'-m','src.cli.daily_metrics_builder','--key','Si','--date','D-1','--out-5m',IN_5M,'--out-day',IN_DAY])
     run([sys.executable,'-m','src.cli.validate_master_freshness','--in-day',IN_DAY])
     run([sys.executable,'-m','src.cli.phase_transition_gate','--in-day',IN_DAY,'--in-history',IN_HISTORY,'--config',CONFIG,'--out-json',OUT_JSON,'--out-history',OUT_HISTORY])
@@ -25,3 +30,4 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+

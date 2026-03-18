@@ -179,18 +179,25 @@ def validate_canonical_master_for_bootstrap(master_path, yday):
         r = csv.DictReader(f)
         if r.fieldnames is None:
             die("FAIL_CLOSED: canonical master empty header: " + master_path)
-        req = {"end", "high", "low", "close"}
         got = set(r.fieldnames)
-        if not req.issubset(got):
-            die("FAIL_CLOSED: canonical master columns missing: required=" + str(sorted(req)) + " got=" + str(sorted(got)) + " path=" + master_path)
+        req_plain = {"end", "high", "low", "close"}
+        req_fo = {"end", "high_fo", "low_fo", "close_fo"}
+        use_fo = False
+        if req_plain.issubset(got):
+            high_col, low_col, close_col = "high", "low", "close"
+        elif req_fo.issubset(got):
+            high_col, low_col, close_col = "high_fo", "low_fo", "close_fo"
+            use_fo = True
+        else:
+            die("FAIL_CLOSED: canonical master columns missing: required_any_of=" + str([sorted(req_plain), sorted(req_fo)]) + " got=" + str(sorted(got)) + " path=" + master_path)
         daily = {}
         for row in r:
             try:
                 end_ts = (row.get("end") or "").strip()
                 d = date.fromisoformat(end_ts[:10])
-                hi = float((row.get("high") or "").strip())
-                lo = float((row.get("low") or "").strip())
-                cl = float((row.get("close") or "").strip())
+                hi = float((row.get(high_col) or "").strip())
+                lo = float((row.get(low_col) or "").strip())
+                cl = float((row.get(close_col) or "").strip())
             except Exception:
                 die("FAIL_CLOSED: invalid canonical master row: " + str(row) + " path=" + master_path)
             cur = daily.get(d)
