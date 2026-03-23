@@ -154,3 +154,11 @@ def _apply_timezone(ts: pd.Series, timezone: str) -> pd.Series:
     if getattr(ts.dt, "tz", None) is None:
         return ts.dt.tz_localize(timezone, nonexistent="NaT", ambiguous="NaT")
     return ts.dt.tz_convert(timezone)
+
+
+def summarize_by_day(*args, **kwargs):
+    return summarize_backtest_by_day(*args, **kwargs)
+
+
+def summarize_segment(*args, **kwargs):
+    return summarize_day_segment(*args, **kwargs)
