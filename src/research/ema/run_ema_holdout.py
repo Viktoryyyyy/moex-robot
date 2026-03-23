@@ -127,10 +127,7 @@ def main() -> None:
 
     pairs = _build_pair_grid(args.fast_min, args.fast_max, args.slow_min, args.slow_max)
     if not pairs:
-        raise ValueError(
-            "No valid EMA pairs found in range. Requirement is fast > 0, slow > 0, fast < slow. "
-            f"Got fast=[{args.fast_min},{args.fast_max}], slow=[{args.slow_min},{args.slow_max}]"
-        )
+        raise ValueError("No valid EMA pairs found in range. Requirement is fast > 0, slow > 0, fast < slow. " f"Got fast=[{args.fast_min},{args.fast_max}], slow=[{args.slow_min},{args.slow_max}]")
 
     schema = lib_ema_search.load_ohlc_schema(args.schema_json)
     source = lib_ema_search.load_source_ohlc_csv(args.input_csv, schema)
@@ -138,10 +135,7 @@ def main() -> None:
 
     full_months = _full_months(base_bars)
     if len(full_months) < args.holdout_months:
-        raise ValueError(
-            "Not enough full calendar months for requested holdout. "
-            f"available_full_months={len(full_months)}, requested_holdout_months={args.holdout_months}"
-        )
+        raise ValueError("Not enough full calendar months for requested holdout. " f"available_full_months={len(full_months)}, requested_holdout_months={args.holdout_months}")
 
     holdout_months = full_months[-args.holdout_months :]
     holdout_start_month = holdout_months[0]
