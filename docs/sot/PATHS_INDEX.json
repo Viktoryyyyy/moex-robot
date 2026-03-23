@@ -1,109 +1,322 @@
 {
-  "manifest_version": "1.0",
+  "manifest_version": "2.0",
   "generated_policy": "manual_canonical_only",
+  "schema_hint": {
+    "fields": [
+      "key",
+      "artifact_kind",
+      "scope",
+      "ownership",
+      "contract_mode",
+      "canonical_path",
+      "canonical_pattern",
+      "env_var",
+      "cli_arg",
+      "producer",
+      "consumers",
+      "rebuild_rule",
+      "status",
+      "notes"
+    ]
+  },
   "paths": [
     {
       "key": "master_5m_si_cny_futoi_obstats",
-      "path": "data/master/master_5m_si_cny_futoi_obstats_2020-01-03_2026-02-03.csv",
-      "scope": "server_only",
-      "type": "dataset",
-      "owner": "pipeline",
-      "notes": "Full enriched 5m master dataset (Si+CNY+FUTOI+OBSTATS)"
+      "artifact_kind": "dataset",
+      "scope": "shared",
+      "ownership": "external_contract",
+      "contract_mode": "external_glob",
+      "canonical_pattern": "data/master/master_5m_si_cny_futoi_obstats_*.csv",
+      "producer": [
+        "src/pipeline/update_master_si_cny_futoi_obstats.py"
+      ],
+      "consumers": [
+        "src/cli/phase_transition_gate.py",
+        "src/research/ema/build_ema_pnl_day.py",
+        "src/research/regimes/build_day_metrics_from_master.py"
+      ],
+      "rebuild_rule": "Use src/pipeline/update_master_si_cny_futoi_obstats.py to rebuild canonical master and publish newest canonical file matched by pattern.",
+      "status": "canonical",
+      "notes": "Canonical master is treated as external/runtime contract; filename date range is variable."
+    },
+    {
+      "key": "master_path_env",
+      "artifact_kind": "config",
+      "scope": "runtime",
+      "ownership": "env_provided",
+      "contract_mode": "env_var",
+      "env_var": "MASTER_PATH",
+      "producer": [
+        "runtime environment",
+        "src/pipeline/update_master_si_cny_futoi_obstats.py",
+        "src/pipeline/update_obstats_from_fo.py"
+      ],
+      "consumers": [
+        "src/cli/run_phase_transition_gate_daily.py",
+        "src/cli/phase_transition_gate.py",
+        "src/api/futures/futoi_5m_full_from_master.py",
+        "src/api/futures/obstats_5m_full_from_master.py"
+      ],
+      "rebuild_rule": "Set MASTER_PATH to a canonical master file matching data/master/master_5m_si_cny_futoi_obstats_*.csv before gate/runtime steps.",
+      "status": "canonical",
+      "notes": "Environment contract through which runtime receives canonical master path."
+    },
+    {
+      "key": "phase_transition_state_dir",
+      "artifact_kind": "state",
+      "scope": "runtime",
+      "ownership": "server_only",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/state/",
+      "producer": [
+        "src/cli/run_phase_transition_gate_daily.py",
+        "src/cli/phase_transition_gate.py",
+        "src/strategy/realtime/ema_5_12/session_state.py"
+      ],
+      "consumers": [
+        "src/cli/phase_transition_gate.py",
+        "src/realtime/gate_preflight.py"
+      ],
+      "rebuild_rule": "Created/updated by runtime CLI flows; do not commit generated state files.",
+      "status": "canonical"
+    },
+    {
+      "key": "phase_transition_logs_dir",
+      "artifact_kind": "log",
+      "scope": "runtime",
+      "ownership": "server_only",
+      "contract_mode": "repo_path",
+      "canonical_path": "logs/",
+      "producer": [
+        "runtime services"
+      ],
+      "consumers": [
+        "operators"
+      ],
+      "rebuild_rule": "Runtime recreates logs directory as needed.",
+      "status": "canonical"
+    },
+    {
+      "key": "gate_input_fo_5m_d1",
+      "artifact_kind": "dataset",
+      "scope": "runtime",
+      "ownership": "server_only",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/state/fo_5m_D-1.csv",
+      "producer": [
+        "src/cli/daily_metrics_builder.py"
+      ],
+      "consumers": [
+        "operator diagnostics"
+      ],
+      "rebuild_rule": "Re-run src/cli/run_phase_transition_gate_daily.py (invokes daily_metrics_builder).",
+      "status": "canonical"
+    },
+    {
+      "key": "gate_input_day_metrics_d1",
+      "artifact_kind": "dataset",
+      "scope": "runtime",
+      "ownership": "server_only",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/state/day_metrics_D-1.csv",
+      "producer": [
+        "src/cli/daily_metrics_builder.py"
+      ],
+      "consumers": [
+        "src/cli/validate_master_freshness.py",
+        "src/cli/phase_transition_gate.py"
+      ],
+      "rebuild_rule": "Re-run src/cli/run_phase_transition_gate_daily.py (invokes daily_metrics_builder).",
+      "status": "canonical"
+    },
+    {
+      "key": "gate_rel_range_history",
+      "artifact_kind": "state",
+      "scope": "runtime",
+      "ownership": "server_only",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/state/rel_range_history.csv",
+      "producer": [
+        "src/cli/phase_transition_gate.py"
+      ],
+      "consumers": [
+        "src/cli/phase_transition_gate.py",
+        "src/research/ema/ema_yearly_summary_gate.py"
+      ],
+      "rebuild_rule": "Initialized/updated by src/cli/phase_transition_gate.py during canonical gate run.",
+      "status": "canonical"
+    },
+    {
+      "key": "gate_phase_transition_risk",
+      "artifact_kind": "state",
+      "scope": "runtime",
+      "ownership": "server_only",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/state/phase_transition_risk.json",
+      "producer": [
+        "src/cli/phase_transition_gate.py"
+      ],
+      "consumers": [
+        "src/realtime/gate_preflight.py"
+      ],
+      "rebuild_rule": "Generated by src/cli/phase_transition_gate.py in run_phase_transition_gate_daily flow.",
+      "status": "canonical"
+    },
+    {
+      "key": "phase_transition_thresholds_config",
+      "artifact_kind": "config",
+      "scope": "shared",
+      "ownership": "in_git",
+      "contract_mode": "repo_path",
+      "canonical_path": "config/phase_transition_p10.json",
+      "producer": [
+        "src/cli/fit_phase_transition_p10.py"
+      ],
+      "consumers": [
+        "src/cli/phase_transition_gate.py",
+        "src/cli/phase_transition_risk.py",
+        "src/research/ema/build_gate_conditioned_ema_day.py"
+      ],
+      "rebuild_rule": "Re-fit using src/cli/fit_phase_transition_p10.py from canonical day metrics.",
+      "status": "canonical"
+    },
+    {
+      "key": "research_ema_pnl_day",
+      "artifact_kind": "derived_artifact",
+      "scope": "research",
+      "ownership": "external_contract",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/research/ema_pnl_day.csv",
+      "producer": [
+        "src/research/ema/build_ema_pnl_day.py"
+      ],
+      "consumers": [
+        "src/research/ema_levels_events.py",
+        "src/research/ema_regime_transition.py",
+        "src/research/regimes/label_good_series.py"
+      ],
+      "rebuild_rule": "Rebuild from canonical master with src/research/ema/build_ema_pnl_day.py.",
+      "status": "canonical"
+    },
+    {
+      "key": "research_day_metrics_from_master",
+      "artifact_kind": "derived_artifact",
+      "scope": "research",
+      "ownership": "external_contract",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/research/day_metrics_from_master.csv",
+      "producer": [
+        "src/research/regimes/build_day_metrics_from_master.py"
+      ],
+      "consumers": [
+        "src/cli/fit_phase_transition_p10.py",
+        "src/research/regimes/pre_series_anomalies.py"
+      ],
+      "rebuild_rule": "Rebuild from canonical master with src/research/regimes/build_day_metrics_from_master.py.",
+      "status": "canonical"
     },
     {
       "key": "regime_day_r1r4",
-      "path": "data/research/regime_day_r1r4.csv",
-      "scope": "in_git",
-      "type": "dataset",
-      "owner": "research",
+      "artifact_kind": "dataset",
+      "scope": "research",
+      "ownership": "in_git",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/research/regime_day_r1r4.csv",
+      "status": "canonical",
       "notes": "Canonical D1 regime classification R1-R4"
     },
     {
       "key": "levels_events_v2",
-      "path": "data/research/level_events_v2.csv",
-      "scope": "in_git",
-      "type": "artifact",
-      "owner": "research",
+      "artifact_kind": "derived_artifact",
+      "scope": "research",
+      "ownership": "in_git",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/research/level_events_v2.csv",
+      "status": "canonical",
       "notes": "Canonical D1 levels interaction events (v2)"
     },
     {
-      "key": "lib_moex_api",
-      "path": "src/api/utils/lib_moex_api.py",
-      "scope": "in_git",
-      "type": "code",
-      "owner": "api"
-    },
-    {
-      "key": "fo_snapshot",
-      "path": "src/api/futures/fo_snapshot.py",
-      "scope": "in_git",
-      "type": "code",
-      "owner": "api"
-    },
-    {
-      "key": "fo_5m_day",
-      "path": "src/api/futures/fo_5m_day.py",
-      "scope": "in_git",
-      "type": "code",
-      "owner": "api"
-    },
-    {
-      "key": "fo_5m_period",
-      "path": "src/api/futures/fo_5m_period.py",
-      "scope": "in_git",
-      "type": "code",
-      "owner": "api"
-    },
-    {
-      "key": "fx_snapshot",
-      "path": "src/api/fx/fx_snapshot.py",
-      "scope": "in_git",
-      "type": "code",
-      "owner": "api"
-    },
-    {
-      "key": "fx_5m_day",
-      "path": "src/api/fx/fx_5m_day.py",
-      "scope": "in_git",
-      "type": "code",
-      "owner": "api"
-    },
-    {
-      "key": "fx_5m_period",
-      "path": "src/api/fx/fx_5m_period.py",
-      "scope": "in_git",
-      "type": "code",
-      "owner": "api"
-    },
-    {
-      "key": "phase_transition_state_dir",
-      "path": "data/state/",
-      "scope": "server_only",
-      "type": "state",
-      "owner": "pipeline",
-      "notes": "Runtime state storage"
-    },
-    {
-      "key": "phase_transition_logs_dir",
-      "path": "logs/",
-      "scope": "server_only",
-      "type": "log",
-      "owner": "pipeline",
-      "notes": "Runtime logs directory"
-    },
-    {
       "key": "level_probs_v1",
-      "path": "data/research/level_probs_v1.csv",
-      "scope": "in_git",
-      "type": "artifact",
-      "owner": "research",
+      "artifact_kind": "derived_artifact",
+      "scope": "research",
+      "ownership": "in_git",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/research/level_probs_v1.csv",
+      "status": "canonical",
       "notes": "Canonical Levels v1 probability table"
     },
     {
       "key": "levels_si_d1_events",
-      "path": "data/research/levels_si_d1_events.csv",
-      "scope": "git_managed",
-      "description": "Canonical D1 breakout events dataset for Si futures (2020–2025)"
+      "artifact_kind": "dataset",
+      "scope": "research",
+      "ownership": "in_git",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/research/levels_si_d1_events.csv",
+      "status": "canonical",
+      "notes": "Canonical D1 breakout events dataset for Si futures (2020–2025)"
+    },
+    {
+      "key": "lib_moex_api",
+      "artifact_kind": "code",
+      "scope": "shared",
+      "ownership": "in_git",
+      "contract_mode": "repo_path",
+      "canonical_path": "src/api/utils/lib_moex_api.py",
+      "status": "canonical"
+    },
+    {
+      "key": "fo_snapshot",
+      "artifact_kind": "code",
+      "scope": "shared",
+      "ownership": "in_git",
+      "contract_mode": "repo_path",
+      "canonical_path": "src/api/futures/fo_snapshot.py",
+      "status": "canonical"
+    },
+    {
+      "key": "fo_5m_day",
+      "artifact_kind": "code",
+      "scope": "shared",
+      "ownership": "in_git",
+      "contract_mode": "repo_path",
+      "canonical_path": "src/api/futures/fo_5m_day.py",
+      "status": "canonical"
+    },
+    {
+      "key": "fo_5m_period",
+      "artifact_kind": "code",
+      "scope": "shared",
+      "ownership": "in_git",
+      "contract_mode": "repo_path",
+      "canonical_path": "src/api/futures/fo_5m_period.py",
+      "status": "canonical"
+    },
+    {
+      "key": "fx_snapshot",
+      "artifact_kind": "code",
+      "scope": "shared",
+      "ownership": "in_git",
+      "contract_mode": "repo_path",
+      "canonical_path": "src/api/fx/fx_snapshot.py",
+      "status": "canonical"
+    },
+    {
+      "key": "fx_5m_day",
+      "artifact_kind": "code",
+      "scope": "shared",
+      "ownership": "in_git",
+      "contract_mode": "repo_path",
+      "canonical_path": "src/api/fx/fx_5m_day.py",
+      "status": "canonical"
+    },
+    {
+      "key": "fx_5m_period",
+      "artifact_kind": "code",
+      "scope": "shared",
+      "ownership": "in_git",
+      "contract_mode": "repo_path",
+      "canonical_path": "src/api/fx/fx_5m_period.py",
+      "status": "canonical"
     }
   ]
 }

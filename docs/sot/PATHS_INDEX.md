@@ -1,31 +1,31 @@
 # SoT Paths Index (Manifest)
 
-GitHub = Source of Truth
+GitHub = Source of Truth  
 Server = Applied State only
 
 ## Policy
-- in_git → file must exist in repository
-- server_only → runtime data, never committed to Git
+- `in_git` → artifact lives in repository
+- `server_only` / `external_contract` / `env_provided` → runtime or external contract, not guaranteed in Git
+- Contract source is explicit via `contract_mode`: `repo_path`, `external_path`, `external_glob`, `env_var`, `cli_arg`
 
 If required key is missing → STOP and escalate.
 
-## Registered Keys
+## Registered Keys (canonical subset)
 
-- master_5m_si_cny_futoi_obstats → data/master/master_5m_si_cny_futoi_obstats_2020-01-03_2026-02-03.csv (server_only)
-- regime_day_r1r4 → data/research/regime_day_r1r4.csv (in_git)
-- levels_si_d1_events → data/research/levels_si_d1_events.csv (git_managed)
-- lib_moex_api → src/api/utils/lib_moex_api.py (in_git)
-- fo_snapshot → src/api/futures/fo_snapshot.py (in_git)
-- fo_5m_day → src/api/futures/fo_5m_day.py (in_git)
-- fo_5m_period → src/api/futures/fo_5m_period.py (in_git)
-- fx_snapshot → src/api/fx/fx_snapshot.py (in_git)
-- fx_5m_day → src/api/fx/fx_5m_day.py (in_git)
-- fx_5m_period → src/api/fx/fx_5m_period.py (in_git)
-- phase_transition_state_dir → data/state/ (server_only)
-- phase_transition_logs_dir → logs/ (server_only)
+- `master_5m_si_cny_futoi_obstats` → `data/master/master_5m_si_cny_futoi_obstats_*.csv` (`external_glob`)
+- `master_path_env` → `MASTER_PATH` (`env_var`)
+- `phase_transition_state_dir` → `data/state/` (`repo_path`)
+- `phase_transition_logs_dir` → `logs/` (`repo_path`)
+- `gate_input_fo_5m_d1` → `data/state/fo_5m_D-1.csv` (`repo_path`)
+- `gate_input_day_metrics_d1` → `data/state/day_metrics_D-1.csv` (`repo_path`)
+- `gate_rel_range_history` → `data/state/rel_range_history.csv` (`repo_path`)
+- `gate_phase_transition_risk` → `data/state/phase_transition_risk.json` (`repo_path`)
+- `phase_transition_thresholds_config` → `config/phase_transition_p10.json` (`repo_path`)
+- `research_ema_pnl_day` → `data/research/ema_pnl_day.csv` (`repo_path`)
+- `research_day_metrics_from_master` → `data/research/day_metrics_from_master.csv` (`repo_path`)
 
 ## Enforcement Rule
 1. Use manifest key.
-2. Resolve path.
-3. Verify scope.
+2. Resolve active contract source (`canonical_path` / `canonical_pattern` / `env_var` / `cli_arg`).
+3. Verify ownership/scope.
 4. If mismatch or missing → STOP.
