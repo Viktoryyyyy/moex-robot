@@ -1,0 +1,11 @@
+{
+  "timestamp": "timestamp",
+  "open": "open",
+  "high": "high",
+  "low": "low",
+  "close": "close",
+  "volume": "volume",
+  "delimiter": ",",
+  "datetime_format": "%Y-%m-%d %H:%M:%S",
+  "timezone": "UTC"
+}
