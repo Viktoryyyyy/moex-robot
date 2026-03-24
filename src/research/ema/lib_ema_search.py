@@ -198,17 +198,34 @@ def generate_ema_signals(
 
 
 def run_point_backtest(bars: pd.DataFrame, *, commission_points: float) -> pd.DataFrame:
-    """Run point-based bar-level backtest from precomputed EMA position signals."""
-    required = ["close", "position"]
+    """Run point-based bar-level backtest with explicit next-bar execution semantics.
+
+    Contract:
+    - signal is formed on bar close t
+    - position[t] is active from open[t] onward because it is signal[t-1]
+    - pnl for bar t is measured from open[t] to open[t+1]
+    - last bar is force-closed at close[t]
+    """
+    required = ["ts", "open", "close", "position"]
     missing = [c for c in required if c not in bars.columns]
     if missing:
         raise OhlcDataError("Missing required bar column(s) for backtest: " + str(missing))
 
     out = bars.copy(deep=True).sort_values("ts", ascending=True).reset_index(drop=True)
-    out["dclose"] = out["close"].diff().fillna(0.0)
     out["trades"] = out["position"].diff().abs().fillna(out["position"].abs())
     out["fee"] = out["trades"] * float(commission_points)
-    out["pnl_bar"] = (out["position"] * out["dclose"]) - out["fee"]
+    out["next_open"] = out["open"].shift(-1)
+
+    out["terminal_fee"] = 0.0
+    if not out.empty:
+        out.loc[out.index[-1], "terminal_fee"] = abs(float(out.iloc[-1]["position"])) * float(commission_points)
+
+    out["pnl_bar"] = np.where(
+        out["next_open"].notna(),
+        out["position"] * (out["next_open"] - out["open"]),
+        out["position"] * (out["close"] - out["open"]),
+    )
+    out["pnl_bar"] = out["pnl_bar"] - out["fee"] - out["terminal_fee"]
     return out
 
 
