@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 REQUIRED_SCHEMA_KEYS = ("timestamp", "open", "high", "low", "close")
@@ -82,7 +83,7 @@ def normalize_ohlc_dataframe(df: pd.DataFrame, schema: dict[str, Any]) -> pd.Dat
 
     timezone = schema.get("timezone")
     if timezone:
-        out["ts"] = _apply_timezone(out["ts"], timezone)
+        out["ps"] = _apply_timezone(out["ts"], timezone)
 
     numeric_columns = ["open", "high", "low", "close"]
     if "volume" in out.columns:
@@ -154,6 +155,112 @@ def _apply_timezone(ts: pd.Series, timezone: str) -> pd.Series:
     if getattr(ts.dt, "tz", None) is None:
         return ts.dt.tz_localize(timezone, nonexistent="NaT", ambiguous="NaT")
     return ts.dt.tz_convert(timezone)
+
+
+def generate_ema_signals(
+    bars: pd.DataFrame,
+    *,
+    ema_fast_span: int,
+    ema_slow_span: int,
+    mode: str,
+) -> pd.DataFrame:
+    """Build EMA signals and tradable position series for a canonical bar frame."""
+    if ema_fast_span <= 0 or ema_slow_span <= 0:
+        raise ValueError(
+            f"EMA spans must be positive. Got fast={ema_fast_span}, slow={ema_slow_span}."
+        )
+    if ema_fast_span >= ema_slow_span:
+        raise ValueError(
+            f"EMA span contract requires fast < slow. Got fast={ema_fast_span}, slow={ema_slow_span}."
+        )
+
+    valid_modes = {"trend_long_short", "trend_long_only", "trend_short_only"}
+    if mode not in valid_modes:
+        raise ValueError(f"Unsupported EMA mode {mode!r}. Allowed: {sorted(valid_modes)}")
+
+    required = ["ts", "open", "high", "low", "close"]
+    missing = [c for c in required if c not in bars.columns]
+    if missing:
+        raise OhlcDataError("Missing required bar column(s) for EMA signal generation: " + str(missing))
+
+    out = bars.copy(deep=True).sort_values("ts", ascending=True).reset_index(drop=True)
+    out["ema_fast"] = out["close"].ewm(span=ema_fast_span, adjust=False).mean()
+    out["ema_slow"] = out["close"].ewm(span=ema_slow_span, adjust=False).mean()
+    out["signal"] = np.sign(out["ema_fast"] - out["ema_slow"]).astype(float)
+
+    if mode == "trend_long_only":
+        out["signal"] = out["signal"].clip(lower=0.0, upper=1.0)
+    elif mode == "trend_short_only":
+        out["signal"] = out["signal"].clip(lower=-1.0, upper=0.0)
+
+    out["position"] = out["signal"].shift(1).fillna(0.0)
+    return out
+
+
+def run_point_backtest(bars: pd.DataFrame, *, commission_points: float) -> pd.DataFrame:
+    """Run point-based bar-level backtest from precomputed EMA position signals."""
+    required = ["close", "position"]
+    missing = [c for c in required if c not in bars.columns]
+    if missing:
+        raise OhlcDataError("Missing required bar column(s) for backtest: " + str(missing))
+
+    out = bars.copy(deep=True).sort_values("ts", ascending=True).reset_index(drop=True)
+    out["dclose"] = out["close"].diff().fillna(0.0)
+    out["trades"] = out["position"].diff().abs().fillna(out["position"].abs())
+    out["fee"] = out["trades"] * float(commission_points)
+    out["pnl_bar"] = (out["position"] * out["dclose"]) - out["fee"]
+    return out
+
+
+def summarize_backtest_by_day(bars: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate bar-level PnL and trade counts to daily results."""
+    required = ["ts", "pnl_bar", "trades"]
+    missing = [c for c in required if c not in bars.columns]
+    if missing:
+        raise OhlcDataError("Missing required bar column(s) for day summary: " + str(missing))
+
+    work = bars.copy(deep=True)
+    work["date"] = pd.to_datetime(work["ts"], errors="coerce").dt.normalize()
+    work = work.dropna(subset=["date"])
+
+    days = (
+        work.groupby("date", as_index=False)
+        .agg(pnl_day=("pnl_bar", "sum"), num_trades_day=("trades", "sum"))
+        .sort_values("date", ascending=True)
+        .reset_index(drop=True)
+    )
+    days["num_trades_day"] = days["num_trades_day"].astype(float)
+    days["cum_pnl_day"] = days["pnl_day"].cumsum()
+    days["dd_day"] = days["cum_pnl_day"] - days["cum_pnl_day"].cummax()
+    return days
+
+
+def summarize_day_segment(days: pd.DataFrame, *, near_zero_threshold: float) -> dict[str, Any]:
+    """Build segment-level summary metrics from daily backtest output."""
+    if days.empty:
+        return {
+            "pnl_day_mean": 0.0,
+            "win_rate": 0.0,
+            "near_zero_rate": 0.0,
+            "total_pnl": 0.0,
+            "num_days": 0,
+            "num_trades": 0,
+            "max_dd": 0.0,
+        }
+
+    pnl = pd.to_numeric(days["pnl_day"], errors="coerce").fillna(0.0)
+    trades = pd.to_numeric(days.get("num_trades_day", 0.0), errors="coerce").fillna(0.0)
+    dd = pd.to_numeric(days.get("dd_day", 0.0), errors="coerce").fillna(0.0)
+
+    return {
+        "pnl_day_mean": float(pnl.mean()),
+        "win_rate": float((pnl > 0.0).mean()),
+        "near_zero_rate": float((inl.abs() <= float(near_zero_threshold)).mean()),
+        "total_pnl": float(pnl.sum()),
+        "num_days": int(len(days)),
+        "num_trades": int(round(float(trades.sum()))),
+        "max_dd": float(dd.min()),
+    }
 
 
 def summarize_by_day(*args, **kwargs):

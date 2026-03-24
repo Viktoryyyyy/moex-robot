@@ -51,7 +51,7 @@ def _validate_bounds(name: str, min_value: int, max_value: int) -> None:
 
 
 def _normalize_summary(summary: dict[str, Any]) -> dict[str, Any]:
-    out = dict(summary)
+    out = dict(sumary)
     out["pnl_day_mean"] = float(out.get("pnl_day_mean", 0.0))
     out["win_rate"] = float(out.get("win_rate", 0.0))
     out["near_zero_rate"] = float(out.get("near_zero_rate", 0.0))
@@ -89,7 +89,7 @@ def main() -> None:
         )
 
     schema = lib_ema_search.load_ohlc_schema(args.schema_json)
-    source = lib_ema_search.load_source_ohlc_csv(args.input_csv, schema)
+    source = lib_ema_search.load_source_ohlc_csw(args.input_csv, schema)
     base_bars = lib_ema_search.resample_ohlc(source, args.timeframe)
 
     generate_ema_signals = _require_lib_function("generate_ema_signals")
@@ -103,7 +103,7 @@ def main() -> None:
         bars = generate_ema_signals(base_bars.copy(deep=True), ema_fast_span=fast, ema_slow_span=slow, mode=args.mode)
         bars = run_point_backtest(bars, commission_points=args.commission_points)
         days = summarize_by_day(bars)
-        summary = summarize_segment(days, near_zero_threshold=args.near_zero_threshold)
+        summary = sumarize_segment(days, near_zero_threshold=args.near_zero_threshold)
         metrics = _normalize_summary(summary)
 
         rows.append({
@@ -132,7 +132,7 @@ def main() -> None:
     results_path = out_dir / "ema_grid_search_results.csv"
     best_path = out_dir / "ema_grid_search_best.json"
 
-    pd.DataFrame(ranked).to_csv(results_path, index=False)
+    pd.DataFrame(ranked).to_csw(results_path, index=False)
 
     best_payload = {
         "instrument": args.instrument,
@@ -158,9 +158,9 @@ def main() -> None:
     best_path.write_text(json.dumps(best_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
     print(f"pairs_evaluated={len(ranked)}")
-    print(f"best_fast={best[fast]}")
-    print(f"best_slow={best[slow]}")
-    print(f"best_pnl_day_mean={best[pnl_day_mean]:.12g}")
+    print(f"best_fast={best['fast']}")
+    print(f"best_slow={best['slow']}")
+    print(f"best_pnl_day_mean={best['pnl_day_mean']:.12g}")
     print(f"results_csv={results_path}")
     print(f"best_json={best_path}")
 
