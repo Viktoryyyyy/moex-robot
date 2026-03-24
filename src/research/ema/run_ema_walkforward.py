@@ -80,10 +80,41 @@ def _normalize_summary(summary: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _month_labels(df: pd.DataFrame) -> list[str]:
+def _month_labels(df: pd.DataFrame) -> list[pd.Period]:
     months = df["ts"].dt.to_period("M")
-    unique = pd.Index(months.dropna().unique()).sort_values()
-    return [str(v) for v in unique]
+    return list(pd.Index(months.dropna().unique()).sort_values())
+
+
+def _is_full_month(df: pd.DataFrame, month: pd.Period) -> bool:
+    month_mask = df["ts"].dt.to_period("M") == month
+    month_bars = df.loc[month_mask]
+    if month_bars.empty:
+        return False
+
+    ts_min = month_bars["ts"].min()
+    ts_max = month_bars["ts"].max()
+    month_start = month.start_time
+    next_month_start = (month + 1).start_time
+
+    if ts_min.tzinfo is not None and month_start.tzinfo is None:
+        month_start = month_start.tz_localize(ts_min.tzinfo)
+        next_month_start = next_month_start.tz_localize(ts_min.tzinfo)
+
+    has_coverage_start = ts_min <= month_start
+    has_coverage_end = ts_max >= next_month_start
+    return bool(has_coverage_start and has_coverage_end)
+
+
+def _full_months(df: pd.DataFrame) -> tuple[list[str], list[str]]:
+    full: list[str] = []
+    incomplete: list[str] = []
+    for month in _month_labels(df):
+        month_str = str(month)
+        if _is_full_month(df, month):
+            full.append(month_str)
+        else:
+            incomplete.append(month_str)
+    return full, incomplete
 
 
 def _build_windows(months: list[str], train_months: int, valid_months: int, step_months: int) -> list[dict[str, str]]:
@@ -144,10 +175,17 @@ def main() -> None:
     source = lib_ema_search.load_source_ohlc_csv(args.input_csv, schema)
     base_bars = lib_ema_search.resample_ohlc(source, args.timeframe)
 
-    months = _month_labels(base_bars)
-    windows = _build_windows(months, args.train_months, args.valid_months, args.step_months)
+    full_months, incomplete_months = _full_months(base_bars)
+    windows = _build_windows(full_months, args.train_months, args.valid_months, args.step_months)
     if not windows:
-        raise ValueError("No full walk-forward windows can be built from available full months. " f"available_months={len(months)}, train_months={args.train_months}, " f"valid_months={args.valid_months}, step_months={args.step_months}")
+        raise ValueError(
+            "No strict full-month walk-forward windows can be built. "
+            + "available_full_months=" + str(len(full_months)) + ", "
+            + "excluded_incomplete_months=" + str(len(incomplete_months)) + ", "
+            + "train_months=" + str(args.train_months) + ", "
+            + "valid_months=" + str(args.valid_months) + ", "
+            + "step_months=" + str(args.step_months)
+        )
 
     generate_ema_signals = _require_lib_function("generate_ema_signals")
     run_point_backtest = _require_lib_function("run_point_backtest")
@@ -239,6 +277,9 @@ def main() -> None:
         "train_months": int(args.train_months),
         "valid_months": int(args.valid_months),
         "step_months": int(args.step_months),
+        "strict_full_months_enforced": True,
+        "available_full_months": int(len(full_months)),
+        "excluded_incomplete_months": [str(m) for m in incomplete_months],
         "windows_built": int(len(windows)),
         "pairs_per_window": int(len(pairs)),
         "selection_rule": SELECTION_RULE,
