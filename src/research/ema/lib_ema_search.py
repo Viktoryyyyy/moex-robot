@@ -83,7 +83,7 @@ def normalize_ohlc_dataframe(df: pd.DataFrame, schema: dict[str, Any]) -> pd.Dat
 
     timezone = schema.get("timezone")
     if timezone:
-        out["ps"] = _apply_timezone(out["ts"], timezone)
+        out["ts"] = _apply_timezone(out["ts"], timezone)
 
     numeric_columns = ["open", "high", "low", "close"]
     if "volume" in out.columns:
@@ -255,7 +255,7 @@ def summarize_day_segment(days: pd.DataFrame, *, near_zero_threshold: float) -> 
     return {
         "pnl_day_mean": float(pnl.mean()),
         "win_rate": float((pnl > 0.0).mean()),
-        "near_zero_rate": float((inl.abs() <= float(near_zero_threshold)).mean()),
+        "near_zero_rate": float((pnl.abs() <= float(near_zero_threshold)).mean()),
         "total_pnl": float(pnl.sum()),
         "num_days": int(len(days)),
         "num_trades": int(round(float(trades.sum()))),
