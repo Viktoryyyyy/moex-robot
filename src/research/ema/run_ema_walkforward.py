@@ -91,17 +91,17 @@ def _is_full_month(df: pd.DataFrame, month: pd.Period) -> bool:
     if month_bars.empty:
         return False
 
-    ts_min = month_bars["ts"].min()
-    ts_max = month_bars["ts"].max()
+    coverage_min = df["ts"].min()
+    coverage_max = df["ts"].max()
     month_start = month.start_time
     next_month_start = (month + 1).start_time
 
-    if ts_min.tzinfo is not None and month_start.tzinfo is None:
-        month_start = month_start.tz_localize(ts_min.tzinfo)
-        next_month_start = next_month_start.tz_localize(ts_min.tzinfo)
+    if coverage_min.tzinfo is not None and month_start.tzinfo is None:
+        month_start = month_start.tz_localize(coverage_min.tzinfo)
+        next_month_start = next_month_start.tz_localize(coverage_min.tzinfo)
 
-    has_coverage_start = ts_min <= month_start
-    has_coverage_end = ts_max >= next_month_start
+    has_coverage_start = coverage_min <= month_start
+    has_coverage_end = coverage_max >= next_month_start
     return bool(has_coverage_start and has_coverage_end)
 
 
