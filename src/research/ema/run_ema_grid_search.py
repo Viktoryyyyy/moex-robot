@@ -51,7 +51,7 @@ def _validate_bounds(name: str, min_value: int, max_value: int) -> None:
 
 
 def _normalize_summary(summary: dict[str, Any]) -> dict[str, Any]:
-    out = dict(sumary)
+    out = dict(summary)
     out["pnl_day_mean"] = float(out.get("pnl_day_mean", 0.0))
     out["win_rate"] = float(out.get("win_rate", 0.0))
     out["near_zero_rate"] = float(out.get("near_zero_rate", 0.0))
@@ -103,7 +103,7 @@ def main() -> None:
         bars = generate_ema_signals(base_bars.copy(deep=True), ema_fast_span=fast, ema_slow_span=slow, mode=args.mode)
         bars = run_point_backtest(bars, commission_points=args.commission_points)
         days = summarize_by_day(bars)
-        summary = sumarize_segment(days, near_zero_threshold=args.near_zero_threshold)
+        summary = summarize_segment(days, near_zero_threshold=args.near_zero_threshold)
         metrics = _normalize_summary(summary)
 
         rows.append({
@@ -132,7 +132,7 @@ def main() -> None:
     results_path = out_dir / "ema_grid_search_results.csv"
     best_path = out_dir / "ema_grid_search_best.json"
 
-    pd.DataFrame(ranked).to_csw(results_path, index=False)
+    pd.DataFrame(ranked).to_csv(results_path, index=False)
 
     best_payload = {
         "instrument": args.instrument,
