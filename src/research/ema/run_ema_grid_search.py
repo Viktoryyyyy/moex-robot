@@ -89,7 +89,7 @@ def main() -> None:
         )
 
     schema = lib_ema_search.load_ohlc_schema(args.schema_json)
-    source = lib_ema_search.load_source_ohlc_csw(args.input_csv, schema)
+    source = lib_ema_search.load_source_ohlc_csv(args.input_csv, schema)
     base_bars = lib_ema_search.resample_ohlc(source, args.timeframe)
 
     generate_ema_signals = _require_lib_function("generate_ema_signals")
