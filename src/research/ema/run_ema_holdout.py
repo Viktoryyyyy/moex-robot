@@ -1,7 +1,8 @@
 """Research-only EMA final holdout month runner.
 
-Evaluates EMA fast/slow pairs on a final untouched holdout segment built from
-last N full calendar months only.
+Selects EMA fast/slow pairs on a pre-holdout train segment and evaluates the
+frozen selected pair on a final untouched holdout segment built from last N
+full calendar months only.
 """
 
 from __future__ import annotations
@@ -40,20 +41,20 @@ def parse_args() -> argparse.Namespace:
 def _require_lib_function(name: str) -> Callable[..., Any]:
     fn = getattr(lib_ema_search, name, None)
     if fn is None or not callable(fn):
-        raise RuntimeError(f"Required function is missing in lib_ema_search.py: {name}")
+        raise RuntimeError("Required function is missing in lib_ema_search.py: " + name)
     return fn
 
 
 def _validate_positive(name: str, value: int) -> None:
     if value <= 0:
-        raise ValueError(f"{name} must be > 0, got {value}")
+        raise ValueError(name + " must be > 0, got " + str(value))
 
 
 def _validate_bounds(name: str, min_value: int, max_value: int) -> None:
-    _validate_positive(f"{name}-min", min_value)
-    _validate_positive(f"{name}-max", max_value)
+    _validate_positive(name + "-min", min_value)
+    _validate_positive(name + "-max", max_value)
     if min_value > max_value:
-        raise ValueError(f"{name} bounds must satisfy min <= max, got min={min_value}, max={max_value}")
+        raise ValueError(name + " bounds must satisfy min <= max, got min=" + str(min_value) + ", max=" + str(max_value))
 
 
 def _build_pair_grid(fast_min: int, fast_max: int, slow_min: int, slow_max: int) -> list[tuple[int, int]]:
@@ -127,19 +128,27 @@ def main() -> None:
 
     pairs = _build_pair_grid(args.fast_min, args.fast_max, args.slow_min, args.slow_max)
     if not pairs:
-        raise ValueError("No valid EMA pairs found in range. Requirement is fast > 0, slow > 0, fast < slow. " f"Got fast=[{args.fast_min},{args.fast_max}], slow=[{args.slow_min},{args.slow_max}]")
+        raise ValueError("No valid EMA pairs found in range. Requirement is fast > 0, slow > 0, fast < slow. Got fast=[" + str(args.fast_min) + "," + str(args.fast_max) + "], slow=[" + str(args.slow_min) + "," + str(args.slow_max) + "]")
 
     schema = lib_ema_search.load_ohlc_schema(args.schema_json)
     source = lib_ema_search.load_source_ohlc_csv(args.input_csv, schema)
     base_bars = lib_ema_search.resample_ohlc(source, args.timeframe)
 
     full_months = _full_months(base_bars)
-    if len(full_months) < args.holdout_months:
-        raise ValueError("Not enough full calendar months for requested holdout. " f"available_full_months={len(full_months)}, requested_holdout_months={args.holdout_months}")
+    if len(full_months) < args.holdout_months + 1:
+        raise ValueError("Not enough full calendar months for train plus requested holdout. available_full_months=" + str(len(full_months)) + ", requested_holdout_months=" + str(args.holdout_months))
 
     holdout_months = full_months[-args.holdout_months :]
+    train_months = full_months[: -args.holdout_months]
+    if not train_months:
+        raise ValueError("Train segment is empty after holdout split")
+
+    train_start_month = train_months[0]
+    train_end_month = train_months[-1]
     holdout_start_month = holdout_months[0]
     holdout_end_month = holdout_months[-1]
+
+    train_bars = _segment_from_months(base_bars, train_start_month, train_end_month)
     holdout_bars = _segment_from_months(base_bars, holdout_start_month, holdout_end_month)
 
     generate_ema_signals = _require_lib_function("generate_ema_signals")
@@ -147,44 +156,57 @@ def main() -> None:
     summarize_by_day = _require_lib_function("summarize_by_day")
     summarize_segment = _require_lib_function("summarize_segment")
 
-    rows: list[dict[str, Any]] = []
+    selection_rows: list[dict[str, Any]] = []
     for fast, slow in pairs:
-        bars = generate_ema_signals(holdout_bars.copy(deep=True), ema_fast_span=fast, ema_slow_span=slow, mode=args.mode)
+        bars = generate_ema_signals(train_bars.copy(deep=True), ema_fast_span=fast, ema_slow_span=slow, mode=args.mode)
         bars = run_point_backtest(bars, commission_points=args.commission_points)
         days = summarize_by_day(bars)
         summary = summarize_segment(days, near_zero_threshold=args.near_zero_threshold)
         metrics = _normalize_summary(summary)
 
-        rows.append({
-            "holdout_start_month": holdout_start_month,
-            "holdout_end_month": holdout_end_month,
-            "instrument": args.instrument,
-            "timeframe": args.timeframe,
-            "mode": args.mode,
-            "fast": int(fast),
-            "slow": int(slow),
-            "commission_points": float(args.commission_points),
-            "near_zero_threshold": float(args.near_zero_threshold),
-            "pnl_day_mean": metrics["pnl_day_mean"],
-            "win_rate": metrics["win_rate"],
-            "near_zero_rate": metrics["near_zero_rate"],
-            "total_pnl": metrics["total_pnl"],
-            "num_days": metrics["num_days"],
-            "num_trades": metrics["num_trades"],
-            "max_dd": metrics["max_dd"],
-        })
+        selection_rows.append(
+            {
+                "selection_start_month": train_start_month,
+                "selection_end_month": train_end_month,
+                "segment_role": "selection_train",
+                "instrument": args.instrument,
+                "timeframe": args.timeframe,
+                "mode": args.mode,
+                "fast": int(fast),
+                "slow": int(slow),
+                "commission_points": float(args.commission_points),
+                "near_zero_threshold": float(args.near_zero_threshold),
+                "pnl_day_mean": metrics["pnl_day_mean"],
+                "win_rate": metrics["win_rate"],
+                "near_zero_rate": metrics["near_zero_rate"],
+                "total_pnl": metrics["total_pnl"],
+                "num_days": metrics["num_days"],
+                "num_trades": metrics["num_trades"],
+                "max_dd": metrics["max_dd"],
+            }
+        )
 
-    ranked = _rank_rows(rows)
+    ranked = _rank_rows(selection_rows)
     best = ranked[0]
+    best_fast = int(best["fast"])
+    best_slow = int(best["slow"])
+
+    holdout_eval_bars = generate_ema_signals(holdout_bars.copy(deep=True), ema_fast_span=best_fast, ema_slow_span=best_slow, mode=args.mode)
+    holdout_eval_bars = run_point_backtest(holdout_eval_bars, commission_points=args.commission_points)
+    holdout_days = summarize_by_day(holdout_eval_bars)
+    holdout_summary = summarize_segment(holdout_days, near_zero_threshold=args.near_zero_threshold)
+    holdout_metrics = _normalize_summary(holdout_summary)
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    results_path = out_dir / "ema_holdout_results.csv"
+    results_path = out_dir / "ema_holdout_train_selection_results.csv"
     best_path = out_dir / "ema_holdout_best.json"
 
     pd.DataFrame(ranked).to_csv(results_path, index=False)
 
     payload = {
+        "selection_start_month": train_start_month,
+        "selection_end_month": train_end_month,
         "holdout_start_month": holdout_start_month,
         "holdout_end_month": holdout_end_month,
         "instrument": args.instrument,
@@ -196,8 +218,9 @@ def main() -> None:
         "slow_max": int(args.slow_max),
         "commission_points": float(args.commission_points),
         "near_zero_threshold": float(args.near_zero_threshold),
-        "best_pair": {"fast": int(best["fast"]), "slow": int(best["slow"])},
-        "best_metrics": {
+        "selection_rule": RANKING_RULE,
+        "selected_pair": {"fast": best_fast, "slow": best_slow},
+        "train_metrics_for_selected_pair": {
             "pnl_day_mean": float(best["pnl_day_mean"]),
             "win_rate": float(best["win_rate"]),
             "near_zero_rate": float(best["near_zero_rate"]),
@@ -206,15 +229,27 @@ def main() -> None:
             "num_trades": int(best["num_trades"]),
             "max_dd": float(best["max_dd"]),
         },
-        "ranking_rule": RANKING_RULE,
+        "holdout_metrics_for_selected_pair": {
+            "pnl_day_mean": float(holdout_metrics["pnl_day_mean"]),
+            "win_rate": float(holdout_metrics["win_rate"]),
+            "near_zero_rate": float(holdout_metrics["near_zero_rate"]),
+            "total_pnl": float(holdout_metrics["total_pnl"]),
+            "num_days": int(holdout_metrics["num_days"]),
+            "num_trades": int(holdout_metrics["num_trades"]),
+            "max_dd": float(holdout_metrics["max_dd"]),
+        },
     }
     best_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
-    print(f"holdout_start_month={holdout_start_month}")
-    print(f"holdout_end_month={holdout_end_month}")
-    print(f"pairs_evaluated={len(ranked)}")
-    print(f"results_csv={results_path}")
-    print(f"best_json={best_path}")
+    print("selection_start_month=" + train_start_month)
+    print("selection_end_month=" + train_end_month)
+    print("holdout_start_month=" + holdout_start_month)
+    print("holdout_end_month=" + holdout_end_month)
+    print("pairs_ranked_on_train=" + str(len(ranked)))
+    print("selected_pair_fast=" + str(best_fast))
+    print("selected_pair_slow=" + str(best_slow))
+    print("results_csv=" + str(results_path))
+    print("best_json=" + str(best_path))
 
 
 if __name__ == "__main__":
