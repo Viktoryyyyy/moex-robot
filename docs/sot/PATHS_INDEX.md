@@ -24,6 +24,9 @@ If required key is missing → STOP and escalate.
 - `research_ema_pnl_day` → `data/research/ema_pnl_day.csv` (`repo_path`)
 - `research_day_metrics_from_master` → `data/research/day_metrics_from_master.csv` (`repo_path`)
 
+- `research_ema_stage1_baseline_day` → `data/research/ema_stage1_baseline_day.csv` (`repo_path`, server_only)
+- `research_ema_gate_joined_day_hist` → `data/research/ema_gate_joined_day_hist.csv` (`repo_path`, server_only)
+
 ## Enforcement Rule
 1. Use manifest key.
 2. Resolve active contract source (`canonical_path` / `canonical_pattern` / `env_var` / `cli_arg`).
