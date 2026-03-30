@@ -4,8 +4,9 @@ import glob
 import os
 import sys
 
-import numpy as np
 import pandas as pd
+
+from src.research.ema.lib_ema_search import generate_ema_signals, run_point_backtest, summarize_backtest_by_day
 
 
 def pick_latest_master(path_glob: str) -> str:
@@ -50,7 +51,9 @@ def parse_timeframes(raw: str):
 
 def resample_ohlc(x: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     if timeframe == "5m":
-        return x.copy()
+        out = x.copy()
+        out = out.rename(columns={"end": "ts"}).sort_values("ts").reset_index(drop=True)
+        return out
 
     rule_map = {
         "15m": "15min",
@@ -63,43 +66,28 @@ def resample_ohlc(x: pd.DataFrame, timeframe: str) -> pd.DataFrame:
     r = (
         y.resample(rule, label="right", closed="right")
         .agg({"open": "first", "high": "max", "low": "min", "close": "last"})
-        .dropna(subset=["close"])
+        .dropna(subset=["open", "high", "low", "close"])
         .reset_index()
     )
+    r = r.rename(columns={"end": "ts"}).sort_values("ts").reset_index(drop=True)
     return r
 
 
 def run_backtest_day_metrics(x: pd.DataFrame, commission_points: float) -> pd.DataFrame:
-    w = x.copy()
+    bars = generate_ema_signals(
+        x,
+        ema_fast_span=5,
+        ema_slow_span=12,
+        mode="trend_long_short",
+    )
+    bars = run_point_backtest(bars, commission_points=commission_points)
+    out = summarize_backtest_by_day(bars).copy()
 
-    w["ema_fast"] = w["close"].ewm(span=5, adjust=False).mean()
-    w["ema_slow"] = w["close"].ewm(span=12, adjust=False).mean()
+    out["date"] = pd.to_datetime(out["date"], errors="coerce").dt.date.astype(str)
+    out["max_dd_day"] = pd.to_numeric(out["dd_day"], errors="coerce").fillna(0.0).mul(-1.0)
+    out["EMA_EDGE_DAY"] = (pd.to_numeric(out["pnl_day"], errors="coerce").fillna(0.0) > 0.0).astype(int)
 
-    diff_ema = w["ema_fast"] - w["ema_slow"]
-    w["pos_raw"] = np.sign(diff_ema).astype(float)
-    w["pos"] = w["pos_raw"].shift(1).fillna(0.0)
-
-    w["dclose"] = w["close"].diff()
-    w["trades"] = w["pos"].diff().abs().fillna(0.0)
-    w["fee"] = w["trades"] * float(commission_points)
-    w["bar_pnl"] = w["pos"] * w["dclose"].fillna(0.0) - w["fee"]
-
-    w["date"] = w["end"].dt.date.astype(str)
-    w["cum_pnl_day"] = w.groupby("date")["bar_pnl"].cumsum()
-    w["run_max_day"] = w.groupby("date")["cum_pnl_day"].cummax()
-    w["dd_day"] = w["cum_pnl_day"] - w["run_max_day"]
-    dd = w.groupby("date")["dd_day"].min().mul(-1.0)
-
-    out = pd.DataFrame(
-        {
-            "date": w.groupby("date")["date"].first(),
-            "pnl_day": w.groupby("date")["bar_pnl"].sum(),
-            "max_dd_day": dd,
-            "num_trades_day": w.groupby("date")["trades"].sum(),
-        }
-    ).reset_index(drop=True)
-
-    out["EMA_EDGE_DAY"] = (out["pnl_day"] > 0).astype(int)
+    out = out[["date", "pnl_day", "max_dd_day", "num_trades_day", "EMA_EDGE_DAY"]].copy()
     return out
 
 
@@ -135,7 +123,7 @@ def main():
     x.columns = ["end", "open", "high", "low", "close"]
 
     x["end"] = pd.to_datetime(x["end"], errors="coerce")
-    x = x.dropna(subset=["end", "close"]).sort_values("end").reset_index(drop=True)
+    x = x.dropna(subset=["end", "open", "high", "low", "close"]).sort_values("end").reset_index(drop=True)
 
     all_out = []
     for tf in tfs:
