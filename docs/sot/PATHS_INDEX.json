@@ -333,7 +333,7 @@
       ],
       "rebuild_rule": "Do not regenerate in Cycle 4B. Access exact server artifact by contract.",
       "status": "canonical",
-      "notes": "Exact approved Cycle 4B baseline artifact located on server; observed columns: date,pnl_day,win_rate,max_dd,num_trades_day."
+      "notes": "Exact approved Cycle 4B baseline artifact located on server; observed columns: date,pnl_day,win_rate,max_dd,num_trades_day. Exact server artifact path is resolved relative to the applied git checkout root. Server-side execution must first resolve repo root via git rev-parse --show-toplevel; do not assume ~/moex_bot is the repo root."
     },
     {
       "key": "research_ema_gate_joined_day_hist",
@@ -351,7 +351,7 @@
       ],
       "rebuild_rule": "Do not regenerate in Cycle 4B. Use exact server artifact by contract.",
       "status": "canonical",
-      "notes": "Exact approved Cycle 4B joined artifact located on server; validated columns: date,pnl_day,EMA_EDGE_DAY,gate_state."
+      "notes": "Exact approved Cycle 4B joined artifact located on server; validated columns: date,pnl_day,EMA_EDGE_DAY,gate_state. Exact server artifact path is resolved relative to the applied git checkout root. Server-side execution must first resolve repo root via git rev-parse --show-toplevel; do not assume ~/moex_bot is the repo root."
     }
   ]
 }
