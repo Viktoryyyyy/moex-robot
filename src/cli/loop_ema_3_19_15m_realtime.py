@@ -1,6 +1,6 @@
 import os
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from src.applied.journal.ema_pilot_journal import append_pilot_day_status, append_pilot_journal
 from src.infra.single_instance import acquire_lock, release_lock
