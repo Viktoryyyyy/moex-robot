@@ -4,7 +4,7 @@ import argparse
 import os
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.applied.journal.ema_pilot_journal import append_pilot_day_status, append_pilot_journal
@@ -22,7 +22,7 @@ LOCK_PATH = Path("data/state/ema_3_19_15m_realtime.lock")
 
 
 def _ts() -> str:
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _event_row(trading_day: str, action: str, trade_status: str, source: str, note: str, block_reason: str, artifact_date: str, artifact_status: str, context_band: str, context_decision: str, context_source_trade_date: str) -> dict:
