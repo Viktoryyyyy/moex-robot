@@ -388,6 +388,60 @@
       "rebuild_rule": "Rebuild or append via src/cli/build_ema_d_day_context.py from explicit master-path and target-day inputs.",
       "status": "canonical",
       "notes": "Frozen D-Day context history artifact; builder-side only."
+    },
+    {
+      "key": "ema_3_19_15m_pilot_journal_csv",
+      "artifact_kind": "state",
+      "scope": "runtime",
+      "ownership": "server_only",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/state/ema_3_19_15m_pilot_journal.csv",
+      "producer": [
+        "src.applied.journal.ema_pilot_journal",
+        "src.cli.loop_ema_3_19_15m_realtime.py"
+      ],
+      "consumers": [
+        "operators"
+      ],
+      "rebuild_rule": "Generated append-only by applied pilot wrapper/runtime.",
+      "status": "canonical",
+      "notes": "Pilot event and trade journal for EMA 3_19 15m applied branch."
+    },
+    {
+      "key": "ema_3_19_15m_pilot_day_status_csv",
+      "artifact_kind": "state",
+      "scope": "runtime",
+      "ownership": "server_only",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/state/ema_3_19_15m_pilot_day_status.csv",
+      "producer": [
+        "src.applied.journal.ema_pilot_journal",
+        "src.cli.run_ema_3_19_15m_pilot.py",
+        "src.cli.loop_ema_3_19_15m_realtime.py"
+      ],
+      "consumers": [
+        "operators"
+      ],
+      "rebuild_rule": "Generated append-only by applied pilot wrapper/runtime.",
+      "status": "canonical",
+      "notes": "Pilot day status journal for EMA 3_19 15m applied branch."
+    },
+    {
+      "key": "ema_3_19_15m_pilot_wrapper",
+      "artifact_kind": "code",
+      "scope": "runtime",
+      "ownership": "in_git",
+      "contract_mode": "repo_path",
+      "canonical_path": "src/cli/run_ema_3_19_15m_pilot.py",
+      "producer": [
+        "git"
+      ],
+      "consumers": [
+        "operators"
+      ],
+      "rebuild_rule": "Git-managed runtime entrypoint for applied pilot launch.",
+      "status": "canonical",
+      "notes": "Builds fresh D-day context artifact, validates preflight, then launches applied loop fail-closed."
     }
   ]
 }
