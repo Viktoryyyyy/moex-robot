@@ -1,10 +1,16 @@
+
 import os
 import time
 from datetime import date, datetime, timezone
 
+from src.api.futures.fo_feed_intraday import load_fo_5m_day
 from src.applied.journal.ema_pilot_journal import append_pilot_day_status, append_pilot_journal
 from src.infra.single_instance import acquire_lock, release_lock
 from src.realtime.ema_d_day_context_preflight import preflight
+from src.strategy.realtime.ema_3_19_15m.executor_ema_3_19_15m import execute_pending_target_on_closed_bar
+from src.strategy.realtime.ema_3_19_15m.session_state_ema_3_19_15m import load_or_init_session_state, save_session_state
+from src.strategy.realtime.ema_3_19_15m.signal_engine_ema_3_19_15m import update_signal_state_on_closed_bar
+from src.strategy.realtime.ema_3_19_15m.trade_logger_ema_3_19_15m import append_execution_event
 
 
 SECID = "Si"
@@ -75,12 +81,34 @@ def _write_block(trading_day: str, source: str, reason: str) -> None:
     append_pilot_day_status(_day_row(trading_day, "BLOCKED", reason, "runtime blocked", "", "error", "", "", ""))
 
 
+def _filter_new_bars(bars: list[dict], last_bar_end: str | None) -> list[dict]:
+    new_bars = []
+    seen = set()
+    for bar in bars:
+        raw_end = bar.get("end")
+        if isinstance(raw_end, datetime):
+            bar_end = raw_end.isoformat()
+        elif isinstance(raw_end, str) and raw_end.strip():
+            datetime.fromisoformat(raw_end)
+            bar_end = raw_end
+        else:
+            raise RuntimeError("invalid bar end in batch")
+        if last_bar_end is not None and bar_end <= last_bar_end:
+            continue
+        if bar_end in seen:
+            raise RuntimeError("duplicate bar_end inside one batch: " + bar_end)
+        seen.add(bar_end)
+        new_bars.append(bar)
+    return new_bars
+
+
 def main() -> int:
-    trade_date = date.today().isoformat()
+    trade_date = date.today()
+    trade_date_str = trade_date.isoformat()
 
     if not os.getenv("MOEX_API_KEY"):
         reason = "MOEX_API_KEY missing"
-        _write_block(trade_date, "realtime_loop", reason)
+        _write_block(trade_date_str, "realtime_loop", reason)
         print("[CRIT] " + reason)
         raise SystemExit(2)
 
@@ -88,42 +116,83 @@ def main() -> int:
         ctx = preflight()
     except Exception as e:
         reason = str(e)
-        _write_block(trade_date, "realtime_loop", reason)
+        _write_block(trade_date_str, "realtime_loop", reason)
         print("[Context] status=BLOCK reason=" + reason)
         raise SystemExit(2)
     if not ctx.allowed:
         reason = "allowed!=true"
-        _write_block(trade_date, "realtime_loop", reason)
+        _write_block(trade_date_str, "realtime_loop", reason)
         print("[Context] status=BLOCK reason=" + reason)
         raise SystemExit(2)
 
     lock = acquire_lock("ema_3_19_15m_realtime")
+    exit_code = 0
     try:
         artifact_date, artifact_status, context_band, context_source_trade_date = _ctx_fields(ctx)
-        append_pilot_journal(_event_row(trade_date, "START", "running", "realtime_loop", "runtime stub active", "", artifact_date, artifact_status, context_band, ctx.decision, context_source_trade_date))
-        append_pilot_day_status(_day_row(trade_date, "RUNNING", "", "runtime stub active", artifact_date, artifact_status, context_band, ctx.decision, context_source_trade_date))
-        print("[EMA_3_19_15M] status=ALLOW target_day=" + ctx.target_day + " source_trade_date=" + ctx.source_trade_date + " band=" + ctx.band)
-        print("[EMA_3_19_15M] runtime stub active")
-        print("[EMA_3_19_15M] secid=" + SECID + " ema_fast=" + str(EMA_FAST_WINDOW) + " ema_slow=" + str(EMA_SLOW_WINDOW) + " bar_interval_seconds=" + str(BAR_INTERVAL_SECONDS) + " trade_date=" + trade_date)
+        append_pilot_journal(_event_row(trade_date_str, "START", "running", "realtime_loop", "runtime active", "", artifact_date, artifact_status, context_band, ctx.decision, context_source_trade_date))
+        append_pilot_day_status(_day_row(trade_date_str, "RUNNING", "", "runtime active", artifact_date, artifact_status, context_band, ctx.decision, context_source_trade_date))
+
+        session = load_or_init_session_state(trade_date_str)
+
         while True:
             try:
                 ctx = preflight()
             except Exception as e:
                 reason = str(e)
-                append_pilot_journal(_event_row(trade_date, "BLOCK", "blocked", "realtime_loop", "runtime blocked", reason, "", "error", "", "", ""))
-                append_pilot_day_status(_day_row(trade_date, "BLOCKED", reason, "runtime blocked", "", "error", "", "", ""))
+                append_pilot_journal(_event_row(trade_date_str, "BLOCK", "blocked", "realtime_loop", "runtime blocked", reason, "", "error", "", "", ""))
+                append_pilot_day_status(_day_row(trade_date_str, "BLOCKED", reason, "runtime blocked", "", "error", "", "", ""))
                 print("[Context] status=BLOCK reason=" + reason)
-                raise SystemExit(2)
+                exit_code = 2
+                break
             if not ctx.allowed:
                 reason = "allowed!=true"
-                append_pilot_journal(_event_row(trade_date, "BLOCK", "blocked", "realtime_loop", "runtime blocked", reason, "", "error", "", "", ""))
-                append_pilot_day_status(_day_row(trade_date, "BLOCKED", reason, "runtime blocked", "", "error", "", "", ""))
+                append_pilot_journal(_event_row(trade_date_str, "BLOCK", "blocked", "realtime_loop", "runtime blocked", reason, "", "error", "", "", ""))
+                append_pilot_day_status(_day_row(trade_date_str, "BLOCKED", reason, "runtime blocked", "", "error", "", "", ""))
                 print("[Context] status=BLOCK reason=" + reason)
-                raise SystemExit(2)
+                exit_code = 2
+                break
+
+            bars = load_fo_5m_day(secid=SECID, trade_date=trade_date)
+            if not isinstance(bars, list):
+                raise RuntimeError("invalid bars payload")
+
+            new_bars = _filter_new_bars(bars, session.last_bar_end)
+            if not new_bars:
+                time.sleep(5)
+                continue
+
+            new_bars.sort(key=lambda x: x["end"])
+
+            for bar in new_bars:
+                raw_end = bar["end"]
+                bar_end = raw_end.isoformat() if isinstance(raw_end, datetime) else raw_end
+                if session.last_bar_end is not None and bar_end <= session.last_bar_end:
+                    raise RuntimeError("duplicate or non-increasing bar_end: " + str(bar_end))
+
+                session = update_signal_state_on_closed_bar(session, bar)
+
+                event = None
+                if session.pending_target is not None:
+                    if session.pending_signal_bar_end is None:
+                        raise RuntimeError("pending_target without pending_signal_bar_end")
+                    if bar_end > session.pending_signal_bar_end:
+                        event = execute_pending_target_on_closed_bar(session, bar)
+
+                if event is not None:
+                    append_execution_event(event)
+
+                session.last_bar_end = bar_end
+                save_session_state(session)
+
             time.sleep(5)
+    except Exception:
+        exit_code = 2
+        raise
     finally:
-        append_pilot_journal(_event_row(trade_date, "STOP", "stopped", "realtime_loop", "runtime stopped", "", "", "ok", "", "", ""))
+        append_pilot_journal(_event_row(trade_date_str, "STOP", "stopped", "realtime_loop", "runtime stopped", "", "", "ok", "", "", ""))
         release_lock(lock)
+
+    return exit_code
 
 
 if __name__ == "__main__":
