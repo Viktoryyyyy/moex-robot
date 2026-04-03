@@ -32,6 +32,16 @@ If required key is missing → STOP and escalate.
 - `research_ema_stage1_baseline_day` → `data/research/ema_stage1_baseline_day.csv` (`repo_path`, server_only)
 - `research_ema_gate_joined_day_hist` → `data/research/ema_gate_joined_day_hist.csv` (`repo_path`, server_only)
 
+
+- `ema_d_day_context_latest_json` → `data/state/ema_d_day_context_latest.json` (`repo_path`, server_only)
+- `ema_d_day_context_history_csv` → `data/state/ema_d_day_context_history.csv` (`repo_path`, server_only)
+- `ema_3_19_15m_pilot_journal_csv` → `data/state/ema_3_19_15m_pilot_journal.csv` (`repo_path`, server_only)
+- `ema_3_19_15m_pilot_day_status_csv` → `data/state/ema_3_19_15m_pilot_day_status.csv` (`repo_path`, server_only)
+- `ema_3_19_15m_signals_dir` → `data/signals/` (`repo_path`, server_only)
+- `ema_3_19_15m_trade_log_csv` → `data/signals/ema_3_19_15m_realtime_*.csv` (`external_glob`, server_only)
+- `ema_3_19_15m_session_state_json` → `data/state/ema_3_19_15m_session_*.json` (`external_glob`, server_only)
+- `ema_3_19_15m_runtime_lock` → `data/state/ema_3_19_15m_realtime.lock` (`repo_path`, server_only)
+
 ## Enforcement Rule
 1. Use manifest key.
 2. Resolve active contract source (`canonical_path` / `canonical_pattern` / `env_var` / `cli_arg`).

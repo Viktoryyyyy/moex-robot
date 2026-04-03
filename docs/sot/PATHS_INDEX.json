@@ -460,6 +460,77 @@
       "rebuild_rule": "Git-managed runtime entrypoint for applied pilot launch.",
       "status": "canonical",
       "notes": "Builds fresh D-day context artifact, validates preflight, then launches applied loop fail-closed."
+    },
+    {
+      "key": "ema_3_19_15m_signals_dir",
+      "artifact_kind": "state",
+      "scope": "runtime",
+      "ownership": "server_only",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/signals/",
+      "producer": [
+        "src.strategy.realtime.ema_3_19_15m.trade_logger_ema_3_19_15m"
+      ],
+      "consumers": [
+        "operators"
+      ],
+      "rebuild_rule": "Created on demand by runtime trade logger; do not commit generated signal files.",
+      "status": "canonical",
+      "notes": "Runtime trade log directory for EMA 3_19 15m applied branch."
+    },
+    {
+      "key": "ema_3_19_15m_trade_log_csv",
+      "artifact_kind": "state",
+      "scope": "runtime",
+      "ownership": "server_only",
+      "contract_mode": "external_glob",
+      "canonical_pattern": "data/signals/ema_3_19_15m_realtime_*.csv",
+      "producer": [
+        "src.strategy.realtime.ema_3_19_15m.trade_logger_ema_3_19_15m"
+      ],
+      "consumers": [
+        "operators"
+      ],
+      "rebuild_rule": "Generated append-only by runtime execution logger.",
+      "status": "canonical",
+      "notes": "Per-trading-day realtime execution log for EMA 3_19 15m applied branch."
+    },
+    {
+      "key": "ema_3_19_15m_session_state_json",
+      "artifact_kind": "state",
+      "scope": "runtime",
+      "ownership": "server_only",
+      "contract_mode": "external_glob",
+      "canonical_pattern": "data/state/ema_3_19_15m_session_*.json",
+      "producer": [
+        "src.strategy.realtime.ema_3_19_15m.session_state_ema_3_19_15m"
+      ],
+      "consumers": [
+        "src.cli.loop_ema_3_19_15m_realtime.py"
+      ],
+      "rebuild_rule": "Created and updated atomically by runtime loop; do not commit generated session snapshots.",
+      "status": "canonical",
+      "notes": "Per-trading-day session checkpoint state for EMA 3_19 15m applied branch."
+    },
+    {
+      "key": "ema_3_19_15m_runtime_lock",
+      "artifact_kind": "state",
+      "scope": "runtime",
+      "ownership": "server_only",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/state/ema_3_19_15m_realtime.lock",
+      "producer": [
+        "src.infra.single_instance",
+        "src.cli.run_ema_3_19_15m_pilot.py",
+        "src.cli.loop_ema_3_19_15m_realtime.py"
+      ],
+      "consumers": [
+        "runtime single-instance guard",
+        "operators"
+      ],
+      "rebuild_rule": "Transient runtime lock artifact; may be removed only when no active runtime process exists.",
+      "status": "canonical",
+      "notes": "Single-instance lock for EMA 3_19 15m applied runtime."
     }
   ]
 }
