@@ -1,4 +1,4 @@
-source ~/venv-moex/bin/activate
+source ~/moex_bot/venv/bin/activate
 python - << 'PY'
 import requests, pandas as pd, re
 from datetime import date
