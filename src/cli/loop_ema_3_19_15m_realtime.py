@@ -1,5 +1,5 @@
-
 import os
+import signal
 import time
 from datetime import date, datetime, timezone
 
@@ -127,6 +127,18 @@ def main() -> int:
 
     lock = acquire_lock("ema_3_19_15m_realtime")
     exit_code = 0
+    stop_requested = False
+
+    def _request_stop(signum, frame):
+        nonlocal stop_requested
+        stop_requested = True
+        print("[STOP] signal=" + str(signum))
+
+    prev_sigint = signal.getsignal(signal.SIGINT)
+    prev_sigterm = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGINT, _request_stop)
+    signal.signal(signal.SIGTERM, _request_stop)
+
     try:
         artifact_date, artifact_status, context_band, context_source_trade_date = _ctx_fields(ctx)
         append_pilot_journal(_event_row(trade_date_str, "START", "running", "realtime_loop", "runtime active", "", artifact_date, artifact_status, context_band, ctx.decision, context_source_trade_date))
@@ -135,6 +147,8 @@ def main() -> int:
         session = load_or_init_session_state(trade_date_str)
 
         while True:
+            if stop_requested:
+                break
             try:
                 ctx = preflight()
             except Exception as e:
@@ -184,13 +198,23 @@ def main() -> int:
                 session.last_bar_end = bar_end
                 save_session_state(session)
 
+                if stop_requested:
+                    break
+
+            if stop_requested:
+                break
+
             time.sleep(5)
     except Exception:
         exit_code = 2
         raise
     finally:
-        append_pilot_journal(_event_row(trade_date_str, "STOP", "stopped", "realtime_loop", "runtime stopped", "", "", "ok", "", "", ""))
-        release_lock(lock)
+        try:
+            append_pilot_journal(_event_row(trade_date_str, "STOP", "stopped", "realtime_loop", "runtime stopped", "", "", "ok", "", "", ""))
+        finally:
+            release_lock(lock)
+            signal.signal(signal.SIGINT, prev_sigint)
+            signal.signal(signal.SIGTERM, prev_sigterm)
 
     return exit_code
 
