@@ -21,6 +21,24 @@
   },
   "paths": [
     {
+      "key": "applied_server_repo_root",
+      "artifact_kind": "location_contract",
+      "scope": "runtime",
+      "ownership": "server_only",
+      "contract_mode": "external_path",
+      "canonical_path": "/home/trader/moex_bot/moex-robot",
+      "producer": [
+        "Server Path Consolidation 4A"
+      ],
+      "consumers": [
+        "operators",
+        "server-side execution steps"
+      ],
+      "rebuild_rule": "Do not infer or relocate. Use this exact applied server repo root unless superseded by an approved metadata update.",
+      "status": "canonical",
+      "notes": "All repo_path server/runtime contracts in the current project resolve relative to this applied server repo root."
+    },
+    {
       "key": "master_5m_si_cny_futoi_obstats",
       "artifact_kind": "dataset",
       "scope": "shared",
