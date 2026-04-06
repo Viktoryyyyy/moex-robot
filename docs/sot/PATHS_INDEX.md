@@ -12,11 +12,13 @@ If required key is missing → STOP and escalate.
 
 ## Applied Server Repo Root
 - Current applied server repo root: `/home/trader/moex_bot/moex-robot`
+- Current applied venv root: `/home/trader/moex_bot/venv`
 - All `repo_path` server/runtime contracts in this project resolve relative to this path unless a later approved metadata update changes it.
 
 ## Registered Keys (canonical subset)
 
 - `applied_server_repo_root` → `/home/trader/moex_bot/moex-robot` (`external_path`, server_only)
+- `applied_server_venv_root` → `/home/trader/moex_bot/venv` (`external_path`, server_only)
 - `master_5m_si_cny_futoi_obstats` → `data/master/master_5m_si_cny_futoi_obstats_*.csv` (`external_glob`)
 - `master_path_env` → `MASTER_PATH` (`env_var`)
 - `phase_transition_state_dir` → `data/state/` (`repo_path`)

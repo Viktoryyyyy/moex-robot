@@ -4,11 +4,8 @@
 (через https://apim.moex.com) по ключевому слову — например "Si", "CNY", "RTS".
 
 ## Окружение
-```bash
-cd ~/moex_bot
-source venv/bin/activate
-set -a; source .env; set +a
-```
+- Applied server repo root: `/home/trader/moex_bot/moex-robot`
+- Applied venv: `/home/trader/moex_bot/venv`
 
 ## 1) fo_snapshot.py — текущие котировки
 Получение актуального last, bid/ask, спреда, объёма.
