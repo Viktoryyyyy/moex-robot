@@ -6,7 +6,18 @@ import sys
 
 import pandas as pd
 
-from src.research.ema.lib_ema_search import generate_ema_signals, run_point_backtest, summarize_backtest_by_day
+from src.research.ema.lib_ema_search import (
+    generate_ema_signals,
+    resample_ohlc,
+    run_point_backtest,
+    summarize_backtest_by_day,
+)
+
+EMA_BASELINE_MATRIX = {
+    "5m": (5, 12),
+    "15m": (3, 19),
+    "1h": (2, 37),
+}
 
 
 def pick_latest_master(path_glob: str) -> str:
@@ -33,14 +44,16 @@ def resolve_ohlc_cols(df_cols):
 
 
 def parse_timeframes(raw: str):
+    default_items = list(EMA_BASELINE_MATRIX.keys())
     items = [x.strip() for x in str(raw).split(",") if x.strip()]
-    allowed = ["5m", "15m", "30m", "1h"]
     if not items:
-        return allowed
+        return default_items
 
     for tf in items:
-        if tf not in allowed:
-            raise ValueError("Unsupported timeframe: " + tf + ". Allowed: " + ", ".join(allowed))
+        if tf not in EMA_BASELINE_MATRIX:
+            raise ValueError(
+                "Unsupported timeframe: " + tf + ". Allowed: " + ", ".join(default_items)
+            )
 
     out = []
     for tf in items:
@@ -49,35 +62,12 @@ def parse_timeframes(raw: str):
     return out
 
 
-def resample_ohlc(x: pd.DataFrame, timeframe: str) -> pd.DataFrame:
-    if timeframe == "5m":
-        out = x.copy()
-        out = out.rename(columns={"end": "ts"}).sort_values("ts").reset_index(drop=True)
-        return out
-
-    rule_map = {
-        "15m": "15min",
-        "30m": "30min",
-        "1h": "1h",
-    }
-    rule = rule_map[timeframe]
-
-    y = x.copy().set_index("end").sort_index()
-    r = (
-        y.resample(rule, label="right", closed="right")
-        .agg({"open": "first", "high": "max", "low": "min", "close": "last"})
-        .dropna(subset=["open", "high", "low", "close"])
-        .reset_index()
-    )
-    r = r.rename(columns={"end": "ts"}).sort_values("ts").reset_index(drop=True)
-    return r
-
-
-def run_backtest_day_metrics(x: pd.DataFrame, commission_points: float) -> pd.DataFrame:
+def run_backtest_day_metrics(x: pd.DataFrame, timeframe: str, commission_points: float) -> pd.DataFrame:
+    ema_fast_span, ema_slow_span = EMA_BASELINE_MATRIX[timeframe]
     bars = generate_ema_signals(
         x,
-        ema_fast_span=5,
-        ema_slow_span=12,
+        ema_fast_span=ema_fast_span,
+        ema_slow_span=ema_slow_span,
         mode="trend_long_short",
     )
     bars = run_point_backtest(bars, commission_points=commission_points)
@@ -100,11 +90,11 @@ def main():
     )
     ap.add_argument(
         "--out_csv",
-        default="data/research/ema_pnl_multitimeframe.csv",
+        default="data/research/usdrubf_ema_pnl_baseline_matrix.csv",
         help="Output CSV path",
     )
     ap.add_argument("--commission_points", type=float, default=2.0, help="Commission in points per trade action")
-    ap.add_argument("--timeframes", default="5m,15m,30m,1h", help="Comma-separated set from: 5m,15m,30m,1h")
+    ap.add_argument("--timeframes", default="5m,15m,1h", help="Comma-separated set from: 5m,15m,1h")
     args = ap.parse_args()
 
     master_csv = args.master_csv.strip()
@@ -120,17 +110,21 @@ def main():
     colmap = resolve_ohlc_cols(df.columns)
 
     x = df[[colmap["end"], colmap["open"], colmap["high"], colmap["low"], colmap["close"]]].copy()
-    x.columns = ["end", "open", "high", "low", "close"]
+    x.columns = ["ts", "open", "high", "low", "close"]
 
-    x["end"] = pd.to_datetime(x["end"], errors="coerce")
-    x = x.dropna(subset=["end", "open", "high", "low", "close"]).sort_values("end").reset_index(drop=True)
+    x["ts"] = pd.to_datetime(x["ts"], errors="coerce")
+    x = x.dropna(subset=["ts", "open", "high", "low", "close"]).sort_values("ts").reset_index(drop=True)
 
     all_out = []
     for tf in tfs:
         bars = resample_ohlc(x, tf)
-        out_tf = run_backtest_day_metrics(bars, commission_points=args.commission_points)
+        out_tf = run_backtest_day_metrics(bars, timeframe=tf, commission_points=args.commission_points)
+        out_tf.insert(0, "ema_slow", EMA_BASELINE_MATRIX[tf][1])
+        out_tf.insert(0, "ema_fast", EMA_BASELINE_MATRIX[tf][0])
         out_tf.insert(0, "timeframe", tf)
-        out_tf = out_tf[["timeframe", "date", "pnl_day", "max_dd_day", "num_trades_day", "EMA_EDGE_DAY"]]
+        out_tf = out_tf[
+            ["timeframe", "ema_fast", "ema_slow", "date", "pnl_day", "max_dd_day", "num_trades_day", "EMA_EDGE_DAY"]
+        ]
         all_out.append(out_tf)
 
     out = pd.concat(all_out, ignore_index=True)
