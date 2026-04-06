@@ -62,6 +62,46 @@ def parse_timeframes(raw: str):
     return out
 
 
+def resample_15m_from_5m(df: pd.DataFrame) -> pd.DataFrame:
+    required = ["ts", "open", "high", "low", "close"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError("Missing required canonical column(s) for 15m resampling: " + str(missing))
+
+    agg = {
+        "open": "first",
+        "high": "max",
+        "low": "min",
+        "close": "last",
+    }
+    if "volume" in df.columns:
+        agg["volume"] = "sum"
+
+    out = (
+        df.sort_values("ts", ascending=True)
+        .set_index("ts")
+        .resample("15min", label="right", closed="right")
+        .agg(agg)
+        .dropna(subset=["open", "high", "low", "close"])
+        .reset_index()
+    )
+
+    if out.empty:
+        raise ValueError("Resampling produced zero rows for timeframe '15m'.")
+
+    return out
+
+
+def build_bars_for_timeframe(x: pd.DataFrame, timeframe: str) -> pd.DataFrame:
+    if timeframe == "5m":
+        return x.copy()
+    if timeframe == "15m":
+        return resample_15m_from_5m(x)
+    if timeframe == "1h":
+        return resample_ohlc(x, timeframe)
+    raise ValueError("Unsupported timeframe: " + timeframe)
+
+
 def run_backtest_day_metrics(x: pd.DataFrame, timeframe: str, commission_points: float) -> pd.DataFrame:
     ema_fast_span, ema_slow_span = EMA_BASELINE_MATRIX[timeframe]
     bars = generate_ema_signals(
@@ -117,7 +157,7 @@ def main():
 
     all_out = []
     for tf in tfs:
-        bars = resample_ohlc(x, tf)
+        bars = build_bars_for_timeframe(x, tf)
         out_tf = run_backtest_day_metrics(bars, timeframe=tf, commission_points=args.commission_points)
         out_tf.insert(0, "ema_slow", EMA_BASELINE_MATRIX[tf][1])
         out_tf.insert(0, "ema_fast", EMA_BASELINE_MATRIX[tf][0])
