@@ -531,6 +531,23 @@
       "rebuild_rule": "Transient runtime lock artifact; may be removed only when no active runtime process exists.",
       "status": "canonical",
       "notes": "Single-instance lock for EMA 3_19 15m applied runtime."
+    },
+    {
+      "key": "research_usdrubf_5m_full_history",
+      "artifact_kind": "dataset",
+      "scope": "research",
+      "ownership": "server_only",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/master/usdrubf_5m_2022-04-26_2026-04-06.csv",
+      "producer": [
+        "src/api/futures/fo_5m_period_paged.py"
+      ],
+      "consumers": [
+        "src/research/ema/build_ema_pnl_day.py"
+      ],
+      "rebuild_rule": "Re-export full-history 5m USDRUBF via src/api/futures/fo_5m_period_paged.py and replace the exact file only by approved update.",
+      "status": "canonical",
+      "notes": "Research input for Perpetual Futures / USDRUBF branch. Expected columns: end, open, high, low, close, volume."
     }
   ]
 }
