@@ -26,6 +26,7 @@ If required key is missing → STOP and escalate.
 
 - `research_ema_stage1_baseline_day` → `data/research/ema_stage1_baseline_day.csv` (`repo_path`, server_only)
 - `research_ema_gate_joined_day_hist` → `data/research/ema_gate_joined_day_hist.csv` (`repo_path`, server_only)
+- `telegram_signal_notifier_checkpoint` → `data/state/telegram_signal_notifier_checkpoint.json` (`repo_path`, server_only)
 
 ## Enforcement Rule
 1. Use manifest key.
