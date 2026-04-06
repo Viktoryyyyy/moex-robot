@@ -192,11 +192,11 @@ def main() -> int:
                     if bar_end > session.pending_signal_bar_end:
                         event = execute_pending_target_on_closed_bar(session, bar)
 
-                if event is not None:
-                    append_execution_event(event)
-
                 session.last_bar_end = bar_end
                 save_session_state(session)
+
+                if event is not None:
+                    append_execution_event(event)
 
                 if stop_requested:
                     break
