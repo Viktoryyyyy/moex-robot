@@ -442,6 +442,23 @@
       "rebuild_rule": "Git-managed runtime entrypoint for applied pilot launch.",
       "status": "canonical",
       "notes": "Builds fresh D-day context artifact, validates preflight, then launches applied loop fail-closed."
+    },
+    {
+      "key": "telegram_signal_notifier_checkpoint",
+      "artifact_kind": "state",
+      "scope": "runtime",
+      "ownership": "server_only",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/state/telegram_signal_notifier_checkpoint.json",
+      "producer": [
+        "src/bot/telegram_signal_notifier.py"
+      ],
+      "consumers": [
+        "src/cli/run_telegram_signal_notifier.py"
+      ],
+      "rebuild_rule": "Created and updated only by telegram notifier after successful sends; do not commit generated checkpoint state.",
+      "status": "canonical",
+      "notes": "Dedup checkpoint for Telegram notifier consuming canonical EMA 3_19 15m execution-event CSV."
     }
   ]
 }
