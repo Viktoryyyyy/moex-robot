@@ -111,6 +111,11 @@ def run_backtest_day_metrics(x: pd.DataFrame, timeframe: str, commission_points:
         mode="trend_long_short",
     )
     bars = run_point_backtest(bars, commission_points=commission_points)
+
+    if timeframe != "5m":
+        bars = bars.copy()
+        bars["ts"] = pd.to_datetime(bars["ts"], errors="coerce") - pd.Timedelta("1ns")
+
     out = summarize_backtest_by_day(bars).copy()
 
     out["date"] = pd.to_datetime(out["date"], errors="coerce").dt.date.astype(str)
