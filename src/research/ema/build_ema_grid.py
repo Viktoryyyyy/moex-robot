@@ -24,7 +24,10 @@ def main():
     grids = {
         "5m": (parse_range("3..8"), parse_range("10..20")),
         "15m": (parse_range("2..6"), parse_range("12..30")),
+        "30m": (parse_range("2..6"), parse_range("12..30")),
         "1h": (parse_range("2..6"), parse_range("20..50")),
+        "4h": (parse_range("2..6"), parse_range("20..50")),
+        "1d": (parse_range("2..6"), parse_range("20..50")),
     }
 
     rows = []

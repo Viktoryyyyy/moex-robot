@@ -14,6 +14,7 @@ OPTIONAL_SCHEMA_KEYS = ("volume", "delimiter", "datetime_format", "timezone")
 
 _ALLOWED_TIMEFRAMES = {
     "5m": "5min",
+    "15m": "15min",
     "30m": "30min",
     "1h": "1h",
     "4h": "4h",
