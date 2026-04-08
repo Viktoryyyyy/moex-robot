@@ -53,8 +53,12 @@ def run_backtest(df: pd.DataFrame, timeframe: str, fast: int, slow: int, fee: fl
         mode="trend_long_short",
     )
     bars = run_point_backtest(bars, commission_points=float(fee))
-    out = summarize_backtest_by_day(bars).copy()
 
+    if timeframe != "5m":
+        bars = bars.copy()
+        bars["ts"] = pd.to_datetime(bars["ts"], errors="coerce") - pd.Timedelta("1ns")
+
+    out = summarize_backtest_by_day(bars).copy()
     out["date"] = pd.to_datetime(out["date"], errors="coerce").dt.date.astype(str)
     out["max_dd_day"] = pd.to_numeric(out["dd_day"], errors="coerce").fillna(0.0).mul(-1.0)
     out["EMA_EDGE_DAY"] = (pd.to_numeric(out["pnl_day"], errors="coerce").fillna(0.0) > 0.0).astype(int)
