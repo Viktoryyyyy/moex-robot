@@ -548,6 +548,23 @@
       "rebuild_rule": "Re-export full-history 5m USDRUBF via src/api/futures/fo_5m_period_paged.py and replace the exact file only by approved update.",
       "status": "canonical",
       "notes": "Research input for Perpetual Futures / USDRUBF branch. Expected columns: end, open, high, low, close, volume."
+    },
+    {
+      "key": "research_usdrubf_large_day_mr_day_pairs",
+      "artifact_kind": "derived_artifact",
+      "scope": "research",
+      "ownership": "external_contract",
+      "contract_mode": "repo_path",
+      "canonical_path": "data/research/usdrubf_large_day_mr_day_pairs.csv",
+      "producer": [
+        "src/research/build_usdrubf_large_day_mr_day_pairs.py"
+      ],
+      "consumers": [
+        "future large-day mean-reversion research analyses"
+      ],
+      "rebuild_rule": "Rebuild from canonical USDRUBF 5m history with src/research/build_usdrubf_large_day_mr_day_pairs.py.",
+      "status": "canonical",
+      "notes": "Research day-pair artifact for relation source_trade_date=s to outcome day date=d, where s is the immediately previous completed trading day before d."
     }
   ]
 }
