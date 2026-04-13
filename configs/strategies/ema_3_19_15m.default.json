@@ -1,0 +1,17 @@
+{
+  "strategy_id": "ema_3_19_15m",
+  "version": "1.0.0",
+  "params": {
+    "instrument_id": "si",
+    "timeframe": "15m",
+    "ema_fast_window": 3,
+    "ema_slow_window": 19,
+    "warmup_bars": 19
+  },
+  "artifact_bindings": {
+    "input_feature_artifact_id": "si_15m_ohlc_feature_frame",
+    "output_day_metrics_artifact_id": "ema_3_19_15m_backtest_day_metrics"
+  },
+  "runtime_policy_ref": null,
+  "risk_policy_ref": null
+}
