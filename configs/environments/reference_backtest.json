@@ -1,0 +1,18 @@
+{
+  "environment_id": "reference_backtest",
+  "mode": "backtest",
+  "is_research": true,
+  "is_backtest": true,
+  "is_live": false,
+  "broker_adapter_ref": null,
+  "market_data_adapter_ref": null,
+  "calendar_source_ref": "moex_futures",
+  "artifact_root_refs": [
+    "MOEX_BOT_ARTIFACT_ROOT"
+  ],
+  "allowed_override_keys": [],
+  "required_env_vars": [
+    "MOEX_BOT_ARTIFACT_ROOT"
+  ],
+  "status": "active"
+}
