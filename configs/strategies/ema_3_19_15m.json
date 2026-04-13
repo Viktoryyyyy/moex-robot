@@ -1,0 +1,25 @@
+{
+  "strategy_id": "ema_3_19_15m",
+  "version": "1.0.0",
+  "package_ref": "src.strategies.ema_3_19_15m",
+  "manifest_ref": "src.strategies.ema_3_19_15m.manifest:STRATEGY_MANIFEST",
+  "config_schema_ref": "src.strategies.ema_3_19_15m.config:StrategyConfig",
+  "default_config_ref": "configs/strategies/ema_3_19_15m.default.json",
+  "artifact_contract_ref": "src.strategies.ema_3_19_15m.artifact_contracts:ARTIFACT_CONTRACTS",
+  "required_dataset_ids": [
+    "si_fo_5m_intraday"
+  ],
+  "required_feature_set_ids": [
+    "si_15m_ohlc_from_5m"
+  ],
+  "required_label_set_ids": [],
+  "instrument_scope": [
+    "si"
+  ],
+  "timeframe": "15m",
+  "supports_backtest": true,
+  "supports_live": false,
+  "report_schema_version": "1",
+  "artifact_contract_version": "1",
+  "status": "active"
+}
