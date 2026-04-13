@@ -1,0 +1,14 @@
+{
+  "artifact_id": "si_fo_5m_intraday_dataset",
+  "artifact_role": "input",
+  "contract_class": "external_pattern",
+  "producer_ref": "moex_data.datasets.si_fo_5m_intraday",
+  "consumer_refs": [
+    "moex_features.intraday.si_15m_ohlc_from_5m",
+    "moex_backtest.engine.run_registered_backtest"
+  ],
+  "format": "csv",
+  "schema_version": 1,
+  "partitioning": "unpartitioned",
+  "locator_ref": "data/master/si_fo_5m_intraday.csv"
+}
