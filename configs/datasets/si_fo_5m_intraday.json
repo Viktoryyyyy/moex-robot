@@ -1,0 +1,21 @@
+{
+  "dataset_id": "si_fo_5m_intraday",
+  "version": "1.0.0",
+  "instrument_ids": [
+    "si"
+  ],
+  "granularity": "5m",
+  "session_semantics": "finalized_bar_end",
+  "timezone": "Europe/Moscow",
+  "schema_ref": "contracts/datasets/si_fo_5m_intraday.json",
+  "partitioning": "unpartitioned",
+  "artifact_ref": "contracts/datasets/si_fo_5m_intraday.json",
+  "producer_ref": "moex_data.datasets.si_fo_5m_intraday",
+  "consumer_tags": [
+    "backtest",
+    "feature_builder"
+  ],
+  "is_research_allowed": true,
+  "is_runtime_allowed": false,
+  "status": "active"
+}
