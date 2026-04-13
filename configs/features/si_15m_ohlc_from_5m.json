@@ -1,0 +1,17 @@
+{
+  "feature_set_id": "si_15m_ohlc_from_5m",
+  "version": "1.0.0",
+  "input_dataset_ids": [
+    "si_fo_5m_intraday"
+  ],
+  "schema_ref": "contracts/features/si_15m_ohlc_from_5m.json",
+  "partitioning": "by_instrument_trade_date",
+  "artifact_ref": "contracts/features/si_15m_ohlc_from_5m.json",
+  "producer_ref": "src.moex_features.intraday.si_15m_ohlc_from_5m:materialize_feature_frame",
+  "row_semantics": "finalized_bar_end",
+  "lookahead_safe": true,
+  "applicability": [
+    "backtest"
+  ],
+  "status": "active"
+}
