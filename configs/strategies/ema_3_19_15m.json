@@ -18,7 +18,7 @@
   ],
   "timeframe": "15m",
   "supports_backtest": true,
-  "supports_live": false,
+  "supports_live": true,
   "report_schema_version": "1",
   "artifact_contract_version": "1",
   "status": "active"

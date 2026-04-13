@@ -1,0 +1,18 @@
+{
+  "environment_id": "reference_runtime_boundary",
+  "mode": "runtime_boundary",
+  "is_research": false,
+  "is_backtest": false,
+  "is_live": true,
+  "broker_adapter_ref": null,
+  "market_data_adapter_ref": null,
+  "calendar_source_ref": "moex_futures",
+  "artifact_root_refs": [
+    "MOEX_BOT_ARTIFACT_ROOT"
+  ],
+  "allowed_override_keys": [],
+  "required_env_vars": [
+    "MOEX_BOT_ARTIFACT_ROOT"
+  ],
+  "status": "active"
+}

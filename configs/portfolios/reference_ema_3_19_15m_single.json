@@ -11,6 +11,6 @@
   "risk_policy_ref": "reference_backtest_no_risk_gate",
   "execution_policy_ref": null,
   "reconciliation_policy_ref": null,
-  "is_live_allowed": false,
+  "is_live_allowed": true,
   "status": "active"
 }

@@ -2,24 +2,14 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from src.moex_strategy_sdk.artifact_contracts import (
-    ALLOWED_CONTRACT_CLASSES,
-    ArtifactContract,
-    validate_artifact_contract,
-)
-from src.moex_strategy_sdk.errors import (
-    ArtifactContractValidationError,
-    ConfigValidationError,
-    ManifestValidationError,
-    StrategyRegistrationError,
-    UnsupportedModeError,
-)
+from src.moex_strategy_sdk.artifact_contracts import ALLOWED_CONTRACT_CLASSES, ArtifactContract, validate_artifact_contract
+from src.moex_strategy_sdk.errors import ArtifactContractValidationError, ConfigValidationError, ManifestValidationError, StrategyRegistrationError, UnsupportedModeError
 from src.moex_strategy_sdk.manifest import validate_strategy_manifest
-
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -38,6 +28,24 @@ class ResolvedRegisteredBacktest:
     dataset_contract: Mapping[str, object]
     feature_contract: Mapping[str, object]
     strategy_artifact_contracts: tuple[ArtifactContract, ...]
+
+
+@dataclass(frozen=True)
+class ResolvedRegisteredRuntimeBoundary:
+    instrument_record: Mapping[str, object]
+    dataset_record: Mapping[str, object]
+    feature_record: Mapping[str, object]
+    strategy_record: Mapping[str, object]
+    portfolio_record: Mapping[str, object]
+    environment_record: Mapping[str, object]
+    default_strategy_config_record: Mapping[str, object]
+    manifest: Any
+    strategy_config: Any
+    dataset_contract: Mapping[str, object]
+    feature_contract: Mapping[str, object]
+    strategy_artifact_contracts: tuple[ArtifactContract, ...]
+    runtime_state_contract: ArtifactContract
+    runtime_trade_log_contract: ArtifactContract
 
 
 def _load_json(repo_relative_path: str) -> Mapping[str, object]:
@@ -74,17 +82,7 @@ def _require_exact_keys(record_name: str, payload: Mapping[str, object], require
 
 
 def _validate_registry_artifact_contract(record_name: str, payload: Mapping[str, object]) -> Mapping[str, object]:
-    required = {
-        "artifact_id",
-        "artifact_role",
-        "contract_class",
-        "producer_ref",
-        "consumer_refs",
-        "format",
-        "schema_version",
-        "partitioning",
-        "locator_ref",
-    }
+    required = {"artifact_id", "artifact_role", "contract_class", "producer_ref", "consumer_refs", "format", "schema_version", "partitioning", "locator_ref"}
     _require_exact_keys(record_name, payload, required)
     contract_class = payload["contract_class"]
     if contract_class not in ALLOWED_CONTRACT_CLASSES:
@@ -111,14 +109,7 @@ def _validate_registry_artifact_contract(record_name: str, payload: Mapping[str,
 
 
 def _validate_default_strategy_config(payload: Mapping[str, object]) -> None:
-    required = {
-        "strategy_id",
-        "version",
-        "params",
-        "artifact_bindings",
-        "runtime_policy_ref",
-        "risk_policy_ref",
-    }
+    required = {"strategy_id", "version", "params", "artifact_bindings", "runtime_policy_ref", "risk_policy_ref"}
     _require_exact_keys("strategy default config", payload, required)
     if not isinstance(payload["strategy_id"], str) or not payload["strategy_id"]:
         raise ConfigValidationError("strategy default config strategy_id is required")
@@ -129,9 +120,9 @@ def _validate_default_strategy_config(payload: Mapping[str, object]) -> None:
     if not isinstance(payload["artifact_bindings"], dict):
         raise ConfigValidationError("strategy default config artifact_bindings must be object")
     if payload["runtime_policy_ref"] is not None:
-        raise ConfigValidationError("runtime_policy_ref must be null in wave-2")
+        raise ConfigValidationError("runtime_policy_ref must be null")
     if payload["risk_policy_ref"] is not None:
-        raise ConfigValidationError("risk_policy_ref must be null in wave-2")
+        raise ConfigValidationError("risk_policy_ref must be null")
 
 
 def _load_strategy_artifact_contracts(import_ref: str) -> tuple[ArtifactContract, ...]:
@@ -149,53 +140,36 @@ def _load_strategy_artifact_contracts(import_ref: str) -> tuple[ArtifactContract
     return tuple(normalized)
 
 
-def load_registered_backtest(*, strategy_id: str, portfolio_id: str, environment_id: str) -> ResolvedRegisteredBacktest:
+def _load_common_registered_components(*, strategy_id: str, portfolio_id: str, environment_id: str) -> tuple[Mapping[str, object], Mapping[str, object], Mapping[str, object], Mapping[str, object], Mapping[str, object], Mapping[str, object], Mapping[str, object], Mapping[str, object], Mapping[str, object], Any, Any, tuple[ArtifactContract, ...]]:
     strategy_record = _load_json("configs/strategies/" + strategy_id + ".json")
     portfolio_record = _load_json("configs/portfolios/" + portfolio_id + ".json")
     environment_record = _load_json("configs/environments/" + environment_id + ".json")
-
     dataset_ids = strategy_record.get("required_dataset_ids")
     feature_ids = strategy_record.get("required_feature_set_ids")
     instrument_scope = strategy_record.get("instrument_scope")
-
     if not isinstance(dataset_ids, list) or len(dataset_ids) != 1:
         raise StrategyRegistrationError("wave-2 requires exactly one required_dataset_id")
     if not isinstance(feature_ids, list) or len(feature_ids) != 1:
         raise StrategyRegistrationError("wave-2 requires exactly one required_feature_set_id")
     if not isinstance(instrument_scope, list) or len(instrument_scope) != 1:
         raise StrategyRegistrationError("wave-2 requires exactly one instrument_scope id")
-
     dataset_record = _load_json("configs/datasets/" + str(dataset_ids[0]) + ".json")
     feature_record = _load_json("configs/features/" + str(feature_ids[0]) + ".json")
     instrument_record = _load_json("configs/instruments/" + str(instrument_scope[0]) + ".json")
     default_strategy_config_record = _load_json(str(strategy_record.get("default_config_ref")))
-
-    dataset_contract = _validate_registry_artifact_contract(
-        "dataset artifact contract",
-        _load_json(str(dataset_record.get("artifact_ref"))),
-    )
-    feature_contract = _validate_registry_artifact_contract(
-        "feature artifact contract",
-        _load_json(str(feature_record.get("artifact_ref"))),
-    )
-
+    dataset_contract = _validate_registry_artifact_contract("dataset artifact contract", _load_json(str(dataset_record.get("artifact_ref"))))
+    feature_contract = _validate_registry_artifact_contract("feature artifact contract", _load_json(str(feature_record.get("artifact_ref"))))
     manifest = _import_ref(str(strategy_record.get("manifest_ref")))
     try:
         manifest = validate_strategy_manifest(manifest)
     except Exception as exc:
         raise ManifestValidationError(str(exc)) from exc
-
     validate_config = _import_ref(str(strategy_record.get("config_schema_ref").rsplit(":", 1)[0] + ":validate_config"))
     strategy_artifact_contracts = _load_strategy_artifact_contracts(str(strategy_record.get("artifact_contract_ref")))
-
     _validate_default_strategy_config(default_strategy_config_record)
-    raw_config = {
-        "strategy_id": default_strategy_config_record["strategy_id"],
-        "version": default_strategy_config_record["version"],
-    }
+    raw_config = {"strategy_id": default_strategy_config_record["strategy_id"], "version": default_strategy_config_record["version"]}
     raw_config.update(dict(default_strategy_config_record["params"]))
     strategy_config = validate_config(raw_config)
-
     if strategy_record.get("strategy_id") != manifest.strategy_id:
         raise ManifestValidationError("strategy registry id does not match manifest.strategy_id")
     if strategy_record.get("version") != manifest.version:
@@ -216,7 +190,6 @@ def load_registered_backtest(*, strategy_id: str, portfolio_id: str, environment
         raise ManifestValidationError("artifact_contract_version does not match manifest")
     if strategy_record.get("status") != "active":
         raise StrategyRegistrationError("strategy registry record must be active")
-
     if dataset_record.get("status") != "active":
         raise StrategyRegistrationError("dataset registry record must be active")
     if feature_record.get("status") != "active":
@@ -227,33 +200,58 @@ def load_registered_backtest(*, strategy_id: str, portfolio_id: str, environment
         raise StrategyRegistrationError("feature row_semantics must equal finalized_bar_end")
     if not bool(feature_record.get("lookahead_safe")):
         raise StrategyRegistrationError("feature record must be lookahead_safe")
-
     enabled_strategy_ids = portfolio_record.get("enabled_strategy_ids")
     if enabled_strategy_ids != [strategy_id]:
         raise StrategyRegistrationError("portfolio must enable exactly the requested strategy id")
-    if bool(portfolio_record.get("is_live_allowed")):
-        raise StrategyRegistrationError("wave-2 portfolio must not allow live mode")
     if portfolio_record.get("status") != "active":
         raise StrategyRegistrationError("portfolio registry record must be active")
+    return instrument_record, dataset_record, feature_record, strategy_record, portfolio_record, environment_record, default_strategy_config_record, dataset_contract, feature_contract, manifest, strategy_config, strategy_artifact_contracts
 
+
+def _require_runtime_env_vars(environment_record: Mapping[str, object]) -> None:
+    required_env_vars = environment_record.get("required_env_vars")
+    if not isinstance(required_env_vars, list) or not required_env_vars:
+        raise StrategyRegistrationError("runtime environment must declare required_env_vars")
+    for env_name in required_env_vars:
+        if not isinstance(env_name, str) or not env_name:
+            raise StrategyRegistrationError("runtime environment required_env_vars must be non-empty strings")
+        if not os.environ.get(env_name):
+            raise StrategyRegistrationError("missing required artifact root env var: " + env_name)
+
+
+def _resolve_strategy_artifact_contract(strategy_artifact_contracts: tuple[ArtifactContract, ...], artifact_id: str) -> ArtifactContract:
+    for contract in strategy_artifact_contracts:
+        if contract.artifact_id == artifact_id:
+            return contract
+    raise StrategyRegistrationError("missing strategy artifact contract: " + artifact_id)
+
+
+def load_registered_backtest(*, strategy_id: str, portfolio_id: str, environment_id: str) -> ResolvedRegisteredBacktest:
+    instrument_record, dataset_record, feature_record, strategy_record, portfolio_record, environment_record, default_strategy_config_record, dataset_contract, feature_contract, manifest, strategy_config, strategy_artifact_contracts = _load_common_registered_components(strategy_id=strategy_id, portfolio_id=portfolio_id, environment_id=environment_id)
     if not bool(environment_record.get("is_backtest")):
         raise UnsupportedModeError("environment must be backtest-enabled")
     if bool(environment_record.get("is_live")):
-        raise UnsupportedModeError("wave-2 environment must not be live-enabled")
+        raise UnsupportedModeError("backtest environment must not be live-enabled")
     if environment_record.get("status") != "active":
         raise StrategyRegistrationError("environment registry record must be active")
+    return ResolvedRegisteredBacktest(instrument_record=instrument_record, dataset_record=dataset_record, feature_record=feature_record, strategy_record=strategy_record, portfolio_record=portfolio_record, environment_record=environment_record, default_strategy_config_record=default_strategy_config_record, manifest=manifest, strategy_config=strategy_config, dataset_contract=dataset_contract, feature_contract=feature_contract, strategy_artifact_contracts=strategy_artifact_contracts)
 
-    return ResolvedRegisteredBacktest(
-        instrument_record=instrument_record,
-        dataset_record=dataset_record,
-        feature_record=feature_record,
-        strategy_record=strategy_record,
-        portfolio_record=portfolio_record,
-        environment_record=environment_record,
-        default_strategy_config_record=default_strategy_config_record,
-        manifest=manifest,
-        strategy_config=strategy_config,
-        dataset_contract=dataset_contract,
-        feature_contract=feature_contract,
-        strategy_artifact_contracts=strategy_artifact_contracts,
-    )
+
+def load_registered_runtime_boundary(*, strategy_id: str, portfolio_id: str, environment_id: str) -> ResolvedRegisteredRuntimeBoundary:
+    instrument_record, dataset_record, feature_record, strategy_record, portfolio_record, environment_record, default_strategy_config_record, dataset_contract, feature_contract, manifest, strategy_config, strategy_artifact_contracts = _load_common_registered_components(strategy_id=strategy_id, portfolio_id=portfolio_id, environment_id=environment_id)
+    if not bool(manifest.supports_live):
+        raise UnsupportedModeError("strategy manifest must support live mode")
+    if not bool(strategy_record.get("supports_live")):
+        raise UnsupportedModeError("strategy registry record must support live mode")
+    if not bool(portfolio_record.get("is_live_allowed")):
+        raise UnsupportedModeError("portfolio registry record must allow live mode")
+    if environment_record.get("status") != "active":
+        raise StrategyRegistrationError("environment registry record must be active")
+    if bool(environment_record.get("is_backtest")):
+        raise UnsupportedModeError("runtime boundary environment must not be backtest-enabled")
+    if not bool(environment_record.get("is_live")):
+        raise UnsupportedModeError("runtime boundary environment must be live-enabled")
+    _require_runtime_env_vars(environment_record)
+    runtime_state_contract = _resolve_strategy_artifact_contract(strategy_artifact_contracts, "ema_3_19_15m_signal_state")
+    runtime_trade_log_contract = _resolve_strategy_artifact_contract(strategy_artifact_contracts, "ema_3_19_15m_trade_log")
+    return ResolvedRegisteredRuntimeBoundary(instrument_record=instrument_record, dataset_record=dataset_record, feature_record=feature_record, strategy_record=strategy_record, portfolio_record=portfolio_record, environment_record=environment_record, default_strategy_config_record=default_strategy_config_record, manifest=manifest, strategy_config=strategy_config, dataset_contract=dataset_contract, feature_contract=feature_contract, strategy_artifact_contracts=strategy_artifact_contracts, runtime_state_contract=runtime_state_contract, runtime_trade_log_contract=runtime_trade_log_contract)
