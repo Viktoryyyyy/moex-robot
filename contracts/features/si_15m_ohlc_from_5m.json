@@ -1,0 +1,14 @@
+{
+  "artifact_id": "si_15m_ohlc_feature_frame",
+  "artifact_role": "input",
+  "contract_class": "external_pattern",
+  "producer_ref": "moex_features.intraday.si_15m_ohlc_from_5m",
+  "consumer_refs": [
+    "strategies.ema_3_19_15m.signal_engine",
+    "strategies.ema_3_19_15m.backtest_adapter"
+  ],
+  "format": "parquet",
+  "schema_version": 1,
+  "partitioning": "by_instrument_trade_date",
+  "locator_ref": "data/features/si_15m_ohlc_from_5m_{run_id}.parquet"
+}
