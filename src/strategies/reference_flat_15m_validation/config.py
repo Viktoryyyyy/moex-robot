@@ -1,0 +1,67 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Mapping
+
+from src.moex_strategy_sdk.config_schema import BaseStrategyConfig
+from src.moex_strategy_sdk.errors import ConfigValidationError
+
+
+@dataclass(frozen=True)
+class StrategyConfig(BaseStrategyConfig):
+    instrument_id: str = "si"
+    timeframe: str = "15m"
+    warmup_bars: int = 1
+
+
+def _expect_exact_str(name: str, value: object, expected: str) -> str:
+    if not isinstance(value, str) or value != expected:
+        raise ConfigValidationError(name + " must equal " + repr(expected))
+    return value
+
+
+def _expect_int(name: str, value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigValidationError(name + " must be int")
+    return value
+
+
+def validate_config(raw_config: Mapping[str, object]) -> StrategyConfig:
+    if not isinstance(raw_config, Mapping):
+        raise ConfigValidationError("raw_config must be Mapping")
+
+    allowed = {
+        "strategy_id",
+        "version",
+        "instrument_id",
+        "timeframe",
+        "warmup_bars",
+    }
+    unknown = sorted(set(raw_config.keys()) - allowed)
+    if unknown:
+        raise ConfigValidationError("unknown config field(s): " + ", ".join(unknown))
+
+    data = {
+        "strategy_id": "reference_flat_15m_validation",
+        "version": "1.0.0",
+        "instrument_id": "si",
+        "timeframe": "15m",
+        "warmup_bars": 1,
+    }
+    data.update(dict(raw_config))
+
+    strategy_id = _expect_exact_str("strategy_id", data["strategy_id"], "reference_flat_15m_validation")
+    version = _expect_exact_str("version", data["version"], "1.0.0")
+    instrument_id = _expect_exact_str("instrument_id", data["instrument_id"], "si")
+    timeframe = _expect_exact_str("timeframe", data["timeframe"], "15m")
+    warmup_bars = _expect_int("warmup_bars", data["warmup_bars"])
+    if warmup_bars < 1:
+        raise ConfigValidationError("warmup_bars must be >= 1")
+
+    return StrategyConfig(
+        strategy_id=strategy_id,
+        version=version,
+        instrument_id=instrument_id,
+        timeframe=timeframe,
+        warmup_bars=warmup_bars,
+    )
