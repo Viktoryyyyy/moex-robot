@@ -46,6 +46,9 @@ class ResolvedRegisteredRuntimeBoundary:
     strategy_artifact_contracts: tuple[ArtifactContract, ...]
     runtime_state_contract: ArtifactContract
     runtime_trade_log_contract: ArtifactContract
+    runtime_feature_builder: Any
+    runtime_signal_builder: Any
+    runtime_live_decision_builder: Any
 
 
 def _load_json(repo_relative_path: str) -> Mapping[str, object]:
@@ -140,6 +143,20 @@ def _load_strategy_artifact_contracts(import_ref: str) -> tuple[ArtifactContract
     return tuple(normalized)
 
 
+def _resolve_runtime_hook_ref(*, strategy_record: Mapping[str, object], module_suffix: str, attr_name: str) -> str:
+    package_ref = strategy_record.get("package_ref")
+    if not isinstance(package_ref, str) or not package_ref:
+        raise StrategyRegistrationError("strategy registry record must declare package_ref")
+    return package_ref + "." + module_suffix + ":" + attr_name
+
+
+def _resolve_runtime_artifact_contract(*, strategy_artifact_contracts: tuple[ArtifactContract, ...], artifact_role: str, producer: str) -> ArtifactContract:
+    matches = [contract for contract in strategy_artifact_contracts if contract.artifact_role == artifact_role and contract.producer == producer]
+    if len(matches) != 1:
+        raise StrategyRegistrationError("expected exactly one runtime artifact contract for role=" + artifact_role + " producer=" + producer)
+    return matches[0]
+
+
 def _load_common_registered_components(*, strategy_id: str, portfolio_id: str, environment_id: str) -> tuple[Mapping[str, object], Mapping[str, object], Mapping[str, object], Mapping[str, object], Mapping[str, object], Mapping[str, object], Mapping[str, object], Mapping[str, object], Mapping[str, object], Any, Any, tuple[ArtifactContract, ...]]:
     strategy_record = _load_json("configs/strategies/" + strategy_id + ".json")
     portfolio_record = _load_json("configs/portfolios/" + portfolio_id + ".json")
@@ -201,8 +218,10 @@ def _load_common_registered_components(*, strategy_id: str, portfolio_id: str, e
     if not bool(feature_record.get("lookahead_safe")):
         raise StrategyRegistrationError("feature record must be lookahead_safe")
     enabled_strategy_ids = portfolio_record.get("enabled_strategy_ids")
-    if enabled_strategy_ids != [strategy_id]:
-        raise StrategyRegistrationError("portfolio must enable exactly the requested strategy id")
+    if not isinstance(enabled_strategy_ids, list) or not enabled_strategy_ids:
+        raise StrategyRegistrationError("portfolio enabled_strategy_ids must be non-empty list")
+    if strategy_id not in enabled_strategy_ids:
+        raise StrategyRegistrationError("portfolio must explicitly enable the requested strategy id")
     if portfolio_record.get("status") != "active":
         raise StrategyRegistrationError("portfolio registry record must be active")
     return instrument_record, dataset_record, feature_record, strategy_record, portfolio_record, environment_record, default_strategy_config_record, dataset_contract, feature_contract, manifest, strategy_config, strategy_artifact_contracts
@@ -252,6 +271,9 @@ def load_registered_runtime_boundary(*, strategy_id: str, portfolio_id: str, env
     if not bool(environment_record.get("is_live")):
         raise UnsupportedModeError("runtime boundary environment must be live-enabled")
     _require_runtime_env_vars(environment_record)
-    runtime_state_contract = _resolve_strategy_artifact_contract(strategy_artifact_contracts, "ema_3_19_15m_signal_state")
-    runtime_trade_log_contract = _resolve_strategy_artifact_contract(strategy_artifact_contracts, "ema_3_19_15m_trade_log")
-    return ResolvedRegisteredRuntimeBoundary(instrument_record=instrument_record, dataset_record=dataset_record, feature_record=feature_record, strategy_record=strategy_record, portfolio_record=portfolio_record, environment_record=environment_record, default_strategy_config_record=default_strategy_config_record, manifest=manifest, strategy_config=strategy_config, dataset_contract=dataset_contract, feature_contract=feature_contract, strategy_artifact_contracts=strategy_artifact_contracts, runtime_state_contract=runtime_state_contract, runtime_trade_log_contract=runtime_trade_log_contract)
+    runtime_state_contract = _resolve_runtime_artifact_contract(strategy_artifact_contracts=strategy_artifact_contracts, artifact_role="state", producer="moex_runtime")
+    runtime_trade_log_contract = _resolve_runtime_artifact_contract(strategy_artifact_contracts=strategy_artifact_contracts, artifact_role="output", producer="moex_runtime")
+    runtime_feature_builder = _import_ref(str(feature_record.get("producer_ref")))
+    runtime_signal_builder = _import_ref(_resolve_runtime_hook_ref(strategy_record=strategy_record, module_suffix="signal_engine", attr_name="generate_signals"))
+    runtime_live_decision_builder = _import_ref(_resolve_runtime_hook_ref(strategy_record=strategy_record, module_suffix="live_adapter", attr_name="build_live_decision"))
+    return ResolvedRegisteredRuntimeBoundary(instrument_record=instrument_record, dataset_record=dataset_record, feature_record=feature_record, strategy_record=strategy_record, portfolio_record=portfolio_record, environment_record=environment_record, default_strategy_config_record=default_strategy_config_record, manifest=manifest, strategy_config=strategy_config, dataset_contract=dataset_contract, feature_contract=feature_contract, strategy_artifact_contracts=strategy_artifact_contracts, runtime_state_contract=runtime_state_contract, runtime_trade_log_contract=runtime_trade_log_contract, runtime_feature_builder=runtime_feature_builder, runtime_signal_builder=runtime_signal_builder, runtime_live_decision_builder=runtime_live_decision_builder)

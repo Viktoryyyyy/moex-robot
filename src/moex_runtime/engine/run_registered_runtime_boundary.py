@@ -6,13 +6,10 @@ import pandas as pd
 
 from src.moex_core.contracts.external_pattern_artifact_path_resolver import resolve_external_pattern_artifact_path
 from src.moex_core.contracts.registry_loader import load_registered_runtime_boundary
-from src.moex_features.intraday.si_15m_ohlc_from_5m import materialize_feature_frame
 from src.moex_runtime.execution.runtime_position_transition import resolve_runtime_position_transition
 from src.moex_runtime.state_store.file_backed_runtime_session_store import append_trade_log_row, load_runtime_state, next_trade_seq, read_last_trade_log_row, save_runtime_state
 from src.moex_strategy_sdk.errors import StrategyRegistrationError
 from src.moex_strategy_sdk.interfaces import LiveStrategyInput
-from src.strategies.ema_3_19_15m.live_adapter import build_live_decision
-from src.strategies.ema_3_19_15m.signal_engine import generate_signals
 
 
 def _to_strategy_inputs(feature_frame: pd.DataFrame) -> tuple[dict[str, object], ...]:
@@ -31,10 +28,10 @@ def run_registered_runtime_boundary(*, strategy_id: str, portfolio_id: str, envi
     resolved = load_registered_runtime_boundary(strategy_id=strategy_id, portfolio_id=portfolio_id, environment_id=environment_id)
     instrument_id = str(resolved.instrument_record["instrument_id"])
     dataset_path = resolve_external_pattern_artifact_path(locator_ref=str(resolved.dataset_contract["locator_ref"]), environment_record=resolved.environment_record, format_kwargs={})
-    feature_frame = materialize_feature_frame(dataset_artifact_path=dataset_path, instrument_id=instrument_id, timezone_name=str(resolved.instrument_record["timezone"]))
+    feature_frame = resolved.runtime_feature_builder(dataset_artifact_path=dataset_path, instrument_id=instrument_id, timezone_name=str(resolved.instrument_record["timezone"]))
     if feature_frame.empty:
         raise StrategyRegistrationError("runtime feature frame is empty")
-    signals = generate_signals(inputs=_to_strategy_inputs(feature_frame), config=resolved.strategy_config)
+    signals = resolved.runtime_signal_builder(inputs=_to_strategy_inputs(feature_frame), config=resolved.strategy_config)
     latest_bar = feature_frame.iloc[-1]
     latest_bar_end = pd.Timestamp(latest_bar["end"])
     latest_bar_end_iso = latest_bar_end.isoformat()
@@ -43,7 +40,7 @@ def run_registered_runtime_boundary(*, strategy_id: str, portfolio_id: str, envi
     trade_log_path = resolve_external_pattern_artifact_path(locator_ref=resolved.runtime_trade_log_contract.locator_ref, environment_record=resolved.environment_record, format_kwargs={"trade_date": trade_date})
     prior_state = load_runtime_state(state_path)
     last_trade_log_row = read_last_trade_log_row(trade_log_path)
-    decision = build_live_decision(inputs=LiveStrategyInput(instrument_id=instrument_id, decision_ts=latest_bar_end.to_pydatetime(), state=prior_state, runtime_metadata={"strategy_id": strategy_id, "portfolio_id": portfolio_id, "environment_id": environment_id}), signals=signals, config=resolved.strategy_config)
+    decision = resolved.runtime_live_decision_builder(inputs=LiveStrategyInput(instrument_id=instrument_id, decision_ts=latest_bar_end.to_pydatetime(), state=prior_state, runtime_metadata={"strategy_id": strategy_id, "portfolio_id": portfolio_id, "environment_id": environment_id}), signals=signals, config=resolved.strategy_config)
     next_seq = next_trade_seq(prior_state=prior_state, last_trade_log_row=last_trade_log_row)
     transition = resolve_runtime_position_transition(prior_state=prior_state, last_trade_log_row=last_trade_log_row, decision=decision, strategy_id=strategy_id, portfolio_id=portfolio_id, environment_id=environment_id, instrument_id=instrument_id, trade_date=trade_date, latest_bar_end_iso=latest_bar_end_iso, next_trade_seq=next_seq, updated_at_iso=datetime.now(timezone.utc).isoformat())
     if transition.position_changed:
