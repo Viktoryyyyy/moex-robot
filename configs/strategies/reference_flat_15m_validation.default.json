@@ -1,0 +1,14 @@
+{
+  "strategy_id": "reference_flat_15m_validation",
+  "version": "1.0.0",
+  "params": {
+    "instrument_id": "si",
+    "timeframe": "15m",
+    "warmup_bars": 1
+  },
+  "artifact_bindings": {
+    "input_feature_artifact_id": "si_15m_ohlc_feature_frame"
+  },
+  "runtime_policy_ref": null,
+  "risk_policy_ref": null
+}
