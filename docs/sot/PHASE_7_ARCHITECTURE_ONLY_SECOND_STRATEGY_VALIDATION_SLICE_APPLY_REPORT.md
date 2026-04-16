@@ -73,7 +73,7 @@ Original apply report commit:
 `src/strategies/reference_flat_15m_validation/live_adapter.py` always returns:
 
 - `desired_position = 0.0`
-- fixed `reason_code = \"architecture_validation_force_flat\"`
+- fixed `reason_code = "architecture_validation_force_flat"`
 
 So the package exists only to prove package registration, runtime-boundary reuse, orchestrator reuse, and artifact isolation for `enabled_strategy_ids > 1`.
 
@@ -122,18 +122,18 @@ Owner-run server proof was executed and passed.
 
 Observed proof result:
 
-- `portfolio_id = \"reference_ema_3_19_15m_with_flat_validation\"`
-- `environment_id = \"reference_runtime_boundary\"`
-- `status = \"ok\"`
+- `portfolio_id = "reference_ema_3_19_15m_with_flat_validation"`
+- `environment_id = "reference_runtime_boundary"`
+- `status = "ok"`
 - `ok = true`
-- `enabled_strategy_ids = (\"ema_3_19_15m\", \"reference_flat_15m_validation\")`
+- `enabled_strategy_ids = ("ema_3_19_15m", "reference_flat_15m_validation")`
 - `delegated_strategy_results` contained exactly two ok per-strategy results in declared order
 - `ema_3_19_15m` resolved through the unchanged runtime boundary with its existing runtime artifacts:
-  - `state_path = \"/home/trader/moex_bot/moex-robot/data/state/ema_3_19_15m_signal_state_2026-04-02.json\"`
-  - `trade_log_path = \"/home/trader/moex_bot/moex-robot/data/signals/ema_3_19_15m_realtime_2026-04-02.csv\"`
+  - `state_path = "/home/trader/moex_bot/moex-robot/data/state/ema_3_19_15m_signal_state_2026-04-02.json"`
+  - `trade_log_path = "/home/trader/moex_bot/moex-robot/data/signals/ema_3_19_15m_realtime_2026-04-02.csv"`
 - `reference_flat_15m_validation` resolved through the unchanged runtime boundary with its own non-colliding runtime artifacts:
-  - `state_path = \"/home/trader/moex_bot/moex-robot/data/state/reference_flat_15m_validation_signal_state_2026-04-02.json\"`
-  - `trade_log_path = \"/home/trader/moex_bot/moex-robot/data/signals/reference_flat_15m_validation_realtime_2026-04-02.csv\"`
+  - `state_path = "/home/trader/moex_bot/moex-robot/data/state/reference_flat_15m_validation_signal_state_2026-04-02.json"`
+  - `trade_log_path = "/home/trader/moex_bot/moex-robot/data/signals/reference_flat_15m_validation_realtime_2026-04-02.csv"`
   - `signal_count = 0`
   - `current_position = 0.0`
   - `desired_position = 0.0`
