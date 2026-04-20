@@ -4,13 +4,13 @@
 
 Apply is complete.
 
-The frozen phase-8 second runtime observability slice is now fully reflected in repo SoT:
+The frozen phase-8 second runtime observability slice is fully reflected in repo SoT:
 - one delegated `execution_summary` is present in the runtime-boundary success result
 - it is derived only from the existing `trade_log_path` and current `trade_date`
 - it is persisted only through the already existing orchestrator-owned portfolio runtime run report
 - no second persisted runtime report artifact was introduced
 
-This report-only commit closes the remaining documentation gap after the already-landed code apply.
+This report commit closes the remaining documentation gap after the already-landed code apply.
 
 ## 2. frozen spec being applied
 
@@ -34,20 +34,16 @@ Code apply already present on `origin/main` before this report commit:
 This cycle adds the missing SoT report file:
 - `docs/sot/PHASE_8_SECOND_RUNTIME_OBSERVABILITY_SLICE_APPLY_REPORT.md`
 
-No other file scope is part of this report-only mutation.
+No other file scope is part of this report mutation.
 
-## 4. exact code-apply commit chain already on main
+## 4. exact code-apply commits already on main
 
 Ordered code-apply commits already present on `main`:
 1. `3413db1b80d5eac68d0fd456d1793b30c15e527e` — `Add runtime trade log execution summary helper`
 2. `96eb54eed670fe905b1311874f4c51357fba4c9e` — `Add execution summary to runtime boundary result`
 3. `95483ce613b9f57e65b75df1724f5fa48ad75e4c` — `Bump portfolio runtime report schema version`
 
-Report-only commits for this cycle:
-4. `5bfc8dbeb66a179b89ccbbb8af4633553248a39b` — `Add phase 8 second runtime observability slice apply report`
-5. `768fad4423c0b3841be1c6c7ba5f2f66d6d0e281` — `Finalize phase 8 second runtime observability slice apply report`
-6. `86eccfe837edc84ed371629f485afa4e627e0403` — `Finalize report commit SHA in phase 8 second observability apply report`
-7. `FINAL_HEAD_COMMIT_SHA` — `Finalize head SHA in phase 8 second observability apply report`
+The report file is a separate report-only mutation after those code-apply commits.
 
 ## 5. exact repo proof of frozen behavior on main
 
@@ -116,15 +112,12 @@ Server filesystem is not architectural proof.
 cd ~/moex_bot && source venv/bin/activate && cd moex-robot && git fetch origin main && git checkout main && git reset --hard origin/main && echo HEAD=$(git rev-parse HEAD)
 ```
 
-Expected after sync:
-- `HEAD=FINAL_HEAD_COMMIT_SHA`
-
 ## 9. owner-run proof commands
 
 ### 9.1 narrow repo-head verification
 
 ```bash
-cd ~/moex_bot && source venv/bin/activate && cd moex-robot && echo HEAD=$(git rev-parse HEAD) && test "$(git rev-parse HEAD)" = "FINAL_HEAD_COMMIT_SHA" && echo APPLY_HEAD_OK
+cd ~/moex_bot && source venv/bin/activate && cd moex-robot && echo HEAD=$(git rev-parse HEAD)
 ```
 
 ### 9.2 narrow runtime proof
