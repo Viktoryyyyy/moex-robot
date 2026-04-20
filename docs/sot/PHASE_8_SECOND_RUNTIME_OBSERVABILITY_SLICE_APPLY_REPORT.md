@@ -43,8 +43,9 @@ Ordered code-apply commits already present on `main`:
 2. `96eb54eed670fe905b1311874f4c51357fba4c9e` — `Add execution summary to runtime boundary result`
 3. `95483ce613b9f57e65b75df1724f5fa48ad75e4c` — `Bump portfolio runtime report schema version`
 
-Report-only commit for this cycle:
-4. `REPLACED_BY_GITHUB_COMMIT_SHA` — `Add phase 8 second runtime observability slice apply report`
+Report-only commits for this cycle:
+4. `5bfc8dbeb66a179b89ccbbb8af4633553248a39b` — `Add phase 8 second runtime observability slice apply report`
+5. `FINAL_REPORT_COMMIT_SHA` — `Finalize phase 8 second runtime observability slice apply report`
 
 ## 5. exact repo proof of frozen behavior on main
 
@@ -114,14 +115,14 @@ cd ~/moex_bot && source venv/bin/activate && cd moex-robot && git fetch origin m
 ```
 
 Expected after sync:
-- `HEAD=REPLACED_BY_GITHUB_COMMIT_SHA`
+- `HEAD=FINAL_REPORT_COMMIT_SHA`
 
 ## 9. owner-run proof commands
 
 ### 9.1 narrow repo-head verification
 
 ```bash
-cd ~/moex_bot && source venv/bin/activate && cd moex-robot && echo HEAD=$(git rev-parse HEAD) && test "$(git rev-parse HEAD)" = "REPLACED_BY_GITHUB_COMMIT_SHA" && echo APPLY_HEAD_OK
+cd ~/moex_bot && source venv/bin/activate && cd moex-robot && echo HEAD=$(git rev-parse HEAD) && test "$(git rev-parse HEAD)" = "FINAL_REPORT_COMMIT_SHA" && echo APPLY_HEAD_OK
 ```
 
 ### 9.2 narrow runtime proof
