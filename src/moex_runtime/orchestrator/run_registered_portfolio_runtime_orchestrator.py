@@ -68,6 +68,29 @@ def _build_failure_summary(*, strategy_id: str, failed_at_utc: str, exc: Excepti
     }
 
 
+def _parse_report_timestamp_utc(timestamp_utc: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(timestamp_utc)
+    except ValueError as exc:
+        raise StrategyRegistrationError("portfolio runtime report timestamp must be valid ISO-8601") from exc
+    if parsed.tzinfo is None:
+        raise StrategyRegistrationError("portfolio runtime report timestamp must be timezone-aware UTC ISO-8601")
+    return parsed.astimezone(timezone.utc)
+
+
+def _build_run_timing_summary(*, started_at_utc: str, completed_at_utc: str) -> dict[str, object]:
+    started_at = _parse_report_timestamp_utc(started_at_utc)
+    completed_at = _parse_report_timestamp_utc(completed_at_utc)
+    wall_clock_duration_seconds = (completed_at - started_at).total_seconds()
+    if wall_clock_duration_seconds < 0:
+        raise StrategyRegistrationError("portfolio runtime report completed_at_utc must not be earlier than started_at_utc")
+    return {
+        "run_timing_summary_schema_version": 1,
+        "timing_scope": "portfolio_run_wall_clock",
+        "wall_clock_duration_seconds": float(wall_clock_duration_seconds),
+    }
+
+
 def run_registered_portfolio_runtime_orchestrator(*, portfolio_id: str, environment_id: str) -> dict[str, object]:
     portfolio_record = _load_portfolio_record(portfolio_id)
     environment_record = _load_environment_record(environment_id)
@@ -87,7 +110,7 @@ def run_registered_portfolio_runtime_orchestrator(*, portfolio_id: str, environm
             portfolio_result = {
                 "portfolio_id": portfolio_id,
                 "environment_id": environment_id,
-                "portfolio_run_schema_version": 3,
+                "portfolio_run_schema_version": 4,
                 "portfolio_run_id": portfolio_run_id,
                 "started_at_utc": started_at_utc,
                 "completed_at_utc": failed_at_utc,
@@ -96,21 +119,24 @@ def run_registered_portfolio_runtime_orchestrator(*, portfolio_id: str, environm
                 "enabled_strategy_ids": enabled_strategy_ids,
                 "delegated_strategy_results": tuple(delegated_strategy_results),
                 "failure_summary": _build_failure_summary(strategy_id=strategy_id, failed_at_utc=failed_at_utc, exc=exc),
+                "run_timing_summary": _build_run_timing_summary(started_at_utc=started_at_utc, completed_at_utc=failed_at_utc),
             }
             _write_portfolio_run_report(portfolio_result=portfolio_result, environment_record=environment_record)
             return portfolio_result
         delegated_strategy_results.append({"strategy_id": strategy_id, "ok": True, "result": delegated_result})
+    completed_at_utc = datetime.now(timezone.utc).isoformat()
     portfolio_result = {
         "portfolio_id": portfolio_id,
         "environment_id": environment_id,
-        "portfolio_run_schema_version": 3,
+        "portfolio_run_schema_version": 4,
         "portfolio_run_id": portfolio_run_id,
         "started_at_utc": started_at_utc,
-        "completed_at_utc": datetime.now(timezone.utc).isoformat(),
+        "completed_at_utc": completed_at_utc,
         "status": "ok",
         "ok": True,
         "enabled_strategy_ids": enabled_strategy_ids,
         "delegated_strategy_results": tuple(delegated_strategy_results),
+        "run_timing_summary": _build_run_timing_summary(started_at_utc=started_at_utc, completed_at_utc=completed_at_utc),
     }
     _write_portfolio_run_report(portfolio_result=portfolio_result, environment_record=environment_record)
     return portfolio_result
