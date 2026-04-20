@@ -78,6 +78,50 @@ def _parse_report_timestamp_utc(timestamp_utc: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _iter_usable_latest_bar_end_utc(delegated_strategy_results: tuple[Mapping[str, object], ...] | list[Mapping[str, object]]) -> tuple[datetime, ...]:
+    parsed_latest_bar_ends: list[datetime] = []
+    for delegated_strategy_result in delegated_strategy_results:
+        if not isinstance(delegated_strategy_result, Mapping):
+            continue
+        if delegated_strategy_result.get("ok") is not True:
+            continue
+        delegated_result = delegated_strategy_result.get("result")
+        if not isinstance(delegated_result, Mapping):
+            continue
+        latest_bar_end = delegated_result.get("latest_bar_end")
+        if not isinstance(latest_bar_end, str) or not latest_bar_end:
+            continue
+        parsed_latest_bar_ends.append(_parse_report_timestamp_utc(latest_bar_end))
+    return tuple(parsed_latest_bar_ends)
+
+
+def _build_data_freshness_summary(*, enabled_strategy_ids: tuple[str, ...], delegated_strategy_results: tuple[Mapping[str, object], ...] | list[Mapping[str, object]]) -> dict[str, object]:
+    parsed_latest_bar_ends = _iter_usable_latest_bar_end_utc(delegated_strategy_results)
+    if not parsed_latest_bar_ends:
+        freshness_coverage_status = "unavailable"
+        oldest_latest_bar_end_utc = None
+        newest_latest_bar_end_utc = None
+        latest_bar_end_span_seconds = None
+    else:
+        oldest_latest_bar_end = min(parsed_latest_bar_ends)
+        newest_latest_bar_end = max(parsed_latest_bar_ends)
+        if len(parsed_latest_bar_ends) == len(enabled_strategy_ids):
+            freshness_coverage_status = "complete"
+        else:
+            freshness_coverage_status = "partial"
+        oldest_latest_bar_end_utc = oldest_latest_bar_end.isoformat()
+        newest_latest_bar_end_utc = newest_latest_bar_end.isoformat()
+        latest_bar_end_span_seconds = float((newest_latest_bar_end - oldest_latest_bar_end).total_seconds())
+    return {
+        "data_freshness_summary_schema_version": 1,
+        "freshness_scope": "portfolio_runtime_inputs",
+        "freshness_coverage_status": freshness_coverage_status,
+        "oldest_latest_bar_end_utc": oldest_latest_bar_end_utc,
+        "newest_latest_bar_end_utc": newest_latest_bar_end_utc,
+        "latest_bar_end_span_seconds": latest_bar_end_span_seconds,
+    }
+
+
 def _build_run_timing_summary(*, started_at_utc: str, completed_at_utc: str) -> dict[str, object]:
     started_at = _parse_report_timestamp_utc(started_at_utc)
     completed_at = _parse_report_timestamp_utc(completed_at_utc)
@@ -110,7 +154,7 @@ def run_registered_portfolio_runtime_orchestrator(*, portfolio_id: str, environm
             portfolio_result = {
                 "portfolio_id": portfolio_id,
                 "environment_id": environment_id,
-                "portfolio_run_schema_version": 4,
+                "portfolio_run_schema_version": 5,
                 "portfolio_run_id": portfolio_run_id,
                 "started_at_utc": started_at_utc,
                 "completed_at_utc": failed_at_utc,
@@ -118,6 +162,7 @@ def run_registered_portfolio_runtime_orchestrator(*, portfolio_id: str, environm
                 "ok": False,
                 "enabled_strategy_ids": enabled_strategy_ids,
                 "delegated_strategy_results": tuple(delegated_strategy_results),
+                "data_freshness_summary": _build_data_freshness_summary(enabled_strategy_ids=enabled_strategy_ids, delegated_strategy_results=delegated_strategy_results),
                 "failure_summary": _build_failure_summary(strategy_id=strategy_id, failed_at_utc=failed_at_utc, exc=exc),
                 "run_timing_summary": _build_run_timing_summary(started_at_utc=started_at_utc, completed_at_utc=failed_at_utc),
             }
@@ -128,7 +173,7 @@ def run_registered_portfolio_runtime_orchestrator(*, portfolio_id: str, environm
     portfolio_result = {
         "portfolio_id": portfolio_id,
         "environment_id": environment_id,
-        "portfolio_run_schema_version": 4,
+        "portfolio_run_schema_version": 5,
         "portfolio_run_id": portfolio_run_id,
         "started_at_utc": started_at_utc,
         "completed_at_utc": completed_at_utc,
@@ -136,6 +181,7 @@ def run_registered_portfolio_runtime_orchestrator(*, portfolio_id: str, environm
         "ok": True,
         "enabled_strategy_ids": enabled_strategy_ids,
         "delegated_strategy_results": tuple(delegated_strategy_results),
+        "data_freshness_summary": _build_data_freshness_summary(enabled_strategy_ids=enabled_strategy_ids, delegated_strategy_results=delegated_strategy_results),
         "run_timing_summary": _build_run_timing_summary(started_at_utc=started_at_utc, completed_at_utc=completed_at_utc),
     }
     _write_portfolio_run_report(portfolio_result=portfolio_result, environment_record=environment_record)
