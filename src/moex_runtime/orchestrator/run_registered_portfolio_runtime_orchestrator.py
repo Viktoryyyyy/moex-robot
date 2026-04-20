@@ -72,10 +72,10 @@ def run_registered_portfolio_runtime_orchestrator(*, portfolio_id: str, environm
             delegated_result = run_registered_runtime_boundary(strategy_id=strategy_id, portfolio_id=portfolio_id, environment_id=environment_id)
         except Exception as exc:
             delegated_strategy_results.append({"strategy_id": strategy_id, "ok": False, "error_type": type(exc).__name__, "error": str(exc)})
-            portfolio_result = {"portfolio_id": portfolio_id, "environment_id": environment_id, "portfolio_run_schema_version": 1, "portfolio_run_id": portfolio_run_id, "started_at_utc": started_at_utc, "completed_at_utc": datetime.now(timezone.utc).isoformat(), "status": "failed", "ok": False, "enabled_strategy_ids": enabled_strategy_ids, "delegated_strategy_results": tuple(delegated_strategy_results)}
+            portfolio_result = {"portfolio_id": portfolio_id, "environment_id": environment_id, "portfolio_run_schema_version": 2, "portfolio_run_id": portfolio_run_id, "started_at_utc": started_at_utc, "completed_at_utc": datetime.now(timezone.utc).isoformat(), "status": "failed", "ok": False, "enabled_strategy_ids": enabled_strategy_ids, "delegated_strategy_results": tuple(delegated_strategy_results)}
             _write_portfolio_run_report(portfolio_result=portfolio_result, environment_record=environment_record)
             return portfolio_result
         delegated_strategy_results.append({"strategy_id": strategy_id, "ok": True, "result": delegated_result})
-    portfolio_result = {"portfolio_id": portfolio_id, "environment_id": environment_id, "portfolio_run_schema_version": 1, "portfolio_run_id": portfolio_run_id, "started_at_utc": started_at_utc, "completed_at_utc": datetime.now(timezone.utc).isoformat(), "status": "ok", "ok": True, "enabled_strategy_ids": enabled_strategy_ids, "delegated_strategy_results": tuple(delegated_strategy_results)}
+    portfolio_result = {"portfolio_id": portfolio_id, "environment_id": environment_id, "portfolio_run_schema_version": 2, "portfolio_run_id": portfolio_run_id, "started_at_utc": started_at_utc, "completed_at_utc": datetime.now(timezone.utc).isoformat(), "status": "ok", "ok": True, "enabled_strategy_ids": enabled_strategy_ids, "delegated_strategy_results": tuple(delegated_strategy_results)}
     _write_portfolio_run_report(portfolio_result=portfolio_result, environment_record=environment_record)
     return portfolio_result
