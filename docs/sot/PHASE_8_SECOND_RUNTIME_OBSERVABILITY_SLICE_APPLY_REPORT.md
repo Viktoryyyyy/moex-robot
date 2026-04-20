@@ -46,7 +46,8 @@ Ordered code-apply commits already present on `main`:
 Report-only commits for this cycle:
 4. `5bfc8dbeb66a179b89ccbbb8af4633553248a39b` — `Add phase 8 second runtime observability slice apply report`
 5. `768fad4423c0b3841be1c6c7ba5f2f66d6d0e281` — `Finalize phase 8 second runtime observability slice apply report`
-6. `8d5ed4d78c3cc0eca4d6b44e4be8c7c1fc4f4d64` — `Finalize report commit SHA in phase 8 second observability apply report`
+6. `86eccfe837edc84ed371629f485afa4e627e0403` — `Finalize report commit SHA in phase 8 second observability apply report`
+7. `FINAL_HEAD_COMMIT_SHA` — `Finalize head SHA in phase 8 second observability apply report`
 
 ## 5. exact repo proof of frozen behavior on main
 
@@ -116,14 +117,14 @@ cd ~/moex_bot && source venv/bin/activate && cd moex-robot && git fetch origin m
 ```
 
 Expected after sync:
-- `HEAD=8d5ed4d78c3cc0eca4d6b44e4be8c7c1fc4f4d64`
+- `HEAD=FINAL_HEAD_COMMIT_SHA`
 
 ## 9. owner-run proof commands
 
 ### 9.1 narrow repo-head verification
 
 ```bash
-cd ~/moex_bot && source venv/bin/activate && cd moex-robot && echo HEAD=$(git rev-parse HEAD) && test "$(git rev-parse HEAD)" = "8d5ed4d78c3cc0eca4d6b44e4be8c7c1fc4f4d64" && echo APPLY_HEAD_OK
+cd ~/moex_bot && source venv/bin/activate && cd moex-robot && echo HEAD=$(git rev-parse HEAD) && test "$(git rev-parse HEAD)" = "FINAL_HEAD_COMMIT_SHA" && echo APPLY_HEAD_OK
 ```
 
 ### 9.2 narrow runtime proof
