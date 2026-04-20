@@ -7,6 +7,7 @@ import pandas as pd
 from src.moex_core.contracts.external_pattern_artifact_path_resolver import resolve_external_pattern_artifact_path
 from src.moex_core.contracts.registry_loader import load_registered_runtime_boundary
 from src.moex_runtime.execution.runtime_position_transition import resolve_runtime_position_transition
+from src.moex_runtime.telemetry.summarize_runtime_trade_log_execution import summarize_runtime_trade_log_execution
 from src.moex_runtime.state_store.file_backed_runtime_session_store import append_trade_log_row, load_runtime_state, next_trade_seq, read_last_trade_log_row, save_runtime_state
 from src.moex_strategy_sdk.errors import StrategyRegistrationError
 from src.moex_strategy_sdk.interfaces import LiveStrategyInput
@@ -49,4 +50,5 @@ def run_registered_runtime_boundary(*, strategy_id: str, portfolio_id: str, envi
             raise StrategyRegistrationError("latest finalized close must be numeric")
         append_trade_log_row(trade_log_path, {"trade_date": trade_date, "seq": next_seq, "bar_end": latest_bar_end_iso, "action": transition.action, "prev_pos": transition.current_position, "new_pos": transition.desired_position, "price": float(close_price), "reason_code": decision.reason_code})
     save_runtime_state(state_path, transition.updated_state)
-    return {"strategy_id": strategy_id, "portfolio_id": portfolio_id, "environment_id": environment_id, "runtime_result_schema_version": 2, "strategy_version": str(resolved.manifest.version), "instrument_id": instrument_id, "trade_date": trade_date, "latest_bar_end": latest_bar_end_iso, "reason_code": decision.reason_code, "dataset_path": str(dataset_path), "state_path": str(state_path), "trade_log_path": str(trade_log_path), "signal_count": int(len(signals)), "current_position": transition.current_position, "desired_position": transition.desired_position, "position_changed": transition.position_changed, "action": transition.action}
+    execution_summary = summarize_runtime_trade_log_execution(trade_log_path=trade_log_path, trade_date=trade_date)
+    return {"strategy_id": strategy_id, "portfolio_id": portfolio_id, "environment_id": environment_id, "runtime_result_schema_version": 3, "strategy_version": str(resolved.manifest.version), "instrument_id": instrument_id, "trade_date": trade_date, "latest_bar_end": latest_bar_end_iso, "reason_code": decision.reason_code, "dataset_path": str(dataset_path), "state_path": str(state_path), "trade_log_path": str(trade_log_path), "signal_count": int(len(signals)), "execution_summary": execution_summary, "current_position": transition.current_position, "desired_position": transition.desired_position, "position_changed": transition.position_changed, "action": transition.action}
