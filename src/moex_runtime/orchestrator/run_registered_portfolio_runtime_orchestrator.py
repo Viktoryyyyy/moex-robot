@@ -135,6 +135,44 @@ def _build_run_timing_summary(*, started_at_utc: str, completed_at_utc: str) -> 
     }
 
 
+def _classify_delegated_outcome_status(*, enabled_strategy_count: int, delegated_success_count: int, delegated_failure_count: int) -> str:
+    if enabled_strategy_count == 0:
+        return "none_enabled"
+    if delegated_success_count == enabled_strategy_count and delegated_failure_count == 0:
+        return "all_succeeded"
+    if delegated_success_count == 0 and delegated_failure_count == enabled_strategy_count:
+        return "all_failed"
+    if delegated_success_count > 0 and delegated_failure_count > 0:
+        return "partial_failure"
+    raise StrategyRegistrationError("delegated outcome summary counts must produce a valid normalized status")
+
+
+def _build_delegated_outcome_summary(*, delegated_strategy_results: tuple[Mapping[str, object], ...] | list[Mapping[str, object]]) -> dict[str, object]:
+    enabled_strategy_count = len(delegated_strategy_results)
+    delegated_success_count = 0
+    delegated_failure_count = 0
+    for delegated_strategy_result in delegated_strategy_results:
+        if not isinstance(delegated_strategy_result, Mapping):
+            raise StrategyRegistrationError("delegated strategy result must be mapping for delegated outcome summary")
+        if delegated_strategy_result.get("ok") is True:
+            delegated_success_count += 1
+            continue
+        if delegated_strategy_result.get("ok") is False:
+            delegated_failure_count += 1
+            continue
+        raise StrategyRegistrationError("delegated strategy result ok flag must be boolean for delegated outcome summary")
+    if delegated_success_count + delegated_failure_count != enabled_strategy_count:
+        raise StrategyRegistrationError("delegated outcome summary counts must exactly match included enabled strategy count")
+    return {
+        "delegated_outcome_summary_schema_version": 1,
+        "delegated_scope": "portfolio_registered_strategies",
+        "enabled_strategy_count": enabled_strategy_count,
+        "delegated_success_count": delegated_success_count,
+        "delegated_failure_count": delegated_failure_count,
+        "delegated_outcome_status": _classify_delegated_outcome_status(enabled_strategy_count=enabled_strategy_count, delegated_success_count=delegated_success_count, delegated_failure_count=delegated_failure_count),
+    }
+
+
 def run_registered_portfolio_runtime_orchestrator(*, portfolio_id: str, environment_id: str) -> dict[str, object]:
     portfolio_record = _load_portfolio_record(portfolio_id)
     environment_record = _load_environment_record(environment_id)
@@ -154,7 +192,7 @@ def run_registered_portfolio_runtime_orchestrator(*, portfolio_id: str, environm
             portfolio_result = {
                 "portfolio_id": portfolio_id,
                 "environment_id": environment_id,
-                "portfolio_run_schema_version": 5,
+                "portfolio_run_schema_version": 6,
                 "portfolio_run_id": portfolio_run_id,
                 "started_at_utc": started_at_utc,
                 "completed_at_utc": failed_at_utc,
@@ -162,6 +200,7 @@ def run_registered_portfolio_runtime_orchestrator(*, portfolio_id: str, environm
                 "ok": False,
                 "enabled_strategy_ids": enabled_strategy_ids,
                 "delegated_strategy_results": tuple(delegated_strategy_results),
+                "delegated_outcome_summary": _build_delegated_outcome_summary(delegated_strategy_results=delegated_strategy_results),
                 "data_freshness_summary": _build_data_freshness_summary(enabled_strategy_ids=enabled_strategy_ids, delegated_strategy_results=delegated_strategy_results),
                 "failure_summary": _build_failure_summary(strategy_id=strategy_id, failed_at_utc=failed_at_utc, exc=exc),
                 "run_timing_summary": _build_run_timing_summary(started_at_utc=started_at_utc, completed_at_utc=failed_at_utc),
@@ -173,7 +212,7 @@ def run_registered_portfolio_runtime_orchestrator(*, portfolio_id: str, environm
     portfolio_result = {
         "portfolio_id": portfolio_id,
         "environment_id": environment_id,
-        "portfolio_run_schema_version": 5,
+        "portfolio_run_schema_version": 6,
         "portfolio_run_id": portfolio_run_id,
         "started_at_utc": started_at_utc,
         "completed_at_utc": completed_at_utc,
@@ -181,6 +220,7 @@ def run_registered_portfolio_runtime_orchestrator(*, portfolio_id: str, environm
         "ok": True,
         "enabled_strategy_ids": enabled_strategy_ids,
         "delegated_strategy_results": tuple(delegated_strategy_results),
+        "delegated_outcome_summary": _build_delegated_outcome_summary(delegated_strategy_results=delegated_strategy_results),
         "data_freshness_summary": _build_data_freshness_summary(enabled_strategy_ids=enabled_strategy_ids, delegated_strategy_results=delegated_strategy_results),
         "run_timing_summary": _build_run_timing_summary(started_at_utc=started_at_utc, completed_at_utc=completed_at_utc),
     }
