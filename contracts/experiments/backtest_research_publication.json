@@ -1,0 +1,21 @@
+{
+  "publication_contract_version": 1,
+  "artifact_root_env_var": "MOEX_BOT_ARTIFACT_ROOT",
+  "artifacts": {
+    "run_metadata": {
+      "artifact_id": "backtest_research_run_metadata",
+      "format": "json",
+      "locator_ref": "data/research_runs/{run_id}/run_metadata.json"
+    },
+    "metrics": {
+      "artifact_id": "backtest_research_metrics",
+      "format": "json",
+      "locator_ref": "data/research_runs/{run_id}/metrics.json"
+    },
+    "experiment_registry": {
+      "artifact_id": "backtest_research_experiment_registry",
+      "format": "jsonl",
+      "locator_ref": "data/research_registry/backtest_research_runs.jsonl"
+    }
+  }
+}
