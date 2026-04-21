@@ -1,0 +1,21 @@
+{
+  "dataset_id": "research_usdrubf_5m_full_history",
+  "version": "1.0.0",
+  "instrument_ids": [
+    "usdrubf"
+  ],
+  "granularity": "5m",
+  "session_semantics": "finalized_bar_end",
+  "timezone": "Europe/Moscow",
+  "schema_ref": "contracts/datasets/research_usdrubf_5m_full_history.json",
+  "partitioning": "unpartitioned",
+  "artifact_ref": "contracts/datasets/research_usdrubf_5m_full_history.json",
+  "producer_ref": "src.api.futures.fo_5m_period_paged",
+  "consumer_tags": [
+    "backtest",
+    "feature_builder"
+  ],
+  "is_research_allowed": true,
+  "is_runtime_allowed": false,
+  "status": "active"
+}
