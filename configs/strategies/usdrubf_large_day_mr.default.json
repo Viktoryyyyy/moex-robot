@@ -1,0 +1,18 @@
+{
+  "strategy_id": "usdrubf_large_day_mr",
+  "version": "1.0.0",
+  "params": {
+    "instrument_id": "usdrubf",
+    "timeframe": "1d",
+    "prior_dir_filter": 0,
+    "min_prior_abs_body_points": 0.0,
+    "min_prior_rel_range": 0.0,
+    "holding_period_days": 1
+  },
+  "artifact_bindings": {
+    "input_feature_artifact_id": "research_usdrubf_large_day_mr_day_pairs_feature_frame",
+    "output_day_metrics_artifact_id": "usdrubf_large_day_mr_backtest_day_metrics"
+  },
+  "runtime_policy_ref": null,
+  "risk_policy_ref": null
+}

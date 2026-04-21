@@ -1,0 +1,14 @@
+{
+  "artifact_id": "research_usdrubf_large_day_mr_day_pairs_feature_frame",
+  "artifact_role": "input",
+  "contract_class": "repo_relative",
+  "producer_ref": "src.moex_features.daily.usdrubf_large_day_mr_day_pairs:materialize_feature_frame",
+  "consumer_refs": [
+    "src.strategies.usdrubf_large_day_mr.signal_engine:generate_signals",
+    "src.strategies.usdrubf_large_day_mr.backtest_adapter:build_backtest_request"
+  ],
+  "format": "csv",
+  "schema_version": 1,
+  "partitioning": "unpartitioned",
+  "locator_ref": "data/research/usdrubf_large_day_mr_day_pairs.csv"
+}

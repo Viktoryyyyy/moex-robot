@@ -1,0 +1,25 @@
+{
+  "strategy_id": "usdrubf_large_day_mr",
+  "version": "1.0.0",
+  "package_ref": "src.strategies.usdrubf_large_day_mr",
+  "manifest_ref": "src.strategies.usdrubf_large_day_mr.manifest:STRATEGY_MANIFEST",
+  "config_schema_ref": "src.strategies.usdrubf_large_day_mr.config:StrategyConfig",
+  "default_config_ref": "configs/strategies/usdrubf_large_day_mr.default.json",
+  "artifact_contract_ref": "src.strategies.usdrubf_large_day_mr.artifact_contracts:ARTIFACT_CONTRACTS",
+  "required_dataset_ids": [
+    "research_usdrubf_5m_full_history"
+  ],
+  "required_feature_set_ids": [
+    "research_usdrubf_large_day_mr_day_pairs"
+  ],
+  "required_label_set_ids": [],
+  "instrument_scope": [
+    "usdrubf"
+  ],
+  "timeframe": "1d",
+  "supports_backtest": true,
+  "supports_live": false,
+  "report_schema_version": "1",
+  "artifact_contract_version": "1",
+  "status": "active"
+}

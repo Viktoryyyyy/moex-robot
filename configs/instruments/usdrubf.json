@@ -1,0 +1,14 @@
+{
+  "instrument_id": "usdrubf",
+  "venue": "moex",
+  "market": "forts",
+  "board": "rfud",
+  "symbol": "usdrubf",
+  "instrument_type": "futures",
+  "timezone": "Europe/Moscow",
+  "trade_calendar_id": "moex_futures",
+  "tick_size": null,
+  "lot_size": 1,
+  "price_scale": null,
+  "is_active": true
+}
