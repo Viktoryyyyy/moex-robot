@@ -65,8 +65,11 @@ def _normalize_status(payload: Mapping[str, object], *, runtime_unit_id: str) ->
 
 
 def resolve_status_path(*, runtime_unit: RuntimeUnitConfig, environment_record: Mapping[str, object]) -> Path:
+    locator_ref = runtime_unit.status_locator_ref
+    if "{runtime_unit_id}" not in locator_ref:
+        raise StrategyRegistrationError("runtime control-plane status locator_ref must include {runtime_unit_id} for per-unit isolation")
     return resolve_external_pattern_artifact_path(
-        locator_ref=runtime_unit.status_locator_ref,
+        locator_ref=locator_ref,
         environment_record=environment_record,
         format_kwargs={"runtime_unit_id": runtime_unit.runtime_unit_id},
     )
