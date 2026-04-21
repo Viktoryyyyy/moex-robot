@@ -95,6 +95,61 @@ def _iter_usable_latest_bar_end_utc(delegated_strategy_results: tuple[Mapping[st
     return tuple(parsed_latest_bar_ends)
 
 
+def _iter_usable_signal_counts(delegated_strategy_results: tuple[Mapping[str, object], ...] | list[Mapping[str, object]]) -> tuple[int, ...]:
+    usable_signal_counts: list[int] = []
+    for delegated_strategy_result in delegated_strategy_results:
+        if not isinstance(delegated_strategy_result, Mapping):
+            continue
+        if delegated_strategy_result.get("ok") is not True:
+            continue
+        delegated_result = delegated_strategy_result.get("result")
+        if not isinstance(delegated_result, Mapping):
+            continue
+        signal_count = delegated_result.get("signal_count")
+        if not isinstance(signal_count, int) or isinstance(signal_count, bool):
+            continue
+        if signal_count < 0:
+            raise StrategyRegistrationError("delegated signal_count must be non-negative integer for signal activity summary")
+        usable_signal_counts.append(signal_count)
+    return tuple(usable_signal_counts)
+
+
+def _classify_signal_activity_status(*, reporting_strategy_count: int, active_strategy_count: int, total_signal_count: int) -> str:
+    if reporting_strategy_count == 0:
+        if active_strategy_count != 0 or total_signal_count != 0:
+            raise StrategyRegistrationError("unavailable signal activity status requires zero active strategies and zero total signals")
+        return "unavailable"
+    if active_strategy_count == 0 and total_signal_count == 0:
+        return "idle"
+    if active_strategy_count > 0 and total_signal_count > 0:
+        return "active"
+    raise StrategyRegistrationError("signal activity summary counts must produce a valid normalized status")
+
+
+def _build_signal_activity_summary(*, enabled_strategy_ids: tuple[str, ...], delegated_strategy_results: tuple[Mapping[str, object], ...] | list[Mapping[str, object]]) -> dict[str, object]:
+    usable_signal_counts = _iter_usable_signal_counts(delegated_strategy_results)
+    reporting_strategy_count = len(usable_signal_counts)
+    active_strategy_count = sum(1 for signal_count in usable_signal_counts if signal_count > 0)
+    total_signal_count = sum(usable_signal_counts)
+    if active_strategy_count > reporting_strategy_count:
+        raise StrategyRegistrationError("active strategy count must not exceed reporting strategy count for signal activity summary")
+    if reporting_strategy_count == 0:
+        signal_coverage_status = "unavailable"
+    elif reporting_strategy_count == len(enabled_strategy_ids):
+        signal_coverage_status = "complete"
+    else:
+        signal_coverage_status = "partial"
+    return {
+        "signal_activity_summary_schema_version": 1,
+        "signal_activity_scope": "portfolio_runtime_signals",
+        "signal_coverage_status": signal_coverage_status,
+        "reporting_strategy_count": reporting_strategy_count,
+        "active_strategy_count": active_strategy_count,
+        "total_signal_count": total_signal_count,
+        "signal_activity_status": _classify_signal_activity_status(reporting_strategy_count=reporting_strategy_count, active_strategy_count=active_strategy_count, total_signal_count=total_signal_count),
+    }
+
+
 def _build_data_freshness_summary(*, enabled_strategy_ids: tuple[str, ...], delegated_strategy_results: tuple[Mapping[str, object], ...] | list[Mapping[str, object]]) -> dict[str, object]:
     parsed_latest_bar_ends = _iter_usable_latest_bar_end_utc(delegated_strategy_results)
     if not parsed_latest_bar_ends:
@@ -192,7 +247,7 @@ def run_registered_portfolio_runtime_orchestrator(*, portfolio_id: str, environm
             portfolio_result = {
                 "portfolio_id": portfolio_id,
                 "environment_id": environment_id,
-                "portfolio_run_schema_version": 6,
+                "portfolio_run_schema_version": 7,
                 "portfolio_run_id": portfolio_run_id,
                 "started_at_utc": started_at_utc,
                 "completed_at_utc": failed_at_utc,
@@ -201,6 +256,7 @@ def run_registered_portfolio_runtime_orchestrator(*, portfolio_id: str, environm
                 "enabled_strategy_ids": enabled_strategy_ids,
                 "delegated_strategy_results": tuple(delegated_strategy_results),
                 "delegated_outcome_summary": _build_delegated_outcome_summary(delegated_strategy_results=delegated_strategy_results),
+                "signal_activity_summary": _build_signal_activity_summary(enabled_strategy_ids=enabled_strategy_ids, delegated_strategy_results=delegated_strategy_results),
                 "data_freshness_summary": _build_data_freshness_summary(enabled_strategy_ids=enabled_strategy_ids, delegated_strategy_results=delegated_strategy_results),
                 "failure_summary": _build_failure_summary(strategy_id=strategy_id, failed_at_utc=failed_at_utc, exc=exc),
                 "run_timing_summary": _build_run_timing_summary(started_at_utc=started_at_utc, completed_at_utc=failed_at_utc),
@@ -212,7 +268,7 @@ def run_registered_portfolio_runtime_orchestrator(*, portfolio_id: str, environm
     portfolio_result = {
         "portfolio_id": portfolio_id,
         "environment_id": environment_id,
-        "portfolio_run_schema_version": 6,
+        "portfolio_run_schema_version": 7,
         "portfolio_run_id": portfolio_run_id,
         "started_at_utc": started_at_utc,
         "completed_at_utc": completed_at_utc,
@@ -221,6 +277,7 @@ def run_registered_portfolio_runtime_orchestrator(*, portfolio_id: str, environm
         "enabled_strategy_ids": enabled_strategy_ids,
         "delegated_strategy_results": tuple(delegated_strategy_results),
         "delegated_outcome_summary": _build_delegated_outcome_summary(delegated_strategy_results=delegated_strategy_results),
+        "signal_activity_summary": _build_signal_activity_summary(enabled_strategy_ids=enabled_strategy_ids, delegated_strategy_results=delegated_strategy_results),
         "data_freshness_summary": _build_data_freshness_summary(enabled_strategy_ids=enabled_strategy_ids, delegated_strategy_results=delegated_strategy_results),
         "run_timing_summary": _build_run_timing_summary(started_at_utc=started_at_utc, completed_at_utc=completed_at_utc),
     }
