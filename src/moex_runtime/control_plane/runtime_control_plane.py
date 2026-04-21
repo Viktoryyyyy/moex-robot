@@ -35,7 +35,8 @@ def _is_due(runtime_unit: RuntimeUnitConfig, prior_status: Mapping[str, object])
         last_dt = datetime.fromisoformat(str(last_eval))
     except Exception:
         return True
-    delta_minutes = (datetime.now() - last_dt).total_seconds() / 60.0
+    now_dt = datetime.now(last_dt.tzinfo) if last_dt.tzinfo is not None else datetime.now()
+    delta_minutes = (now_dt - last_dt).total_seconds() / 60.0
     return delta_minutes >= runtime_unit.cadence_minutes
 
 
