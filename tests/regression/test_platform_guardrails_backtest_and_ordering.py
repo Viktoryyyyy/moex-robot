@@ -51,7 +51,9 @@ def test_backtest_semantics_preserve_reversal_fee_and_forced_terminal_close() ->
     assert out["trades"].tolist() == [0.0, 1.0, 2.0]
     assert out["fee"].tolist() == [0.0, 2.0, 4.0]
     assert out["terminal_fee"].tolist() == [0.0, 0.0, 2.0]
-    assert out["next_open"].tolist() == [110.0, 90.0, float("nan")]
+    assert out["next_open"].iloc[0] == 110.0
+    assert out["next_open"].iloc[1] == 90.0
+    assert pd.isna(out["next_open"].iloc[2])
     assert out["pnl_bar"].round(8).tolist() == [0.0, -22.0, -11.0]
 
 
