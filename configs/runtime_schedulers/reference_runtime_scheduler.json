@@ -1,0 +1,9 @@
+{
+  "scheduler_id": "reference_runtime_scheduler",
+  "environment_id": "reference_runtime",
+  "runtime_unit_ids": [
+    "reference_ema_3_19_15m_runtime"
+  ],
+  "summary_locator_ref": "data/control_plane/scheduler_pass_summary_{scheduler_id}.json",
+  "status": "active"
+}
