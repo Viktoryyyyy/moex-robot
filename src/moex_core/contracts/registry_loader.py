@@ -28,6 +28,10 @@ class ResolvedRegisteredBacktest:
     dataset_contract: Mapping[str, object]
     feature_contract: Mapping[str, object]
     strategy_artifact_contracts: tuple[ArtifactContract, ...]
+    backtest_feature_builder: Any
+    backtest_signal_builder: Any
+    backtest_request_builder: Any
+    backtest_output_contract: ArtifactContract
 
 
 @dataclass(frozen=True)
@@ -143,7 +147,7 @@ def _load_strategy_artifact_contracts(import_ref: str) -> tuple[ArtifactContract
     return tuple(normalized)
 
 
-def _resolve_runtime_hook_ref(*, strategy_record: Mapping[str, object], module_suffix: str, attr_name: str) -> str:
+def _resolve_strategy_hook_ref(*, strategy_record: Mapping[str, object], module_suffix: str, attr_name: str) -> str:
     package_ref = strategy_record.get("package_ref")
     if not isinstance(package_ref, str) or not package_ref:
         raise StrategyRegistrationError("strategy registry record must declare package_ref")
@@ -253,7 +257,19 @@ def load_registered_backtest(*, strategy_id: str, portfolio_id: str, environment
         raise UnsupportedModeError("backtest environment must not be live-enabled")
     if environment_record.get("status") != "active":
         raise StrategyRegistrationError("environment registry record must be active")
-    return ResolvedRegisteredBacktest(instrument_record=instrument_record, dataset_record=dataset_record, feature_record=feature_record, strategy_record=strategy_record, portfolio_record=portfolio_record, environment_record=environment_record, default_strategy_config_record=default_strategy_config_record, manifest=manifest, strategy_config=strategy_config, dataset_contract=dataset_contract, feature_contract=feature_contract, strategy_artifact_contracts=strategy_artifact_contracts)
+    artifact_bindings = default_strategy_config_record.get("artifact_bindings")
+    if not isinstance(artifact_bindings, dict):
+        raise ConfigValidationError("strategy default config artifact_bindings must be object")
+    output_artifact_id = artifact_bindings.get("output_day_metrics_artifact_id")
+    if not isinstance(output_artifact_id, str) or not output_artifact_id:
+        raise ConfigValidationError("strategy default config output_day_metrics_artifact_id is required")
+    backtest_output_contract = _resolve_strategy_artifact_contract(strategy_artifact_contracts, output_artifact_id)
+    if backtest_output_contract.artifact_role != "output" or backtest_output_contract.producer != "moex_backtest":
+        raise StrategyRegistrationError("expected exactly one backtest output artifact contract for artifact_id=" + output_artifact_id)
+    backtest_feature_builder = _import_ref(str(feature_record.get("producer_ref")))
+    backtest_signal_builder = _import_ref(_resolve_strategy_hook_ref(strategy_record=strategy_record, module_suffix="signal_engine", attr_name="generate_signals"))
+    backtest_request_builder = _import_ref(_resolve_strategy_hook_ref(strategy_record=strategy_record, module_suffix="backtest_adapter", attr_name="build_backtest_request"))
+    return ResolvedRegisteredBacktest(instrument_record=instrument_record, dataset_record=dataset_record, feature_record=feature_record, strategy_record=strategy_record, portfolio_record=portfolio_record, environment_record=environment_record, default_strategy_config_record=default_strategy_config_record, manifest=manifest, strategy_config=strategy_config, dataset_contract=dataset_contract, feature_contract=feature_contract, strategy_artifact_contracts=strategy_artifact_contracts, backtest_feature_builder=backtest_feature_builder, backtest_signal_builder=backtest_signal_builder, backtest_request_builder=backtest_request_builder, backtest_output_contract=backtest_output_contract)
 
 
 def load_registered_runtime_boundary(*, strategy_id: str, portfolio_id: str, environment_id: str) -> ResolvedRegisteredRuntimeBoundary:
@@ -274,6 +290,6 @@ def load_registered_runtime_boundary(*, strategy_id: str, portfolio_id: str, env
     runtime_state_contract = _resolve_runtime_artifact_contract(strategy_artifact_contracts=strategy_artifact_contracts, artifact_role="state", producer="moex_runtime")
     runtime_trade_log_contract = _resolve_runtime_artifact_contract(strategy_artifact_contracts=strategy_artifact_contracts, artifact_role="output", producer="moex_runtime")
     runtime_feature_builder = _import_ref(str(feature_record.get("producer_ref")))
-    runtime_signal_builder = _import_ref(_resolve_runtime_hook_ref(strategy_record=strategy_record, module_suffix="signal_engine", attr_name="generate_signals"))
-    runtime_live_decision_builder = _import_ref(_resolve_runtime_hook_ref(strategy_record=strategy_record, module_suffix="live_adapter", attr_name="build_live_decision"))
+    runtime_signal_builder = _import_ref(_resolve_strategy_hook_ref(strategy_record=strategy_record, module_suffix="signal_engine", attr_name="generate_signals"))
+    runtime_live_decision_builder = _import_ref(_resolve_strategy_hook_ref(strategy_record=strategy_record, module_suffix="live_adapter", attr_name="build_live_decision"))
     return ResolvedRegisteredRuntimeBoundary(instrument_record=instrument_record, dataset_record=dataset_record, feature_record=feature_record, strategy_record=strategy_record, portfolio_record=portfolio_record, environment_record=environment_record, default_strategy_config_record=default_strategy_config_record, manifest=manifest, strategy_config=strategy_config, dataset_contract=dataset_contract, feature_contract=feature_contract, strategy_artifact_contracts=strategy_artifact_contracts, runtime_state_contract=runtime_state_contract, runtime_trade_log_contract=runtime_trade_log_contract, runtime_feature_builder=runtime_feature_builder, runtime_signal_builder=runtime_signal_builder, runtime_live_decision_builder=runtime_live_decision_builder)
