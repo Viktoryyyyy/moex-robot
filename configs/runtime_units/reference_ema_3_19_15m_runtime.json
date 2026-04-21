@@ -1,0 +1,38 @@
+{
+  "runtime_unit_id": "reference_ema_3_19_15m_runtime",
+  "strategy_id": "ema_3_19_15m",
+  "portfolio_id": "reference_ema_3_19_15m_single",
+  "environment_id": "reference_runtime",
+  "runtime_mode": "live",
+  "instrument_scope": [
+    "si"
+  ],
+  "timeframe": "15m",
+  "enabled": true,
+  "cadence_minutes": 15,
+  "market_window": {
+    "timezone": "Europe/Moscow",
+    "start_time": "10:00",
+    "end_time": "23:50",
+    "allowed_weekdays": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ]
+  },
+  "restart_policy": {
+    "max_consecutive_failures": 2,
+    "stale_after_minutes": 60,
+    "require_operator_reset_after_exhausted": true
+  },
+  "dispatch_ref": "src.moex_runtime.engine.run_registered_runtime_boundary:run_registered_runtime_boundary",
+  "dispatch_kwargs": {
+    "strategy_id": "ema_3_19_15m",
+    "portfolio_id": "reference_ema_3_19_15m_single",
+    "environment_id": "reference_runtime"
+  },
+  "status_locator_ref": "data/control_plane/runtime_unit_status_{runtime_unit_id}.json",
+  "status": "active"
+}
