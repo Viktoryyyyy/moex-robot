@@ -7,11 +7,7 @@ from typing import Mapping
 import pandas as pd
 
 from src.moex_core.contracts.registry_loader import load_registered_backtest
-from src.moex_features.intraday.si_15m_ohlc_from_5m import materialize_feature_frame
-from src.moex_strategy_sdk.artifact_contracts import ArtifactContract
 from src.moex_strategy_sdk.errors import InterfaceValidationError, StrategyRegistrationError
-from src.strategies.ema_3_19_15m.backtest_adapter import build_backtest_request
-from src.strategies.ema_3_19_15m.signal_engine import generate_signals
 
 
 DEFAULT_COMMISSION_POINTS = 2.0
@@ -39,11 +35,7 @@ def _resolve_external_pattern_path(
 
 
 def _to_strategy_inputs(feature_frame: pd.DataFrame) -> tuple[dict[str, object], ...]:
-    rows: list[dict[str, object]] = []
-    columns = [column for column in ["instrument_id", "end", "open", "high", "low", "close", "volume"] if column in feature_frame.columns]
-    for row in feature_frame[columns].to_dict(orient="records"):
-        rows.append(row)
-    return tuple(rows)
+    return tuple(dict(row) for row in feature_frame.to_dict(orient="records"))
 
 
 def _validate_bar_frame(feature_frame: pd.DataFrame) -> pd.DataFrame:
@@ -68,13 +60,6 @@ def _validate_bar_frame(feature_frame: pd.DataFrame) -> pd.DataFrame:
         if work[column].isna().any():
             raise InterfaceValidationError("feature frame contains invalid " + column)
     return work.reset_index(drop=True)
-
-
-def _resolve_output_contract(strategy_artifact_contracts: tuple[ArtifactContract, ...], artifact_id: str) -> ArtifactContract:
-    for contract in strategy_artifact_contracts:
-        if contract.artifact_id == artifact_id:
-            return contract
-    raise StrategyRegistrationError("missing strategy artifact contract: " + artifact_id)
 
 
 def _execute_canonical_backtest(
@@ -168,14 +153,14 @@ def run_registered_backtest(*, strategy_id: str, portfolio_id: str, environment_
         format_kwargs={"run_id": run_id},
     )
 
-    feature_frame = materialize_feature_frame(
+    feature_frame = resolved.backtest_feature_builder(
         dataset_artifact_path=dataset_path,
         instrument_id=str(resolved.instrument_record["instrument_id"]),
         timezone_name=str(resolved.instrument_record["timezone"]),
     )
     inputs = _to_strategy_inputs(feature_frame)
-    signals = generate_signals(inputs=inputs, config=resolved.strategy_config)
-    backtest_request = build_backtest_request(
+    signals = resolved.backtest_signal_builder(inputs=inputs, config=resolved.strategy_config)
+    backtest_request = resolved.backtest_request_builder(
         inputs=inputs,
         signals=signals,
         config=resolved.strategy_config,
@@ -186,12 +171,8 @@ def run_registered_backtest(*, strategy_id: str, portfolio_id: str, environment_
         commission_points=float(DEFAULT_COMMISSION_POINTS),
     )
 
-    output_contract = _resolve_output_contract(
-        resolved.strategy_artifact_contracts,
-        "ema_3_19_15m_backtest_day_metrics",
-    )
     output_path = _resolve_external_pattern_path(
-        locator_ref=output_contract.locator_ref,
+        locator_ref=resolved.backtest_output_contract.locator_ref,
         environment_record=resolved.environment_record,
         format_kwargs={"run_id": run_id},
     )
