@@ -1,0 +1,17 @@
+{
+  "feature_set_id": "research_usdrubf_large_day_mr_day_pairs",
+  "version": "1.0.0",
+  "input_dataset_ids": [
+    "research_usdrubf_5m_full_history"
+  ],
+  "schema_ref": "contracts/features/research_usdrubf_large_day_mr_day_pairs.json",
+  "partitioning": "unpartitioned",
+  "artifact_ref": "contracts/features/research_usdrubf_large_day_mr_day_pairs.json",
+  "producer_ref": "src.moex_features.daily.usdrubf_large_day_mr_day_pairs:materialize_feature_frame",
+  "row_semantics": "finalized_bar_end",
+  "lookahead_safe": true,
+  "applicability": [
+    "backtest"
+  ],
+  "status": "active"
+}
