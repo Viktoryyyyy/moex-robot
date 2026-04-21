@@ -7,6 +7,7 @@ from typing import Mapping
 import pandas as pd
 
 from src.moex_core.contracts.registry_loader import load_registered_backtest
+from src.moex_research.publishers.backtest_research_result_publisher import publish_backtest_research_result
 from src.moex_strategy_sdk.errors import InterfaceValidationError, StrategyRegistrationError
 
 
@@ -179,6 +180,17 @@ def run_registered_backtest(*, strategy_id: str, portfolio_id: str, environment_
     output_path.parent.mkdir(parents=True, exist_ok=True)
     day_metrics.to_csv(output_path, index=False)
 
+    publication_refs = publish_backtest_research_result(
+        run_id=run_id,
+        strategy_id=strategy_id,
+        portfolio_id=portfolio_id,
+        environment_id=environment_id,
+        resolved=resolved,
+        dataset_path=dataset_path,
+        primary_result_path=output_path,
+        day_metrics=day_metrics,
+    )
+
     return {
         "strategy_id": strategy_id,
         "portfolio_id": portfolio_id,
@@ -188,4 +200,5 @@ def run_registered_backtest(*, strategy_id: str, portfolio_id: str, environment_
         "output_path": str(output_path),
         "rows": int(len(day_metrics)),
         "signal_count": int(len(backtest_request.normalized_signals)),
+        **publication_refs,
     }
