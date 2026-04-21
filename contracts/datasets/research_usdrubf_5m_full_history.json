@@ -1,0 +1,14 @@
+{
+  "artifact_id": "research_usdrubf_5m_full_history_dataset",
+  "artifact_role": "input",
+  "contract_class": "repo_relative",
+  "producer_ref": "src.api.futures.fo_5m_period_paged",
+  "consumer_refs": [
+    "src.moex_features.daily.usdrubf_large_day_mr_day_pairs:materialize_feature_frame",
+    "moex_backtest.engine.run_registered_backtest"
+  ],
+  "format": "csv",
+  "schema_version": 1,
+  "partitioning": "unpartitioned",
+  "locator_ref": "data/master/usdrubf_5m_2022-04-26_2026-04-06.csv"
+}
