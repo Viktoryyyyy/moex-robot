@@ -3,10 +3,7 @@ import argparse
 import json
 import os
 import sys
-import urllib.parse
-import urllib.request
 
-import numpy as np
 import pandas as pd
 
 
@@ -14,9 +11,7 @@ INSTRUMENT = "USDRUBF"
 TZ = "Europe/Moscow"
 DEFAULT_IN_CSV = "data/master/usdrubf_5m_2022-04-26_2026-04-06.csv"
 DEFAULT_OUT_DIR = "data/research/usdrubf_canonical_session_map_package"
-SESSION_GAP_HOURS = 6.0
 REQUIRED_BAR_COLS = ["end", "open", "high", "low", "close"]
-REQUIRED_OFF_DAYS_COLS = ["tradedate", "is_traded", "reason", "trade_session_date"]
 
 
 def _die(msg: str) -> None:
@@ -25,112 +20,6 @@ def _die(msg: str) -> None:
 
 def _ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
-
-
-def _read_json(url: str) -> dict:
-    try:
-        with urllib.request.urlopen(url, timeout=60) as r:
-            raw = r.read().decode("utf-8")
-    except Exception as e:
-        _die("ISS request failed: " + url + " reason=" + str(e))
-    try:
-        return json.loads(raw)
-    except Exception as e:
-        _die("ISS response is not valid JSON: " + url + " reason=" + str(e))
-
-
-def _table_to_df(payload: dict, name: str) -> pd.DataFrame:
-    if name not in payload:
-        _die("ISS response missing table: " + name)
-    table = payload[name]
-    if "columns" not in table or "data" not in table:
-        _die("ISS table has invalid shape: " + name)
-    return pd.DataFrame(table["data"], columns=table["columns"])
-
-
-def _normalize_off_days(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty:
-        _die("off_days rows are empty")
-    missing = [c for c in REQUIRED_OFF_DAYS_COLS if c not in df.columns]
-    if missing:
-        _die("off_days missing required columns: " + str(missing))
-    out = df[REQUIRED_OFF_DAYS_COLS].copy()
-    out["tradedate"] = pd.to_datetime(out["tradedate"], errors="coerce").dt.date.astype(str)
-    out["trade_session_date"] = pd.to_datetime(out["trade_session_date"], errors="coerce").dt.date.astype(str)
-    out.loc[out["trade_session_date"] == "NaT", "trade_session_date"] = ""
-    out["reason"] = out["reason"].astype("string")
-    out["is_traded"] = pd.to_numeric(out["is_traded"], errors="coerce")
-    if out["tradedate"].isna().any() or out["tradedate"].duplicated().any():
-        _die("off_days has invalid or duplicate tradedate rows")
-    return out.sort_values("tradedate").reset_index(drop=True)
-
-
-def _load_off_days_csv(path: str, start_date: str, end_date: str) -> pd.DataFrame:
-    if not os.path.exists(path):
-        _die("off_days csv not found: " + path)
-    df = pd.read_csv(path)
-    out = _normalize_off_days(df)
-    out = out[(out["tradedate"] >= start_date) & (out["tradedate"] <= end_date)].copy()
-    if out.empty:
-        _die("off_days csv has no rows in requested range")
-    return out.reset_index(drop=True)
-
-
-def _fetch_off_days(start_date: str, end_date: str) -> pd.DataFrame:
-    frames = []
-    for year in range(int(start_date[:4]), int(end_date[:4]) + 1):
-        q = urllib.parse.urlencode({"from": str(year) + "-01-01", "till": str(year) + "-12-31", "show_all_days": "1", "iss.only": "off_days", "iss.meta": "off"})
-        url = "https://iss.moex.com/iss/calendars/futures.json?" + q
-        frames.append(_table_to_df(_read_json(url), "off_days"))
-    out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-    out = _normalize_off_days(out)
-    out = out[(out["tradedate"] >= start_date) & (out["tradedate"] <= end_date)].copy()
-    if out.empty:
-        _die("ISS futures off_days returned no rows in requested range")
-    return out.reset_index(drop=True)
-
-
-def _normalize_security(security: pd.DataFrame) -> pd.DataFrame:
-    if security.empty:
-        _die("ISS futures securities returned no rows for " + INSTRUMENT)
-    return security.reset_index(drop=True)
-
-
-def _load_security_csv(path: str) -> pd.DataFrame:
-    if not os.path.exists(path):
-        _die("securities csv not found: " + path)
-    df = pd.read_csv(path)
-    return _normalize_security(df)
-
-
-def _fetch_security() -> pd.DataFrame:
-    urls = [
-        "https://iss.moex.com/iss/engines/futures/markets/forts/securities/" + INSTRUMENT + ".json?iss.only=securities&iss.meta=off",
-        "https://iss.moex.com/iss/engines/futures/markets/forts/boards/rfud/securities/" + INSTRUMENT + ".json?iss.only=securities&iss.meta=off",
-    ]
-    last_error = ""
-    for url in urls:
-        try:
-            df = _table_to_df(_read_json(url), "securities")
-            if not df.empty:
-                df["source_url"] = url
-                return _normalize_security(df)
-        except SystemExit as e:
-            last_error = str(e)
-    _die("ISS futures securities returned no rows for " + INSTRUMENT + " last_error=" + last_error)
-
-
-def _extract_weekend_session(security: pd.DataFrame) -> int:
-    if "SECID" in security.columns:
-        hit = security[security["SECID"].astype(str) == INSTRUMENT].copy()
-        if not hit.empty:
-            security = hit
-    if "weekend_session" not in security.columns:
-        _die("ISS futures securities missing weekend_session for " + INSTRUMENT)
-    vals = pd.to_numeric(security["weekend_session"], errors="coerce").dropna().astype(int).unique().tolist()
-    if len(vals) != 1:
-        _die("weekend_session is not singular for " + INSTRUMENT + ": " + str(vals))
-    return int(vals[0])
 
 
 def _load_bars(path: str) -> pd.DataFrame:
@@ -149,7 +38,7 @@ def _load_bars(path: str) -> pd.DataFrame:
     else:
         ts = ts.dt.tz_convert(TZ)
     work["bar_end_moscow"] = ts
-    work["base_date"] = ts.dt.date.astype(str)
+    work["calendar_session_date"] = ts.dt.date.astype(str)
     for c in ["open", "high", "low", "close"]:
         work[c] = pd.to_numeric(work[c], errors="coerce")
     if work[["open", "high", "low", "close"]].isna().any().any():
@@ -159,35 +48,17 @@ def _load_bars(path: str) -> pd.DataFrame:
     return work.sort_values("bar_end_moscow").reset_index(drop=True)
 
 
-def _include_row(reason: str, is_traded: float, weekend_session: int) -> tuple[int, str]:
-    if pd.isna(reason) or str(reason) == "<NA" or str(reason).strip() == "":
-        return 0, "fail_closed_null_reason"
-    r = str(reason).strip()
-    traded = int(is_traded) if np.isfinite(is_traded) else -1
-    if r in ["N", "T"]:
-        return (1, "include_" + r) if traded == 1 else (0, "exclude_not_traded_" + r)
-    if r == "W":
-        return (1, "include_W_weekend_session_0") if traded == 1 and weekend_session == 0 else (0, "exclude_W_weekend_ineligible")
-    if r == "H":
-        return 0, "exclude_H"
-    return 0, "fail_closed_unknown_reason_" + r
-
-
-def _build_gap_sessions(bars: pd.DataFrame) -> pd.DataFrame:
-    work = bars.copy()
-    work["gap_hours"] = work["bar_end_moscow"].diff().dt.total_seconds().div(3600.0)
-    work["gap_new_session"] = ((work["gap_hours"].isna()) | (work["gap_hours"] > SESSION_GAP_HOURS)).astype(int)
-    work["gap_session_index"] = work["gap_new_session"].cumsum() - 1
-    return _aggregate_sessions(work, "gap_session_index", "gap_session_date")
-
-
-def _aggregate_sessions(work: pd.DataFrame, index_col: str, date_col: str) -> pd.DataFrame:
+def _aggregate_sessions(work: pd.DataFrame) -> pd.DataFrame:
     rows = []
-    for idx, g in work.groupby(index_col, sort=True):
+    dates = work["calendar_session_date"].drop_duplicates().tolist()
+    date_to_idx = {d: i for i, d in enumerate(dates)}
+    for session_date, g in work.groupby("calendar_session_date", sort=True):
         g = g.sort_values("bar_end_moscow").reset_index(drop=True)
         rows.append({
-            index_col: int(idx),
-            date_col: str(g.iloc[-1][date_col]) if date_col in g.columns else str(g.iloc[-1]["base_date"]),
+            "calendar_session_index": int(date_to_idx[str(session_date)]),
+            "calendar_session_date": str(session_date),
+            "weekday": int(pd.Timestamp(str(session_date)).weekday()),
+            "is_saturday": int(pd.Timestamp(str(session_date)).weekday() == 5),
             "session_start": pd.Timestamp(g.iloc[0]["bar_end_moscow"]).isoformat(),
             "session_end": pd.Timestamp(g.iloc[-1]["bar_end_moscow"]).isoformat(),
             "bar_count": int(len(g)),
@@ -196,88 +67,77 @@ def _aggregate_sessions(work: pd.DataFrame, index_col: str, date_col: str) -> pd
             "low": float(g["low"].min()),
             "close": float(g.iloc[-1]["close"]),
         })
-    return pd.DataFrame(rows).sort_values(index_col).reset_index(drop=True)
+    if not rows:
+        _die("calendar session table is empty")
+    return pd.DataFrame(rows).sort_values("calendar_session_index").reset_index(drop=True)
 
 
-def _build_canonical_map(bars: pd.DataFrame, off_days: pd.DataFrame, weekend_session: int) -> tuple[pd.DataFrame, pd.DataFrame]:
-    joined = bars.merge(off_days, left_on="base_date", right_on="tradedate", how="left", validate="many_to_one")
-    if joined["tradedate"].isna().any():
-        missing = sorted(joined.loc[joined["tradedate"].isna(), "base_date"].unique().tolist())
-        _die("bars have dates missing from ISS futures off_days: " + str(missing[:10]))
-    decisions = joined.apply(lambda r: _include_row(r["reason"], r["is_traded"], weekend_session), axis=1)
-    joined["canonical_include"] = [x[0] for x in decisions]
-    joined["canonical_reason"] = [x[1] for x in decisions]
-    joined["canonical_session_date"] = joined["trade_session_date"].where(joined["trade_session_date"].astype(str) != "", joined["base_date"])
-    included = joined[joined["canonical_include"] == 1].copy()
-    if included.empty:
-        _die("canonical session map has zero included bars")
-    ordered_dates = included["canonical_session_date"].drop_duplicates().tolist()
+def _build_calendar_session_map(bars: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    included = bars.copy()
+    ordered_dates = included["calendar_session_date"].drop_duplicates().tolist()
     date_to_idx = {d: i for i, d in enumerate(ordered_dates)}
-    included["canonical_session_index"] = included["canonical_session_date"].map(date_to_idx).astype(int)
-    session_map = included[["bar_end_moscow", "base_date", "tradedate", "reason", "is_traded", "trade_session_date", "canonical_session_date", "canonical_session_index", "canonical_reason", "open", "high", "low", "close"]].copy()
-    sessions = _aggregate_sessions(included, "canonical_session_index", "canonical_session_date")
+    included["calendar_session_index"] = included["calendar_session_date"].map(date_to_idx).astype(int)
+    included["session_rule"] = "bar_end_moscow_calendar_date"
+    session_map = included[[
+        "bar_end_moscow",
+        "calendar_session_date",
+        "calendar_session_index",
+        "session_rule",
+        "open",
+        "high",
+        "low",
+        "close",
+    ]].copy()
+    sessions = _aggregate_sessions(included)
     return session_map, sessions
 
 
-def _compare(gap_sessions: pd.DataFrame, canonical_sessions: pd.DataFrame) -> pd.DataFrame:
-    n_gap = int(len(gap_sessions))
-    n_can = int(len(canonical_sessions))
-    common = min(n_gap, n_can)
-    rows = []
-    for i in range(common):
-        g = gap_sessions.iloc[i]
-        c = canonical_sessions.iloc[i]
-        rows.append({
-            "row_index": i,
-            "gap_session_date": str(g["gap_session_date"]),
-            "canonical_session_date": str(c["canonical_session_date"]),
-            "same_start": int(str(g["session_start"]) == str(c["session_start"])),
-            "same_end": int(str(g["session_end"]) == str(c["session_end"])),
-            "same_bar_count": int(int(g["bar_count"]) == int(c["bar_count"])),
-            "same_ohlc": int(all(abs(float(g[x]) - float(c[x])) < 1e-9 for x in ["open", "high", "low", "close"])),
-            "gap_bar_count": int(g["bar_count"]),
-            "canonical_bar_count": int(c["bar_count"]),
-            "gap_close": float(g["close"]),
-            "canonical_close": float(c["close"]),
-        })
-    extra = abs(n_gap - n_can)
-    out = pd.DataFrame(rows)
-    if out.empty:
-        _die("comparison table is empty")
-    out.attrs["gap_session_count"] = n_gap
-    out.attrs["canonical_session_count"] = n_can
-    out.attrs["extra_session_count_delta"] = extra
-    return out
+def _build_summary(bars: pd.DataFrame, sessions: pd.DataFrame) -> pd.DataFrame:
+    saturday_sessions = int(sessions["is_saturday"].sum())
+    rows = [
+        {"metric": "instrument", "value": INSTRUMENT},
+        {"metric": "timezone", "value": TZ},
+        {"metric": "session_rule", "value": "date(bar_end in Europe/Moscow)"},
+        {"metric": "gap_based_partition_used", "value": 0},
+        {"metric": "trade_session_date_remap_used", "value": 0},
+        {"metric": "bar_count", "value": int(len(bars))},
+        {"metric": "calendar_session_count", "value": int(len(sessions))},
+        {"metric": "saturday_session_count", "value": saturday_sessions},
+        {"metric": "first_session_date", "value": str(sessions["calendar_session_date"].min())},
+        {"metric": "last_session_date", "value": str(sessions["calendar_session_date"].max())},
+        {"metric": "decision", "value": "canonical_calendar_date_session_map_materialized"},
+    ]
+    return pd.DataFrame(rows)
 
 
-def _materiality(comparison: pd.DataFrame, gap_sessions: pd.DataFrame, canonical_sessions: pd.DataFrame) -> tuple[str, pd.DataFrame]:
-    mismatched = comparison[(comparison["same_start"] == 0) | (comparison["same_end"] == 0) | (comparison["same_bar_count"] == 0) | (comparison["same_ohlc"] == 0)]
-    n_gap = int(len(gap_sessions))
-    n_can = int(len(canonical_sessions))
-    material = int(n_gap != n_can or len(mismatched) > 0)
-    summary = pd.DataFrame([
-        {"metric": "gap_session_count", "value": n_gap},
-        {"metric": "canonical_session_count", "value": n_can},
-        {"metric": "matched_prefix_sessions", "value": int(len(comparison))},
-        {"metric": "mismatched_prefix_sessions", "value": int(len(mismatched))},
-        {"metric": "partition_material", "value": material},
-        {"metric": "decision", "value": "rerun_required" if material else "current_negative_result_can_be_upgraded_without_rerun"},
-    ])
-    return "material" if material else "immaterial", summary
+def _write_metadata(path: str, args: argparse.Namespace, summary: pd.DataFrame) -> None:
+    payload = {
+        "instrument": INSTRUMENT,
+        "timezone": TZ,
+        "input_csv": args.in_csv,
+        "out_dir": args.out_dir,
+        "session_rule": "date(bar_end in Europe/Moscow)",
+        "gap_based_partition_used": False,
+        "trade_session_date_remap_used": False,
+        "saturday_rule": "each traded Saturday calendar date is a separate D1 session",
+        "summary": {str(r["metric"]): r["value"] for _, r in summary.iterrows()},
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+        f.write("\n")
 
 
-def _write_report(path: str, status: str, summary: pd.DataFrame, weekend_session: int) -> None:
+def _write_report(path: str, summary: pd.DataFrame) -> None:
     lines = []
-    lines.append("# USDRUBF canonical session map package")
+    lines.append("# USDRUBF calendar-date session map package")
     lines.append("")
     lines.append("## Contract applied")
     lines.append("")
-    lines.append("- base date: bar_end interpreted in Europe/Moscow")
-    lines.append("- join: bar base_date to ISS futures off_days.tradedate")
-    lines.append("- canonical session date: trade_session_date when present, otherwise base date")
-    lines.append("- N/T included, H excluded, W conditional on is_traded=1 and USDRUBF.weekend_session=0")
-    lines.append("- ISS futures session endpoint is not used as historical ground truth")
-    lines.append("- USDRUBF weekend_session: " + str(weekend_session))
+    lines.append("- D1 session rule: group bars by date(bar_end in Europe/Moscow)")
+    lines.append("- Saturday bars, when present, remain a separate D1 session for that Saturday")
+    lines.append("- trade_session_date remapping is not used in this branch")
+    lines.append("- gap > 6h segmentation is not used for D1 construction in this branch")
+    lines.append("- scope: research-only session map materialization")
     lines.append("")
     lines.append("## Decision")
     lines.append("")
@@ -286,7 +146,7 @@ def _write_report(path: str, status: str, summary: pd.DataFrame, weekend_session
     lines.append("")
     lines.append("## Label note")
     lines.append("")
-    lines.append("This package compares session partitions only. It does not recompute primary event-anchored labels or secondary delayed execution-compatible labels.")
+    lines.append("This package materializes the branch-approved D1 session map only. It does not recompute primary event-anchored labels or secondary delayed execution-compatible labels.")
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
@@ -295,47 +155,26 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--in_csv", default=DEFAULT_IN_CSV)
     ap.add_argument("--out_dir", default=DEFAULT_OUT_DIR)
-    ap.add_argument("--off_days_csv", default="")
-    ap.add_argument("--securities_csv", default="")
     args = ap.parse_args()
+
     bars = _load_bars(args.in_csv)
-    start_date = str(bars["base_date"].min())
-    end_date = str(bars["base_date"].max())
-    if args.off_days_csv:
-        off_days = _load_off_days_csv(args.off_days_csv, start_date, end_date)
-        off_days_source = "csv"
-    else:
-        off_days = _fetch_off_days(start_date, end_date)
-        off_days_source = "live_iss"
-    if args.securities_csv:
-        security = _load_security_csv(args.securities_csv)
-        securities_source = "csv"
-    else:
-        security = _fetch_security()
-        securities_source = "live_iss"
-    weekend_session = _extract_weekend_session(security)
-    session_map, canonical_sessions = _build_canonical_map(bars, off_days, weekend_session)
-    gap_bars = bars.copy()
-    gap_bars["gap_session_date"] = gap_bars["base_date"]
-    gap_sessions = _build_gap_sessions(gap_bars)
-    comparison = _compare(gap_sessions, canonical_sessions)
-    status, summary = _materiality(comparison, gap_sessions, canonical_sessions)
+    session_map, sessions = _build_calendar_session_map(bars)
+    summary = _build_summary(bars, sessions)
+
     _ensure_dir(args.out_dir)
-    off_days.to_csv(os.path.join(args.out_dir, "iss_futures_off_days_v1.csv"), index=False)
-    security.to_csv(os.path.join(args.out_dir, "iss_futures_securities_v1.csv"), index=False)
-    session_map.to_csv(os.path.join(args.out_dir, "USDRUBF_session_map_v1.csv"), index=False)
-    gap_sessions.to_csv(os.path.join(args.out_dir, "gap_sessions_v1.csv"), index=False)
-    canonical_sessions.to_csv(os.path.join(args.out_dir, "canonical_sessions_v1.csv"), index=False)
-    comparison.to_csv(os.path.join(args.out_dir, "gap_vs_canonical_session_comparison_v1.csv"), index=False)
-    summary.to_csv(os.path.join(args.out_dir, "session_partition_summary_v1.csv"), index=False)
-    _write_report(os.path.join(args.out_dir, "report.md"), status, summary, weekend_session)
+    session_map.to_csv(os.path.join(args.out_dir, "USDRUBF_calendar_session_map_v1.csv"), index=False)
+    sessions.to_csv(os.path.join(args.out_dir, "calendar_sessions_v1.csv"), index=False)
+    summary.to_csv(os.path.join(args.out_dir, "calendar_session_summary_v1.csv"), index=False)
+    _write_metadata(os.path.join(args.out_dir, "metadata.json"), args, summary)
+    _write_report(os.path.join(args.out_dir, "report.md"), summary)
+
     print("OUT_DIR=" + args.out_dir)
-    print("OFF_DAYS_SOURCE=" + off_days_source)
-    print("SECURITIES_SOURCE=" + securities_source)
-    print("GAP_SESSIONS=" + str(len(gap_sessions)))
-    print("CANONICAL_SESSIONS=" + str(len(canonical_sessions)))
-    print("PARTITION_DIFFERENCE=" + status)
-    print("DECISION=" + str(summary[summary["metric"] == "decision"]["value"].iloc[0]))
+    print("SESSION_RULE=date(bar_end in Europe/Moscow)")
+    print("GAP_BASED_PARTITION_USED=0")
+    print("TRADE_SESSION_DATE_REMAP_USED=0")
+    print("CALENDAR_SESSIONS=" + str(len(sessions)))
+    print("SATURDAY_SESSIONS=" + str(int(sessions["is_saturday"].sum())))
+    print("DECISION=canonical_calendar_date_session_map_materialized")
     return 0
 
 
