@@ -48,6 +48,34 @@ def _table_to_df(payload: dict, name: str) -> pd.DataFrame:
     return pd.DataFrame(table["data"], columns=table["columns"])
 
 
+def _normalize_off_days(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        _die("off_days rows are empty")
+    missing = [c for c in REQUIRED_OFF_DAYS_COLS if c not in df.columns]
+    if missing:
+        _die("off_days missing required columns: " + str(missing))
+    out = df[REQUIRED_OFF_DAYS_COLS].copy()
+    out["tradedate"] = pd.to_datetime(out["tradedate"], errors="coerce").dt.date.astype(str)
+    out["trade_session_date"] = pd.to_datetime(out["trade_session_date"], errors="coerce").dt.date.astype(str)
+    out.loc[out["trade_session_date"] == "NaT", "trade_session_date"] = ""
+    out["reason"] = out["reason"].astype("string")
+    out["is_traded"] = pd.to_numeric(out["is_traded"], errors="coerce")
+    if out["tradedate"].isna().any() or out["tradedate"].duplicated().any():
+        _die("off_days has invalid or duplicate tradedate rows")
+    return out.sort_values("tradedate").reset_index(drop=True)
+
+
+def _load_off_days_csv(path: str, start_date: str, end_date: str) -> pd.DataFrame:
+    if not os.path.exists(path):
+        _die("off_days csv not found: " + path)
+    df = pd.read_csv(path)
+    out = _normalize_off_days(df)
+    out = out[(out["tradedate"] >= start_date) & (out["tradedate"] <= end_date)].copy()
+    if out.empty:
+        _die("off_days csv has no rows in requested range")
+    return out.reset_index(drop=True)
+
+
 def _fetch_off_days(start_date: str, end_date: str) -> pd.DataFrame:
     frames = []
     for year in range(int(start_date[:4]), int(end_date[:4]) + 1):
@@ -55,21 +83,24 @@ def _fetch_off_days(start_date: str, end_date: str) -> pd.DataFrame:
         url = "https://iss.moex.com/iss/calendars/futures.json?" + q
         frames.append(_table_to_df(_read_json(url), "off_days"))
     out = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-    if out.empty:
-        _die("ISS futures off_days returned no rows")
-    missing = [c for c in REQUIRED_OFF_DAYS_COLS if c not in out.columns]
-    if missing:
-        _die("ISS futures off_days missing required columns: " + str(missing))
-    out = out[REQUIRED_OFF_DAYS_COLS].copy()
-    out["tradedate"] = pd.to_datetime(out["tradedate"], errors="coerce").dt.date.astype(str)
-    out["trade_session_date"] = pd.to_datetime(out["trade_session_date"], errors="coerce").dt.date.astype(str)
-    out.loc[out["trade_session_date"] == "NaT", "trade_session_date"] = ""
-    out["reason"] = out["reason"].astype("string")
-    out["is_traded"] = pd.to_numeric(out["is_traded"], errors="coerce")
+    out = _normalize_off_days(out)
     out = out[(out["tradedate"] >= start_date) & (out["tradedate"] <= end_date)].copy()
-    if out["tradedate"].isna().any() or out["tradedate"].duplicated().any():
-        _die("ISS futures off_days has invalid or duplicate tradedate rows")
-    return out.sort_values("tradedate").reset_index(drop=True)
+    if out.empty:
+        _die("ISS futures off_days returned no rows in requested range")
+    return out.reset_index(drop=True)
+
+
+def _normalize_security(security: pd.DataFrame) -> pd.DataFrame:
+    if security.empty:
+        _die("ISS futures securities returned no rows for " + INSTRUMENT)
+    return security.reset_index(drop=True)
+
+
+def _load_security_csv(path: str) -> pd.DataFrame:
+    if not os.path.exists(path):
+        _die("securities csv not found: " + path)
+    df = pd.read_csv(path)
+    return _normalize_security(df)
 
 
 def _fetch_security() -> pd.DataFrame:
@@ -83,7 +114,7 @@ def _fetch_security() -> pd.DataFrame:
             df = _table_to_df(_read_json(url), "securities")
             if not df.empty:
                 df["source_url"] = url
-                return df
+                return _normalize_security(df)
         except SystemExit as e:
             last_error = str(e)
     _die("ISS futures securities returned no rows for " + INSTRUMENT + " last_error=" + last_error)
@@ -264,12 +295,24 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--in_csv", default=DEFAULT_IN_CSV)
     ap.add_argument("--out_dir", default=DEFAULT_OUT_DIR)
+    ap.add_argument("--off_days_csv", default="")
+    ap.add_argument("--securities_csv", default="")
     args = ap.parse_args()
     bars = _load_bars(args.in_csv)
     start_date = str(bars["base_date"].min())
     end_date = str(bars["base_date"].max())
-    off_days = _fetch_off_days(start_date, end_date)
-    security = _fetch_security()
+    if args.off_days_csv:
+        off_days = _load_off_days_csv(args.off_days_csv, start_date, end_date)
+        off_days_source = "csv"
+    else:
+        off_days = _fetch_off_days(start_date, end_date)
+        off_days_source = "live_iss"
+    if args.securities_csv:
+        security = _load_security_csv(args.securities_csv)
+        securities_source = "csv"
+    else:
+        security = _fetch_security()
+        securities_source = "live_iss"
     weekend_session = _extract_weekend_session(security)
     session_map, canonical_sessions = _build_canonical_map(bars, off_days, weekend_session)
     gap_bars = bars.copy()
@@ -287,6 +330,8 @@ def main() -> int:
     summary.to_csv(os.path.join(args.out_dir, "session_partition_summary_v1.csv"), index=False)
     _write_report(os.path.join(args.out_dir, "report.md"), status, summary, weekend_session)
     print("OUT_DIR=" + args.out_dir)
+    print("OFF_DAYS_SOURCE=" + off_days_source)
+    print("SECURITIES_SOURCE=" + securities_source)
     print("GAP_SESSIONS=" + str(len(gap_sessions)))
     print("CANONICAL_SESSIONS=" + str(len(canonical_sessions)))
     print("PARTITION_DIFFERENCE=" + status)
