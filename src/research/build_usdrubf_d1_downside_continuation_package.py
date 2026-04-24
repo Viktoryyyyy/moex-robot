@@ -9,7 +9,8 @@ import pandas as pd
 
 DEFAULT_IN_CSV = "data/master/usdrubf_5m_2022-04-26_2026-04-06.csv"
 DEFAULT_OUT_DIR = "data/research/usdrubf_d1_downside_continuation_package"
-SESSION_GAP_HOURS = 6.0
+SESSION_RULE = "date(bar_end in Europe/Moscow)"
+TZ = "Europe/Moscow"
 MIN_HISTORY_SESSIONS = 20
 FRAGILITY_QS = [0.75, 0.80, 0.85]
 FRAGILITY_CLOSE_CUTS = [0.10, 0.15, 0.20]
@@ -40,12 +41,19 @@ def _load_intraday(path: str) -> pd.DataFrame:
         _die("missing required columns: " + str(missing))
 
     work = df[REQUIRED_COLS].copy()
-    work["end"] = pd.to_datetime(work["end"], errors="coerce")
+    ts = pd.to_datetime(work["end"], errors="coerce")
+    if ts.isna().any():
+        _die("invalid timestamp values in column end")
+    if getattr(ts.dt, "tz", None) is None:
+        ts = ts.dt.tz_localize(TZ)
+    else:
+        ts = ts.dt.tz_convert(TZ)
+    work["end"] = ts
+    work["calendar_session_date"] = ts.dt.date.astype(str)
+
     for c in ["open", "high", "low", "close"]:
         work[c] = pd.to_numeric(work[c], errors="coerce")
 
-    if work["end"].isna().any():
-        _die("invalid timestamp values in column end")
     if work[["open", "high", "low", "close"]].isna().any().any():
         _die("non-numeric or missing OHLC values found")
     if work["end"].duplicated().any():
@@ -57,17 +65,12 @@ def _load_intraday(path: str) -> pd.DataFrame:
     return work
 
 
-def _build_sessions(work: pd.DataFrame, session_gap_hours: float) -> pd.DataFrame:
-    if session_gap_hours <= 0.0:
-        _die("session_gap_hours must be > 0")
-
-    work = work.copy()
-    work["gap_hours"] = work["end"].diff().dt.total_seconds().div(3600.0)
-    work["new_session"] = ((work["gap_hours"].isna()) | (work["gap_hours"] > session_gap_hours)).astype(int)
-    work["session_index"] = work["new_session"].cumsum() - 1
-
+def _build_sessions(work: pd.DataFrame) -> pd.DataFrame:
     rows = []
-    for session_index, g in work.groupby("session_index", sort=True):
+    ordered_dates = work["calendar_session_date"].drop_duplicates().tolist()
+    date_to_idx = {d: i for i, d in enumerate(ordered_dates)}
+
+    for session_date, g in work.groupby("calendar_session_date", sort=True):
         g = g.sort_values("end", ascending=True).reset_index(drop=True)
         session_start = pd.Timestamp(g.iloc[0]["end"])
         session_end = pd.Timestamp(g.iloc[-1]["end"])
@@ -76,16 +79,19 @@ def _build_sessions(work: pd.DataFrame, session_gap_hours: float) -> pd.DataFram
         session_low = float(g["low"].min())
         session_close = float(g.iloc[-1]["close"])
         if not np.isfinite([session_open, session_high, session_low, session_close]).all():
-            _die("non-finite aggregated OHLC for session_index=" + str(session_index))
+            _die("non-finite aggregated OHLC for calendar_session_date=" + str(session_date))
         if session_high < session_low:
-            _die("session_high < session_low for session_index=" + str(session_index))
+            _die("session_high < session_low for calendar_session_date=" + str(session_date))
 
         rows.append(
             {
-                "session_index": int(session_index),
+                "session_index": int(date_to_idx[str(session_date)]),
+                "calendar_session_date": str(session_date),
+                "weekday": int(pd.Timestamp(str(session_date)).weekday()),
+                "is_saturday": int(pd.Timestamp(str(session_date)).weekday() == 5),
                 "session_start": session_start,
                 "session_end": session_end,
-                "setup_day": session_end.date().isoformat(),
+                "setup_day": str(session_date),
                 "open": session_open,
                 "high": session_high,
                 "low": session_low,
@@ -355,10 +361,15 @@ def _build_metadata(experiment: pd.DataFrame, sessions: pd.DataFrame) -> pd.Data
         [
             {"field": "instrument", "value": "USDRUBF"},
             {"field": "timeframe", "value": "D1 futures sessions"},
-            {"field": "session_indexing_rule", "value": "observed completed futures sessions from 5m bars using gap > " + str(SESSION_GAP_HOURS) + "h"},
+            {"field": "session_indexing_rule", "value": SESSION_RULE},
+            {"field": "timezone", "value": TZ},
+            {"field": "gap_based_partition_used", "value": 0},
+            {"field": "trade_session_date_remap_used", "value": 0},
+            {"field": "saturday_rule", "value": "traded Saturdays are separate D1 sessions"},
             {"field": "date_span_start", "value": str(sessions.iloc[0]["setup_day"])},
             {"field": "date_span_end", "value": str(sessions.iloc[-1]["setup_day"])},
             {"field": "session_count", "value": int(len(sessions))},
+            {"field": "saturday_session_count", "value": int(sessions["is_saturday"].sum())},
             {"field": "experiment_row_count", "value": int(len(experiment))},
             {"field": "min_history_sessions_for_expanding_threshold", "value": MIN_HISTORY_SESSIONS},
             {"field": "primary_quantile_cut", "value": "q80"},
@@ -420,23 +431,27 @@ def _write_report(
     lines.append("- continuation: " + continuation)
     lines.append("- asymmetry: " + asymmetry)
     lines.append("- sample: " + sample_sufficient)
+    lines.append("- result_status: canonical")
     lines.append("")
     lines.append("## Semantics")
     lines.append("")
     lines.append("- primary labels are event-anchored on completed D-1")
     lines.append("- secondary delayed labels are reported separately and are not the primary hypothesis answer")
-    lines.append("- session indexing uses observed completed futures sessions from the canonical 5m series")
+    lines.append("- D1 session rule: date(bar_end in Europe/Moscow)")
+    lines.append("- traded Saturdays are separate D1 sessions")
+    lines.append("- trade_session_date remapping is not used in this branch")
+    lines.append("- gap > 6h segmentation is not used for D1 construction in this branch")
     lines.append("")
     lines.append("## Metadata")
     lines.append("")
     for _, row in metadata.iterrows():
         lines.append("- " + str(row["field"]) + ": " + str(row["value"]))
     lines.append("")
-    lines.append("## Primary summary")
+    lines.append("## Primary event-anchored summary")
     lines.append("")
     lines.append(summary.to_markdown(index=False))
     lines.append("")
-    lines.append("## Comparisons")
+    lines.append("## Primary comparisons")
     lines.append("")
     lines.append(comparisons.to_markdown(index=False))
     lines.append("")
@@ -455,6 +470,10 @@ def _write_report(
     else:
         lines.append(year_conc.to_markdown(index=False))
     lines.append("")
+    lines.append("## Secondary execution-compatible label note")
+    lines.append("")
+    lines.append("y_exec_leg1 and y_exec_leg2 remain secondary delayed execution-compatible labels only. They are emitted in experiment_table.csv but are not used for the primary hypothesis verdict.")
+    lines.append("")
     lines.append("## Non-iid note")
     lines.append("")
     lines.append("Primary label y_post2 overlaps whenever downside events occur on adjacent setup sessions; treat standard errors and significance claims as non-iid sensitive.")
@@ -466,11 +485,10 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--in_csv", default=DEFAULT_IN_CSV, help="Canonical USDRUBF 5m input CSV")
     ap.add_argument("--out_dir", default=DEFAULT_OUT_DIR, help="Output package directory")
-    ap.add_argument("--session_gap_hours", type=float, default=SESSION_GAP_HOURS, help="Gap threshold used to start a new observed futures session")
     args = ap.parse_args()
 
     work = _load_intraday(args.in_csv)
-    sessions = _build_sessions(work, args.session_gap_hours)
+    sessions = _build_sessions(work)
     experiment = _build_experiment_table(sessions)
     metadata = _build_metadata(experiment, sessions)
     summary, comparisons = _build_summary_and_comparison(experiment)
@@ -512,6 +530,10 @@ def main() -> int:
     topline = summary[summary["group"] == "downside_event"].iloc[0]
     print("IN=" + args.in_csv)
     print("OUT_DIR=" + args.out_dir)
+    print("SESSION_RULE=" + SESSION_RULE)
+    print("GAP_BASED_PARTITION_USED=0")
+    print("TRADE_SESSION_DATE_REMAP_USED=0")
+    print("SATURDAY_SESSIONS=" + str(int(sessions["is_saturday"].sum())))
     print("ROWS=" + str(len(experiment)))
     print("DOWNSIDE_N=" + str(int(topline["n"])))
     print("MIRROR_UP_N=" + str(int(summary[summary["group"] == "mirror_up_event"]["n"].iloc[0])))
@@ -520,6 +542,7 @@ def main() -> int:
     print("CONTINUATION=" + continuation)
     print("ASYMMETRY=" + asymmetry)
     print("SAMPLE=" + sample_sufficient)
+    print("RESULT_STATUS=canonical")
     return 0
 
 
