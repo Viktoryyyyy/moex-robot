@@ -1,0 +1,18 @@
+{
+  "config_id": "futures_duplicate_exposure_groups_config",
+  "version": "1.0",
+  "project": "MOEX Bot",
+  "status": "implemented_config",
+  "groups": [
+    {
+      "exposure_group_code": "usd_rub_futures",
+      "exposure_description": "USD/RUB futures exposure including ordinary Si family and USDRUBF perpetual",
+      "members": [
+        {"family_code": "Si", "primary_candidate": true, "duplicate_reason": "ordinary USD/RUB futures family"},
+        {"family_code": "USDRUBF", "primary_candidate": true, "duplicate_reason": "perpetual USD/RUB futures instrument; separate instrument class for Slice 1"}
+      ],
+      "review_notes": "Both Si and USDRUBF are allowed in Slice 1 because the task explicitly requires both ordinary and perpetual USD/RUB coverage."
+    }
+  ],
+  "contract": "contracts/datasets/futures_duplicate_exposure_group_contract.md"
+}
