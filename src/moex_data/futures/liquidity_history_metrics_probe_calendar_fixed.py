@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import xml.etree.ElementTree as ET
 from typing import Any, Dict, Iterable, Optional, Set, Tuple
 
 import pandas as pd
@@ -29,50 +30,75 @@ def _response_note(response: requests.Response) -> str:
     return "status=" + str(response.status_code) + " content_type=" + str(content_type) + " body_prefix=" + text
 
 
-def _request_calendar_json(base_url: str, path: str, params: Dict[str, Any], timeout: float) -> Tuple[Optional[Dict[str, Any]], str]:
-    url = base.url_join(base_url, path)
-    try:
-        response = requests.get(url, params=params, headers=base.auth_headers(False), timeout=timeout)
-    except Exception as exc:
-        return None, path + " request_error=" + exc.__class__.__name__ + ": " + str(exc)[:220]
-    if response.status_code < 200 or response.status_code >= 300:
-        return None, path + " http_error " + _response_note(response)
-    try:
-        data = response.json()
-    except Exception as exc:
-        return None, path + " non_json_response " + exc.__class__.__name__ + ": " + _response_note(response)
-    if not isinstance(data, dict):
-        return None, path + " json_root_not_object"
-    return data, ""
-
-
-def _calendar_frame_from_response(data: Dict[str, Any]) -> pd.DataFrame:
-    frame = base.block_to_frame(data, ["off_days", "data", "calendar"])
+def _calendar_frame_from_table(frame: pd.DataFrame) -> pd.DataFrame:
     if frame.empty:
         return frame
     date_col = base.canonical_column(frame, ["date", "DATE", "tradedate", "TRADEDATE"])
     status_col = base.canonical_column(frame, CALENDAR_STATUS_CANDIDATES)
     if not date_col or not status_col:
         return pd.DataFrame()
-    frame = frame.copy()
-    frame["__calendar_date_col"] = date_col
-    frame["__calendar_status_col"] = status_col
-    return frame
+    out = frame.copy()
+    out["__calendar_date_col"] = date_col
+    out["__calendar_status_col"] = status_col
+    return out
+
+
+def _calendar_frame_from_json(data: Dict[str, Any]) -> pd.DataFrame:
+    return _calendar_frame_from_table(base.block_to_frame(data, ["off_days", "data", "calendar"]))
+
+
+def _calendar_frame_from_xml(text: str) -> pd.DataFrame:
+    try:
+        root = ET.fromstring(text)
+    except Exception:
+        return pd.DataFrame()
+    target = None
+    for elem in root.iter():
+        if elem.tag.split("}")[-1] == "data" and elem.attrib.get("id") == "off_days":
+            target = elem
+            break
+    if target is None:
+        return pd.DataFrame()
+    rows = []
+    for elem in target.iter():
+        if elem.tag.split("}")[-1] == "row" and elem.attrib:
+            rows.append(dict(elem.attrib))
+    if not rows:
+        return pd.DataFrame()
+    return _calendar_frame_from_table(pd.DataFrame(rows))
+
+
+def _request_calendar_frame(base_url: str, path: str, params: Dict[str, Any], timeout: float) -> Tuple[pd.DataFrame, str]:
+    url = base.url_join(base_url, path)
+    try:
+        response = requests.get(url, params=params, headers=base.auth_headers(False), timeout=timeout)
+    except Exception as exc:
+        return pd.DataFrame(), path + " request_error=" + exc.__class__.__name__ + ": " + str(exc)[:220]
+    if response.status_code < 200 or response.status_code >= 300:
+        return pd.DataFrame(), path + " http_error " + _response_note(response)
+    try:
+        data = response.json()
+        if isinstance(data, dict):
+            frame = _calendar_frame_from_json(data)
+            if not frame.empty:
+                return frame, ""
+            return pd.DataFrame(), path + " json_calendar_columns_not_found"
+    except Exception:
+        pass
+    frame = _calendar_frame_from_xml(response.text or "")
+    if not frame.empty:
+        return frame, ""
+    return pd.DataFrame(), path + " calendar_not_parseable " + _response_note(response)
 
 
 def _fetch_calendar_frame_once(base_urls: Iterable[str], path: str, params: Dict[str, Any], timeout: float) -> Tuple[pd.DataFrame, str]:
     notes = []
     for base_url in base_urls:
-        data, note = _request_calendar_json(base_url, path, params, timeout)
-        if note:
-            notes.append(note)
-            continue
-        if data is None:
-            continue
-        frame = _calendar_frame_from_response(data)
+        frame, note = _request_calendar_frame(base_url, path, params, timeout)
         if not frame.empty:
             return frame, ""
-        notes.append(path + " calendar_columns_not_found")
+        if note:
+            notes.append(note)
     return pd.DataFrame(), "; ".join(notes)[:700]
 
 
@@ -84,7 +110,7 @@ def fetch_futures_calendar(screen_from: str, screen_till: str, timeout: float, i
         base_urls.append(str(iss_base_url))
     if base.DEFAULT_ISS_BASE_URL not in base_urls:
         base_urls.append(base.DEFAULT_ISS_BASE_URL)
-    paths = ["/iss/calendars.json", "/iss/calendars/futures.json"]
+    paths = ["/iss/calendars/", "/iss/calendars", "/iss/calendars.json", "/iss/calendars/futures.json"]
     for chunk_from, chunk_till in base.year_chunks(screen_from, screen_till):
         params = {
             "from": chunk_from,
