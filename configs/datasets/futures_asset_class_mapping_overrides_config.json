@@ -1,0 +1,21 @@
+{
+  "config_id": "futures_asset_class_mapping_overrides_config",
+  "version": "1.0",
+  "project": "MOEX Bot",
+  "status": "implemented_config",
+  "overrides": [
+    {
+      "family_code": "Si",
+      "asset_class": "currency",
+      "mapping_source": "manual_override",
+      "override_reason": "USD/RUB futures family"
+    },
+    {
+      "family_code": "USDRUBF",
+      "asset_class": "currency",
+      "mapping_source": "manual_override",
+      "override_reason": "USD/RUB perpetual futures"
+    }
+  ],
+  "contract": "contracts/datasets/futures_asset_class_mapping_contract.md"
+}
