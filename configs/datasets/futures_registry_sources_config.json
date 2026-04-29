@@ -1,0 +1,18 @@
+{
+  "config_id": "futures_registry_sources_config",
+  "version": "1.0",
+  "project": "MOEX Bot",
+  "status": "implemented_config",
+  "sources": [
+    {
+      "source_endpoint_id": "moex_iss_forts_securities_rfud",
+      "source_system": "MOEX_ISS",
+      "engine": "futures",
+      "market": "forts",
+      "board": "RFUD",
+      "endpoint_path": "/iss/engines/futures/markets/forts/boards/rfud/securities.json",
+      "purpose": "canonical futures securities registry snapshot"
+    }
+  ],
+  "output_contract": "contracts/datasets/futures_registry_snapshot_contract.md"
+}
