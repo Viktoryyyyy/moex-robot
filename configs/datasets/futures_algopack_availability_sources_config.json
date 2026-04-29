@@ -1,0 +1,36 @@
+{
+  "config_id": "futures_algopack_availability_sources_config",
+  "version": "1.0",
+  "project": "MOEX Bot",
+  "status": "implemented_config",
+  "sources": [
+    {
+      "endpoint_id": "algopack_fo_tradestats",
+      "dataset_contract": "contracts/datasets/futures_algopack_tradestats_availability_report_contract.md",
+      "endpoint_path": "/iss/datashop/algopack/fo/tradestats.json",
+      "required_for_slice1": true
+    },
+    {
+      "endpoint_id": "moex_futoi",
+      "dataset_contract": "contracts/datasets/futures_futoi_availability_report_contract.md",
+      "endpoint_path": "/iss/analyticalproducts/futoi/securities.json",
+      "required_for_slice1": true
+    },
+    {
+      "endpoint_id": "algopack_fo_obstats",
+      "dataset_contract": "contracts/datasets/futures_obstats_availability_report_contract.md",
+      "endpoint_path": "/iss/datashop/algopack/fo/obstats.json",
+      "required_for_slice1": false
+    },
+    {
+      "endpoint_id": "algopack_fo_hi2",
+      "dataset_contract": "contracts/datasets/futures_hi2_availability_report_contract.md",
+      "endpoint_path": "/iss/datashop/algopack/fo/hi2.json",
+      "required_for_slice1": false
+    }
+  ],
+  "probe_policy": {
+    "execution_allowed_in_this_authoring_step": false,
+    "purpose": "declarative endpoint registry only"
+  }
+}
