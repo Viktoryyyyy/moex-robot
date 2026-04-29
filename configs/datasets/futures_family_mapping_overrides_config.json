@@ -1,0 +1,21 @@
+{
+  "config_id": "futures_family_mapping_overrides_config",
+  "version": "1.0",
+  "project": "MOEX Bot",
+  "status": "implemented_config",
+  "overrides": [
+    {
+      "family_code": "Si",
+      "match": {"secid_prefix": "Si"},
+      "mapping_source": "manual_override",
+      "override_reason": "canonical Slice 1 Si family seed"
+    },
+    {
+      "family_code": "USDRUBF",
+      "match": {"secid": "USDRUBF"},
+      "mapping_source": "manual_override",
+      "override_reason": "canonical Slice 1 perpetual futures seed"
+    }
+  ],
+  "contract": "contracts/datasets/futures_family_mapping_contract.md"
+}
