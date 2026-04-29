@@ -1,0 +1,21 @@
+{
+  "config_id": "futures_perpetual_detection_overrides_config",
+  "version": "1.0",
+  "project": "MOEX Bot",
+  "status": "implemented_config",
+  "rules": {
+    "missing_last_trade_date_is_evidence": true,
+    "reviewed_sentinel_or_technical_dates_are_evidence": true,
+    "far_future_registry_dates_require_review": true
+  },
+  "overrides": [
+    {
+      "secid": "USDRUBF",
+      "family_code": "USDRUBF",
+      "is_perpetual": true,
+      "evidence_type": "manual_review_perpetual_identity",
+      "manual_override_reason": "accepted Slice 1 perpetual futures instrument"
+    }
+  ],
+  "contract": "contracts/datasets/futures_perpetual_detection_rule_contract.md"
+}
