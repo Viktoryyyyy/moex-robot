@@ -1,0 +1,17 @@
+{
+  "config_id": "futures_liquidity_screen_thresholds_config",
+  "version": "1.0",
+  "project": "MOEX Bot",
+  "status": "implemented_config",
+  "threshold_profiles": [
+    {
+      "threshold_profile_id": "slice1_initial_review_v1",
+      "purpose": "minimum liquidity review profile before Slice 1 acquisition",
+      "min_active_days": 20,
+      "min_median_daily_volume": null,
+      "min_median_daily_value": null,
+      "manual_review_allowed": true
+    }
+  ],
+  "contract": "contracts/datasets/futures_liquidity_screen_contract.md"
+}
