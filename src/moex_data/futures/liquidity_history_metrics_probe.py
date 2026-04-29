@@ -356,7 +356,7 @@ def fetch_futures_calendar(screen_from: str, screen_till: str, timeout: float, i
     try:
         for chunk_from, chunk_till in year_chunks(screen_from, screen_till):
             params = {"from": chunk_from, "till": chunk_till, "iss.only": "off_days", "show_all_days": "1"}
-            frame = fetch_paged_frame(iss_base_url, "/iss/calendars/futures.json", params, "off_days", timeout, False)
+            frame = fetch_paged_frame(iss_base_url, "/iss/calendars.json", params, "off_days", timeout, False)
             if not frame.empty:
                 frames.append(frame)
     except Exception as exc:
@@ -365,7 +365,7 @@ def fetch_futures_calendar(screen_from: str, screen_till: str, timeout: float, i
         return None, "calendar_empty_response"
     calendar = pd.concat(frames, ignore_index=True)
     date_col = canonical_column(calendar, ["date", "DATE", "tradedate", "TRADEDATE"])
-    status_col = canonical_column(calendar, ["futures", "FUTURES", "futures_", "FUTURES_", "is_traded", "IS_TRADED", "workday", "WORKDAY", "is_workday", "IS_WORKDAY"])
+    status_col = canonical_column(calendar, ["futures_workday", "FUTURES_WORKDAY", "futures", "FUTURES", "futures_", "FUTURES_", "is_traded", "IS_TRADED", "workday", "WORKDAY", "is_workday", "IS_WORKDAY"])
     if not date_col or not status_col:
         return None, "calendar_required_columns_not_found"
     out: Set[str] = set()
