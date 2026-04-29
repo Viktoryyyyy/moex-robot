@@ -1,0 +1,15 @@
+{
+  "config_id": "futures_history_depth_thresholds_config",
+  "version": "1.0",
+  "project": "MOEX Bot",
+  "status": "implemented_config",
+  "threshold_profiles": [
+    {
+      "threshold_profile_id": "slice1_initial_review_v1",
+      "purpose": "minimum history-depth review profile before Slice 1 acquisition",
+      "min_available_trading_days": 20,
+      "manual_review_allowed": true
+    }
+  ],
+  "contract": "contracts/datasets/futures_history_depth_screen_contract.md"
+}
