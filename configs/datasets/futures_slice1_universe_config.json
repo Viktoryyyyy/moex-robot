@@ -1,0 +1,51 @@
+{
+  "config_id": "futures_slice1_universe_config",
+  "version": "1.0",
+  "project": "MOEX Bot",
+  "status": "implemented_config",
+  "scope": {
+    "contracts_only": true,
+    "configs_only": true,
+    "loader_implementation_allowed": false,
+    "availability_probe_execution_allowed": false
+  },
+  "included_families": [
+    {
+      "family_code": "Si",
+      "asset_class": "currency",
+      "instrument_type": "ordinary_expiring_future_family",
+      "inclusion_status": "included_for_slice1_contract_authoring",
+      "inclusion_reason": "accepted Slice 1 ordinary USD/RUB futures family"
+    },
+    {
+      "family_code": "USDRUBF",
+      "preferred_secid": "USDRUBF",
+      "asset_class": "currency",
+      "instrument_type": "perpetual_future",
+      "inclusion_status": "included_for_slice1_contract_authoring",
+      "inclusion_reason": "accepted Slice 1 perpetual USD/RUB futures instrument"
+    }
+  ],
+  "excluded_optional_third_family": {
+    "inclusion_status": "excluded_for_now",
+    "exclusion_reason": "optional third family is explicitly out of Slice 1 until availability, liquidity, and history-depth reports are accepted"
+  },
+  "required_before_loader_implementation": [
+    "accepted registry snapshot output",
+    "accepted normalized instrument registry output",
+    "accepted ALGOPACK availability reports",
+    "accepted liquidity screen",
+    "accepted history-depth screen",
+    "PM acceptance of exact Slice 1 whitelist"
+  ],
+  "contracts": [
+    "contracts/datasets/futures_registry_snapshot_contract.md",
+    "contracts/datasets/futures_normalized_instrument_registry_contract.md",
+    "contracts/datasets/futures_family_mapping_contract.md",
+    "contracts/datasets/futures_asset_class_mapping_contract.md",
+    "contracts/datasets/futures_perpetual_detection_rule_contract.md",
+    "contracts/datasets/futures_expiration_map_contract.md",
+    "contracts/datasets/futures_slice1_cross_asset_whitelist_rule_contract.md",
+    "contracts/datasets/futures_excluded_family_rule_contract.md"
+  ]
+}
