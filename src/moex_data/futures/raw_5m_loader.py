@@ -340,7 +340,7 @@ def main():
     quality = pd.DataFrame(quality_rows)
     Path(outputs["quality_report"]).parent.mkdir(parents=True, exist_ok=True)
     quality.to_parquet(outputs["quality_report"], index=False)
-    quality_counts = {str(k): int(v) for k, v in quality["quality_status"].astype(str).value_counts(dropna=False).to_dict().items()}
+    quality_status_counts = {str(k): int(v) for k, v in quality["quality_status"].astype(str).value_counts(dropna=False).to_dict().items()}
     manifest = {
         "schema_version": SCHEMA_MANIFEST,
         "run_id": run_id,
@@ -353,10 +353,10 @@ def main():
         "output_artifacts": outputs,
         "partition_paths_created": partition_paths,
         "instrument_summaries": summaries,
-        "quality_status_counts": quality_counts,
+        "quality_status_counts": quality_status_counts,
         "calendar_validation_summary": {"calendar_denominator_status": calendar_status, "calendar_from": calendar_from, "calendar_till": calendar_till, "expected_trading_days": len(expected_calendar)},
         "short_history_handling": {"SiU7": summaries.get("SiU7")},
-        "loader_result_verdict": "pass" if quality_counts.get("fail", 0) == 0 else "fail",
+        "loader_result_verdict": "pass" if quality_status_counts.get("fail", 0) == 0 else "fail",
     }
     Path(outputs["manifest"]).parent.mkdir(parents=True, exist_ok=True)
     Path(outputs["manifest"]).write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
@@ -364,7 +364,7 @@ def main():
     print_json_line("loader_whitelist_applied", whitelist)
     print_json_line("excluded_instruments_confirmed", excluded)
     print_json_line("output_artifacts_created", outputs)
-    print_json_line("raw_5m_quality_summary", {"quality_status_counts": quality_counts, "instruments": summaries})
+    print_json_line("raw_5m_quality_summary", {"quality_status_counts": quality_status_counts, "instruments": summaries})
     print_json_line("calendar_validation_summary", manifest["calendar_validation_summary"])
     print_json_line("short_history_handling", manifest["short_history_handling"])
     print_json_line("loader_result_verdict", manifest["loader_result_verdict"])
