@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 import argparse
-import hashlib
 import json
 import os
 import sys
-from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path.cwd() / "src"))
 
@@ -15,32 +12,22 @@ import pandas as pd
 from moex_data.futures import liquidity_history_metrics_probe as base
 from moex_data.futures import liquidity_history_metrics_probe_apim_calendar as apim_calendar
 
-TZ_MSK = ZoneInfo("Europe/Moscow")
+from moex_data.futures.slice1_common import DEFAULT_EXCLUDED
+from moex_data.futures.slice1_common import DEFAULT_WHITELIST
+from moex_data.futures.slice1_common import SHORT_HISTORY_ALLOWED
+from moex_data.futures.slice1_common import parse_list
+from moex_data.futures.slice1_common import print_json_line
+from moex_data.futures.slice1_common import stable_id
+from moex_data.futures.slice1_common import today_msk
+from moex_data.futures.slice1_common import utc_now_iso
+
 SCHEMA_RAW_5M = "futures_raw_5m.v1"
 SCHEMA_QUALITY = "futures_raw_5m_quality_report.v1"
 SCHEMA_MANIFEST = "futures_raw_5m_loader_manifest.v1"
-DEFAULT_WHITELIST = ["SiM6", "SiU6", "SiU7", "SiZ6", "USDRUBF"]
-DEFAULT_EXCLUDED = ["SiH7", "SiM7"]
-SHORT_HISTORY_ALLOWED = {"SiU7"}
-
-
-def today_msk():
-    return datetime.now(TZ_MSK).date().isoformat()
-
-
-def utc_now_iso():
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
 
 def stable_id(parts):
     return hashlib.sha256("|".join([str(x) for x in parts]).encode("utf-8")).hexdigest()[:24]
-
-
-def parse_list(value, default):
-    text = str(value or "").strip()
-    if not text:
-        return list(default)
-    return [x.strip() for x in text.split(",") if x.strip()]
 
 
 def output_paths(data_root, run_date):
@@ -234,10 +221,6 @@ def write_partitions(frame, data_root, family_code, secid):
         part.sort_values(["ts", "secid"]).to_parquet(path, index=False)
         paths.append(str(path))
     return paths
-
-
-def print_json_line(key, value):
-    print(key + ": " + json.dumps(value, ensure_ascii=False, sort_keys=True, default=str))
 
 
 def main():

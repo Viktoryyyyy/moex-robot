@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 import argparse
-import hashlib
 import json
 import os
 import sys
-from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path.cwd() / "src"))
 
@@ -14,13 +11,18 @@ import pandas as pd
 
 from moex_data.futures import liquidity_history_metrics_probe as base
 
-TZ_MSK = ZoneInfo("Europe/Moscow")
+from moex_data.futures.slice1_common import DEFAULT_EXCLUDED
+from moex_data.futures.slice1_common import DEFAULT_WHITELIST
+from moex_data.futures.slice1_common import SHORT_HISTORY_ALLOWED
+from moex_data.futures.slice1_common import parse_list
+from moex_data.futures.slice1_common import print_json_line
+from moex_data.futures.slice1_common import stable_id
+from moex_data.futures.slice1_common import today_msk
+from moex_data.futures.slice1_common import utc_now_iso
+
 SCHEMA_D1 = "futures_derived_d1_ohlcv.v1"
 SCHEMA_QUALITY = "futures_derived_d1_ohlcv_quality_report.v1"
 SCHEMA_MANIFEST = "futures_derived_d1_ohlcv_manifest.v1"
-DEFAULT_WHITELIST = ["SiM6", "SiU6", "SiU7", "SiZ6", "USDRUBF"]
-DEFAULT_EXCLUDED = ["SiH7", "SiM7"]
-SHORT_HISTORY_ALLOWED = {"SiU7"}
 REQUIRED_CONTRACTS = [
     "contracts/datasets/futures_raw_5m_contract.md",
     "contracts/datasets/futures_derived_d1_ohlcv_contract.md",
@@ -29,23 +31,8 @@ REQUIRED_CONTRACTS = [
 ]
 
 
-def today_msk():
-    return datetime.now(TZ_MSK).date().isoformat()
-
-
-def utc_now_iso():
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-
-
 def stable_id(parts):
     return hashlib.sha256("|".join([str(x) for x in parts]).encode("utf-8")).hexdigest()[:24]
-
-
-def parse_list(value, default):
-    text = str(value or "").strip()
-    if not text:
-        return list(default)
-    return [x.strip() for x in text.split(",") if x.strip()]
 
 
 def output_paths(data_root, run_date):
@@ -260,10 +247,6 @@ def validate_exact_scope(raw, whitelist, excluded):
     hits = [x for x in observed if x.upper() in excluded_upper]
     if hits:
         raise RuntimeError("Excluded instruments found in selected raw rows: " + json.dumps(hits, ensure_ascii=False))
-
-
-def print_json_line(key, value):
-    print(key + ": " + json.dumps(value, ensure_ascii=False, sort_keys=True, default=str))
 
 
 def main():
