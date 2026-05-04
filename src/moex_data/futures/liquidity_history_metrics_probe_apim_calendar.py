@@ -3,7 +3,10 @@ import json
 import os
 import sys
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from typing import Any, Dict, Optional, Set, Tuple
+
+sys.path.insert(0, str(Path.cwd() / "src"))
 
 import pandas as pd
 import requests
