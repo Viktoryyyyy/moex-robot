@@ -205,21 +205,34 @@ def json_value(value: Any) -> str:
 
 
 def parse_source_contracts(value: Any) -> List[str]:
-    if isinstance(value, list):
-        return [str(x) for x in value if clean_text(x)]
-    if isinstance(value, tuple):
-        return [str(x) for x in value if clean_text(x)]
+    if value is None:
+        return []
+    if hasattr(value, "tolist") and not isinstance(value, (str, bytes)):
+        value = value.tolist()
+    if isinstance(value, (list, tuple, set)):
+        out = []
+        for item in value:
+            text = clean_text(item)
+            if text:
+                out.append(text)
+        return out
     text = clean_text(value)
     if not text:
         return []
     try:
         parsed = json.loads(text)
-        if isinstance(parsed, list):
-            return [str(x) for x in parsed if clean_text(x)]
+        if hasattr(parsed, "tolist") and not isinstance(parsed, (str, bytes)):
+            parsed = parsed.tolist()
+        if isinstance(parsed, (list, tuple, set)):
+            out = []
+            for item in parsed:
+                parsed_text = clean_text(item)
+                if parsed_text:
+                    out.append(parsed_text)
+            return out
     except Exception:
         pass
-    return [x.strip() for x in text.split(",") if x.strip()]
-
+    return [x.strip().strip("[]").strip().strip(chr(39)).strip(chr(34)) for x in text.split(",") if x.strip()]
 
 def read_parquet_if_exists(path: Path) -> Tuple[pd.DataFrame, bool]:
     if not path.exists():
