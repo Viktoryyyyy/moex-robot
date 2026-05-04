@@ -26,12 +26,21 @@ from moex_data.futures.slice1_common import utc_now_iso
 
 SCHEMA_DAILY_REFRESH_MANIFEST = "futures_daily_data_refresh_manifest.v1"
 REQUIRED_CONTRACTS = [
+    "contracts/datasets/futures_registry_refresh_manifest_contract.md",
     "contracts/datasets/futures_raw_5m_loader_manifest_contract.md",
     "contracts/datasets/futures_futoi_5m_raw_loader_manifest_contract.md",
     "contracts/datasets/futures_derived_d1_ohlcv_manifest_contract.md",
     "contracts/datasets/futures_daily_data_refresh_manifest_contract.md",
 ]
 COMPONENTS = [
+    {
+        "component_id": "registry_refresh_runner",
+        "script": "src/moex_data/futures/registry_refresh_runner.py",
+        "manifest_rel": ["futures", "runs", "registry_refresh"],
+        "manifest_schema": "futures_registry_refresh_manifest.v1",
+        "verdict_field": "registry_refresh_result_verdict",
+        "quality_label": "registry_refresh",
+    },
     {
         "component_id": "raw_5m_loader",
         "script": "src/moex_data/futures/raw_5m_loader.py",
@@ -66,9 +75,7 @@ COMPONENTS = [
 
 
 def output_paths(data_root, run_date):
-    return {
-        "manifest": str(data_root / "futures" / "runs" / "daily_refresh" / ("run_date=" + run_date) / "manifest.json")
-    }
+    return {"manifest": str(data_root / "futures" / "runs" / "daily_refresh" / ("run_date=" + run_date) / "manifest.json")}
 
 
 def child_manifest_path(data_root, component, run_date):
@@ -80,6 +87,29 @@ def child_manifest_path(data_root, component, run_date):
 
 def load_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def assert_registry_refresh_manifest(name, manifest, component):
+    schema = str(manifest.get("schema_version") or "")
+    if schema != component["manifest_schema"]:
+        raise RuntimeError(name + " schema_version mismatch: " + schema)
+    verdict = str(manifest.get(component["verdict_field"]) or "")
+    if verdict != "pass":
+        raise RuntimeError(name + " verdict is not pass: " + verdict)
+    if str(manifest.get("artifact_validation_status") or "") != "pass":
+        raise RuntimeError(name + " artifact_validation_status is not pass")
+    outputs = manifest.get("output_artifacts") or {}
+    if not isinstance(outputs, dict):
+        raise RuntimeError(name + " output_artifacts is not object")
+    missing = []
+    for key, value in outputs.items():
+        if key == "manifest":
+            continue
+        path = Path(str(value)).expanduser()
+        if not value or not path.exists():
+            missing.append(key + "=" + str(value))
+    if missing:
+        raise RuntimeError(name + " missing output_artifacts: " + "; ".join(missing))
 
 
 def assert_exact_scope(name, manifest, component, whitelist, excluded):
@@ -130,11 +160,8 @@ def assert_child_artifacts(name, manifest):
         raise RuntimeError(name + " output_artifacts is not object")
     missing_outputs = []
     for key, value in outputs.items():
-        if not value:
-            missing_outputs.append(key)
-            continue
         path = Path(str(value)).expanduser()
-        if not path.exists():
+        if not value or not path.exists():
             missing_outputs.append(key + "=" + str(value))
     if missing_outputs:
         raise RuntimeError(name + " missing output_artifacts: " + "; ".join(missing_outputs))
@@ -150,6 +177,9 @@ def assert_child_artifacts(name, manifest):
 
 
 def assert_child_verdict(name, manifest, component):
+    if component["component_id"] == "registry_refresh_runner":
+        assert_registry_refresh_manifest(name, manifest, component)
+        return
     schema = str(manifest.get("schema_version") or "")
     if schema != component["manifest_schema"]:
         raise RuntimeError(name + " schema_version mismatch: " + schema)
@@ -170,7 +200,7 @@ def assert_child_verdict(name, manifest, component):
 
 def component_command(root, component, args, whitelist, excluded):
     cmd = [sys.executable, str(root / component["script"])]
-    if component["component_id"] in ["raw_5m_loader", "futoi_raw_loader"]:
+    if component["component_id"] in ["registry_refresh_runner", "raw_5m_loader", "futoi_raw_loader"]:
         cmd.extend(["--snapshot-date", args.snapshot_date])
     cmd.extend(["--run-date", args.run_date])
     if args.from_date:
@@ -178,11 +208,11 @@ def component_command(root, component, args, whitelist, excluded):
     if args.till:
         cmd.extend(["--till", args.till])
     cmd.extend(["--data-root", str(args.data_root_resolved)])
-    if component["component_id"] in ["raw_5m_loader", "futoi_raw_loader"]:
+    if component["component_id"] in ["registry_refresh_runner", "raw_5m_loader", "futoi_raw_loader"]:
         cmd.extend(["--timeout", str(args.timeout)])
     cmd.extend(["--whitelist", ",".join(whitelist)])
     cmd.extend(["--excluded", ",".join(excluded)])
-    if component["component_id"] in ["raw_5m_loader", "futoi_raw_loader"]:
+    if component["component_id"] in ["registry_refresh_runner", "raw_5m_loader", "futoi_raw_loader"]:
         cmd.extend(["--iss-base-url", args.iss_base_url])
         cmd.extend(["--apim-base-url", args.apim_base_url])
     return cmd
@@ -193,16 +223,7 @@ def run_component(root, data_root, component, args, whitelist, excluded):
     started_at = time.time()
     cmd = component_command(root, component, args, whitelist, excluded)
     proc = subprocess.run(cmd, cwd=str(root), text=True, capture_output=True)
-    item = {
-        "component_id": component["component_id"],
-        "command": cmd,
-        "returncode": int(proc.returncode),
-        "stdout_tail": proc.stdout[-4000:],
-        "stderr_tail": proc.stderr[-4000:],
-        "manifest_path": str(expected_manifest),
-        "status": "fail",
-        "validation_status": "not_validated",
-    }
+    item = {"component_id": component["component_id"], "command": cmd, "returncode": int(proc.returncode), "stdout_tail": proc.stdout[-4000:], "stderr_tail": proc.stderr[-4000:], "manifest_path": str(expected_manifest), "status": "fail", "validation_status": "not_validated"}
     if proc.returncode != 0:
         item["failure_reason"] = "component_returncode_nonzero"
         return item, None
@@ -215,9 +236,10 @@ def run_component(root, data_root, component, args, whitelist, excluded):
     manifest = load_json(expected_manifest)
     try:
         assert_child_verdict(component["component_id"], manifest, component)
-        assert_exact_scope(component["component_id"], manifest, component, whitelist, excluded)
-        assert_short_history(component["component_id"], manifest, component)
-        assert_child_artifacts(component["component_id"], manifest)
+        if component["component_id"] != "registry_refresh_runner":
+            assert_exact_scope(component["component_id"], manifest, component, whitelist, excluded)
+            assert_short_history(component["component_id"], manifest, component)
+            assert_child_artifacts(component["component_id"], manifest)
         item["status"] = "pass"
         item["validation_status"] = "pass"
         item["child_run_id"] = manifest.get("run_id")
@@ -234,6 +256,8 @@ def run_component(root, data_root, component, args, whitelist, excluded):
 def merge_per_instrument(child_manifests):
     out = {}
     for component_id, manifest in child_manifests.items():
+        if component_id == "registry_refresh_runner":
+            continue
         summaries = manifest.get("instrument_summaries") or {}
         for secid, summary in summaries.items():
             if secid not in out:
@@ -246,12 +270,7 @@ def merge_per_instrument(child_manifests):
 def manifest_references(child_items):
     out = {}
     for item in child_items:
-        out[item["component_id"]] = {
-            "manifest_path": item.get("manifest_path"),
-            "child_run_id": item.get("child_run_id"),
-            "status": item.get("status"),
-            "validation_status": item.get("validation_status"),
-        }
+        out[item["component_id"]] = {"manifest_path": item.get("manifest_path"), "child_run_id": item.get("child_run_id"), "status": item.get("status"), "validation_status": item.get("validation_status")}
     return out
 
 
@@ -293,7 +312,6 @@ def main():
     parser.add_argument("--whitelist", default=",".join(DEFAULT_WHITELIST))
     parser.add_argument("--excluded", default=",".join(DEFAULT_EXCLUDED))
     args = parser.parse_args()
-
     root = Path.cwd().resolve()
     args.data_root_resolved = base.resolve_data_root(args)
     data_root = args.data_root_resolved
@@ -302,12 +320,10 @@ def main():
     for secid in whitelist:
         if secid in excluded:
             raise RuntimeError("Whitelisted instrument is also excluded: " + secid)
-
     base.assert_files_exist(root, REQUIRED_CONTRACTS)
     run_started_ts = utc_now_iso()
     run_id = "futures_daily_data_refresh_" + args.run_date + "_" + stable_id([args.snapshot_date, run_started_ts, ",".join(whitelist), args.from_date, args.till])
     outputs = output_paths(data_root, args.run_date)
-
     child_items = []
     child_manifests = {}
     final_status = "pass"
@@ -320,43 +336,19 @@ def main():
             blockers.append(component["component_id"] + ":" + str(item.get("failure_reason") or "failed"))
             break
         child_manifests[component["component_id"]] = manifest
-
     per_instrument = merge_per_instrument(child_manifests)
-    scope_check = validate_final_scope(per_instrument, whitelist, excluded) if child_manifests else {"status": "not_computed"}
-    short_history_check = validate_short_history_final(per_instrument) if child_manifests else {"status": "not_computed"}
+    scope_check = validate_final_scope(per_instrument, whitelist, excluded) if len(child_manifests) > 1 else {"status": "not_computed"}
+    short_history_check = validate_short_history_final(per_instrument) if len(child_manifests) > 1 else {"status": "not_computed"}
     if scope_check.get("status") != "pass":
         final_status = "fail"
         blockers.append("final_scope_check_failed")
     if short_history_check.get("status") != "pass":
         final_status = "fail"
         blockers.append("final_short_history_check_failed")
-
-    manifest = {
-        "schema_version": SCHEMA_DAILY_REFRESH_MANIFEST,
-        "run_id": run_id,
-        "run_date": args.run_date,
-        "snapshot_date": args.snapshot_date,
-        "refresh_from": args.from_date or None,
-        "refresh_till": args.till or None,
-        "started_ts": run_started_ts,
-        "completed_ts": utc_now_iso(),
-        "runner_whitelist_applied": whitelist,
-        "excluded_instruments_confirmed": excluded,
-        "component_execution_order": [x["component_id"] for x in COMPONENTS],
-        "child_component_status": child_items,
-        "child_manifest_references": manifest_references(child_items),
-        "per_instrument_status": per_instrument,
-        "short_history_flag_check": short_history_check,
-        "excluded_instruments_check": scope_check,
-        "artifact_validation_status": "pass" if final_status == "pass" else "fail",
-        "daily_refresh_result_verdict": final_status,
-        "blockers": blockers,
-        "output_artifacts": outputs,
-    }
+    manifest = {"schema_version": SCHEMA_DAILY_REFRESH_MANIFEST, "run_id": run_id, "run_date": args.run_date, "snapshot_date": args.snapshot_date, "refresh_from": args.from_date or None, "refresh_till": args.till or None, "started_ts": run_started_ts, "completed_ts": utc_now_iso(), "runner_whitelist_applied": whitelist, "excluded_instruments_confirmed": excluded, "component_execution_order": [x["component_id"] for x in COMPONENTS], "child_component_status": child_items, "child_manifest_references": manifest_references(child_items), "per_instrument_status": per_instrument, "short_history_flag_check": short_history_check, "excluded_instruments_check": scope_check, "artifact_validation_status": "pass" if final_status == "pass" else "fail", "daily_refresh_result_verdict": final_status, "blockers": blockers, "output_artifacts": outputs}
     path = Path(outputs["manifest"])
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
-
     print_json_line("daily_refresh_manifest_path", str(path))
     print_json_line("child_component_status", manifest["child_manifest_references"])
     print_json_line("artifact_validation_status", manifest["artifact_validation_status"])
