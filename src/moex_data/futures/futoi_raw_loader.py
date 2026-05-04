@@ -27,7 +27,6 @@ SCHEMA_MANIFEST = "futures_futoi_5m_raw_loader_manifest.v1"
 FUTOI_AVAILABILITY_CONTRACT = "contracts/datasets/futures_futoi_availability_report_contract.md"
 
 
-
 def output_paths(data_root, run_date):
     return {
         "futoi_raw_partition_root": str(data_root / "futures" / "futoi_raw"),
@@ -240,14 +239,7 @@ def normalize_futoi(frame, secid, family_code, board, source_url, source_ticker,
     seq_col = base.canonical_column(frame, ["seqnum", "SEQNUM"])
     if not date_col and not moment_col:
         return pd.DataFrame(), {"error": "missing_required_columns:tradedate_or_moment", "columns": [str(x) for x in frame.columns]}
-    required = {
-        "clgroup": clgroup_col,
-        "pos": pos_col,
-        "pos_long": pos_long_col,
-        "pos_short": pos_short_col,
-        "pos_long_num": pos_long_num_col,
-        "pos_short_num": pos_short_num_col,
-    }
+    required = {"clgroup": clgroup_col, "pos": pos_col, "pos_long": pos_long_col, "pos_short": pos_short_col, "pos_long_num": pos_long_num_col, "pos_short_num": pos_short_num_col}
     missing = [k for k, v in required.items() if not v]
     if missing:
         return pd.DataFrame(), {"error": "missing_required_columns:" + ",".join(missing), "columns": [str(x) for x in frame.columns]}
@@ -293,51 +285,28 @@ def normalize_futoi(frame, secid, family_code, board, source_url, source_ticker,
     out["calendar_denominator_status"] = calendar_status
     out = out.loc[out["trade_date"].notna() & out["ts"].notna() & out["clgroup"].notna()].copy()
     out = out.sort_values(["trade_date", "ts", "secid", "clgroup"]).reset_index(drop=True)
-    meta = {
-        "error": "",
-        "columns": [str(x) for x in frame.columns],
-        "mapped_columns": {
-            "tradedate": str(date_col) if date_col else None,
-            "tradetime": str(time_col) if time_col else None,
-            "moment": str(moment_col) if moment_col else None,
-            "systime": str(systime_col) if systime_col else None,
-            "ticker": str(ticker_col) if ticker_col else None,
-            "clgroup": str(clgroup_col),
-            "pos": str(pos_col),
-            "pos_long": str(pos_long_col),
-            "pos_short": str(pos_short_col),
-            "pos_long_num": str(pos_long_num_col),
-            "pos_short_num": str(pos_short_num_col),
-            "sess_id": str(sess_col) if sess_col else None,
-            "seqnum": str(seq_col) if seq_col else None,
-        },
-    }
+    meta = {"error": "", "columns": [str(x) for x in frame.columns], "mapped_columns": {"tradedate": str(date_col) if date_col else None, "tradetime": str(time_col) if time_col else None, "moment": str(moment_col) if moment_col else None, "systime": str(systime_col) if systime_col else None, "ticker": str(ticker_col) if ticker_col else None, "clgroup": str(clgroup_col), "pos": str(pos_col), "pos_long": str(pos_long_col), "pos_short": str(pos_short_col), "pos_long_num": str(pos_long_num_col), "pos_short_num": str(pos_short_num_col), "sess_id": str(sess_col) if sess_col else None, "seqnum": str(seq_col) if seq_col else None}}
     return out, meta
+
+
+def filter_calendar_rows(frame, expected_calendar):
+    if frame.empty or expected_calendar is None:
+        return frame, {"source_off_calendar_date_count": 0, "source_off_calendar_dates": []}
+    dates = set(frame["trade_date"].dropna().astype(str).tolist())
+    off_dates = sorted([x for x in dates if x not in expected_calendar])
+    if not off_dates:
+        return frame, {"source_off_calendar_date_count": 0, "source_off_calendar_dates": []}
+    filtered = frame.loc[frame["trade_date"].astype(str).isin(expected_calendar)].copy().reset_index(drop=True)
+    return filtered, {"source_off_calendar_date_count": len(off_dates), "source_off_calendar_dates": off_dates}
 
 
 def quality_counts(frame, expected_calendar):
     if frame.empty:
-        return {
-            "rows": 0,
-            "trade_dates": 0,
-            "min_ts": None,
-            "max_ts": None,
-            "clgroups": [],
-            "duplicate_key_count": 0,
-            "null_required_count": 0,
-            "invalid_position_count": 0,
-            "off_calendar_date_count": None,
-            "missing_expected_trading_days": None,
-        }
+        return {"rows": 0, "trade_dates": 0, "min_ts": None, "max_ts": None, "clgroups": [], "duplicate_key_count": 0, "null_required_count": 0, "invalid_position_count": 0, "off_calendar_date_count": None, "missing_expected_trading_days": None}
     duplicates = int(frame.duplicated(subset=["trade_date", "ts", "secid", "clgroup"]).sum())
     required = ["clgroup", "pos", "pos_long", "pos_short", "pos_long_num", "pos_short_num"]
     null_required = int(frame[required].isna().any(axis=1).sum())
-    invalid = (
-        (frame["pos_long"] < 0)
-        | (frame["pos_short"] > 0)
-        | (frame["pos_long_num"] < 0)
-        | (frame["pos_short_num"] < 0)
-    )
+    invalid = (frame["pos_long"] < 0) | (frame["pos_short"] > 0) | (frame["pos_long_num"] < 0) | (frame["pos_short_num"] < 0)
     dates = set(frame["trade_date"].dropna().astype(str).tolist())
     off_calendar = None
     missing_expected = None
@@ -346,18 +315,7 @@ def quality_counts(frame, expected_calendar):
         expected = set([x for x in expected_calendar if min(dates) <= x <= max(dates)])
         missing_expected = len(expected - dates)
     clgroups = sorted([str(x) for x in frame["clgroup"].dropna().astype(str).unique().tolist()])
-    return {
-        "rows": int(len(frame)),
-        "trade_dates": len(dates),
-        "min_ts": str(frame["ts"].min()),
-        "max_ts": str(frame["ts"].max()),
-        "clgroups": clgroups,
-        "duplicate_key_count": duplicates,
-        "null_required_count": null_required,
-        "invalid_position_count": int(invalid.fillna(True).sum()),
-        "off_calendar_date_count": off_calendar,
-        "missing_expected_trading_days": missing_expected,
-    }
+    return {"rows": int(len(frame)), "trade_dates": len(dates), "min_ts": str(frame["ts"].min()), "max_ts": str(frame["ts"].max()), "clgroups": clgroups, "duplicate_key_count": duplicates, "null_required_count": null_required, "invalid_position_count": int(invalid.fillna(True).sum()), "off_calendar_date_count": off_calendar, "missing_expected_trading_days": missing_expected}
 
 
 def data_gap_status(counts):
@@ -376,12 +334,7 @@ def status_from_counts(counts, fetch_status, calendar_status, futoi_availability
         return "fail", "FUTOI availability artifact is not completed/available"
     if calendar_status != "canonical_apim_futures_xml":
         return "fail", "calendar denominator is not canonical_apim_futures_xml"
-    checks = [
-        ("duplicate_key_count", "duplicate primary-key rows detected before partition write"),
-        ("null_required_count", "null required FUTOI values detected"),
-        ("invalid_position_count", "invalid FUTOI position sign/count values detected"),
-        ("off_calendar_date_count", "loaded trade dates outside APIM futures calendar"),
-    ]
+    checks = [("duplicate_key_count", "duplicate primary-key rows detected before partition write"), ("null_required_count", "null required FUTOI values detected"), ("invalid_position_count", "invalid FUTOI position sign/count values detected"), ("off_calendar_date_count", "loaded trade dates outside APIM futures calendar")]
     for key, note in checks:
         if counts.get(key) is not None and int(counts.get(key) or 0) > 0:
             return "fail", note
@@ -456,6 +409,7 @@ def main():
         short_history_flag = bool(row.get("short_history_flag"))
         source_frame, source_url, fetch_status, fetch_error, source_ticker = fetch_futoi(secid, family_code, start, end, float(args.timeout), str(args.apim_base_url), str(args.iss_base_url))
         raw, meta = normalize_futoi(source_frame, secid, family_code, board, source_url, source_ticker, ingest_ts, short_history_flag, calendar_status)
+        raw, calendar_filter = filter_calendar_rows(raw, expected_calendar)
         counts = quality_counts(raw, expected_calendar)
         gap_status = data_gap_status(counts)
         quality_status, notes = status_from_counts(counts, fetch_status, calendar_status, str(row.get("futoi_availability_status", "")), str(row.get("futoi_probe_status", "")))
@@ -463,83 +417,14 @@ def main():
         partition_paths.extend(paths)
         source_scope = str(raw["source_scope"].dropna().iloc[0]) if not raw.empty and "source_scope" in raw.columns else ""
         source_scope_values[secid] = source_scope
-        quality_rows.append({
-            "quality_report_id": stable_id([run_id, secid]),
-            "run_id": run_id,
-            "run_date": run_date,
-            "snapshot_date": snapshot_date,
-            "board": board,
-            "secid": secid,
-            "family_code": family_code,
-            "source_ticker": str(source_ticker or "").upper(),
-            "source_scope": source_scope,
-            "dataset_id": "futures_futoi_5m_raw",
-            "schema_version": SCHEMA_QUALITY,
-            "requested_from": start,
-            "requested_till": end,
-            "source_endpoint_url": source_url,
-            "fetch_status": fetch_status,
-            "fetch_error": fetch_error or None,
-            "normalization_error": meta.get("error") or None,
-            "rows": counts.get("rows"),
-            "trade_dates": counts.get("trade_dates"),
-            "min_ts": counts.get("min_ts"),
-            "max_ts": counts.get("max_ts"),
-            "clgroups_json": json.dumps(counts.get("clgroups") or [], ensure_ascii=False, sort_keys=True),
-            "duplicate_key_count": counts.get("duplicate_key_count"),
-            "null_required_count": counts.get("null_required_count"),
-            "invalid_position_count": counts.get("invalid_position_count"),
-            "off_calendar_date_count": counts.get("off_calendar_date_count"),
-            "missing_expected_trading_days": counts.get("missing_expected_trading_days"),
-            "partition_count": len(paths),
-            "calendar_denominator_status": calendar_status,
-            "futoi_availability_status": row.get("futoi_availability_status"),
-            "futoi_probe_status": row.get("futoi_probe_status"),
-            "history_depth_status": row.get("history_depth_status"),
-            "liquidity_status": row.get("liquidity_status"),
-            "short_history_flag": short_history_flag,
-            "data_gap_status": gap_status,
-            "quality_status": quality_status,
-            "review_notes": notes,
-            "mapped_columns_json": json.dumps(meta.get("mapped_columns") or {}, ensure_ascii=False, sort_keys=True),
-            "observed_columns_json": json.dumps(meta.get("columns") or [], ensure_ascii=False, sort_keys=True),
-        })
-        summaries[secid] = {
-            "requested_from": start,
-            "requested_till": end,
-            "source_ticker": str(source_ticker or "").upper(),
-            "source_scope": source_scope,
-            "rows": counts.get("rows"),
-            "trade_dates": counts.get("trade_dates"),
-            "partition_count": len(paths),
-            "quality_status": quality_status,
-            "data_gap_status": gap_status,
-            "short_history_flag": short_history_flag,
-            "review_notes": notes,
-        }
+        quality_rows.append({"quality_report_id": stable_id([run_id, secid]), "run_id": run_id, "run_date": run_date, "snapshot_date": snapshot_date, "board": board, "secid": secid, "family_code": family_code, "source_ticker": str(source_ticker or "").upper(), "source_scope": source_scope, "dataset_id": "futures_futoi_5m_raw", "schema_version": SCHEMA_QUALITY, "requested_from": start, "requested_till": end, "source_endpoint_url": source_url, "fetch_status": fetch_status, "fetch_error": fetch_error or None, "normalization_error": meta.get("error") or None, "rows": counts.get("rows"), "trade_dates": counts.get("trade_dates"), "min_ts": counts.get("min_ts"), "max_ts": counts.get("max_ts"), "clgroups_json": json.dumps(counts.get("clgroups") or [], ensure_ascii=False, sort_keys=True), "duplicate_key_count": counts.get("duplicate_key_count"), "null_required_count": counts.get("null_required_count"), "invalid_position_count": counts.get("invalid_position_count"), "off_calendar_date_count": counts.get("off_calendar_date_count"), "source_off_calendar_date_count": calendar_filter.get("source_off_calendar_date_count"), "source_off_calendar_dates_json": json.dumps(calendar_filter.get("source_off_calendar_dates") or [], ensure_ascii=False, sort_keys=True), "missing_expected_trading_days": counts.get("missing_expected_trading_days"), "partition_count": len(paths), "calendar_denominator_status": calendar_status, "futoi_availability_status": row.get("futoi_availability_status"), "futoi_probe_status": row.get("futoi_probe_status"), "history_depth_status": row.get("history_depth_status"), "liquidity_status": row.get("liquidity_status"), "short_history_flag": short_history_flag, "data_gap_status": gap_status, "quality_status": quality_status, "review_notes": notes, "mapped_columns_json": json.dumps(meta.get("mapped_columns") or {}, ensure_ascii=False, sort_keys=True), "observed_columns_json": json.dumps(meta.get("columns") or [], ensure_ascii=False, sort_keys=True)})
+        summaries[secid] = {"requested_from": start, "requested_till": end, "source_ticker": str(source_ticker or "").upper(), "source_scope": source_scope, "rows": counts.get("rows"), "trade_dates": counts.get("trade_dates"), "partition_count": len(paths), "quality_status": quality_status, "data_gap_status": gap_status, "short_history_flag": short_history_flag, "source_off_calendar_date_count": calendar_filter.get("source_off_calendar_date_count"), "source_off_calendar_dates": calendar_filter.get("source_off_calendar_dates"), "review_notes": notes}
 
     quality = pd.DataFrame(quality_rows)
     Path(outputs["quality_report"]).parent.mkdir(parents=True, exist_ok=True)
     quality.to_parquet(outputs["quality_report"], index=False)
     quality_status_counts = {str(k): int(v) for k, v in quality["quality_status"].astype(str).value_counts(dropna=False).to_dict().items()}
-    manifest = {
-        "schema_version": SCHEMA_MANIFEST,
-        "run_id": run_id,
-        "run_date": run_date,
-        "snapshot_date": snapshot_date,
-        "ingest_ts": ingest_ts,
-        "loader_whitelist_applied": whitelist,
-        "excluded_instruments_confirmed": excluded,
-        "input_artifacts": input_paths,
-        "output_artifacts": outputs,
-        "partition_paths_created": partition_paths,
-        "instrument_summaries": summaries,
-        "quality_status_counts": quality_status_counts,
-        "calendar_validation_summary": {"calendar_denominator_status": calendar_status, "calendar_from": calendar_from, "calendar_till": calendar_till, "expected_trading_days": len(expected_calendar)},
-        "futoi_source_scope_note": {"by_instrument": source_scope_values, "family_aggregate_futoi": "FUTOI source ticker may be family-level for expiring Si contracts; secid partition preserves accepted whitelist scope without treating FUTOI as OHLCV."},
-        "short_history_handling": {"SiU7": summaries.get("SiU7")},
-        "loader_result_verdict": "pass" if quality_status_counts.get("fail", 0) == 0 else "fail",
-    }
+    manifest = {"schema_version": SCHEMA_MANIFEST, "run_id": run_id, "run_date": run_date, "snapshot_date": snapshot_date, "ingest_ts": ingest_ts, "loader_whitelist_applied": whitelist, "excluded_instruments_confirmed": excluded, "input_artifacts": input_paths, "output_artifacts": outputs, "partition_paths_created": partition_paths, "instrument_summaries": summaries, "quality_status_counts": quality_status_counts, "calendar_validation_summary": {"calendar_denominator_status": calendar_status, "calendar_from": calendar_from, "calendar_till": calendar_till, "expected_trading_days": len(expected_calendar)}, "futoi_source_scope_note": {"by_instrument": source_scope_values, "family_aggregate_futoi": "FUTOI source ticker may be family-level for expiring Si contracts; secid partition preserves accepted whitelist scope without treating FUTOI as OHLCV."}, "short_history_handling": {"SiU7": summaries.get("SiU7")}, "loader_result_verdict": "pass" if quality_status_counts.get("fail", 0) == 0 else "fail"}
     Path(outputs["manifest"]).parent.mkdir(parents=True, exist_ok=True)
     Path(outputs["manifest"]).write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
 
