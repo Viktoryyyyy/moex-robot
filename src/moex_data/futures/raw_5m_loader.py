@@ -26,9 +26,6 @@ SCHEMA_QUALITY = "futures_raw_5m_quality_report.v1"
 SCHEMA_MANIFEST = "futures_raw_5m_loader_manifest.v1"
 
 
-def stable_id(parts):
-    return hashlib.sha256("|".join([str(x) for x in parts]).encode("utf-8")).hexdigest()[:24]
-
 
 def output_paths(data_root, run_date):
     return {

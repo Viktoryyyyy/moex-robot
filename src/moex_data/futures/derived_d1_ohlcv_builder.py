@@ -31,9 +31,6 @@ REQUIRED_CONTRACTS = [
 ]
 
 
-def stable_id(parts):
-    return hashlib.sha256("|".join([str(x) for x in parts]).encode("utf-8")).hexdigest()[:24]
-
 
 def output_paths(data_root, run_date):
     return {
