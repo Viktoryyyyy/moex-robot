@@ -12,6 +12,7 @@ consumer:
 - futures_data_lake_pm_review
 - futures_daily_refresh_quality_consumer
 - later_scheduler_or_cron_wrapper
+- later_futures_continuous_builder_integration
 
 path_pattern: ${MOEX_DATA_ROOT}/futures/runs/daily_refresh/run_date={run_date}/manifest.json
 primary_key:
@@ -54,7 +55,7 @@ validation_rules:
 - schema_version must equal futures_daily_data_refresh_manifest.v1.
 - runner_whitelist_applied must equal SiM6, SiU6, SiU7, SiZ6, USDRUBF for accepted Slice 1 closeout.
 - excluded_instruments_confirmed must include SiH7 and SiM7.
-- component_execution_order must equal registry_refresh_runner, raw_5m_loader, futoi_raw_loader, derived_d1_ohlcv_builder.
+- component_execution_order must equal registry_refresh_runner, raw_5m_loader, futoi_raw_loader, derived_d1_ohlcv_builder for the implemented Slice 1.1 runner.
 - daily_refresh_result_verdict must be pass only when every child component status is pass and artifact_validation_status is pass.
 - child_manifest_references must include manifest references for registry_refresh_runner, raw_5m_loader, futoi_raw_loader, and derived_d1_ohlcv_builder.
 - registry_refresh_runner child manifest must conform to futures_registry_refresh_manifest.v1.
@@ -70,6 +71,17 @@ validation_rules:
 - no child manifest or partition path may include secid=SiH7 or secid=SiM7 in downstream loader/builder outputs.
 - if any child component fails, the runner must fail closed and must not execute later components.
 
+continuous_builder_integration_contract:
+- continuous futures v1 integration is declared as the next fail-closed extension point, not as part of the implemented Slice 1.1 manifest schema.
+- current futures_daily_data_refresh_manifest.v1 remains valid until the continuous builder is implemented.
+- when continuous builder is enabled, it must run only after registry_refresh_runner, raw_5m_loader, futoi_raw_loader, and derived_d1_ohlcv_builder have passed.
+- enabled continuous builder runs must produce futures_continuous_builder_manifest.v1 before the top-level daily refresh can return pass.
+- enabled continuous builder runs must preserve separate raw 5m, FUTOI raw, raw derived D1, continuous roll map, continuous 5m, and continuous D1 storage zones.
+- enabled continuous builder runs must fail closed if futures_continuous_roll_map.v1, futures_continuous_5m.v1, futures_continuous_d1.v1, or futures_continuous_quality_report.v1 validation fails.
+- enabled continuous builder runs must not silently bridge partial Si-chain gaps caused by excluded SiH7 or SiM7.
+- enabled continuous builder runs must preserve USDRUBF identity behavior.
+- a future schema version must explicitly add continuous_series_builder to component_execution_order and child_manifest_references when implementation is added.
+
 blocking_conditions:
 - any required child manifest contract is missing from repo.
 - registry_refresh_runner fails or its manifest verdict is not pass.
@@ -81,3 +93,4 @@ blocking_conditions:
 - any excluded instrument appears in downstream child summaries or partition paths.
 - SiU7 short_history_flag is not true.
 - child output artifacts or created partitions are missing.
+- when continuous builder is enabled, its child manifest, roll map, continuous 5m, continuous D1, and quality report must all validate before top-level pass.
