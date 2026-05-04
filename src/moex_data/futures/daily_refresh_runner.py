@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 import argparse
-import hashlib
 import json
 import os
 import subprocess
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path.cwd() / "src"))
 
@@ -18,12 +15,16 @@ except Exception:
     load_dotenv = None
 
 from moex_data.futures import liquidity_history_metrics_probe as base
+from moex_data.futures.slice1_common import DEFAULT_EXCLUDED
+from moex_data.futures.slice1_common import DEFAULT_WHITELIST
+from moex_data.futures.slice1_common import SHORT_HISTORY_ALLOWED
+from moex_data.futures.slice1_common import parse_list
+from moex_data.futures.slice1_common import print_json_line
+from moex_data.futures.slice1_common import stable_id
+from moex_data.futures.slice1_common import today_msk
+from moex_data.futures.slice1_common import utc_now_iso
 
-TZ_MSK = ZoneInfo("Europe/Moscow")
 SCHEMA_DAILY_REFRESH_MANIFEST = "futures_daily_data_refresh_manifest.v1"
-DEFAULT_WHITELIST = ["SiM6", "SiU6", "SiU7", "SiZ6", "USDRUBF"]
-DEFAULT_EXCLUDED = ["SiH7", "SiM7"]
-SHORT_HISTORY_ALLOWED = {"SiU7"}
 REQUIRED_CONTRACTS = [
     "contracts/datasets/futures_raw_5m_loader_manifest_contract.md",
     "contracts/datasets/futures_futoi_5m_raw_loader_manifest_contract.md",
@@ -64,25 +65,6 @@ COMPONENTS = [
 ]
 
 
-def today_msk():
-    return datetime.now(TZ_MSK).date().isoformat()
-
-
-def utc_now_iso():
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-
-
-def stable_id(parts):
-    return hashlib.sha256("|".join([str(x) for x in parts]).encode("utf-8")).hexdigest()[:24]
-
-
-def parse_list(value, default):
-    text = str(value or "").strip()
-    if not text:
-        return list(default)
-    return [x.strip() for x in text.split(",") if x.strip()]
-
-
 def output_paths(data_root, run_date):
     return {
         "manifest": str(data_root / "futures" / "runs" / "daily_refresh" / ("run_date=" + run_date) / "manifest.json")
@@ -94,10 +76,6 @@ def child_manifest_path(data_root, component, run_date):
     for part in component["manifest_rel"]:
         path = path / part
     return path / ("run_date=" + run_date) / "manifest.json"
-
-
-def print_json_line(key, value):
-    print(key + ": " + json.dumps(value, ensure_ascii=False, sort_keys=True, default=str))
 
 
 def load_json(path):
