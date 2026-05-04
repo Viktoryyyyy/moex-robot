@@ -109,12 +109,14 @@ def run_child(root, component_id, command, expected):
     return item
 
 
-def status_counts(path, field):
+def availability_summary(path):
     frame = pd.read_parquet(path)
+    field = "availability_status"
     if field not in frame.columns:
         return {"rows": int(len(frame)), "validation_status": "fail", "failure_reason": "missing " + field}
     counts = {str(k): int(v) for k, v in frame[field].astype(str).value_counts(dropna=False).to_dict().items()}
-    return {"rows": int(len(frame)), "status_counts": counts, "validation_status": "pass" if int(counts.get("fail") or 0) == 0 and int(len(frame)) > 0 else "fail"}
+    expected_available = int(len(frame)) > 0 and int(counts.get("available") or 0) == int(len(frame))
+    return {"rows": int(len(frame)), "status_counts": counts, "validation_status": "pass" if expected_available else "fail"}
 
 
 def screen_summary(path, field, whitelist):
@@ -141,13 +143,15 @@ def screen_summary(path, field, whitelist):
 
 
 def validate_outputs(outputs, whitelist):
+    registry_rows = int(len(pd.read_parquet(outputs["registry_snapshot"])))
+    normalized_rows = int(len(pd.read_parquet(outputs["normalized_registry"])))
     summaries = {
-        "registry_snapshot": {"rows": int(len(pd.read_parquet(outputs["registry_snapshot"]))), "validation_status": "pass"},
-        "normalized_registry": {"rows": int(len(pd.read_parquet(outputs["normalized_registry"]))), "validation_status": "pass"},
-        "algopack_fo_tradestats": status_counts(outputs["algopack_fo_tradestats"], "availability_status"),
-        "moex_futoi": status_counts(outputs["moex_futoi"], "availability_status"),
-        "algopack_fo_obstats": status_counts(outputs["algopack_fo_obstats"], "availability_status"),
-        "algopack_fo_hi2": status_counts(outputs["algopack_fo_hi2"], "availability_status"),
+        "registry_snapshot": {"rows": registry_rows, "validation_status": "pass" if registry_rows > 0 else "fail"},
+        "normalized_registry": {"rows": normalized_rows, "validation_status": "pass" if normalized_rows > 0 else "fail"},
+        "algopack_fo_tradestats": availability_summary(outputs["algopack_fo_tradestats"]),
+        "moex_futoi": availability_summary(outputs["moex_futoi"]),
+        "algopack_fo_obstats": availability_summary(outputs["algopack_fo_obstats"]),
+        "algopack_fo_hi2": availability_summary(outputs["algopack_fo_hi2"]),
         "liquidity_screen": screen_summary(outputs["liquidity_screen"], "liquidity_status", whitelist),
         "history_depth_screen": screen_summary(outputs["history_depth_screen"], "history_depth_status", whitelist),
     }
