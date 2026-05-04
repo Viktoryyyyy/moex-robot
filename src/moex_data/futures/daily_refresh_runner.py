@@ -200,7 +200,8 @@ def component_command(root, component, args, whitelist, excluded):
     if args.till:
         cmd.extend(["--till", args.till])
     cmd.extend(["--data-root", str(args.data_root_resolved)])
-    cmd.extend(["--timeout", str(args.timeout)])
+    if component["component_id"] in ["raw_5m_loader", "futoi_raw_loader"]:
+        cmd.extend(["--timeout", str(args.timeout)])
     cmd.extend(["--whitelist", ",".join(whitelist)])
     cmd.extend(["--excluded", ",".join(excluded)])
     if component["component_id"] in ["raw_5m_loader", "futoi_raw_loader"]:
