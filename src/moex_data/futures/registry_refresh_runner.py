@@ -190,8 +190,8 @@ def main():
     child_items = []
     child_items.append(run_child(root, "algopack_availability_probe", [sys.executable, str(root / "src/moex_data/futures/algopack_availability_probe.py")] + common, {k: outputs[k] for k in ["registry_snapshot", "normalized_registry", "algopack_fo_tradestats", "moex_futoi", "algopack_fo_obstats", "algopack_fo_hi2"]}))
     if child_items[-1].get("status") == "pass":
-        screen_cmd = [sys.executable, str(root / "src/moex_data/futures/liquidity_history_metrics_probe.py")] + common + ["--full-history-proven"]
-        child_items.append(run_child(root, "liquidity_history_metrics_probe", screen_cmd, {"liquidity_screen": outputs["liquidity_screen"], "history_depth_screen": outputs["history_depth_screen"]}))
+        screen_cmd = [sys.executable, str(root / "src/moex_data/futures/liquidity_history_metrics_probe_apim_calendar.py")] + common + ["--full-history-proven"]
+        child_items.append(run_child(root, "liquidity_history_metrics_probe_apim_calendar", screen_cmd, {"liquidity_screen": outputs["liquidity_screen"], "history_depth_screen": outputs["history_depth_screen"]}))
     final_status = "pass" if len(child_items) == 2 and all(x.get("status") == "pass" for x in child_items) else "fail"
     blockers = [str(x.get("component_id")) + ":" + str(x.get("failure_reason")) for x in child_items if x.get("status") != "pass"]
     output_summaries = {}
@@ -200,7 +200,7 @@ def main():
         blockers += validation_blockers
         if validation_blockers:
             final_status = "fail"
-    manifest = {"schema_version": SCHEMA_MANIFEST, "run_id": run_id, "run_date": args.run_date, "snapshot_date": args.snapshot_date, "refresh_from": args.from_date or None, "refresh_till": args.till or None, "started_ts": started_ts, "completed_ts": utc_now_iso(), "runner_whitelist_applied": whitelist, "excluded_instruments_confirmed": excluded, "component_execution_order": ["algopack_availability_probe", "liquidity_history_metrics_probe"], "child_component_status": child_items, "child_output_references": {x["component_id"]: {"status": x.get("status"), "validation_status": x.get("validation_status"), "expected_outputs": x.get("expected_outputs")} for x in child_items}, "output_artifacts": outputs, "output_summaries": output_summaries, "artifact_validation_status": "pass" if final_status == "pass" else "fail", "registry_refresh_result_verdict": final_status, "blockers": blockers}
+    manifest = {"schema_version": SCHEMA_MANIFEST, "run_id": run_id, "run_date": args.run_date, "snapshot_date": args.snapshot_date, "refresh_from": args.from_date or None, "refresh_till": args.till or None, "started_ts": started_ts, "completed_ts": utc_now_iso(), "runner_whitelist_applied": whitelist, "excluded_instruments_confirmed": excluded, "component_execution_order": ["algopack_availability_probe", "liquidity_history_metrics_probe_apim_calendar"], "child_component_status": child_items, "child_output_references": {x["component_id"]: {"status": x.get("status"), "validation_status": x.get("validation_status"), "expected_outputs": x.get("expected_outputs")} for x in child_items}, "output_artifacts": outputs, "output_summaries": output_summaries, "artifact_validation_status": "pass" if final_status == "pass" else "fail", "registry_refresh_result_verdict": final_status, "blockers": blockers}
     path = Path(outputs["manifest"])
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
