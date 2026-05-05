@@ -30,6 +30,7 @@ SCHEMA_MANIFEST = "futures_registry_refresh_manifest.v1"
 REQUIRED_CONTRACTS = [
     "contracts/datasets/futures_registry_snapshot_contract.md",
     "contracts/datasets/futures_normalized_instrument_registry_contract.md",
+    "contracts/datasets/futures_family_mapping_contract.md",
     "contracts/datasets/futures_algopack_tradestats_availability_report_contract.md",
     "contracts/datasets/futures_futoi_availability_report_contract.md",
     "contracts/datasets/futures_obstats_availability_report_contract.md",
@@ -47,6 +48,7 @@ REQUIRED_CONFIGS = [
 CONTRACTS = {
     "registry_snapshot": "contracts/datasets/futures_registry_snapshot_contract.md",
     "normalized_registry": "contracts/datasets/futures_normalized_instrument_registry_contract.md",
+    "family_mapping": "contracts/datasets/futures_family_mapping_contract.md",
     "algopack_fo_tradestats": "contracts/datasets/futures_algopack_tradestats_availability_report_contract.md",
     "moex_futoi": "contracts/datasets/futures_futoi_availability_report_contract.md",
     "algopack_fo_obstats": "contracts/datasets/futures_obstats_availability_report_contract.md",
@@ -109,14 +111,39 @@ def run_child(root, component_id, command, expected):
     return item
 
 
-def availability_summary(path):
+def basic_rows_summary(path):
     frame = pd.read_parquet(path)
-    field = "availability_status"
-    if field not in frame.columns:
-        return {"rows": int(len(frame)), "validation_status": "fail", "failure_reason": "missing " + field}
-    counts = {str(k): int(v) for k, v in frame[field].astype(str).value_counts(dropna=False).to_dict().items()}
-    expected_available = int(len(frame)) > 0 and int(counts.get("available") or 0) == int(len(frame))
-    return {"rows": int(len(frame)), "status_counts": counts, "validation_status": "pass" if expected_available else "fail"}
+    return {"rows": int(len(frame)), "validation_status": "pass" if int(len(frame)) > 0 else "fail"}
+
+
+def family_mapping_summary(path):
+    frame = pd.read_parquet(path)
+    if "mapping_status" not in frame.columns:
+        return {"rows": int(len(frame)), "validation_status": "fail", "failure_reason": "missing mapping_status"}
+    counts = {str(k): int(v) for k, v in frame["mapping_status"].astype(str).value_counts(dropna=False).to_dict().items()}
+    return {"rows": int(len(frame)), "status_counts": counts, "validation_status": "pass" if int(len(frame)) > 0 else "fail"}
+
+
+def availability_summary(path, whitelist):
+    frame = pd.read_parquet(path)
+    required = ["secid", "availability_status"]
+    missing = [x for x in required if x not in frame.columns]
+    if missing:
+        return {"rows": int(len(frame)), "validation_status": "fail", "failure_reason": "missing " + ",".join(missing)}
+    counts = {str(k): int(v) for k, v in frame["availability_status"].astype(str).value_counts(dropna=False).to_dict().items()}
+    by_secid = {}
+    status = "pass" if int(len(frame)) > 0 else "fail"
+    for secid in whitelist:
+        row = frame.loc[frame["secid"].astype(str).str.upper() == secid.upper()].tail(1)
+        if row.empty:
+            by_secid[secid] = "missing"
+            status = "fail"
+            continue
+        value = str(row.iloc[0].get("availability_status", ""))
+        by_secid[secid] = value
+        if value != "available":
+            status = "fail"
+    return {"rows": int(len(frame)), "status_counts": counts, "whitelist_status": by_secid, "validation_status": status}
 
 
 def screen_summary(path, field, whitelist):
@@ -124,7 +151,7 @@ def screen_summary(path, field, whitelist):
     if "secid" not in frame.columns or field not in frame.columns:
         return {"rows": int(len(frame)), "validation_status": "fail", "failure_reason": "missing required screen fields"}
     by_secid = {}
-    status = "pass"
+    status = "pass" if int(len(frame)) > 0 else "fail"
     for secid in whitelist:
         row = frame.loc[frame["secid"].astype(str).str.upper() == secid.upper()].tail(1)
         if row.empty:
@@ -143,15 +170,14 @@ def screen_summary(path, field, whitelist):
 
 
 def validate_outputs(outputs, whitelist):
-    registry_rows = int(len(pd.read_parquet(outputs["registry_snapshot"])))
-    normalized_rows = int(len(pd.read_parquet(outputs["normalized_registry"])))
     summaries = {
-        "registry_snapshot": {"rows": registry_rows, "validation_status": "pass" if registry_rows > 0 else "fail"},
-        "normalized_registry": {"rows": normalized_rows, "validation_status": "pass" if normalized_rows > 0 else "fail"},
-        "algopack_fo_tradestats": availability_summary(outputs["algopack_fo_tradestats"]),
-        "moex_futoi": availability_summary(outputs["moex_futoi"]),
-        "algopack_fo_obstats": availability_summary(outputs["algopack_fo_obstats"]),
-        "algopack_fo_hi2": availability_summary(outputs["algopack_fo_hi2"]),
+        "registry_snapshot": basic_rows_summary(outputs["registry_snapshot"]),
+        "normalized_registry": basic_rows_summary(outputs["normalized_registry"]),
+        "family_mapping": family_mapping_summary(outputs["family_mapping"]),
+        "algopack_fo_tradestats": availability_summary(outputs["algopack_fo_tradestats"], whitelist),
+        "moex_futoi": availability_summary(outputs["moex_futoi"], whitelist),
+        "algopack_fo_obstats": availability_summary(outputs["algopack_fo_obstats"], whitelist),
+        "algopack_fo_hi2": availability_summary(outputs["algopack_fo_hi2"], whitelist),
         "liquidity_screen": screen_summary(outputs["liquidity_screen"], "liquidity_status", whitelist),
         "history_depth_screen": screen_summary(outputs["history_depth_screen"], "history_depth_status", whitelist),
     }
@@ -188,7 +214,7 @@ def main():
     if args.till:
         common += ["--till", args.till]
     child_items = []
-    child_items.append(run_child(root, "algopack_availability_probe", [sys.executable, str(root / "src/moex_data/futures/algopack_availability_probe.py")] + common, {k: outputs[k] for k in ["registry_snapshot", "normalized_registry", "algopack_fo_tradestats", "moex_futoi", "algopack_fo_obstats", "algopack_fo_hi2"]}))
+    child_items.append(run_child(root, "registry_evidence_artifacts_producer", [sys.executable, str(root / "src/moex_data/futures/registry_evidence_artifacts_producer.py")] + common, {k: outputs[k] for k in ["registry_snapshot", "normalized_registry", "family_mapping", "algopack_fo_tradestats", "moex_futoi", "algopack_fo_obstats", "algopack_fo_hi2"]}))
     if child_items[-1].get("status") == "pass":
         screen_cmd = [sys.executable, str(root / "src/moex_data/futures/liquidity_history_metrics_probe_apim_calendar.py")] + common + ["--full-history-proven"]
         child_items.append(run_child(root, "liquidity_history_metrics_probe_apim_calendar", screen_cmd, {"liquidity_screen": outputs["liquidity_screen"], "history_depth_screen": outputs["history_depth_screen"]}))
@@ -200,7 +226,7 @@ def main():
         blockers += validation_blockers
         if validation_blockers:
             final_status = "fail"
-    manifest = {"schema_version": SCHEMA_MANIFEST, "run_id": run_id, "run_date": args.run_date, "snapshot_date": args.snapshot_date, "refresh_from": args.from_date or None, "refresh_till": args.till or None, "started_ts": started_ts, "completed_ts": utc_now_iso(), "runner_whitelist_applied": whitelist, "excluded_instruments_confirmed": excluded, "component_execution_order": ["algopack_availability_probe", "liquidity_history_metrics_probe_apim_calendar"], "child_component_status": child_items, "child_output_references": {x["component_id"]: {"status": x.get("status"), "validation_status": x.get("validation_status"), "expected_outputs": x.get("expected_outputs")} for x in child_items}, "output_artifacts": outputs, "output_summaries": output_summaries, "artifact_validation_status": "pass" if final_status == "pass" else "fail", "registry_refresh_result_verdict": final_status, "blockers": blockers}
+    manifest = {"schema_version": SCHEMA_MANIFEST, "run_id": run_id, "run_date": args.run_date, "snapshot_date": args.snapshot_date, "refresh_from": args.from_date or None, "refresh_till": args.till or None, "started_ts": started_ts, "completed_ts": utc_now_iso(), "runner_whitelist_applied": whitelist, "excluded_instruments_confirmed": excluded, "component_execution_order": ["registry_evidence_artifacts_producer", "liquidity_history_metrics_probe_apim_calendar"], "child_component_status": child_items, "child_output_references": {x["component_id"]: {"status": x.get("status"), "validation_status": x.get("validation_status"), "expected_outputs": x.get("expected_outputs")} for x in child_items}, "output_artifacts": outputs, "output_summaries": output_summaries, "artifact_validation_status": "pass" if final_status == "pass" else "fail", "registry_refresh_result_verdict": final_status, "blockers": blockers}
     path = Path(outputs["manifest"])
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
