@@ -128,6 +128,17 @@ def test_missing_expected_bar_gap_fails_closed():
         resample_continuous_htf(source, make_calendar(), "15m")
 
 
+def test_fully_missing_expected_bucket_fails_closed():
+    source = make_source_bars()
+    missing_bucket_ends = pd.to_datetime(
+        ["2026-05-04 10:20:00", "2026-05-04 10:25:00", "2026-05-04 10:30:00"]
+    )
+    source = source.loc[~source["end"].isin(missing_bucket_ends)].reset_index(drop=True)
+
+    with pytest.raises(HTFResamplingError, match="missing_expected_5m_source_bar_inside_bucket"):
+        resample_continuous_htf(source, make_calendar(), "15m")
+
+
 def test_cross_session_boundary_fails_closed():
     source = make_source_bars()
     source.loc[1, "session_date"] = "2026-05-05"
