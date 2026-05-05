@@ -491,14 +491,35 @@ def _validate_expected_bar_counts(
         .agg(source_bar_count=("end", "count"))
         .reset_index()
     )
-    joined = observed_counts.merge(
+    context_keys = [col for col in bucket_keys if col != "bucket_end"]
+    observed_ranges = (
+        source.groupby(list(context_keys), dropna=False)
+        .agg(
+            first_requested_source_end=("end", "min"),
+            last_requested_source_end=("end", "max"),
+        )
+        .reset_index()
+    )
+    expected_spine = observed_ranges.merge(
         expected_counts,
-        on=["session_date", "session_interval_id", "bucket_end"],
+        on=["session_date", "session_interval_id"],
         how="left",
     )
-    if joined["expected_source_bar_count"].isna().any():
+    if expected_spine["expected_source_bar_count"].isna().any():
         raise HTFResamplingError("bucket_boundary_not_validated_by_calendar")
-    if (joined["source_bar_count"] != joined["expected_source_bar_count"]).any():
+
+    expected_spine = expected_spine.loc[
+        (expected_spine["bucket_end"] >= expected_spine["first_requested_source_end"])
+        & (expected_spine["bucket_end"] <= expected_spine["last_requested_source_end"])
+    ].copy()
+    coverage = expected_spine.merge(
+        observed_counts,
+        on=list(bucket_keys),
+        how="left",
+    )
+    if coverage["source_bar_count"].isna().any():
+        raise HTFResamplingError("missing_expected_5m_source_bar_inside_bucket")
+    if (coverage["source_bar_count"] != coverage["expected_source_bar_count"]).any():
         raise HTFResamplingError("missing_expected_5m_source_bar_inside_bucket")
 
 
