@@ -12,7 +12,7 @@ consumer:
 - futures_slice1_universe_selector
 - futures_data_lake_pm_review
 
-path_pattern: ${MOEX_DATA_ROOT}/futures/screens/snapshot_date={snapshot_date}/futures_liquidity_screen.parquet
+path_pattern: ${MOEX_DATA_ROOT}/futures/screens/liquidity/snapshot_date={snapshot_date}/futures_liquidity_screen.parquet
 primary_key:
 - liquidity_screen_id
 - snapshot_date
