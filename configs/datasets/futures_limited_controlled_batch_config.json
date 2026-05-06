@@ -1,0 +1,65 @@
+{
+  "schema_version": "futures_limited_controlled_batch_config.v1",
+  "snapshot_date": "2026-05-06",
+  "controlled_batch_id": "limited_controlled_batch_2026_05_06_w_mm_mx",
+  "allowed_families": [
+    "W",
+    "MM",
+    "MX"
+  ],
+  "blocked_families": [
+    "SiH7",
+    "SiM7"
+  ],
+  "preserved_existing_rollouts": {
+    "pilot_families": [
+      "CR",
+      "GD",
+      "GL"
+    ],
+    "slice_1_whitelist": [
+      "SiM6",
+      "SiU6",
+      "SiU7",
+      "SiZ6",
+      "USDRUBF"
+    ]
+  },
+  "evidence": {
+    "artifact_class": "external_pattern",
+    "root_env": "MOEX_DATA_ROOT",
+    "input_patterns": [
+      "futures/rfud_candidates/snapshot_date={snapshot_date}/rfud_candidates.csv",
+      "futures/rfud_candidates/snapshot_date={snapshot_date}/rfud_candidates.json",
+      "futures/rfud_candidates/snapshot_date={snapshot_date}/rfud_candidates.parquet",
+      "futures/rfud_candidates/snapshot_date={snapshot_date}/*.csv",
+      "futures/rfud_candidates/snapshot_date={snapshot_date}/*.json",
+      "futures/rfud_candidates/snapshot_date={snapshot_date}/*.parquet",
+      "runs/rfud_candidates/snapshot_date={snapshot_date}/*.csv",
+      "runs/rfud_candidates/snapshot_date={snapshot_date}/*.json",
+      "runs/rfud_candidates/snapshot_date={snapshot_date}/*.parquet"
+    ]
+  },
+  "output": {
+    "artifact_class": "external_pattern",
+    "root_env": "MOEX_DATA_ROOT",
+    "path_pattern": "futures/limited_controlled_batch_classification/snapshot_date={snapshot_date}/controlled_batch_classification.csv",
+    "summary_path_pattern": "futures/limited_controlled_batch_classification/snapshot_date={snapshot_date}/controlled_batch_classification_summary.json"
+  },
+  "classification_policy": {
+    "raw_futoi_complete_status_values": [
+      "complete",
+      "pass",
+      "accepted",
+      "available",
+      "ok",
+      "true"
+    ],
+    "liquidity_history_review_required_values": [
+      "review_required"
+    ],
+    "limited_batch_status": "controlled_provisional",
+    "excluded_status": "not_in_limited_controlled_batch",
+    "continuous_eligibility_status": "not_accepted"
+  }
+}
