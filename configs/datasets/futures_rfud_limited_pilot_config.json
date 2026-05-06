@@ -1,0 +1,53 @@
+{
+  "config_id": "futures_rfud_limited_pilot_config",
+  "version": "1.0",
+  "project": "MOEX Bot",
+  "status": "implemented_config",
+  "scope": {
+    "limited_pilot_only": true,
+    "supported_board": "rfud",
+    "all_futures_rollout_allowed": false,
+    "historical_backfill_allowed": false,
+    "strategy_research_runtime_changes_allowed": false
+  },
+  "pilot_families": [
+    "CR",
+    "GD",
+    "GL"
+  ],
+  "current_whitelist_preserved": [
+    "SiM6",
+    "SiU6",
+    "SiU7",
+    "SiZ6",
+    "USDRUBF"
+  ],
+  "excluded_deferred_preserved": [
+    "SiH7",
+    "SiM7"
+  ],
+  "continuous_v1": {
+    "roll_policy_id": "expiration_minus_1_trading_session_v1",
+    "adjustment_policy_id": "unadjusted_v1",
+    "adjustment_factor": 1.0
+  },
+  "evidence_artifacts_required": [
+    "futures_family_mapping.parquet",
+    "futures_algopack_tradestats_availability_report.parquet",
+    "futures_futoi_availability_report.parquet",
+    "futures_liquidity_screen.parquet",
+    "futures_history_depth_screen.parquet"
+  ],
+  "classification_policy": {
+    "included_requires": [
+      "family_mapping_status=pass",
+      "tradestats_availability_status=available",
+      "futoi_availability_status=available",
+      "liquidity_status=pass",
+      "history_depth_status=pass"
+    ],
+    "missing_or_unresolved_required_evidence": "deferred",
+    "unsupported_board": "deferred",
+    "structural_identity_failure": "excluded"
+  }
+}
