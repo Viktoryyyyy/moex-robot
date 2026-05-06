@@ -13,6 +13,11 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import requests
 
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
+
 TZ_MSK = ZoneInfo("Europe/Moscow")
 DEFAULT_ISS_BASE_URL = "https://iss.moex.com"
 DEFAULT_APIM_BASE_URL = "https://apim.moex.com"
@@ -43,10 +48,12 @@ REQUIRED_CONTRACTS = [
     "contracts/datasets/futures_futoi_availability_report_contract.md",
     "contracts/datasets/futures_obstats_availability_report_contract.md",
     "contracts/datasets/futures_hi2_availability_report_contract.md",
+    "contracts/datasets/futures_rfud_candidates_evidence_contract.md",
 ]
 REQUIRED_CONFIGS = [
     "configs/datasets/futures_algopack_availability_sources_config.json",
     "configs/datasets/futures_slice1_universe_config.json",
+    "configs/datasets/futures_evidence_universe_scope_config.json",
 ]
 MONTH_CODES = set("FGHJKMNQUVXZ")
 
@@ -375,7 +382,19 @@ def included_family_config(universe_config: Dict[str, Any]) -> List[Dict[str, An
     return out
 
 
-def select_probe_instruments(normalized: pd.DataFrame, universe_config: Dict[str, Any]) -> pd.DataFrame:
+def select_probe_instruments(normalized: pd.DataFrame, universe_config: Dict[str, Any], universe_scope: str = "slice1") -> pd.DataFrame:
+    if universe_scope == "rfud_candidates":
+        required = ["board", "secid", "family_code"]
+        missing = [x for x in required if x not in normalized.columns]
+        if missing:
+            raise RuntimeError("Normalized registry missing required columns for rfud_candidates scope: " + ", ".join(missing))
+        selected = normalized.loc[normalized["board"].astype(str).str.strip().str.lower() == "rfud"].copy()
+        if selected.empty:
+            raise RuntimeError("rfud_candidates scope selected zero instruments from normalized registry")
+        selected["selection_status"] = "selected_from_rfud_candidates"
+        return selected.drop_duplicates(["board", "secid"]).sort_values(["family_code", "secid", "board"]).reset_index(drop=True)
+    if universe_scope != "slice1":
+        raise ValueError("Unsupported universe_scope: " + str(universe_scope))
     selected = []
     seen = set()
     for item in included_family_config(universe_config):
@@ -554,7 +573,18 @@ def build_availability_report(
     return pd.DataFrame(rows)
 
 
-def contract_output_path(data_root: Path, relative_contract: str, snapshot_date: str) -> Path:
+def contract_output_path(data_root: Path, relative_contract: str, snapshot_date: str, universe_scope: str = "slice1") -> Path:
+    if universe_scope == "rfud_candidates":
+        if relative_contract == "contracts/datasets/futures_registry_snapshot_contract.md":
+            return data_root / "futures" / "registry" / "universe_scope=rfud_candidates" / ("snapshot_date=" + snapshot_date) / "futures_registry_snapshot.parquet"
+        if relative_contract == "contracts/datasets/futures_normalized_instrument_registry_contract.md":
+            return data_root / "futures" / "registry" / "universe_scope=rfud_candidates" / ("snapshot_date=" + snapshot_date) / "futures_normalized_instrument_registry.parquet"
+        for endpoint_id, rel in CONTRACT_BY_ENDPOINT.items():
+            if rel == relative_contract:
+                return data_root / "futures" / "availability" / "universe_scope=rfud_candidates" / ("snapshot_date=" + snapshot_date) / REPORT_FILE_BY_ENDPOINT[endpoint_id]
+        raise RuntimeError("Unknown contract output path for rfud_candidates: " + relative_contract)
+    if universe_scope != "slice1":
+        raise ValueError("Unsupported universe_scope: " + str(universe_scope))
     if relative_contract == "contracts/datasets/futures_registry_snapshot_contract.md":
         return data_root / "futures" / "registry" / ("snapshot_date=" + snapshot_date) / "futures_registry_snapshot.parquet"
     if relative_contract == "contracts/datasets/futures_normalized_instrument_registry_contract.md":
@@ -589,6 +619,9 @@ def print_json_line(key: str, value: Any) -> None:
 
 
 def main() -> int:
+    if load_dotenv is not None:
+        load_dotenv()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--snapshot-date", default=today_msk())
     parser.add_argument("--from", dest="from_date", default="")
@@ -598,6 +631,7 @@ def main() -> int:
     parser.add_argument("--iss-base-url", default=os.getenv("MOEX_ISS_BASE_URL", DEFAULT_ISS_BASE_URL))
     parser.add_argument("--apim-base-url", default=os.getenv("MOEX_API_URL", DEFAULT_APIM_BASE_URL))
     parser.add_argument("--timeout", type=float, default=35.0)
+    parser.add_argument("--universe-scope", choices=["slice1", "rfud_candidates"], default="slice1")
     args = parser.parse_args()
 
     root = repo_root()
@@ -627,10 +661,13 @@ def main() -> int:
     registry["raw_payload_json"] = registry["raw_payload_json"].astype(str)
 
     normalized = build_normalized_registry(registry)
-    instruments = select_probe_instruments(normalized, universe_config)
+    instruments = select_probe_instruments(normalized, universe_config, str(args.universe_scope))
+    rfud_registry_count = int((normalized["board"].astype(str).str.strip().str.lower() == "rfud").sum())
+    if str(args.universe_scope) == "rfud_candidates" and rfud_registry_count > 7 and len(instruments) <= 7:
+        raise RuntimeError("rfud_candidates scope selected <=7 instruments while registry has more than 7 RFUD instruments")
 
-    registry_path = contract_output_path(data_root, "contracts/datasets/futures_registry_snapshot_contract.md", snapshot_date)
-    normalized_path = contract_output_path(data_root, "contracts/datasets/futures_normalized_instrument_registry_contract.md", snapshot_date)
+    registry_path = contract_output_path(data_root, "contracts/datasets/futures_registry_snapshot_contract.md", snapshot_date, str(args.universe_scope))
+    normalized_path = contract_output_path(data_root, "contracts/datasets/futures_normalized_instrument_registry_contract.md", snapshot_date, str(args.universe_scope))
     write_parquet(registry, registry_path)
     write_parquet(normalized, normalized_path)
 
@@ -661,7 +698,7 @@ def main() -> int:
             str(args.apim_base_url),
             str(args.iss_base_url),
         )
-        out_path = contract_output_path(data_root, contract_rel, snapshot_date)
+        out_path = contract_output_path(data_root, contract_rel, snapshot_date, str(args.universe_scope))
         write_parquet(report, out_path)
         report_paths[endpoint_id] = str(out_path)
         report_summaries[endpoint_id] = summarize_status(report)
@@ -677,11 +714,14 @@ def main() -> int:
         "unique_secid": int(registry["secid"].nunique()),
         "boards": sorted([str(x) for x in registry["board"].dropna().unique().tolist()]),
         "snapshot_date": snapshot_date,
+        "universe_scope": str(args.universe_scope),
     }
     normalized_summary = {
         "rows": int(len(normalized)),
         "unique_family_code": int(normalized["family_code"].nunique()),
         "selected_probe_instruments": instruments[["family_code", "secid", "board", "selection_status"]].to_dict("records"),
+        "universe_scope": str(args.universe_scope),
+        "rfud_registry_count": rfud_registry_count,
     }
 
     print_json_line("output_artifacts_created", output_paths)

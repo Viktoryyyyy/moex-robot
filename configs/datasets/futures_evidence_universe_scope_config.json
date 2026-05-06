@@ -1,0 +1,35 @@
+{
+  "allowed_universe_scopes": [
+    "slice1",
+    "rfud_candidates"
+  ],
+  "config_id": "futures_evidence_universe_scope_config",
+  "default_universe_scope": "slice1",
+  "project": "MOEX Bot",
+  "scopes": {
+    "rfud_candidates": {
+      "availability_output_root": "${MOEX_DATA_ROOT}/futures/availability/universe_scope=rfud_candidates/snapshot_date={snapshot_date}",
+      "blocked_actions": [
+        "raw_5m_loader_expansion",
+        "futoi_loader_expansion",
+        "historical_backfill",
+        "daily_refresh_expansion",
+        "continuous_series_expansion",
+        "strategy_runtime_changes"
+      ],
+      "board": "rfud",
+      "evidence_only": true,
+      "history_depth_output_root": "${MOEX_DATA_ROOT}/futures/screens/history_depth/universe_scope=rfud_candidates/snapshot_date={snapshot_date}",
+      "liquidity_output_root": "${MOEX_DATA_ROOT}/futures/screens/liquidity/universe_scope=rfud_candidates/snapshot_date={snapshot_date}",
+      "path_scope_segment": "universe_scope=rfud_candidates",
+      "selection_mode": "all_current_rfud_from_normalized_registry"
+    },
+    "slice1": {
+      "path_scope_segment": null,
+      "preserve_legacy_paths": true,
+      "selection_mode": "slice1_universe_config"
+    }
+  },
+  "status": "implemented_config",
+  "version": "1.0"
+}

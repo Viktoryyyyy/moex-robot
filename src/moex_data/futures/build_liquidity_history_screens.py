@@ -32,6 +32,7 @@ CONTRACT_HISTORY_DEPTH_SCREEN = "contracts/datasets/futures_history_depth_screen
 CONFIG_SLICE1_UNIVERSE = "configs/datasets/futures_slice1_universe_config.json"
 CONFIG_LIQUIDITY_THRESHOLDS = "configs/datasets/futures_liquidity_screen_thresholds_config.json"
 CONFIG_HISTORY_DEPTH_THRESHOLDS = "configs/datasets/futures_history_depth_thresholds_config.json"
+CONFIG_EVIDENCE_UNIVERSE_SCOPE = "configs/datasets/futures_evidence_universe_scope_config.json"
 
 REQUIRED_REPO_FILES = [
     CONTRACT_NORMALIZED_REGISTRY,
@@ -44,6 +45,7 @@ REQUIRED_REPO_FILES = [
     CONFIG_SLICE1_UNIVERSE,
     CONFIG_LIQUIDITY_THRESHOLDS,
     CONFIG_HISTORY_DEPTH_THRESHOLDS,
+    CONFIG_EVIDENCE_UNIVERSE_SCOPE,
 ]
 
 REQUIRED_INPUT_CONTRACTS = [
@@ -128,6 +130,36 @@ def resolve_contract_path(pattern: str, data_root: Path, snapshot_date: str) -> 
     if "{" in value or "}" in value or "$" in value:
         raise RuntimeError("Unresolved path_pattern placeholder: " + pattern)
     return Path(value).expanduser().resolve()
+
+
+def scoped_input_path(rel_contract: str, data_root: Path, snapshot_date: str, universe_scope: str, legacy_path: Path) -> Path:
+    if universe_scope == "slice1":
+        return legacy_path
+    if universe_scope != "rfud_candidates":
+        raise ValueError("Unsupported universe_scope: " + str(universe_scope))
+    if rel_contract == CONTRACT_NORMALIZED_REGISTRY:
+        return data_root / "futures" / "registry" / "universe_scope=rfud_candidates" / ("snapshot_date=" + snapshot_date) / "futures_normalized_instrument_registry.parquet"
+    if rel_contract == CONTRACT_TRADESTATS:
+        return data_root / "futures" / "availability" / "universe_scope=rfud_candidates" / ("snapshot_date=" + snapshot_date) / "futures_algopack_tradestats_availability_report.parquet"
+    if rel_contract == CONTRACT_FUTOI:
+        return data_root / "futures" / "availability" / "universe_scope=rfud_candidates" / ("snapshot_date=" + snapshot_date) / "futures_futoi_availability_report.parquet"
+    if rel_contract == CONTRACT_OBSTATS:
+        return data_root / "futures" / "availability" / "universe_scope=rfud_candidates" / ("snapshot_date=" + snapshot_date) / "futures_obstats_availability_report.parquet"
+    if rel_contract == CONTRACT_HI2:
+        return data_root / "futures" / "availability" / "universe_scope=rfud_candidates" / ("snapshot_date=" + snapshot_date) / "futures_hi2_availability_report.parquet"
+    raise RuntimeError("Unknown scoped input contract: " + rel_contract)
+
+
+def scoped_output_path(label: str, data_root: Path, snapshot_date: str, universe_scope: str, legacy_path: Path) -> Path:
+    if universe_scope == "slice1":
+        return legacy_path
+    if universe_scope != "rfud_candidates":
+        raise ValueError("Unsupported universe_scope: " + str(universe_scope))
+    if label == "futures_liquidity_screen":
+        return data_root / "futures" / "screens" / "liquidity" / "universe_scope=rfud_candidates" / ("snapshot_date=" + snapshot_date) / "futures_liquidity_screen.parquet"
+    if label == "futures_history_depth_screen":
+        return data_root / "futures" / "screens" / "history_depth" / "universe_scope=rfud_candidates" / ("snapshot_date=" + snapshot_date) / "futures_history_depth_screen.parquet"
+    raise RuntimeError("Unknown scoped output label: " + label)
 
 
 def stable_id(parts: Iterable[Any]) -> str:
@@ -402,6 +434,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--snapshot-date", default=today_msk())
     parser.add_argument("--data-root", default="")
+    parser.add_argument("--universe-scope", choices=["slice1", "rfud_candidates"], default="slice1")
     args = parser.parse_args()
 
     root = repo_root()
@@ -415,11 +448,13 @@ def main() -> int:
     history_profile = first_threshold_profile(read_json(root / CONFIG_HISTORY_DEPTH_THRESHOLDS), DEFAULT_THRESHOLD_PROFILE_ID)
     read_json(root / CONFIG_SLICE1_UNIVERSE)
 
-    input_paths = {rel: resolve_contract_path(contracts[rel]["path_pattern"], data_root, snapshot_date) for rel in REQUIRED_INPUT_CONTRACTS}
-    output_paths = {
+    legacy_input_paths = {rel: resolve_contract_path(contracts[rel]["path_pattern"], data_root, snapshot_date) for rel in REQUIRED_INPUT_CONTRACTS}
+    input_paths = {rel: scoped_input_path(rel, data_root, snapshot_date, str(args.universe_scope), legacy_input_paths[rel]) for rel in REQUIRED_INPUT_CONTRACTS}
+    legacy_output_paths = {
         "futures_liquidity_screen": resolve_contract_path(contracts[CONTRACT_LIQUIDITY_SCREEN]["path_pattern"], data_root, snapshot_date),
         "futures_history_depth_screen": resolve_contract_path(contracts[CONTRACT_HISTORY_DEPTH_SCREEN]["path_pattern"], data_root, snapshot_date),
     }
+    output_paths = {label: scoped_output_path(label, data_root, snapshot_date, str(args.universe_scope), legacy_output_paths[label]) for label in legacy_output_paths}
 
     normalized_registry = read_parquet_required(input_paths[CONTRACT_NORMALIZED_REGISTRY], "normalized_registry")
     reports: Dict[str, pd.DataFrame] = {}
@@ -446,6 +481,7 @@ def main() -> int:
     print_json_line("history_depth_screen_summary", summarize_screen(history, "history_depth_status"))
     print_json_line("selected_instruments_covered", selected)
     print_json_line("availability_universe_checks", universe_checks)
+    print_json_line("universe_scope", str(args.universe_scope))
     return 0
 
 
