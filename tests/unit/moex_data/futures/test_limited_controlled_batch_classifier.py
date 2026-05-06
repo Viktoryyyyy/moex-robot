@@ -1,77 +1,68 @@
-import csv
-import json
-from pathlib import Path
+import pandas as pd
 
 from moex_data.futures.limited_controlled_batch_classifier import classify
 
 
+def _write_parquet(path, rows):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_parquet(path, index=False)
+
+
 def test_limited_controlled_batch_classifier(tmp_path, monkeypatch):
     data_root = tmp_path / "data"
-    candidate_dir = data_root / "futures" / "rfud_candidates" / "snapshot_date=2026-05-06"
-    candidate_dir.mkdir(parents=True)
+    snapshot_dir = "snapshot_date=2026-05-06"
 
-    rows = [
-        {
-            "family": "W",
-            "raw_futoi_status": "complete",
-            "liquidity_history_status": "review_required",
-        },
-        {
-            "family": "MM",
-            "raw_futoi_status": "complete",
-            "liquidity_history_status": "review_required",
-        },
-        {
-            "family": "MX",
-            "raw_futoi_status": "complete",
-            "liquidity_history_status": "review_required",
-        },
-        {
-            "family": "CR",
-            "raw_futoi_status": "complete",
-            "liquidity_history_status": "accepted",
-        },
-        {
-            "family": "SiH7",
-            "raw_futoi_status": "complete",
-            "liquidity_history_status": "review_required",
-        },
+    registry_rows = [
+        {"family_code": "W", "secid": "W1", "board": "rfud"},
+        {"family_code": "MM", "secid": "MM1", "board": "rfud"},
+        {"family_code": "MX", "secid": "MX1", "board": "rfud"},
+        {"family_code": "CR", "secid": "CR1", "board": "rfud"},
+        {"family_code": "SiH7", "secid": "SiH7", "board": "rfud"},
+    ]
+    availability_rows = [
+        {"secid": "W1", "board": "rfud", "availability_status": "available"},
+        {"secid": "MM1", "board": "rfud", "availability_status": "available"},
+        {"secid": "MX1", "board": "rfud", "availability_status": "available"},
+        {"secid": "CR1", "board": "rfud", "availability_status": "available"},
+        {"secid": "SiH7", "board": "rfud", "availability_status": "available"},
+    ]
+    liquidity_rows = [
+        {"secid": "W1", "board": "rfud", "liquidity_status": "review_required"},
+        {"secid": "MM1", "board": "rfud", "liquidity_status": "review_required"},
+        {"secid": "MX1", "board": "rfud", "liquidity_status": "review_required"},
+        {"secid": "CR1", "board": "rfud", "liquidity_status": "pass"},
+        {"secid": "SiH7", "board": "rfud", "liquidity_status": "review_required"},
+    ]
+    history_rows = [
+        {"secid": "W1", "board": "rfud", "history_depth_status": "review_required"},
+        {"secid": "MM1", "board": "rfud", "history_depth_status": "review_required"},
+        {"secid": "MX1", "board": "rfud", "history_depth_status": "review_required"},
+        {"secid": "CR1", "board": "rfud", "history_depth_status": "pass"},
+        {"secid": "SiH7", "board": "rfud", "history_depth_status": "review_required"},
     ]
 
-    csv_path = candidate_dir / "rfud_candidates.csv"
-    with csv_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(
-            handle,
-            fieldnames=["family", "raw_futoi_status", "liquidity_history_status"],
-        )
-        writer.writeheader()
-        writer.writerows(rows)
+    _write_parquet(
+        data_root / "futures" / "registry" / "universe_scope=rfud_candidates" / snapshot_dir / "futures_normalized_instrument_registry.parquet",
+        registry_rows,
+    )
+    _write_parquet(
+        data_root / "futures" / "availability" / "universe_scope=rfud_candidates" / snapshot_dir / "futures_algopack_tradestats_availability_report.parquet",
+        availability_rows,
+    )
+    _write_parquet(
+        data_root / "futures" / "availability" / "universe_scope=rfud_candidates" / snapshot_dir / "futures_futoi_availability_report.parquet",
+        availability_rows,
+    )
+    _write_parquet(
+        data_root / "futures" / "screens" / "liquidity" / "universe_scope=rfud_candidates" / snapshot_dir / "futures_liquidity_screen.parquet",
+        liquidity_rows,
+    )
+    _write_parquet(
+        data_root / "futures" / "screens" / "history_depth" / "universe_scope=rfud_candidates" / snapshot_dir / "futures_history_depth_screen.parquet",
+        history_rows,
+    )
 
     monkeypatch.setenv("MOEX_DATA_ROOT", str(data_root))
-
-    repo_root = Path(__file__).resolve().parents[4]
-    config_dir = repo_root / "configs" / "datasets"
-    config_dir.mkdir(parents=True, exist_ok=True)
-
-    config_path = config_dir / "futures_limited_controlled_batch_config.json"
-    if not config_path.exists():
-        config_path.write_text(
-            json.dumps(
-                {
-                    "controlled_batch_id": "test_batch",
-                    "evidence": {
-                        "input_patterns": [
-                            "futures/rfud_candidates/snapshot_date={snapshot_date}/rfud_candidates.csv"
-                        ]
-                    },
-                    "output": {
-                        "path_pattern": "futures/out/{snapshot_date}/classification.csv",
-                        "summary_path_pattern": "futures/out/{snapshot_date}/summary.json",
-                    },
-                }
-            ),
-            encoding="utf-8",
-        )
 
     result_rows, metadata = classify("2026-05-06")
 
@@ -79,5 +70,6 @@ def test_limited_controlled_batch_classifier(tmp_path, monkeypatch):
     assert [row["family"] for row in result_rows] == ["MM", "MX", "W"]
     assert all(row["classification_status"] == "controlled_provisional" for row in result_rows)
     assert all(row["continuous_eligibility_status"] == "not_accepted" for row in result_rows)
+    assert metadata["summary"]["row_count"] == 3
     assert "CR" not in metadata["summary"]["families"]
     assert "SiH7" not in metadata["summary"]["families"]
