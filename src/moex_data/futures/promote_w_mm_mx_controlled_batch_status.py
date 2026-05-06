@@ -82,6 +82,15 @@ def require_columns(frame: pd.DataFrame, columns: Iterable[str]) -> None:
         raise RuntimeError("Classification artifact missing required columns: " + ", ".join(missing))
 
 
+def normalize_family_column(frame: pd.DataFrame) -> pd.DataFrame:
+    out = frame.copy()
+    if "family_code" not in out.columns:
+        if "family" not in out.columns:
+            raise RuntimeError("Classification artifact missing required family column: family_code or family")
+        out["family_code"] = out["family"]
+    return out
+
+
 def text(value: Any) -> str:
     if value is None:
         return ""
@@ -104,24 +113,26 @@ def count_by(frame: pd.DataFrame, column: str) -> Dict[str, int]:
     return {str(key): int(value) for key, value in values.items()}
 
 
-def validate_source(frame: pd.DataFrame, summary: Dict[str, Any], snapshot_date: str) -> None:
-    require_columns(frame, ["snapshot_date", "family_code", "classification_status", "continuous_eligibility_status"])
-    if len(frame) != 3:
-        raise RuntimeError("Expected exactly 3 classification rows, got " + str(len(frame)))
-    snapshot_values = list_values(frame, "snapshot_date")
+def validate_source(frame: pd.DataFrame, summary: Dict[str, Any], snapshot_date: str) -> pd.DataFrame:
+    normalized = normalize_family_column(frame)
+    require_columns(normalized, ["snapshot_date", "family_code", "classification_status", "continuous_eligibility_status"])
+    if len(normalized) != 3:
+        raise RuntimeError("Expected exactly 3 classification rows, got " + str(len(normalized)))
+    snapshot_values = list_values(normalized, "snapshot_date")
     if snapshot_values != [snapshot_date]:
         raise RuntimeError("Unexpected snapshot_date values: " + json.dumps(snapshot_values, ensure_ascii=False))
-    family_values = list_values(frame, "family_code")
+    family_values = list_values(normalized, "family_code")
     if family_values != sorted(TARGET_FAMILIES):
         raise RuntimeError("Expected only W/MM/MX families, got " + json.dumps(family_values, ensure_ascii=False))
-    source_statuses = list_values(frame, "classification_status")
+    source_statuses = list_values(normalized, "classification_status")
     if source_statuses != [REQUIRED_SOURCE_STATUS]:
         raise RuntimeError("Expected source classification_status controlled_provisional, got " + json.dumps(source_statuses, ensure_ascii=False))
-    continuous_statuses = list_values(frame, "continuous_eligibility_status")
+    continuous_statuses = list_values(normalized, "continuous_eligibility_status")
     if continuous_statuses != [CONTINUOUS_STATUS]:
         raise RuntimeError("Expected continuous_eligibility_status not_accepted, got " + json.dumps(continuous_statuses, ensure_ascii=False))
     if str(summary.get("snapshot_date", snapshot_date)).strip() != snapshot_date:
         raise RuntimeError("Summary snapshot_date is inconsistent with requested snapshot_date")
+    return normalized
 
 
 def build_promoted(frame: pd.DataFrame, snapshot_date: str) -> pd.DataFrame:
@@ -218,8 +229,8 @@ def main() -> int:
     summary_path = path_from_pattern(data_root, OUTPUT_SUMMARY_PATTERN, snapshot_date)
     source = read_csv_required(source_path)
     source_summary = read_json_required(source_summary_path)
-    validate_source(source, source_summary, snapshot_date)
-    promoted = build_promoted(source, snapshot_date)
+    normalized_source = validate_source(source, source_summary, snapshot_date)
+    promoted = build_promoted(normalized_source, snapshot_date)
     summary = build_summary(promoted, source_path, source_summary_path, output_path, summary_path, snapshot_date)
     if not all(bool(value) for value in summary["preservation_checks"].values()):
         raise RuntimeError("Preservation checks failed: " + json.dumps(summary["preservation_checks"], ensure_ascii=False, sort_keys=True))
