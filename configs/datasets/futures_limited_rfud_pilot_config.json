@@ -1,0 +1,51 @@
+{
+  "config_id": "futures_limited_rfud_pilot_config",
+  "version": "1.0",
+  "project": "MOEX Bot",
+  "status": "implemented_config",
+  "scope": {
+    "board": "RFUD",
+    "pilot_only": true,
+    "all_futures_rollout": false,
+    "historical_backfill": false,
+    "strategy_research_runtime_trading_changes": false
+  },
+  "preserved_current_whitelist": [
+    "SiM6",
+    "SiU6",
+    "SiU7",
+    "SiZ6",
+    "USDRUBF"
+  ],
+  "preserved_excluded_deferred_instruments": [
+    "SiH7",
+    "SiM7"
+  ],
+  "pilot_families": [
+    "CR",
+    "GD",
+    "GL"
+  ],
+  "pilot_selection_source": "PM-selected families after accepted all-universe eligibility contract and server evidence artifacts for snapshot_date=2026-05-05",
+  "required_evidence_artifacts": [
+    "futures_family_mapping.parquet",
+    "futures_futoi_availability_report.parquet",
+    "futures_algopack_tradestats_availability_report.parquet",
+    "futures_liquidity_screen.parquet",
+    "futures_history_depth_screen.parquet"
+  ],
+  "classification_policy": {
+    "included_requires_all_mandatory_checks_pass": true,
+    "missing_unresolved_partial_failed_or_uncontracted_checks": "deferred",
+    "structural_invalidity": "excluded",
+    "futoi_mandatory": true,
+    "raw_5m_mandatory": true,
+    "liquidity_mandatory": true,
+    "history_depth_mandatory": true
+  },
+  "continuous_v1_policy": {
+    "roll_policy_id": "expiration_minus_1_trading_session_v1",
+    "adjustment_policy_id": "unadjusted_v1",
+    "adjustment_factor": 1.0
+  }
+}
