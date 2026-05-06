@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import argparse
 import csv
-import glob
 import json
 import os
 from pathlib import Path
 from typing import Any
+
+import pandas as pd
+
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
 
 ALLOWED_FAMILIES = {"W", "MM", "MX"}
 BLOCKED_FAMILIES = {"SiH7", "SiM7"}
@@ -22,68 +28,17 @@ def _load_config() -> dict[str, Any]:
     return json.loads(config_path.read_text(encoding="utf-8"))
 
 
-def _candidate_paths(data_root: str, snapshot_date: str, patterns: list[str]) -> list[Path]:
-    results: list[Path] = []
-    for pattern in patterns:
-        expanded = pattern.format(snapshot_date=snapshot_date)
-        full_pattern = os.path.join(data_root, expanded)
-        for match in glob.glob(full_pattern):
-            path = Path(match)
-            if path.is_file():
-                results.append(path)
-    deduped = []
-    seen = set()
-    for path in results:
-        key = str(path.resolve())
-        if key not in seen:
-            seen.add(key)
-            deduped.append(path)
-    return deduped
+def _resolve_path(data_root: str, pattern: str, snapshot_date: str) -> Path:
+    return Path(data_root) / pattern.format(snapshot_date=snapshot_date)
 
 
-def _normalize_value(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(value).strip().lower()
-
-
-def _extract_rows(path: Path) -> list[dict[str, Any]]:
-    suffix = path.suffix.lower()
-    if suffix == ".json":
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(payload, list):
-            return [item for item in payload if isinstance(item, dict)]
-        if isinstance(payload, dict):
-            for value in payload.values():
-                if isinstance(value, list):
-                    return [item for item in value if isinstance(item, dict)]
-        return []
-    if suffix == ".csv":
-        with path.open("r", encoding="utf-8") as handle:
-            return list(csv.DictReader(handle))
-    if suffix == ".parquet":
-        try:
-            import pandas as pd
-        except Exception as exc:
-            raise RuntimeError("pandas required for parquet support") from exc
-        return pd.read_parquet(path).to_dict("records")
-    return []
-
-
-def _family_from_row(row: dict[str, Any]) -> str:
-    for key in ["family", "family_code", "underlying_family", "symbol_family"]:
-        value = row.get(key)
-        if value:
-            return str(value).strip()
-    return ""
-
-
-def _status_from_row(row: dict[str, Any], keys: list[str]) -> str:
-    for key in keys:
-        value = row.get(key)
-        if value is not None and str(value).strip() != "":
-            return str(value).strip()
-    return ""
+def _read_required_parquet(path: Path, label: str) -> pd.DataFrame:
+    if not path.exists():
+        raise FileNotFoundError("Missing required artifact for " + label + ": " + str(path))
+    frame = pd.read_parquet(path)
+    if frame.empty:
+        raise RuntimeError("Artifact is empty for " + label + ": " + str(path))
+    return frame
 
 
 def classify(snapshot_date: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -92,64 +47,96 @@ def classify(snapshot_date: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if not data_root:
         raise RuntimeError("MOEX_DATA_ROOT is required")
 
-    patterns = config["evidence"]["input_patterns"]
-    candidate_files = _candidate_paths(data_root, snapshot_date, patterns)
-    if not candidate_files:
-        raise RuntimeError("No rfud_candidates artifacts found")
+    paths = config["evidence"]["input_paths"]
 
-    family_rows: dict[str, dict[str, Any]] = {}
+    normalized = _read_required_parquet(
+        _resolve_path(data_root, paths["normalized_registry"], snapshot_date),
+        "normalized_registry",
+    )
+    tradestats = _read_required_parquet(
+        _resolve_path(data_root, paths["tradestats_availability"], snapshot_date),
+        "tradestats_availability",
+    )
+    futoi = _read_required_parquet(
+        _resolve_path(data_root, paths["futoi_availability"], snapshot_date),
+        "futoi_availability",
+    )
+    liquidity = _read_required_parquet(
+        _resolve_path(data_root, paths["liquidity_screen"], snapshot_date),
+        "liquidity_screen",
+    )
+    history = _read_required_parquet(
+        _resolve_path(data_root, paths["history_depth_screen"], snapshot_date),
+        "history_depth_screen",
+    )
 
-    for path in candidate_files:
-        for row in _extract_rows(path):
-            family = _family_from_row(row)
-            if family not in ALLOWED_FAMILIES:
-                continue
+    registry = normalized[["family_code", "secid", "board"]].drop_duplicates().copy()
 
-            raw_status = _normalize_value(
-                _status_from_row(
-                    row,
-                    ["raw_futoi_status", "raw_status", "futoi_status", "availability_status"],
-                )
-            )
-            liquidity_status = _normalize_value(
-                _status_from_row(
-                    row,
-                    ["liquidity_history_status", "history_status", "liquidity_status"],
-                )
-            )
+    tradestats_ok = tradestats.loc[
+        tradestats["availability_status"].astype(str) == "available",
+        ["secid", "board"],
+    ].drop_duplicates().copy()
+    tradestats_ok["tradestats_ok"] = True
 
-            accepted_raw = raw_status in {
-                "complete",
-                "pass",
-                "accepted",
-                "available",
-                "ok",
-                "true",
+    futoi_ok = futoi.loc[
+        futoi["availability_status"].astype(str) == "available",
+        ["secid", "board"],
+    ].drop_duplicates().copy()
+    futoi_ok["futoi_ok"] = True
+
+    liquidity_ok = liquidity.loc[
+        liquidity["liquidity_status"].astype(str) == "review_required",
+        ["secid", "board"],
+    ].drop_duplicates().copy()
+    liquidity_ok["liquidity_ok"] = True
+
+    history_ok = history.loc[
+        history["history_depth_status"].astype(str) == "review_required",
+        ["secid", "board"],
+    ].drop_duplicates().copy()
+    history_ok["history_ok"] = True
+
+    merged = registry.merge(tradestats_ok, on=["secid", "board"], how="left")
+    merged = merged.merge(futoi_ok, on=["secid", "board"], how="left")
+    merged = merged.merge(liquidity_ok, on=["secid", "board"], how="left")
+    merged = merged.merge(history_ok, on=["secid", "board"], how="left")
+
+    merged["tradestats_ok"] = merged["tradestats_ok"].fillna(False)
+    merged["futoi_ok"] = merged["futoi_ok"].fillna(False)
+    merged["liquidity_ok"] = merged["liquidity_ok"].fillna(False)
+    merged["history_ok"] = merged["history_ok"].fillna(False)
+
+    selected = merged.loc[
+        merged["family_code"].astype(str).isin(ALLOWED_FAMILIES)
+        & merged["tradestats_ok"]
+        & merged["futoi_ok"]
+        & merged["liquidity_ok"]
+        & merged["history_ok"]
+    ].copy()
+
+    family_rows = []
+    for family in sorted(selected["family_code"].astype(str).unique().tolist()):
+        family_rows.append(
+            {
+                "snapshot_date": snapshot_date,
+                "family": family,
+                "classification_status": CONTROLLED_STATUS,
+                "liquidity_history_status": "review_required",
+                "raw_futoi_status": "complete",
+                "continuous_eligibility_status": CONTINUOUS_STATUS,
+                "evidence_source": "rfud_candidates_contract_artifacts",
+                "controlled_batch_id": config["controlled_batch_id"],
             }
-            review_required = liquidity_status == "review_required"
+        )
 
-            if accepted_raw and review_required:
-                family_rows[family] = {
-                    "snapshot_date": snapshot_date,
-                    "family": family,
-                    "classification_status": CONTROLLED_STATUS,
-                    "liquidity_history_status": "review_required",
-                    "raw_futoi_status": "complete",
-                    "continuous_eligibility_status": CONTINUOUS_STATUS,
-                    "evidence_source": str(path),
-                    "controlled_batch_id": config["controlled_batch_id"],
-                }
-
-    final_rows = [family_rows[key] for key in sorted(family_rows)]
-
-    invalid = [row["family"] for row in final_rows if row["family"] not in ALLOWED_FAMILIES]
+    invalid = [row["family"] for row in family_rows if row["family"] not in ALLOWED_FAMILIES]
     if invalid:
-        raise RuntimeError(f"Unexpected families selected: {invalid}")
+        raise RuntimeError("Unexpected families selected: " + json.dumps(invalid))
 
     summary = {
         "snapshot_date": snapshot_date,
-        "row_count": len(final_rows),
-        "families": [row["family"] for row in final_rows],
+        "row_count": len(family_rows),
+        "families": [row["family"] for row in family_rows],
         "classification_status": CONTROLLED_STATUS,
         "continuous_eligibility_status": CONTINUOUS_STATUS,
         "preserved_pilot": sorted(PILOT_FAMILIES),
@@ -176,13 +163,13 @@ def classify(snapshot_date: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         ]
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
-        writer.writerows(final_rows)
+        writer.writerows(family_rows)
 
     summary_path = Path(data_root) / summary_pattern
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
-    return final_rows, {
+    return family_rows, {
         "output_artifact": str(output_path),
         "summary_artifact": str(summary_path),
         "summary": summary,
@@ -190,6 +177,9 @@ def classify(snapshot_date: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
 
 
 def main() -> None:
+    if load_dotenv is not None:
+        load_dotenv()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--snapshot-date", required=True)
     args = parser.parse_args()
