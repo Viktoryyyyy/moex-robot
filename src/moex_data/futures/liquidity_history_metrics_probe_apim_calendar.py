@@ -40,7 +40,7 @@ def _apim_calendar_base_url() -> str:
 
 def fetch_futures_calendar(screen_from: str, screen_till: str, timeout: float, unused_iss_base_url: str) -> Tuple[Optional[Set[str]], str]:
     out: Set[str] = set()
-    required = ["tradedate", "futures_workday", "futures_trade_session_date", "futures_reason"]
+    required = ["tradedate", "futures_workday", "futures_reason"]
     parsed_rows = 0
     try:
         for chunk_from, chunk_till in base.year_chunks(screen_from, screen_till):
@@ -68,11 +68,9 @@ def fetch_futures_calendar(screen_from: str, screen_till: str, timeout: float, u
                 parsed_rows += 1
                 if not _truthy_workday(_xml_attr(row, "futures_workday")):
                     continue
-                canonical_session_date = base.parse_iso_date(_xml_attr(row, "futures_trade_session_date"))
-                if not canonical_session_date:
-                    canonical_session_date = base.parse_iso_date(_xml_attr(row, "tradedate"))
-                if canonical_session_date:
-                    out.add(canonical_session_date)
+                canonical_trade_date = base.parse_iso_date(_xml_attr(row, "tradedate"))
+                if canonical_trade_date:
+                    out.add(canonical_trade_date)
     except Exception as exc:
         return None, "unresolved: " + exc.__class__.__name__ + ": " + str(exc)[:300]
     if parsed_rows == 0:
