@@ -10,7 +10,7 @@ from moex_data.futures.futoi_raw_loader import resolve_path_from_contract
 
 SCOPE = "controlled_batch_w_mm_mx"
 CONFIG = "configs/datasets/futures_controlled_batch_w_mm_mx_raw_scope_config.json"
-PILOT_CLASSIFICATION_REL = "futures/registry/pilot_classification/snapshot_date={snapshot_date}/limited_rfud_pilot_classification.parquet"
+PILOT_CLASSIFICATION_REL = "futures/registry/controlled_wmmmx_eligibility/snapshot_date={snapshot_date}/controlled_wmmmx_eligibility.parquet"
 
 
 def load_config(root, path):
