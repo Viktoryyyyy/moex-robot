@@ -80,12 +80,12 @@ def controlled_status_filter(frame, snapshot_date):
     validation_mask = ~work["_validation_status_normalized"].isin(ACCEPTED_VALIDATION_STATUSES)
     missing_range_mask = work["_first_available_day"].isna() | work["_last_available_day"].isna()
     inverted_range_mask = (~missing_range_mask) & (work["_first_available_day"] > work["_last_available_day"])
-    future_unresolved_mask = (~missing_range_mask) & (work["_last_available_day"] > snapshot_day)
+    expired_mask = (~missing_range_mask) & (work["_last_available_day"] < snapshot_day)
     work.loc[draft_mask, "eligibility_rejection_reason"] = "mapping_status_draft"
     work.loc[(work["eligibility_rejection_reason"] == "") & validation_mask, "eligibility_rejection_reason"] = "validation_status_not_accepted"
     work.loc[(work["eligibility_rejection_reason"] == "") & missing_range_mask, "eligibility_rejection_reason"] = "raw_loader_date_range_missing"
     work.loc[(work["eligibility_rejection_reason"] == "") & inverted_range_mask, "eligibility_rejection_reason"] = "raw_loader_date_range_inverted"
-    work.loc[(work["eligibility_rejection_reason"] == "") & future_unresolved_mask, "eligibility_rejection_reason"] = "raw_loader_date_range_not_resolvable_as_of_snapshot"
+    work.loc[(work["eligibility_rejection_reason"] == "") & expired_mask, "eligibility_rejection_reason"] = "contract_expired_before_snapshot"
     accepted = work.loc[work["eligibility_rejection_reason"] == ""].copy()
     rejected = work.loc[work["eligibility_rejection_reason"] != ""].copy()
     accepted["mapping_status"] = accepted[mapping_col].astype(str)
@@ -163,8 +163,9 @@ def main():
         "gate_policy": {
             "mapping_status_draft_allowed": False,
             "validation_status_required": "accepted_status_only",
-            "raw_loader_date_range_required": True,
-            "raw_loader_date_range_must_be_resolvable_as_of_snapshot_date": True
+            "last_trade_date_required": True,
+            "expired_before_snapshot_allowed": False,
+            "future_expiry_allowed_for_validated_active_contracts": True
         },
         "rejection_counts": rejection_counts,
         "rejected_examples": rejected_examples,
