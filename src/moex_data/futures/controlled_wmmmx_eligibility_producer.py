@@ -12,7 +12,7 @@ except Exception:
 import pandas as pd
 
 TARGET_FAMILIES = {"W", "MM", "MX"}
-+TARGET_BOARD = "RFUD"
+TARGET_BOARD = "RFUD"
 TARGET_STATUS = "controlled_accepted_for_data_pipeline"
 CONTINUOUS_STATUS = "not_accepted"
 SCHEMA_VERSION = "futures_controlled_wmmmx_eligibility.v1"
