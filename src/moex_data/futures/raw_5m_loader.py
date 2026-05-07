@@ -24,6 +24,8 @@ from moex_data.futures.slice1_common import utc_now_iso
 SCHEMA_RAW_5M = "futures_raw_5m.v1"
 SCHEMA_QUALITY = "futures_raw_5m_quality_report.v1"
 SCHEMA_MANIFEST = "futures_raw_5m_loader_manifest.v1"
+PRIMARY_KEY = ["trade_date", "ts", "secid"]
+MARKET_VALUE_COLUMNS = ["open", "high", "low", "close", "volume", "value", "num_trades"]
 
 
 
@@ -199,10 +201,53 @@ def normalize_tradestats(frame, secid, family_code, board, source_url, ingest_ts
     return out, meta
 
 
+def duplicate_timestamp_policy(frame):
+    diag = {
+        "raw_rows_before_duplicate_policy": int(len(frame)),
+        "exact_duplicate_full_row_count": 0,
+        "source_session_duplicate_timestamp_row_count": 0,
+        "conflicting_duplicate_timestamp_row_count": 0,
+        "rows_after_exact_duplicate_drop": int(len(frame)),
+        "duplicate_conflict_examples": [],
+    }
+    if frame.empty:
+        return frame.copy(), diag
+    full_dup_mask = frame.duplicated(keep="first")
+    diag["exact_duplicate_full_row_count"] = int(full_dup_mask.sum())
+    clean = frame.loc[~full_dup_mask].copy().reset_index(drop=True)
+    dup_mask = clean.duplicated(subset=PRIMARY_KEY, keep=False)
+    if dup_mask.any():
+        dup = clean.loc[dup_mask].copy()
+        source_session_count = 0
+        conflict_count = 0
+        examples = []
+        value_cols = [x for x in MARKET_VALUE_COLUMNS if x in dup.columns]
+        for key_values, group in dup.groupby(PRIMARY_KEY, dropna=False):
+            market_variants = int(group[value_cols].drop_duplicates().shape[0]) if value_cols else int(group.drop_duplicates().shape[0])
+            extra_rows = int(len(group) - 1)
+            if market_variants == 1:
+                source_session_count += extra_rows
+            else:
+                conflict_count += extra_rows
+            if len(examples) < 10:
+                examples.append({
+                    "trade_date": str(key_values[0]),
+                    "ts": str(key_values[1]),
+                    "secid": str(key_values[2]),
+                    "rows": int(len(group)),
+                    "market_value_variants": market_variants,
+                })
+        diag["source_session_duplicate_timestamp_row_count"] = int(source_session_count)
+        diag["conflicting_duplicate_timestamp_row_count"] = int(conflict_count)
+        diag["duplicate_conflict_examples"] = examples
+    diag["rows_after_exact_duplicate_drop"] = int(len(clean))
+    return clean, diag
+
+
 def quality_counts(frame, expected_calendar):
     if frame.empty:
         return {"rows": 0, "trade_dates": 0, "min_ts": None, "max_ts": None, "duplicate_ts_count": 0, "null_ohlc_count": 0, "invalid_ohlc_count": 0, "off_calendar_date_count": None, "missing_expected_trading_days": None}
-    duplicates = int(frame.duplicated(subset=["trade_date", "ts", "secid"]).sum())
+    duplicates = int(frame.duplicated(subset=PRIMARY_KEY).sum())
     null_ohlc = int(frame[["open", "high", "low", "close"]].isna().any(axis=1).sum())
     invalid = (frame["high"] < frame["low"]) | (frame["open"] > frame["high"]) | (frame["open"] < frame["low"]) | (frame["close"] > frame["high"]) | (frame["close"] < frame["low"])
     dates = set(frame["trade_date"].dropna().astype(str).tolist())
@@ -220,7 +265,7 @@ def status_from_counts(counts, fetch_status, calendar_status, history_status, sh
         return "fail", "source fetch failed or produced zero rows"
     if calendar_status != "canonical_apim_futures_xml":
         return "fail", "calendar denominator is not canonical_apim_futures_xml"
-    for key, note in [("duplicate_ts_count", "duplicate primary timestamp rows detected before partition write"), ("null_ohlc_count", "null OHLC values detected"), ("invalid_ohlc_count", "invalid OHLC ordering detected"), ("off_calendar_date_count", "loaded trade dates outside APIM futures calendar")]:
+    for key, note in [("duplicate_ts_count", "conflicting duplicate primary timestamp rows detected before partition write"), ("null_ohlc_count", "null OHLC values detected"), ("invalid_ohlc_count", "invalid OHLC ordering detected"), ("off_calendar_date_count", "loaded trade dates outside APIM futures calendar")]:
         if counts.get(key) is not None and int(counts.get(key) or 0) > 0:
             return "fail", note
     if short_history_flag:
@@ -232,8 +277,9 @@ def status_from_counts(counts, fetch_status, calendar_status, history_status, sh
 
 def write_partitions(frame, data_root, family_code, secid):
     paths = []
-    clean = frame.drop_duplicates(subset=["trade_date", "ts", "secid"], keep="last").copy()
-    for trade_date, part in clean.groupby("trade_date"):
+    if frame.duplicated(subset=PRIMARY_KEY).any():
+        raise RuntimeError("duplicate primary timestamp rows detected before partition write: " + str(secid))
+    for trade_date, part in frame.groupby("trade_date"):
         path = partition_path(data_root, str(trade_date), family_code, secid)
         path.parent.mkdir(parents=True, exist_ok=True)
         part.sort_values(["ts", "secid"]).to_parquet(path, index=False)
@@ -289,6 +335,7 @@ def main():
     partition_paths = []
     quality_rows = []
     summaries = {}
+    duplicate_diagnostics = {}
     for _, row in instruments.iterrows():
         secid = str(row.get("secid"))
         family_code = str(row.get("family_code"))
@@ -298,6 +345,8 @@ def main():
         short_history_flag = bool(row.get("short_history_flag"))
         source_frame, source_url, fetch_status, fetch_error = base.fetch_tradestats(secid, start, end, float(args.timeout), str(args.apim_base_url), str(args.iss_base_url))
         raw, meta = normalize_tradestats(source_frame, secid, family_code, board, source_url, ingest_ts, short_history_flag, calendar_status)
+        raw, duplicate_diag = duplicate_timestamp_policy(raw)
+        duplicate_diagnostics[secid] = duplicate_diag
         counts = quality_counts(raw, expected_calendar)
         quality_status, notes = status_from_counts(counts, fetch_status, calendar_status, str(row.get("history_depth_status", "")), short_history_flag)
         paths = write_partitions(raw, data_root, family_code, secid) if quality_status != "fail" else []
@@ -318,6 +367,11 @@ def main():
             "fetch_status": fetch_status,
             "fetch_error": fetch_error or None,
             "normalization_error": meta.get("error") or None,
+            "raw_rows_before_duplicate_policy": duplicate_diag.get("raw_rows_before_duplicate_policy"),
+            "exact_duplicate_full_row_count": duplicate_diag.get("exact_duplicate_full_row_count"),
+            "source_session_duplicate_timestamp_row_count": duplicate_diag.get("source_session_duplicate_timestamp_row_count"),
+            "conflicting_duplicate_timestamp_row_count": duplicate_diag.get("conflicting_duplicate_timestamp_row_count"),
+            "rows_after_exact_duplicate_drop": duplicate_diag.get("rows_after_exact_duplicate_drop"),
             "rows": counts.get("rows"),
             "trade_dates": counts.get("trade_dates"),
             "min_ts": counts.get("min_ts"),
@@ -334,15 +388,21 @@ def main():
             "short_history_flag": short_history_flag,
             "quality_status": quality_status,
             "review_notes": notes,
+            "duplicate_conflict_examples_json": json.dumps(duplicate_diag.get("duplicate_conflict_examples") or [], ensure_ascii=False, sort_keys=True, default=str),
             "mapped_columns_json": json.dumps(meta.get("mapped_columns") or {}, ensure_ascii=False, sort_keys=True),
             "observed_columns_json": json.dumps(meta.get("columns") or [], ensure_ascii=False, sort_keys=True),
         })
-        summaries[secid] = {"requested_from": start, "requested_till": end, "rows": counts.get("rows"), "trade_dates": counts.get("trade_dates"), "partition_count": len(paths), "quality_status": quality_status, "short_history_flag": short_history_flag, "review_notes": notes}
+        summaries[secid] = {"requested_from": start, "requested_till": end, "rows": counts.get("rows"), "trade_dates": counts.get("trade_dates"), "partition_count": len(paths), "quality_status": quality_status, "short_history_flag": short_history_flag, "review_notes": notes, "exact_duplicate_full_row_count": duplicate_diag.get("exact_duplicate_full_row_count"), "source_session_duplicate_timestamp_row_count": duplicate_diag.get("source_session_duplicate_timestamp_row_count"), "conflicting_duplicate_timestamp_row_count": duplicate_diag.get("conflicting_duplicate_timestamp_row_count")}
 
     quality = pd.DataFrame(quality_rows)
     Path(outputs["quality_report"]).parent.mkdir(parents=True, exist_ok=True)
     quality.to_parquet(outputs["quality_report"], index=False)
     quality_status_counts = {str(k): int(v) for k, v in quality["quality_status"].astype(str).value_counts(dropna=False).to_dict().items()}
+    duplicate_summary = {
+        "exact_duplicate_full_rows_dropped": int(quality["exact_duplicate_full_row_count"].fillna(0).sum()) if "exact_duplicate_full_row_count" in quality.columns else 0,
+        "source_session_duplicate_timestamp_rows": int(quality["source_session_duplicate_timestamp_row_count"].fillna(0).sum()) if "source_session_duplicate_timestamp_row_count" in quality.columns else 0,
+        "conflicting_duplicate_timestamp_rows": int(quality["conflicting_duplicate_timestamp_row_count"].fillna(0).sum()) if "conflicting_duplicate_timestamp_row_count" in quality.columns else 0,
+    }
     manifest = {
         "schema_version": SCHEMA_MANIFEST,
         "run_id": run_id,
@@ -356,6 +416,13 @@ def main():
         "partition_paths_created": partition_paths,
         "instrument_summaries": summaries,
         "quality_status_counts": quality_status_counts,
+        "duplicate_timestamp_policy": {
+            "exact_duplicate_full_rows": "drop_deterministically_keep_first_before_quality_and_write",
+            "source_session_duplicate_timestamp_rows": "diagnose_only_fail_closed_unless_full_row_exact_duplicate",
+            "conflicting_duplicate_timestamp_rows": "fail_closed_no_ohlcv_aggregation",
+        },
+        "duplicate_summary": duplicate_summary,
+        "duplicate_diagnostics": duplicate_diagnostics,
         "calendar_validation_summary": {"calendar_denominator_status": calendar_status, "calendar_from": calendar_from, "calendar_till": calendar_till, "expected_trading_days": len(expected_calendar)},
         "short_history_handling": {"SiU7": summaries.get("SiU7")},
         "loader_result_verdict": "pass" if quality_status_counts.get("fail", 0) == 0 else "fail",
@@ -367,6 +434,7 @@ def main():
     print_json_line("excluded_instruments_confirmed", excluded)
     print_json_line("output_artifacts_created", outputs)
     print_json_line("raw_5m_quality_summary", {"quality_status_counts": quality_status_counts, "instruments": summaries})
+    print_json_line("duplicate_summary", duplicate_summary)
     print_json_line("calendar_validation_summary", manifest["calendar_validation_summary"])
     print_json_line("short_history_handling", manifest["short_history_handling"])
     print_json_line("loader_result_verdict", manifest["loader_result_verdict"])
