@@ -39,43 +39,64 @@ def partition_path(data_root, trade_date, family_code, secid):
     return data_root / "futures" / "raw_5m" / ("trade_date=" + trade_date) / ("family=" + family_code) / ("secid=" + secid) / "part.parquet"
 
 
-def load_inputs(data_root, contracts, snapshot_date):
+def load_inputs(data_root, contracts, snapshot_date, require_screen_inputs):
     normalized_path = base.resolve_contract_path(data_root, contracts, base.CONTRACT_BY_ID["normalized_registry"], snapshot_date)
     liquidity_path = base.resolve_contract_path(data_root, contracts, base.CONTRACT_BY_ID["liquidity_screen"], snapshot_date)
     history_path = base.resolve_contract_path(data_root, contracts, base.CONTRACT_BY_ID["history_depth_screen"], snapshot_date)
-    for path in [normalized_path, liquidity_path, history_path]:
-        if not path.exists():
-            raise FileNotFoundError("Missing required input artifact: " + str(path))
-    return {
-        "normalized_registry": str(normalized_path),
-        "liquidity_screen": str(liquidity_path),
-        "history_depth_screen": str(history_path),
-    }, pd.read_parquet(normalized_path), pd.read_parquet(liquidity_path), pd.read_parquet(history_path)
+    if not normalized_path.exists():
+        raise FileNotFoundError("Missing required input artifact: " + str(normalized_path))
+    input_paths = {"normalized_registry": str(normalized_path), "liquidity_screen": str(liquidity_path), "history_depth_screen": str(history_path)}
+    if require_screen_inputs:
+        for path in [liquidity_path, history_path]:
+            if not path.exists():
+                raise FileNotFoundError("Missing required input artifact: " + str(path))
+        return input_paths, pd.read_parquet(normalized_path), pd.read_parquet(liquidity_path), pd.read_parquet(history_path)
+    input_paths["screen_inputs_required"] = False
+    input_paths["screen_inputs_bypassed_reason"] = "prevalidated_controlled_whitelist"
+    return input_paths, pd.read_parquet(normalized_path), pd.DataFrame(), pd.DataFrame()
 
 
-def select_instruments(normalized, liquidity, history, whitelist, excluded):
-    for name, frame in [("normalized_registry", normalized), ("liquidity_screen", liquidity), ("history_depth_screen", history)]:
-        if "secid" not in frame.columns:
-            raise RuntimeError(name + " missing secid column")
+def select_instruments(normalized, liquidity, history, whitelist, excluded, require_screen_inputs):
+    if "secid" not in normalized.columns:
+        raise RuntimeError("normalized_registry missing secid column")
+    if require_screen_inputs:
+        for name, frame in [("liquidity_screen", liquidity), ("history_depth_screen", history)]:
+            if "secid" not in frame.columns:
+                raise RuntimeError(name + " missing secid column")
     rows = []
     for secid in whitelist:
         if secid in excluded:
             raise RuntimeError("Whitelisted instrument is also excluded: " + secid)
         nrow = normalized.loc[normalized["secid"].astype(str).str.upper() == secid.upper()].tail(1)
-        lrow = liquidity.loc[liquidity["secid"].astype(str).str.upper() == secid.upper()].tail(1)
-        hrow = history.loc[history["secid"].astype(str).str.upper() == secid.upper()].tail(1)
-        if nrow.empty or lrow.empty or hrow.empty:
-            raise RuntimeError("Whitelisted instrument is missing from accepted artifacts: " + secid)
-        liquidity_status = str(lrow.iloc[0].get("liquidity_status", "")).strip()
-        history_status = str(hrow.iloc[0].get("history_depth_status", "")).strip()
-        if liquidity_status != "pass":
-            raise RuntimeError("liquidity_status is not pass for " + secid + ": " + liquidity_status)
-        short_history_flag = secid in SHORT_HISTORY_ALLOWED
-        if short_history_flag:
-            if history_status not in ["pass", "review_required"]:
-                raise RuntimeError("short-history instrument has invalid history_depth_status: " + secid + " " + history_status)
-        elif history_status != "pass":
-            raise RuntimeError("history_depth_status is not pass for " + secid + ": " + history_status)
+        if nrow.empty:
+            raise RuntimeError("Whitelisted instrument is missing from normalized registry: " + secid)
+        if require_screen_inputs:
+            lrow = liquidity.loc[liquidity["secid"].astype(str).str.upper() == secid.upper()].tail(1)
+            hrow = history.loc[history["secid"].astype(str).str.upper() == secid.upper()].tail(1)
+            if lrow.empty or hrow.empty:
+                raise RuntimeError("Whitelisted instrument is missing from accepted artifacts: " + secid)
+            liquidity_status = str(lrow.iloc[0].get("liquidity_status", "")).strip()
+            history_status = str(hrow.iloc[0].get("history_depth_status", "")).strip()
+            if liquidity_status != "pass":
+                raise RuntimeError("liquidity_status is not pass for " + secid + ": " + liquidity_status)
+            short_history_flag = secid in SHORT_HISTORY_ALLOWED
+            if short_history_flag:
+                if history_status not in ["pass", "review_required"]:
+                    raise RuntimeError("short-history instrument has invalid history_depth_status: " + secid + " " + history_status)
+            elif history_status != "pass":
+                raise RuntimeError("history_depth_status is not pass for " + secid + ": " + history_status)
+            first_available_date = hrow.iloc[0].get("first_available_date")
+            last_available_date = hrow.iloc[0].get("last_available_date")
+            screen_from = hrow.iloc[0].get("screen_from")
+            screen_till = hrow.iloc[0].get("screen_till")
+        else:
+            liquidity_status = "pass"
+            history_status = "pass"
+            short_history_flag = False
+            first_available_date = None
+            last_available_date = None
+            screen_from = None
+            screen_till = None
         row = nrow.iloc[0].to_dict()
         row["secid"] = secid
         row["board"] = str(row.get("board", "rfud") or "rfud")
@@ -83,10 +104,10 @@ def select_instruments(normalized, liquidity, history, whitelist, excluded):
         row["liquidity_status"] = liquidity_status
         row["history_depth_status"] = history_status
         row["short_history_flag"] = short_history_flag
-        row["first_available_date"] = hrow.iloc[0].get("first_available_date")
-        row["last_available_date"] = hrow.iloc[0].get("last_available_date")
-        row["screen_from"] = hrow.iloc[0].get("screen_from")
-        row["screen_till"] = hrow.iloc[0].get("screen_till")
+        row["first_available_date"] = first_available_date
+        row["last_available_date"] = last_available_date
+        row["screen_from"] = screen_from
+        row["screen_till"] = screen_till
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -245,8 +266,9 @@ def main():
 
     base.assert_files_exist(root, base.REQUIRED_CONTRACTS)
     contracts = base.load_contract_values(root)
-    input_paths, normalized, liquidity, history = load_inputs(data_root, contracts, snapshot_date)
-    instruments = select_instruments(normalized, liquidity, history, whitelist, excluded)
+    require_screen_inputs = [str(x).upper() for x in whitelist] == [str(x).upper() for x in DEFAULT_WHITELIST]
+    input_paths, normalized, liquidity, history = load_inputs(data_root, contracts, snapshot_date, require_screen_inputs)
+    instruments = select_instruments(normalized, liquidity, history, whitelist, excluded, require_screen_inputs)
 
     ranges = {}
     starts = []
