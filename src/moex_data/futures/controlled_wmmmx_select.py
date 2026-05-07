@@ -10,6 +10,7 @@ from moex_data.futures.futoi_raw_loader import resolve_path_from_contract
 
 SCOPE = "controlled_batch_w_mm_mx"
 CONFIG = "configs/datasets/futures_controlled_batch_w_mm_mx_raw_scope_config.json"
+PILOT_CLASSIFICATION_REL = "futures/registry/pilot_classification/snapshot_date={snapshot_date}/limited_rfud_pilot_classification.parquet"
 
 
 def load_config(root, path):
@@ -44,10 +45,8 @@ def _require(frame, name, cols):
         raise RuntimeError(name + " missing: " + ",".join(missing))
 
 
-def _path(data_root, contracts, contract_rel, snapshot_date):
-    pattern = contracts[contract_rel]["path_pattern"]
-    rel = pattern.replace("${MOEX_DATA_ROOT}/", "").replace("{snapshot_date}", snapshot_date).replace("YYYY-MM-DD", snapshot_date)
-    return Path(data_root) / rel
+def _pilot_classification_path(data_root, snapshot_date):
+    return Path(data_root) / PILOT_CLASSIFICATION_REL.replace("{snapshot_date}", snapshot_date)
 
 
 def load_frames(root, data_root, snapshot_date):
@@ -56,13 +55,18 @@ def load_frames(root, data_root, snapshot_date):
     liquidity = pd.read_parquet(base.resolve_contract_path(data_root, contracts, base.CONTRACT_BY_ID["liquidity_screen"], snapshot_date))
     history = pd.read_parquet(base.resolve_contract_path(data_root, contracts, base.CONTRACT_BY_ID["history_depth_screen"], snapshot_date))
     futoi = pd.read_parquet(resolve_path_from_contract(data_root, contracts, FUTOI_AVAILABILITY_CONTRACT, snapshot_date))
-    return normalized, liquidity, history, futoi
+    classification_path = _pilot_classification_path(data_root, snapshot_date)
+    if not classification_path.exists():
+        raise FileNotFoundError("Missing controlled classification artifact: " + str(classification_path))
+    classification = pd.read_parquet(classification_path)
+    return normalized, liquidity, history, futoi, classification
 
 
 def select(root, data_root, snapshot_date, config_path, whitelist, excluded):
     cfg = load_config(root, config_path)
-    normalized, liquidity, history, futoi = load_frames(root, data_root, snapshot_date)
-    _require(normalized, "normalized_registry", ["secid", "classification_status", "continuous_eligibility_status"])
+    normalized, liquidity, history, futoi, classification = load_frames(root, data_root, snapshot_date)
+    _require(normalized, "normalized_registry", ["secid"])
+    _require(classification, "pilot_classification", ["secid", "classification_status", "continuous_eligibility_status"])
     _require(liquidity, "liquidity_screen", ["secid", "liquidity_status"])
     _require(history, "history_depth_screen", ["secid", "history_depth_status"])
     _require(futoi, "futoi_availability", ["secid", "availability_status", "probe_status"])
@@ -70,7 +74,9 @@ def select(root, data_root, snapshot_date, config_path, whitelist, excluded):
     families = {str(x).upper() for x in cfg["families"]}
     cls = cfg["required_classification_status"]
     cont = cfg["required_continuous_eligibility_status"]
-    work = normalized.loc[normalized[fam_col].astype(str).str.upper().isin(families)].copy()
+    status_cols = classification[["secid", "classification_status", "continuous_eligibility_status"]].drop_duplicates(subset=["secid"], keep="last")
+    work = normalized.merge(status_cols, on="secid", how="inner")
+    work = work.loc[work[fam_col].astype(str).str.upper().isin(families)].copy()
     if whitelist:
         allowed = {str(x).upper() for x in whitelist}
         work = work.loc[work["secid"].astype(str).str.upper().isin(allowed)].copy()
@@ -95,4 +101,4 @@ def select(root, data_root, snapshot_date, config_path, whitelist, excluded):
         if str(f.iloc[0].get("availability_status")) != "available" or str(f.iloc[0].get("probe_status")) != "completed":
             raise RuntimeError("futoi gate failed for " + secid)
         rows.append({"secid": secid, "family": str(n.iloc[0].get(fam_col)), "classification_status": cls, "continuous_eligibility_status": cont, "gate_status": "pass"})
-    return secids, {"universe_scope": SCOPE, "selected_secids": secids, "rows": rows, "gate_status": "pass"}
+    return secids, {"universe_scope": SCOPE, "selected_secids": secids, "rows": rows, "classification_artifact": str(_pilot_classification_path(data_root, snapshot_date)), "gate_status": "pass"}
