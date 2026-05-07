@@ -3,14 +3,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from moex_data.futures import liquidity_history_metrics_probe as base
-from moex_data.futures.futoi_raw_loader import FUTOI_AVAILABILITY_CONTRACT
-from moex_data.futures.futoi_raw_loader import load_contract_values_extended
-from moex_data.futures.futoi_raw_loader import resolve_path_from_contract
-
 SCOPE = "controlled_batch_w_mm_mx"
 CONFIG = "configs/datasets/futures_controlled_batch_w_mm_mx_raw_scope_config.json"
-PILOT_CLASSIFICATION_REL = "futures/registry/controlled_wmmmx_eligibility/snapshot_date={snapshot_date}/controlled_wmmmx_eligibility.parquet"
+ELIGIBILITY_REL = "futures/registry/controlled_wmmmx_eligibility/snapshot_date={snapshot_date}/controlled_wmmmx_eligibility.parquet"
 
 
 def load_config(root, path):
@@ -28,15 +23,8 @@ def load_config(root, path):
     return data
 
 
-def _family_col(frame):
-    for col in ["family_code", "family", "asset_code", "underlying_asset"]:
-        if col in frame.columns:
-            return col
-    raise RuntimeError("family column missing")
-
-
-def _row(frame, secid):
-    return frame.loc[frame["secid"].astype(str).str.upper() == str(secid).upper()].tail(1)
+def _eligibility_path(data_root, snapshot_date):
+    return Path(data_root) / ELIGIBILITY_REL.replace("{snapshot_date}", snapshot_date)
 
 
 def _require(frame, name, cols):
@@ -45,60 +33,66 @@ def _require(frame, name, cols):
         raise RuntimeError(name + " missing: " + ",".join(missing))
 
 
-def _pilot_classification_path(data_root, snapshot_date):
-    return Path(data_root) / PILOT_CLASSIFICATION_REL.replace("{snapshot_date}", snapshot_date)
+def _family_col(frame):
+    for col in ["family", "family_code", "asset_code", "underlying_asset"]:
+        if col in frame.columns:
+            return col
+    raise RuntimeError("eligibility family column missing")
 
 
-def load_frames(root, data_root, snapshot_date):
-    contracts = load_contract_values_extended(root)
-    normalized = pd.read_parquet(base.resolve_contract_path(data_root, contracts, base.CONTRACT_BY_ID["normalized_registry"], snapshot_date))
-    liquidity = pd.read_parquet(base.resolve_contract_path(data_root, contracts, base.CONTRACT_BY_ID["liquidity_screen"], snapshot_date))
-    history = pd.read_parquet(base.resolve_contract_path(data_root, contracts, base.CONTRACT_BY_ID["history_depth_screen"], snapshot_date))
-    futoi = pd.read_parquet(resolve_path_from_contract(data_root, contracts, FUTOI_AVAILABILITY_CONTRACT, snapshot_date))
-    classification_path = _pilot_classification_path(data_root, snapshot_date)
-    if not classification_path.exists():
-        raise FileNotFoundError("Missing controlled classification artifact: " + str(classification_path))
-    classification = pd.read_parquet(classification_path)
-    return normalized, liquidity, history, futoi, classification
+def load_eligibility(data_root, snapshot_date):
+    path = _eligibility_path(data_root, snapshot_date)
+    if not path.exists():
+        raise FileNotFoundError("Missing controlled WMMMX eligibility artifact: " + str(path))
+    frame = pd.read_parquet(path)
+    _require(frame, "controlled_wmmmx_eligibility", ["secid", "classification_status", "continuous_eligibility_status"])
+    return frame, path
 
 
 def select(root, data_root, snapshot_date, config_path, whitelist, excluded):
     cfg = load_config(root, config_path)
-    normalized, liquidity, history, futoi, classification = load_frames(root, data_root, snapshot_date)
-    _require(normalized, "normalized_registry", ["secid"])
-    _require(classification, "pilot_classification", ["secid", "classification_status", "continuous_eligibility_status"])
-    _require(liquidity, "liquidity_screen", ["secid", "liquidity_status"])
-    _require(history, "history_depth_screen", ["secid", "history_depth_status"])
-    _require(futoi, "futoi_availability", ["secid", "availability_status", "probe_status"])
-    fam_col = _family_col(normalized)
+    eligibility, path = load_eligibility(data_root, snapshot_date)
+    fam_col = _family_col(eligibility)
     families = {str(x).upper() for x in cfg["families"]}
-    cls = cfg["required_classification_status"]
-    cont = cfg["required_continuous_eligibility_status"]
-    status_cols = classification[["secid", "classification_status", "continuous_eligibility_status"]].drop_duplicates(subset=["secid"], keep="last")
-    work = normalized.merge(status_cols, on="secid", how="inner")
-    work = work.loc[work[fam_col].astype(str).str.upper().isin(families)].copy()
+    cls = str(cfg["required_classification_status"])
+    cont = str(cfg["required_continuous_eligibility_status"])
+    observed_families = {str(x).upper() for x in eligibility[fam_col].dropna().astype(str).unique().tolist()}
+    outside = sorted(observed_families - families)
+    if outside:
+        raise RuntimeError("eligibility contains out-of-scope families: " + ",".join(outside))
+    work = eligibility.copy()
+    if "board" in work.columns:
+        bad_board = work.loc[work["board"].astype(str).str.upper() != "RFUD"]
+        if not bad_board.empty:
+            raise RuntimeError("eligibility contains non-RFUD board rows")
+    bad_cls = work.loc[work["classification_status"].astype(str) != cls]
+    if not bad_cls.empty:
+        raise RuntimeError("eligibility contains invalid classification_status rows")
+    bad_cont = work.loc[work["continuous_eligibility_status"].astype(str) != cont]
+    if not bad_cont.empty:
+        raise RuntimeError("eligibility contains invalid continuous_eligibility_status rows")
     if whitelist:
         allowed = {str(x).upper() for x in whitelist}
         work = work.loc[work["secid"].astype(str).str.upper().isin(allowed)].copy()
     banned = {str(x).upper() for x in excluded}
     work = work.loc[~work["secid"].astype(str).str.upper().isin(banned)].copy()
-    work = work.loc[(work["classification_status"].astype(str) == cls) & (work["continuous_eligibility_status"].astype(str) == cont)].copy()
     if work.empty:
         raise RuntimeError("controlled scope selected zero instruments")
     secids = sorted(work["secid"].astype(str).unique().tolist())
     rows = []
-    for secid in secids:
-        n = _row(work, secid)
-        l = _row(liquidity, secid)
-        h = _row(history, secid)
-        f = _row(futoi, secid)
-        if n.empty or l.empty or h.empty or f.empty:
-            raise RuntimeError("missing prerequisite artifact for " + secid)
-        if str(l.iloc[0].get("liquidity_status")) != "pass":
-            raise RuntimeError("liquidity gate failed for " + secid)
-        if str(h.iloc[0].get("history_depth_status")) != "pass":
-            raise RuntimeError("history gate failed for " + secid)
-        if str(f.iloc[0].get("availability_status")) != "available" or str(f.iloc[0].get("probe_status")) != "completed":
-            raise RuntimeError("futoi gate failed for " + secid)
-        rows.append({"secid": secid, "family": str(n.iloc[0].get(fam_col)), "classification_status": cls, "continuous_eligibility_status": cont, "gate_status": "pass"})
-    return secids, {"universe_scope": SCOPE, "selected_secids": secids, "rows": rows, "classification_artifact": str(_pilot_classification_path(data_root, snapshot_date)), "gate_status": "pass"}
+    for _, row in work.drop_duplicates(subset=["secid"], keep="last").sort_values("secid").iterrows():
+        rows.append({
+            "secid": str(row.get("secid")),
+            "family": str(row.get(fam_col)),
+            "classification_status": cls,
+            "continuous_eligibility_status": cont,
+            "gate_status": "pass"
+        })
+    return secids, {
+        "universe_scope": SCOPE,
+        "selected_secids": secids,
+        "rows": rows,
+        "eligibility_artifact": str(path),
+        "eligibility_row_count": int(len(eligibility.index)),
+        "gate_status": "pass"
+    }
