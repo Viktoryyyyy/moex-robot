@@ -35,4 +35,4 @@ jobs:
 
       - name: Run tests
         run: |
-          PYTHONPATH=. pytest -q
+          PYTHONPATH=.:src pytest -q
