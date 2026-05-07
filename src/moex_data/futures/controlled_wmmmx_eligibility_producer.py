@@ -48,6 +48,13 @@ def require_col(frame, candidates, label):
     raise RuntimeError(label + " column missing")
 
 
+def optional_col(frame, candidates):
+    for col in candidates:
+        if col in frame.columns:
+            return col
+    return None
+
+
 def parse_date_series(series):
     return pd.to_datetime(series, errors="coerce").dt.date
 
@@ -55,22 +62,25 @@ def parse_date_series(series):
 def controlled_status_filter(frame, snapshot_date):
     mapping_col = require_col(frame, ["mapping_status", "map_status"], "mapping_status")
     validation_col = require_col(frame, ["validation_status", "validated_status", "registry_validation_status"], "validation_status")
-    first_col = require_col(frame, ["first_available_date", "screen_from", "history_first_available_date"], "first_available_date")
-    last_col = require_col(frame, ["last_available_date", "screen_till", "history_last_available_date"], "last_available_date")
+    first_col = optional_col(frame, ["first_available_date", "screen_from", "history_first_available_date", "first_trade_date", "firsttradedate", "start_date"])
+    last_col = require_col(frame, ["last_available_date", "screen_till", "history_last_available_date", "last_trade_date", "lasttradedate", "expiration_date", "expiration"], "last_trade_date")
     snapshot_day = pd.to_datetime(snapshot_date, errors="coerce").date()
     if pd.isna(snapshot_day):
         raise RuntimeError("invalid snapshot_date: " + str(snapshot_date))
     work = frame.copy()
     work["_mapping_status_normalized"] = work[mapping_col].fillna("").astype(str).str.strip().str.lower()
     work["_validation_status_normalized"] = work[validation_col].fillna("").astype(str).str.strip().str.lower()
-    work["_first_available_day"] = parse_date_series(work[first_col])
+    if first_col:
+        work["_first_available_day"] = parse_date_series(work[first_col])
+    else:
+        work["_first_available_day"] = snapshot_day
     work["_last_available_day"] = parse_date_series(work[last_col])
     work["eligibility_rejection_reason"] = ""
     draft_mask = work["_mapping_status_normalized"] == "draft"
     validation_mask = ~work["_validation_status_normalized"].isin(ACCEPTED_VALIDATION_STATUSES)
     missing_range_mask = work["_first_available_day"].isna() | work["_last_available_day"].isna()
     inverted_range_mask = (~missing_range_mask) & (work["_first_available_day"] > work["_last_available_day"])
-    future_unresolved_mask = (~missing_range_mask) & ((work["_first_available_day"] > snapshot_day) | (work["_last_available_day"] > snapshot_day))
+    future_unresolved_mask = (~missing_range_mask) & (work["_last_available_day"] > snapshot_day)
     work.loc[draft_mask, "eligibility_rejection_reason"] = "mapping_status_draft"
     work.loc[(work["eligibility_rejection_reason"] == "") & validation_mask, "eligibility_rejection_reason"] = "validation_status_not_accepted"
     work.loc[(work["eligibility_rejection_reason"] == "") & missing_range_mask, "eligibility_rejection_reason"] = "raw_loader_date_range_missing"
@@ -82,6 +92,7 @@ def controlled_status_filter(frame, snapshot_date):
     accepted["validation_status"] = accepted[validation_col].astype(str)
     accepted["first_available_date"] = accepted["_first_available_day"].astype(str)
     accepted["last_available_date"] = accepted["_last_available_day"].astype(str)
+    accepted["eligibility_date_source"] = json.dumps({"first_col": first_col, "last_col": last_col}, sort_keys=True)
     return accepted, rejected
 
 
@@ -126,7 +137,7 @@ def main():
     merged["eligibility_status"] = "eligible"
     merged["source_status_artifact"] = str(status_path)
     merged["source_registry_artifact"] = str(registry_path)
-    out = merged[["schema_version", "snapshot_date", "secid", "family_code", "board", "mapping_status", "validation_status", "first_available_date", "last_available_date", "classification_status", "continuous_eligibility_status", "source_status_artifact", "source_registry_artifact", "eligibility_status"]].drop_duplicates().sort_values(["family_code", "secid"]).reset_index(drop=True)
+    out = merged[["schema_version", "snapshot_date", "secid", "family_code", "board", "mapping_status", "validation_status", "first_available_date", "last_available_date", "eligibility_date_source", "classification_status", "continuous_eligibility_status", "source_status_artifact", "source_registry_artifact", "eligibility_status"]].drop_duplicates().sort_values(["family_code", "secid"]).reset_index(drop=True)
     families = sorted(out["family_code"].astype(str).unique().tolist())
     boards = sorted(out["board"].astype(str).unique().tolist())
     if families != sorted(TARGET_FAMILIES):
