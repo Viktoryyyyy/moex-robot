@@ -1,0 +1,24 @@
+{
+  "schema_version": "futures_controlled_raw_scope_config.v1",
+  "universe_scope": "controlled_batch_w_mm_mx",
+  "raw_only": true,
+  "families": ["W", "MM", "MX"],
+  "required_classification_status": "controlled_accepted_for_data_pipeline",
+  "required_continuous_eligibility_status": "not_accepted",
+  "allowed_components": [
+    "raw_5m_loader",
+    "futoi_raw_loader",
+    "derived_d1_ohlcv_builder"
+  ],
+  "forbidden_components": [
+    "expiration_map_builder",
+    "continuous_roll_map_builder",
+    "continuous_5m_builder",
+    "continuous_d1_builder",
+    "continuous_builder_manifest",
+    "continuous_quality_report"
+  ],
+  "continuous_build_allowed": false,
+  "roll_policy_change_allowed": false,
+  "continuous_artifact_creation_allowed": false
+}
