@@ -61,7 +61,10 @@ def main():
     registry = pd.read_parquet(registry_path)
     fam_col = family_col(registry)
     brd_col = board_col(registry)
-    status = status.rename(columns={"family": "family_code"})
+    if "family_code" not in status.columns:
+        if "family" not in status.columns:
+            raise RuntimeError("status artifact missing family_code or family column")
+        status = status.rename(columns={"family": "family_code"})
     status = status.loc[status["family_code"].astype(str).str.upper().isin(TARGET_FAMILIES)].copy()
     status = status.loc[(status["classification_status"].astype(str) == TARGET_STATUS) & (status["continuous_eligibility_status"].astype(str) == CONTINUOUS_STATUS)].copy()
     if status.empty:
