@@ -1,13 +1,18 @@
 import json
+import os
 from pathlib import Path
 
 import pandas as pd
 
 from moex_data.futures import futoi_raw_loader
+from moex_data.futures import liquidity_history_metrics_probe as base
 
 SCOPE = "controlled_batch_w_mm_mx"
 CONFIG = "configs/datasets/futures_controlled_batch_w_mm_mx_raw_scope_config.json"
 ELIGIBILITY_REL = "futures/registry/controlled_wmmmx_eligibility/snapshot_date={snapshot_date}/controlled_wmmmx_eligibility.parquet"
+NO_OBSERVED_SOURCE_ROWS_REASON = "no_observed_source_rows_as_of_snapshot"
+FUTURE_CONTRACT_NOT_YET_LOADABLE_REASON = "future_contract_not_yet_loadable"
+SOURCE_SECID_NOT_PROVEN_REASON = "source_secid_not_proven"
 
 
 def load_config(root, path):
@@ -62,6 +67,57 @@ def _status(row, field):
     return str(row.get(field, "")).strip()
 
 
+def _source_secid_col(frame):
+    return base.canonical_column(frame, ["secid", "SECID"])
+
+
+def _zero_rows_reason(first_available_date, snapshot_date):
+    if str(first_available_date) > str(snapshot_date):
+        return FUTURE_CONTRACT_NOT_YET_LOADABLE_REASON
+    return NO_OBSERVED_SOURCE_ROWS_REASON
+
+
+def _probe_source_identity(secid, first_available_date, last_available_date, snapshot_date, timeout, apim_base_url, iss_base_url):
+    source_frame, source_url, fetch_status, fetch_error = base.fetch_tradestats(secid, first_available_date, last_available_date, float(timeout), str(apim_base_url), str(iss_base_url))
+    out = {
+        "source_probe_status": fetch_status,
+        "source_probe_error": fetch_error or None,
+        "source_endpoint_url": source_url,
+        "source_rows_before_filter": int(len(source_frame)),
+        "source_rows_after_filter": 0,
+        "source_identity_filtered_out_rows": 0,
+        "source_observed_secids": [],
+        "source_remaining_secids": [],
+        "source_identity_gate_status": "blocked",
+        "source_identity_exclude_reason": "",
+    }
+    if fetch_status != "completed" or source_frame.empty:
+        out["source_identity_exclude_reason"] = _zero_rows_reason(first_available_date, snapshot_date)
+        return out
+    col = _source_secid_col(source_frame)
+    if not col:
+        out["source_identity_exclude_reason"] = SOURCE_SECID_NOT_PROVEN_REASON
+        return out
+    requested = str(secid).strip().upper()
+    source_identity = source_frame[col].astype(str).str.strip().str.upper()
+    observed = sorted([str(x) for x in source_identity.dropna().unique().tolist() if str(x)])
+    mask = source_identity == requested
+    filtered = source_frame.loc[mask].copy()
+    remaining = sorted([str(x) for x in filtered[col].astype(str).str.strip().str.upper().dropna().unique().tolist() if str(x)]) if not filtered.empty else []
+    out["source_rows_after_filter"] = int(len(filtered))
+    out["source_identity_filtered_out_rows"] = int(len(source_frame) - len(filtered))
+    out["source_observed_secids"] = observed
+    out["source_remaining_secids"] = remaining
+    if filtered.empty:
+        out["source_identity_exclude_reason"] = _zero_rows_reason(first_available_date, snapshot_date)
+        return out
+    if remaining != [requested]:
+        out["source_identity_exclude_reason"] = SOURCE_SECID_NOT_PROVEN_REASON
+        return out
+    out["source_identity_gate_status"] = "pass"
+    return out
+
+
 def _load_futoi_gate_frames(root, data_root, snapshot_date):
     contracts = futoi_raw_loader.load_contract_values_extended(root)
     _, _, _, history, futoi_availability = futoi_raw_loader.load_inputs(data_root, contracts, snapshot_date)
@@ -77,8 +133,10 @@ def load_eligibility(data_root, snapshot_date):
     return frame, path
 
 
-def select(root, data_root, snapshot_date, config_path, whitelist, excluded):
+def select(root, data_root, snapshot_date, config_path, whitelist, excluded, apim_base_url=None, iss_base_url=None, timeout=60.0):
     cfg = load_config(root, config_path)
+    apim_base_url = str(apim_base_url or os.getenv("MOEX_API_URL", base.DEFAULT_APIM_BASE_URL))
+    iss_base_url = str(iss_base_url or os.getenv("MOEX_ISS_BASE_URL", base.DEFAULT_ISS_BASE_URL))
     eligibility, path = load_eligibility(data_root, snapshot_date)
     history, futoi_availability = _load_futoi_gate_frames(root, data_root, snapshot_date)
     fam_col = _family_col(eligibility)
@@ -120,6 +178,7 @@ def select(root, data_root, snapshot_date, config_path, whitelist, excluded):
         history_status = _status(hrow, "history_depth_status")
         futoi_availability_status = _status(arow, "availability_status")
         futoi_probe_status = _status(arow, "probe_status")
+        source_probe = _probe_source_identity(secid, first_available_date, last_available_date, snapshot_date, timeout, apim_base_url, iss_base_url)
         base_row = {
             "secid": secid,
             "family": str(row.get(fam_col)),
@@ -131,8 +190,24 @@ def select(root, data_root, snapshot_date, config_path, whitelist, excluded):
             "futoi_history_depth_status": history_status,
             "futoi_availability_status": futoi_availability_status,
             "futoi_probe_status": futoi_probe_status,
+            "source_probe_status": source_probe.get("source_probe_status"),
+            "source_probe_error": source_probe.get("source_probe_error"),
+            "source_endpoint_url": source_probe.get("source_endpoint_url"),
+            "source_rows_before_filter": source_probe.get("source_rows_before_filter"),
+            "source_rows_after_filter": source_probe.get("source_rows_after_filter"),
+            "source_identity_filtered_out_rows": source_probe.get("source_identity_filtered_out_rows"),
+            "source_observed_secids": source_probe.get("source_observed_secids"),
+            "source_remaining_secids": source_probe.get("source_remaining_secids"),
+            "source_identity_gate_status": source_probe.get("source_identity_gate_status"),
+            "source_identity_exclude_reason": source_probe.get("source_identity_exclude_reason"),
         }
         blocker_reasons = []
+        if source_probe.get("source_identity_gate_status") != "pass":
+            excluded_row = dict(base_row)
+            excluded_row["gate_status"] = "excluded"
+            excluded_row["blocker_reason"] = str(source_probe.get("source_identity_exclude_reason") or SOURCE_SECID_NOT_PROVEN_REASON)
+            excluded_rows.append(excluded_row)
+            continue
         if history_status != "pass":
             blocker_reasons.append("futoi_history_depth_status_not_pass:" + history_status)
         if futoi_availability_status != "available" or futoi_probe_status != "completed":
@@ -160,6 +235,7 @@ def select(root, data_root, snapshot_date, config_path, whitelist, excluded):
         "futoi_history_depth_required_status": "pass",
         "futoi_availability_required_status": "available",
         "futoi_probe_required_status": "completed",
-        "futoi_gate_blocked_count": int(len(excluded_rows)),
+        "futoi_gate_blocked_count": int(len([x for x in excluded_rows if "futoi_" in str(x.get("blocker_reason", ""))])),
+        "source_identity_excluded_count": int(len([x for x in excluded_rows if str(x.get("source_identity_gate_status", "")) != "pass"])),
         "gate_status": "pass"
     }

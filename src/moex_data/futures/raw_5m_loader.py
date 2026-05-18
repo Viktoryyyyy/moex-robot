@@ -26,6 +26,7 @@ SCHEMA_QUALITY = "futures_raw_5m_quality_report.v1"
 SCHEMA_MANIFEST = "futures_raw_5m_loader_manifest.v1"
 PRIMARY_KEY = ["trade_date", "ts", "secid"]
 MARKET_VALUE_COLUMNS = ["open", "high", "low", "close", "volume", "value", "num_trades"]
+SOURCE_IDENTITY_COLUMNS = ["secid", "SECID"]
 
 
 
@@ -154,28 +155,47 @@ def normalize_tradestats(frame, secid, family_code, board, source_url, ingest_ts
     value_col = base.canonical_column(frame, ["val", "VAL", "value", "VALUE", "turnover", "TURNOVER"])
     trades_col = base.canonical_column(frame, ["trades", "TRADES", "num_trades", "NUM_TRADES", "numtrades", "NUMTRADES"])
     seq_col = base.canonical_column(frame, ["seqnum", "SEQNUM", "source_seqnum", "SOURCE_SEQNUM"])
+    source_secid_col = base.canonical_column(frame, SOURCE_IDENTITY_COLUMNS)
+    asset_code_col = base.canonical_column(frame, ["asset_code", "ASSET_CODE"])
+    systime_col = base.canonical_column(frame, ["systime", "SYSTIME"])
     required = {"tradedate": date_col, "open": open_col, "high": high_col, "low": low_col, "close": close_col, "volume": volume_col}
     missing = [k for k, v in required.items() if not v]
     if missing:
         return pd.DataFrame(), {"error": "missing_required_columns:" + ",".join(missing), "columns": [str(x) for x in frame.columns]}
+    if not source_secid_col:
+        return pd.DataFrame(), {"error": "missing_source_secid_column", "columns": [str(x) for x in frame.columns], "source_identity_status": "not_proven"}
+    requested_source_secid = str(secid).strip().upper()
+    source_identity = frame[source_secid_col].astype(str).str.strip().str.upper()
+    observed_source_secids = sorted([str(x) for x in source_identity.dropna().unique().tolist() if str(x)])
+    source_identity_mask = source_identity == requested_source_secid
+    source_identity_filtered_out_rows = int(len(frame) - int(source_identity_mask.sum()))
+    work = frame.loc[source_identity_mask].copy().reset_index(drop=True)
+    if work.empty:
+        return pd.DataFrame(), {"error": "zero_source_filtered_rows", "columns": [str(x) for x in frame.columns], "source_identity_status": "zero_after_filter", "requested_source_secid": requested_source_secid, "observed_source_secids": observed_source_secids, "source_identity_filtered_out_rows": source_identity_filtered_out_rows}
+    remaining_source_secids = sorted([str(x) for x in work[source_secid_col].astype(str).str.strip().str.upper().dropna().unique().tolist() if str(x)])
+    if remaining_source_secids != [requested_source_secid]:
+        return pd.DataFrame(), {"error": "mixed_source_identity_after_filter", "columns": [str(x) for x in frame.columns], "source_identity_status": "mixed_after_filter", "requested_source_secid": requested_source_secid, "observed_source_secids": observed_source_secids, "remaining_source_secids": remaining_source_secids, "source_identity_filtered_out_rows": source_identity_filtered_out_rows}
     out = pd.DataFrame()
-    out["trade_date"] = frame[date_col].map(base.parse_iso_date)
-    out["ts"] = combine_ts(frame, date_col, time_col)
+    out["trade_date"] = work[date_col].map(base.parse_iso_date)
+    out["ts"] = combine_ts(work, date_col, time_col)
     out["end"] = out["ts"]
     out["session_date"] = out["trade_date"]
     out["board"] = board
     out["secid"] = secid
+    out["source_secid"] = work[source_secid_col].astype(str).str.strip()
+    out["source_asset_code"] = work[asset_code_col].astype(str) if asset_code_col else None
+    out["source_systime"] = work[systime_col].astype(str) if systime_col else None
     out["family_code"] = family_code
-    out["open"] = base.coerce_numeric(frame[open_col])
-    out["high"] = base.coerce_numeric(frame[high_col])
-    out["low"] = base.coerce_numeric(frame[low_col])
-    out["close"] = base.coerce_numeric(frame[close_col])
-    out["volume"] = base.coerce_numeric(frame[volume_col])
-    out["value"] = base.coerce_numeric(frame[value_col]) if value_col else None
-    out["num_trades"] = base.coerce_numeric(frame[trades_col]) if trades_col else None
+    out["open"] = base.coerce_numeric(work[open_col])
+    out["high"] = base.coerce_numeric(work[high_col])
+    out["low"] = base.coerce_numeric(work[low_col])
+    out["close"] = base.coerce_numeric(work[close_col])
+    out["volume"] = base.coerce_numeric(work[volume_col])
+    out["value"] = base.coerce_numeric(work[value_col]) if value_col else None
+    out["num_trades"] = base.coerce_numeric(work[trades_col]) if trades_col else None
     out["source"] = "MOEX_ALGOPACK_FO_TRADESTATS"
     out["source_endpoint_url"] = source_url
-    out["source_seqnum"] = frame[seq_col].astype(str) if seq_col else None
+    out["source_seqnum"] = work[seq_col].astype(str) if seq_col else None
     out["ingest_ts"] = ingest_ts
     out["schema_version"] = SCHEMA_RAW_5M
     out["short_history_flag"] = bool(short_history_flag)
@@ -196,7 +216,15 @@ def normalize_tradestats(frame, secid, family_code, board, source_url, ingest_ts
             "value": str(value_col) if value_col else None,
             "num_trades": str(trades_col) if trades_col else None,
             "source_seqnum": str(seq_col) if seq_col else None,
+            "source_secid": str(source_secid_col),
+            "source_asset_code": str(asset_code_col) if asset_code_col else None,
+            "source_systime": str(systime_col) if systime_col else None,
         },
+        "source_identity_status": "proven",
+        "requested_source_secid": requested_source_secid,
+        "observed_source_secids": observed_source_secids,
+        "remaining_source_secids": remaining_source_secids,
+        "source_identity_filtered_out_rows": source_identity_filtered_out_rows,
     }
     return out, meta
 
@@ -367,6 +395,11 @@ def main():
             "fetch_status": fetch_status,
             "fetch_error": fetch_error or None,
             "normalization_error": meta.get("error") or None,
+            "source_identity_status": meta.get("source_identity_status"),
+            "requested_source_secid": meta.get("requested_source_secid"),
+            "observed_source_secids_json": json.dumps(meta.get("observed_source_secids") or [], ensure_ascii=False, sort_keys=True),
+            "remaining_source_secids_json": json.dumps(meta.get("remaining_source_secids") or [], ensure_ascii=False, sort_keys=True),
+            "source_identity_filtered_out_rows": meta.get("source_identity_filtered_out_rows"),
             "raw_rows_before_duplicate_policy": duplicate_diag.get("raw_rows_before_duplicate_policy"),
             "exact_duplicate_full_row_count": duplicate_diag.get("exact_duplicate_full_row_count"),
             "source_session_duplicate_timestamp_row_count": duplicate_diag.get("source_session_duplicate_timestamp_row_count"),
@@ -392,7 +425,7 @@ def main():
             "mapped_columns_json": json.dumps(meta.get("mapped_columns") or {}, ensure_ascii=False, sort_keys=True),
             "observed_columns_json": json.dumps(meta.get("columns") or [], ensure_ascii=False, sort_keys=True),
         })
-        summaries[secid] = {"requested_from": start, "requested_till": end, "rows": counts.get("rows"), "trade_dates": counts.get("trade_dates"), "partition_count": len(paths), "quality_status": quality_status, "short_history_flag": short_history_flag, "review_notes": notes, "exact_duplicate_full_row_count": duplicate_diag.get("exact_duplicate_full_row_count"), "source_session_duplicate_timestamp_row_count": duplicate_diag.get("source_session_duplicate_timestamp_row_count"), "conflicting_duplicate_timestamp_row_count": duplicate_diag.get("conflicting_duplicate_timestamp_row_count")}
+        summaries[secid] = {"requested_from": start, "requested_till": end, "rows": counts.get("rows"), "trade_dates": counts.get("trade_dates"), "partition_count": len(paths), "quality_status": quality_status, "short_history_flag": short_history_flag, "review_notes": notes, "source_identity_status": meta.get("source_identity_status"), "source_identity_filtered_out_rows": meta.get("source_identity_filtered_out_rows"), "observed_source_secids": meta.get("observed_source_secids") or [], "exact_duplicate_full_row_count": duplicate_diag.get("exact_duplicate_full_row_count"), "source_session_duplicate_timestamp_row_count": duplicate_diag.get("source_session_duplicate_timestamp_row_count"), "conflicting_duplicate_timestamp_row_count": duplicate_diag.get("conflicting_duplicate_timestamp_row_count")}
 
     quality = pd.DataFrame(quality_rows)
     Path(outputs["quality_report"]).parent.mkdir(parents=True, exist_ok=True)
