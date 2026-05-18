@@ -170,7 +170,7 @@ def main():
     args.data_root_resolved = base.resolve_data_root(args)
     data_root = args.data_root_resolved
     excluded = parse_list(args.excluded, [])
-    secids, gate = select(root, data_root, args.snapshot_date, args.config, parse_list(args.whitelist, []), excluded)
+    secids, gate = select(root, data_root, args.snapshot_date, args.config, parse_list(args.whitelist, []), excluded, args.apim_base_url, args.iss_base_url, float(args.timeout))
     ranges = resolved_ranges(gate, args)
     before = snapshot_continuous(data_root)
     statuses = []
