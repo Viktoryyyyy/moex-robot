@@ -29,20 +29,16 @@ from moex_data.futures.slice1_common import utc_now_iso
 SCHEMA_ROLL_MAP = "futures_continuous_roll_map.v1"
 CONTRACT_EXPIRATION_MAP = "contracts/datasets/futures_expiration_map_contract.md"
 CONTRACT_ROLL_MAP = "contracts/datasets/futures_continuous_roll_map_contract.md"
-REQUIRED_CONTRACTS = [
-    CONTRACT_EXPIRATION_MAP,
-    CONTRACT_ROLL_MAP,
-]
+REQUIRED_CONTRACTS = [CONTRACT_EXPIRATION_MAP, CONTRACT_ROLL_MAP]
 ROLL_POLICY_ID = "expiration_minus_1_trading_session_v1"
 ADJUSTMENT_POLICY_ID = "unadjusted_v1"
 ADJUSTMENT_FACTOR = 1.0
 CALENDAR_STATUS = "canonical_apim_futures_xml"
 CALENDAR_SOURCE = "MOEX_APIM_XML:/iss/calendars"
 PERPETUAL_IDENTITIES = {"USDRUBF"}
+SI_FAMILY_CODE = "Si"
 SI_CHAIN_SCOPE = ["SiM6", "SiU6", "SiZ6", "SiU7"]
-EXPLICIT_GAP_AFTER_SOURCE = {
-    "SiZ6": ["SiH7", "SiM7"],
-}
+EXPLICIT_GAP_AFTER_SOURCE = {"SiZ6": ["SiH7", "SiM7"]}
 ALLOWED_DECISION_SOURCES = {
     "registry_expiration_date",
     "registry_last_trade_date_fallback",
@@ -226,6 +222,25 @@ def si_scope_rows(scoped: pd.DataFrame) -> pd.DataFrame:
     return out.sort_values(["family_code", "_anchor_sort", "secid"]).reset_index(drop=True)
 
 
+def generic_ordinary_scope_rows(scoped: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    si_scope_upper = {x.upper() for x in SI_CHAIN_SCOPE}
+    for _, row in scoped.iterrows():
+        secid = str(clean_text(row.get("secid")) or "")
+        if not secid:
+            continue
+        if secid.upper() in PERPETUAL_IDENTITIES:
+            continue
+        if secid.upper() in si_scope_upper or str(clean_text(row.get("family_code")) or "") == SI_FAMILY_CODE:
+            continue
+        rows.append(row.to_dict())
+    if not rows:
+        return pd.DataFrame()
+    out = pd.DataFrame(rows)
+    out["_anchor_sort"] = out.apply(lambda row: ordinary_anchor(row) or "9999-12-31", axis=1)
+    return out.sort_values(["family_code", "_anchor_sort", "secid"]).reset_index(drop=True)
+
+
 def build_perpetual_row(row: pd.Series, snapshot_date: str, run_id: str) -> Dict[str, Any]:
     secid = str(clean_text(row.get("secid")) or "USDRUBF")
     board = str(clean_text(row.get("board")) or "rfud")
@@ -263,86 +278,87 @@ def build_perpetual_row(row: pd.Series, snapshot_date: str, run_id: str) -> Dict
     }
 
 
-def build_si_rows(si_rows: pd.DataFrame, snapshot_date: str, run_id: str, ordered_sessions: List[str], excluded: List[str]) -> List[Dict[str, Any]]:
-    if si_rows.empty:
+def build_ordinary_rows(source_rows: pd.DataFrame, snapshot_date: str, run_id: str, ordered_sessions: List[str], excluded: List[str]) -> List[Dict[str, Any]]:
+    if source_rows.empty:
         return []
     rows: List[Dict[str, Any]] = []
-    previous_roll_date: Optional[str] = None
     excluded_upper = {x.upper() for x in excluded}
-    records = [si_rows.iloc[i] for i in range(len(si_rows))]
-    for idx, row in enumerate(records):
-        secid = str(clean_text(row.get("secid")) or "")
-        board = str(clean_text(row.get("board")) or "rfud")
-        family_code = str(clean_text(row.get("family_code")) or "Si")
-        decision_source = str(clean_text(row.get("decision_source")) or "")
-        if decision_source not in ALLOWED_DECISION_SOURCES:
-            raise RuntimeError("Invalid decision_source for " + secid + ": " + decision_source)
-        is_perpetual = bool_value(row.get("is_perpetual"))
-        if is_perpetual:
-            raise RuntimeError("Si chain row unexpectedly marked perpetual: " + secid)
-        anchor = ordinary_anchor(row)
-        roll_date = None
-        if anchor:
-            roll_date = previous_session_before(ordered_sessions, anchor)
-        if idx == 0:
-            first_trade = clean_date(row.get("first_trade_date")) or snapshot_date
-            valid_from = first_session_on_or_after(ordered_sessions, first_trade)
-        else:
-            if previous_roll_date is None:
-                raise RuntimeError("Previous roll_date missing before " + secid)
-            valid_from = next_session_after(ordered_sessions, previous_roll_date)
-        valid_through = roll_date
-        next_secid = None
-        next_contract_code = None
-        if idx + 1 < len(records):
-            next_secid = str(clean_text(records[idx + 1].get("secid")) or "")
-            next_contract_code = next_secid
-        missing_explicit = [x for x in EXPLICIT_GAP_AFTER_SOURCE.get(secid, []) if x.upper() in excluded_upper]
-        if decision_source == "unresolved" or not anchor or not roll_date:
-            roll_status = "blocked_unresolved_anchor"
-            review_notes = "Ordinary source contract has unresolved or missing roll anchor."
-        elif missing_explicit:
-            roll_status = "explicit_partial_chain_gap"
-            review_notes = "Partial chain gap is explicit; excluded contracts between source and next are " + ",".join(missing_explicit) + "."
-        elif not next_secid:
-            roll_status = "blocked_missing_next_contract"
-            review_notes = "No included next source contract exists in current Slice 1 scope."
-        else:
-            roll_status = "active_window"
-            review_notes = None
-        out = {
-            "roll_map_id": "futures_continuous_roll_map_" + stable_id([snapshot_date, ROLL_POLICY_ID, board, secid, run_id]),
-            "snapshot_date": snapshot_date,
-            "family_code": family_code,
-            "continuous_symbol": family_code,
-            "board": board,
-            "source_secid": secid,
-            "source_contract_code": secid,
-            "next_secid": next_secid,
-            "next_contract_code": next_contract_code,
-            "is_perpetual": False,
-            "roll_required": True,
-            "roll_anchor_date": anchor,
-            "roll_date": roll_date,
-            "valid_from_session": valid_from,
-            "valid_through_session": valid_through,
-            "calendar_status": CALENDAR_STATUS,
-            "calendar_source": CALENDAR_SOURCE,
-            "roll_policy_id": ROLL_POLICY_ID,
-            "adjustment_policy_id": ADJUSTMENT_POLICY_ID,
-            "adjustment_factor": ADJUSTMENT_FACTOR,
-            "decision_source": decision_source,
-            "roll_status": roll_status,
-            "schema_version": SCHEMA_ROLL_MAP,
-            "review_notes": review_notes,
-            "source_expiration_status": clean_text(row.get("expiration_status")),
-            "source_expiration_map_id": clean_text(row.get("expiration_map_id")),
-            "build_run_id": run_id,
-            "build_ts": utc_now_iso(),
-        }
-        rows.append(out)
-        previous_roll_date = roll_date
+    for family_code, group in source_rows.groupby("family_code", sort=True):
+        previous_roll_date: Optional[str] = None
+        records = [group.iloc[i] for i in range(len(group))]
+        for idx, row in enumerate(records):
+            secid = str(clean_text(row.get("secid")) or "")
+            board = str(clean_text(row.get("board")) or "rfud")
+            current_family = str(clean_text(row.get("family_code")) or family_code or secid)
+            decision_source = str(clean_text(row.get("decision_source")) or "")
+            if decision_source not in ALLOWED_DECISION_SOURCES:
+                raise RuntimeError("Invalid decision_source for " + secid + ": " + decision_source)
+            if bool_value(row.get("is_perpetual")):
+                raise RuntimeError("Ordinary row unexpectedly marked perpetual: " + secid)
+            anchor = ordinary_anchor(row)
+            roll_date = previous_session_before(ordered_sessions, anchor) if anchor else None
+            if idx == 0:
+                first_trade = clean_date(row.get("first_trade_date")) or snapshot_date
+                valid_from = first_session_on_or_after(ordered_sessions, first_trade)
+            else:
+                if previous_roll_date is None:
+                    raise RuntimeError("Previous roll_date missing before " + secid)
+                valid_from = next_session_after(ordered_sessions, previous_roll_date)
+            valid_through = roll_date
+            next_secid = None
+            next_contract_code = None
+            if idx + 1 < len(records):
+                next_secid = str(clean_text(records[idx + 1].get("secid")) or "")
+                next_contract_code = next_secid
+            missing_explicit = [x for x in EXPLICIT_GAP_AFTER_SOURCE.get(secid, []) if x.upper() in excluded_upper]
+            if decision_source == "unresolved" or not anchor or not roll_date:
+                roll_status = "blocked_unresolved_anchor"
+                review_notes = "Ordinary source contract has unresolved or missing roll anchor."
+            elif missing_explicit:
+                roll_status = "explicit_partial_chain_gap"
+                review_notes = "Partial chain gap is explicit; excluded contracts between source and next are " + ",".join(missing_explicit) + "."
+            elif not next_secid:
+                roll_status = "blocked_missing_next_contract"
+                review_notes = "No included next source contract exists in current selected scope."
+            else:
+                roll_status = "active_window"
+                review_notes = None
+            rows.append({
+                "roll_map_id": "futures_continuous_roll_map_" + stable_id([snapshot_date, ROLL_POLICY_ID, board, secid, run_id]),
+                "snapshot_date": snapshot_date,
+                "family_code": current_family,
+                "continuous_symbol": current_family,
+                "board": board,
+                "source_secid": secid,
+                "source_contract_code": secid,
+                "next_secid": next_secid,
+                "next_contract_code": next_contract_code,
+                "is_perpetual": False,
+                "roll_required": True,
+                "roll_anchor_date": anchor,
+                "roll_date": roll_date,
+                "valid_from_session": valid_from,
+                "valid_through_session": valid_through,
+                "calendar_status": CALENDAR_STATUS,
+                "calendar_source": CALENDAR_SOURCE,
+                "roll_policy_id": ROLL_POLICY_ID,
+                "adjustment_policy_id": ADJUSTMENT_POLICY_ID,
+                "adjustment_factor": ADJUSTMENT_FACTOR,
+                "decision_source": decision_source,
+                "roll_status": roll_status,
+                "schema_version": SCHEMA_ROLL_MAP,
+                "review_notes": review_notes,
+                "source_expiration_status": clean_text(row.get("expiration_status")),
+                "source_expiration_map_id": clean_text(row.get("expiration_map_id")),
+                "build_run_id": run_id,
+                "build_ts": utc_now_iso(),
+            })
+            previous_roll_date = roll_date
     return rows
+
+
+def build_si_rows(si_rows: pd.DataFrame, snapshot_date: str, run_id: str, ordered_sessions: List[str], excluded: List[str]) -> List[Dict[str, Any]]:
+    return build_ordinary_rows(si_rows, snapshot_date, run_id, ordered_sessions, excluded)
 
 
 def build_roll_map(expiration_map: pd.DataFrame, snapshot_date: str, whitelist: List[str], excluded: List[str], ordered_sessions: List[str], run_id: str) -> pd.DataFrame:
@@ -350,6 +366,8 @@ def build_roll_map(expiration_map: pd.DataFrame, snapshot_date: str, whitelist: 
     rows: List[Dict[str, Any]] = []
     si_rows = si_scope_rows(scoped)
     rows.extend(build_si_rows(si_rows, snapshot_date, run_id, ordered_sessions, excluded))
+    generic_rows = generic_ordinary_scope_rows(scoped)
+    rows.extend(build_ordinary_rows(generic_rows, snapshot_date, run_id, ordered_sessions, excluded))
     for _, row in scoped.sort_values(["family_code", "secid"]).iterrows():
         secid = str(clean_text(row.get("secid")) or "")
         if secid.upper() in PERPETUAL_IDENTITIES:
@@ -362,30 +380,11 @@ def build_roll_map(expiration_map: pd.DataFrame, snapshot_date: str, whitelist: 
 def validate_roll_map(frame: pd.DataFrame, whitelist: List[str], excluded: List[str], ordered_sessions: List[str]) -> List[str]:
     blockers: List[str] = []
     required = [
-        "roll_map_id",
-        "snapshot_date",
-        "family_code",
-        "continuous_symbol",
-        "board",
-        "source_secid",
-        "source_contract_code",
-        "next_secid",
-        "next_contract_code",
-        "is_perpetual",
-        "roll_required",
-        "roll_anchor_date",
-        "roll_date",
-        "valid_from_session",
-        "valid_through_session",
-        "calendar_status",
-        "calendar_source",
-        "roll_policy_id",
-        "adjustment_policy_id",
-        "adjustment_factor",
-        "decision_source",
-        "roll_status",
-        "schema_version",
-        "review_notes",
+        "roll_map_id", "snapshot_date", "family_code", "continuous_symbol", "board", "source_secid",
+        "source_contract_code", "next_secid", "next_contract_code", "is_perpetual", "roll_required",
+        "roll_anchor_date", "roll_date", "valid_from_session", "valid_through_session", "calendar_status",
+        "calendar_source", "roll_policy_id", "adjustment_policy_id", "adjustment_factor", "decision_source",
+        "roll_status", "schema_version", "review_notes",
     ]
     missing = [x for x in required if x not in frame.columns]
     if missing:
@@ -509,12 +508,7 @@ def summarize(frame: pd.DataFrame) -> Dict[str, Any]:
             "decision_source": row.get("decision_source"),
             "adjustment_factor": row.get("adjustment_factor"),
         })
-    return {
-        "rows": int(len(frame)),
-        "roll_status_counts": status_counts,
-        "family_counts": family_counts,
-        "instruments": instruments,
-    }
+    return {"rows": int(len(frame)), "roll_status_counts": status_counts, "family_counts": family_counts, "instruments": instruments}
 
 
 def main() -> int:
@@ -551,35 +545,16 @@ def main() -> int:
     write_parquet(roll_map, output_path)
 
     summary = summarize(roll_map)
-    inputs = {
-        "expiration_map": str(expiration_map_path),
-        "calendar_source": CALENDAR_SOURCE,
-        "calendar_status": CALENDAR_STATUS,
-    }
+    inputs = {"expiration_map": str(expiration_map_path), "calendar_source": CALENDAR_SOURCE, "calendar_status": CALENDAR_STATUS}
     outputs = {"continuous_roll_map": str(output_path)}
     verdict = "pass" if not blockers else "fail"
-
     print_json_line("input_artifacts", inputs)
     print_json_line("output_artifacts_created", outputs)
-    print_json_line("calendar_binding_summary", {
-        "calendar_status": CALENDAR_STATUS,
-        "calendar_source": CALENDAR_SOURCE,
-        "session_min": ordered_sessions[0],
-        "session_max": ordered_sessions[-1],
-        "session_count": len(ordered_sessions),
-    })
+    print_json_line("calendar_binding_summary", {"calendar_status": CALENDAR_STATUS, "calendar_source": CALENDAR_SOURCE, "session_min": ordered_sessions[0], "session_max": ordered_sessions[-1], "session_count": len(ordered_sessions)})
     print_json_line("roll_map_summary", summary)
-    print_json_line("si_chain_handling", {
-        "scope": SI_CHAIN_SCOPE,
-        "excluded_contracts_not_promoted": excluded,
-        "partial_gap_sources": EXPLICIT_GAP_AFTER_SOURCE,
-    })
-    print_json_line("usdrubf_identity_handling", {
-        "source_secid": "USDRUBF",
-        "roll_required": False,
-        "roll_status": "perpetual_identity",
-        "adjustment_factor": ADJUSTMENT_FACTOR,
-    })
+    print_json_line("si_chain_handling", {"scope": SI_CHAIN_SCOPE, "excluded_contracts_not_promoted": excluded, "partial_gap_sources": EXPLICIT_GAP_AFTER_SOURCE})
+    print_json_line("generic_ordinary_handling", {"selected_non_si_non_perpetual_supported": True, "roll_policy_id": ROLL_POLICY_ID, "adjustment_policy_id": ADJUSTMENT_POLICY_ID, "adjustment_factor": ADJUSTMENT_FACTOR})
+    print_json_line("usdrubf_identity_handling", {"source_secid": "USDRUBF", "roll_required": False, "roll_status": "perpetual_identity", "adjustment_factor": ADJUSTMENT_FACTOR})
     print_json_line("builder_result_verdict", verdict)
     if blockers:
         print_json_line("blockers", blockers)
