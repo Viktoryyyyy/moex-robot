@@ -40,12 +40,19 @@ def _family_col(frame):
     raise RuntimeError("eligibility family column missing")
 
 
+def _parse_day(value, label, secid):
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        raise RuntimeError("eligibility " + label + " is not raw-loader-date-range-resolvable for " + str(secid))
+    return parsed.date().isoformat()
+
+
 def load_eligibility(data_root, snapshot_date):
     path = _eligibility_path(data_root, snapshot_date)
     if not path.exists():
         raise FileNotFoundError("Missing controlled WMMMX eligibility artifact: " + str(path))
     frame = pd.read_parquet(path)
-    _require(frame, "controlled_wmmmx_eligibility", ["secid", "classification_status", "continuous_eligibility_status"])
+    _require(frame, "controlled_wmmmx_eligibility", ["secid", "classification_status", "continuous_eligibility_status", "first_available_date", "last_available_date"])
     return frame, path
 
 
@@ -81,11 +88,19 @@ def select(root, data_root, snapshot_date, config_path, whitelist, excluded):
     secids = sorted(work["secid"].astype(str).unique().tolist())
     rows = []
     for _, row in work.drop_duplicates(subset=["secid"], keep="last").sort_values("secid").iterrows():
+        secid = str(row.get("secid"))
+        first_available_date = _parse_day(row.get("first_available_date"), "first_available_date", secid)
+        last_available_date = _parse_day(row.get("last_available_date"), "last_available_date", secid)
+        if first_available_date > last_available_date:
+            raise RuntimeError("eligibility raw-loader date range is inverted for " + secid)
         rows.append({
-            "secid": str(row.get("secid")),
+            "secid": secid,
             "family": str(row.get(fam_col)),
             "classification_status": cls,
             "continuous_eligibility_status": cont,
+            "first_available_date": first_available_date,
+            "last_available_date": last_available_date,
+            "raw_loader_date_range_resolvable": True,
             "gate_status": "pass"
         })
     return secids, {
@@ -94,5 +109,6 @@ def select(root, data_root, snapshot_date, config_path, whitelist, excluded):
         "rows": rows,
         "eligibility_artifact": str(path),
         "eligibility_row_count": int(len(eligibility.index)),
+        "raw_loader_date_range_resolvable": True,
         "gate_status": "pass"
     }
