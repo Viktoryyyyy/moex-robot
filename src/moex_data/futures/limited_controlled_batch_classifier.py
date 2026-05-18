@@ -20,6 +20,7 @@ PILOT_FAMILIES = {"CR", "GD", "GL"}
 SLICE1_WHITELIST = {"SiM6", "SiU6", "SiU7", "SiZ6", "USDRUBF"}
 CONTROLLED_STATUS = "controlled_provisional"
 CONTINUOUS_STATUS = "not_accepted"
+ACCEPTED_LIQUIDITY_STATUSES = {"pass", "review_required"}
 
 
 def _load_config() -> dict[str, Any]:
@@ -85,7 +86,7 @@ def classify(snapshot_date: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     futoi_ok["futoi_ok"] = True
 
     liquidity_ok = liquidity.loc[
-        liquidity["liquidity_status"].astype(str) == "review_required",
+        liquidity["liquidity_status"].astype(str).isin(ACCEPTED_LIQUIDITY_STATUSES),
         ["secid", "board"],
     ].drop_duplicates().copy()
     liquidity_ok["liquidity_ok"] = True
@@ -139,6 +140,7 @@ def classify(snapshot_date: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         "families": [row["family"] for row in family_rows],
         "classification_status": CONTROLLED_STATUS,
         "continuous_eligibility_status": CONTINUOUS_STATUS,
+        "accepted_liquidity_statuses": sorted(ACCEPTED_LIQUIDITY_STATUSES),
         "preserved_pilot": sorted(PILOT_FAMILIES),
         "preserved_slice_1": sorted(SLICE1_WHITELIST),
         "blocked_non_promoted": sorted(BLOCKED_FAMILIES),
