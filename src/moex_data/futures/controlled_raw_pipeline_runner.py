@@ -62,15 +62,29 @@ def absence(before, after):
     return {"continuous_build_executed": False, "new_or_changed_continuous_artifacts_detected": changed, "status": "pass" if not changed else "fail", "before": before, "after": after}
 
 
-def command(root, cid, script, args, secids, excluded):
+def resolved_bounds(gate, args):
+    rows = gate.get("rows") or []
+    starts = []
+    ends = []
+    for row in rows:
+        if not bool(row.get("raw_loader_date_range_resolvable")):
+            raise RuntimeError("controlled eligibility contains unresolved raw-loader range for " + str(row.get("secid")))
+        starts.append(str(row.get("first_available_date") or "").strip())
+        ends.append(str(row.get("last_available_date") or "").strip())
+    if not starts or not ends:
+        raise RuntimeError("controlled eligibility resolved zero loader ranges")
+    effective_from = str(args.from_date or min(starts))
+    effective_till = str(args.till or max(ends))
+    return effective_from, effective_till
+
+
+def command(root, cid, script, args, secids, excluded, effective_from, effective_till):
     cmd = [sys.executable, str(root / script)]
     if cid in ["raw_5m_loader", "futoi_raw_loader"]:
         cmd += ["--snapshot-date", args.snapshot_date]
     cmd += ["--run-date", args.run_date]
-    if args.from_date:
-        cmd += ["--from", args.from_date]
-    if args.till:
-        cmd += ["--till", args.till]
+    cmd += ["--from", effective_from]
+    cmd += ["--till", effective_till]
     cmd += ["--data-root", str(args.data_root_resolved), "--whitelist", ",".join(secids), "--excluded", ",".join(excluded)]
     if cid in ["raw_5m_loader", "futoi_raw_loader"]:
         cmd += ["--iss-base-url", args.iss_base_url, "--apim-base-url", args.apim_base_url, "--timeout", str(args.timeout)]
@@ -94,11 +108,11 @@ def validate_manifest(component_id, manifest, verdict_field, whitelist_field, se
         raise RuntimeError(component_id + " quality fail rows")
 
 
-def run_one(root, data_root, item, args, secids, excluded):
+def run_one(root, data_root, item, args, secids, excluded, effective_from, effective_till):
     cid, script, verdict, whitelist = item
     mpath = child_manifest(data_root, cid, args.run_date)
     started = time.time()
-    proc = subprocess.run(command(root, cid, script, args, secids, excluded), cwd=str(root), text=True, capture_output=True)
+    proc = subprocess.run(command(root, cid, script, args, secids, excluded, effective_from, effective_till), cwd=str(root), text=True, capture_output=True)
     status = {"component_id": cid, "returncode": proc.returncode, "stdout_tail": proc.stdout[-3000:], "stderr_tail": proc.stderr[-3000:], "manifest_path": str(mpath), "status": "fail"}
     if proc.returncode != 0:
         status["failure_reason"] = "returncode_nonzero"
@@ -142,13 +156,14 @@ def main():
     data_root = args.data_root_resolved
     excluded = parse_list(args.excluded, [])
     secids, gate = select(root, data_root, args.snapshot_date, args.config, parse_list(args.whitelist, []), excluded)
+    effective_from, effective_till = resolved_bounds(gate, args)
     before = snapshot_continuous(data_root)
     statuses = []
     manifests = {}
     final = "pass"
     blockers = []
     for item in COMPONENTS:
-        st, mf = run_one(root, data_root, item, args, secids, excluded)
+        st, mf = run_one(root, data_root, item, args, secids, excluded, effective_from, effective_till)
         statuses.append(st)
         if st["status"] != "pass":
             final = "fail"
@@ -159,12 +174,14 @@ def main():
     if abs_check["status"] != "pass":
         final = "fail"
         blockers.append("continuous_absence_failed")
-    manifest = {"schema_version": SCHEMA_DIAGNOSTICS, "run_id": "controlled_raw_pipeline_" + args.run_date + "_" + stable_id([args.snapshot_date, utc_now_iso(), ",".join(secids)]), "universe_scope": args.universe_scope, "snapshot_date": args.snapshot_date, "run_date": args.run_date, "selected_secids": secids, "classification_gate": gate, "raw_5m_status": statuses[0] if len(statuses) > 0 else {"status": "not_run"}, "futoi_integration_status": statuses[1] if len(statuses) > 1 else {"status": "not_run"}, "raw_d1_integration_status": statuses[2] if len(statuses) > 2 else {"status": "not_run"}, "diagnostics_status": "pass", "continuous_absence_checks": abs_check, "preservation_checks": {"slice1_defaults_changed": False, "si_continuous_behavior_changed": False, "roll_policy_changed": False, "status": "pass"}, "component_status": statuses, "final_verdict": final, "blockers": blockers}
+    manifest = {"schema_version": SCHEMA_DIAGNOSTICS, "run_id": "controlled_raw_pipeline_" + args.run_date + "_" + stable_id([args.snapshot_date, utc_now_iso(), ",".join(secids)]), "universe_scope": args.universe_scope, "snapshot_date": args.snapshot_date, "run_date": args.run_date, "resolved_loader_from": effective_from, "resolved_loader_till": effective_till, "selected_secids": secids, "classification_gate": gate, "raw_5m_status": statuses[0] if len(statuses) > 0 else {"status": "not_run"}, "futoi_integration_status": statuses[1] if len(statuses) > 1 else {"status": "not_run"}, "raw_d1_integration_status": statuses[2] if len(statuses) > 2 else {"status": "not_run"}, "diagnostics_status": "pass", "continuous_absence_checks": abs_check, "preservation_checks": {"slice1_defaults_changed": False, "si_continuous_behavior_changed": False, "roll_policy_changed": False, "status": "pass"}, "component_status": statuses, "final_verdict": final, "blockers": blockers}
     path = out_path(data_root, args.universe_scope, args.run_date)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
     print_json_line("controlled_raw_pipeline_manifest_path", str(path))
     print_json_line("selected_secids", secids)
+    print_json_line("resolved_loader_from", effective_from)
+    print_json_line("resolved_loader_till", effective_till)
     print_json_line("classification_gate", gate)
     print_json_line("continuous_absence_checks", abs_check)
     print_json_line("final_verdict", final)
