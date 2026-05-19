@@ -9,6 +9,7 @@
   ],
   "active_futoi_raw_selection_mode": "rfud_included_universe",
   "active_raw_5m_selection_mode": "rfud_included_universe",
+  "active_raw_d1_selection_mode": "rfud_included_raw_d1",
   "chunking_policy": {
     "chunk_dimensions": [
       "family_code",
@@ -42,6 +43,7 @@
     "raw_5m_probe_failed",
     "raw_5m_schema_invalid",
     "raw_5m_calendar_mismatch",
+    "raw_5m_quality_not_accepted",
     "futoi_unavailable",
     "futoi_unresolved",
     "liquidity_threshold_pending_pm_decision",
@@ -107,6 +109,14 @@
     "futoi_eligible_only": true,
     "selection_flag": "futoi_eligible"
   },
+  "l3_5_raw_d1_included_universe": {
+    "board": "RFUD",
+    "classification_status": "included",
+    "dataset_stage": "raw_d1",
+    "raw_5m_eligible_only": true,
+    "raw_d1_eligible_only": true,
+    "source_quality_stage": "raw_5m"
+  },
   "manifest_required": true,
   "market": "forts",
   "preserve_existing_partitions": true,
@@ -120,8 +130,10 @@
     "selected_flag": "raw_5m_eligible"
   },
   "raw_d1_derivation_policy": {
-    "drives_backfill_selection": "later_stage_only",
+    "drives_backfill_selection": true,
     "enabled_for_first_slice": false,
+    "enabled_for_l3_5": true,
+    "requires_accepted_raw_5m_quality": true,
     "selected_flag": "raw_d1_eligible"
   },
   "required_checks_for_included": [
