@@ -7,6 +7,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path.cwd() / "src"))
 
+try:
+    from dotenv import load_dotenv
+except Exception:
+    load_dotenv = None
+
 import pandas as pd
 
 from moex_data.futures import liquidity_history_metrics_probe as base
@@ -23,20 +28,51 @@ from moex_data.futures.slice1_common import utc_now_iso
 SCHEMA_D1 = "futures_derived_d1_ohlcv.v1"
 SCHEMA_QUALITY = "futures_derived_d1_ohlcv_quality_report.v1"
 SCHEMA_MANIFEST = "futures_derived_d1_ohlcv_manifest.v1"
+SCHEMA_ELIGIBILITY = "futures_all_universe_eligibility_snapshot.v1"
+DATASET_STAGE = "raw_d1"
+MODE_L3_5 = "rfud_included_raw_d1"
 REQUIRED_CONTRACTS = [
     "contracts/datasets/futures_raw_5m_contract.md",
     "contracts/datasets/futures_derived_d1_ohlcv_contract.md",
     "contracts/datasets/futures_derived_d1_ohlcv_manifest_contract.md",
     "contracts/datasets/futures_derived_d1_ohlcv_quality_report_contract.md",
+    "contracts/datasets/futures_all_universe_eligibility_contract.md",
+    "configs/datasets/futures_all_universe_eligibility_config.json",
 ]
 
 
+def load_json(path):
+    with Path(path).open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise RuntimeError("JSON root is not object: " + str(path))
+    return data
 
-def output_paths(data_root, run_date):
+
+def dump_json(path, data):
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+
+
+def write_parquet(path, frame):
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(p, index=False)
+
+
+def output_paths(data_root, run_date, chunk_id=""):
+    root = data_root / "futures"
+    if chunk_id:
+        return {
+            "derived_d1_partition_root": str(root / "derived_d1_ohlcv"),
+            "quality_report": str(root / "quality" / "derived_d1_ohlcv_builder" / ("chunk_id=" + chunk_id) / "quality_report.parquet"),
+            "manifest": str(root / "runs" / "derived_d1_ohlcv_builder" / ("chunk_id=" + chunk_id) / "manifest.json"),
+        }
     return {
-        "derived_d1_partition_root": str(data_root / "futures" / "derived_d1_ohlcv"),
-        "quality_report": str(data_root / "futures" / "quality" / "derived_d1_ohlcv_builder" / ("run_date=" + run_date) / "futures_derived_d1_ohlcv_quality_report.parquet"),
-        "manifest": str(data_root / "futures" / "runs" / "derived_d1_ohlcv_builder" / ("run_date=" + run_date) / "manifest.json"),
+        "derived_d1_partition_root": str(root / "derived_d1_ohlcv"),
+        "quality_report": str(root / "quality" / "derived_d1_ohlcv_builder" / ("run_date=" + run_date) / "futures_derived_d1_ohlcv_quality_report.parquet"),
+        "manifest": str(root / "runs" / "derived_d1_ohlcv_builder" / ("run_date=" + run_date) / "manifest.json"),
     }
 
 
@@ -48,6 +84,25 @@ def d1_path(data_root, trade_date, family_code, secid):
     return data_root / "futures" / "derived_d1_ohlcv" / ("trade_date=" + str(trade_date)) / ("family=" + str(family_code)) / ("secid=" + str(secid)) / "part.parquet"
 
 
+def eligibility_path(data_root, snapshot_date, explicit):
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    return data_root / "futures" / "all_universe" / "eligibility_snapshot" / ("snapshot_date=" + snapshot_date) / "eligibility_snapshot.parquet"
+
+
+def refined_eligibility_path(data_root, snapshot_date, explicit):
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    return data_root / "futures" / "all_universe" / "eligibility_snapshot_raw_d1" / ("snapshot_date=" + snapshot_date) / "eligibility_snapshot.parquet"
+
+
+def quality_report_paths(data_root, explicit):
+    if explicit:
+        return [Path(x).expanduser().resolve() for x in str(explicit).split(",") if x.strip()]
+    base_dir = data_root / "futures" / "all_universe" / "quality" / "raw_5m_backfill"
+    return sorted(base_dir.glob("chunk_id=*/quality_report.parquet"))
+
+
 def partition_value(path, key):
     prefix = key + "="
     for part in Path(path).parts:
@@ -56,31 +111,99 @@ def partition_value(path, key):
     return ""
 
 
-def discover_raw_paths(data_root, whitelist, excluded, from_date, till):
+def require_columns(frame, cols, name):
+    missing = [x for x in cols if x not in frame.columns]
+    if missing:
+        raise RuntimeError(name + " missing required fields: " + ", ".join(missing))
+
+
+def accepted_quality(quality_paths, from_date, till):
+    frames = []
+    for path in quality_paths:
+        if path.exists():
+            frame = pd.read_parquet(path)
+            if len(frame):
+                frame["_quality_report_path"] = str(path)
+                frames.append(frame)
+    if not frames:
+        raise RuntimeError("No non-empty raw 5m quality reports found")
+    quality = pd.concat(frames, ignore_index=True)
+    require_columns(quality, ["dataset_stage", "family_code", "secid", "quality_status", "rows_written", "partition_status", "date_from", "date_till"], "raw_5m_quality_reports")
+    q = quality.loc[
+        (quality["dataset_stage"].astype(str) == "raw_5m")
+        & (quality["quality_status"].astype(str) == "pass")
+        & (quality["partition_status"].astype(str) == "written")
+        & (pd.to_numeric(quality["rows_written"], errors="coerce") > 0)
+    ].copy()
+    if from_date:
+        q = q.loc[q["date_till"].astype(str) >= str(from_date)].copy()
+    if till:
+        q = q.loc[q["date_from"].astype(str) <= str(till)].copy()
+    if q.empty:
+        raise RuntimeError("No accepted raw 5m quality rows after filters")
+    return q.sort_values(["family_code", "secid", "date_from", "date_till"]).reset_index(drop=True)
+
+
+def refine_eligibility_for_raw_d1(eligibility, quality, config):
+    require_columns(eligibility, ["secid", "board", "classification_status", "raw_5m_eligible", "raw_d1_eligible", "schema_version"], "eligibility_snapshot")
+    stage = config.get("l3_5_raw_d1_included_universe") or {}
+    target_board = str(stage.get("board", "RFUD")).upper()
+    accepted_secids = set(quality["secid"].astype(str).tolist())
+    out = eligibility.copy()
+    selected = (
+        (out["board"].astype(str).str.upper() == target_board)
+        & (out["classification_status"].astype(str) == "included")
+        & (out["raw_5m_eligible"] == True)
+        & (out["secid"].astype(str).isin(accepted_secids))
+    )
+    out["raw_d1_eligible"] = False
+    out.loc[selected, "raw_d1_eligible"] = True
+    out["dataset_stage"] = DATASET_STAGE
+    out["schema_version"] = SCHEMA_ELIGIBILITY
+    if "raw_d1_check_status" not in out.columns:
+        out["raw_d1_check_status"] = ""
+    if "deferral_reason" not in out.columns:
+        out["deferral_reason"] = ""
+    if "backfill_selection_status" not in out.columns:
+        out["backfill_selection_status"] = ""
+    if "backfill_selection_reason" not in out.columns:
+        out["backfill_selection_reason"] = ""
+    if "notes" not in out.columns:
+        out["notes"] = ""
+    included_raw5m = (out["board"].astype(str).str.upper() == target_board) & (out["classification_status"].astype(str) == "included") & (out["raw_5m_eligible"] == True)
+    out.loc[included_raw5m & selected, "raw_d1_check_status"] = "pass"
+    out.loc[included_raw5m & selected, "backfill_selection_status"] = "selected"
+    out.loc[included_raw5m & selected, "backfill_selection_reason"] = "raw_d1_selected_from_accepted_raw_5m_quality"
+    out.loc[included_raw5m & ~selected, "raw_d1_check_status"] = "raw_5m_quality_not_accepted"
+    out.loc[included_raw5m & ~selected, "deferral_reason"] = "raw_5m_quality_not_accepted"
+    out.loc[included_raw5m & ~selected, "backfill_selection_status"] = "deferred"
+    out.loc[included_raw5m & ~selected, "backfill_selection_reason"] = "raw_5m_quality_not_accepted"
+    out["notes"] = out["notes"].astype(str) + " | PM L3-5 raw D1 eligibility refined from accepted raw 5m quality"
+    selected_frame = out.loc[selected].copy().sort_values(["family_code", "secid"]).reset_index(drop=True)
+    if selected_frame.empty:
+        raise RuntimeError("No RFUD included raw_d1 eligible instruments after raw 5m quality refinement")
+    return out, selected_frame
+
+
+def discover_raw_paths(data_root, selected, from_date, till):
     root = raw_root(data_root)
     if not root.exists():
         raise FileNotFoundError("Missing raw 5m root: " + str(root))
-    whitelist_upper = {x.upper() for x in whitelist}
-    excluded_upper = {x.upper() for x in excluded}
+    selected_pairs = {(str(row.get("family_code")), str(row.get("secid"))) for _, row in selected.iterrows()}
     paths = []
-    excluded_hits = []
     for path in sorted(root.glob("trade_date=*/family=*/secid=*/part.parquet")):
+        family_code = partition_value(path, "family")
         secid = partition_value(path, "secid")
         trade_date = partition_value(path, "trade_date")
-        if secid.upper() in excluded_upper:
-            excluded_hits.append(str(path))
-            continue
-        if secid.upper() not in whitelist_upper:
+        if (family_code, secid) not in selected_pairs:
             continue
         if from_date and trade_date < from_date:
             continue
         if till and trade_date > till:
             continue
         paths.append(path)
-    if excluded_hits:
-        raise RuntimeError("Excluded instruments found in raw 5m input paths: " + json.dumps(excluded_hits[:20], ensure_ascii=False))
     if not paths:
-        raise RuntimeError("No raw 5m partitions found for accepted whitelist")
+        raise RuntimeError("No raw 5m partitions found for raw D1 selected universe")
     return paths
 
 
@@ -94,7 +217,7 @@ def read_raw(paths):
 
 
 def validate_raw(frame):
-    required = ["trade_date", "ts", "board", "secid", "family_code", "open", "high", "low", "close", "volume", "schema_version", "short_history_flag", "calendar_denominator_status"]
+    required = ["trade_date", "ts", "board", "secid", "family_code", "open", "high", "low", "close", "volume", "schema_version", "calendar_denominator_status"]
     missing = [x for x in required if x not in frame.columns]
     if missing:
         raise RuntimeError("Raw 5m input missing required fields: " + ", ".join(missing))
@@ -104,6 +227,8 @@ def validate_raw(frame):
     calendar = sorted([str(x) for x in frame["calendar_denominator_status"].dropna().unique().tolist()])
     if calendar != ["canonical_apim_futures_xml"]:
         raise RuntimeError("Raw 5m calendar status mismatch: " + json.dumps(calendar, ensure_ascii=False))
+    if sorted([str(x) for x in frame["board"].dropna().unique().tolist()]) != ["RFUD"]:
+        raise RuntimeError("Raw D1 derivation supports RFUD board only")
 
 
 def normalize_raw(frame):
@@ -157,8 +282,9 @@ def aggregate_d1(raw, ingest_ts):
             "source_rows": int(len(part)),
             "ingest_ts": ingest_ts,
             "schema_version": SCHEMA_D1,
-            "short_history_flag": first_bool(part["short_history_flag"]),
+            "short_history_flag": first_bool(part["short_history_flag"]) if "short_history_flag" in part.columns else False,
             "calendar_denominator_status": "canonical_apim_futures_xml",
+            "dataset_stage": DATASET_STAGE,
         })
     return pd.DataFrame(rows).sort_values(["trade_date", "family_code", "secid"]).reset_index(drop=True) if rows else pd.DataFrame()
 
@@ -201,7 +327,7 @@ def status_from_counts(counts):
     for key, note in checks:
         if int(counts.get(key) or 0) > 0:
             return "fail", note
-    return "pass", "derived D1 OHLCV build completed from raw 5m"
+    return "pass", "derived raw D1 OHLCV build completed from accepted raw 5m"
 
 
 def write_partitions(d1, data_root):
@@ -223,7 +349,7 @@ def per_instrument(raw, d1, paths):
     summaries = {}
     for secid, part in raw.groupby("secid", sort=True):
         d1_part = d1.loc[d1["secid"].astype(str) == str(secid)].copy()
-        short_history_flag = first_bool(part["short_history_flag"])
+        short_history_flag = first_bool(part["short_history_flag"]) if "short_history_flag" in part.columns else False
         status = "pass" if int(len(d1_part)) == int(part["trade_date"].nunique()) else "fail"
         summaries[str(secid)] = {
             "raw_5m_rows": int(len(part)),
@@ -236,68 +362,36 @@ def per_instrument(raw, d1, paths):
     return summaries
 
 
-def validate_exact_scope(raw, whitelist, excluded):
+def validate_selected_scope(raw, selected):
     observed = sorted(raw["secid"].dropna().astype(str).unique().tolist())
-    if sorted([x.upper() for x in observed]) != sorted([x.upper() for x in whitelist]):
-        raise RuntimeError("Raw partitions do not cover exact accepted whitelist. observed=" + json.dumps(observed, ensure_ascii=False) + " expected=" + json.dumps(sorted(whitelist), ensure_ascii=False))
-    excluded_upper = {x.upper() for x in excluded}
-    hits = [x for x in observed if x.upper() in excluded_upper]
-    if hits:
-        raise RuntimeError("Excluded instruments found in selected raw rows: " + json.dumps(hits, ensure_ascii=False))
+    expected = sorted(selected["secid"].dropna().astype(str).unique().tolist())
+    if sorted([x.upper() for x in observed]) != sorted([x.upper() for x in expected]):
+        raise RuntimeError("Raw partitions do not cover exact raw D1 selected universe. observed=" + json.dumps(observed, ensure_ascii=False) + " expected=" + json.dumps(expected, ensure_ascii=False))
+    selected_boards = sorted(selected["board"].dropna().astype(str).str.upper().unique().tolist())
+    if selected_boards != ["RFUD"]:
+        raise RuntimeError("Selected raw D1 universe must be RFUD only: " + json.dumps(selected_boards, ensure_ascii=False))
+    bad = selected.loc[(selected["classification_status"].astype(str) != "included") | (selected["raw_5m_eligible"] != True) | (selected["raw_d1_eligible"] != True)].copy()
+    if len(bad):
+        raise RuntimeError("Selected raw D1 universe contains non-eligible rows")
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--run-date", default=today_msk())
-    parser.add_argument("--from", dest="from_date", default="")
-    parser.add_argument("--till", default="")
-    parser.add_argument("--data-root", default="")
-    parser.add_argument("--whitelist", default=",".join(DEFAULT_WHITELIST))
-    parser.add_argument("--excluded", default=",".join(DEFAULT_EXCLUDED))
-    args = parser.parse_args()
+def chunk_groups(selected):
+    groups = []
+    for fam, frame in selected.groupby("family_code", sort=True):
+        groups.append((str(fam), frame.sort_values("secid").reset_index(drop=True)))
+    return groups
 
-    root = Path.cwd().resolve()
-    data_root = base.resolve_data_root(args)
-    run_date = str(args.run_date).strip()
-    from_date = base.parse_iso_date(str(args.from_date or "")) if str(args.from_date or "").strip() else ""
-    till = base.parse_iso_date(str(args.till or "")) if str(args.till or "").strip() else ""
-    whitelist = parse_list(args.whitelist, DEFAULT_WHITELIST)
-    excluded = parse_list(args.excluded, DEFAULT_EXCLUDED)
-    ingest_ts = utc_now_iso()
-    run_id = "futures_derived_d1_ohlcv_builder_" + run_date + "_" + stable_id([ingest_ts, ",".join(whitelist), from_date, till])
 
-    base.assert_files_exist(root, REQUIRED_CONTRACTS)
-    for secid in whitelist:
-        if secid in excluded:
-            raise RuntimeError("Whitelisted instrument is also excluded: " + secid)
-
-    raw_paths = discover_raw_paths(data_root, whitelist, excluded, from_date, till)
-    raw = read_raw(raw_paths)
-    validate_raw(raw)
-    raw = normalize_raw(raw)
-    validate_exact_scope(raw, whitelist, excluded)
-
-    d1 = aggregate_d1(raw, ingest_ts)
-    counts = quality_counts(raw, d1)
-    aggregate_status, aggregate_notes = status_from_counts(counts)
-    partition_paths = write_partitions(d1, data_root) if aggregate_status != "fail" else []
-    summaries = per_instrument(raw, d1, partition_paths)
-
-    if "SiU7" in summaries and summaries["SiU7"].get("short_history_flag") is not True:
-        raise RuntimeError("SiU7 short_history_flag is not true in derived D1 output")
+def build_quality_rows(run_id, run_date, summaries):
+    rows = []
     for secid, summary in summaries.items():
-        if secid not in SHORT_HISTORY_ALLOWED and summary.get("short_history_flag") is True:
-            raise RuntimeError("Unexpected short_history_flag=true for " + str(secid))
-
-    outputs = output_paths(data_root, run_date)
-    quality_rows = []
-    for secid, summary in summaries.items():
-        quality_rows.append({
+        rows.append({
             "quality_report_id": stable_id([run_id, secid]),
             "run_id": run_id,
             "run_date": run_date,
             "secid": secid,
             "dataset_id": "futures_derived_d1_ohlcv",
+            "dataset_stage": DATASET_STAGE,
             "schema_version": SCHEMA_QUALITY,
             "quality_status": summary.get("quality_status"),
             "review_notes": "derived D1 rows match raw secid/trade_date pairs" if summary.get("quality_status") == "pass" else "derived D1 row count mismatch",
@@ -308,38 +402,156 @@ def main():
             "partition_count": summary.get("partition_count"),
             "calendar_denominator_status": "canonical_apim_futures_xml",
         })
-    quality = pd.DataFrame(quality_rows).sort_values(["secid"]).reset_index(drop=True)
-    Path(outputs["quality_report"]).parent.mkdir(parents=True, exist_ok=True)
-    quality.to_parquet(outputs["quality_report"], index=False)
-    quality_counts_by_status = {str(k): int(v) for k, v in quality["quality_status"].astype(str).value_counts(dropna=False).to_dict().items()}
+    return pd.DataFrame(rows).sort_values(["secid"]).reset_index(drop=True)
+
+
+def main():
+    if load_dotenv is not None:
+        load_dotenv()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run-date", default=today_msk())
+    parser.add_argument("--snapshot-date", default=today_msk())
+    parser.add_argument("--from", dest="from_date", default="")
+    parser.add_argument("--till", default="")
+    parser.add_argument("--data-root", default="")
+    parser.add_argument("--config", default="configs/datasets/futures_all_universe_eligibility_config.json")
+    parser.add_argument("--input-eligibility", default="")
+    parser.add_argument("--output-eligibility", default="")
+    parser.add_argument("--quality-reports", default="")
+    parser.add_argument("--selection-mode", default=MODE_L3_5)
+    parser.add_argument("--whitelist", default="")
+    parser.add_argument("--excluded", default=",".join(DEFAULT_EXCLUDED))
+    args = parser.parse_args()
+
+    root = Path.cwd().resolve()
+    data_root = base.resolve_data_root(args)
+    run_date = str(args.run_date).strip()
+    snapshot_date = str(args.snapshot_date).strip()
+    from_date = base.parse_iso_date(str(args.from_date or "")) if str(args.from_date or "").strip() else ""
+    till = base.parse_iso_date(str(args.till or "")) if str(args.till or "").strip() else ""
+    config = load_json(root / args.config)
+    mode = str(args.selection_mode or config.get("active_raw_d1_selection_mode") or MODE_L3_5)
+    if mode != MODE_L3_5:
+        raise RuntimeError("Unsupported raw D1 selection mode: " + mode)
+    if config.get("continuous_build_enabled") is not False or config.get("w1_build_enabled") is not False:
+        raise RuntimeError("continuous_build_enabled and w1_build_enabled must be false")
+    if args.whitelist:
+        raise RuntimeError("Manual whitelist is forbidden for PM L3-5 raw D1 registry expansion")
+
+    base.assert_files_exist(root, REQUIRED_CONTRACTS)
+    quality = accepted_quality(quality_report_paths(data_root, str(args.quality_reports or "")), from_date, till)
+    ep = eligibility_path(data_root, snapshot_date, str(args.input_eligibility or ""))
+    if not ep.exists():
+        raise FileNotFoundError("Missing eligibility snapshot: " + str(ep))
+    eligibility = pd.read_parquet(ep)
+    refined, selected = refine_eligibility_for_raw_d1(eligibility, quality, config)
+    refined_path = refined_eligibility_path(data_root, snapshot_date, str(args.output_eligibility or ""))
+    write_parquet(refined_path, refined)
+
+    raw_paths = discover_raw_paths(data_root, selected, from_date, till)
+    raw = read_raw(raw_paths)
+    validate_raw(raw)
+    raw = normalize_raw(raw)
+    validate_selected_scope(raw, selected)
+
+    ingest_ts = utc_now_iso()
+    run_id = "futures_raw_d1_derivation_" + run_date + "_" + stable_id([ingest_ts, snapshot_date, len(selected), from_date, till])
+    d1 = aggregate_d1(raw, ingest_ts)
+    counts = quality_counts(raw, d1)
+    aggregate_status, aggregate_notes = status_from_counts(counts)
+    partition_paths = write_partitions(d1, data_root) if aggregate_status != "fail" else []
+    summaries = per_instrument(raw, d1, partition_paths)
+
+    for secid, summary in summaries.items():
+        if secid not in SHORT_HISTORY_ALLOWED and summary.get("short_history_flag") is True:
+            raise RuntimeError("Unexpected short_history_flag=true for " + str(secid))
+
+    quality_rows = build_quality_rows(run_id, run_date, summaries)
+    quality_counts_by_status = {str(k): int(v) for k, v in quality_rows["quality_status"].astype(str).value_counts(dropna=False).to_dict().items()}
+    aggregate_outputs = output_paths(data_root, run_date)
+    write_parquet(aggregate_outputs["quality_report"], quality_rows)
+
+    chunk_outputs = []
+    for fam, frame in chunk_groups(selected):
+        chunk_id = "raw_d1_" + stable_id([run_id, fam, from_date, till, ",".join(frame["secid"].astype(str).tolist())])
+        paths_for_chunk = [x for x in partition_paths if "/family=" + str(fam) + "/" in str(x)]
+        chunk_out = output_paths(data_root, run_date, chunk_id)
+        chunk_quality = quality_rows.loc[quality_rows["secid"].astype(str).isin(frame["secid"].astype(str).tolist())].copy()
+        write_parquet(chunk_out["quality_report"], chunk_quality)
+        chunk_manifest = {
+            "schema_version": SCHEMA_MANIFEST,
+            "run_id": run_id,
+            "chunk_id": chunk_id,
+            "dataset_stage": DATASET_STAGE,
+            "family_code": fam,
+            "secid_list": frame["secid"].astype(str).tolist(),
+            "date_from": from_date or str(raw["trade_date"].min()),
+            "date_till": till or str(raw["trade_date"].max()),
+            "status": "succeeded" if not chunk_quality.empty and chunk_quality["quality_status"].astype(str).eq("pass").all() else "partial_failed",
+            "started_at": ingest_ts,
+            "finished_at": utc_now_iso(),
+            "failed_secid": chunk_quality.loc[chunk_quality["quality_status"].astype(str) != "pass", "secid"].astype(str).tolist(),
+            "deferred_secid": [],
+            "skipped_secid": [],
+            "output_partitions": paths_for_chunk,
+            "quality_summary": {str(k): int(v) for k, v in chunk_quality["quality_status"].astype(str).value_counts(dropna=False).to_dict().items()},
+            "error_code": "" if chunk_quality["quality_status"].astype(str).eq("pass").all() else "secid_level_failure",
+            "error_message": "",
+            "retry_allowed": not chunk_quality["quality_status"].astype(str).eq("pass").all(),
+            "next_retry_scope": "secid_date_range_dataset_stage" if not chunk_quality["quality_status"].astype(str).eq("pass").all() else "",
+        }
+        dump_json(chunk_out["manifest"], chunk_manifest)
+        chunk_outputs.append(chunk_out)
 
     manifest = {
         "schema_version": SCHEMA_MANIFEST,
         "run_id": run_id,
         "run_date": run_date,
+        "snapshot_date": snapshot_date,
+        "dataset_stage": DATASET_STAGE,
+        "selection_mode": mode,
         "ingest_ts": ingest_ts,
-        "builder_whitelist_applied": whitelist,
-        "excluded_instruments_confirmed": excluded,
-        "input_artifacts": {"raw_5m_partition_root": str(raw_root(data_root)), "raw_5m_partitions_read": [str(x) for x in raw_paths]},
-        "output_artifacts": outputs,
+        "input_artifacts": {
+            "eligibility_snapshot": str(ep),
+            "refined_raw_d1_eligibility_snapshot": str(refined_path),
+            "raw_5m_quality_reports": [str(x) for x in quality_report_paths(data_root, str(args.quality_reports or ""))],
+            "raw_5m_partition_root": str(raw_root(data_root)),
+            "raw_5m_partitions_read": [str(x) for x in raw_paths],
+        },
+        "selected_universe": {
+            "board": "RFUD",
+            "classification_status": "included",
+            "raw_5m_eligible": True,
+            "raw_d1_eligible": True,
+            "family_count": int(selected["family_code"].nunique()),
+            "secid_count": int(len(selected)),
+            "secids": selected["secid"].astype(str).tolist(),
+        },
+        "output_artifacts": aggregate_outputs,
+        "chunk_outputs": chunk_outputs,
         "partition_paths_created": partition_paths,
         "instrument_summaries": summaries,
         "quality_status_counts": quality_counts_by_status,
         "source_to_output_row_check": counts,
-        "short_history_handling": {"SiU7": summaries.get("SiU7")},
         "calendar_validation_summary": {"calendar_denominator_status": "canonical_apim_futures_xml"},
         "builder_result_verdict": "pass" if quality_counts_by_status.get("fail", 0) == 0 and aggregate_status == "pass" else "fail",
         "aggregate_review_notes": aggregate_notes,
+        "forbidden_scope_checks": {
+            "futoi_join": "not_performed",
+            "continuous_fields": "not_emitted",
+            "continuous_build": "not_performed",
+            "w1_build": "not_performed",
+        },
     }
-    Path(outputs["manifest"]).parent.mkdir(parents=True, exist_ok=True)
-    Path(outputs["manifest"]).write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+    dump_json(aggregate_outputs["manifest"], manifest)
 
-    print_json_line("builder_whitelist_applied", whitelist)
-    print_json_line("excluded_instruments_confirmed", excluded)
-    print_json_line("output_artifacts_created", outputs)
+    print_json_line("selection_mode", mode)
+    print_json_line("selected_universe", manifest["selected_universe"])
+    print_json_line("source_raw_5m_status", {"accepted_quality_rows": int(len(quality)), "raw_5m_partitions_read": int(len(raw_paths))})
+    print_json_line("output_artifacts_created", aggregate_outputs)
+    print_json_line("chunk_outputs", chunk_outputs)
     print_json_line("derived_d1_quality_summary", {"quality_status_counts": quality_counts_by_status, "instruments": summaries})
     print_json_line("source_to_output_row_check", counts)
-    print_json_line("short_history_handling", manifest["short_history_handling"])
     print_json_line("builder_result_verdict", manifest["builder_result_verdict"])
     return 0 if manifest["builder_result_verdict"] == "pass" else 1
 
