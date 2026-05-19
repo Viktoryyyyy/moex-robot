@@ -6,12 +6,13 @@ artifact_class: external_pattern
 format: json
 schema_version: futures_derived_d1_ohlcv_manifest.v1
 
-purpose: Run manifest for Slice 1 derived D1 OHLCV builder execution, including applied whitelist, excluded instruments, input raw 5m partitions, output D1 artifacts, per-instrument summaries, and source-to-output row checks.
+purpose: Run manifest for derived D1 OHLCV builder execution, including applied whitelist or eligibility-snapshot-driven selection, excluded instruments, input raw 5m partitions, output D1 artifacts, per-instrument summaries, and source-to-output row checks.
 producer: src/moex_data/futures/derived_d1_ohlcv_builder.py
 consumer:
 - futures_data_lake_pm_review
 - futures_derived_d1_ohlcv_quality_report_consumer
 - later_daily_refresh_runner
+- later_futures_all_universe_raw_d1_derivation_stage
 
 path_pattern: ${MOEX_DATA_ROOT}/futures/runs/derived_d1_ohlcv_builder/run_date={run_date}/manifest.json
 primary_key:
@@ -34,8 +35,18 @@ required_fields:
 - calendar_validation_summary
 - builder_result_verdict
 
+optional_all_universe_fields:
+- eligibility_snapshot_id
+- registry_snapshot_id
+- chunk_id
+- dataset_stage
+- backfill_selection_status
+- backfill_selection_reason
+
 nullable_fields:
-- none
+- eligibility_snapshot_id
+- registry_snapshot_id
+- chunk_id
 
 status_fields:
 - builder_result_verdict
@@ -45,20 +56,24 @@ status_fields:
 validation_rules:
 - schema_version must equal futures_derived_d1_ohlcv_manifest.v1.
 - builder_whitelist_applied must equal SiM6, SiU6, SiU7, SiZ6, USDRUBF for accepted Slice 1 closeout.
-- excluded_instruments_confirmed must include SiH7 and SiM7.
+- For later all-universe D1 derivation slices, selection must be driven by eligibility_snapshot_id and raw_d1_eligible=true.
+- PM L3-2 first executable slice must not execute D1 derivation.
+- The Slice 1 whitelist remains a compatibility baseline, not the all-universe selection rule.
+- excluded_instruments_confirmed must include SiH7 and SiM7 for Slice 1 closeout.
 - builder_result_verdict must be pass only when quality_status_counts.fail is absent or zero.
 - calendar_validation_summary.calendar_denominator_status must equal canonical_apim_futures_xml.
 - input_artifacts.raw_5m_partition_root must reference the futures_raw_5m external pattern.
-- partition_paths_created must contain no path with secid=SiH7 or secid=SiM7.
-- short_history_handling must include SiU7 and its per-instrument short_history_flag must be true.
+- partition_paths_created must contain no path with secid=SiH7 or secid=SiM7 for Slice 1 compatibility runs.
+- short_history_handling must include SiU7 and its per-instrument short_history_flag must be true for Slice 1 compatibility runs.
 - output_artifacts must include derived_d1_partition_root, quality_report, and manifest.
 - source_to_output_row_check.missing_d1_row_count must equal zero.
 
 blocking_conditions:
 - manifest missing after builder run.
 - builder_result_verdict is fail.
-- missing accepted whitelist instrument from instrument_summaries.
+- missing accepted whitelist instrument from instrument_summaries in Slice 1 compatibility runs.
+- missing eligibility-selected instrument from instrument_summaries in eligibility-snapshot-driven runs.
 - excluded instrument appears in partition_paths_created.
 - APIM futures calendar validation not canonical in source rows.
 - source_to_output_row_check shows missing D1 rows.
-- SiU7 short_history_flag not true in short_history_handling.
+- SiU7 short_history_flag not true in short_history_handling for Slice 1 compatibility runs.

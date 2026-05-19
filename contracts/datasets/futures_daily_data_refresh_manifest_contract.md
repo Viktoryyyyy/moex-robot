@@ -45,6 +45,14 @@ required_fields:
 - blockers
 - output_artifacts
 
+optional_all_universe_fields:
+- eligibility_snapshot_id
+- registry_snapshot_id
+- chunk_id
+- dataset_stage
+- backfill_selection_status
+- backfill_selection_reason
+
 nullable_fields:
 - refresh_from
 - refresh_till
@@ -52,6 +60,9 @@ nullable_fields:
 - child_manifest_references.continuous_roll_map_builder.manifest_path
 - child_manifest_references.continuous_5m_builder.manifest_path
 - child_manifest_references.continuous_d1_builder.manifest_path
+- eligibility_snapshot_id
+- registry_snapshot_id
+- chunk_id
 
 status_fields:
 - daily_refresh_result_verdict
@@ -64,29 +75,25 @@ status_fields:
 validation_rules:
 - schema_version must equal futures_daily_data_refresh_manifest.v1.
 - runner_whitelist_applied must equal SiM6, SiU6, SiU7, SiZ6, USDRUBF for accepted Slice 1 closeout.
-- excluded_instruments_confirmed must include SiH7 and SiM7.
+- For later all-universe daily refresh expansion, selection must be driven by eligibility_snapshot_id and stage-specific eligibility flags rather than hardcoded whitelist logic.
+- PM L3-2 first executable slice must not implement or schedule daily unattended refresh.
+- The Slice 1 whitelist remains a compatibility baseline, not the all-universe selection rule.
+- excluded_instruments_confirmed must include SiH7 and SiM7 for Slice 1 closeout.
 - roll_policy_id must equal expiration_minus_1_trading_session_v1.
 - adjustment_policy_id must equal unadjusted_v1.
 - adjustment_factor must equal 1.0.
-- component_execution_order must equal registry_refresh_runner, raw_5m_loader, futoi_raw_loader, derived_d1_ohlcv_builder, expiration_map_builder, continuous_roll_map_builder, continuous_5m_builder, continuous_d1_builder, continuous_builder_manifest, continuous_quality_report.
+- component_execution_order must equal registry_refresh_runner, raw_5m_loader, futoi_raw_loader, derived_d1_ohlcv_builder, expiration_map_builder, continuous_roll_map_builder, continuous_5m_builder, continuous_d1_builder, continuous_builder_manifest, continuous_quality_report for the current daily refresh implementation.
 - daily_refresh_result_verdict must be pass only when every child component status is pass, artifact_validation_status is pass, and the continuous quality report has zero fail rows.
 - child_manifest_references must include manifest references for registry_refresh_runner, raw_5m_loader, futoi_raw_loader, derived_d1_ohlcv_builder, continuous_builder_manifest, and the continuous_quality_report gate.
 - continuous_child_artifact_references must include expiration_map, continuous_roll_map, continuous_5m_root, continuous_d1_root, continuous_builder_manifest, and continuous_quality_report.
-- registry_refresh_runner child manifest must conform to futures_registry_refresh_manifest.v1.
-- raw_5m_loader child manifest must conform to futures_raw_5m_loader_manifest.v1.
-- futoi_raw_loader child manifest must conform to futures_futoi_5m_raw_loader_manifest.v1.
-- derived_d1_ohlcv_builder child manifest must conform to futures_derived_d1_ohlcv_manifest.v1.
-- continuous_builder_manifest child manifest must conform to futures_continuous_builder_manifest.v1.
-- continuous_quality_report must conform to futures_continuous_quality_report.v1 and must have zero check_status=fail rows.
 - registry_refresh_runner must execute before raw_5m_loader.
 - raw_5m_loader and futoi_raw_loader must receive the same snapshot_date that registry_refresh_runner refreshed.
 - continuous components must execute only after registry_refresh_runner, raw_5m_loader, futoi_raw_loader, and derived_d1_ohlcv_builder have passed.
-- continuous components must execute in this order: expiration_map_builder, continuous_roll_map_builder, continuous_5m_builder, continuous_d1_builder, continuous_builder_manifest, continuous_quality_report.
 - all child output_artifacts and partition_paths_created must exist at validation time where the child manifest contract declares them.
-- per_instrument_status must contain only accepted whitelist instruments for raw 5m, FUTOI, and raw D1 components.
+- per_instrument_status must contain only accepted whitelist instruments for raw 5m, FUTOI, and raw D1 components in Slice 1 compatibility runs.
 - excluded_instruments_check.status must equal pass.
-- short_history_flag_check.status must equal pass and must confirm SiU7 short_history_flag=true across downstream raw/FUTOI/D1 data components.
-- no child manifest or partition path may include secid=SiH7 or secid=SiM7 in downstream loader/builder outputs.
+- short_history_flag_check.status must equal pass and must confirm SiU7 short_history_flag=true across downstream raw/FUTOI/D1 data components in Slice 1 compatibility runs.
+- no child manifest or partition path may include secid=SiH7 or secid=SiM7 in downstream loader/builder outputs for Slice 1 compatibility runs.
 - continuous roll map, continuous 5m, continuous D1, continuous builder manifest, and continuous quality report must preserve adjustment_policy_id=unadjusted_v1 and adjustment_factor=1.0.
 - USDRUBF must remain a perpetual identity in continuous outputs.
 - partial Si-chain gaps caused by excluded SiH7 or SiM7 must remain explicit and must not be silently bridged.
@@ -105,9 +112,10 @@ blocking_conditions:
 - continuous_builder_manifest fails or its manifest verdict is not pass.
 - continuous_quality_report is missing, invalid, or has any check_status=fail row.
 - any child manifest is stale relative to the child process execution.
-- any accepted whitelist instrument is missing from raw/FUTOI/D1 child instrument_summaries.
+- any accepted whitelist instrument is missing from raw/FUTOI/D1 child instrument_summaries in Slice 1 compatibility runs.
+- any eligibility-selected instrument is missing from stage-specific all-universe child outputs in eligibility-snapshot-driven runs.
 - any excluded instrument appears in downstream child summaries, partition paths, roll map, or continuous output source fields.
-- SiU7 short_history_flag is not true for raw/FUTOI/D1 child components.
+- SiU7 short_history_flag is not true for raw/FUTOI/D1 child components in Slice 1 compatibility runs.
 - child output artifacts or created partitions are missing.
 - USDRUBF identity validation fails.
 - adjustment_factor is not 1.0.
