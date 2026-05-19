@@ -1,0 +1,117 @@
+{
+  "access_api_timeframes": [
+    "5m",
+    "15m",
+    "30m",
+    "1h",
+    "4h",
+    "D1"
+  ],
+  "chunking_policy": {
+    "chunk_dimensions": [
+      "family_code",
+      "date_range",
+      "dataset_stage"
+    ],
+    "retry_child_chunk_dimensions": [
+      "secid",
+      "date_range",
+      "dataset_stage"
+    ],
+    "secid_level_failure_isolation": true
+  },
+  "classification_statuses": [
+    "included",
+    "deferred",
+    "excluded"
+  ],
+  "continuous_build_enabled": false,
+  "continuous_v1_policy": {
+    "candidate_flag_only": true,
+    "continuous_build_enabled": false,
+    "selected_flag": "continuous_v1_eligible"
+  },
+  "date_range_chunk_size_days_default": 5,
+  "date_range_chunk_size_days_max": 20,
+  "deferral_reason_enum": [
+    "unsupported_board_pending_review",
+    "not_selected_for_first_executable_slice",
+    "raw_5m_unavailable",
+    "raw_5m_probe_failed",
+    "raw_5m_schema_invalid",
+    "raw_5m_calendar_mismatch",
+    "futoi_unavailable",
+    "futoi_unresolved",
+    "liquidity_threshold_pending_pm_decision",
+    "history_depth_threshold_pending_pm_decision",
+    "future_no_trade_not_yet_loadable",
+    "expired_no_current_load_scope",
+    "w1_known_gap",
+    "continuous_build_deferred"
+  ],
+  "engine": "futures",
+  "eligibility_flags": [
+    "registry_only_eligible",
+    "raw_5m_eligible",
+    "futoi_eligible",
+    "raw_d1_eligible",
+    "continuous_v1_eligible",
+    "access_api_eligible",
+    "w1_eligible"
+  ],
+  "exclusion_reason_enum": [
+    "technical_registry_row",
+    "non_future_registry_row",
+    "duplicate_registry_identity",
+    "missing_required_identity_fields",
+    "unsupported_engine_market",
+    "explicit_pm_exclusion",
+    "corrupt_source_payload",
+    "not_in_current_available_universe"
+  ],
+  "first_executable_slice": {
+    "board": "RFUD",
+    "dataset_stage": "raw_5m",
+    "included_only": true,
+    "max_secid": 2,
+    "preferred_family_code": "Si",
+    "raw_5m_eligible_only": true,
+    "recent_trading_dates": 3
+  },
+  "futoi_probe_policy": {
+    "drives_backfill_selection": "later_stage_only",
+    "enabled_for_first_slice": false,
+    "selected_flag": "futoi_eligible"
+  },
+  "manifest_required": true,
+  "market": "forts",
+  "preserve_existing_partitions": true,
+  "preserve_existing_slice1_outputs": true,
+  "quality_report_required": true,
+  "raw_5m_probe_policy": {
+    "drives_backfill_selection": true,
+    "enabled_for_first_slice": true,
+    "failure_status": "deferred",
+    "required_for_included": true,
+    "selected_flag": "raw_5m_eligible"
+  },
+  "raw_d1_derivation_policy": {
+    "drives_backfill_selection": "later_stage_only",
+    "enabled_for_first_slice": false,
+    "selected_flag": "raw_d1_eligible"
+  },
+  "required_checks_for_included": [
+    "identity_check",
+    "supported_board_check",
+    "family_mapping_check",
+    "raw_5m_access_probe",
+    "calendar_quality_check"
+  ],
+  "schema_version": "futures_all_universe_eligibility_config.v1",
+  "supported_boards": [
+    "RFUD"
+  ],
+  "unsupported_board_policy": "defer",
+  "w1_build_enabled": false,
+  "w1_policy": "known_gap"
+}
