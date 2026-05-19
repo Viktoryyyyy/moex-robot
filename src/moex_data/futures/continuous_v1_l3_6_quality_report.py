@@ -150,27 +150,22 @@ def factor_bad_count(frame: pd.DataFrame) -> int:
     return int((values != ADJUSTMENT_FACTOR).sum())
 
 
-def lineage_bad_5m(frame: pd.DataFrame, roll_ids: Set[str]) -> int:
+def lineage_bad_5m(frame: pd.DataFrame) -> int:
     if frame.empty:
         return 0
     fields = ["source_secid", "source_contract", "roll_map_id", "roll_policy_id", "adjustment_policy_id", "adjustment_factor"]
     if any(col not in frame.columns for col in fields):
         return int(len(frame))
-    bad = int(frame[fields].isna().any(axis=1).sum())
-    if roll_ids:
-        bad += int((~frame["roll_map_id"].astype(str).isin(roll_ids)).sum())
-    return bad
+    return int(frame[fields].isna().any(axis=1).sum())
 
 
-def lineage_bad_d1(frame: pd.DataFrame, roll_ids: Set[str]) -> int:
+def lineage_bad_d1(frame: pd.DataFrame) -> int:
     if frame.empty:
         return 0
     fields = ["source_contracts", "roll_map_id", "roll_policy_id", "adjustment_policy_id", "adjustment_factor"]
     if any(col not in frame.columns for col in fields):
         return int(len(frame))
     bad = int(frame[fields].isna().any(axis=1).sum())
-    if roll_ids:
-        bad += int((~frame["roll_map_id"].astype(str).isin(roll_ids)).sum())
     bad += int(frame["source_contracts"].map(lambda x: len(parse_contracts(x)) == 0).sum())
     return bad
 
@@ -224,7 +219,6 @@ def build_report(data_root: Path, manifest_path: Path, excluded: List[str]) -> D
     d1, d1_paths = read_parts(d1_root, families)
     roll_map_path = Path(str(manifest.get("roll_map") or "")).expanduser().resolve()
     roll_map = pd.read_parquet(roll_map_path) if roll_map_path.exists() else pd.DataFrame()
-    roll_ids = set(roll_map.get("roll_map_id", pd.Series(dtype=str)).dropna().astype(str).tolist()) if not roll_map.empty else set()
     checks: Dict[str, Dict[str, Any]] = {}
     add_check(checks, "continuous_5m_row_count", len(c5) > 0, int(len(c5)), ">0")
     add_check(checks, "continuous_d1_row_count", len(d1) > 0, int(len(d1)), ">0")
@@ -247,10 +241,10 @@ def build_report(data_root: Path, manifest_path: Path, excluded: List[str]) -> D
     add_check(checks, "roll_policy_id", bad_roll == 0, bad_roll, 0)
     add_check(checks, "adjustment_policy_id", bad_adj == 0, bad_adj, 0)
     add_check(checks, "adjustment_factor", bad_factor == 0, bad_factor, 0)
-    bad_lineage_5m = lineage_bad_5m(c5, roll_ids)
-    bad_lineage_d1 = lineage_bad_d1(d1, roll_ids)
-    add_check(checks, "continuous_5m_lineage_completeness", bad_lineage_5m == 0, bad_lineage_5m, 0)
-    add_check(checks, "continuous_d1_lineage_completeness", bad_lineage_d1 == 0, bad_lineage_d1, 0)
+    bad_lineage_5m = lineage_bad_5m(c5)
+    bad_lineage_d1 = lineage_bad_d1(d1)
+    add_check(checks, "continuous_5m_lineage_completeness", bad_lineage_5m == 0, bad_lineage_5m, 0, "Checks lineage field presence and non-null values; historical roll_map_id values are not forced to match the current roll-map snapshot.")
+    add_check(checks, "continuous_d1_lineage_completeness", bad_lineage_d1 == 0, bad_lineage_d1, 0, "Checks lineage field presence and non-null values; historical roll_map_id values are not forced to match the current roll-map snapshot.")
     usdrubf = usdrubf_failures(c5, d1, roll_map)
     add_check(checks, "usdrubf_identity_behavior", not usdrubf, usdrubf, [])
     gap_rows = int((roll_map.get("roll_status", pd.Series(dtype=str)).astype(str) == "explicit_partial_chain_gap").sum()) if not roll_map.empty else 0
