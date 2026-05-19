@@ -7,6 +7,7 @@
     "4h",
     "D1"
   ],
+  "active_raw_5m_selection_mode": "rfud_included_universe",
   "chunking_policy": {
     "chunk_dimensions": [
       "family_code",
@@ -90,6 +91,13 @@
     "drives_backfill_selection": "later_stage_only",
     "enabled_for_first_slice": false,
     "selected_flag": "futoi_eligible"
+  },
+  "l3_3_raw_5m_included_universe": {
+    "board": "RFUD",
+    "dataset_stage": "raw_5m",
+    "classification_status": "included",
+    "raw_5m_eligible_only": true,
+    "recent_trading_dates": 3
   },
   "manifest_required": true,
   "market": "forts",
