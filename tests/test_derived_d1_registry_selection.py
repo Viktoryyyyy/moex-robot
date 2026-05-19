@@ -51,7 +51,8 @@ def _row(frame, secid):
 
 
 def test_raw_d1_selection_uses_eligibility_and_accepted_raw_5m_quality():
-    refined, selected = mod.refine_eligibility_for_raw_d1(_eligibility(), _quality().loc[_quality()["quality_status"] == "pass"].copy(), _config())
+    quality = _quality()
+    refined, selected = mod.refine_eligibility_for_raw_d1(_eligibility(), quality.loc[quality["quality_status"] == "pass"].copy(), _config())
     assert selected["secid"].tolist() == ["C", "A"]
     assert _row(refined, "A")["raw_d1_eligible"] is True
     assert _row(refined, "C")["raw_d1_eligible"] is True
@@ -61,11 +62,12 @@ def test_raw_d1_selection_uses_eligibility_and_accepted_raw_5m_quality():
 
 
 def test_raw_d1_chunk_groups_are_family_driven_and_deferred_visible():
-    refined, selected = mod.refine_eligibility_for_raw_d1(_eligibility(), _quality().loc[_quality()["quality_status"] == "pass"].copy(), _config())
+    quality = _quality()
+    refined, selected = mod.refine_eligibility_for_raw_d1(_eligibility(), quality.loc[quality["quality_status"] == "pass"].copy(), _config())
     groups = mod.chunk_groups(selected)
     assert [family for family, _frame in groups] == ["CNY", "Si"]
     assert set(refined["secid"].tolist()) == {"A", "B", "C", "D"}
-    assert refined.loc[refined["secid"] == "D", "raw_d1_eligible"].iloc[0] is False
+    assert bool(refined.loc[refined["secid"] == "D", "raw_d1_eligible"].iloc[0]) is False
 
 
 def test_raw_d1_aggregate_is_raw_5m_only_and_outputs_stage():
