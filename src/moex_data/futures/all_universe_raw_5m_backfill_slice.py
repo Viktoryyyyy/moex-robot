@@ -25,6 +25,8 @@ SCHEMA_ELIGIBILITY = "futures_all_universe_eligibility_snapshot.v1"
 SCHEMA_MANIFEST = "futures_all_universe_raw_5m_chunk_manifest.v1"
 SCHEMA_QUALITY = "futures_all_universe_raw_5m_quality_report.v1"
 DATASET_STAGE = "raw_5m"
+MODE_L3_2 = "first_executable_slice"
+MODE_L3_3 = "rfud_included_universe"
 REQUIRED_SOT_FILES = [
     "contracts/datasets/futures_all_universe_snapshot_contract.md",
     "contracts/datasets/futures_all_universe_eligibility_contract.md",
@@ -33,6 +35,7 @@ REQUIRED_SOT_FILES = [
 NOT_APPLICABLE_FIRST_SLICE = "not_applicable_pm_l3_2_raw_5m_slice"
 EXPLICIT_PM_EXCLUSION = "explicit_pm_exclusion"
 FIRST_SLICE_NOTES = "PM L3-2 bounded raw 5m first executable slice"
+L3_3_NOTES = "PM L3-3 RFUD included raw 5m universe"
 
 
 def now_utc():
@@ -147,6 +150,13 @@ def recent_dates(snapshot_date, count, timeout, iss_base_url):
     return selected
 
 
+def selection_mode(config, explicit_mode=None):
+    mode = str(explicit_mode or config.get("active_raw_5m_selection_mode") or MODE_L3_2).strip()
+    if mode not in [MODE_L3_2, MODE_L3_3]:
+        raise RuntimeError("Unsupported raw_5m selection mode: " + mode)
+    return mode
+
+
 def choose(registry, config):
     fs = config.get("first_executable_slice") or {}
     board = str(fs.get("board", "RFUD")).upper()
@@ -173,7 +183,7 @@ def choose(registry, config):
     return c["secid"].astype(str).tolist(), str(c["family_code"].iloc[0])
 
 
-def classification_for_row(secid, board, family_code, in_slice, explicitly_excluded, supported):
+def classify_l3_2(secid, board, family_code, in_slice, explicitly_excluded, supported):
     identity_status = "pass" if str(secid).strip() else "fail"
     board_status = "pass" if board in supported else "deferred"
     family_status = "pass" if str(family_code or "").strip() else "deferred"
@@ -190,10 +200,33 @@ def classification_for_row(secid, board, family_code, in_slice, explicitly_exclu
     return "deferred", "not_selected_for_first_executable_slice", identity_status, board_status, family_status, "not_selected_for_first_executable_slice"
 
 
-def build_eligibility(registry, selected, dates, config, registry_snapshot_id):
+def classify_l3_3(secid, board, family_code, explicitly_excluded, supported, target_board):
+    identity_status = "pass" if str(secid).strip() else "fail"
+    board_status = "pass" if board == target_board and board in supported else "deferred"
+    family_status = "pass" if str(family_code or "").strip() else "deferred"
+    if explicitly_excluded:
+        return "excluded", EXPLICIT_PM_EXCLUSION, identity_status, board_status, family_status, "not_applicable_explicit_pm_exclusion"
+    if identity_status != "pass":
+        return "excluded", "missing_required_identity_fields", identity_status, board_status, family_status, "not_applicable_missing_identity"
+    if board_status != "pass":
+        return "deferred", "unsupported_board_pending_review", identity_status, board_status, family_status, "not_evaluated_unsupported_board"
+    if family_status != "pass":
+        return "deferred", "family_mapping_unresolved", identity_status, board_status, family_status, "not_evaluated_family_mapping_unresolved"
+    return "included", "rfud_included_universe_selected", identity_status, board_status, family_status, "pass"
+
+
+def classification_for_row(secid, board, family_code, in_slice, explicitly_excluded, supported):
+    return classify_l3_2(secid, board, family_code, in_slice, explicitly_excluded, supported)
+
+
+def build_eligibility(registry, selected, dates, config, registry_snapshot_id, mode=None):
+    mode = selection_mode(config, mode)
     selected_upper = {x.upper() for x in selected}
     supported = {str(x).upper() for x in config.get("supported_boards", ["RFUD"])}
-    excluded = {str(x).upper() for x in (config.get("first_executable_slice") or {}).get("excluded_secids", [])}
+    fs = config.get("first_executable_slice") or {}
+    l33 = config.get("l3_3_raw_5m_included_universe") or {}
+    excluded = {str(x).upper() for x in fs.get("excluded_secids", [])}
+    target_board = str(l33.get("board", "RFUD")).upper()
     rows = []
     for _, row in registry.iterrows():
         secid = str(row.get("secid"))
@@ -201,7 +234,12 @@ def build_eligibility(registry, selected, dates, config, registry_snapshot_id):
         family_code = row.get("family_code")
         in_slice = secid.upper() in selected_upper
         explicitly_excluded = secid.upper() in excluded
-        status, reason, identity_status, board_status, family_status, raw_5m_status = classification_for_row(secid, board, family_code, in_slice, explicitly_excluded, supported)
+        if mode == MODE_L3_3:
+            status, reason, identity_status, board_status, family_status, raw_5m_status = classify_l3_3(secid, board, family_code, explicitly_excluded, supported, target_board)
+            notes = L3_3_NOTES
+        else:
+            status, reason, identity_status, board_status, family_status, raw_5m_status = classify_l3_2(secid, board, family_code, in_slice, explicitly_excluded, supported)
+            notes = FIRST_SLICE_NOTES
         is_included = status == "included"
         is_excluded = status == "excluded"
         if is_included:
@@ -240,7 +278,7 @@ def build_eligibility(registry, selected, dates, config, registry_snapshot_id):
             "expiration_policy_status": NOT_APPLICABLE_FIRST_SLICE,
             "perpetual_policy_status": NOT_APPLICABLE_FIRST_SLICE,
             "calendar_quality_status": calendar_status,
-            "continuous_eligibility_status": "deferred_pm_l3_2_out_of_scope",
+            "continuous_eligibility_status": "deferred_pm_l3_3_out_of_scope" if mode == MODE_L3_3 else "deferred_pm_l3_2_out_of_scope",
             "registry_only_eligible": not is_included,
             "raw_5m_eligible": is_included and raw_5m_status == "pass",
             "futoi_eligible": False,
@@ -255,10 +293,17 @@ def build_eligibility(registry, selected, dates, config, registry_snapshot_id):
             "backfill_selection_reason": reason,
             "selected_trading_dates_json": json.dumps(dates, sort_keys=True),
             "source_scope": row.get("source_scope"),
-            "notes": FIRST_SLICE_NOTES,
+            "notes": notes,
             "schema_version": SCHEMA_ELIGIBILITY,
         })
     return pd.DataFrame(rows)
+
+
+def selected_universe(eligibility):
+    selected = eligibility.loc[(eligibility["classification_status"] == "included") & (eligibility["raw_5m_eligible"] == True)].copy()
+    if selected.empty:
+        raise RuntimeError("No RFUD included raw_5m eligible instruments selected")
+    return selected.sort_values(["family_code", "secid"]).reset_index(drop=True)
 
 
 def qrow(run_id, chunk_id, erow, registry_snapshot_id, date_from, date_till, raw, fetch_status, failure, partitions):
@@ -296,14 +341,13 @@ def qrow(run_id, chunk_id, erow, registry_snapshot_id, date_from, date_till, raw
         "quality_status": status,
         "failure_reason": failure,
         "deferred_reason": "",
-        "notes": FIRST_SLICE_NOTES,
+        "notes": L3_3_NOTES,
         "output_partitions_json": json.dumps(partitions, sort_keys=True),
         "schema_version": SCHEMA_QUALITY,
     }
 
 
-def run_chunk(args, root, eligibility, dates, run_id, registry_snapshot_id, chunk_id):
-    selected = eligibility.loc[(eligibility["classification_status"] == "included") & (eligibility["raw_5m_eligible"] == True)].copy()
+def run_chunk(args, root, selected, dates, run_id, registry_snapshot_id, chunk_id):
     date_from = min(dates)
     date_till = max(dates)
     secids = selected["secid"].astype(str).tolist()
@@ -364,7 +408,24 @@ def run_chunk(args, root, eligibility, dates, run_id, registry_snapshot_id, chun
     return manifest, quality
 
 
-def aggregate(registry, eligibility, manifest):
+def chunk_groups(selected):
+    groups = []
+    for fam, frame in selected.groupby("family_code", sort=True):
+        groups.append((str(fam), frame.sort_values("secid").reset_index(drop=True)))
+    return groups
+
+
+def aggregate(registry, eligibility, manifests):
+    if isinstance(manifests, dict):
+        manifests = [manifests]
+    failed = []
+    partial = 0
+    statuses = []
+    for manifest in manifests:
+        failed.extend(manifest.get("failed_secid") or [])
+        if manifest.get("status") == "partial_failed":
+            partial += 1
+        statuses.append(manifest.get("status"))
     return {
         "candidate_universe_count": int(len(registry)),
         "included_count": int((eligibility["classification_status"] == "included").sum()),
@@ -376,10 +437,10 @@ def aggregate(registry, eligibility, manifest):
         "continuous_v1_eligible_count": int((eligibility["continuous_v1_eligible"] == True).sum()),
         "access_api_eligible_count": int((eligibility["access_api_eligible"] == True).sum()),
         "w1_gap_count": int((eligibility["w1_status"].astype(str) == "known_gap").sum()),
-        "failed_secid_count": int(len(manifest.get("failed_secid") or [])),
-        "partial_failed_chunk_count": 1 if manifest.get("status") == "partial_failed" else 0,
+        "failed_secid_count": int(len(failed)),
+        "partial_failed_chunk_count": int(partial),
         "preserved_partition_count": 0,
-        "chunk_status": manifest.get("status"),
+        "chunk_status": "partial_failed" if any(x in ["partial_failed", "failed"] for x in statuses) else "succeeded",
     }
 
 
@@ -391,6 +452,7 @@ def main():
     parser.add_argument("--run-date", default=today_msk())
     parser.add_argument("--config", default="configs/datasets/futures_all_universe_eligibility_config.json")
     parser.add_argument("--data-root", default="")
+    parser.add_argument("--selection-mode", choices=[MODE_L3_2, MODE_L3_3], default="")
     parser.add_argument("--iss-base-url", default=os.getenv("MOEX_ISS_BASE_URL", base.DEFAULT_ISS_BASE_URL))
     parser.add_argument("--apim-base-url", default=os.getenv("MOEX_API_URL", base.DEFAULT_APIM_BASE_URL))
     parser.add_argument("--timeout", type=float, default=60.0)
@@ -401,26 +463,49 @@ def main():
     root = data_root(args)
     base.assert_files_exist(repo_root, REQUIRED_SOT_FILES)
     config = load_json(repo_root / args.config)
+    mode = selection_mode(config, args.selection_mode)
     if config.get("continuous_build_enabled") is not False or config.get("w1_build_enabled") is not False:
         raise RuntimeError("continuous_build_enabled and w1_build_enabled must be false")
     source_path, normalized = load_registry(repo_root, root, args.snapshot_date)
-    run_id = "all_universe_raw_5m_slice_" + args.run_date + "_" + base.stable_id([args.snapshot_date, source_path, now_utc()])
+    run_id = "all_universe_raw_5m_slice_" + args.run_date + "_" + base.stable_id([args.snapshot_date, source_path, now_utc(), mode])
     registry = build_registry(normalized, args.snapshot_date, source_path, run_id, config)
-    selected, fam = choose(registry, config)
-    dates = recent_dates(args.snapshot_date, int((config.get("first_executable_slice") or {}).get("recent_trading_dates", 3)), float(args.timeout), str(args.iss_base_url))
     registry_snapshot_id = "registry_snapshot_" + base.stable_id([args.snapshot_date, source_path, len(registry)])
-    eligibility = build_eligibility(registry, selected, dates, config, registry_snapshot_id)
-    chunk_id = "raw_5m_" + base.stable_id([registry_snapshot_id, fam, min(dates), max(dates), ",".join(selected)])
-    out = paths(root, args.snapshot_date, chunk_id)
+    if mode == MODE_L3_2:
+        selected_ids, fam = choose(registry, config)
+        recent_count = int((config.get("first_executable_slice") or {}).get("recent_trading_dates", 3))
+    else:
+        selected_ids = []
+        fam = "ALL_RFUD_INCLUDED"
+        recent_count = int((config.get("l3_3_raw_5m_included_universe") or {}).get("recent_trading_dates", 3))
+    dates = recent_dates(args.snapshot_date, recent_count, float(args.timeout), str(args.iss_base_url))
+    eligibility = build_eligibility(registry, selected_ids, dates, config, registry_snapshot_id, mode)
+    selected = selected_universe(eligibility)
+    out = paths(root, args.snapshot_date, "registry_eligibility_" + base.stable_id([registry_snapshot_id, mode]))
     write_parquet(out["registry_snapshot"], registry)
     write_parquet(out["eligibility_snapshot"], eligibility)
-    manifest, quality = run_chunk(args, root, eligibility, dates, run_id, registry_snapshot_id, chunk_id)
-    write_parquet(out["quality_report"], quality)
-    dump_json(out["chunk_manifest"], manifest)
-    report = aggregate(registry, eligibility, manifest)
-    dump_json(out["aggregate_report"], report)
-    print(json.dumps({"outputs": out, "first_slice_scope": {"family_code": fam, "secid_list": selected, "trading_dates": dates, "dataset_stage": DATASET_STAGE}, "chunk_status": manifest.get("status"), "aggregate_report": report}, ensure_ascii=False, sort_keys=True, default=str))
-    return 0 if manifest.get("status") in ["succeeded", "partial_failed"] else 1
+    manifests = []
+    quality_frames = []
+    chunk_outputs = []
+    for fam, frame in chunk_groups(selected):
+        chunk_id = "raw_5m_" + base.stable_id([registry_snapshot_id, fam, min(dates), max(dates), ",".join(frame["secid"].astype(str).tolist()), mode])
+        chunk_out = paths(root, args.snapshot_date, chunk_id)
+        manifest, quality = run_chunk(args, root, frame, dates, run_id, registry_snapshot_id, chunk_id)
+        write_parquet(chunk_out["quality_report"], quality)
+        dump_json(chunk_out["chunk_manifest"], manifest)
+        report = aggregate(registry, eligibility, [manifest])
+        dump_json(chunk_out["aggregate_report"], report)
+        manifests.append(manifest)
+        quality_frames.append(quality)
+        chunk_outputs.append(chunk_out)
+    aggregate_report = aggregate(registry, eligibility, manifests)
+    print(json.dumps({
+        "outputs": {"registry_snapshot": out["registry_snapshot"], "eligibility_snapshot": out["eligibility_snapshot"], "chunks": chunk_outputs},
+        "selection_mode": mode,
+        "selected_universe": {"family_count": len(chunk_groups(selected)), "secid_count": int(len(selected)), "secids": selected["secid"].astype(str).tolist(), "trading_dates": dates, "dataset_stage": DATASET_STAGE},
+        "chunk_status": aggregate_report.get("chunk_status"),
+        "aggregate_report": aggregate_report,
+    }, ensure_ascii=False, sort_keys=True, default=str))
+    return 0 if aggregate_report.get("chunk_status") in ["succeeded", "partial_failed"] else 1
 
 
 if __name__ == "__main__":
