@@ -7,6 +7,7 @@
     "4h",
     "D1"
   ],
+  "active_futoi_raw_selection_mode": "rfud_included_universe",
   "active_raw_5m_selection_mode": "rfud_included_universe",
   "chunking_policy": {
     "chunk_dimensions": [
@@ -88,7 +89,7 @@
     "recent_trading_dates": 3
   },
   "futoi_probe_policy": {
-    "drives_backfill_selection": "later_stage_only",
+    "drives_backfill_selection": true,
     "enabled_for_first_slice": false,
     "selected_flag": "futoi_eligible"
   },
@@ -98,6 +99,13 @@
     "classification_status": "included",
     "raw_5m_eligible_only": true,
     "recent_trading_dates": 3
+  },
+  "l3_4_futoi_raw_included_universe": {
+    "board": "RFUD",
+    "classification_status": "included",
+    "dataset_stage": "futoi_raw",
+    "futoi_eligible_only": true,
+    "selection_flag": "futoi_eligible"
   },
   "manifest_required": true,
   "market": "forts",
