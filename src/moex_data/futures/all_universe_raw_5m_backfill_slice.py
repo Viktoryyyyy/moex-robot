@@ -138,7 +138,10 @@ def recent_dates(snapshot_date, count, timeout, iss_base_url):
     dates, status = apim_calendar.fetch_futures_calendar(start.isoformat(), end.isoformat(), timeout, iss_base_url)
     if dates is None or status != "canonical_apim_futures_xml":
         raise RuntimeError("futures calendar unavailable: " + str(status))
-    return sorted([x for x in dates if x <= snapshot_date])[-int(count):]
+    selected = sorted([x for x in dates if x <= snapshot_date])[-int(count):]
+    if len(selected) < int(count):
+        raise RuntimeError("Not enough recent futures trading dates")
+    return selected
 
 
 def choose(registry, config):
@@ -146,27 +149,49 @@ def choose(registry, config):
     board = str(fs.get("board", "RFUD")).upper()
     fam = str(fs.get("preferred_family_code", "Si"))
     max_n = int(fs.get("max_secid", 2))
-    c = registry.loc[(registry["board"].astype(str).str.upper() == board) & (registry["family_code"].astype(str) == fam)].copy()
+    excluded = {str(x).upper() for x in fs.get("excluded_secids", [])}
+    preferred = [str(x) for x in fs.get("preferred_secids", [])]
+    base_scope = registry.loc[(registry["board"].astype(str).str.upper() == board) & (~registry["secid"].astype(str).str.upper().isin(excluded))].copy()
+    if not preferred:
+        c = base_scope.loc[base_scope["family_code"].astype(str) == fam].copy()
+        if c.empty:
+            c = base_scope.copy()
+        c = c.sort_values(["family_code", "secid"]).head(max_n)
+    else:
+        rows = []
+        upper_to_row = {str(row.get("secid")).upper(): row for _, row in base_scope.iterrows()}
+        for secid in preferred:
+            row = upper_to_row.get(secid.upper())
+            if row is not None:
+                rows.append(row.to_dict())
+        c = pd.DataFrame(rows).head(max_n)
     if c.empty:
-        c = registry.loc[registry["board"].astype(str).str.upper() == board].copy()
-    c = c.sort_values(["family_code", "secid"]).head(max_n)
-    if c.empty:
-        raise RuntimeError("No first-slice RFUD candidates")
+        raise RuntimeError("No first-slice RFUD candidates after exclusions")
     return c["secid"].astype(str).tolist(), str(c["family_code"].iloc[0])
 
 
 def build_eligibility(registry, selected, dates, config, registry_snapshot_id):
     selected_upper = {x.upper() for x in selected}
     supported = {str(x).upper() for x in config.get("supported_boards", ["RFUD"])}
+    excluded = {str(x).upper() for x in (config.get("first_executable_slice") or {}).get("excluded_secids", [])}
     rows = []
     for _, row in registry.iterrows():
         secid = str(row.get("secid"))
         board = str(row.get("board", "")).upper()
         in_slice = secid.upper() in selected_upper
-        status = "included" if board in supported and in_slice else "deferred"
-        reason = "first_executable_slice_selected" if status == "included" else "not_selected_for_first_executable_slice"
-        if board not in supported:
+        explicitly_excluded = secid.upper() in excluded
+        if explicitly_excluded:
+            status = "excluded"
+            reason = "explicit_pm_exclusion"
+        elif board not in supported:
+            status = "deferred"
             reason = "unsupported_board_pending_review"
+        elif in_slice:
+            status = "included"
+            reason = "first_executable_slice_selected"
+        else:
+            status = "deferred"
+            reason = "not_selected_for_first_executable_slice"
         rows.append({
             "eligibility_snapshot_id": "eligibility_" + base.stable_id([registry_snapshot_id, secid, status, reason]),
             "registry_snapshot_id": registry_snapshot_id,
@@ -182,8 +207,8 @@ def build_eligibility(registry, selected, dates, config, registry_snapshot_id):
             "expiration_date": row.get("expiration_date"),
             "classification_status": status,
             "classification_reason": reason,
-            "deferral_reason": "" if status == "included" else reason,
-            "exclusion_reason": "",
+            "deferral_reason": "" if status in ["included", "excluded"] else reason,
+            "exclusion_reason": reason if status == "excluded" else "",
             "registry_only_eligible": status != "included",
             "raw_5m_eligible": status == "included",
             "futoi_eligible": False,

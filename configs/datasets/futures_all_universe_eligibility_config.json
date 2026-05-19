@@ -72,9 +72,17 @@
   "first_executable_slice": {
     "board": "RFUD",
     "dataset_stage": "raw_5m",
+    "excluded_secids": [
+      "SiH7",
+      "SiM7"
+    ],
     "included_only": true,
     "max_secid": 2,
     "preferred_family_code": "Si",
+    "preferred_secids": [
+      "SiM6",
+      "SiU6"
+    ],
     "raw_5m_eligible_only": true,
     "recent_trading_dates": 3
   },
