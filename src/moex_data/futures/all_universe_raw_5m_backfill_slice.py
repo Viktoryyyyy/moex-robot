@@ -30,6 +30,9 @@ REQUIRED_SOT_FILES = [
     "contracts/datasets/futures_all_universe_eligibility_contract.md",
     "configs/datasets/futures_all_universe_eligibility_config.json",
 ]
+NOT_APPLICABLE_FIRST_SLICE = "not_applicable_pm_l3_2_raw_5m_slice"
+EXPLICIT_PM_EXCLUSION = "explicit_pm_exclusion"
+FIRST_SLICE_NOTES = "PM L3-2 bounded raw 5m first executable slice"
 
 
 def now_utc():
@@ -170,6 +173,23 @@ def choose(registry, config):
     return c["secid"].astype(str).tolist(), str(c["family_code"].iloc[0])
 
 
+def classification_for_row(secid, board, family_code, in_slice, explicitly_excluded, supported):
+    identity_status = "pass" if str(secid).strip() else "fail"
+    board_status = "pass" if board in supported else "deferred"
+    family_status = "pass" if str(family_code or "").strip() else "deferred"
+    if explicitly_excluded:
+        return "excluded", EXPLICIT_PM_EXCLUSION, identity_status, board_status, family_status, "not_applicable_explicit_pm_exclusion"
+    if identity_status != "pass":
+        return "excluded", "missing_required_identity_fields", identity_status, board_status, family_status, "not_applicable_missing_identity"
+    if board_status != "pass":
+        return "deferred", "unsupported_board_pending_review", identity_status, board_status, family_status, "not_evaluated_unsupported_board"
+    if family_status != "pass":
+        return "deferred", "family_mapping_unresolved", identity_status, board_status, family_status, "not_evaluated_family_mapping_unresolved"
+    if in_slice:
+        return "included", "first_executable_slice_selected", identity_status, board_status, family_status, "pass"
+    return "deferred", "not_selected_for_first_executable_slice", identity_status, board_status, family_status, "not_selected_for_first_executable_slice"
+
+
 def build_eligibility(registry, selected, dates, config, registry_snapshot_id):
     selected_upper = {x.upper() for x in selected}
     supported = {str(x).upper() for x in config.get("supported_boards", ["RFUD"])}
@@ -178,51 +198,64 @@ def build_eligibility(registry, selected, dates, config, registry_snapshot_id):
     for _, row in registry.iterrows():
         secid = str(row.get("secid"))
         board = str(row.get("board", "")).upper()
+        family_code = row.get("family_code")
         in_slice = secid.upper() in selected_upper
         explicitly_excluded = secid.upper() in excluded
-        if explicitly_excluded:
-            status = "excluded"
-            reason = "explicit_pm_exclusion"
-        elif board not in supported:
-            status = "deferred"
-            reason = "unsupported_board_pending_review"
-        elif in_slice:
-            status = "included"
-            reason = "first_executable_slice_selected"
+        status, reason, identity_status, board_status, family_status, raw_5m_status = classification_for_row(secid, board, family_code, in_slice, explicitly_excluded, supported)
+        is_included = status == "included"
+        is_excluded = status == "excluded"
+        if is_included:
+            backfill_status = "selected"
+        elif is_excluded:
+            backfill_status = "excluded"
         else:
-            status = "deferred"
-            reason = "not_selected_for_first_executable_slice"
+            backfill_status = "deferred"
+        calendar_status = "pass" if dates else "deferred"
         rows.append({
             "eligibility_snapshot_id": "eligibility_" + base.stable_id([registry_snapshot_id, secid, status, reason]),
             "registry_snapshot_id": registry_snapshot_id,
+            "eligibility_snapshot_date": row.get("registry_snapshot_date"),
             "registry_snapshot_date": row.get("registry_snapshot_date"),
             "engine": row.get("engine"),
             "market": row.get("market"),
             "board": board,
             "secid": secid,
             "short_code": row.get("short_code"),
-            "family_code": row.get("family_code"),
+            "family_code": family_code,
             "asset_code": row.get("asset_code"),
             "instrument_type": row.get("instrument_type"),
             "expiration_date": row.get("expiration_date"),
             "classification_status": status,
             "classification_reason": reason,
             "deferral_reason": "" if status in ["included", "excluded"] else reason,
-            "exclusion_reason": reason if status == "excluded" else "",
-            "registry_only_eligible": status != "included",
-            "raw_5m_eligible": status == "included",
+            "exclusion_reason": reason if is_excluded else "",
+            "registry_source": row.get("registry_source"),
+            "identity_check_status": identity_status,
+            "board_check_status": board_status,
+            "family_mapping_status": family_status,
+            "raw_5m_check_status": raw_5m_status,
+            "futoi_check_status": NOT_APPLICABLE_FIRST_SLICE,
+            "liquidity_check_status": NOT_APPLICABLE_FIRST_SLICE,
+            "history_depth_check_status": NOT_APPLICABLE_FIRST_SLICE,
+            "expiration_policy_status": NOT_APPLICABLE_FIRST_SLICE,
+            "perpetual_policy_status": NOT_APPLICABLE_FIRST_SLICE,
+            "calendar_quality_status": calendar_status,
+            "continuous_eligibility_status": "deferred_pm_l3_2_out_of_scope",
+            "registry_only_eligible": not is_included,
+            "raw_5m_eligible": is_included and raw_5m_status == "pass",
             "futoi_eligible": False,
             "raw_d1_eligible": False,
             "continuous_v1_eligible": False,
-            "access_api_eligible": status == "included",
+            "access_api_eligible": is_included,
             "w1_eligible": False,
             "w1_status": "known_gap",
             "future_no_trade_not_yet_loadable": False,
             "expired_no_current_load_scope": False,
-            "backfill_selection_status": "selected" if status == "included" else "not_selected",
+            "backfill_selection_status": backfill_status,
             "backfill_selection_reason": reason,
             "selected_trading_dates_json": json.dumps(dates, sort_keys=True),
             "source_scope": row.get("source_scope"),
+            "notes": FIRST_SLICE_NOTES,
             "schema_version": SCHEMA_ELIGIBILITY,
         })
     return pd.DataFrame(rows)
@@ -263,7 +296,7 @@ def qrow(run_id, chunk_id, erow, registry_snapshot_id, date_from, date_till, raw
         "quality_status": status,
         "failure_reason": failure,
         "deferred_reason": "",
-        "notes": "PM L3-2 bounded raw 5m first executable slice",
+        "notes": FIRST_SLICE_NOTES,
         "output_partitions_json": json.dumps(partitions, sort_keys=True),
         "schema_version": SCHEMA_QUALITY,
     }
@@ -293,8 +326,8 @@ def run_chunk(args, root, eligibility, dates, run_id, registry_snapshot_id, chun
             if qstatus == "fail":
                 failure = notes or fetch_error or "raw_5m_quality_failed"
             else:
-                paths = raw_5m_loader.write_partitions(raw, root, fam, secid)
-                partitions.extend(paths)
+                paths_written = raw_5m_loader.write_partitions(raw, root, fam, secid)
+                partitions.extend(paths_written)
         except Exception as exc:
             failure = exc.__class__.__name__ + ": " + str(exc)
         if failure:
