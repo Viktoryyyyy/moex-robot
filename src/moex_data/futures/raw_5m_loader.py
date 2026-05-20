@@ -59,6 +59,14 @@ def load_inputs(data_root, contracts, snapshot_date, require_screen_inputs):
     return input_paths, pd.read_parquet(normalized_path), pd.DataFrame(), pd.DataFrame()
 
 
+def history_depth_review_ready(row):
+    return (
+        str(row.get("history_depth_status", "")).strip() == "review_required"
+        and str(row.get("validation_status", "")).strip() == "metrics_computed"
+        and str(row.get("review_status", "")).strip() == "ready_for_pm_review"
+    )
+
+
 def select_instruments(normalized, liquidity, history, whitelist, excluded, require_screen_inputs):
     if "secid" not in normalized.columns:
         raise RuntimeError("normalized_registry missing secid column")
@@ -82,12 +90,16 @@ def select_instruments(normalized, liquidity, history, whitelist, excluded, requ
             history_status = str(hrow.iloc[0].get("history_depth_status", "")).strip()
             if liquidity_status != "pass":
                 raise RuntimeError("liquidity_status is not pass for " + secid + ": " + liquidity_status)
+            history_review_ready = history_depth_review_ready(hrow.iloc[0])
             short_history_flag = secid in SHORT_HISTORY_ALLOWED
-            if short_history_flag:
-                if history_status not in ["pass", "review_required"]:
-                    raise RuntimeError("short-history instrument has invalid history_depth_status: " + secid + " " + history_status)
-            elif history_status != "pass":
-                raise RuntimeError("history_depth_status is not pass for " + secid + ": " + history_status)
+            if history_status == "pass":
+                pass
+            elif history_status == "review_required" and history_review_ready:
+                pass
+            elif history_status in ["fail", "not_checked", "blocked", "missing", ""]:
+                raise RuntimeError("history_depth_status is blocked for " + secid + ": " + history_status)
+            else:
+                raise RuntimeError("history_depth_status is malformed or not review-ready for " + secid + ": " + history_status)
             first_available_date = hrow.iloc[0].get("first_available_date")
             last_available_date = hrow.iloc[0].get("last_available_date")
             screen_from = hrow.iloc[0].get("screen_from")
@@ -95,6 +107,7 @@ def select_instruments(normalized, liquidity, history, whitelist, excluded, requ
         else:
             liquidity_status = "pass"
             history_status = "pass"
+            history_review_ready = False
             short_history_flag = False
             first_available_date = None
             last_available_date = None
@@ -106,6 +119,7 @@ def select_instruments(normalized, liquidity, history, whitelist, excluded, requ
         row["family_code"] = str(row.get("family_code", "") or "")
         row["liquidity_status"] = liquidity_status
         row["history_depth_status"] = history_status
+        row["history_depth_review_ready"] = bool(history_review_ready)
         row["short_history_flag"] = short_history_flag
         row["first_available_date"] = first_available_date
         row["last_available_date"] = last_available_date

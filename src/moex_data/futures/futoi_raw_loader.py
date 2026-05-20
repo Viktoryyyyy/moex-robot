@@ -79,6 +79,14 @@ def load_inputs(data_root, contracts, snapshot_date):
     }, pd.read_parquet(normalized_path), pd.read_parquet(liquidity_path), pd.read_parquet(history_path), pd.read_parquet(futoi_availability_path)
 
 
+def history_depth_review_ready(row):
+    return (
+        str(row.get("history_depth_status", "")).strip() == "review_required"
+        and str(row.get("validation_status", "")).strip() == "metrics_computed"
+        and str(row.get("review_status", "")).strip() == "ready_for_pm_review"
+    )
+
+
 def select_instruments(normalized, liquidity, history, futoi_availability, whitelist, excluded):
     for name, frame in [("normalized_registry", normalized), ("liquidity_screen", liquidity), ("history_depth_screen", history), ("futoi_availability_report", futoi_availability)]:
         if "secid" not in frame.columns:
