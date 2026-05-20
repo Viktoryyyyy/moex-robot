@@ -40,6 +40,8 @@ REQUIRED_CONTRACTS = [
     "contracts/datasets/futures_derived_d1_ohlcv_manifest_contract.md",
     "contracts/datasets/futures_daily_data_refresh_manifest_contract.md",
     "contracts/datasets/futures_daily_refresh_scheduler_contract.md",
+    "contracts/datasets/futures_all_universe_snapshot_contract.md",
+    "contracts/datasets/futures_all_universe_eligibility_contract.md",
     "contracts/datasets/futures_expiration_map_contract.md",
     "contracts/datasets/futures_continuous_roll_map_contract.md",
     "contracts/datasets/futures_continuous_5m_contract.md",
@@ -52,6 +54,7 @@ REQUIRED_CONTRACTS = [
 
 COMPONENTS = [
     {"component_id": "registry_refresh_runner", "script": "src/moex_data/futures/registry_refresh_runner.py", "kind": "slice_manifest", "manifest_rel": ["futures", "runs", "registry_refresh"], "schema": "futures_registry_refresh_manifest.v1", "verdict": "registry_refresh_result_verdict"},
+    {"component_id": "all_universe_eligibility_snapshot", "script": "src/moex_data/futures/all_universe_raw_5m_backfill_slice.py", "kind": "all_universe_eligibility"},
     {"component_id": "raw_5m_loader", "script": "src/moex_data/futures/raw_5m_loader.py", "kind": "slice_manifest", "manifest_rel": ["futures", "runs", "raw_5m_loader"], "schema": "futures_raw_5m_loader_manifest.v1", "verdict": "loader_result_verdict", "whitelist_field": "loader_whitelist_applied", "short_history_container": "short_history_handling"},
     {"component_id": "futoi_raw_loader", "script": "src/moex_data/futures/futoi_raw_loader.py", "kind": "slice_manifest", "manifest_rel": ["futures", "runs", "futoi_raw_loader"], "schema": "futures_futoi_5m_raw_loader_manifest.v1", "verdict": "loader_result_verdict", "whitelist_field": "loader_whitelist_applied", "short_history_container": "short_history_handling"},
     {"component_id": "derived_d1_ohlcv_builder", "script": "src/moex_data/futures/derived_d1_ohlcv_builder.py", "kind": "slice_manifest", "manifest_rel": ["futures", "runs", "derived_d1_ohlcv_builder"], "schema": "futures_derived_d1_ohlcv_manifest.v1", "verdict": "builder_result_verdict", "whitelist_field": "builder_whitelist_applied", "short_history_container": "short_history_handling"},
@@ -106,6 +109,17 @@ def parse_stdout(stdout):
         except Exception:
             out[key.strip()] = value
     return out
+
+
+def parse_last_stdout_json(stdout):
+    for line in reversed([x for x in str(stdout or "").splitlines() if x.strip()]):
+        try:
+            parsed = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
 
 
 def require_path(path, label):
@@ -322,6 +336,51 @@ def w1_families(paths):
     return sorted(set(families))
 
 
+def run_all_universe_eligibility_component(root, data_root, component, args, whitelist):
+    item = {"component_id": component["component_id"], "status": "fail", "validation_status": "not_validated"}
+    try:
+        started_at = time.time()
+        cmd = [
+            sys.executable,
+            str(root / component["script"]),
+            "--snapshot-date", args.snapshot_date,
+            "--run-date", args.run_date,
+            "--data-root", str(args.data_root_resolved),
+            "--selection-mode", "rfud_included_universe",
+            "--timeout", str(args.timeout),
+            "--iss-base-url", args.iss_base_url,
+            "--apim-base-url", args.apim_base_url,
+        ]
+        proc = subprocess.run(cmd, cwd=str(root), text=True, capture_output=True)
+        item.update({"command": cmd, "returncode": int(proc.returncode), "stdout_tail": proc.stdout[-4000:], "stderr_tail": proc.stderr[-4000:]})
+        if proc.returncode != 0:
+            raise RuntimeError("component_returncode_nonzero")
+        parsed = parse_last_stdout_json(proc.stdout)
+        if not isinstance(parsed, dict):
+            raise RuntimeError("all_universe_stdout_json_missing")
+        outputs = parsed.get("outputs") or {}
+        registry_snapshot = require_path(outputs.get("registry_snapshot"), "all_universe.registry_snapshot")
+        eligibility_snapshot = require_path(outputs.get("eligibility_snapshot"), "all_universe.eligibility_snapshot")
+        if registry_snapshot.stat().st_mtime < started_at - 1.0:
+            raise RuntimeError("all_universe_registry_snapshot_stale")
+        if eligibility_snapshot.stat().st_mtime < started_at - 1.0:
+            raise RuntimeError("all_universe_eligibility_snapshot_stale")
+        selected = ((parsed.get("selected_universe") or {}).get("secids") or [])
+        selected_upper = {str(x).upper() for x in selected}
+        missing = [x for x in whitelist if str(x).upper() not in selected_upper]
+        if missing:
+            raise RuntimeError("all_universe_eligibility_missing_required_whitelist:" + ",".join(missing))
+        chunk_status = str(parsed.get("chunk_status") or "")
+        if chunk_status != "succeeded":
+            raise RuntimeError("all_universe_chunk_status_not_succeeded:" + chunk_status)
+        item.update({"status": "pass", "validation_status": "pass", "child_verdict": "pass", "output_artifacts": outputs, "selected_universe": parsed.get("selected_universe"), "aggregate_report": parsed.get("aggregate_report")})
+        return item, None
+    except Exception as exc:
+        item["failure_reason"] = exc.__class__.__name__ + ": " + str(exc)
+        item["validation_status"] = "fail"
+        return item, None
+
+
 def run_continuous_w1_component(root, data_root, component, args):
     paths = continuous_paths(data_root, args.snapshot_date, args.run_date)
     item = {"component_id": component["component_id"], "status": "fail", "validation_status": "not_validated"}
@@ -365,6 +424,8 @@ def run_component(root, data_root, component, args, whitelist, excluded):
     paths = continuous_paths(data_root, args.snapshot_date, args.run_date)
     item = {"component_id": component["component_id"], "status": "fail", "validation_status": "not_validated"}
     try:
+        if component["kind"] == "all_universe_eligibility":
+            return run_all_universe_eligibility_component(root, data_root, component, args, whitelist)
         if component["kind"] == "continuous_w1":
             return run_continuous_w1_component(root, data_root, component, args)
         if component["kind"] == "continuous_quality_gate":
