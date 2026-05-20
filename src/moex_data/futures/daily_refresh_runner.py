@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -38,12 +39,15 @@ REQUIRED_CONTRACTS = [
     "contracts/datasets/futures_futoi_5m_raw_loader_manifest_contract.md",
     "contracts/datasets/futures_derived_d1_ohlcv_manifest_contract.md",
     "contracts/datasets/futures_daily_data_refresh_manifest_contract.md",
+    "contracts/datasets/futures_daily_refresh_scheduler_contract.md",
     "contracts/datasets/futures_expiration_map_contract.md",
     "contracts/datasets/futures_continuous_roll_map_contract.md",
     "contracts/datasets/futures_continuous_5m_contract.md",
     "contracts/datasets/futures_continuous_d1_contract.md",
+    "contracts/datasets/futures_continuous_w1_contract.md",
     "contracts/datasets/futures_continuous_builder_manifest_contract.md",
     "contracts/datasets/futures_continuous_quality_report_contract.md",
+    "contracts/datasets/futures_continuous_w1_quality_report_contract.md",
 ]
 
 COMPONENTS = [
@@ -55,6 +59,7 @@ COMPONENTS = [
     {"component_id": "continuous_roll_map_builder", "script": "src/moex_data/futures/continuous_roll_map_builder.py", "kind": "stdout_artifact", "artifact": "roll_map"},
     {"component_id": "continuous_5m_builder", "script": "src/moex_data/futures/continuous_series_builder.py", "kind": "stdout_artifact", "artifact": "continuous_5m"},
     {"component_id": "continuous_d1_builder", "script": "src/moex_data/futures/continuous_d1_builder.py", "kind": "stdout_artifact", "artifact": "continuous_d1"},
+    {"component_id": "continuous_w1_builder", "script": "src/moex_data/futures/continuous_w1_builder.py", "kind": "continuous_w1"},
     {"component_id": "continuous_builder_manifest", "script": "src/moex_data/futures/continuous_builder_manifest.py", "kind": "continuous_manifest"},
     {"component_id": "continuous_quality_report", "script": "", "kind": "continuous_quality_gate"},
 ]
@@ -72,8 +77,10 @@ def continuous_paths(data_root, snapshot_date, run_date):
         "continuous_roll_map": str(data_root / "futures" / "continuous" / "roll_map" / ("snapshot_date=" + snapshot_date) / roll / "futures_continuous_roll_map.parquet"),
         "continuous_5m_root": str(data_root / "futures" / "continuous_5m" / roll / adj),
         "continuous_d1_root": str(data_root / "futures" / "continuous_d1" / roll / adj),
+        "continuous_w1_root": str(data_root / "futures" / "continuous_w1" / roll / adj),
         "continuous_builder_manifest": str(data_root / "futures" / "runs" / "continuous_series_builder" / ("run_date=" + run_date) / "manifest.json"),
         "continuous_quality_report": str(data_root / "futures" / "quality" / "continuous_series_builder" / ("run_date=" + run_date) / "futures_continuous_quality_report.parquet"),
+        "continuous_w1_quality_report_root": str(data_root / "futures" / "quality" / "continuous_w1_builder" / ("run_date=" + run_date)),
     }
 
 
@@ -190,6 +197,29 @@ def validate_stdout_artifact(component, paths):
     raise RuntimeError("Unsupported artifact kind: " + str(kind))
 
 
+def validate_continuous_w1_artifact(paths, w1_quality_reports):
+    root = require_path(paths["continuous_w1_root"], "continuous_w1")
+    parquet_paths = sorted(root.glob("family=*/week_start=*/part.parquet"))
+    if not parquet_paths:
+        raise RuntimeError("continuous_w1 has no partitions")
+    sample = pd.read_parquet(parquet_paths[0])
+    if "schema_version" not in sample.columns:
+        raise RuntimeError("continuous_w1 missing schema_version")
+    observed = sorted([str(x) for x in sample["schema_version"].dropna().unique().tolist()])
+    if observed != ["futures_continuous_w1.v1"]:
+        raise RuntimeError("continuous_w1 sample schema_version mismatch: " + json.dumps(observed, ensure_ascii=False))
+    missing_reports = [x for x in w1_quality_reports if not Path(str(x)).exists()]
+    if missing_reports:
+        raise RuntimeError("continuous_w1 quality reports missing: " + json.dumps(missing_reports, ensure_ascii=False))
+    for report_path in w1_quality_reports:
+        report = load_json(report_path)
+        if str(report.get("schema_version") or "") != "futures_continuous_w1_quality_report.v1":
+            raise RuntimeError("continuous_w1 quality schema mismatch: " + str(report_path))
+        if str(report.get("quality_report_status") or "") != "pass":
+            raise RuntimeError("continuous_w1 quality report is not pass: " + str(report_path))
+    return {"path": paths["continuous_w1_root"], "partition_count": int(len(parquet_paths)), "quality_reports": w1_quality_reports}
+
+
 def validate_continuous_manifest(paths, whitelist, excluded):
     manifest = load_json(paths["continuous_builder_manifest"])
     if str(manifest.get("schema_version") or "") != "futures_continuous_builder_manifest.v1":
@@ -252,10 +282,66 @@ def component_command(root, component, args, whitelist, excluded):
     return cmd
 
 
+def w1_families(paths):
+    root = Path(paths["continuous_d1_root"])
+    if not root.is_dir():
+        raise RuntimeError("continuous_d1 root missing for W1: " + str(root))
+    families = []
+    for path in sorted(root.glob("family=*")):
+        if path.is_dir():
+            value = path.name.split("=", 1)[1]
+            if value:
+                families.append(value)
+    if not families:
+        raise RuntimeError("continuous_d1 has no family partitions for W1")
+    return sorted(set(families))
+
+
+def run_continuous_w1_component(root, data_root, component, args):
+    paths = continuous_paths(data_root, args.snapshot_date, args.run_date)
+    item = {"component_id": component["component_id"], "status": "fail", "validation_status": "not_validated"}
+    families = w1_families(paths)
+    quality_reports = []
+    parsed_by_family = {}
+    commands = []
+    from_date = args.from_date or args.run_date
+    till = args.till or args.run_date
+    started_at = time.time()
+    try:
+        for family in families:
+            cmd = [sys.executable, str(root / component["script"]), "--run-date", args.run_date, "--from", from_date, "--till", till, "--data-root", str(args.data_root_resolved), "--family", family, "--roll-policy-id", ROLL_POLICY_ID, "--adjustment-policy-id", ADJUSTMENT_POLICY_ID]
+            proc = subprocess.run(cmd, cwd=str(root), text=True, capture_output=True)
+            commands.append({"family": family, "command": cmd, "returncode": int(proc.returncode), "stdout_tail": proc.stdout[-4000:], "stderr_tail": proc.stderr[-4000:]})
+            if proc.returncode != 0:
+                raise RuntimeError("component_returncode_nonzero:" + family)
+            parsed = parse_stdout(proc.stdout)
+            parsed_by_family[family] = parsed
+            if str(parsed.get("builder_result_verdict") or "") != "pass":
+                raise RuntimeError("continuous_w1_builder_result_verdict_not_pass:" + family)
+            source_report = Path(str((parsed.get("output_artifacts_created") or {}).get("quality_report") or ""))
+            if not source_report.exists():
+                raise RuntimeError("continuous_w1_quality_report_missing:" + family)
+            target_report = Path(paths["continuous_w1_quality_report_root"]) / ("family=" + family) / "quality_report.json"
+            target_report.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source_report, target_report)
+            quality_reports.append(str(target_report))
+        artifact = validate_continuous_w1_artifact(paths, quality_reports)
+        touched = [Path(x) for x in quality_reports]
+        if any(x.stat().st_mtime < started_at - 1.0 for x in touched):
+            raise RuntimeError("continuous_w1_quality_report_stale")
+        item.update({"status": "pass", "validation_status": "pass", "command": commands, "child_verdict": "pass", "output_artifacts": artifact, "stdout_fields": parsed_by_family, "quality_report_path": paths["continuous_w1_quality_report_root"]})
+        return item, None
+    except Exception as exc:
+        item.update({"command": commands, "failure_reason": exc.__class__.__name__ + ": " + str(exc), "validation_status": "fail"})
+        return item, None
+
+
 def run_component(root, data_root, component, args, whitelist, excluded):
     paths = continuous_paths(data_root, args.snapshot_date, args.run_date)
     item = {"component_id": component["component_id"], "status": "fail", "validation_status": "not_validated"}
     try:
+        if component["kind"] == "continuous_w1":
+            return run_continuous_w1_component(root, data_root, component, args)
         if component["kind"] == "continuous_quality_gate":
             manifest, report = validate_continuous_manifest(paths, whitelist, excluded)
             item.update({"status": "pass", "validation_status": "pass", "manifest_path": paths["continuous_builder_manifest"], "quality_report_path": paths["continuous_quality_report"], "child_run_id": manifest.get("run_id"), "quality_rows": int(len(report))})
@@ -347,8 +433,10 @@ def continuous_refs(data_root, snapshot_date, run_date):
         "continuous_roll_map": {"path": paths["continuous_roll_map"], "schema_version": "futures_continuous_roll_map.v1"},
         "continuous_5m_root": {"path": paths["continuous_5m_root"], "schema_version": "futures_continuous_5m.v1"},
         "continuous_d1_root": {"path": paths["continuous_d1_root"], "schema_version": "futures_continuous_d1.v1"},
+        "continuous_w1_root": {"path": paths["continuous_w1_root"], "schema_version": "futures_continuous_w1.v1"},
         "continuous_builder_manifest": {"path": paths["continuous_builder_manifest"], "schema_version": "futures_continuous_builder_manifest.v1"},
         "continuous_quality_report": {"path": paths["continuous_quality_report"], "schema_version": "futures_continuous_quality_report.v1"},
+        "continuous_w1_quality_report_root": {"path": paths["continuous_w1_quality_report_root"], "schema_version": "futures_continuous_w1_quality_report.v1"},
     }
 
 

@@ -146,11 +146,31 @@ def availability_summary(path, whitelist):
     return {"rows": int(len(frame)), "status_counts": counts, "whitelist_status": by_secid, "validation_status": status}
 
 
+def history_depth_row_status(row, secid):
+    value = str(row.get("history_depth_status", ""))
+    validation_status = str(row.get("validation_status", ""))
+    review_status = str(row.get("review_status", ""))
+    if value == "pass":
+        return "pass", "history_depth_pass"
+    if value == "review_required" and validation_status == "metrics_computed" and review_status == "ready_for_pm_review":
+        return "pass", "history_depth_review_ready"
+    if secid in SHORT_HISTORY_ALLOWED and value == "review_required" and validation_status == "metrics_computed" and review_status == "ready_for_pm_review":
+        return "pass", "short_history_review_ready"
+    if value in ["fail", "not_checked", "blocked", "missing", ""]:
+        return "fail", "history_depth_blocked:" + value
+    return "fail", "history_depth_malformed:" + value
+
+
 def screen_summary(path, field, whitelist):
     frame = pd.read_parquet(path)
     if "secid" not in frame.columns or field not in frame.columns:
         return {"rows": int(len(frame)), "validation_status": "fail", "failure_reason": "missing required screen fields"}
+    if field == "history_depth_status":
+        missing = [x for x in ["validation_status", "review_status"] if x not in frame.columns]
+        if missing:
+            return {"rows": int(len(frame)), "validation_status": "fail", "failure_reason": "missing " + ",".join(missing)}
     by_secid = {}
+    review_gate = {}
     status = "pass" if int(len(frame)) > 0 else "fail"
     for secid in whitelist:
         row = frame.loc[frame["secid"].astype(str).str.upper() == secid.upper()].tail(1)
@@ -160,13 +180,18 @@ def screen_summary(path, field, whitelist):
             continue
         value = str(row.iloc[0].get(field, ""))
         by_secid[secid] = value
-        if field == "history_depth_status" and secid in SHORT_HISTORY_ALLOWED:
-            if value not in ["pass", "review_required"]:
+        if field == "history_depth_status":
+            row_status, reason = history_depth_row_status(row.iloc[0], secid)
+            review_gate[secid] = reason
+            if row_status != "pass":
                 status = "fail"
         elif value != "pass":
             status = "fail"
     counts = {str(k): int(v) for k, v in frame[field].astype(str).value_counts(dropna=False).to_dict().items()}
-    return {"rows": int(len(frame)), "status_counts": counts, "whitelist_status": by_secid, "validation_status": status}
+    result = {"rows": int(len(frame)), "status_counts": counts, "whitelist_status": by_secid, "validation_status": status}
+    if field == "history_depth_status":
+        result["review_gate_status"] = review_gate
+    return result
 
 
 def validate_outputs(outputs, whitelist):
