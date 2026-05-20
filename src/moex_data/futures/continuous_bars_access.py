@@ -125,6 +125,8 @@ def _validate_htf_calendar_request(session_calendar_id: str | None, session_cale
         raise FuturesContinuousBarsAccessError("missing_htf_session_calendar")
 
 def _load_source_partitions(request: _Request, source_timeframe: str) -> pd.DataFrame:
+    if source_timeframe == "W1":
+        return _load_w1_partitions(request)
     frames: List[pd.DataFrame] = []
     for key in _source_partition_keys(request, source_timeframe):
         path = _source_partition_path(request, source_timeframe, key)
@@ -134,6 +136,32 @@ def _load_source_partitions(request: _Request, source_timeframe: str) -> pd.Data
     if not frames:
         raise FuturesContinuousBarsAccessError("no_source_partitions")
     return pd.concat(frames, ignore_index=True)
+
+def _load_w1_partitions(request: _Request) -> pd.DataFrame:
+    root = request.data_root / "futures" / "continuous_w1" / ("roll_policy=" + request.roll_policy_id) / ("adjustment_policy=" + request.adjustment_policy_id) / ("family=" + request.family_code)
+    if not root.is_dir():
+        raise FuturesContinuousBarsAccessError("missing_source_family:" + str(root))
+    start_date = request.start_ts.strftime("%Y-%m-%d")
+    end_date = request.end_ts.strftime("%Y-%m-%d")
+    frames: List[pd.DataFrame] = []
+    for path in sorted(root.glob("week_start=*/part.parquet")):
+        week_start = _partition_value(path, "week_start")
+        if not week_start:
+            raise FuturesContinuousBarsAccessError("invalid_w1_partition_path:" + str(path))
+        week_end = (pd.Timestamp(week_start) + pd.Timedelta(days=6)).date().isoformat()
+        if week_end < start_date or week_start > end_date:
+            continue
+        frames.append(pd.read_parquet(path))
+    if not frames:
+        raise FuturesContinuousBarsAccessError("no_source_partitions")
+    return pd.concat(frames, ignore_index=True)
+
+def _partition_value(path: Path, key: str) -> str:
+    prefix = key + "="
+    for part in path.parts:
+        if part.startswith(prefix):
+            return part[len(prefix):]
+    return ""
 
 def _source_partition_keys(request: _Request, source_timeframe: str) -> Sequence[str]:
     if source_timeframe != "W1":
