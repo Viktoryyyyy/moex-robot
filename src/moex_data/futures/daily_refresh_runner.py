@@ -349,7 +349,6 @@ def run_all_universe_eligibility_component(root, data_root, component, args, whi
             "--selection-mode", "rfud_included_universe",
             "--timeout", str(args.timeout),
             "--iss-base-url", args.iss_base_url,
-            "--apim-base-url", args.apim_base_url,
         ]
         proc = subprocess.run(cmd, cwd=str(root), text=True, capture_output=True)
         item.update({"command": cmd, "returncode": int(proc.returncode), "stdout_tail": proc.stdout[-4000:], "stderr_tail": proc.stderr[-4000:]})
