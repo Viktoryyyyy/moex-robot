@@ -54,7 +54,7 @@ REQUIRED_CONTRACTS = [
 
 COMPONENTS = [
     {"component_id": "registry_refresh_runner", "script": "src/moex_data/futures/registry_refresh_runner.py", "kind": "slice_manifest", "manifest_rel": ["futures", "runs", "registry_refresh"], "schema": "futures_registry_refresh_manifest.v1", "verdict": "registry_refresh_result_verdict"},
-    {"component_id": "all_universe_eligibility_snapshot", "script": "src/moex_data/futures/all_universe_raw_5m_backfill_slice.py", "kind": "all_universe_eligibility"},
+    {"component_id": "all_universe_eligibility_snapshot", "script": "src/moex_data/futures/all_universe_eligibility_snapshot_runner.py", "kind": "all_universe_eligibility"},
     {"component_id": "raw_5m_loader", "script": "src/moex_data/futures/raw_5m_loader.py", "kind": "slice_manifest", "manifest_rel": ["futures", "runs", "raw_5m_loader"], "schema": "futures_raw_5m_loader_manifest.v1", "verdict": "loader_result_verdict", "whitelist_field": "loader_whitelist_applied", "short_history_container": "short_history_handling"},
     {"component_id": "futoi_raw_loader", "script": "src/moex_data/futures/futoi_raw_loader.py", "kind": "slice_manifest", "manifest_rel": ["futures", "runs", "futoi_raw_loader"], "schema": "futures_futoi_5m_raw_loader_manifest.v1", "verdict": "loader_result_verdict", "whitelist_field": "loader_whitelist_applied", "short_history_container": "short_history_handling"},
     {"component_id": "derived_d1_ohlcv_builder", "script": "src/moex_data/futures/derived_d1_ohlcv_builder.py", "kind": "slice_manifest", "manifest_rel": ["futures", "runs", "derived_d1_ohlcv_builder"], "schema": "futures_derived_d1_ohlcv_manifest.v1", "verdict": "builder_result_verdict", "whitelist_field": "builder_whitelist_applied", "short_history_container": "short_history_handling"},
@@ -370,9 +370,9 @@ def run_all_universe_eligibility_component(root, data_root, component, args, whi
         missing = [x for x in whitelist if str(x).upper() not in selected_upper]
         if missing:
             raise RuntimeError("all_universe_eligibility_missing_required_whitelist:" + ",".join(missing))
-        chunk_status = str(parsed.get("chunk_status") or "")
-        if chunk_status != "succeeded":
-            raise RuntimeError("all_universe_chunk_status_not_succeeded:" + chunk_status)
+        snapshot_status = str(parsed.get("snapshot_status") or "")
+        if snapshot_status != "succeeded":
+            raise RuntimeError("all_universe_snapshot_status_not_succeeded:" + snapshot_status)
         item.update({"status": "pass", "validation_status": "pass", "child_verdict": "pass", "output_artifacts": outputs, "selected_universe": parsed.get("selected_universe"), "aggregate_report": parsed.get("aggregate_report")})
         return item, None
     except Exception as exc:
