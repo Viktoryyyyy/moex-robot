@@ -109,18 +109,23 @@ def select_instruments(normalized, liquidity, history, futoi_availability, white
             raise RuntimeError("liquidity_status is not pass for " + secid + ": " + liquidity_status)
         if futoi_availability_status != "available" or futoi_probe_status != "completed":
             raise RuntimeError("FUTOI availability is not completed/available for " + secid + ": " + futoi_availability_status + "/" + futoi_probe_status)
+        history_review_ready = history_depth_review_ready(hrow.iloc[0])
         short_history_flag = secid in SHORT_HISTORY_ALLOWED
-        if short_history_flag:
-            if history_status not in ["pass", "review_required"]:
-                raise RuntimeError("short-history instrument has invalid history_depth_status: " + secid + " " + history_status)
-        elif history_status != "pass":
-            raise RuntimeError("history_depth_status is not pass for " + secid + ": " + history_status)
+        if history_status == "pass":
+            pass
+        elif history_status == "review_required" and history_review_ready:
+            pass
+        elif history_status in ["fail", "not_checked", "blocked", "missing", ""]:
+            raise RuntimeError("history_depth_status is blocked for " + secid + ": " + history_status)
+        else:
+            raise RuntimeError("history_depth_status is malformed or not review-ready for " + secid + ": " + history_status)
         row = nrow.iloc[0].to_dict()
         row["secid"] = secid
         row["board"] = str(row.get("board", "rfud") or "rfud")
         row["family_code"] = str(row.get("family_code", "") or "")
         row["liquidity_status"] = liquidity_status
         row["history_depth_status"] = history_status
+        row["history_depth_review_ready"] = bool(history_review_ready)
         row["futoi_availability_status"] = futoi_availability_status
         row["futoi_probe_status"] = futoi_probe_status
         row["short_history_flag"] = short_history_flag
