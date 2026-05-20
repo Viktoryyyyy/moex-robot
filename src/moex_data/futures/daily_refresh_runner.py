@@ -139,6 +139,31 @@ def validate_slice_manifest(component, manifest, whitelist, excluded):
             if key != "manifest":
                 require_path(value, component_id + "." + key)
         return
+    if component_id == "derived_d1_ohlcv_builder":
+        quality = manifest.get("quality_status_counts") or {}
+        if int(quality.get("fail") or 0) != 0:
+            raise RuntimeError(component_id + " quality fail rows present")
+        summaries = manifest.get("instrument_summaries") or {}
+        for secid in whitelist:
+            if secid not in summaries:
+                raise RuntimeError(component_id + " missing instrument summary: " + secid)
+        for secid in excluded:
+            if secid in summaries:
+                raise RuntimeError(component_id + " excluded instrument present: " + secid)
+        for secid in SHORT_HISTORY_ALLOWED:
+            item = summaries.get(secid) if isinstance(summaries, dict) else None
+            if not isinstance(item, dict) or item.get("short_history_flag") is not True:
+                raise RuntimeError(component_id + " short_history_flag missing for " + secid)
+        outputs = manifest.get("output_artifacts") or {}
+        for key, value in outputs.items():
+            require_path(value, component_id + "." + key)
+        for value in manifest.get("partition_paths_created") or []:
+            text = str(value)
+            for secid in excluded:
+                if ("secid=" + secid) in text:
+                    raise RuntimeError(component_id + " excluded partition path: " + text)
+            require_path(value, component_id + ".partition")
+        return
     if manifest.get(component["whitelist_field"]) != whitelist:
         raise RuntimeError(component_id + " whitelist mismatch")
     confirmed = manifest.get("excluded_instruments_confirmed") or []
@@ -271,7 +296,7 @@ def component_command(root, component, args, whitelist, excluded):
     if component_id in ["continuous_5m_builder", "continuous_d1_builder", "continuous_builder_manifest"]:
         cmd.extend(["--roll-policy-id", ROLL_POLICY_ID])
         cmd.extend(["--adjustment-policy-id", ADJUSTMENT_POLICY_ID])
-    if component_id != "continuous_d1_builder":
+    if component_id not in ["continuous_d1_builder", "derived_d1_ohlcv_builder"]:
         cmd.extend(["--whitelist", ",".join(whitelist)])
     cmd.extend(["--excluded", ",".join(excluded)])
     if component_id in ["registry_refresh_runner", "raw_5m_loader", "futoi_raw_loader"]:
@@ -397,8 +422,10 @@ def merge_per_instrument(child_manifests):
 
 def validate_final_scope(per_instrument, whitelist, excluded):
     observed = sorted(per_instrument.keys())
-    if sorted([x.upper() for x in observed]) != sorted([x.upper() for x in whitelist]):
-        return {"status": "fail", "observed": observed, "expected": whitelist}
+    observed_upper = {str(x).upper() for x in observed}
+    missing = [x for x in whitelist if str(x).upper() not in observed_upper]
+    if missing:
+        return {"status": "fail", "observed": observed, "expected": whitelist, "missing_required": missing}
     hits = [x for x in observed if str(x).upper() in {y.upper() for y in excluded}]
     if hits:
         return {"status": "fail", "excluded_hits": hits}
