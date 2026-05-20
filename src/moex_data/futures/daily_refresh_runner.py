@@ -72,6 +72,14 @@ def output_paths(data_root, run_date):
     return {"manifest": str(data_root / "futures" / "runs" / "daily_refresh" / ("run_date=" + run_date) / "manifest.json")}
 
 
+def prerequisite_paths(data_root, snapshot_date, run_date):
+    return {
+        "registry_manifest": str(data_root / "futures" / "runs" / "registry_refresh" / ("run_date=" + run_date) / "manifest.json"),
+        "eligibility_snapshot": str(data_root / "futures" / "all_universe" / "eligibility_snapshot" / ("snapshot_date=" + snapshot_date) / "eligibility_snapshot.parquet"),
+        "all_universe_registry_snapshot": str(data_root / "futures" / "all_universe" / "registry_snapshot" / ("snapshot_date=" + snapshot_date) / "registry_snapshot.parquet"),
+    }
+
+
 def continuous_paths(data_root, snapshot_date, run_date):
     roll = "roll_policy=" + ROLL_POLICY_ID
     adj = "adjustment_policy=" + ADJUSTMENT_POLICY_ID
@@ -419,6 +427,59 @@ def run_continuous_w1_component(root, data_root, component, args):
         return item, None
 
 
+def reused_prerequisite_component(data_root, component, args, whitelist):
+    component_id = component["component_id"]
+    paths = prerequisite_paths(data_root, args.snapshot_date, args.run_date)
+    item = {
+        "component_id": component_id,
+        "status": "fail",
+        "validation_status": "not_validated",
+        "reuse_prerequisites": True,
+    }
+    try:
+        if component_id == "registry_refresh_runner":
+            manifest_path = require_path(paths["registry_manifest"], "reused registry manifest")
+            manifest = load_json(manifest_path)
+            validate_slice_manifest(component, manifest, whitelist, [])
+            item.update({
+                "status": "pass",
+                "validation_status": "pass",
+                "manifest_path": str(manifest_path),
+                "child_run_id": manifest.get("run_id"),
+                "child_verdict": manifest.get(component["verdict"]),
+                "output_artifacts": manifest.get("output_artifacts"),
+            })
+            return item, manifest
+        if component_id == "all_universe_eligibility_snapshot":
+            registry_snapshot = require_path(paths["all_universe_registry_snapshot"], "reused all-universe registry snapshot")
+            eligibility_snapshot = require_path(paths["eligibility_snapshot"], "reused eligibility snapshot")
+            frame = pd.read_parquet(eligibility_snapshot)
+            if frame.empty:
+                raise RuntimeError("reused eligibility snapshot is empty")
+            if "secid" not in frame.columns:
+                raise RuntimeError("reused eligibility snapshot missing secid")
+            selected_upper = {str(x).upper() for x in frame["secid"].dropna().tolist()}
+            missing = [x for x in whitelist if str(x).upper() not in selected_upper]
+            if missing:
+                raise RuntimeError("reused eligibility missing required whitelist:" + ",".join(missing))
+            item.update({
+                "status": "pass",
+                "validation_status": "pass",
+                "child_verdict": "pass",
+                "output_artifacts": {
+                    "registry_snapshot": str(registry_snapshot),
+                    "eligibility_snapshot": str(eligibility_snapshot),
+                },
+                "selected_universe": {"secid_count": int(len(selected_upper)), "required_whitelist": whitelist},
+            })
+            return item, None
+        raise RuntimeError("unsupported reused prerequisite: " + component_id)
+    except Exception as exc:
+        item["failure_reason"] = exc.__class__.__name__ + ": " + str(exc)
+        item["validation_status"] = "fail"
+        return item, None
+
+
 def run_component(root, data_root, component, args, whitelist, excluded):
     paths = continuous_paths(data_root, args.snapshot_date, args.run_date)
     item = {"component_id": component["component_id"], "status": "fail", "validation_status": "not_validated"}
@@ -541,6 +602,7 @@ def main():
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--whitelist", default=",".join(DEFAULT_WHITELIST))
     parser.add_argument("--excluded", default=",".join(DEFAULT_EXCLUDED))
+    parser.add_argument("--reuse-prerequisites", action="store_true", help="Reuse existing registry and eligibility artifacts for snapshot_date instead of recomputing them.")
     args = parser.parse_args()
     root = Path.cwd().resolve()
     args.data_root_resolved = base.resolve_data_root(args)
@@ -558,7 +620,10 @@ def main():
     final_status = "pass"
     blockers = []
     for component in COMPONENTS:
-        item, manifest = run_component(root, data_root, component, args, whitelist, excluded)
+        if args.reuse_prerequisites and component["component_id"] in ["registry_refresh_runner", "all_universe_eligibility_snapshot"]:
+            item, manifest = reused_prerequisite_component(data_root, component, args, whitelist)
+        else:
+            item, manifest = run_component(root, data_root, component, args, whitelist, excluded)
         items.append(item)
         if item.get("status") != "pass":
             final_status = "fail"
@@ -590,6 +655,7 @@ def main():
         "roll_policy_id": ROLL_POLICY_ID,
         "adjustment_policy_id": ADJUSTMENT_POLICY_ID,
         "adjustment_factor": ADJUSTMENT_FACTOR,
+        "reuse_prerequisites": bool(args.reuse_prerequisites),
         "component_execution_order": [x["component_id"] for x in COMPONENTS],
         "child_component_status": items,
         "child_manifest_references": child_refs(items),
