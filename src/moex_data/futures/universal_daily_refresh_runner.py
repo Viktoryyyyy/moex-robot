@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path.cwd() / "src"))
@@ -116,7 +117,7 @@ STAGES = {
 
 
 def utc_now_iso():
-    return base.utc_now_iso()
+    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
 
 def today_msk():
