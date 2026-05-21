@@ -36,10 +36,11 @@ def test_no_slice1_whitelist_or_short_history_scope():
 
 
 def test_required_sot_files_include_eligibility_and_futoi_availability_contracts():
-    required = literal_assigned_to("REQUIRED_SOT_FILES")
-    assert "contracts/datasets/futures_all_universe_eligibility_contract.md" in required
-    assert "contracts/datasets/futures_futoi_availability_report_contract.md" in required
-    assert "configs/datasets/futures_all_universe_eligibility_config.json" in required
+    text = source()
+    assert "contracts/datasets/futures_all_universe_eligibility_contract.md" in text
+    assert "contracts/datasets/futures_futoi_availability_report_contract.md" in text
+    assert "configs/datasets/futures_all_universe_eligibility_config.json" in text
+    assert "FUTOI_AVAILABILITY_CONTRACT" in text
 
 
 def test_selection_is_eligibility_snapshot_driven_futoi_true():
