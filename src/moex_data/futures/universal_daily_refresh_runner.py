@@ -5,7 +5,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path.cwd() / "src"))
@@ -117,7 +117,7 @@ STAGES = {
 
 
 def utc_now_iso():
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def today_msk():
@@ -230,6 +230,34 @@ def missing_component(stage_id):
     }
 
 
+def preflight_planned_stages(planned_stage_order):
+    for stage_id in planned_stage_order:
+        stage = STAGES[stage_id]
+        if stage.get("kind") == "missing_canonical_component":
+            return {
+                "stage_id": "preflight",
+                "component_id": "universal_daily_refresh_preflight",
+                "status": "fail",
+                "validation_status": "fail",
+                "blocked_stage_id": stage_id,
+                "blocked_component_id": stage["component_id"],
+                "failure_reason": stage.get("blocker") or "missing_canonical_component",
+                "blocker_class": "canonical_component_missing",
+                "preflight_scope": "planned_stage_order",
+                "preflight_result": "known_missing_canonical_component_detected",
+            }
+    return None
+
+
+def blocker_for_item(item):
+    stage_id = item.get("blocked_stage_id") or item.get("stage_id")
+    return str(stage_id) + ":" + str(item.get("failure_reason") or "failed")
+
+
+def executed_stage_ids(items):
+    return [x.get("stage_id") for x in items if x.get("stage_id") != "preflight"]
+
+
 def stages_to_run(args):
     if args.stage:
         return [args.stage]
@@ -298,31 +326,41 @@ def main():
         ",".join(secid_filter),
     ])
 
+    planned_stage_order = stages_to_run(args)
     items = []
     blockers = []
     final_status = "pass"
-    for stage_id in stages_to_run(args):
-        kind = STAGES[stage_id]["kind"]
-        if kind == "command":
-            item = run_command_stage(root, stage_id, args)
-        elif kind == "family_command":
-            item = missing_component(stage_id)
-            item["failure_reason"] = "family-scoped W1 orchestration requires canonical family discovery from accepted continuous D1 manifest"
-            item["blocker_class"] = "canonical_family_discovery_missing"
-        elif kind == "metadata_gate":
-            item = metadata_gate(stage_id)
-        elif kind == "missing_canonical_component":
-            item = missing_component(stage_id)
-        elif kind == "manifest_write":
-            item = metadata_gate(stage_id)
-        else:
-            item = missing_component(stage_id)
-            item["failure_reason"] = "unsupported_stage_kind:" + str(kind)
-        items.append(item)
-        if item.get("status") != "pass":
-            final_status = "fail"
-            blockers.append(stage_id + ":" + str(item.get("failure_reason") or "failed"))
-            break
+
+    preflight_item = None
+    if not args.stage:
+        preflight_item = preflight_planned_stages(planned_stage_order)
+    if preflight_item is not None:
+        items.append(preflight_item)
+        final_status = "fail"
+        blockers.append(blocker_for_item(preflight_item))
+    else:
+        for stage_id in planned_stage_order:
+            kind = STAGES[stage_id]["kind"]
+            if kind == "command":
+                item = run_command_stage(root, stage_id, args)
+            elif kind == "family_command":
+                item = missing_component(stage_id)
+                item["failure_reason"] = "family-scoped W1 orchestration requires canonical family discovery from accepted continuous D1 manifest"
+                item["blocker_class"] = "canonical_family_discovery_missing"
+            elif kind == "metadata_gate":
+                item = metadata_gate(stage_id)
+            elif kind == "missing_canonical_component":
+                item = missing_component(stage_id)
+            elif kind == "manifest_write":
+                item = metadata_gate(stage_id)
+            else:
+                item = missing_component(stage_id)
+                item["failure_reason"] = "unsupported_stage_kind:" + str(kind)
+            items.append(item)
+            if item.get("status") != "pass":
+                final_status = "fail"
+                blockers.append(blocker_for_item(item))
+                break
 
     outputs = output_paths(data_root, args.run_date)
     manifest = {
@@ -335,7 +373,8 @@ def main():
         "started_ts": started_ts,
         "completed_ts": utc_now_iso(),
         "canonical_stage_order": CANONICAL_STAGE_IDS,
-        "executed_stage_order": [x.get("stage_id") for x in items],
+        "planned_stage_order": planned_stage_order,
+        "executed_stage_order": executed_stage_ids(items),
         "debug_controls": debug_scope,
         "selection_model": "eligibility_snapshot_driven",
         "slice1_whitelist_semantics": "forbidden_as_canonical_scope",
