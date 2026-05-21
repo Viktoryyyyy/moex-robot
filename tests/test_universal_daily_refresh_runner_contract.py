@@ -69,6 +69,29 @@ def test_missing_canonical_futoi_stage_fails_closed_not_slice1_fallback():
     assert futoi["script"] == ""
 
 
+def test_full_run_has_fail_fast_preflight_before_heavy_stages():
+    text = runner_source()
+    assert "def preflight_planned_stages" in text
+    assert "known_missing_canonical_component_detected" in text
+    assert "blocked_stage_id" in text
+    assert "if not args.stage" in text
+    assert "preflight_item = preflight_planned_stages(planned_stage_order)" in text
+
+
+def test_manifest_records_planned_stage_order_and_no_real_execution_for_preflight_marker():
+    text = runner_source()
+    assert '"planned_stage_order": planned_stage_order' in text
+    assert '"executed_stage_order": executed_stage_ids(items)' in text
+    assert 'x.get("stage_id") != "preflight"' in text
+
+
+def test_utc_timestamp_is_timezone_aware():
+    text = runner_source()
+    assert "datetime.utcnow()" not in text
+    assert "from datetime import datetime, timezone" in text
+    assert "datetime.now(timezone.utc)" in text
+
+
 def test_debug_controls_are_orchestration_only():
     text = runner_source()
     assert "orchestration_only_no_universe_or_eligibility_redefinition" in text
