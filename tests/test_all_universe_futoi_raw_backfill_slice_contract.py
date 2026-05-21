@@ -48,6 +48,8 @@ def test_selection_is_eligibility_snapshot_driven_futoi_true():
     assert "futoi_eligible" in text
     assert "classification_status=included and futoi_eligible=true" in text
     assert "eligibility_snapshot_driven_futoi_eligible_true" in text
+    assert "derive_futoi_eligibility" in text
+    assert "futoi_eligibility_snapshot" in text
 
 
 def test_fail_closed_on_missing_or_invalid_futoi_availability():
@@ -74,3 +76,12 @@ def test_preserves_excluded_deferred_visibility_in_aggregate():
     assert "deferred_count" in text
     assert "excluded_count" in text
     assert "classification_visibility_preserved" in text
+
+
+def test_derived_futoi_eligibility_marks_only_included_available_completed_rows():
+    text = source()
+    assert 'status != "included"' in text
+    assert 'futoi_status.append("not_applicable_not_included")' in text
+    assert 'availability_status != "available" or probe_status != "completed"' in text
+    assert 'futoi_status.append("pass")' in text
+    assert 'futoi_flags.append(True)' in text
