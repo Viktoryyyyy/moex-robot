@@ -61,15 +61,15 @@ def test_universal_runner_does_not_import_slice1_whitelist_defaults():
     assert "SHORT_HISTORY_ALLOWED" not in text
 
 
-def test_missing_canonical_futoi_stage_fails_closed_not_slice1_fallback():
+def test_canonical_futoi_stage_is_wired_not_slice1_fallback():
     stages = literal_assigned_to("STAGES")
     futoi = stages["futoi_raw_refresh"]
-    assert futoi["kind"] == "missing_canonical_component"
-    assert futoi["blocker"] == "canonical_all_universe_futoi_raw_producer_missing"
-    assert futoi["script"] == ""
+    assert futoi["kind"] == "command"
+    assert futoi["component_id"] == "canonical_all_universe_futoi_raw_refresh"
+    assert futoi["script"] == "src/moex_data/futures/all_universe_futoi_raw_backfill_slice.py"
 
 
-def test_full_run_has_fail_fast_preflight_before_heavy_stages():
+def test_full_run_preflight_keeps_missing_component_guard_for_future_gaps():
     text = runner_source()
     assert "def preflight_planned_stages" in text
     assert "known_missing_canonical_component_detected" in text
@@ -98,6 +98,16 @@ def test_debug_controls_are_orchestration_only():
     assert "semantics_effect" in text
     assert "slice1_whitelist_semantics" in text
     assert "forbidden_as_canonical_scope" in text
+    assert "eligibility_snapshot_driven_futoi_eligible_true" in text
+
+
+def test_futoi_stage_receives_snapshot_date_data_root_timeout_and_apim():
+    text = runner_source()
+    assert '"futoi_raw_refresh"' in text
+    assert '{"registry_refresh", "all_universe_eligibility_snapshot", "raw_5m_refresh", "futoi_raw_refresh", "raw_d1_derivation", "expiration_map", "roll_map", "continuous_5m"}' in text
+    assert '{"raw_5m_refresh", "futoi_raw_refresh", "raw_d1_derivation", "continuous_5m", "continuous_d1", "continuous_w1"}' in text
+    assert '{"all_universe_eligibility_snapshot", "raw_5m_refresh", "futoi_raw_refresh"}' in text
+    assert '{"raw_5m_refresh", "futoi_raw_refresh"}' in text
 
 
 def test_scheduler_contract_points_to_universal_runner():
