@@ -20,6 +20,7 @@ from moex_data.futures import liquidity_history_metrics_probe_apim_calendar as a
 
 SCHEMA_MANIFEST = "futures_all_universe_futoi_raw_chunk_manifest.v1"
 SCHEMA_QUALITY = "futures_all_universe_futoi_raw_quality_report.v1"
+SCHEMA_FUTOI_ELIGIBILITY = "futures_all_universe_futoi_eligibility_snapshot.v1"
 DATASET_STAGE = "futoi_raw"
 MODE_RFUD_INCLUDED = "rfud_included_universe"
 FUTOI_AVAILABILITY_CONTRACT = "contracts/datasets/futures_futoi_availability_report_contract.md"
@@ -62,6 +63,7 @@ def paths(root, snapshot_date, chunk_id):
     base_dir = root / "futures" / "all_universe"
     return {
         "eligibility_snapshot": str(base_dir / "eligibility_snapshot" / ("snapshot_date=" + snapshot_date) / "eligibility_snapshot.parquet"),
+        "futoi_eligibility_snapshot": str(base_dir / "futoi_eligibility_snapshot" / ("snapshot_date=" + snapshot_date) / "futoi_eligibility_snapshot.parquet"),
         "chunk_manifest": str(base_dir / "runs" / "futoi_raw_backfill" / ("chunk_id=" + chunk_id) / "manifest.json"),
         "quality_report": str(base_dir / "quality" / "futoi_raw_backfill" / ("chunk_id=" + chunk_id) / "quality_report.parquet"),
         "aggregate_report": str(base_dir / "quality" / "futoi_raw_backfill" / ("chunk_id=" + chunk_id) / "aggregate_report.json"),
@@ -85,15 +87,6 @@ def load_eligibility(root, snapshot_date):
     return str(p), frame
 
 
-def selected_universe(eligibility):
-    selected = eligibility.loc[(eligibility["classification_status"].astype(str) == "included") & (eligibility["futoi_eligible"] == True)].copy()
-    if selected.empty:
-        raise RuntimeError("No eligibility_snapshot rows with classification_status=included and futoi_eligible=true")
-    if "registry_snapshot_id" not in selected.columns or selected["registry_snapshot_id"].isna().all():
-        raise RuntimeError("Selected FUTOI universe lacks registry_snapshot_id")
-    return selected.sort_values(["family_code", "secid"]).reset_index(drop=True)
-
-
 def load_availability(repo_root, root, snapshot_date):
     p = resolve_availability_path(repo_root, root, snapshot_date)
     if not p.exists():
@@ -112,31 +105,74 @@ def latest_by_secid(frame):
     return {str(row.get("_secid_upper")): row for _, row in work.drop_duplicates("_secid_upper", keep="last").iterrows()}
 
 
-def validate_availability(selected, availability):
+def derive_futoi_eligibility(eligibility, availability):
     by_secid = latest_by_secid(availability)
-    rows = []
+    work = eligibility.copy()
     failures = []
-    for _, row in selected.iterrows():
+    futoi_status = []
+    futoi_flags = []
+    availability_statuses = []
+    probe_statuses = []
+    first_dates = []
+    last_dates = []
+    source_urls = []
+    for _, row in work.iterrows():
         secid = str(row.get("secid"))
+        status = str(row.get("classification_status", ""))
+        if status != "included":
+            futoi_status.append("not_applicable_not_included")
+            futoi_flags.append(False)
+            availability_statuses.append("")
+            probe_statuses.append("")
+            first_dates.append(None)
+            last_dates.append(None)
+            source_urls.append(None)
+            continue
         arow = by_secid.get(secid.upper())
         if arow is None:
             failures.append(secid + ":missing_futoi_availability_row")
+            futoi_status.append("fail_missing_futoi_availability_row")
+            futoi_flags.append(False)
+            availability_statuses.append("")
+            probe_statuses.append("")
+            first_dates.append(None)
+            last_dates.append(None)
+            source_urls.append(None)
             continue
         availability_status = str(arow.get("availability_status", "")).strip()
         probe_status = str(arow.get("probe_status", "")).strip()
+        availability_statuses.append(availability_status)
+        probe_statuses.append(probe_status)
+        first_dates.append(arow.get("first_available_date"))
+        last_dates.append(arow.get("last_available_date"))
+        source_urls.append(arow.get("source_endpoint_url"))
         if availability_status != "available" or probe_status != "completed":
             failures.append(secid + ":futoi_availability_not_available_completed")
+            futoi_status.append("fail_futoi_availability_not_available_completed")
+            futoi_flags.append(False)
             continue
-        merged = row.to_dict()
-        merged["futoi_availability_status"] = availability_status
-        merged["futoi_probe_status"] = probe_status
-        merged["futoi_first_available_date"] = arow.get("first_available_date")
-        merged["futoi_last_available_date"] = arow.get("last_available_date")
-        merged["futoi_source_endpoint_url_probe"] = arow.get("source_endpoint_url")
-        rows.append(merged)
+        futoi_status.append("pass")
+        futoi_flags.append(True)
+    work["futoi_check_status"] = futoi_status
+    work["futoi_eligible"] = futoi_flags
+    work["futoi_availability_status"] = availability_statuses
+    work["futoi_probe_status"] = probe_statuses
+    work["futoi_first_available_date"] = first_dates
+    work["futoi_last_available_date"] = last_dates
+    work["futoi_source_endpoint_url_probe"] = source_urls
+    work["futoi_eligibility_schema_version"] = SCHEMA_FUTOI_ELIGIBILITY
     if failures:
         raise RuntimeError("Canonical FUTOI availability validation failed: " + ";".join(failures))
-    return pd.DataFrame(rows)
+    return work
+
+
+def selected_universe(futoi_eligibility):
+    selected = futoi_eligibility.loc[(futoi_eligibility["classification_status"].astype(str) == "included") & (futoi_eligibility["futoi_eligible"] == True)].copy()
+    if selected.empty:
+        raise RuntimeError("No eligibility_snapshot rows with classification_status=included and futoi_eligible=true")
+    if "registry_snapshot_id" not in selected.columns or selected["registry_snapshot_id"].isna().all():
+        raise RuntimeError("Selected FUTOI universe lacks registry_snapshot_id")
+    return selected.sort_values(["family_code", "secid"]).reset_index(drop=True)
 
 
 def selected_dates(row):
@@ -269,13 +305,13 @@ def run_chunk(args, root, selected, run_id, chunk_id):
     return manifest, quality
 
 
-def aggregate(eligibility, selected, manifest):
+def aggregate(eligibility, futoi_eligibility, selected, manifest):
     return {
         "candidate_universe_count": int(len(eligibility)),
         "included_count": int((eligibility["classification_status"].astype(str) == "included").sum()),
         "deferred_count": int((eligibility["classification_status"].astype(str) == "deferred").sum()),
         "excluded_count": int((eligibility["classification_status"].astype(str) == "excluded").sum()),
-        "futoi_eligible_count": int((eligibility["futoi_eligible"] == True).sum()),
+        "futoi_eligible_count": int((futoi_eligibility["futoi_eligible"] == True).sum()),
         "selected_futoi_secid_count": int(len(selected)),
         "failed_secid_count": int(len(manifest.get("failed_secid") or [])),
         "chunk_status": manifest.get("status"),
@@ -301,18 +337,19 @@ def main():
     root = data_root(args)
     base.assert_files_exist(repo_root, REQUIRED_SOT_FILES)
     eligibility_path, eligibility = load_eligibility(root, args.snapshot_date)
-    selected = selected_universe(eligibility)
     availability_path, availability = load_availability(repo_root, root, args.snapshot_date)
-    selected = validate_availability(selected, availability)
+    futoi_eligibility = derive_futoi_eligibility(eligibility, availability)
+    selected = selected_universe(futoi_eligibility)
     run_id = "all_universe_futoi_raw_" + args.run_date + "_" + base.stable_id([args.snapshot_date, eligibility_path, availability_path, now_utc()])
     chunk_id = "futoi_raw_" + base.stable_id([args.snapshot_date, ",".join(selected["secid"].astype(str).tolist()), args.from_date, args.till])
     out = paths(root, args.snapshot_date, chunk_id)
+    write_parquet(out["futoi_eligibility_snapshot"], futoi_eligibility)
     manifest, quality = run_chunk(args, root, selected, run_id, chunk_id)
     manifest["input_artifacts"] = {"eligibility_snapshot": eligibility_path, "futoi_availability_report": availability_path}
     manifest["output_artifacts"] = out
     write_parquet(out["quality_report"], quality)
     dump_json(out["chunk_manifest"], manifest)
-    aggregate_report = aggregate(eligibility, selected, manifest)
+    aggregate_report = aggregate(eligibility, futoi_eligibility, selected, manifest)
     dump_json(out["aggregate_report"], aggregate_report)
     print(json.dumps({"outputs": out, "selection_mode": args.selection_mode, "selected_universe": {"secid_count": int(len(selected)), "secids": selected["secid"].astype(str).tolist(), "dataset_stage": DATASET_STAGE}, "chunk_status": aggregate_report.get("chunk_status"), "aggregate_report": aggregate_report}, ensure_ascii=False, sort_keys=True, default=str))
     return 0 if aggregate_report.get("chunk_status") in ["succeeded", "partial_failed"] else 1
