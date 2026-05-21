@@ -6,16 +6,21 @@ artifact_class: external_contract
 format: markdown
 schema_version: futures_daily_refresh_scheduler_contract.v1
 
-purpose: Server-applied scheduler contract for the daily unattended MOEX futures data refresh runner.
+purpose: Server-applied scheduler contract for the canonical universal MOEX futures data refresh runner.
 
 source_of_truth:
 - GitHub stores this scheduler contract and the runner code.
 - Server stores systemd unit/timer state, data lake artifacts, run manifests, and logs.
-- Server filesystem is applied state only and must not redefine stage order or artifact contracts.
+- Server filesystem is applied state only and must not redefine stage order, universe semantics, or artifact contracts.
 
-entrypoint:
+canonical_entrypoint:
+- module: moex_data.futures.universal_daily_refresh_runner
+- canonical_command: cd /home/trader/moex_bot/moex-robot && source /home/trader/moex_bot/venv/bin/activate && PYTHONPATH=src python -m moex_data.futures.universal_daily_refresh_runner --data-root /home/trader/moex_bot/data
+
+legacy_compatibility_entrypoint:
 - module: moex_data.futures.daily_refresh_runner
-- canonical_command: cd /home/trader/moex_bot/moex-robot && source /home/trader/moex_bot/venv/bin/activate && PYTHONPATH=src python -m moex_data.futures.daily_refresh_runner --data-root /home/trader/moex_bot/data
+- status: compatibility_only
+- note: Legacy runner may remain available for Slice 1 compatibility/debug, but it must not define canonical all-universe daily refresh semantics.
 
 runtime_environment:
 - venv: /home/trader/moex_bot/venv
@@ -24,33 +29,37 @@ runtime_environment:
 - pythonpath: src
 - dotenv_policy: .env may be loaded only inside Python process through python-dotenv, never by shell-sourcing as production dependency.
 
-required_stage_order:
-1. registry_refresh_runner
-2. raw_5m_loader
-3. futoi_raw_loader
-4. derived_d1_ohlcv_builder
-5. expiration_map_builder
-6. continuous_roll_map_builder
-7. continuous_5m_builder
-8. continuous_d1_builder
-9. continuous_w1_builder
-10. continuous_builder_manifest
-11. continuous_quality_report
+required_canonical_stage_order:
+1. registry_refresh
+2. all_universe_eligibility_snapshot
+3. raw_5m_refresh
+4. futoi_raw_refresh
+5. raw_d1_derivation
+6. continuous_eligibility_refinement
+7. expiration_map
+8. roll_map
+9. continuous_5m
+10. continuous_d1
+11. continuous_w1
+12. quality_reports
+13. unified_manifest
 
 stage_policies:
-- registry refresh must complete before any downstream raw/FUTOI/D1/continuous stage.
+- registry refresh must complete before downstream raw/FUTOI/D1/continuous stages.
+- all-universe eligibility snapshot must define canonical included/deferred/excluded status.
 - raw 5m and FUTOI raw remain separate storage zones.
 - raw D1 derivation must use accepted raw 5m partitions.
 - continuous 5m must use accepted raw/FUTOI-independent roll mapping and accepted raw 5m inputs.
 - continuous D1 must derive from accepted continuous 5m.
 - continuous W1 must derive only from accepted continuous D1.
 - quality reports must be generated before the top-level daily refresh verdict is pass.
-- one daily manifest must be written at ${MOEX_DATA_ROOT}/futures/runs/daily_refresh/run_date={run_date}/manifest.json.
+- one universal daily manifest must be written at ${MOEX_DATA_ROOT}/futures/runs/universal_daily_refresh/run_date={run_date}/manifest.json.
 
 fail_closed_policy:
 - If any child component fails, the runner must stop and must not execute later components.
-- daily_refresh_result_verdict=pass is allowed only when all executed child components and quality gates pass.
+- universal_daily_refresh_result_verdict=pass is allowed only when all executed child components and quality gates pass.
 - Missing, stale, malformed, or invalid child artifacts are blocking.
+- Missing canonical all-universe producer components are blocking.
 - Previous valid artifacts must remain available if the current run fails.
 - No global cleanup is allowed during unattended daily refresh.
 
@@ -60,12 +69,13 @@ scheduler_policy:
 - The timer must call the canonical module entrypoint, not an ad hoc script that changes stage order.
 - The scheduler must not source .env in shell as a production dependency.
 - The scheduler must not run strategy, research, or runtime trading logic.
+- The scheduler must not point canonical daily refresh to the legacy Slice 1 compatibility runner.
 
 observability_policy:
-- The daily manifest is the primary run status artifact.
+- The universal daily manifest is the primary run status artifact.
 - The latest manifest path must be inspectable by date partition.
-- A failed run must preserve blocker details in the daily manifest blockers field.
-- Child manifests and quality reports must be referenced from the daily manifest.
+- A failed run must preserve blocker details in the universal daily manifest blockers field.
+- Child manifests and quality reports must be referenced from the universal daily manifest.
 
 forbidden_scope:
 - no strategy changes
@@ -76,11 +86,14 @@ forbidden_scope:
 - no change to roll_policy_id=expiration_minus_1_trading_session_v1
 - no change to adjustment_policy_id=unadjusted_v1
 - no server-first code edits
+- no Slice 1 whitelist semantics as canonical daily refresh scope
 
 acceptance_criteria:
 - Repository contains this contract.
-- daily_refresh_runner.py requires this contract before execution.
-- daily_refresh_runner.py component_execution_order matches required_stage_order.
+- Repository contains futures_universal_daily_refresh_manifest_contract.md.
+- universal_daily_refresh_runner.py requires the universal manifest contract before execution.
+- universal_daily_refresh_runner.py canonical_stage_order matches required_canonical_stage_order.
 - GitHub Actions tests pass before merge to origin/main.
 - Server apply happens only after origin/main contains the accepted commit.
-- Real server run writes one daily manifest and exits 0 only on pass.
+- Real server run writes one universal daily manifest.
+- If canonical all-universe producer stages are missing, real server run fails closed with explicit blocker rather than silently falling back to Slice 1.
