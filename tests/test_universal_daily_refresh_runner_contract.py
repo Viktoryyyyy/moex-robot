@@ -110,6 +110,13 @@ def test_futoi_stage_receives_snapshot_date_data_root_timeout_and_apim():
     assert '{"raw_5m_refresh", "futoi_raw_refresh"}' in text
 
 
+def test_futoi_stage_forwards_small_scope_filters_and_exact_contract_mode():
+    text = runner_source()
+    assert 'if stage_id == "futoi_raw_refresh":' in text
+    assert 'cmd.extend(["--family", args.family])' in text
+    assert 'cmd.extend(["--secid", args.secid, "--exact-contract-only"])' in text
+
+
 def test_scheduler_contract_points_to_universal_runner():
     text = SCHEDULER_CONTRACT.read_text(encoding="utf-8")
     assert "module: moex_data.futures.universal_daily_refresh_runner" in text
