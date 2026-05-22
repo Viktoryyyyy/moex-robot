@@ -105,7 +105,9 @@ def test_futoi_stage_receives_snapshot_date_data_root_timeout_and_apim():
     text = runner_source()
     assert '"futoi_raw_refresh"' in text
     assert '{"registry_refresh", "all_universe_eligibility_snapshot", "raw_5m_refresh", "futoi_raw_refresh", "raw_d1_derivation", "expiration_map", "roll_map", "continuous_5m"}' in text
-    assert '{"raw_5m_refresh", "futoi_raw_refresh", "raw_d1_derivation", "continuous_5m", "continuous_d1", "continuous_w1"}' in text
+    assert 'DATE_WINDOW_FORWARD_STAGE_IDS = {' in text
+    assert '"raw_5m_refresh"' not in str(literal_assigned_to("DATE_WINDOW_FORWARD_STAGE_IDS"))
+    assert literal_assigned_to("DATE_WINDOW_FORWARD_STAGE_IDS") == {"futoi_raw_refresh", "raw_d1_derivation", "continuous_5m", "continuous_d1"}
     assert '{"all_universe_eligibility_snapshot", "raw_5m_refresh", "futoi_raw_refresh"}' in text
     assert '{"raw_5m_refresh", "futoi_raw_refresh"}' in text
 
