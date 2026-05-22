@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import copy
 import json
 import os
 import subprocess
@@ -168,6 +169,9 @@ def command_for_stage(root, stage_id, args):
             cmd.extend(["--family", args.family])
         if args.secid:
             cmd.extend(["--secid", args.secid])
+    if stage_id == "continuous_w1":
+        if args.family:
+            cmd.extend(["--family", args.family])
     if stage_id in {"registry_refresh", "all_universe_eligibility_snapshot", "raw_5m_refresh", "futoi_raw_refresh", "raw_d1_derivation", "expiration_map", "roll_map", "continuous_5m", "continuous_d1", "continuous_w1"}:
         cmd.extend(["--data-root", str(args.data_root_resolved)])
     if stage_id in {"registry_refresh", "all_universe_eligibility_snapshot", "raw_5m_refresh", "futoi_raw_refresh", "roll_map"}:
@@ -210,6 +214,121 @@ def run_command_stage(root, stage_id, args):
         return item
     item["status"] = "pass"
     item["validation_status"] = "pass"
+    return item
+
+
+def parse_json_line_output(text):
+    parsed = {}
+    for raw in str(text or "").splitlines():
+        if ":" not in raw:
+            continue
+        key, value = raw.split(":", 1)
+        key = key.strip()
+        if not key:
+            continue
+        value = value.strip()
+        if not value:
+            continue
+        try:
+            parsed[key] = json.loads(value)
+        except Exception:
+            continue
+    return parsed
+
+
+def family_from_path(value):
+    for part in Path(str(value)).parts:
+        if part.startswith("family="):
+            family = part[len("family="):].strip()
+            if family:
+                return family
+    return ""
+
+
+def ordered_unique(values):
+    out = []
+    seen = set()
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            out.append(text)
+    return out
+
+
+def accepted_continuous_d1_item(items):
+    for item in reversed(items):
+        if item.get("stage_id") == "continuous_d1":
+            if item.get("status") == "pass" and item.get("validation_status") == "pass" and int(item.get("returncode", 1)) == 0:
+                return item
+            return None
+    return None
+
+
+def discover_w1_families_from_accepted_d1(items):
+    d1_item = accepted_continuous_d1_item(items)
+    if d1_item is None:
+        raise RuntimeError("accepted_continuous_d1_child_status_missing")
+    parsed = parse_json_line_output(d1_item.get("stdout_tail", ""))
+    families = []
+    summary = parsed.get("continuous_d1_summary")
+    if isinstance(summary, dict):
+        families.extend(summary.get("families") or [])
+    artifacts = parsed.get("output_artifacts_created")
+    if isinstance(artifacts, dict):
+        paths = artifacts.get("continuous_d1_partitions_created") or []
+        if not isinstance(paths, list):
+            paths = []
+        families.extend([family_from_path(path) for path in paths])
+    families = ordered_unique(families)
+    if not families:
+        raise RuntimeError("accepted_continuous_d1_family_discovery_empty")
+    return families
+
+
+def run_family_command_stage(root, stage_id, args, items):
+    stage = STAGES[stage_id]
+    item = {
+        "stage_id": stage_id,
+        "component_id": stage["component_id"],
+        "status": "fail",
+        "validation_status": "fail",
+        "family_discovery_source": "accepted_continuous_d1_child_output",
+        "family_results": [],
+    }
+    try:
+        if args.family:
+            explicit = parse_family_or_secid(args.family)
+            families = explicit if explicit else discover_w1_families_from_accepted_d1(items)
+            item["family_discovery_source"] = "debug_family_filter"
+        else:
+            families = discover_w1_families_from_accepted_d1(items)
+        item["families"] = families
+    except Exception as exc:
+        item["failure_reason"] = "canonical_family_discovery_from_accepted_continuous_d1_failed:" + str(exc)
+        item["blocker_class"] = "canonical_family_discovery_failed"
+        return item
+    if not families:
+        item["failure_reason"] = "canonical_family_discovery_from_accepted_continuous_d1_empty"
+        item["blocker_class"] = "canonical_family_discovery_empty"
+        return item
+    family_failures = []
+    for family in families:
+        family_args = copy.copy(args)
+        family_args.family = family
+        child = run_command_stage(root, stage_id, family_args)
+        child["family_code"] = family
+        item["family_results"].append(child)
+        if child.get("status") != "pass" or child.get("validation_status") != "pass":
+            family_failures.append(family + ":" + str(child.get("failure_reason") or "failed"))
+    if family_failures:
+        item["failure_reason"] = "continuous_w1_family_execution_failed"
+        item["blocker_class"] = "continuous_w1_family_execution_failed"
+        item["family_failures"] = family_failures
+        return item
+    item["status"] = "pass"
+    item["validation_status"] = "pass"
+    item["family_count"] = len(families)
     return item
 
 
@@ -350,9 +469,7 @@ def main():
             if kind == "command":
                 item = run_command_stage(root, stage_id, args)
             elif kind == "family_command":
-                item = missing_component(stage_id)
-                item["failure_reason"] = "family-scoped W1 orchestration requires canonical family discovery from accepted continuous D1 manifest"
-                item["blocker_class"] = "canonical_family_discovery_missing"
+                item = run_family_command_stage(root, stage_id, args, items)
             elif kind == "metadata_gate":
                 item = metadata_gate(stage_id)
             elif kind == "missing_canonical_component":
