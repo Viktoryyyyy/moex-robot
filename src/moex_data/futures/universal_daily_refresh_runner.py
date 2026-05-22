@@ -163,6 +163,11 @@ def command_for_stage(root, stage_id, args):
             cmd.extend(["--till", args.till])
     if stage_id in {"all_universe_eligibility_snapshot", "raw_5m_refresh", "futoi_raw_refresh"}:
         cmd.extend(["--selection-mode", "rfud_included_universe"])
+    if stage_id == "futoi_raw_refresh":
+        if args.family:
+            cmd.extend(["--family", args.family])
+        if args.secid:
+            cmd.extend(["--secid", args.secid, "--exact-contract-only"])
     if stage_id in {"registry_refresh", "all_universe_eligibility_snapshot", "raw_5m_refresh", "futoi_raw_refresh", "raw_d1_derivation", "expiration_map", "roll_map", "continuous_5m", "continuous_d1", "continuous_w1"}:
         cmd.extend(["--data-root", str(args.data_root_resolved)])
     if stage_id in {"registry_refresh", "all_universe_eligibility_snapshot", "raw_5m_refresh", "futoi_raw_refresh", "roll_map"}:
