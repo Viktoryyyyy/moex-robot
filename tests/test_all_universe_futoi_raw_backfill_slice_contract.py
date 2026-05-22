@@ -86,3 +86,22 @@ def test_derived_futoi_eligibility_marks_only_included_available_completed_rows(
     assert 'availability_status != "available" or probe_status != "completed"' in text
     assert 'futoi_status.append("pass")' in text
     assert 'futoi_flags.append(True)' in text
+
+
+def test_futoi_scope_filters_are_real_selection_filters():
+    text = source()
+    assert "def apply_scope_filters" in text
+    assert 'parser.add_argument("--secid"' in text
+    assert 'parser.add_argument("--family"' in text
+    assert "FUTOI scope filters produced empty selected universe" in text
+    assert "selected = apply_scope_filters(selected, secid_filter, family_filter)" in text
+    assert '"scope_filters"' in text
+
+
+def test_exact_contract_mode_avoids_family_first_fallback():
+    text = source()
+    assert "def fetch_futoi_exact_contract" in text
+    assert 'parser.add_argument("--exact-contract-only", action="store_true")' in text
+    assert 'if bool(args.exact_contract_only):' in text
+    assert 'path = "/iss/analyticalproducts/futoi/securities/" + ticker + ".json"' in text
+    assert 'generic = "/iss/analyticalproducts/futoi/securities.json"' not in text
