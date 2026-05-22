@@ -1,0 +1,10 @@
+[Unit]
+Description=Run MOEX Bot universal futures daily data refresh
+
+[Timer]
+OnCalendar=*-*-* 23:45:00
+Persistent=true
+Unit=moex-futures-daily-refresh.service
+
+[Install]
+WantedBy=timers.target
