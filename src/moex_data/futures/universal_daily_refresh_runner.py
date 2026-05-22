@@ -48,6 +48,13 @@ REQUIRED_CONTRACTS = [
     "configs/datasets/futures_all_universe_eligibility_config.json",
 ]
 
+DATE_WINDOW_FORWARD_STAGE_IDS = {
+    "futoi_raw_refresh",
+    "raw_d1_derivation",
+    "continuous_5m",
+    "continuous_d1",
+}
+
 STAGES = {
     "registry_refresh": {
         "component_id": "registry_refresh_runner",
@@ -157,11 +164,15 @@ def command_for_stage(root, stage_id, args):
         cmd.extend(["--snapshot-date", args.snapshot_date])
     if stage_id not in {"continuous_eligibility_refinement", "quality_reports", "unified_manifest"}:
         cmd.extend(["--run-date", args.run_date])
-    if stage_id in {"raw_5m_refresh", "futoi_raw_refresh", "raw_d1_derivation", "continuous_5m", "continuous_d1", "continuous_w1"}:
+    if stage_id in DATE_WINDOW_FORWARD_STAGE_IDS:
         if args.from_date:
             cmd.extend(["--from", args.from_date])
         if args.till:
             cmd.extend(["--till", args.till])
+    if stage_id == "continuous_w1":
+        w1_from_date = args.from_date or args.run_date
+        w1_till = args.till or args.run_date
+        cmd.extend(["--from", w1_from_date, "--till", w1_till])
     if stage_id in {"all_universe_eligibility_snapshot", "raw_5m_refresh", "futoi_raw_refresh"}:
         cmd.extend(["--selection-mode", "rfud_included_universe"])
     if stage_id == "futoi_raw_refresh":
