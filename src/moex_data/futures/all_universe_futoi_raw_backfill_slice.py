@@ -40,6 +40,10 @@ def today_msk():
     return futoi.today_msk()
 
 
+def parse_csv(value):
+    return [x.strip() for x in str(value or "").split(",") if x.strip()]
+
+
 def dump_json(path, data):
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -175,6 +179,19 @@ def selected_universe(futoi_eligibility):
     return selected.sort_values(["family_code", "secid"]).reset_index(drop=True)
 
 
+def apply_scope_filters(selected, secid_filter, family_filter):
+    out = selected.copy()
+    secids = {x.upper() for x in secid_filter}
+    families = {x.upper() for x in family_filter}
+    if secids:
+        out = out.loc[out["secid"].astype(str).str.upper().isin(secids)].copy()
+    if families:
+        out = out.loc[out["family_code"].astype(str).str.upper().isin(families)].copy()
+    if out.empty:
+        raise RuntimeError("FUTOI scope filters produced empty selected universe")
+    return out.sort_values(["family_code", "secid"]).reset_index(drop=True)
+
+
 def selected_dates(row):
     raw = str(row.get("selected_trading_dates_json", "") or "").strip()
     if not raw:
@@ -203,6 +220,25 @@ def date_bounds(row, from_override, till_override):
     if not start or not end:
         raise RuntimeError("Cannot resolve FUTOI date range for " + str(row.get("secid")))
     return start, end
+
+
+def fetch_futoi_exact_contract(secid, date_from, date_till, timeout, apim_base_url, iss_base_url):
+    ticker = str(secid or "").strip().lower()
+    if not ticker:
+        raise RuntimeError("Exact FUTOI fetch requires secid")
+    path = "/iss/analyticalproducts/futoi/securities/" + ticker + ".json"
+    last_url = ""
+    last_error = ""
+    for base_url, use_apim in [(apim_base_url, True), (iss_base_url, False)]:
+        params = {"from": date_from, "till": date_till}
+        last_url = base.url_join(base_url, path)
+        try:
+            frame = base.fetch_paged_frame(base_url, path, params, "data", timeout, use_apim)
+            if not frame.empty:
+                return frame, last_url, "completed", "", ticker
+        except Exception as exc:
+            last_error = exc.__class__.__name__ + ": " + str(exc)[:500]
+    return pd.DataFrame(), last_url, "failed", last_error or "empty_response", ticker
 
 
 def quality_row(run_id, chunk_id, erow, date_from, date_till, raw, fetch_status, failure, partitions, calendar_status):
@@ -243,7 +279,10 @@ def run_instrument(args, root, row, run_id, chunk_id, expected_calendar, calenda
     family_code = str(row.get("family_code"))
     board = str(row.get("board", "RFUD") or "RFUD")
     date_from, date_till = date_bounds(row, str(args.from_date or ""), str(args.till or ""))
-    source_frame, source_url, fetch_status, fetch_error, source_ticker = futoi.fetch_futoi(secid, family_code, date_from, date_till, float(args.timeout), str(args.apim_base_url), str(args.iss_base_url))
+    if bool(args.exact_contract_only):
+        source_frame, source_url, fetch_status, fetch_error, source_ticker = fetch_futoi_exact_contract(secid, date_from, date_till, float(args.timeout), str(args.apim_base_url), str(args.iss_base_url))
+    else:
+        source_frame, source_url, fetch_status, fetch_error, source_ticker = futoi.fetch_futoi(secid, family_code, date_from, date_till, float(args.timeout), str(args.apim_base_url), str(args.iss_base_url))
     raw = pd.DataFrame()
     failure = ""
     partitions = []
@@ -301,6 +340,7 @@ def run_chunk(args, root, selected, run_id, chunk_id):
         "quality_summary": {str(k): int(v) for k, v in quality["quality_status"].astype(str).value_counts(dropna=False).to_dict().items()} if not quality.empty else {},
         "calendar_validation_summary": {"calendar_denominator_status": calendar_status, "calendar_from": calendar_from, "calendar_till": calendar_till, "expected_trading_days": len(expected_calendar)},
         "no_futoi_prejoin_into_ohlcv": True,
+        "exact_contract_only": bool(args.exact_contract_only),
     }
     return manifest, quality
 
@@ -329,6 +369,9 @@ def main():
     parser.add_argument("--from", dest="from_date", default="")
     parser.add_argument("--till", default="")
     parser.add_argument("--selection-mode", choices=[MODE_RFUD_INCLUDED], default=MODE_RFUD_INCLUDED)
+    parser.add_argument("--family", default="")
+    parser.add_argument("--secid", default="")
+    parser.add_argument("--exact-contract-only", action="store_true")
     parser.add_argument("--iss-base-url", default=os.getenv("MOEX_ISS_BASE_URL", base.DEFAULT_ISS_BASE_URL))
     parser.add_argument("--apim-base-url", default=os.getenv("MOEX_API_URL", base.DEFAULT_APIM_BASE_URL))
     parser.add_argument("--timeout", type=float, default=60.0)
@@ -336,22 +379,26 @@ def main():
     repo_root = Path.cwd().resolve()
     root = data_root(args)
     base.assert_files_exist(repo_root, REQUIRED_SOT_FILES)
+    secid_filter = parse_csv(args.secid)
+    family_filter = parse_csv(args.family)
     eligibility_path, eligibility = load_eligibility(root, args.snapshot_date)
     availability_path, availability = load_availability(repo_root, root, args.snapshot_date)
     futoi_eligibility = derive_futoi_eligibility(eligibility, availability)
     selected = selected_universe(futoi_eligibility)
-    run_id = "all_universe_futoi_raw_" + args.run_date + "_" + base.stable_id([args.snapshot_date, eligibility_path, availability_path, now_utc()])
-    chunk_id = "futoi_raw_" + base.stable_id([args.snapshot_date, ",".join(selected["secid"].astype(str).tolist()), args.from_date, args.till])
+    selected = apply_scope_filters(selected, secid_filter, family_filter)
+    run_id = "all_universe_futoi_raw_" + args.run_date + "_" + base.stable_id([args.snapshot_date, eligibility_path, availability_path, now_utc(), ",".join(secid_filter), ",".join(family_filter), bool(args.exact_contract_only)])
+    chunk_id = "futoi_raw_" + base.stable_id([args.snapshot_date, ",".join(selected["secid"].astype(str).tolist()), args.from_date, args.till, bool(args.exact_contract_only)])
     out = paths(root, args.snapshot_date, chunk_id)
     write_parquet(out["futoi_eligibility_snapshot"], futoi_eligibility)
     manifest, quality = run_chunk(args, root, selected, run_id, chunk_id)
     manifest["input_artifacts"] = {"eligibility_snapshot": eligibility_path, "futoi_availability_report": availability_path}
     manifest["output_artifacts"] = out
+    manifest["scope_filters"] = {"secid": secid_filter, "family": family_filter}
     write_parquet(out["quality_report"], quality)
     dump_json(out["chunk_manifest"], manifest)
     aggregate_report = aggregate(eligibility, futoi_eligibility, selected, manifest)
     dump_json(out["aggregate_report"], aggregate_report)
-    print(json.dumps({"outputs": out, "selection_mode": args.selection_mode, "selected_universe": {"secid_count": int(len(selected)), "secids": selected["secid"].astype(str).tolist(), "dataset_stage": DATASET_STAGE}, "chunk_status": aggregate_report.get("chunk_status"), "aggregate_report": aggregate_report}, ensure_ascii=False, sort_keys=True, default=str))
+    print(json.dumps({"outputs": out, "selection_mode": args.selection_mode, "scope_filters": {"secid": secid_filter, "family": family_filter}, "exact_contract_only": bool(args.exact_contract_only), "selected_universe": {"secid_count": int(len(selected)), "secids": selected["secid"].astype(str).tolist(), "dataset_stage": DATASET_STAGE}, "chunk_status": aggregate_report.get("chunk_status"), "aggregate_report": aggregate_report}, ensure_ascii=False, sort_keys=True, default=str))
     return 0 if aggregate_report.get("chunk_status") in ["succeeded", "partial_failed"] else 1
 
 
