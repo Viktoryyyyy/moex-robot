@@ -207,6 +207,33 @@ def discover_raw_paths(data_root, selected, from_date, till):
     return paths
 
 
+def selected_pairs_from_paths(paths):
+    return {(partition_value(path, "family"), partition_value(path, "secid")) for path in paths}
+
+
+def filter_selected_by_raw_paths(refined, selected, raw_paths):
+    pairs = selected_pairs_from_paths(raw_paths)
+    if not pairs:
+        raise RuntimeError("No raw 5m partitions found for raw D1 selected universe in requested window")
+    out = refined.copy()
+    sel = selected.copy()
+    sel["_raw_d1_pair"] = list(zip(sel["family_code"].astype(str), sel["secid"].astype(str)))
+    selected2 = sel.loc[sel["_raw_d1_pair"].isin(pairs)].drop(columns=["_raw_d1_pair"]).copy().sort_values(["family_code", "secid"]).reset_index(drop=True)
+    if selected2.empty:
+        raise RuntimeError("No raw D1 selected universe rows with raw partitions for requested window")
+    missing = sel.loc[~sel["_raw_d1_pair"].isin(pairs), "_raw_d1_pair"].tolist()
+    if missing:
+        out["_raw_d1_pair"] = list(zip(out["family_code"].astype(str), out["secid"].astype(str)))
+        mask = out["_raw_d1_pair"].isin(set(missing))
+        out.loc[mask, "raw_d1_eligible"] = False
+        out.loc[mask, "raw_d1_check_status"] = "raw_5m_partition_not_found_for_requested_window"
+        out.loc[mask, "deferral_reason"] = "raw_5m_partition_not_found_for_requested_window"
+        out.loc[mask, "backfill_selection_status"] = "deferred"
+        out.loc[mask, "backfill_selection_reason"] = "raw_5m_partition_not_found_for_requested_window"
+        out = out.drop(columns=["_raw_d1_pair"])
+    return out, selected2
+
+
 def read_raw(paths):
     frames = []
     for path in paths:
@@ -446,9 +473,10 @@ def main():
     eligibility = pd.read_parquet(ep)
     refined, selected = refine_eligibility_for_raw_d1(eligibility, quality, config)
     refined_path = refined_eligibility_path(data_root, snapshot_date, str(args.output_eligibility or ""))
+    raw_paths = discover_raw_paths(data_root, selected, from_date, till)
+    refined, selected = filter_selected_by_raw_paths(refined, selected, raw_paths)
     write_parquet(refined_path, refined)
 
-    raw_paths = discover_raw_paths(data_root, selected, from_date, till)
     raw = read_raw(raw_paths)
     validate_raw(raw)
     raw = normalize_raw(raw)
