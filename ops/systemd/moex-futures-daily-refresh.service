@@ -1,0 +1,12 @@
+[Unit]
+Description=MOEX Bot universal futures daily data refresh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=trader
+WorkingDirectory=/home/trader/moex_bot/moex-robot
+Environment=MOEX_DATA_ROOT=/home/trader/moex_bot/data
+Environment=PYTHONPATH=src
+ExecStart=/home/trader/moex_bot/venv/bin/python -m moex_data.futures.universal_daily_refresh_runner --data-root /home/trader/moex_bot/data
