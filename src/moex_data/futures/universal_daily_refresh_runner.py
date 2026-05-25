@@ -342,6 +342,7 @@ def discover_w1_families_from_accepted_d1(items):
 
 
 def run_family_command_stage(root, stage_id, args, items):
+    started_at = time.time()
     stage = STAGES[stage_id]
     item = {
         "stage_id": stage_id,
@@ -350,6 +351,7 @@ def run_family_command_stage(root, stage_id, args, items):
         "validation_status": "fail",
         "family_discovery_source": "accepted_continuous_d1_child_output",
         "family_results": [],
+        "duration_sec": 0.0,
     }
     try:
         if args.family:
@@ -366,10 +368,12 @@ def run_family_command_stage(root, stage_id, args, items):
     except Exception as exc:
         item["failure_reason"] = "canonical_family_discovery_from_accepted_continuous_d1_failed:" + str(exc)
         item["blocker_class"] = "canonical_family_discovery_failed"
+        item["duration_sec"] = round(time.time() - started_at, 3)
         return item
     if not families:
         item["failure_reason"] = "canonical_family_discovery_from_accepted_continuous_d1_empty"
         item["blocker_class"] = "canonical_family_discovery_empty"
+        item["duration_sec"] = round(time.time() - started_at, 3)
         return item
     family_failures = []
     for family in families:
@@ -384,10 +388,12 @@ def run_family_command_stage(root, stage_id, args, items):
         item["failure_reason"] = "continuous_w1_family_execution_failed"
         item["blocker_class"] = "continuous_w1_family_execution_failed"
         item["family_failures"] = family_failures
+        item["duration_sec"] = round(time.time() - started_at, 3)
         return item
     item["status"] = "pass"
     item["validation_status"] = "pass"
     item["family_count"] = len(families)
+    item["duration_sec"] = round(time.time() - started_at, 3)
     return item
 
 
@@ -557,6 +563,12 @@ def main():
             parsed = parse_json_line_output(item.get("stdout_tail", ""))
             registry_child_duration_summary = parsed.get("child_duration_summary") or {}
             availability_probe_timing_summary = parsed.get("availability_probe_timing_summary") or {}
+            if not availability_probe_timing_summary:
+                registry_manifest_path = args.data_root_resolved / "futures" / "runs" / "registry_refresh" / ("run_date=" + args.run_date) / "manifest.json"
+                if registry_manifest_path.is_file():
+                    registry_manifest = json.loads(registry_manifest_path.read_text(encoding="utf-8"))
+                    registry_child_duration_summary = registry_child_duration_summary or registry_manifest.get("child_duration_summary") or {}
+                    availability_probe_timing_summary = registry_manifest.get("availability_probe_timing_summary") or {}
     outputs = output_paths(data_root, args.run_date)
     manifest = {
         "schema_version": SCHEMA_UNIVERSAL_DAILY_REFRESH_MANIFEST,

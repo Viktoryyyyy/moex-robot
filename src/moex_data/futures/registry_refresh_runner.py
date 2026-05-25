@@ -86,7 +86,7 @@ def run_child(root, component_id, command, expected):
     started_at = time.time()
     proc = subprocess.run(command, cwd=str(root), text=True, capture_output=True)
     completed_at = time.time()
-    item = {"component_id": component_id, "command": command, "returncode": int(proc.returncode), "stdout_tail": proc.stdout[-4000:], "stderr_tail": proc.stderr[-4000:], "duration_sec": round(completed_at - started_at, 3), "status": "fail", "validation_status": "not_validated"}
+    item = {"component_id": component_id, "command": command, "returncode": int(proc.returncode), "stdout_tail": proc.stdout[-4000:], "stderr_tail": proc.stderr[-4000:], "duration_sec": round(completed_at - started_at, 3), "json_line_outputs": parse_json_line_output(proc.stdout), "status": "fail", "validation_status": "not_validated"}
     if proc.returncode != 0:
         item["failure_reason"] = "component_returncode_nonzero"
         return item
@@ -269,7 +269,7 @@ def main():
     child_duration_summary = {str(x.get("component_id")): x.get("duration_sec") for x in child_items if x.get("component_id")}
     availability_probe_timing_summary = {}
     if child_items:
-        parsed_child_stdout = parse_json_line_output(child_items[0].get("stdout_tail", ""))
+        parsed_child_stdout = child_items[0].get("json_line_outputs") or parse_json_line_output(child_items[0].get("stdout_tail", ""))
         availability_probe_timing_summary = parsed_child_stdout.get("availability_probe_timing_summary") or {}
     output_summaries = {}
     if final_status == "pass":
