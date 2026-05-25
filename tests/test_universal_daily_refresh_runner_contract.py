@@ -88,7 +88,7 @@ def test_manifest_records_planned_stage_order_and_no_real_execution_for_prefligh
 def test_utc_timestamp_is_timezone_aware():
     text = runner_source()
     assert "datetime.utcnow()" not in text
-    assert "from datetime import datetime, timezone" in text
+    assert "from datetime import datetime, timedelta, timezone" in text
     assert "datetime.now(timezone.utc)" in text
 
 
@@ -135,3 +135,11 @@ def test_manifest_contract_declares_universal_manifest_and_stage_order():
     for stage in EXPECTED_STAGE_ORDER:
         assert stage in text
     assert "Slice 1 whitelist semantics are forbidden as canonical daily refresh scope" in text
+
+
+def test_continuous_w1_uses_week_window_and_filters_to_existing_d1_partitions():
+    text = runner_source()
+    assert "def week_start_for_date" in text
+    assert "w1_from_date, w1_till = w1_date_window(args)" in text
+    assert "filter_w1_families_by_existing_d1_partitions" in text
+    assert "families_skipped_no_d1_source_partition" in text
