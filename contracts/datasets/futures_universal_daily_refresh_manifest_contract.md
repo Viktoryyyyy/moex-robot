@@ -27,8 +27,12 @@ required_fields:
 - refresh_till
 - started_ts
 - completed_ts
+- total_duration_sec
 - canonical_stage_order
 - executed_stage_order
+- stage_duration_summary
+- registry_child_duration_summary
+- availability_probe_timing_summary
 - debug_controls
 - selection_model
 - slice1_whitelist_semantics
@@ -37,10 +41,18 @@ required_fields:
 - adjustment_policy_id
 - adjustment_factor
 - child_component_status
+- child_component_status[].duration_sec
 - artifact_validation_status
 - universal_daily_refresh_result_verdict
 - blockers
 - output_artifacts
+
+observability_fields:
+- total_duration_sec: total wall-clock runtime for the universal refresh runner in seconds.
+- child_component_status[].duration_sec: wall-clock runtime for each executed top-level stage in seconds.
+- stage_duration_summary: map of stage_id to duration_sec for every executed top-level stage.
+- registry_child_duration_summary: registry_refresh child component duration map forwarded from the registry refresh manifest/stdout.
+- availability_probe_timing_summary: per-endpoint availability probe timing forwarded from registry evidence production; each endpoint summary must include selected_instrument_count, probe_count, max_workers, duration_sec, row_count, and row_count_matches_selected_instruments.
 
 canonical_stage_order:
 1. registry_refresh
@@ -72,6 +84,7 @@ allowed_debug_controls:
 - --secid <secid>
 - --from YYYY-MM-DD
 - --till YYYY-MM-DD
+- --availability-max-workers N
 
 debug_control_policy:
 - debug_controls.semantics_effect must equal orchestration_only_no_universe_or_eligibility_redefinition.
@@ -82,12 +95,18 @@ debug_control_policy:
 - Debug controls must not change adjustment policy.
 - Debug controls must not change quality rules.
 - Debug controls must not change included/deferred/excluded rules.
+- --availability-max-workers only controls bounded probe concurrency in registry evidence availability probing and must not change endpoint candidates, selected instruments, row-level statuses, or fail-closed behavior.
 
 validation_rules:
 - schema_version must equal futures_universal_daily_refresh_manifest.v1.
 - canonical_stage_order must exactly match this contract.
 - executed_stage_order must be a prefix of canonical_stage_order unless --stage is used.
 - --stage execution must still report the full canonical_stage_order and debug_controls.stage.
+- total_duration_sec must be present and non-negative.
+- every executed child_component_status row must include duration_sec.
+- stage_duration_summary must contain every executed stage_id.
+- registry_child_duration_summary must be present after registry_refresh execution.
+- availability_probe_timing_summary must be present after registry_refresh execution and must include endpoint-level selected_instrument_count, probe_count, max_workers, duration_sec, row_count, and row_count_matches_selected_instruments.
 - roll_policy_id must equal expiration_minus_1_trading_session_v1.
 - adjustment_policy_id must equal unadjusted_v1.
 - adjustment_factor must equal 1.0.
