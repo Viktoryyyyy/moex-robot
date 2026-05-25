@@ -9,15 +9,12 @@ __pycache__/
 
 venv/
 .venv/
-
 .env
 .env.*
 *.pem
 *.key
-
 logs/
 state/
-
 data/raw/
 data/interim/
 data/archive/
@@ -26,8 +23,6 @@ data/fx/*.csv
 data/fo/*.csv
 data/*.csv
 *.csv
-
-
 # local scratch
 dirlist.txt
 filelist.txt
@@ -35,11 +30,8 @@ project_tree.txt
 clean_moex_bot.sh
 move_code.sh
 scripts/run_ema_5_12_tmux.sh
-
-# local scratch
-dirlist.txt
-filelist.txt
-project_tree.txt
-clean_moex_bot.sh
-move_code.sh
-scripts/run_ema_5_12_tmux.sh
+# server-local applied/data artifacts
+data/control_plane/
+data/research/
+data/runtime/
+.tmp_phase8_third_proof_artifacts/
