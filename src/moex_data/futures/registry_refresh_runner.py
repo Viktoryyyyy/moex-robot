@@ -85,7 +85,8 @@ def output_paths(root, data_root, snapshot_date, run_date):
 def run_child(root, component_id, command, expected):
     started_at = time.time()
     proc = subprocess.run(command, cwd=str(root), text=True, capture_output=True)
-    item = {"component_id": component_id, "command": command, "returncode": int(proc.returncode), "stdout_tail": proc.stdout[-4000:], "stderr_tail": proc.stderr[-4000:], "status": "fail", "validation_status": "not_validated"}
+    completed_at = time.time()
+    item = {"component_id": component_id, "command": command, "returncode": int(proc.returncode), "stdout_tail": proc.stdout[-4000:], "stderr_tail": proc.stderr[-4000:], "duration_sec": round(completed_at - started_at, 3), "status": "fail", "validation_status": "not_validated"}
     if proc.returncode != 0:
         item["failure_reason"] = "component_returncode_nonzero"
         return item
@@ -109,6 +110,23 @@ def run_child(root, component_id, command, expected):
     item["validation_status"] = "pass"
     item["expected_outputs"] = expected
     return item
+
+
+def parse_json_line_output(text):
+    parsed = {}
+    for raw in str(text or "").splitlines():
+        if ":" not in raw:
+            continue
+        key, value = raw.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key or not value:
+            continue
+        try:
+            parsed[key] = json.loads(value)
+        except Exception:
+            continue
+    return parsed
 
 
 def basic_rows_summary(path):
@@ -222,6 +240,7 @@ def main():
     parser.add_argument("--iss-base-url", default=os.getenv("MOEX_ISS_BASE_URL", base.DEFAULT_ISS_BASE_URL))
     parser.add_argument("--apim-base-url", default=os.getenv("MOEX_API_URL", base.DEFAULT_APIM_BASE_URL))
     parser.add_argument("--timeout", type=float, default=60.0)
+    parser.add_argument("--availability-max-workers", type=int, default=int(os.getenv("MOEX_AVAILABILITY_MAX_WORKERS", "4")))
     parser.add_argument("--whitelist", default=",".join(DEFAULT_WHITELIST))
     parser.add_argument("--excluded", default=",".join(DEFAULT_EXCLUDED))
     args = parser.parse_args()
@@ -238,25 +257,34 @@ def main():
         common += ["--from", args.from_date]
     if args.till:
         common += ["--till", args.till]
+    run_started_epoch = time.time()
     child_items = []
-    child_items.append(run_child(root, "registry_evidence_artifacts_producer", [sys.executable, str(root / "src/moex_data/futures/registry_evidence_artifacts_producer.py")] + common, {k: outputs[k] for k in ["registry_snapshot", "normalized_registry", "family_mapping", "algopack_fo_tradestats", "moex_futoi", "algopack_fo_obstats", "algopack_fo_hi2"]}))
+    evidence_cmd = [sys.executable, str(root / "src/moex_data/futures/registry_evidence_artifacts_producer.py")] + common + ["--availability-max-workers", str(args.availability_max_workers)]
+    child_items.append(run_child(root, "registry_evidence_artifacts_producer", evidence_cmd, {k: outputs[k] for k in ["registry_snapshot", "normalized_registry", "family_mapping", "algopack_fo_tradestats", "moex_futoi", "algopack_fo_obstats", "algopack_fo_hi2"]}))
     if child_items[-1].get("status") == "pass":
         screen_cmd = [sys.executable, str(root / "src/moex_data/futures/liquidity_history_metrics_probe_apim_calendar.py")] + common + ["--full-history-proven"]
         child_items.append(run_child(root, "liquidity_history_metrics_probe_apim_calendar", screen_cmd, {"liquidity_screen": outputs["liquidity_screen"], "history_depth_screen": outputs["history_depth_screen"]}))
     final_status = "pass" if len(child_items) == 2 and all(x.get("status") == "pass" for x in child_items) else "fail"
     blockers = [str(x.get("component_id")) + ":" + str(x.get("failure_reason")) for x in child_items if x.get("status") != "pass"]
+    child_duration_summary = {str(x.get("component_id")): x.get("duration_sec") for x in child_items if x.get("component_id")}
+    availability_probe_timing_summary = {}
+    if child_items:
+        parsed_child_stdout = parse_json_line_output(child_items[0].get("stdout_tail", ""))
+        availability_probe_timing_summary = parsed_child_stdout.get("availability_probe_timing_summary") or {}
     output_summaries = {}
     if final_status == "pass":
         output_summaries, validation_blockers = validate_outputs(outputs, whitelist)
         blockers += validation_blockers
         if validation_blockers:
             final_status = "fail"
-    manifest = {"schema_version": SCHEMA_MANIFEST, "run_id": run_id, "run_date": args.run_date, "snapshot_date": args.snapshot_date, "refresh_from": args.from_date or None, "refresh_till": args.till or None, "started_ts": started_ts, "completed_ts": utc_now_iso(), "runner_whitelist_applied": whitelist, "excluded_instruments_confirmed": excluded, "component_execution_order": ["registry_evidence_artifacts_producer", "liquidity_history_metrics_probe_apim_calendar"], "child_component_status": child_items, "child_output_references": {x["component_id"]: {"status": x.get("status"), "validation_status": x.get("validation_status"), "expected_outputs": x.get("expected_outputs")} for x in child_items}, "output_artifacts": outputs, "output_summaries": output_summaries, "artifact_validation_status": "pass" if final_status == "pass" else "fail", "registry_refresh_result_verdict": final_status, "blockers": blockers}
+    manifest = {"schema_version": SCHEMA_MANIFEST, "run_id": run_id, "run_date": args.run_date, "snapshot_date": args.snapshot_date, "refresh_from": args.from_date or None, "refresh_till": args.till or None, "started_ts": started_ts, "completed_ts": utc_now_iso(), "total_duration_sec": round(time.time() - run_started_epoch, 3), "runner_whitelist_applied": whitelist, "excluded_instruments_confirmed": excluded, "availability_max_workers": int(args.availability_max_workers), "component_execution_order": ["registry_evidence_artifacts_producer", "liquidity_history_metrics_probe_apim_calendar"], "child_component_status": child_items, "child_duration_summary": child_duration_summary, "availability_probe_timing_summary": availability_probe_timing_summary, "child_output_references": {x["component_id"]: {"status": x.get("status"), "validation_status": x.get("validation_status"), "expected_outputs": x.get("expected_outputs")} for x in child_items}, "output_artifacts": outputs, "output_summaries": output_summaries, "artifact_validation_status": "pass" if final_status == "pass" else "fail", "registry_refresh_result_verdict": final_status, "blockers": blockers}
     path = Path(outputs["manifest"])
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
     print_json_line("registry_refresh_manifest_path", str(path))
     print_json_line("child_component_status", manifest["child_output_references"])
+    print_json_line("child_duration_summary", child_duration_summary)
+    print_json_line("availability_probe_timing_summary", availability_probe_timing_summary)
     print_json_line("artifact_validation_status", manifest["artifact_validation_status"])
     print_json_line("registry_refresh_result_verdict", final_status)
     if blockers:

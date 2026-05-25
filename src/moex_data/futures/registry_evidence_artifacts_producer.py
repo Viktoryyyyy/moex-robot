@@ -156,6 +156,7 @@ def main() -> int:
     parser.add_argument("--iss-base-url", default=os.getenv("MOEX_ISS_BASE_URL", availability.DEFAULT_ISS_BASE_URL))
     parser.add_argument("--apim-base-url", default=os.getenv("MOEX_API_URL", availability.DEFAULT_APIM_BASE_URL))
     parser.add_argument("--timeout", type=float, default=35.0)
+    parser.add_argument("--availability-max-workers", type=int, default=int(os.getenv("MOEX_AVAILABILITY_MAX_WORKERS", "4")))
     args = parser.parse_args()
 
     root = Path.cwd().resolve()
@@ -179,6 +180,7 @@ def main() -> int:
 
     report_paths: Dict[str, str] = {}
     report_summaries: Dict[str, Any] = {}
+    availability_probe_timing_summary: Dict[str, Any] = {}
     for source in source_items:
         if not isinstance(source, dict):
             continue
@@ -199,11 +201,13 @@ def main() -> int:
             float(args.timeout),
             str(args.apim_base_url),
             str(args.iss_base_url),
+            int(args.availability_max_workers),
         )
         out_path = availability.contract_output_path(data_root, contract_rel, snapshot_date)
         write_parquet(report, out_path)
         report_paths[endpoint_id] = str(out_path)
         report_summaries[endpoint_id] = status_summary(report, "availability_status")
+        availability_probe_timing_summary[endpoint_id] = report.attrs.get("timing_summary", {})
 
     output_paths = {
         "registry_snapshot": str(availability.contract_output_path(data_root, "contracts/datasets/futures_registry_snapshot_contract.md", snapshot_date)),
@@ -216,6 +220,7 @@ def main() -> int:
     availability.print_json_line("registry_snapshot_summary", {"rows": int(len(registry)), "unique_secid": int(registry["secid"].nunique()), "snapshot_date": snapshot_date})
     availability.print_json_line("normalized_registry_summary", {"rows": int(len(normalized)), "unique_family_code": int(normalized["family_code"].nunique()), "selected_rfud_instruments": int(len(instruments))})
     availability.print_json_line("family_mapping_summary", status_summary(family_mapping, "mapping_status"))
+    availability.print_json_line("availability_probe_timing_summary", availability_probe_timing_summary)
     for endpoint_id in ["algopack_fo_tradestats", "moex_futoi", "algopack_fo_obstats", "algopack_fo_hi2"]:
         availability.print_json_line(endpoint_id + "_availability_summary", report_summaries.get(endpoint_id, {"rows": 0, "status_counts": {}}))
     return 0

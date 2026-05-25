@@ -188,6 +188,8 @@ def command_for_stage(root, stage_id, args):
         cmd.extend(["--timeout", str(args.timeout)])
     if stage_id in {"registry_refresh", "all_universe_eligibility_snapshot", "raw_5m_refresh", "futoi_raw_refresh", "roll_map"}:
         cmd.extend(["--iss-base-url", args.iss_base_url])
+    if stage_id == "registry_refresh":
+        cmd.extend(["--availability-max-workers", str(args.availability_max_workers)])
     if stage_id in {"raw_5m_refresh", "futoi_raw_refresh"}:
         cmd.extend(["--apim-base-url", args.apim_base_url])
     if stage_id in {"continuous_5m", "continuous_d1", "continuous_w1"}:
@@ -210,13 +212,15 @@ def run_command_stage(root, stage_id, args):
     cmd = command_for_stage(root, stage_id, args)
     started_at = time.time()
     proc = subprocess.run(cmd, cwd=str(root), text=True, capture_output=True)
+    completed_at = time.time()
     item.update({
         "command": cmd,
         "returncode": int(proc.returncode),
         "stdout_tail": proc.stdout[-4000:],
         "stderr_tail": proc.stderr[-4000:],
         "started_epoch": started_at,
-        "completed_epoch": time.time(),
+        "completed_epoch": completed_at,
+        "duration_sec": round(completed_at - started_at, 3),
     })
     if proc.returncode != 0:
         item["failure_reason"] = "component_returncode_nonzero"
@@ -394,6 +398,7 @@ def metadata_gate(stage_id):
         "component_id": stage["component_id"],
         "status": "pass",
         "validation_status": "pass",
+        "duration_sec": 0.0,
         "gate_note": "metadata gate only; no universe semantics are changed here",
     }
 
@@ -405,6 +410,7 @@ def missing_component(stage_id):
         "component_id": stage["component_id"],
         "status": "fail",
         "validation_status": "fail",
+        "duration_sec": 0.0,
         "failure_reason": stage.get("blocker") or "missing_canonical_component",
         "blocker_class": "canonical_component_missing",
     }
@@ -467,6 +473,7 @@ def main():
     parser.add_argument("--iss-base-url", default=os.getenv("MOEX_ISS_BASE_URL", base.DEFAULT_ISS_BASE_URL))
     parser.add_argument("--apim-base-url", default=os.getenv("MOEX_API_URL", base.DEFAULT_APIM_BASE_URL))
     parser.add_argument("--timeout", type=float, default=60.0)
+    parser.add_argument("--availability-max-workers", type=int, default=int(os.getenv("MOEX_AVAILABILITY_MAX_WORKERS", "4")))
     parser.add_argument("--reuse-prerequisites", action="store_true")
     parser.add_argument("--stop-after", default="")
     parser.add_argument("--stage", default="")
@@ -491,6 +498,7 @@ def main():
         "secid": secid_filter,
         "from": args.from_date or None,
         "till": args.till or None,
+        "availability_max_workers": int(args.availability_max_workers),
         "semantics_effect": "orchestration_only_no_universe_or_eligibility_redefinition",
     }
 
@@ -507,6 +515,7 @@ def main():
     ])
 
     planned_stage_order = stages_to_run(args)
+    run_started_epoch = time.time()
     items = []
     blockers = []
     final_status = "pass"
@@ -540,6 +549,14 @@ def main():
                 blockers.append(blocker_for_item(item))
                 break
 
+    stage_duration_summary = {str(x.get("stage_id")): x.get("duration_sec") for x in items if x.get("stage_id")}
+    registry_child_duration_summary = {}
+    availability_probe_timing_summary = {}
+    for item in items:
+        if item.get("stage_id") == "registry_refresh":
+            parsed = parse_json_line_output(item.get("stdout_tail", ""))
+            registry_child_duration_summary = parsed.get("child_duration_summary") or {}
+            availability_probe_timing_summary = parsed.get("availability_probe_timing_summary") or {}
     outputs = output_paths(data_root, args.run_date)
     manifest = {
         "schema_version": SCHEMA_UNIVERSAL_DAILY_REFRESH_MANIFEST,
@@ -550,9 +567,13 @@ def main():
         "refresh_till": args.till or None,
         "started_ts": started_ts,
         "completed_ts": utc_now_iso(),
+        "total_duration_sec": round(time.time() - run_started_epoch, 3),
         "canonical_stage_order": CANONICAL_STAGE_IDS,
         "planned_stage_order": planned_stage_order,
         "executed_stage_order": executed_stage_ids(items),
+        "stage_duration_summary": stage_duration_summary,
+        "registry_child_duration_summary": registry_child_duration_summary,
+        "availability_probe_timing_summary": availability_probe_timing_summary,
         "debug_controls": debug_scope,
         "selection_model": "eligibility_snapshot_driven",
         "futoi_selection_model": "eligibility_snapshot_driven_futoi_eligible_true",
