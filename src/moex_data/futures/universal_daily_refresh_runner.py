@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path.cwd() / "src"))
@@ -170,8 +170,7 @@ def command_for_stage(root, stage_id, args):
         if args.till:
             cmd.extend(["--till", args.till])
     if stage_id == "continuous_w1":
-        w1_from_date = args.from_date or args.run_date
-        w1_till = args.till or args.run_date
+        w1_from_date, w1_till = w1_date_window(args)
         cmd.extend(["--from", w1_from_date, "--till", w1_till])
     if stage_id in {"all_universe_eligibility_snapshot", "raw_5m_refresh", "futoi_raw_refresh"}:
         cmd.extend(["--selection-mode", "rfud_included_universe"])
@@ -267,6 +266,47 @@ def ordered_unique(values):
     return out
 
 
+def week_start_for_date(value):
+    day = datetime.strptime(str(value), "%Y-%m-%d").date()
+    return (day - timedelta(days=day.weekday())).isoformat()
+
+
+def date_values(from_date, till):
+    start = datetime.strptime(str(from_date), "%Y-%m-%d").date()
+    end = datetime.strptime(str(till), "%Y-%m-%d").date()
+    if start > end:
+        raise RuntimeError("W1 --from is after --till")
+    out = []
+    day = start
+    while day <= end:
+        out.append(day.isoformat())
+        day = day + timedelta(days=1)
+    return out
+
+
+def w1_date_window(args):
+    return args.from_date or week_start_for_date(args.run_date), args.till or args.run_date
+
+
+def continuous_d1_partition_path(data_root, family, trade_date):
+    return Path(data_root) / "futures" / "continuous_d1" / ("roll_policy=" + ROLL_POLICY_ID) / ("adjustment_policy=" + ADJUSTMENT_POLICY_ID) / ("family=" + str(family)) / ("trade_date=" + str(trade_date)) / "part.parquet"
+
+
+def filter_w1_families_by_existing_d1_partitions(families, args):
+    from_date, till = w1_date_window(args)
+    dates = date_values(from_date, till)
+    kept = []
+    skipped = []
+    for family in families:
+        if any(continuous_d1_partition_path(args.data_root_resolved, family, trade_date).is_file() for trade_date in dates):
+            kept.append(family)
+        else:
+            skipped.append(family)
+    if not kept:
+        raise RuntimeError("accepted_continuous_d1_family_discovery_no_source_partitions_for_w1")
+    return kept, skipped
+
+
 def accepted_continuous_d1_item(items):
     for item in reversed(items):
         if item.get("stage_id") == "continuous_d1":
@@ -314,6 +354,10 @@ def run_family_command_stage(root, stage_id, args, items):
             item["family_discovery_source"] = "debug_family_filter"
         else:
             families = discover_w1_families_from_accepted_d1(items)
+        if stage_id == "continuous_w1":
+            item["families_before_d1_partition_filter"] = families
+            families, skipped = filter_w1_families_by_existing_d1_partitions(families, args)
+            item["families_skipped_no_d1_source_partition"] = skipped
         item["families"] = families
     except Exception as exc:
         item["failure_reason"] = "canonical_family_discovery_from_accepted_continuous_d1_failed:" + str(exc)
