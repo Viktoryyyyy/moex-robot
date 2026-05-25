@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 import os
 import re
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -495,7 +497,9 @@ def probe_endpoint_for_instrument(
     error_code = ""
     error_message = ""
     candidates = endpoint_probe_candidates(endpoint_id, secid, family, config_path)
+    probe_count = 0
     for path, extra_params, prefer_apim in candidates:
+        probe_count += 1
         params = dict(base_params)
         params.update(extra_params)
         base_url = apim_base_url if prefer_apim else iss_base_url
@@ -527,27 +531,27 @@ def probe_endpoint_for_instrument(
         "observed_max_ts": stats["max_ts"],
         "error_code": error_code or None,
         "error_message": error_message or None,
+        "probe_count": probe_count,
     }
 
 
-def build_availability_report(
+def availability_record_from_probe(
     endpoint_id: str,
     config_path: str,
-    instruments: pd.DataFrame,
+    row: pd.Series,
     snapshot_date: str,
     probe_from: str,
     probe_till: str,
     timeout: float,
     apim_base_url: str,
     iss_base_url: str,
-) -> pd.DataFrame:
-    rows = []
-    for _, row in instruments.iterrows():
-        secid = str(row.get("secid", "")).strip()
-        family = str(row.get("family_code", "")).strip()
-        board = str(row.get("board", "rfud") or "rfud").strip()
-        result = probe_endpoint_for_instrument(endpoint_id, config_path, secid, family, probe_from, probe_till, timeout, apim_base_url, iss_base_url)
-        rows.append({
+) -> Dict[str, Any]:
+    secid = str(row.get("secid", "")).strip()
+    family = str(row.get("family_code", "")).strip()
+    board = str(row.get("board", "rfud") or "rfud").strip()
+    result = probe_endpoint_for_instrument(endpoint_id, config_path, secid, family, probe_from, probe_till, timeout, apim_base_url, iss_base_url)
+    return {
+        "row": {
             "availability_report_id": stable_id([endpoint_id, snapshot_date, board, secid, probe_from, probe_till]),
             "snapshot_date": snapshot_date,
             "board": board,
@@ -569,8 +573,72 @@ def build_availability_report(
             "review_notes": None,
             "probe_status": "completed",
             "validation_status": "not_validated",
-        })
-    return pd.DataFrame(rows)
+        },
+        "probe_count": int(result.get("probe_count") or 0),
+    }
+
+
+def normalize_max_workers(value: Any) -> int:
+    try:
+        workers = int(value)
+    except Exception:
+        workers = 1
+    if workers < 1:
+        workers = 1
+    if workers > 16:
+        workers = 16
+    return workers
+
+
+def build_availability_report(
+    endpoint_id: str,
+    config_path: str,
+    instruments: pd.DataFrame,
+    snapshot_date: str,
+    probe_from: str,
+    probe_till: str,
+    timeout: float,
+    apim_base_url: str,
+    iss_base_url: str,
+    max_workers: int = 1,
+) -> pd.DataFrame:
+    started_at = time.time()
+    workers = normalize_max_workers(max_workers)
+    indexed_rows = list(instruments.iterrows())
+    records_by_position: Dict[int, Dict[str, Any]] = {}
+    if workers == 1 or len(indexed_rows) <= 1:
+        for position, (_, row) in enumerate(indexed_rows):
+            records_by_position[position] = availability_record_from_probe(endpoint_id, config_path, row, snapshot_date, probe_from, probe_till, timeout, apim_base_url, iss_base_url)
+    else:
+        effective_workers = min(workers, len(indexed_rows))
+        with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+            future_to_position = {}
+            for position, (_, row) in enumerate(indexed_rows):
+                future = executor.submit(availability_record_from_probe, endpoint_id, config_path, row, snapshot_date, probe_from, probe_till, timeout, apim_base_url, iss_base_url)
+                future_to_position[future] = position
+            for future in as_completed(future_to_position):
+                position = future_to_position[future]
+                records_by_position[position] = future.result()
+    missing_positions = [position for position in range(len(indexed_rows)) if position not in records_by_position]
+    if missing_positions:
+        raise RuntimeError("availability_probe_missing_rows:" + ",".join([str(x) for x in missing_positions]))
+    rows = [records_by_position[position]["row"] for position in range(len(indexed_rows))]
+    probe_count = sum([int(records_by_position[position].get("probe_count") or 0) for position in range(len(indexed_rows))])
+    frame = pd.DataFrame(rows)
+    if not frame.empty:
+        frame = frame.sort_values(["family_code", "secid", "board"]).reset_index(drop=True)
+    frame.attrs["timing_summary"] = {
+        "endpoint_id": endpoint_id,
+        "selected_instrument_count": int(len(indexed_rows)),
+        "probe_count": int(probe_count),
+        "max_workers": int(workers),
+        "duration_sec": round(time.time() - started_at, 3),
+        "row_count": int(len(frame)),
+        "row_count_matches_selected_instruments": bool(len(frame) == len(indexed_rows)),
+    }
+    if len(frame) != len(indexed_rows):
+        raise RuntimeError("availability_probe_row_count_mismatch:" + endpoint_id)
+    return frame
 
 
 def contract_output_path(data_root: Path, relative_contract: str, snapshot_date: str, universe_scope: str = "slice1") -> Path:
@@ -631,6 +699,7 @@ def main() -> int:
     parser.add_argument("--iss-base-url", default=os.getenv("MOEX_ISS_BASE_URL", DEFAULT_ISS_BASE_URL))
     parser.add_argument("--apim-base-url", default=os.getenv("MOEX_API_URL", DEFAULT_APIM_BASE_URL))
     parser.add_argument("--timeout", type=float, default=35.0)
+    parser.add_argument("--availability-max-workers", type=int, default=int(os.getenv("MOEX_AVAILABILITY_MAX_WORKERS", "4")))
     parser.add_argument("--universe-scope", choices=["slice1", "rfud_candidates"], default="slice1")
     args = parser.parse_args()
 
@@ -677,6 +746,7 @@ def main() -> int:
 
     report_paths: Dict[str, str] = {}
     report_summaries: Dict[str, Any] = {}
+    availability_probe_timing_summary: Dict[str, Any] = {}
     for source in source_items:
         if not isinstance(source, dict):
             continue
@@ -697,11 +767,13 @@ def main() -> int:
             float(args.timeout),
             str(args.apim_base_url),
             str(args.iss_base_url),
+            int(args.availability_max_workers),
         )
         out_path = contract_output_path(data_root, contract_rel, snapshot_date, str(args.universe_scope))
         write_parquet(report, out_path)
         report_paths[endpoint_id] = str(out_path)
         report_summaries[endpoint_id] = summarize_status(report)
+        availability_probe_timing_summary[endpoint_id] = report.attrs.get("timing_summary", {})
 
     output_paths = {
         "registry_snapshot": str(registry_path),
@@ -727,6 +799,7 @@ def main() -> int:
     print_json_line("output_artifacts_created", output_paths)
     print_json_line("registry_snapshot_summary", registry_summary)
     print_json_line("normalized_registry_summary", normalized_summary)
+    print_json_line("availability_probe_timing_summary", availability_probe_timing_summary)
     for endpoint_id in ["algopack_fo_tradestats", "moex_futoi", "algopack_fo_obstats", "algopack_fo_hi2"]:
         print_json_line(endpoint_id + "_availability_summary", report_summaries.get(endpoint_id, {"rows": 0, "status_counts": {}}))
     return 0
