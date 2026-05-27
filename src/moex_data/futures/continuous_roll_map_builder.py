@@ -129,7 +129,7 @@ def parse_date_str(value: str) -> datetime.date:
     return datetime.strptime(value, "%Y-%m-%d").date()
 
 
-def calendar_window(expiration_map: pd.DataFrame, snapshot_date: str) -> Dict[str, str]:
+def calendar_window(expiration_map: pd.DataFrame, snapshot_date: str, data_root: Optional[Path] = None, whitelist: Optional[List[str]] = None, excluded: Optional[List[str]] = None) -> Dict[str, str]:
     dates: List[str] = []
     for column in ["first_trade_date", "last_trade_date", "expiration_date", "roll_anchor_date"]:
         if column in expiration_map.columns:
@@ -137,6 +137,22 @@ def calendar_window(expiration_map: pd.DataFrame, snapshot_date: str) -> Dict[st
                 date_value = clean_date(value)
                 if date_value:
                     dates.append(date_value)
+    if data_root is not None and "secid" in expiration_map.columns:
+        excluded_upper = {str(x).upper() for x in (excluded or [])}
+        allowed_upper = {str(x).upper() for x in (whitelist or [])}
+        scoped = expiration_map.copy()
+        if allowed_upper:
+            scoped = scoped.loc[scoped["secid"].astype(str).str.upper().isin(allowed_upper)].copy()
+        for _, row in scoped.iterrows():
+            secid = str(clean_text(row.get("secid")) or "")
+            family_code = str(clean_text(row.get("family_code")) or "")
+            if not secid or not family_code:
+                continue
+            if secid.upper() in excluded_upper or secid.upper() in PERPETUAL_IDENTITIES:
+                continue
+            raw_sessions = raw_partition_sessions(data_root, family_code, secid, None)
+            if raw_sessions:
+                dates.append(raw_sessions[0])
     dates.append(snapshot_date)
     start = min(dates)
     end = max(dates)
@@ -145,8 +161,8 @@ def calendar_window(expiration_map: pd.DataFrame, snapshot_date: str) -> Dict[st
     return {"from": start_dt.isoformat(), "till": end_dt.isoformat()}
 
 
-def fetch_canonical_sessions(expiration_map: pd.DataFrame, snapshot_date: str, timeout: float, iss_base_url: str) -> List[str]:
-    window = calendar_window(expiration_map, snapshot_date)
+def fetch_canonical_sessions(expiration_map: pd.DataFrame, snapshot_date: str, timeout: float, iss_base_url: str, data_root: Optional[Path] = None, whitelist: Optional[List[str]] = None, excluded: Optional[List[str]] = None) -> List[str]:
+    window = calendar_window(expiration_map, snapshot_date, data_root, whitelist, excluded)
     sessions, status = apim_calendar.fetch_futures_calendar(window["from"], window["till"], timeout, iss_base_url)
     if sessions is None or status != CALENDAR_STATUS:
         raise RuntimeError("Canonical futures calendar cannot be resolved: " + str(status))
@@ -241,6 +257,56 @@ def generic_ordinary_scope_rows(scoped: pd.DataFrame) -> pd.DataFrame:
     return out.sort_values(["family_code", "_anchor_sort", "secid"]).reset_index(drop=True)
 
 
+def raw_5m_partition_root(data_root: Path) -> Path:
+    return data_root / "futures" / "raw_5m"
+
+
+def partition_value(path: Path, key: str) -> str:
+    prefix = key + "="
+    for part in Path(path).parts:
+        if part.startswith(prefix):
+            return part[len(prefix):]
+    return ""
+
+
+def raw_partition_sessions(data_root: Path, family_code: str, secid: str, valid_through: Optional[str]) -> List[str]:
+    root = raw_5m_partition_root(data_root)
+    if not root.exists():
+        return []
+    family = str(family_code or "").strip()
+    source = str(secid or "").strip()
+    sessions: List[str] = []
+    pattern = "trade_date=*/family=" + family + "/secid=" + source + "/part.parquet"
+    for path in sorted(root.glob(pattern)):
+        trade_date = clean_date(partition_value(path, "trade_date"))
+        if not trade_date:
+            continue
+        if valid_through and trade_date > valid_through:
+            continue
+        sessions.append(trade_date)
+    return sorted(set(sessions))
+
+
+def accepted_backfill_start_from_row(row: pd.Series) -> Optional[str]:
+    for column in ["accepted_raw_coverage_from", "accepted_backfill_from", "raw_5m_first_available_date", "first_available_date", "first_trade_date"]:
+        value = clean_date(row.get(column))
+        if value:
+            return value
+    return None
+
+
+def first_ordinary_valid_from(row: pd.Series, data_root: Path, ordered_sessions: List[str], valid_through: Optional[str]) -> str:
+    secid = str(clean_text(row.get("secid")) or "")
+    family_code = str(clean_text(row.get("family_code")) or "")
+    raw_sessions = raw_partition_sessions(data_root, family_code, secid, valid_through)
+    if raw_sessions:
+        return first_session_on_or_after(ordered_sessions, raw_sessions[0])
+    backfill_start = accepted_backfill_start_from_row(row)
+    if backfill_start:
+        return first_session_on_or_after(ordered_sessions, backfill_start)
+    raise RuntimeError("first_ordinary_valid_from_unresolved_for_" + secid)
+
+
 def build_perpetual_row(row: pd.Series, snapshot_date: str, run_id: str) -> Dict[str, Any]:
     secid = str(clean_text(row.get("secid")) or "USDRUBF")
     board = str(clean_text(row.get("board")) or "rfud")
@@ -278,7 +344,7 @@ def build_perpetual_row(row: pd.Series, snapshot_date: str, run_id: str) -> Dict
     }
 
 
-def build_ordinary_rows(source_rows: pd.DataFrame, snapshot_date: str, run_id: str, ordered_sessions: List[str], excluded: List[str]) -> List[Dict[str, Any]]:
+def build_ordinary_rows(source_rows: pd.DataFrame, snapshot_date: str, run_id: str, ordered_sessions: List[str], excluded: List[str], data_root: Path) -> List[Dict[str, Any]]:
     if source_rows.empty:
         return []
     rows: List[Dict[str, Any]] = []
@@ -298,8 +364,7 @@ def build_ordinary_rows(source_rows: pd.DataFrame, snapshot_date: str, run_id: s
             anchor = ordinary_anchor(row)
             roll_date = previous_session_before(ordered_sessions, anchor) if anchor else None
             if idx == 0:
-                first_trade = clean_date(row.get("first_trade_date")) or snapshot_date
-                valid_from = first_session_on_or_after(ordered_sessions, first_trade)
+                valid_from = first_ordinary_valid_from(row, data_root, ordered_sessions, roll_date)
             else:
                 if previous_roll_date is None:
                     raise RuntimeError("Previous roll_date missing before " + secid)
@@ -357,17 +422,17 @@ def build_ordinary_rows(source_rows: pd.DataFrame, snapshot_date: str, run_id: s
     return rows
 
 
-def build_si_rows(si_rows: pd.DataFrame, snapshot_date: str, run_id: str, ordered_sessions: List[str], excluded: List[str]) -> List[Dict[str, Any]]:
-    return build_ordinary_rows(si_rows, snapshot_date, run_id, ordered_sessions, excluded)
+def build_si_rows(si_rows: pd.DataFrame, snapshot_date: str, run_id: str, ordered_sessions: List[str], excluded: List[str], data_root: Path) -> List[Dict[str, Any]]:
+    return build_ordinary_rows(si_rows, snapshot_date, run_id, ordered_sessions, excluded, data_root)
 
 
-def build_roll_map(expiration_map: pd.DataFrame, snapshot_date: str, whitelist: List[str], excluded: List[str], ordered_sessions: List[str], run_id: str) -> pd.DataFrame:
+def build_roll_map(expiration_map: pd.DataFrame, snapshot_date: str, whitelist: List[str], excluded: List[str], ordered_sessions: List[str], run_id: str, data_root: Path) -> pd.DataFrame:
     scoped = source_rows_for_scope(expiration_map, whitelist, excluded)
     rows: List[Dict[str, Any]] = []
     si_rows = si_scope_rows(scoped)
-    rows.extend(build_si_rows(si_rows, snapshot_date, run_id, ordered_sessions, excluded))
+    rows.extend(build_si_rows(si_rows, snapshot_date, run_id, ordered_sessions, excluded, data_root))
     generic_rows = generic_ordinary_scope_rows(scoped)
-    rows.extend(build_ordinary_rows(generic_rows, snapshot_date, run_id, ordered_sessions, excluded))
+    rows.extend(build_ordinary_rows(generic_rows, snapshot_date, run_id, ordered_sessions, excluded, data_root))
     for _, row in scoped.sort_values(["family_code", "secid"]).iterrows():
         secid = str(clean_text(row.get("secid")) or "")
         if secid.upper() in PERPETUAL_IDENTITIES:
@@ -539,8 +604,8 @@ def main() -> int:
         raise FileNotFoundError("Missing expiration map artifact: " + str(expiration_map_path))
 
     expiration_map = pd.read_parquet(expiration_map_path)
-    ordered_sessions = fetch_canonical_sessions(expiration_map, snapshot_date, float(args.timeout), str(args.iss_base_url))
-    roll_map = build_roll_map(expiration_map, snapshot_date, whitelist, excluded, ordered_sessions, run_id)
+    ordered_sessions = fetch_canonical_sessions(expiration_map, snapshot_date, float(args.timeout), str(args.iss_base_url), data_root, whitelist, excluded)
+    roll_map = build_roll_map(expiration_map, snapshot_date, whitelist, excluded, ordered_sessions, run_id, data_root)
     blockers = validate_roll_map(roll_map, whitelist, excluded, ordered_sessions)
     write_parquet(roll_map, output_path)
 
