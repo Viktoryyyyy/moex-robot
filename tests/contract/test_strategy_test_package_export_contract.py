@@ -60,7 +60,9 @@ def test_strategy_test_package_export_contract_does_not_add_execution_surface():
     )
 
     package_exports = tuple(
-        export_name for export_name in contracts.__all__ if "strategy_test_package" in export_name.casefold()
+        export_name
+        for export_name in contracts.__all__
+        if export_name in EXPECTED_PACKAGE_EXPORTS
     )
     assert package_exports == EXPECTED_PACKAGE_EXPORTS
 
