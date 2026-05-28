@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 
-class StrategyRegistrationError(Exception):
+class StrategySDKError(Exception):
+    pass
+
+
+class StrategyRegistrationError(StrategySDKError):
     pass
 
 
