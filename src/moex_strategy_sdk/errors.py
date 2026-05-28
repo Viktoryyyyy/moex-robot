@@ -1,33 +1,14 @@
-from __future__ import annotations
+class StrategySDKError(Exception):
+    """Base error for Strategy SDK contract violations."""
 
 
-class StrategyRegistrationError(Exception):
-    pass
+class ManifestValidationError(StrategySDKError):
+    """Raised when a strategy manifest violates the SDK contract."""
 
 
-class StrategyIdMismatchError(StrategyRegistrationError):
-    pass
+class ArtifactContractError(StrategySDKError):
+    """Raised when an artifact contract is incomplete or invalid."""
 
 
-class ManifestValidationError(StrategyRegistrationError):
-    pass
-
-
-class ConfigValidationError(StrategyRegistrationError):
-    pass
-
-
-class InterfaceValidationError(StrategyRegistrationError):
-    pass
-
-
-class ArtifactContractValidationError(StrategyRegistrationError):
-    pass
-
-
-class UnsupportedModeError(StrategyRegistrationError):
-    pass
-
-
-class ForbiddenResponsibilityError(StrategyRegistrationError):
-    pass
+class LifecycleError(StrategySDKError):
+    """Raised when a lifecycle transition violates the SDK contract."""
