@@ -158,7 +158,7 @@ def test_experiment_registry_contract_aligns_with_pr3_skeleton():
 
 
 def test_promotion_verdict_contract_keeps_runtime_promotion_separate():
-    text = _contract_text("promotion_verdict.v1.md")
+    text = _contract_text("promotion_verdict.v1.md").lower()
 
     assert "promotion verdict is separate from registry metrics" in text
     assert "runner must not create promotion verdict" in text
