@@ -257,11 +257,14 @@ class PromotionVerdict:
             setattr(self, field, value)
 
 
-def validate_promotion_verdict(verdict: PromotionVerdict) -> PromotionVerdict:
+def _validate_verdict_instance(verdict: PromotionVerdict) -> PromotionVerdict:
     if not isinstance(verdict, PromotionVerdict):
         raise TypeError("verdict must be PromotionVerdict")
     validate_promotion_verdict_values(verdict.__dict__)
     return verdict
+
+
+validate_promotion_verdict = _validate_verdict_instance
 
 
 __all__ = [
