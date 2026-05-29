@@ -235,18 +235,10 @@ def test_ema_test_fixture_backtest_dry_run_writes_result_and_drafts(tmp_path: Pa
 
 
 def test_ema_test_fixture_backtest_rejects_non_temporary_path(tmp_path: Path):
-    request = EMATestFixtureBacktestRequest(
-        **_request_values(tmp_path, output_path=str(Path("/not-temp") / "result.json")),
-    )
-
-    result = run_ema_3_19_test_fixture_backtest_dry_run(request)
-
-    assert result.dry_run_status == "rejected"
-    assert result.row_count_or_none is None
-    assert result.output_path_or_none is None
-    assert result.metrics_summary_or_none is None
-    assert result.report_artifact_or_none is None
-    assert result.error_message_or_none
+    with pytest.raises(EMATestFixtureBacktestDryRunError):
+        EMATestFixtureBacktestRequest(
+            **_request_values(tmp_path, output_path=str(Path("/not-temp") / "result.json")),
+        )
 
 
 def test_non_numeric_close_rejects_without_output(tmp_path: Path):
