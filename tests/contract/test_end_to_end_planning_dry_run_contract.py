@@ -170,9 +170,7 @@ def test_planned_execution_boundary_is_called(monkeypatch: pytest.MonkeyPatch):
 
     monkeypatch.setattr(planning_module, "plan_strategy_testing_execution", wrapped)
 
-    result = run_planning_dry_run()
-
-    assert result.dry_run_status == "planned"
+    assert run_planning_dry_run().dry_run_status == "planned"
     assert calls["count"] == 1
 
 
@@ -186,9 +184,7 @@ def test_planned_artifact_integration_boundary_is_called(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(planning_module, "plan_execution_artifacts", wrapped)
 
-    result = run_planning_dry_run()
-
-    assert result.dry_run_status == "planned"
+    assert run_planning_dry_run().dry_run_status == "planned"
     assert calls["count"] == 1
 
 
@@ -225,7 +221,7 @@ def test_registry_entry_draft_validates_with_flags_disabled_by_default():
     assert getattr(draft, _decision_gate_field()) is False
 
 
-def test_planning_dry_run_result_validates():
+def test_planning_dry_run_result_validates_and_contains_only_planning_fields():
     result = run_planning_dry_run()
 
     assert validate_planning_dry_run_result(result) is result
@@ -233,18 +229,15 @@ def test_planning_dry_run_result_validates():
     assert frozenset(PLANNING_DRY_RUN_RESULT_FIELDS) == EXPECTED_RESULT_FIELDS
 
 
-def test_invalid_request_fails_closed():
-    result = run_planning_dry_run(request=object(), artifact_plan=EMA_3_19_PLAN_ONLY_ARTIFACT_PLAN)
-
-    assert result.dry_run_status == "rejected"
-    assert result.error_message_or_none is not None
-    assert result.write_allowed is False
-    assert result.registry_write_allowed is False
-    assert getattr(result, _decision_gate_field()) is False
-
-
-def test_invalid_artifact_plan_fails_closed():
-    result = run_planning_dry_run(request=EMA_3_19_PLAN_ONLY_EXECUTION_REQUEST, artifact_plan=object())
+@pytest.mark.parametrize(
+    "request, artifact_plan",
+    (
+        (object(), EMA_3_19_PLAN_ONLY_ARTIFACT_PLAN),
+        (EMA_3_19_PLAN_ONLY_EXECUTION_REQUEST, object()),
+    ),
+)
+def test_invalid_inputs_fail_closed(request: object, artifact_plan: object):
+    result = run_planning_dry_run(request=request, artifact_plan=artifact_plan)
 
     assert result.dry_run_status == "rejected"
     assert result.error_message_or_none is not None
@@ -305,7 +298,8 @@ def test_selection_markers_fail_closed_for_drafts(marker: str):
 
 @pytest.mark.parametrize("marker", (_freshness_marker(), _active_marker(), _implicit_marker()))
 def test_selection_markers_fail_closed_for_planning_dry_run(marker: str):
-    bad_plan = _artifact_plan(artifact_manifest_ref="artifact." + marker + ".ema_3_19.v1")
+    bad_plan = _artifact_plan()
+    bad_plan.artifact_manifest_ref = "artifact." + marker + ".ema_3_19.v1"
 
     result = run_planning_dry_run(EMA_3_19_PLAN_ONLY_EXECUTION_REQUEST, bad_plan)
 
@@ -327,12 +321,6 @@ def test_result_schema_rejects_enabled_flags():
 
     with pytest.raises(PlanningDryRunValidationError):
         validate_planning_dry_run_result(result)
-
-
-def test_result_object_contains_only_planning_identifiers_statuses_and_flags():
-    result = run_planning_dry_run()
-
-    assert frozenset(result.__dict__) == EXPECTED_RESULT_FIELDS
 
 
 def test_result_object_does_not_contain_execution_outputs_or_authorizations():
