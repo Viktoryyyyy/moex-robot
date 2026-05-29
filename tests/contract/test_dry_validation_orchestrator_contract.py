@@ -180,9 +180,9 @@ def test_orchestrator_source_has_no_forbidden_execution_responsibility_markers()
 def test_orchestrator_source_keeps_discovery_markers_guard_only():
     source = ORCHESTRATOR_PATH.read_text(encoding="utf-8").casefold()
 
-    assert "late" + "st" in source
-    assert "cur" + "rent" in source
-    assert "auto" + "detect" in source
+    assert '"late" + "st"' in source
+    assert '"cur" + "rent"' in source
+    assert '"auto" + "detect"' in source
     assert "latest" not in source
     assert "current" not in source
     assert "autodetect" not in source
