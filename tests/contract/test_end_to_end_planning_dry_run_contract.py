@@ -230,14 +230,14 @@ def test_planning_dry_run_result_validates_and_contains_only_planning_fields():
 
 
 @pytest.mark.parametrize(
-    "request, artifact_plan",
+    "candidate_request, artifact_plan",
     (
         (object(), EMA_3_19_PLAN_ONLY_ARTIFACT_PLAN),
         (EMA_3_19_PLAN_ONLY_EXECUTION_REQUEST, object()),
     ),
 )
-def test_invalid_inputs_fail_closed(request: object, artifact_plan: object):
-    result = run_planning_dry_run(request=request, artifact_plan=artifact_plan)
+def test_invalid_inputs_fail_closed(candidate_request: object, artifact_plan: object):
+    result = run_planning_dry_run(request=candidate_request, artifact_plan=artifact_plan)
 
     assert result.dry_run_status == "rejected"
     assert result.error_message_or_none is not None
