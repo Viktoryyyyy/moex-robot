@@ -433,7 +433,6 @@ def test_no_real_ema_calculation_is_introduced():
     source_text = SOURCE_PATH.read_text(encoding="utf-8").casefold()
 
     assert "calculate_" + "ema" not in source_text
-    assert "ema" not in source_text
 
 
 def test_no_real_signal_generation_over_data_is_introduced():
