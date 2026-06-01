@@ -6,7 +6,7 @@ from moex_research.metrics.schemas import MetricsSummary
 from moex_research.publishers.report_artifacts import ReportArtifactSpec
 from moex_research.runners.canonical_data_sample_read import CanonicalDataSampleReadRequest
 from moex_research.runners.ema_sample_signal import EMASampleSignalRequest
-from moex_research.runners.sample_backtest import SampleBacktestRequest
+from moex_research.runners.sample_backtest import SampleBacktestError, SampleBacktestRequest
 from moex_research.runners.sample_pipeline import (
     ALLOWED_MODES,
     REQ_FIELDS,
@@ -156,19 +156,18 @@ def test_sample_pipeline_runs_full_sample_chain(tmp_path: Path):
     assert frozenset(RES_FIELDS) == EXPECTED_RES
 
 
-def test_sample_pipeline_rejects_bad_nested_backtest(tmp_path: Path):
-    bad_backtest = SampleBacktestRequest(
-        request_id="ema_3_19.sample_backtest.test",
-        signal_request=_signal_request(tmp_path),
-        backtest_output_path=str(Path("/not-temp") / "sample_backtest.json"),
-        artifact_manifest_ref="artifact_manifest.ema_3_19.sample_backtest.test",
-        backtest_artifact_ref="backtest_artifact.ema_3_19.sample_backtest.test",
-        metrics_artifact_ref="metrics.ema_3_19.sample_backtest.test",
-        report_artifact_ref="report.ema_3_19.sample_backtest.test",
-        mode="canonical_sample_backtest_only",
-    )
-    # Construction fails closed at the lower boundary, so keep assertion explicit.
-    assert bad_backtest is not None
+def test_lower_boundary_invalid_backtest_request_fails_closed(tmp_path: Path):
+    with pytest.raises(SampleBacktestError):
+        SampleBacktestRequest(
+            request_id="ema_3_19.sample_backtest.test",
+            signal_request=_signal_request(tmp_path),
+            backtest_output_path=str(Path("/not-temp") / "sample_backtest.json"),
+            artifact_manifest_ref="artifact_manifest.ema_3_19.sample_backtest.test",
+            backtest_artifact_ref="backtest_artifact.ema_3_19.sample_backtest.test",
+            metrics_artifact_ref="metrics.ema_3_19.sample_backtest.test",
+            report_artifact_ref="report.ema_3_19.sample_backtest.test",
+            mode="canonical_sample_backtest_only",
+        )
 
 
 def test_result_has_no_forbidden_fields(tmp_path: Path):
