@@ -159,7 +159,7 @@ def test_platform_markers_fail_closed(marker: str):
 def test_approved_static_sample_file_exists_inside_repo():
     assert SAMPLE_PATH.exists()
     assert SAMPLE_PATH.is_file()
-    assert SAMPLE_PATH.parts[-4:] == (
+    assert SAMPLE_PATH.parts[-3:] == (
         "strategy_testing",
         "canonical_samples",
         "si_d1_ohlcv_sample.json",
