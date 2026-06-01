@@ -62,38 +62,26 @@ def _auto() -> str:
     return "auto" + "detect"
 
 
-def _srv() -> str:
-    return "ser" + "ver"
+def _markers(path_like: bool) -> tuple[str, ...]:
+    base = (_late(), _cur(), _auto())
+    if not path_like:
+        return base
+    return (*base, "ser" + "ver", "run" + "time", "li" + "ve", "data" + "lake", "moex" + "iss", "net" + "work")
 
 
-def _rt() -> str:
-    return "run" + "time"
-
-
-def _lv() -> str:
-    return "li" + "ve"
-
-
-def _dl() -> str:
-    return "data" + "lake"
-
-
-def _tokens(value: str) -> str:
-    out = value.casefold()
-    for sep in ("/", "\\", ".", "_", "-", ":"):
-        out = out.replace(sep, " ")
-    return " ".join(out.split())
+def _flat(value: str) -> str:
+    result = value.casefold()
+    for separator in ("/", "\\", ".", "_", "-", ":"):
+        result = result.replace(separator, " ")
+    return " ".join(result.split())
 
 
 def _text(value: object, field_name: str, *, path_like: bool = False) -> str:
     if not isinstance(value, str) or not value.strip():
         raise EMASampleSignalError(f"{field_name} is required")
     folded = value.casefold()
-    spaced = _tokens(value)
-    markers = (_late(), _cur(), _auto())
-    if path_like:
-        markers = (*markers, _srv(), _rt(), _lv(), _dl(), "moex" + "iss", "net" + "work")
-    for marker in markers:
+    spaced = _flat(value)
+    for marker in _markers(path_like):
         if marker in folded or marker in spaced:
             raise EMASampleSignalError(f"{field_name} contains unsupported marker")
     return value
@@ -109,21 +97,22 @@ def validate_ema_sample_signal_request_values(values: Mapping[str, object]) -> d
     sample_request = values["sample_read_request"]
     if not isinstance(sample_request, CanonicalDataSampleReadRequest):
         raise EMASampleSignalError("sample_read_request must be CanonicalDataSampleReadRequest")
+    mode = _text(values["pipeline_mode"], "pipeline_mode")
+    if mode not in ALLOWED_PIPELINE_MODES:
+        raise EMASampleSignalError("pipeline_mode is unsupported")
     return {
         "pipeline_request_id": _text(values["pipeline_request_id"], "pipeline_request_id"),
         "sample_read_request": validate_canonical_data_sample_read_request(sample_request),
         "signal_output_path": _text(values["signal_output_path"], "signal_output_path", path_like=True),
         "artifact_manifest_ref": _text(values["artifact_manifest_ref"], "artifact_manifest_ref"),
         "signal_artifact_ref": _text(values["signal_artifact_ref"], "signal_artifact_ref"),
-        "pipeline_mode": _text(values["pipeline_mode"], "pipeline_mode"),
+        "pipeline_mode": mode,
     }
 
 
 class EMASampleSignalRequest:
     def __init__(self, **values: object) -> None:
         normalized = validate_ema_sample_signal_request_values(values)
-        if normalized["pipeline_mode"] not in ALLOWED_PIPELINE_MODES:
-            raise EMASampleSignalError("pipeline_mode is unsupported")
         for key, value in normalized.items():
             setattr(self, key, value)
 
@@ -151,11 +140,11 @@ def _sample_rows(request: CanonicalDataSampleReadRequest) -> list[Mapping[str, o
     return rows
 
 
-def _ema(prev: float | None, value: float, period: int) -> float:
-    if prev is None:
+def _ema(previous: float | None, value: float, period: int) -> float:
+    if previous is None:
         return value
     alpha = 2.0 / (period + 1.0)
-    return value * alpha + prev * (1.0 - alpha)
+    return value * alpha + previous * (1.0 - alpha)
 
 
 def _signal(fast: float, slow: float) -> int:
@@ -170,14 +159,14 @@ def _signal_rows(request: EMASampleSignalRequest, rows: list[Mapping[str, object
     canonical = request.sample_read_request.canonical_read_request
     fast: float | None = None
     slow: float | None = None
-    out: list[SyntheticSignalRow] = []
+    output: list[SyntheticSignalRow] = []
     for row in rows:
         close_value = row["close"]
         if not isinstance(close_value, (int, float)):
             raise EMASampleSignalError("close must be numeric")
         fast = _ema(fast, float(close_value), 3)
         slow = _ema(slow, float(close_value), 19)
-        out.append(
+        output.append(
             SyntheticSignalRow(
                 strategy_id=canonical.strategy_id,
                 strategy_test_id=canonical.strategy_test_id,
@@ -189,7 +178,7 @@ def _signal_rows(request: EMASampleSignalRequest, rows: list[Mapping[str, object
                 source_type="synthetic_test_only",
             )
         )
-    return tuple(out)
+    return tuple(output)
 
 
 def _write(request: EMASampleSignalRequest, rows: tuple[SyntheticSignalRow, ...]):
@@ -204,16 +193,17 @@ def _write(request: EMASampleSignalRequest, rows: tuple[SyntheticSignalRow, ...]
         rows=rows,
         source_type="synthetic_test_only",
     )
-    write_request = SyntheticSignalArtifactWriteRequest(
-        request_id=request.pipeline_request_id + ".write",
-        strategy_id=canonical.strategy_id,
-        strategy_test_id=canonical.strategy_test_id,
-        signal_artifact=artifact,
-        output_path=request.signal_output_path,
-        artifact_manifest_ref=request.artifact_manifest_ref,
-        write_mode="dry_run_test_only",
+    return write_synthetic_signal_artifact_dry_run(
+        SyntheticSignalArtifactWriteRequest(
+            request_id=request.pipeline_request_id + ".write",
+            strategy_id=canonical.strategy_id,
+            strategy_test_id=canonical.strategy_test_id,
+            signal_artifact=artifact,
+            output_path=request.signal_output_path,
+            artifact_manifest_ref=request.artifact_manifest_ref,
+            write_mode="dry_run_test_only",
+        )
     )
-    return write_synthetic_signal_artifact_dry_run(write_request)
 
 
 def validate_ema_sample_signal_result_values(values: Mapping[str, object]) -> dict[str, object]:
@@ -229,8 +219,11 @@ def validate_ema_sample_signal_result_values(values: Mapping[str, object]) -> di
             raise EMASampleSignalError("written result requires row count")
         if error is not None:
             raise EMASampleSignalError("written result must not include error")
-    elif not isinstance(error, str) or not error.strip():
-        raise EMASampleSignalError("rejected result requires error")
+    else:
+        if values["row_count_or_none"] is not None:
+            raise EMASampleSignalError("rejected result must not include row count")
+        if not isinstance(error, str) or not error.strip():
+            raise EMASampleSignalError("rejected result requires error")
     return dict(values)
 
 
