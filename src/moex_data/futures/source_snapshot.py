@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import tempfile
 from typing import Any, Final
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -62,6 +63,19 @@ RAW_5M_OUTPUT_COLUMNS: Final[tuple[str, ...]] = (
 _OHLC_SOURCE_COLUMNS: Final[tuple[str, ...]] = ("pr_open", "pr_high", "pr_low", "pr_close")
 _NON_NEGATIVE_SOURCE_COLUMNS: Final[tuple[str, ...]] = ("vol", "val", "trades")
 _DYNAMIC_MARKERS: Final[tuple[str, ...]] = ("latest", "current", "autodetect")
+_BEARER_TOKEN_ENV_NAMES: Final[tuple[str, ...]] = (
+    "MOEX_APIM_BEARER_TOKEN",
+    "MOEX_APIM_TOKEN",
+    "MOEX_ALGOPACK_TOKEN",
+    "MOEX_DATASHOP_TOKEN",
+    "MOEX_ISS_TOKEN",
+    "MOEX_TOKEN",
+)
+_SUBSCRIPTION_KEY_ENV_NAMES: Final[tuple[str, ...]] = (
+    "MOEX_APIM_SUBSCRIPTION_KEY",
+    "OCP_APIM_SUBSCRIPTION_KEY",
+    "MOEX_SUBSCRIPTION_KEY",
+)
 
 
 class SourceSnapshotError(ValueError):
@@ -230,16 +244,48 @@ def endpoint_and_query(contract: dict[str, object]) -> tuple[str, dict[str, Any]
     return endpoint, dict(query), url
 
 
+def auth_headers_from_env(env: dict[str, str] | None = None) -> dict[str, str]:
+    active_env = os.environ if env is None else env
+    headers: dict[str, str] = {}
+    custom_header_name = active_env.get("MOEX_APIM_AUTH_HEADER_NAME", "").strip()
+    custom_header_value = active_env.get("MOEX_APIM_AUTH_HEADER_VALUE", "").strip()
+    if custom_header_name or custom_header_value:
+        if not custom_header_name or not custom_header_value:
+            raise SourceSnapshotError("both MOEX_APIM_AUTH_HEADER_NAME and MOEX_APIM_AUTH_HEADER_VALUE are required")
+        headers[custom_header_name] = custom_header_value
+    direct_authorization = active_env.get("MOEX_APIM_AUTHORIZATION", "").strip()
+    if direct_authorization:
+        headers["Authorization"] = direct_authorization
+    for env_name in _BEARER_TOKEN_ENV_NAMES:
+        token = active_env.get(env_name, "").strip()
+        if token:
+            if token.casefold().startswith("bearer "):
+                headers["Authorization"] = token
+            else:
+                headers["Authorization"] = "Bearer " + token
+            break
+    for env_name in _SUBSCRIPTION_KEY_ENV_NAMES:
+        subscription_key = active_env.get(env_name, "").strip()
+        if subscription_key:
+            headers["Ocp-Apim-Subscription-Key"] = subscription_key
+            break
+    return headers
+
+
 def fetch_iss_json(url: str) -> tuple[dict[str, Any], str]:
-    request = Request(url, headers={"Accept": "application/json"})
-    with urlopen(request, timeout=30) as response:
-        status = int(getattr(response, "status", response.getcode()))
-        if status != 200:
-            raise SourceSnapshotError("HTTP status is not 200")
-        content_type = response.headers.get("Content-Type", "")
-        if "json" not in content_type.casefold():
-            raise SourceSnapshotError("response content type is not JSON")
-        body = response.read()
+    headers = {"Accept": "application/json", **auth_headers_from_env()}
+    request = Request(url, headers=headers)
+    try:
+        with urlopen(request, timeout=30) as response:
+            status = int(getattr(response, "status", response.getcode()))
+            if status != 200:
+                raise SourceSnapshotError("HTTP status is not 200: " + str(status))
+            content_type = response.headers.get("Content-Type", "")
+            if "json" not in content_type.casefold():
+                raise SourceSnapshotError("response content type is not JSON")
+            body = response.read()
+    except HTTPError as exc:
+        raise SourceSnapshotError("HTTP status is not 200: " + str(exc.code)) from exc
     try:
         payload = json.loads(body.decode("utf-8"))
     except json.JSONDecodeError as exc:
