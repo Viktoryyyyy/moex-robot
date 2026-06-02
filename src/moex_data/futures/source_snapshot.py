@@ -64,6 +64,7 @@ _OHLC_SOURCE_COLUMNS: Final[tuple[str, ...]] = ("pr_open", "pr_high", "pr_low", 
 _NON_NEGATIVE_SOURCE_COLUMNS: Final[tuple[str, ...]] = ("vol", "val", "trades")
 _DYNAMIC_MARKERS: Final[tuple[str, ...]] = ("latest", "current", "autodetect")
 _BEARER_TOKEN_ENV_NAMES: Final[tuple[str, ...]] = (
+    "MOEX_API_KEY",
     "MOEX_APIM_BEARER_TOKEN",
     "MOEX_APIM_TOKEN",
     "MOEX_ALGOPACK_TOKEN",
