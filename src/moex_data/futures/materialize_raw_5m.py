@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import tempfile
 from typing import Final
 
 import pandas as pd
