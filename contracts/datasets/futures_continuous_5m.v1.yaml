@@ -1,0 +1,56 @@
+contract_id: futures_continuous_5m.v1
+dataset_id: futures_continuous_5m
+artifact_class: external_pattern
+implementation_status: blocked_placeholder
+blocked_until:
+  - roll_policy_contract_is_approved
+  - expiration_family_mapping_contract_is_approved
+producer: moex_data.futures.continuous_builder
+consumers:
+  - moex_data.futures.resampler
+  - moex_data.futures.quality_report_builder
+format: parquet
+schema_version: futures_continuous_5m.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/futures/continuous_5m/roll_policy={ROLL_POLICY}/family={FAMILY}/trade_date={YYYY-MM-DD}/part.parquet"
+partitioning:
+  - roll_policy
+  - family
+  - trade_date
+grain: 5m_bar
+source_contracts:
+  - futures_raw_5m.v1
+primary_key:
+  - ts
+  - continuous_symbol
+  - roll_policy
+required_columns:
+  - trade_date
+  - ts
+  - session_date
+  - continuous_symbol
+  - family
+  - source_secid
+  - open
+  - high
+  - low
+  - close
+  - volume
+  - value
+  - num_trades
+  - roll_policy
+  - adjustment_policy
+  - adjustment_factor
+  - is_roll_boundary
+  - source_schema_version
+  - build_ts
+quality_checks:
+  - non_null_ohlc
+  - high_ge_low
+  - source_secid_present
+  - roll_boundary_flag_consistency
+path_rules:
+  storage_root: env_contract
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+retention_policy: rebuildable_from_source
