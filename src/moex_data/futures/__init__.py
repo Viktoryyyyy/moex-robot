@@ -16,6 +16,22 @@ from .controlled_read import (
     controlled_read_probe,
 )
 from .manifest import FuturesManifestValidationError, validate_refresh_manifest_values
+from .materialize_raw_5m import (
+    BLOCKED_NO_SOURCE_STATUS,
+    RAW_5M_REQUIRED_COLUMNS,
+    TARGET_CONTRACT_ID,
+    TARGET_DATASET_ID,
+    TARGET_FAMILY,
+    TARGET_SECID,
+    TARGET_TRADE_DATE,
+    FuturesRaw5mMaterializationError,
+    Raw5mMaterializationPaths,
+    Raw5mMaterializationRequest,
+    Raw5mMaterializationResult,
+    build_materialization_request,
+    materialization_target_paths,
+    materialize_single_raw_5m_partition,
+)
 from .quality import FuturesQualityValidationError, validate_quality_report_rows, validate_quality_row_values
 from .schemas import (
     EXPECTED_CONFIG_ID,
@@ -31,6 +47,7 @@ from .schemas import (
 )
 
 __all__ = (
+    "BLOCKED_NO_SOURCE_STATUS",
     "ControlledReadEvidence",
     "ControlledReadPathProbe",
     "ControlledReadPlan",
@@ -50,12 +67,25 @@ __all__ = (
     "FuturesQualityReport",
     "FuturesQualityRow",
     "FuturesQualityValidationError",
+    "FuturesRaw5mMaterializationError",
     "FuturesRefreshManifest",
+    "RAW_5M_REQUIRED_COLUMNS",
+    "Raw5mMaterializationPaths",
+    "Raw5mMaterializationRequest",
+    "Raw5mMaterializationResult",
+    "TARGET_CONTRACT_ID",
+    "TARGET_DATASET_ID",
+    "TARGET_FAMILY",
+    "TARGET_SECID",
+    "TARGET_TRADE_DATE",
+    "build_materialization_request",
     "controlled_read_paths",
     "controlled_read_probe",
     "expand_contract_path",
     "load_futures_data_lake_contract_package",
     "load_simple_yaml_mapping",
+    "materialization_target_paths",
+    "materialize_single_raw_5m_partition",
     "validate_dataset_contract_set",
     "validate_dataset_contract_values",
     "validate_futures_data_lake_config_values",
