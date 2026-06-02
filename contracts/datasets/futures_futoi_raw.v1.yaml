@@ -1,0 +1,43 @@
+contract_id: futures_futoi_raw.v1
+dataset_id: futures_futoi_raw
+artifact_class: external_pattern
+producer: moex_data.futures.futoi_loader
+consumers:
+  - moex_data.futures.quality_report_builder
+  - moex_data.futures.futoi_joiner
+format: parquet
+schema_version: futures_futoi_raw.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/futures/futoi_raw/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
+partitioning:
+  - trade_date
+  - family
+  - secid
+grain: futoi_observation
+primary_key:
+  - moment
+  - secid
+required_columns:
+  - trade_date
+  - moment
+  - systime
+  - secid
+  - family
+  - pos_long
+  - pos_short
+  - pos_long_num
+  - pos_short_num
+  - seqnum
+  - source
+  - ingest_ts
+quality_checks:
+  - non_null_moment
+  - non_null_secid
+  - duplicate_moment_secid_count
+  - monotonic_moment_by_secid
+  - non_negative_positions
+path_rules:
+  storage_root: env_contract
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+retention_policy: keep_all_valid_partitions
