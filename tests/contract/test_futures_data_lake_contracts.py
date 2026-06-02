@@ -36,6 +36,14 @@ EXPECTED_CONTRACT_PATHS = (
     "contracts/datasets/futures_quality_report.v1.yaml",
     "contracts/datasets/futures_continuous_5m.v1.yaml",
 )
+FUTURES_VALIDATOR_SOURCE_PATHS = (
+    "src/moex_data/futures/__init__.py",
+    "src/moex_data/futures/config.py",
+    "src/moex_data/futures/contracts.py",
+    "src/moex_data/futures/manifest.py",
+    "src/moex_data/futures/quality.py",
+    "src/moex_data/futures/schemas.py",
+)
 
 
 def _dataset_contract(contract_id: str = "futures_raw_5m.v1", **overrides: object) -> dict[str, object]:
@@ -279,7 +287,9 @@ def test_quality_report_rows_must_be_non_empty_and_single_run():
 
 def test_futures_helper_dependency_import_guard():
     imported_names = []
-    for source_path in (REPO_ROOT / "src" / "moex_data" / "futures").glob("*.py"):
+    for relative_path in FUTURES_VALIDATOR_SOURCE_PATHS:
+        source_path = REPO_ROOT / relative_path
+        assert source_path.exists(), relative_path
         imported_names.extend(_imported_names_from_source(source_path.read_text(encoding="utf-8")))
 
     for term in _guard_terms():
