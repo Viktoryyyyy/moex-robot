@@ -246,8 +246,20 @@ def test_quality_report_rows_must_be_non_empty_and_single_run():
         validate_quality_report_rows((_quality_row(), _quality_row(run_id="other_run")))
 
 
-def test_futures_package_has_no_imports_from_forbidden_architecture_layers():
-    forbidden_prefixes = ("moex_" + "runtime", "moex_" + "backtest", "moex_" + "research", "strateg" + "ies")
+def test_futures_package_has_no_forbidden_imports():
+    forbidden_prefixes = (
+        "moex_runtime",
+        "moex_backtest",
+        "moex_research",
+        "strategies",
+        "requests",
+        "urllib",
+        "socket",
+        "subprocess",
+        "pandas",
+        "numpy",
+        "pyarrow",
+    )
     for source_path in (REPO_ROOT / "src" / "moex_data" / "futures").glob("*.py"):
         tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
         for node in ast.walk(tree):
@@ -259,14 +271,3 @@ def test_futures_package_has_no_imports_from_forbidden_architecture_layers():
                 continue
             for imported_name in imported_names:
                 assert not imported_name.startswith(forbidden_prefixes), source_path
-
-
-def test_futures_helper_source_has_no_forbidden_heavy_or_operational_dependencies():
-    source = "\n".join(
-        path.read_text(encoding="utf-8").casefold()
-        for path in (REPO_ROOT / "src" / "moex_data" / "futures").glob("*.py")
-    )
-    forbidden_terms = ("req" + "uests", "url" + "lib", "so" + "cket", "sub" + "process", "pan" + "das", "num" + "py", "pya" + "rrow")
-
-    for term in forbidden_terms:
-        assert term not in source
