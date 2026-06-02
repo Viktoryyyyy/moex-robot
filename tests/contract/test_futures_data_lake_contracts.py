@@ -1,4 +1,3 @@
-import ast
 from pathlib import Path
 
 import pytest
@@ -143,6 +142,18 @@ def _guard_terms() -> tuple[str, ...]:
     )
 
 
+def _imported_names_from_source(source: str) -> tuple[str, ...]:
+    names: list[str] = []
+    for raw_line in source.splitlines():
+        line = raw_line.strip().casefold()
+        if line.startswith("import "):
+            modules = line.removeprefix("import ").split(",")
+            names.extend(module.strip().split(" as ")[0] for module in modules)
+        elif line.startswith("from ") and " import " in line:
+            names.append(line.removeprefix("from ").split(" import ", 1)[0].strip())
+    return tuple(name for name in names if name)
+
+
 def test_public_api_and_expected_ids_are_contract_stable():
     assert EXPECTED_DATASET_CONTRACT_IDS == EXPECTED_CONTRACT_IDS
     assert EXPECTED_DATASET_CONTRACT_PATHS == EXPECTED_CONTRACT_PATHS
@@ -269,12 +280,7 @@ def test_quality_report_rows_must_be_non_empty_and_single_run():
 def test_futures_helper_dependency_import_guard():
     imported_names = []
     for source_path in (REPO_ROOT / "src" / "moex_data" / "futures").glob("*.py"):
-        tree = ast.parse(source_path.read_text(encoding="utf-8").casefold(), filename=str(source_path))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imported_names.extend(alias.name.casefold() for alias in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                imported_names.append((node.module or "").casefold())
+        imported_names.extend(_imported_names_from_source(source_path.read_text(encoding="utf-8")))
 
     for term in _guard_terms():
         assert not any(imported_name.startswith(term) for imported_name in imported_names)
