@@ -1,0 +1,46 @@
+contract_id: futures_raw_5m.v1
+dataset_id: futures_raw_5m
+artifact_class: external_pattern
+producer: moex_data.futures.raw_5m_loader
+consumers:
+  - moex_data.futures.resampler
+  - moex_data.futures.quality_report_builder
+format: parquet
+schema_version: futures_raw_5m.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/futures/raw_5m/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
+partitioning:
+  - trade_date
+  - family
+  - secid
+grain: 5m_bar
+primary_key:
+  - ts
+  - secid
+required_columns:
+  - trade_date
+  - ts
+  - session_date
+  - secid
+  - family
+  - board
+  - open
+  - high
+  - low
+  - close
+  - volume
+  - value
+  - num_trades
+  - source
+  - ingest_ts
+quality_checks:
+  - non_null_ohlc
+  - high_ge_low
+  - open_high_low_close_inside_range
+  - duplicate_ts_secid_count
+  - monotonic_ts_by_secid
+path_rules:
+  storage_root: env_contract
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+retention_policy: keep_all_valid_partitions
