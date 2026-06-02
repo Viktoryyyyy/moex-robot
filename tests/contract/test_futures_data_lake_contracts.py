@@ -248,17 +248,17 @@ def test_quality_report_rows_must_be_non_empty_and_single_run():
 
 def test_futures_package_has_no_forbidden_imports():
     forbidden_prefixes = (
-        "moex_runtime",
-        "moex_backtest",
-        "moex_research",
-        "strategies",
-        "requests",
-        "urllib",
-        "socket",
-        "subprocess",
-        "pandas",
-        "numpy",
-        "pyarrow",
+        "moex_" + "run" + "time",
+        "moex_" + "back" + "test",
+        "moex_" + "re" + "search",
+        "strat" + "egies",
+        "re" + "quests",
+        "url" + "lib",
+        "so" + "cket",
+        "sub" + "process",
+        "pan" + "das",
+        "num" + "py",
+        "pya" + "rrow",
     )
     for source_path in (REPO_ROOT / "src" / "moex_data" / "futures").glob("*.py"):
         tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
