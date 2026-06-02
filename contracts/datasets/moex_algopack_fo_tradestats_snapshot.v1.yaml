@@ -1,0 +1,85 @@
+source_contract_id: moex_algopack_fo_tradestats_snapshot.v1
+artifact_class: external_pattern
+producer: future owner-run source snapshot step
+consumer: existing single-partition materializer
+target_dataset_id: futures_raw_5m
+target_contract_id: futures_raw_5m.v1
+target_partition:
+  trade_date: 2026-06-02
+  family: Si
+  secid: SiM6
+method: GET
+endpoint: https://apim.moex.com/iss/datashop/algopack/fo/tradestats/{secid}.json
+query_parameters:
+  secid: SiM6
+  from: 2026-06-02
+  till: 2026-06-02
+  latest: 0
+response_format: ISS-style JSON
+primary_table: data
+pagination_table: data.cursor
+confirmed_row_count: 96
+required_source_columns:
+  - tradedate
+  - tradetime
+  - secid
+  - asset_code
+  - pr_open
+  - pr_high
+  - pr_low
+  - pr_close
+  - vol
+  - val
+  - trades
+  - SYSTIME
+field_mapping_to_futures_raw_5m:
+  trade_date: tradedate
+  ts: tradedate + tradetime
+  session_date: tradedate
+  secid: secid
+  family: asset_code
+  board: RFUD
+  open: pr_open
+  high: pr_high
+  low: pr_low
+  close: pr_close
+  volume: vol
+  value: val
+  num_trades: trades
+  source: algopack.fo.tradestats.v1
+  ingest_ts: source snapshot creation timestamp
+timestamp_semantics:
+  - ts is MOEX/MSK exchange-local 5-minute bucket timestamp
+  - no UTC conversion in this contract
+  - session_date equals tradedate for this single artifact only
+pagination_rule:
+  - fail closed if data.cursor indicates incomplete pagination
+fail_closed_conditions:
+  - HTTP status != 200
+  - non-JSON response
+  - missing required columns
+  - row_count = 0
+  - secid != SiM6
+  - asset_code != Si
+  - tradedate != 2026-06-02
+  - duplicate tradedate + tradetime
+  - non-monotonic timestamps
+  - null OHLC
+  - invalid OHLC
+  - negative vol/val/trades
+  - incomplete cursor/pagination
+  - fallback to ISS candles/RFUD marketdata
+  - synthetic/manual row construction
+  - latest/current/autodetect dynamic selection
+scope_exclusions:
+  - this contract does not authorize source artifact creation
+  - this contract does not authorize data lake write
+  - this contract does not authorize materialization
+  - this contract does not authorize strategy/research/runtime/live
+execution_guards:
+  - no loader implementation is created by this contract
+  - no network call is made by this contract
+  - no source artifact is created by this contract
+  - no data lake write is performed by this contract
+  - no materialization is run by this contract
+  - no backfill is run by this contract
