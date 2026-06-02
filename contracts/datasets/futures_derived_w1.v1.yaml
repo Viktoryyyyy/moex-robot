@@ -1,0 +1,48 @@
+contract_id: futures_derived_w1.v1
+dataset_id: futures_derived_w1
+artifact_class: external_pattern
+producer: moex_data.futures.resampler
+consumers:
+  - moex_data.futures.quality_report_builder
+  - moex_backtest.engine
+  - moex_features.daily
+format: parquet
+schema_version: futures_derived_w1.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/futures/derived_w1/series_type={SERIES_TYPE}/family={FAMILY}/part.parquet"
+partitioning:
+  - series_type
+  - family
+grain: w1_bar
+source_contracts:
+  - futures_raw_5m.v1
+  - futures_continuous_5m.v1
+primary_key:
+  - week_start_date
+  - symbol
+  - series_type
+required_columns:
+  - week_start_date
+  - week_end_date
+  - symbol
+  - family
+  - series_type
+  - open
+  - high
+  - low
+  - close
+  - volume
+  - value
+  - num_trades
+  - source_schema_version
+  - build_ts
+quality_checks:
+  - non_null_ohlc
+  - high_ge_low
+  - duplicate_week_symbol_count
+  - calendar_week_boundary_check
+path_rules:
+  storage_root: env_contract
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+retention_policy: rebuildable_from_source
