@@ -1,0 +1,46 @@
+contract_id: futures_quality_report.v1
+dataset_id: futures_quality_report
+artifact_class: external_pattern
+producer: moex_data.futures.quality_report_builder
+consumers:
+  - moex_data.futures.refresh_validator
+format: json
+schema_version: futures_quality_report.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/futures/quality/run_date={YYYY-MM-DD}/run_id={RUN_ID}/quality_report.json"
+partitioning:
+  - run_date
+  - run_id
+grain: dataset_quality_report
+primary_key:
+  - run_id
+  - dataset_id
+  - family
+  - secid
+  - trade_date
+required_fields:
+  - run_id
+  - dataset_id
+  - family
+  - secid
+  - trade_date
+  - rows
+  - min_ts
+  - max_ts
+  - duplicate_key_count
+  - gap_count
+  - null_ohlc_count
+  - invalid_ohlc_count
+  - futoi_missing_count
+  - calendar_status
+  - quality_status
+  - notes
+allowed_quality_status:
+  - pass
+  - warn
+  - fail
+path_rules:
+  storage_root: env_contract
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+retention_policy: keep_all_runs
