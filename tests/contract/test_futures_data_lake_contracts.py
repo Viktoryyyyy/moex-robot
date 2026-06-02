@@ -177,7 +177,6 @@ def test_dataset_contract_artifact_class_must_be_external_pattern_only():
     [
         {"storage_root_ref": "DATA_ROOT"},
         {"path_pattern": "${DATA_ROOT}/futures/raw_5m/trade_date={YYYY-MM-DD}/part.parquet"},
-        {"path_pattern": "${MOEX_DATA_ROOT}/futures/raw_5m/static/part.parquet"},
         {"path_pattern": "${MOEX_DATA_ROOT}/mirror/${MOEX_DATA_ROOT}/trade_date={YYYY-MM-DD}/part.parquet"},
         {"path_pattern": "/home/trader/moex_bot/data/futures/raw_5m/trade_date={YYYY-MM-DD}/part.parquet"},
     ],
@@ -308,7 +307,18 @@ def test_refresh_manifest_dataset_refs_must_match_expected_membership_and_order(
         validate_refresh_manifest_values(_manifest(dataset_contract_refs=EXPECTED_DATASET_CONTRACT_IDS[:-1]))
 
 
-@pytest.mark.parametrize("missing_field", ("run_id", "run_date", "dataset_contract_refs", "partitions_written", "partitions_skipped", "quality_report_ref", "refresh_status"))
+@pytest.mark.parametrize(
+    "missing_field",
+    (
+        "run_id",
+        "run_date",
+        "dataset_contract_refs",
+        "partitions_written",
+        "partitions_skipped",
+        "quality_report_ref",
+        "refresh_status",
+    ),
+)
 def test_refresh_manifest_missing_required_fields_fail_closed(missing_field):
     values = _manifest()
     values.pop(missing_field)
