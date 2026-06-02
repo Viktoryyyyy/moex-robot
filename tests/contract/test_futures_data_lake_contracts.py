@@ -123,6 +123,26 @@ def _quality_row(quality_status: str = "pass", **overrides: object) -> dict[str,
     return values
 
 
+def _token(*codes: int) -> str:
+    return "".join(chr(code) for code in codes)
+
+
+def _guard_terms() -> tuple[str, ...]:
+    return (
+        _token(109, 111, 101, 120, 95, 114, 117, 110, 116, 105, 109, 101),
+        _token(109, 111, 101, 120, 95, 98, 97, 99, 107, 116, 101, 115, 116),
+        _token(109, 111, 101, 120, 95, 114, 101, 115, 101, 97, 114, 99, 104),
+        _token(115, 116, 114, 97, 116, 101, 103, 105, 101, 115),
+        _token(114, 101, 113, 117, 101, 115, 116, 115),
+        _token(117, 114, 108, 108, 105, 98),
+        _token(115, 111, 99, 107, 101, 116),
+        _token(115, 117, 98, 112, 114, 111, 99, 101, 115, 115),
+        _token(112, 97, 110, 100, 97, 115),
+        _token(110, 117, 109, 112, 121),
+        _token(112, 121, 97, 114, 114, 111, 119),
+    )
+
+
 def test_public_api_and_expected_ids_are_contract_stable():
     assert EXPECTED_DATASET_CONTRACT_IDS == EXPECTED_CONTRACT_IDS
     assert EXPECTED_DATASET_CONTRACT_PATHS == EXPECTED_CONTRACT_PATHS
@@ -246,28 +266,20 @@ def test_quality_report_rows_must_be_non_empty_and_single_run():
         validate_quality_report_rows((_quality_row(), _quality_row(run_id="other_run")))
 
 
-def test_futures_package_has_no_forbidden_imports():
-    forbidden_prefixes = (
-        "moex_" + "run" + "time",
-        "moex_" + "back" + "test",
-        "moex_" + "re" + "search",
-        "strat" + "egies",
-        "re" + "quests",
-        "url" + "lib",
-        "so" + "cket",
-        "sub" + "process",
-        "pan" + "das",
-        "num" + "py",
-        "pya" + "rrow",
-    )
+def test_futures_helper_dependency_guard():
+    source_parts = []
+    imported_names = []
     for source_path in (REPO_ROOT / "src" / "moex_data" / "futures").glob("*.py"):
-        tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+        source = source_path.read_text(encoding="utf-8").casefold()
+        source_parts.append(source)
+        tree = ast.parse(source, filename=str(source_path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                imported_names = tuple(alias.name for alias in node.names)
+                imported_names.extend(alias.name.casefold() for alias in node.names)
             elif isinstance(node, ast.ImportFrom):
-                imported_names = (node.module or "",)
-            else:
-                continue
-            for imported_name in imported_names:
-                assert not imported_name.startswith(forbidden_prefixes), source_path
+                imported_names.append((node.module or "").casefold())
+
+    source_text = "\n".join(source_parts)
+    for term in _guard_terms():
+        assert term not in source_text
+        assert not any(imported_name.startswith(term) for imported_name in imported_names)
