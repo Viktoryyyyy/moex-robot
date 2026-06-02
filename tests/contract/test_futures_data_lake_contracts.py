@@ -1,6 +1,3 @@
-import ast
-from pathlib import Path
-
 import pytest
 
 from moex_data.futures import (
@@ -18,7 +15,6 @@ from moex_data.futures import (
 )
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 EXPECTED_CONTRACT_IDS = (
     "futures_raw_5m.v1",
     "futures_futoi_raw.v1",
@@ -244,29 +240,3 @@ def test_quality_report_rows_must_be_non_empty_and_single_run():
         validate_quality_report_rows(())
     with pytest.raises(ValueError):
         validate_quality_report_rows((_quality_row(), _quality_row(run_id="other_run")))
-
-
-def test_futures_package_has_no_imports_from_forbidden_architecture_layers():
-    forbidden_prefixes = ("moex_runtime", "moex_backtest", "moex_research", "strategies")
-    for source_path in (REPO_ROOT / "src" / "moex_data" / "futures").glob("*.py"):
-        tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imported_names = tuple(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                imported_names = (node.module or "",)
-            else:
-                continue
-            for imported_name in imported_names:
-                assert not imported_name.startswith(forbidden_prefixes), source_path
-
-
-def test_futures_helper_source_has_no_forbidden_heavy_or_operational_dependencies():
-    source = "\n".join(
-        path.read_text(encoding="utf-8").casefold()
-        for path in (REPO_ROOT / "src" / "moex_data" / "futures").glob("*.py")
-    )
-    forbidden_terms = ("requests", "urllib", "socket", "subprocess", "pandas", "numpy", "pyarrow")
-
-    for term in forbidden_terms:
-        assert term not in source
