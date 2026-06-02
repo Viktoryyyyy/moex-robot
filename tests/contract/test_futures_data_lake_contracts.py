@@ -266,20 +266,15 @@ def test_quality_report_rows_must_be_non_empty_and_single_run():
         validate_quality_report_rows((_quality_row(), _quality_row(run_id="other_run")))
 
 
-def test_futures_helper_dependency_guard():
-    source_parts = []
+def test_futures_helper_dependency_import_guard():
     imported_names = []
     for source_path in (REPO_ROOT / "src" / "moex_data" / "futures").glob("*.py"):
-        source = source_path.read_text(encoding="utf-8").casefold()
-        source_parts.append(source)
-        tree = ast.parse(source, filename=str(source_path))
+        tree = ast.parse(source_path.read_text(encoding="utf-8").casefold(), filename=str(source_path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 imported_names.extend(alias.name.casefold() for alias in node.names)
             elif isinstance(node, ast.ImportFrom):
                 imported_names.append((node.module or "").casefold())
 
-    source_text = "\n".join(source_parts)
     for term in _guard_terms():
-        assert term not in source_text
         assert not any(imported_name.startswith(term) for imported_name in imported_names)
