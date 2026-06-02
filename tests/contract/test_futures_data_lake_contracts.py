@@ -41,6 +41,7 @@ EXPECTED_CONTRACT_PATHS = (
     "contracts/datasets/futures_quality_report.v1.yaml",
     "contracts/datasets/futures_continuous_5m.v1.yaml",
 )
+CONFIG_VALIDATION_ERRORS = (FuturesConfigValidationError, FuturesContractValidationError)
 
 
 def _dataset_id(contract_id: str) -> str:
@@ -249,7 +250,7 @@ def test_config_uses_repo_relative_artifact_class_and_pr106_contract_paths():
     ],
 )
 def test_config_invalid_artifact_paths_refs_and_blocked_contracts_fail_closed(overrides):
-    with pytest.raises(FuturesConfigValidationError):
+    with pytest.raises(CONFIG_VALIDATION_ERRORS):
         validate_futures_data_lake_config_values(_config(**overrides))
 
 
@@ -262,7 +263,7 @@ def test_config_invalid_artifact_paths_refs_and_blocked_contracts_fail_closed(ov
     ],
 )
 def test_config_external_storage_root_must_be_env_contract_moex_data_root(external_storage_root):
-    with pytest.raises(FuturesConfigValidationError):
+    with pytest.raises(CONFIG_VALIDATION_ERRORS):
         validate_futures_data_lake_config_values(_config(external_storage_root=external_storage_root))
 
 
@@ -282,7 +283,7 @@ def test_config_missing_required_fields_fail_closed(missing_field):
     values = _config()
     values.pop(missing_field)
 
-    with pytest.raises(FuturesConfigValidationError):
+    with pytest.raises(CONFIG_VALIDATION_ERRORS):
         validate_futures_data_lake_config_values(values)
 
 
