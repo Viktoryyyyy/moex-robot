@@ -1,0 +1,5 @@
+contract_id: instrument_registry.v1
+registry_kind: instrument
+artifact_class: repo_relative
+config_ref: configs/instruments/instrument_registry.v1.yaml
+schema_version: registry_contract.v1
