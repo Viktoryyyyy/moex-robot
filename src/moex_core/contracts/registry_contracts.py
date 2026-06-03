@@ -78,6 +78,7 @@ class RegistryEntry:
     enabled: bool
     registry_mutation_allowed: bool
     promotion_ref_or_none: str | None
+    payload: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -87,6 +88,10 @@ class RegistryPackage:
 
 def _blocked_tokens() -> tuple[str, ...]:
     return ("late" + "st", "cur" + "rent", "auto" + "detect")
+
+
+def _approval_tokens() -> tuple[str, ...]:
+    return ("metric", "verdict", "approval", "approved", "promotion")
 
 
 def _require_text(value: object, field_name: str) -> str:
@@ -105,6 +110,11 @@ def _guard_text(value: str, field_name: str) -> str:
     if value.startswith("/"):
         raise RegistryContractError(f"{field_name} must not be absolute")
     return value
+
+
+def _contains_approval_token(value: object) -> bool:
+    normalized = str(value).casefold()
+    return any(token in normalized for token in _approval_tokens())
 
 
 def _require_bool(value: object, field_name: str) -> bool:
@@ -149,9 +159,38 @@ def _validate_repo_path(value: object, registry_kind: str) -> str:
     return repo_path
 
 
+def _guard_payload(value: object, field_name: str) -> None:
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if _contains_approval_token(key):
+                raise RegistryContractError("strategy promotion approval must stay outside registry")
+            _guard_text(str(key), field_name)
+            _guard_payload(item, f"{field_name}.{key}")
+        return
+    if isinstance(value, (str, bytes)):
+        _guard_text(str(value), field_name)
+        return
+    if isinstance(value, Sequence):
+        for item in value:
+            _guard_payload(item, field_name)
+        return
+    if value is None or isinstance(value, (bool, int, float)):
+        return
+    raise RegistryContractError("payload contains unsupported value")
+
+
+def _validate_payload(value: object, registry_kind: str) -> dict[str, object] | None:
+    if value is None:
+        return None
+    if not isinstance(value, Mapping):
+        raise RegistryContractError("registry payload must be a mapping")
+    _guard_payload(value, registry_kind)
+    return dict(value)
+
+
 def _entry_to_values(entry: object) -> Mapping[str, object]:
     if isinstance(entry, RegistryEntry):
-        return {
+        values: dict[str, object] = {
             "entry_id": entry.entry_id,
             "registry_kind": entry.registry_kind,
             "config_id": entry.config_id,
@@ -162,6 +201,9 @@ def _entry_to_values(entry: object) -> Mapping[str, object]:
             "registry_mutation_allowed": entry.registry_mutation_allowed,
             "promotion_ref_or_none": entry.promotion_ref_or_none,
         }
+        if entry.payload is not None:
+            values[entry.registry_kind] = entry.payload
+        return values
     if isinstance(entry, Mapping):
         return entry
     raise RegistryContractError("registry entry must be a mapping or RegistryEntry")
@@ -170,18 +212,21 @@ def _entry_to_values(entry: object) -> Mapping[str, object]:
 def validate_registry_entry_values(values: Mapping[str, object]) -> RegistryEntry:
     if not isinstance(values, Mapping):
         raise RegistryContractError("registry entry values must be a mapping")
-    expected_fields = set(_REQUIRED_FIELDS)
-    unknown_fields = set(values).difference(expected_fields)
-    if unknown_fields:
-        normalized = " ".join(str(field).casefold() for field in unknown_fields)
-        if "metric" in normalized or "verdict" in normalized or "approval" in normalized:
-            raise RegistryContractError("strategy promotion approval must stay outside registry")
-        raise RegistryContractError("registry entry contains unsupported fields")
-    if tuple(field for field in _REQUIRED_FIELDS if field not in values):
+    missing = tuple(field for field in _REQUIRED_FIELDS if field not in values)
+    if missing:
         raise RegistryContractError("registry entry is missing required fields")
+
     registry_kind = _require_text(values["registry_kind"], "registry_kind")
     if registry_kind not in REGISTRY_KINDS:
         raise RegistryContractError("unsupported registry_kind")
+
+    allowed_fields = set(_REQUIRED_FIELDS) | {registry_kind}
+    unknown_fields = set(values).difference(allowed_fields)
+    if unknown_fields:
+        if any(_contains_approval_token(field) for field in unknown_fields):
+            raise RegistryContractError("strategy promotion approval must stay outside registry")
+        raise RegistryContractError("registry entry contains unsupported fields")
+
     entry_id = _require_text(values["entry_id"], "entry_id")
     if not entry_id.startswith(f"{registry_kind}."):
         raise RegistryContractError("entry_id must be typed by registry_kind")
@@ -201,6 +246,7 @@ def validate_registry_entry_values(values: Mapping[str, object]) -> RegistryEntr
         enabled=_require_bool(values["enabled"], "enabled"),
         registry_mutation_allowed=registry_mutation_allowed,
         promotion_ref_or_none=_require_ref_or_none(values["promotion_ref_or_none"], "promotion_ref_or_none"),
+        payload=_validate_payload(values.get(registry_kind), registry_kind),
     )
 
 
