@@ -1,0 +1,14 @@
+entry_id: feature.d1_tsmom_inputs.v1
+registry_kind: feature
+config_id: feature_registry.d1_tsmom_inputs.v1
+artifact_class: repo_relative
+repo_path: configs/features/feature_registry.v1.yaml
+dependencies:
+  dataset:
+    - dataset.futures_derived_d1.v1
+enabled: true
+registry_mutation_allowed: false
+promotion_ref_or_none: null
+feature:
+  feature_id: d1_tsmom_inputs
+  version: v1
