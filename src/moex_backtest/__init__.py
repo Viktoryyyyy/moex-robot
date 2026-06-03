@@ -1,4 +1,11 @@
 from .costs.models import ALLOWED_COST_MODEL_IDS, ALLOWED_SLIPPAGE_MODEL_IDS, CostSlippageModelSpec
+from .engine import (
+    BacktestValidationError,
+    CanonicalBacktestEngine,
+    CanonicalBacktestInput,
+    CostConfig,
+    ExecutionConfig,
+)
 from .engine.interfaces import BacktestEngine, BacktestRequest, BacktestResult
 from .fills.models import ALLOWED_FILL_MODEL_IDS, FillModelSpec
 from .reports.artifacts import REQUIRED_CANONICAL_BACKTEST_ARTIFACT_NAMES
@@ -12,7 +19,12 @@ __all__ = [
     "BacktestRequest",
     "BacktestResult",
     "BacktestSemanticsContract",
+    "BacktestValidationError",
+    "CanonicalBacktestEngine",
+    "CanonicalBacktestInput",
+    "CostConfig",
     "CostSlippageModelSpec",
+    "ExecutionConfig",
     "FillModelSpec",
     "REQUIRED_BACKTEST_SEMANTICS_FIELDS",
     "REQUIRED_CANONICAL_BACKTEST_ARTIFACT_NAMES",
