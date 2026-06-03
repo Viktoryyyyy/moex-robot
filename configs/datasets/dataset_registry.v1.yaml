@@ -1,0 +1,14 @@
+entry_id: dataset.futures_derived_d1.v1
+registry_kind: dataset
+config_id: dataset_registry.futures_derived_d1.v1
+artifact_class: repo_relative
+repo_path: configs/datasets/dataset_registry.v1.yaml
+dependencies:
+  instrument:
+    - instrument.Si.v1
+enabled: true
+registry_mutation_allowed: false
+promotion_ref_or_none: null
+dataset:
+  dataset_id: futures_derived_d1
+  contract_ref: contracts/datasets/futures_derived_d1.v1.yaml
