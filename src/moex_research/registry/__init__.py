@@ -1,3 +1,4 @@
+from .dry_write import DryExperimentRegistryWriter, DryRegistryWriteResult
 from .schemas import (
     ALLOWED_CANONICALITY_STATUSES,
     ALLOWED_RESULT_STATUSES,
@@ -20,6 +21,8 @@ __all__ = [
     "ALLOWED_CANONICALITY_STATUSES",
     "ALLOWED_RESULT_STATUSES",
     "ALLOWED_RUN_STATUSES",
+    "DryExperimentRegistryWriter",
+    "DryRegistryWriteResult",
     "REQUIRED_ARTIFACT_MANIFEST_FIELDS",
     "REQUIRED_ARTIFACT_MANIFEST_ITEM_FIELDS",
     "REQUIRED_CANONICAL_ARTIFACT_ROLES",
