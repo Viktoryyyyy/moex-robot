@@ -1,0 +1,13 @@
+entry_id: portfolio.single_strategy_research.v1
+registry_kind: portfolio
+config_id: portfolio_registry.single_strategy_research.v1
+artifact_class: repo_relative
+repo_path: configs/portfolios/portfolio_registry.v1.yaml
+dependencies:
+  strategy:
+    - strategy.d1_tsmom.v1
+  instrument:
+    - instrument.Si.v1
+enabled: false
+registry_mutation_allowed: false
+promotion_ref_or_none: null
