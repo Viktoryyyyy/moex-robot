@@ -1,0 +1,7 @@
+contract_id: dataset_registry.v1
+registry_kind: dataset
+artifact_class: repo_relative
+config_ref: configs/datasets/dataset_registry.v1.yaml
+schema_version: registry_contract.v1
+required_dependency_kinds:
+  - instrument
