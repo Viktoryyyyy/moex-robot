@@ -149,6 +149,24 @@ def _validate_repo_path(value: object, registry_kind: str) -> str:
     return repo_path
 
 
+def _entry_to_values(entry: object) -> Mapping[str, object]:
+    if isinstance(entry, RegistryEntry):
+        return {
+            "entry_id": entry.entry_id,
+            "registry_kind": entry.registry_kind,
+            "config_id": entry.config_id,
+            "artifact_class": entry.artifact_class,
+            "repo_path": entry.repo_path,
+            "dependencies": entry.dependencies,
+            "enabled": entry.enabled,
+            "registry_mutation_allowed": entry.registry_mutation_allowed,
+            "promotion_ref_or_none": entry.promotion_ref_or_none,
+        }
+    if isinstance(entry, Mapping):
+        return entry
+    raise RegistryContractError("registry entry must be a mapping or RegistryEntry")
+
+
 def validate_registry_entry_values(values: Mapping[str, object]) -> RegistryEntry:
     if not isinstance(values, Mapping):
         raise RegistryContractError("registry entry values must be a mapping")
@@ -194,7 +212,7 @@ def validate_registry_package_values(values: Mapping[str, object]) -> RegistryPa
     entries_value = values["entries"]
     if isinstance(entries_value, (str, bytes)) or not isinstance(entries_value, Sequence):
         raise RegistryContractError("entries must be a sequence")
-    entries = tuple(validate_registry_entry_values(entry) for entry in entries_value)
+    entries = tuple(validate_registry_entry_values(_entry_to_values(entry)) for entry in entries_value)
     if tuple(entry.registry_kind for entry in entries) != REGISTRY_KINDS:
         raise RegistryContractError("registry package must contain required registry kinds in order")
     _validate_unique_entries(entries)
