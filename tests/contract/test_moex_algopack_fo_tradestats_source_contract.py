@@ -37,6 +37,13 @@ EXPECTED_FIELD_MAPPING = {
     "source": "algopack.fo.tradestats.v1",
     "ingest_ts": "source snapshot creation timestamp",
 }
+EXPECTED_LIFECYCLE_STATUSES = {
+    "listed_active_with_trades",
+    "listed_active_no_trades",
+    "expired_with_history",
+    "expired_no_data",
+    "unknown_or_invalid_contract",
+}
 
 
 def _parse_scalar(value: str) -> object:
@@ -134,7 +141,32 @@ def test_target_partition_endpoint_and_query_are_exact():
     assert contract["response_format"] == "ISS-style JSON"
     assert contract["primary_table"] == "data"
     assert contract["pagination_table"] == "data.cursor"
+
+
+def test_confirmed_row_count_is_diagnostic_evidence_not_exact_invariant():
+    contract = _source_contract()
+
     assert contract["confirmed_row_count"] == 96
+    semantics = contract["confirmed_row_count_semantics"]
+    assert semantics["status"] == "diagnostic_evidence_only"
+    assert semantics["invariant"] == "not_exact_row_count_requirement"
+    interpretation = "\n".join(semantics["interpretation"])
+    assert "earlier diagnostic evidence only" in interpretation
+    assert "must not be used as a hard equality invariant" in interpretation
+    assert "lifecycle-aware row_count semantics" in interpretation
+
+
+def test_approved_explicit_source_artifact_accepts_observed_115_rows():
+    artifact = _source_contract()["approved_explicit_source_artifact"]
+
+    assert artifact["external_path"] == (
+        "/home/trader/moex_bot/data/source_snapshots/"
+        "moex_algopack_fo_tradestats_snapshot.v1/SiM6_2026-06-02.csv"
+    )
+    assert artifact["row_count"] == 115
+    assert artifact["sha256"] == "a15c3e73ab781b1f327698d7319a294e117b03e1a9efebaad6498e8d4b2e513b"
+    assert artifact["lifecycle_status"] == "listed_active_with_trades"
+    assert artifact["materializer_input_status"] == "acceptable_after_schema_identity_hash_manifest_checks"
 
 
 def test_required_source_columns_and_mapping_cover_raw_5m_contract():
@@ -156,6 +188,42 @@ def test_timestamp_and_pagination_semantics_are_contract_only():
     assert contract["pagination_rule"] == ["fail closed if data.cursor indicates incomplete pagination"]
 
 
+def test_lifecycle_aware_row_count_semantics_are_declared():
+    semantics = _source_contract()["lifecycle_row_count_semantics"]
+
+    assert semantics["row_count_interpretation"] == "lifecycle_aware"
+    assert set(semantics["lifecycle_statuses"]) == EXPECTED_LIFECYCLE_STATUSES
+    assert "positive row_count is expected" in semantics["listed_active_with_trades"]
+    assert "fail closed" in "\n".join(semantics["unknown_or_invalid_contract"])
+    assert (
+        "row_count=0 may be acceptable only after schema, partition identity, lifecycle, and manifest evidence are valid"
+        in semantics["listed_active_no_trades"]
+    )
+    assert (
+        "row_count=0 may be acceptable only when lifecycle evidence confirms no historical data exists for the requested partition"
+        in semantics["expired_no_data"]
+    )
+
+
+def test_zero_row_rules_are_lifecycle_aware_and_fail_closed_when_ambiguous():
+    rules = set(_source_contract()["zero_row_interpretation"])
+
+    assert "row_count=0 is not automatically failure" in rules
+    assert "row_count=0 must be interpreted through lifecycle status" in rules
+    assert "unknown lifecycle must fail closed" in rules
+    assert "ambiguous source response must fail closed" in rules
+    assert "unknown_or_invalid_contract with row_count=0 must fail closed" in rules
+
+
+def test_positive_row_count_still_requires_schema_identity_hash_and_manifest_checks():
+    rules = set(_source_contract()["positive_row_count_rules"])
+
+    assert "positive row_count does not by itself authorize materialization" in rules
+    assert "positive row_count still requires schema validation" in rules
+    assert "positive row_count still requires partition identity validation" in rules
+    assert "positive row_count still requires hash and manifest validation" in rules
+
+
 def test_fail_closed_conditions_include_required_guards():
     conditions = set(_source_contract()["fail_closed_conditions"])
 
@@ -163,7 +231,11 @@ def test_fail_closed_conditions_include_required_guards():
         "HTTP status != 200",
         "non-JSON response",
         "missing required columns",
-        "row_count = 0",
+        "unknown lifecycle status",
+        "ambiguous source response",
+        "unknown_or_invalid_contract",
+        "row_count=0 with unknown or ambiguous lifecycle",
+        "row_count=0 for listed_active_with_trades",
         "secid != SiM6",
         "asset_code != Si",
         "tradedate != 2026-06-02",
@@ -178,6 +250,8 @@ def test_fail_closed_conditions_include_required_guards():
         "latest/current/autodetect dynamic selection",
     ):
         assert required_condition in conditions
+
+    assert "row_count = 0" not in conditions
 
 
 def test_scope_exclusions_block_artifact_creation_materialization_and_runtime_permissions():
@@ -209,6 +283,9 @@ def test_contract_does_not_declare_output_paths_or_permissioned_execution():
         "httpx",
         "aiohttp",
         "socket",
+        "must exactly equal 96",
+        "row_count = 96",
+        "row_count == 96",
     )
     for marker in forbidden_contract_markers:
         assert marker not in contract_text
