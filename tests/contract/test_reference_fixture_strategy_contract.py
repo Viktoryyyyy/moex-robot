@@ -31,12 +31,18 @@ def test_reference_fixture_strategy_required_files_exist():
 
 def test_manifest_declares_required_contract_fields_and_blocks_live():
     for field_name in REQUIRED_MANIFEST_FIELDS:
-        assert getattr(MANIFEST, field_name)
+        assert hasattr(MANIFEST, field_name)
     assert MANIFEST.strategy_id == STRATEGY_ID
-    assert MANIFEST.supports_backtest is True
-    assert MANIFEST.supports_live is False
+    assert MANIFEST.version == "0.1.0"
+    assert MANIFEST.instrument_scope == ("Si",)
+    assert MANIFEST.timeframe == "D1"
     assert MANIFEST.required_datasets == ("dataset.futures_derived_d1.v1",)
     assert MANIFEST.required_features == ("feature.d1_tsmom_inputs.v1",)
+    assert MANIFEST.required_labels == ("label.reference_fixture_none.v1",)
+    assert MANIFEST.supports_backtest is True
+    assert MANIFEST.supports_live is False
+    assert MANIFEST.report_schema_version == "reference_fixture_report.v1"
+    assert MANIFEST.artifact_contract_version == "reference_fixture_artifacts.v1"
 
 
 def test_config_is_typed_validated_and_fail_closed():
