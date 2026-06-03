@@ -16,7 +16,6 @@ from .schemas import (
     validate_metrics_summary,
     validate_metrics_summary_values,
 )
-from .summary import build_backtest_metrics_summary
 
 __all__ = [
     "ALLOWED_GROSS_OR_NET",
@@ -27,7 +26,6 @@ __all__ = [
     "MetricsArtifactSpec",
     "MetricsSummary",
     "MetricsValidationError",
-    "build_backtest_metrics_summary",
     "validate_metric_record",
     "validate_metric_record_values",
     "validate_metrics_artifact_spec",
