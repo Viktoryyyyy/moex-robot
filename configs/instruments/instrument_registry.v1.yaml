@@ -1,0 +1,14 @@
+entry_id: instrument.Si.v1
+registry_kind: instrument
+config_id: instrument_registry.Si.v1
+artifact_class: repo_relative
+repo_path: configs/instruments/instrument_registry.v1.yaml
+dependencies: {}
+enabled: true
+registry_mutation_allowed: false
+promotion_ref_or_none: null
+instrument:
+  family: Si
+  market: futures
+  timeframe_scope:
+    - D1
