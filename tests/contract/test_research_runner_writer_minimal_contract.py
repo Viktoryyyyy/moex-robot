@@ -7,7 +7,6 @@ from moex_research.runners.dry_run import (
     ResearchRunRequest,
     ResearchRunnerValidationError,
 )
-from moex_research.registry.schemas import RegistryValidationError
 from strategies.reference_fixture_strategy.manifest import MANIFEST, STRATEGY_ID
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -155,15 +154,15 @@ def test_stdout_only_and_dynamic_artifact_references_are_rejected():
         _request(artifact_root="artifacts/research/*")
 
 
-def test_runtime_live_and_production_registry_paths_are_blocked():
+def test_runtime_live_production_registry_and_registry_mode_paths_are_blocked():
     with pytest.raises(ResearchRunnerValidationError):
         _request(runtime_live_allowed=True)
     with pytest.raises(ResearchRunnerValidationError):
         _request(production_registry_write_allowed=True)
     with pytest.raises(ResearchRunnerValidationError):
         _request(promotion_verdict_ref="reports/promotion.json")
-    with pytest.raises(RegistryValidationError):
-        MinimalResearchRunner().run(_request(registry_write_mode="production_write"))
+    with pytest.raises(ResearchRunnerValidationError):
+        _request(registry_write_mode="production_write")
 
 
 def test_runner_source_has_no_file_io_network_runtime_or_custom_pnl_engine_terms():
