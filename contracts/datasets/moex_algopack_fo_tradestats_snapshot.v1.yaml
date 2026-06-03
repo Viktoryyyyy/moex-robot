@@ -19,6 +19,19 @@ response_format: ISS-style JSON
 primary_table: data
 pagination_table: data.cursor
 confirmed_row_count: 96
+confirmed_row_count_semantics:
+  status: diagnostic_evidence_only
+  invariant: not_exact_row_count_requirement
+  interpretation:
+    - confirmed_row_count records earlier diagnostic evidence only
+    - confirmed_row_count must not be used as a hard equality invariant for source artifacts
+    - lifecycle-aware row_count semantics determine whether observed row_count is acceptable
+approved_explicit_source_artifact:
+  external_path: /home/trader/moex_bot/data/source_snapshots/moex_algopack_fo_tradestats_snapshot.v1/SiM6_2026-06-02.csv
+  row_count: 115
+  sha256: a15c3e73ab781b1f327698d7319a294e117b03e1a9efebaad6498e8d4b2e513b
+  lifecycle_status: listed_active_with_trades
+  materializer_input_status: acceptable_after_schema_identity_hash_manifest_checks
 required_source_columns:
   - tradedate
   - tradetime
@@ -54,11 +67,45 @@ timestamp_semantics:
   - session_date equals tradedate for this single artifact only
 pagination_rule:
   - fail closed if data.cursor indicates incomplete pagination
+lifecycle_row_count_semantics:
+  row_count_interpretation: lifecycle_aware
+  lifecycle_statuses:
+    - listed_active_with_trades
+    - listed_active_no_trades
+    - expired_with_history
+    - expired_no_data
+    - unknown_or_invalid_contract
+  listed_active_with_trades:
+    - positive row_count is expected
+    - row_count=0 fails unless lifecycle evidence is revised to listed_active_no_trades
+  listed_active_no_trades:
+    - row_count=0 may be acceptable only after schema, partition identity, lifecycle, and manifest evidence are valid
+  expired_with_history:
+    - positive historical row_count may be acceptable after schema, partition identity, lifecycle, and manifest evidence are valid
+  expired_no_data:
+    - row_count=0 may be acceptable only when lifecycle evidence confirms no historical data exists for the requested partition
+  unknown_or_invalid_contract:
+    - fail closed
+zero_row_interpretation:
+  - row_count=0 is not automatically failure
+  - row_count=0 must be interpreted through lifecycle status
+  - unknown lifecycle must fail closed
+  - ambiguous source response must fail closed
+  - unknown_or_invalid_contract with row_count=0 must fail closed
+positive_row_count_rules:
+  - positive row_count does not by itself authorize materialization
+  - positive row_count still requires schema validation
+  - positive row_count still requires partition identity validation
+  - positive row_count still requires hash and manifest validation
 fail_closed_conditions:
   - HTTP status != 200
   - non-JSON response
   - missing required columns
-  - row_count = 0
+  - unknown lifecycle status
+  - ambiguous source response
+  - unknown_or_invalid_contract
+  - row_count=0 with unknown or ambiguous lifecycle
+  - row_count=0 for listed_active_with_trades
   - secid != SiM6
   - asset_code != Si
   - tradedate != 2026-06-02
