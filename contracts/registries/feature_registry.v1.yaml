@@ -1,0 +1,7 @@
+contract_id: feature_registry.v1
+registry_kind: feature
+artifact_class: repo_relative
+config_ref: configs/features/feature_registry.v1.yaml
+schema_version: registry_contract.v1
+required_dependency_kinds:
+  - dataset

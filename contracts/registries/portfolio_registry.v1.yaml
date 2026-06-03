@@ -1,0 +1,5 @@
+contract_id: portfolio_registry.v1
+registry_kind: portfolio
+artifact_class: repo_relative
+config_ref: configs/portfolios/portfolio_registry.v1.yaml
+schema_version: registry_contract.v1

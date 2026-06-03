@@ -1,0 +1,9 @@
+contract_id: strategy_registry.v1
+registry_kind: strategy
+artifact_class: repo_relative
+config_ref: configs/strategies/strategy_registry.v1.yaml
+schema_version: registry_contract.v1
+required_dependency_kinds:
+  - dataset
+  - feature
+  - instrument
