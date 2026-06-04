@@ -1,0 +1,18 @@
+backtest_id: d1_tsmom_minimal.platform_run.v1
+strategy_id: d1_tsmom_minimal
+strategy_config_ref: configs/strategies/d1_tsmom_minimal.platform_run.v1.yaml
+canonical_backtest_engine_ref: src/moex_backtest/engine/canonical.py
+backtest_adapter_ref: src/strategies/d1_tsmom_minimal/backtest_adapter.py
+timeframe: D1
+execution_semantics:
+  fill_model_id: next_bar_open
+  signal_timestamp_rule: signal row timestamp is decision timestamp
+  execution_delay_rule: strict next bar after signal timestamp
+  terminal_close: true
+cost_config:
+  commission_bps: 0.0
+  slippage_bps: 0.0
+initial_cash: 0.0
+runtime_live_allowed: false
+broker_integration_allowed: false
+market_conclusion_allowed: false
