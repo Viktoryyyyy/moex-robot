@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from moex_backtest.engine.interfaces import BacktestResult
@@ -17,6 +19,7 @@ PROCESS_PROOF_STRATEGY_CONFIG_REF = "configs/strategies/reference_fixture_strate
 PROCESS_PROOF_BACKTEST_CONFIG_REF = "configs/backtests/reference_fixture_strategy.process_proof.v1.yaml"
 PROCESS_PROOF_ARTIFACT_ROOT = "artifacts/research/process_proofs"
 PROCESS_PROOF_REPO_COMMIT = "699eba0652c414ec72543d4ff556dc9ffeb44fac"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _declared_strategy_registry_entry(**overrides):
@@ -95,6 +98,23 @@ def _validate_process_proof_selection(registry_entry_values, request):
     if payload.get("version") != request.strategy_version:
         raise RegistryContractError("strategy version mismatch")
     return entry
+
+
+def _assert_repo_relative_config_ref_materialized(config_ref):
+    normalized = config_ref.replace("\\", "/")
+    path = Path(normalized)
+    assert normalized == config_ref
+    assert not path.is_absolute()
+    assert not any(marker in path.parts for marker in ("latest", "current", "autodetect"))
+    assert not any(token in normalized for token in ("*", "?", "[", "]", "{", "}"))
+    resolved = _REPO_ROOT / path
+    assert resolved.is_file()
+    assert "repo_path: " + normalized in resolved.read_text(encoding="utf-8")
+
+
+def test_first_fast_strategy_process_proof_config_refs_are_materialized_repo_relative_files():
+    _assert_repo_relative_config_ref_materialized(PROCESS_PROOF_STRATEGY_CONFIG_REF)
+    _assert_repo_relative_config_ref_materialized(PROCESS_PROOF_BACKTEST_CONFIG_REF)
 
 
 def test_first_fast_strategy_process_proof_connects_selection_runner_backtest_and_artifacts():
