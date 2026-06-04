@@ -1,0 +1,57 @@
+schema_id: experiment_registry_entry.v1
+artifact_class: repo_relative
+repo_path: contracts/experiments/experiment_registry_entry.v1.yaml
+purpose: minimal production-capable experiment registry entry contract
+required_fields:
+  - registry_entry_id
+  - run_id
+  - strategy_id
+  - strategy_version
+  - run_status
+  - result_status
+  - result_storage_bundle_ref
+  - artifact_bundle_manifest_ref
+  - pm_review_closeout_ref
+  - repo_commit
+  - data_refs
+  - result_refs
+  - immutable_inputs_hash
+allowed_run_statuses:
+  - planned
+  - dry_run_validated
+  - controlled_written
+  - blocked
+  - failed
+allowed_result_statuses:
+  - not_evaluated
+  - supported_provisional
+  - not_supported_provisional
+  - blocked
+required_data_refs:
+  - dataset_version_or_hash
+  - source_snapshot_ref
+  - data_refresh_manifest_ref
+  - materialized_partition_ref
+  - quality_report_ref
+required_result_refs:
+  - parameter_snapshot_ref
+  - canonical_backtest_result_ref
+  - research_runner_ref
+  - research_run_request_ref
+  - strategy_package_ref
+  - strategy_config_ref
+forbidden_ref_markers:
+  - latest
+  - current
+  - autodetect
+forbidden_values:
+  - approved
+  - promoted
+  - live_ready
+  - runtime_ready
+  - production_ready
+  - market_supported
+production_write_allowed: false
+runtime_live_allowed: false
+broker_integration_allowed: false
+market_conclusion_allowed: false

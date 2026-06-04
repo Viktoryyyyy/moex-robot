@@ -1,0 +1,42 @@
+schema_id: result_storage_bundle.v1
+artifact_class: repo_relative
+repo_path: contracts/experiments/result_storage_bundle.v1.yaml
+purpose: minimal result storage bundle contract for dry-run and controlled local writes
+required_fields:
+  - run_id
+  - schema_version
+  - storage_mode
+  - immutable_inputs
+  - immutable_inputs_hash
+  - data_refs
+  - result_refs
+  - artifact_manifest
+  - pm_review_closeout_ref
+  - finalized
+allowed_storage_modes:
+  - dry_run
+  - controlled_fixture
+  - controlled_tempdir
+  - controlled_local_test
+blocked_storage_modes:
+  - production_write
+required_data_refs:
+  - dataset_version_or_hash
+  - source_snapshot_ref
+  - data_refresh_manifest_ref
+  - materialized_partition_ref
+  - quality_report_ref
+required_result_refs:
+  - parameter_snapshot_ref
+  - canonical_backtest_result_ref
+  - research_runner_ref
+  - research_run_request_ref
+  - strategy_package_ref
+  - strategy_config_ref
+immutability_rules:
+  finalized_bundle_immutable: true
+  identical_immutable_inputs_idempotent: true
+  changed_immutable_inputs_same_run_id_collision: true
+stdout_only_result_allowed: false
+server_side_result_storage_allowed: false
+production_write_allowed: false

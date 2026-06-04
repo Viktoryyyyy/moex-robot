@@ -1,0 +1,41 @@
+schema_id: artifact_bundle_manifest.v1
+artifact_class: repo_relative
+repo_path: contracts/experiments/artifact_bundle_manifest.v1.yaml
+purpose: explicit artifact bundle manifest contract for experiment result storage
+required_fields:
+  - manifest_id
+  - run_id
+  - schema_version
+  - repo_commit
+  - artifacts
+artifact_item_required_fields:
+  - artifact_id
+  - role
+  - ref_class
+  - locator
+  - producer
+  - consumer
+  - format
+  - schema_version
+allowed_ref_classes:
+  - repo_relative
+  - external_pattern
+  - cli_argument
+  - env_contract
+required_artifact_roles:
+  - parameter_snapshot
+  - canonical_backtest_result
+  - research_run_request
+  - pm_review_closeout
+first_class_artifact_roles:
+  - research_runner
+  - strategy_package
+  - strategy_config
+  - dataset_manifest
+forbidden_ref_markers:
+  - latest
+  - current
+  - autodetect
+stdout_only_result_allowed: false
+implicit_autodetect_allowed: false
+dangling_refs_allowed: false

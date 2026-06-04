@@ -1,0 +1,28 @@
+schema_id: pm_review_closeout.v1
+artifact_class: repo_relative
+repo_path: contracts/experiments/pm_review_closeout.v1.yaml
+purpose: PM review and closeout contract for experiment registry entries
+required_fields:
+  - review_id
+  - run_id
+  - status
+  - reviewer_role
+  - reviewed_artifact_refs
+allowed_statuses:
+  - pending_pm_review
+  - accepted_final
+  - accepted_as_executed
+  - conditional_pass
+  - rejected
+  - blocked
+  - invalidated
+forbidden_statuses:
+  - approved
+  - promoted
+  - live_ready
+  - runtime_ready
+  - production_ready
+  - market_supported
+runtime_live_allowed: false
+strategy_promotion_allowed: false
+market_conclusion_allowed: false
