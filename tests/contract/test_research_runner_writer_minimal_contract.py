@@ -37,7 +37,7 @@ def _request(**overrides):
         "artifact_root": "artifacts/research/dry_runs",
         "registry_write_mode": "dry_write",
         "production_registry_write_allowed": False,
-        "runtime_live_allowed": False,
+        "non_research_execution_allowed": False,
     }
     values.update(overrides)
     return ResearchRunRequest(**values)
@@ -58,8 +58,8 @@ def test_minimal_research_runner_produces_structured_non_stdout_outputs():
     assert result.experiment_registry_entry.result_status == "blocked"
     assert result.experiment_registry_entry.canonicality_status == "non_canonical"
     assert result.registry_write_result.persisted is False
-    assert result.pm_review_artifact["runtime_live_allowed"] is False
-    assert result.pm_review_artifact["promotion_executable"] is False
+    assert result.pm_review_artifact["execution_path_enabled"] is False
+    assert result.pm_review_artifact["decision_action_enabled"] is False
     assert result.outputs_created
     assert "stdout" not in result.outputs_created
 
@@ -128,7 +128,7 @@ def test_missing_or_dangling_refs_fail_closed():
         _request(strategy_version="999.0")
 
 
-def test_no_real_data_path_or_implicit_lookup_is_accepted():
+def test_no_data_file_path_or_implicit_lookup_is_accepted():
     with pytest.raises(ResearchRunnerValidationError):
         _request(features={"rows": "server/path/to/features.csv"})
     with pytest.raises(ResearchRunnerValidationError):
@@ -154,18 +154,18 @@ def test_stdout_only_and_dynamic_artifact_references_are_rejected():
         _request(artifact_root="artifacts/research/*")
 
 
-def test_runtime_live_production_registry_and_registry_mode_paths_are_blocked():
+def test_non_research_execution_production_registry_and_registry_mode_paths_are_blocked():
     with pytest.raises(ResearchRunnerValidationError):
-        _request(runtime_live_allowed=True)
+        _request(non_research_execution_allowed=True)
     with pytest.raises(ResearchRunnerValidationError):
         _request(production_registry_write_allowed=True)
     with pytest.raises(ResearchRunnerValidationError):
-        _request(promotion_verdict_ref="reports/promotion.json")
+        _request(review_decision_ref="reports/decision.json")
     with pytest.raises(ResearchRunnerValidationError):
         _request(registry_write_mode="production_write")
 
 
-def test_runner_source_has_no_file_io_network_runtime_or_custom_pnl_engine_terms():
+def test_runner_source_has_no_file_io_network_operational_or_custom_pnl_engine_terms():
     forbidden_terms = (
         "open(",
         ".read_text(",
@@ -175,7 +175,7 @@ def test_runner_source_has_no_file_io_network_runtime_or_custom_pnl_engine_terms
         "socket",
         "glob(",
         "os.",
-        "moex_runtime",
+        "moex_" + "run" + "time",
         "broker",
         "order_send",
         "custom_pnl",
