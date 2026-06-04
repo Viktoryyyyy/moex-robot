@@ -1,0 +1,36 @@
+schema_id: d1_tsmom_minimal_platform_run_request.v1
+artifact_class: repo_relative
+repo_path: contracts/experiments/d1_tsmom_minimal_platform_run_request.v1.yaml
+purpose: exact first real platform-backed D1 TSMOM Minimal request contract for later controlled execution
+required_fields:
+  - request_id
+  - strategy_package_ref
+  - strategy_config_ref
+  - canonical_backtest_engine_ref
+  - canonical_backtest_config_ref
+  - research_runner_ref
+  - parameter_snapshot_ref
+  - dataset_refs
+  - result_storage_contract_refs
+required_dataset_refs:
+  - dataset_version_or_hash
+  - source_snapshot_ref
+  - data_refresh_manifest_ref
+  - materialized_partition_ref
+  - quality_report_ref
+  - dataset_manifest_ref
+required_result_storage_contract_refs:
+  - experiment_registry_entry_contract_ref
+  - result_storage_bundle_contract_ref
+  - artifact_bundle_manifest_contract_ref
+  - pm_review_closeout_contract_ref
+forbidden_ref_markers:
+  - latest
+  - current
+  - autodetect
+stdout_only_result_allowed: false
+production_write_allowed: false
+runtime_live_allowed: false
+broker_integration_allowed: false
+market_conclusion_allowed: false
+real_run_allowed_in_this_slice: false
