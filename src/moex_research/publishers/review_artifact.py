@@ -35,8 +35,8 @@ def build_pm_review_artifact(
         "artifact_manifest_ref": artifact_manifest.artifact_manifest_id,
         "metrics_artifact_ref": metrics_summary.artifact_ref,
         "review_boundary": "PM review only; no market conclusion or strategy readiness claim",
-        "runtime_live_allowed": False,
-        "promotion_executable": False,
+        "execution_path_enabled": False,
+        "decision_action_enabled": False,
     }
 
 
