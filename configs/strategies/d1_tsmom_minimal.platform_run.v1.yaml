@@ -1,0 +1,23 @@
+strategy_id: d1_tsmom_minimal
+strategy_package_ref: src/strategies/d1_tsmom_minimal
+schema_version: d1_tsmom_minimal_config.v1
+strategy_version: 0.1.0
+instrument_scope:
+  - Si
+  - USDRUBF
+timeframe: D1
+required_datasets:
+  - dataset.futures_derived_d1.v1
+required_features:
+  - feature.d1_tsmom_minimal_returns.v1
+required_labels:
+  - label.d1_tsmom_minimal_forward_return.v1
+parameters:
+  lookback_days: 20
+  signal_threshold: 0.0
+  target_abs_position: 1
+  execution_delay_bars: 1
+runtime_live_allowed: false
+production_registry_write_allowed: false
+parameter_optimization_allowed: false
+market_conclusion_allowed: false

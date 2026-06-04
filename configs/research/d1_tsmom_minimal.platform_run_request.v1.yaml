@@ -1,0 +1,26 @@
+request_id: d1_tsmom_minimal.platform_run_request.v1
+strategy_package_ref: src/strategies/d1_tsmom_minimal
+strategy_config_ref: configs/strategies/d1_tsmom_minimal.platform_run.v1.yaml
+canonical_backtest_engine_ref: src/moex_backtest/engine/canonical.py
+canonical_backtest_config_ref: configs/backtests/d1_tsmom_minimal.platform_run.v1.yaml
+research_runner_ref: src/moex_research/runners/d1_tsmom_minimal_platform.py
+parameter_snapshot_ref: configs/research/d1_tsmom_minimal.parameter_snapshot.v1.yaml
+dataset_refs:
+  dataset_version_or_hash: futures_d1_tsmom_minimal.contract_only.v1
+  source_snapshot_ref: contracts/datasets/futures_source_snapshot.v1.yaml
+  data_refresh_manifest_ref: contracts/datasets/futures_data_refresh_manifest.v1.yaml
+  materialized_partition_ref: contracts/datasets/futures_derived_d1.v1.yaml
+  quality_report_ref: contracts/datasets/futures_quality_report.v1.yaml
+  dataset_manifest_ref: contracts/datasets/futures_d1_tsmom_minimal_manifest.v1.yaml
+result_storage_contract_refs:
+  experiment_registry_entry_contract_ref: contracts/experiments/experiment_registry_entry.v1.yaml
+  result_storage_bundle_contract_ref: contracts/experiments/result_storage_bundle.v1.yaml
+  artifact_bundle_manifest_contract_ref: contracts/experiments/artifact_bundle_manifest.v1.yaml
+  pm_review_closeout_contract_ref: contracts/experiments/pm_review_closeout.v1.yaml
+execution_control:
+  real_run_allowed_in_this_slice: false
+  production_write_allowed: false
+  runtime_live_allowed: false
+  broker_integration_allowed: false
+  parameter_optimization_allowed: false
+  market_conclusion_allowed: false

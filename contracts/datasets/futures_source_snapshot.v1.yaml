@@ -1,0 +1,21 @@
+contract_id: futures_source_snapshot.v1
+artifact_class: external_pattern
+producer: moex_data.futures.source_snapshot
+consumers:
+  - moex_features.daily.tsmom_minimal
+  - moex_research.runners.d1_tsmom_minimal_platform
+format: json
+schema_version: futures_source_snapshot.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/futures/source_snapshots/snapshot_id={SNAPSHOT_ID}/source_snapshot.json"
+required_fields:
+  - snapshot_id
+  - source_system
+  - captured_ts
+  - source_contract_refs
+  - content_hash
+path_rules:
+  storage_root: env_contract
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+  latest_current_autodetect_allowed: false

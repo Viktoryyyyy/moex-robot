@@ -1,0 +1,13 @@
+parameter_snapshot_id: d1_tsmom_minimal.parameter_snapshot.v1
+strategy_id: d1_tsmom_minimal
+strategy_version: 0.1.0
+schema_version: d1_tsmom_minimal_parameter_snapshot.v1
+parameters:
+  lookback_days: 20
+  signal_threshold: 0.0
+  target_abs_position: 1
+  execution_delay_bars: 1
+backtest_config_ref: configs/backtests/d1_tsmom_minimal.platform_run.v1.yaml
+strategy_config_ref: configs/strategies/d1_tsmom_minimal.platform_run.v1.yaml
+parameter_optimization_allowed: false
+immutable_for_request_ref: configs/research/d1_tsmom_minimal.platform_run_request.v1.yaml
