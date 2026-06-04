@@ -53,8 +53,8 @@ class ResearchRunRequest:
     artifact_root: str = "artifacts/research/dry_runs"
     registry_write_mode: str = "dry_write"
     production_registry_write_allowed: bool = False
-    runtime_live_allowed: bool = False
-    promotion_verdict_ref: str | None = None
+    non_research_execution_allowed: bool = False
+    review_decision_ref: str | None = None
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -88,12 +88,12 @@ class ResearchRunRequest:
             raise ResearchRunnerValidationError("production_registry_write_allowed must be boolean")
         if self.production_registry_write_allowed:
             raise ResearchRunnerValidationError("production registry write is blocked in minimal dry-run slice")
-        if not isinstance(self.runtime_live_allowed, bool):
-            raise ResearchRunnerValidationError("runtime_live_allowed must be boolean")
-        if self.runtime_live_allowed:
-            raise ResearchRunnerValidationError("runtime/live path is blocked in minimal dry-run slice")
-        if self.promotion_verdict_ref is not None:
-            raise ResearchRunnerValidationError("promotion verdict reference is not accepted in minimal dry-run slice")
+        if not isinstance(self.non_research_execution_allowed, bool):
+            raise ResearchRunnerValidationError("non_research_execution_allowed must be boolean")
+        if self.non_research_execution_allowed:
+            raise ResearchRunnerValidationError("non-research execution path is blocked in minimal dry-run slice")
+        if self.review_decision_ref is not None:
+            raise ResearchRunnerValidationError("review decision reference is not accepted in minimal dry-run slice")
         if not isinstance(self.features, Mapping):
             raise ResearchRunnerValidationError("features must be an explicit in-memory mapping")
         rows = self.features.get("rows")
