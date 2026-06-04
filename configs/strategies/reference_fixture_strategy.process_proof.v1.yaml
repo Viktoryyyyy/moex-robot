@@ -1,0 +1,25 @@
+config_id: strategy.reference_fixture_strategy.process_proof.v1
+artifact_class: repo_relative
+repo_path: configs/strategies/reference_fixture_strategy.process_proof.v1.yaml
+strategy_id: reference_fixture_strategy
+strategy_package_ref: strategies.reference_fixture_strategy
+strategy_version: "0.1.0"
+process_proof_only: true
+fixture_only: true
+instrument_scope:
+  - Si
+timeframe: D1
+required_datasets:
+  - dataset.futures_derived_d1.v1
+required_features:
+  - feature.d1_tsmom_inputs.v1
+required_labels:
+  - label.reference_fixture_none.v1
+supports_backtest: true
+supports_live: false
+registry_mutation_allowed: false
+production_registry_write_allowed: false
+non_research_execution_allowed: false
+promotion_logic_allowed: false
+market_conclusion_allowed: false
+artifact_root: artifacts/research/process_proofs
