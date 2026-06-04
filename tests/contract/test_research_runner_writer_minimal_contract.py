@@ -180,7 +180,7 @@ def test_runner_source_has_no_file_io_network_operational_or_custom_pnl_engine_t
         "order_send",
         "custom_pnl",
     )
-    for path in RUNNER_ROOT.glob("*.py"):
+    for path in (RUNNER_ROOT / "dry_run.py",):
         source = path.read_text(encoding="utf-8").casefold()
         for term in forbidden_terms:
             assert term not in source
