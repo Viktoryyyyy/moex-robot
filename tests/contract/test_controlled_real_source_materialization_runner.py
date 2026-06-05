@@ -74,8 +74,6 @@ def _base_args(tmp_path: Path) -> list[str]:
         REPO_ROOT.as_posix(),
         "--moex-data-root",
         (tmp_path / "moex_data_root").as_posix(),
-        "--artifact-bundle-root",
-        (tmp_path / "artifact_bundle").as_posix(),
         "--run-id",
         "controlled_real_source_test_run",
         "--family",
@@ -150,7 +148,6 @@ def test_controlled_real_source_runner_writes_only_declared_artifacts(tmp_path):
     assert result.raw_storage_path.exists()
     assert result.raw_manifest_path.exists()
     assert result.raw_quality_report_path.exists()
-    assert result.proof_summary_path.exists()
     assert result.proof_summary["status"] == "succeeded"
     assert result.proof_summary["source_adapter"] == "moex_iss_forts_candles_5m"
     assert result.proof_summary["real_iss_fetch_performed"] is False
@@ -161,14 +158,12 @@ def test_controlled_real_source_runner_writes_only_declared_artifacts(tmp_path):
         result.raw_storage_path,
         result.raw_manifest_path,
         result.raw_quality_report_path,
-        result.proof_summary_path,
     }
 
 
 @pytest.mark.parametrize(
     "option_name",
     [
-        "--artifact-bundle-root",
         "--family",
         "--secid",
         "--board",
