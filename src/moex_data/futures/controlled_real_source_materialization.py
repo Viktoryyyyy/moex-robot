@@ -35,7 +35,6 @@ class ControlledRealSourceMaterializationResult:
     raw_storage_path: Path
     raw_manifest_path: Path
     raw_quality_report_path: Path
-    proof_summary_path: Path
     output_files: tuple[Path, ...]
     proof_summary: Mapping[str, object]
 
@@ -136,7 +135,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Controlled MOEX ISS FORTS native 5m source materialization runner")
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--moex-data-root")
-    parser.add_argument("--artifact-bundle-root", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--family", required=True)
     parser.add_argument("--secid", required=True)
@@ -153,7 +151,6 @@ def _build_parser() -> argparse.ArgumentParser:
 def _execute(args: argparse.Namespace, *, source_adapter: Raw5mSourceAdapter | None = None) -> ControlledRealSourceMaterializationResult:
     repo_root = Path(args.repo_root)
     moex_data_root = _resolve_moex_data_root(args.moex_data_root)
-    artifact_bundle_root = Path(_safe_text(args.artifact_bundle_root, "artifact_bundle_root"))
     run_id = _safe_text(args.run_id, "run_id")
     family = _safe_text(args.family, "FAMILY")
     secid = _safe_text(args.secid, "SECID")
@@ -219,8 +216,7 @@ def _execute(args: argparse.Namespace, *, source_adapter: Raw5mSourceAdapter | N
     _write_parquet(raw_storage_path, recording_adapter.rows)
     _write_json(raw_manifest_path, raw_manifest_values)
     _write_json(raw_quality_report_path, raw_quality_values)
-    proof_summary_path = artifact_bundle_root / run_id / "controlled_real_source_materialization_summary.json"
-    output_files = (raw_storage_path, raw_manifest_path, raw_quality_report_path, proof_summary_path)
+    output_files = (raw_storage_path, raw_manifest_path, raw_quality_report_path)
     proof_summary = {
         "run_id": run_id,
         "status": "succeeded",
@@ -237,13 +233,11 @@ def _execute(args: argparse.Namespace, *, source_adapter: Raw5mSourceAdapter | N
             "row_count": raw_result.partition_validation.row_count,
         },
     }
-    _write_json(proof_summary_path, proof_summary)
     return ControlledRealSourceMaterializationResult(
         run_id=run_id,
         raw_storage_path=raw_storage_path,
         raw_manifest_path=raw_manifest_path,
         raw_quality_report_path=raw_quality_report_path,
-        proof_summary_path=proof_summary_path,
         output_files=output_files,
         proof_summary=proof_summary,
     )
