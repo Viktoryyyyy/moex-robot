@@ -1,0 +1,21 @@
+schema_id: futures_source_contracts.v1
+artifact_class: repo_relative
+repo_path: contracts/datasets/futures_source_contracts.v1.yaml
+purpose: explicit MOEX source contract declarations for futures historical data core
+sources:
+  - source_id: moex_iss_forts_candles_5m
+    source_system: MOEX_ISS
+    market: FORTS
+    board: RFUD
+    native_timeframe: 5m
+    output_contract_ref: contracts/datasets/futures_ohlcv_5m.v1.yaml
+  - source_id: moex_algopack_futoi_raw
+    source_system: ALGOPACK
+    market: FORTS
+    board: RFUD
+    native_timeframe: raw
+    output_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
+path_rules:
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+  dynamic_scan_allowed: false
