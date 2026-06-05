@@ -192,9 +192,8 @@ def test_missing_moex_data_root_or_cli_root_fails_closed(tmp_path, monkeypatch):
 
 
 def test_missing_identity_field_rejected_by_boundary(tmp_path):
-    exit_code = main(_without_option(_base_args(tmp_path), "--family"))
-
-    assert exit_code == 2
+    with pytest.raises(SystemExit):
+        main(_without_option(_base_args(tmp_path), "--family"))
 
 
 def test_unconfigured_instrument_identity_is_rejected(tmp_path):
