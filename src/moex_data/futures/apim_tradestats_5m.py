@@ -66,11 +66,12 @@ def build_moex_apim_fo_tradestats_5m_url(base_url: str) -> str:
 def build_moex_apim_fo_tradestats_5m_params(request: Raw5mMaterializationRequest, *, start: int) -> dict[str, object]:
     if start < 0:
         raise MoexApimTradestatsSourceError("APIM tradestats start must be non-negative")
+    secid = guard_text(request.identity.secid, "SECID")
     return {
         "date": request.partition_key.isoformat(),
         "from": request.partition_key.isoformat(),
         "till": request.partition_key.isoformat(),
-        "secid": request.identity.secid,
+        "secid": secid,
         "start": start,
         "iss.meta": "off",
         "iss.only": "tradestats",
