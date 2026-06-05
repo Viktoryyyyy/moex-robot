@@ -12,7 +12,7 @@ from moex_data.futures.iss_forts_5m import (
     build_moex_iss_forts_candles_5m_page_request,
 )
 from moex_data.futures.raw_ohlcv_5m import Raw5mMaterializationRequest
-from moex_data.futures.validation import FuturesInstrumentIdentity
+from moex_data.futures.validation import FuturesInstrumentIdentity, FuturesValidationError
 
 
 @dataclass(frozen=True)
@@ -178,5 +178,5 @@ def test_adapter_rejects_dynamic_markers():
         source_contract_ref="contracts/datasets/futures_source_contracts.v1.yaml",
     )
 
-    with pytest.raises(MoexIssSourceError):
+    with pytest.raises(FuturesValidationError):
         build_moex_iss_forts_candles_5m_page_request(bad_request)
