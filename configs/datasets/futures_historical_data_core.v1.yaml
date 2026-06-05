@@ -1,0 +1,30 @@
+config_id: futures_historical_data_core.v1
+artifact_class: repo_relative
+repo_path: configs/datasets/futures_historical_data_core.v1.yaml
+universe_config_ref: configs/instruments/futures_universe.v1.yaml
+source_contracts_ref: contracts/datasets/futures_source_contracts.v1.yaml
+dataset_contract_refs:
+  - contracts/datasets/futures_ohlcv_5m.v1.yaml
+  - contracts/datasets/futures_ohlcv_derived_timeframe.v1.yaml
+  - contracts/datasets/futures_futoi_raw.v1.yaml
+  - contracts/datasets/futures_continuous_series_policy.v1.yaml
+approved_timeframes:
+  - 5m
+  - 10m
+  - 15m
+  - 30m
+  - 1h
+  - 4h
+  - 1D
+  - 1W
+external_storage_root:
+  artifact_id: moex_data_root
+  artifact_class: env_contract
+  env_var: MOEX_DATA_ROOT
+  required: true
+  hardcoded_server_path_allowed: false
+continuous_series_status: blocked_placeholder
+path_rules:
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+  dynamic_scan_allowed: false
