@@ -11,8 +11,12 @@ from pathlib import Path
 from typing import Final
 
 from moex_core.calendars.moex_iss_calendar import build_futures_calendar_from_rows
+from moex_data.futures.apim_tradestats_5m import (
+    MOEX_APIM_FO_TRADESTATS_SOURCE_ID,
+    MoexApimFoTradestats5mAdapter,
+)
 from moex_data.futures.contract_io import expand_contract_path, load_simple_yaml_mapping
-from moex_data.futures.iss_forts_5m import MoexIssFortsCandles5mAdapter
+from moex_data.futures.iss_forts_5m import MOEX_ISS_FORTS_CANDLES_SOURCE_ID, MoexIssFortsCandles5mAdapter
 from moex_data.futures.manifests import futures_partition_manifest_to_values
 from moex_data.futures.materialization import Raw5mSourceAdapter, materialize_raw_5m_boundary
 from moex_data.futures.raw_ohlcv_5m import Raw5mMaterializationRequest
@@ -24,6 +28,7 @@ CALENDAR_CONTRACT_REF: Final[str] = "contracts/datasets/futures_calendar_session
 RAW_SOURCE_CONTRACT_REF: Final[str] = "contracts/datasets/futures_source_contracts.v1.yaml"
 FUTURES_UNIVERSE_REF: Final[str] = "configs/instruments/futures_universe.v1.yaml"
 IDENTITY_FIELDS: Final[tuple[str, ...]] = ("FAMILY", "SECID", "BOARD", "MARKET", "SERIES_TYPE")
+SOURCE_FIELDS: Final[tuple[str, ...]] = ("source_id", "source_system", "market", "board", "native_timeframe", "output_contract_ref")
 
 
 class ControlledRealSourceMaterializationError(ValueError):
@@ -110,6 +115,13 @@ def _complete_identity(values: Mapping[str, object]) -> dict[str, object]:
     return {field: _safe_text(values[field], field) for field in IDENTITY_FIELDS}
 
 
+def _complete_source(values: Mapping[str, object]) -> dict[str, object]:
+    missing = tuple(field for field in SOURCE_FIELDS if field not in values)
+    if missing:
+        raise ControlledRealSourceMaterializationError("missing source contract field: " + missing[0])
+    return {field: _safe_text(values[field], field) for field in SOURCE_FIELDS}
+
+
 def _load_universe(repo_root: Path) -> Mapping[str, object]:
     lines = (repo_root / FUTURES_UNIVERSE_REF).read_text(encoding="utf-8").splitlines()
     instruments: list[dict[str, object]] = []
@@ -141,21 +153,67 @@ def _load_universe(repo_root: Path) -> Mapping[str, object]:
     return {"universe_id": "futures_universe.v1", "dynamic_scan_allowed": False, "instruments": tuple(instruments)}
 
 
+def _load_source_contract_entries(repo_root: Path) -> tuple[Mapping[str, object], ...]:
+    lines = (repo_root / RAW_SOURCE_CONTRACT_REF).read_text(encoding="utf-8").splitlines()
+    sources: list[dict[str, object]] = []
+    current: dict[str, object] | None = None
+    implicit_selection_false = False
+    dynamic_scan_false = False
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped == "implicit_file_selection_allowed: false":
+            implicit_selection_false = True
+            continue
+        if stripped == "dynamic_scan_allowed: false":
+            dynamic_scan_false = True
+            continue
+        if stripped.startswith("- "):
+            if current is not None:
+                sources.append(_complete_source(current))
+            current = {}
+            key, value = _key_value(stripped.removeprefix("- ").strip(), "source")
+            current[key] = value
+            continue
+        if current is not None and ":" in stripped:
+            key, value = _key_value(stripped, "source")
+            current[key] = value
+    if current is not None:
+        sources.append(_complete_source(current))
+    if not implicit_selection_false or not dynamic_scan_false:
+        raise ControlledRealSourceMaterializationError("source contract must reject implicit selection and dynamic scan")
+    if not sources:
+        raise ControlledRealSourceMaterializationError("source contract set must be non-empty")
+    return tuple(sources)
+
+
 def _contract_values(repo_root: Path, repo_relative_path: str) -> Mapping[str, object]:
     values = load_simple_yaml_mapping(repo_root, repo_relative_path)
     validate_dataset_contract_values(values)
     return values
 
 
-def _source_contract_values(board: str, market: str) -> dict[str, object]:
-    return {
-        "source_id": "moex_iss_forts_candles_5m",
-        "source_system": "MOEX_ISS",
-        "market": market,
-        "board": board,
-        "native_timeframe": "5m",
-        "output_contract_ref": RAW_5M_CONTRACT_REF,
-    }
+def _source_contract_values(repo_root: Path, source_id: str, board: str, market: str) -> Mapping[str, object]:
+    matches = tuple(source for source in _load_source_contract_entries(repo_root) if source["source_id"] == source_id)
+    if len(matches) != 1:
+        raise ControlledRealSourceMaterializationError("selected source_id is not uniquely declared")
+    source = matches[0]
+    if source["board"] != board or source["market"] != market:
+        raise ControlledRealSourceMaterializationError("selected source contract does not match requested board/market")
+    if source["native_timeframe"] != "5m":
+        raise ControlledRealSourceMaterializationError("selected source contract is not native 5m")
+    if source["output_contract_ref"] != RAW_5M_CONTRACT_REF:
+        raise ControlledRealSourceMaterializationError("selected source contract does not bind raw 5m output")
+    return source
+
+
+def _default_source_adapter(source_id: str, iss_base_url: str, apim_base_url: str) -> Raw5mSourceAdapter:
+    if source_id == MOEX_ISS_FORTS_CANDLES_SOURCE_ID:
+        return MoexIssFortsCandles5mAdapter(base_url=iss_base_url)
+    if source_id == MOEX_APIM_FO_TRADESTATS_SOURCE_ID:
+        return MoexApimFoTradestats5mAdapter(base_url=apim_base_url)
+    raise ControlledRealSourceMaterializationError("unsupported source_id")
 
 
 def _placeholders(run_id: str, family: str, secid: str, board: str, market: str, series_type: str, trade_date: date) -> dict[str, str | None]:
@@ -173,7 +231,7 @@ def _placeholders(run_id: str, family: str, secid: str, board: str, market: str,
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Controlled MOEX ISS FORTS native 5m source materialization runner")
+    parser = argparse.ArgumentParser(description="Controlled FORTS native 5m real-source materialization runner")
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--moex-data-root")
     parser.add_argument("--run-id", required=True)
@@ -185,7 +243,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trade-date", required=True)
     parser.add_argument("--raw-manifest-ref", required=True)
     parser.add_argument("--raw-quality-report-ref", required=True)
+    parser.add_argument("--source-id", default=MOEX_ISS_FORTS_CANDLES_SOURCE_ID)
     parser.add_argument("--iss-base-url", default="https://iss.moex.com")
+    parser.add_argument("--apim-base-url", default="https://iss.moex.com")
     return parser
 
 
@@ -200,13 +260,16 @@ def _execute(args: argparse.Namespace, *, source_adapter: Raw5mSourceAdapter | N
     series_type = _safe_text(args.series_type, "SERIES_TYPE")
     raw_manifest_ref = _safe_text(args.raw_manifest_ref, "raw_manifest_ref")
     raw_quality_ref = _safe_text(args.raw_quality_report_ref, "raw_quality_report_ref")
+    source_id = _safe_text(args.source_id, "source_id")
     iss_base_url = _safe_text(args.iss_base_url, "iss_base_url")
+    apim_base_url = _safe_text(args.apim_base_url, "apim_base_url")
     try:
         trade_date = date.fromisoformat(_safe_text(args.trade_date, "trade_date"))
     except ValueError as exc:
         raise ControlledRealSourceMaterializationError("trade_date must be ISO date") from exc
     raw_contract = _contract_values(repo_root, RAW_5M_CONTRACT_REF)
     raw_storage_ref = _safe_text(raw_contract.get("path_pattern"), "raw_storage_ref")
+    source_contract = _source_contract_values(repo_root, source_id, board, market)
     placeholders = _placeholders(run_id, family, secid, board, market, series_type, trade_date)
     raw_storage_path = expand_contract_path(raw_storage_ref, moex_data_root, placeholders)
     raw_manifest_path = expand_contract_path(raw_manifest_ref, moex_data_root, placeholders)
@@ -231,12 +294,12 @@ def _execute(args: argparse.Namespace, *, source_adapter: Raw5mSourceAdapter | N
         [{"trade_date": trade_date.isoformat(), "is_trading_day": True, "reason": "controlled_real_source_materialization"}],
         calendar_contract_ref=CALENDAR_CONTRACT_REF,
     )
-    adapter = source_adapter if source_adapter is not None else MoexIssFortsCandles5mAdapter(base_url=iss_base_url)
+    adapter = source_adapter if source_adapter is not None else _default_source_adapter(source_id, iss_base_url, apim_base_url)
     recording = _RecordingAdapter(adapter)
     raw_result = materialize_raw_5m_boundary(
         request_values,
         universe_values=_load_universe(repo_root),
-        source_contract_values=_source_contract_values(board, market),
+        source_contract_values=source_contract,
         calendar=calendar,
         source_adapter=recording,
     )
@@ -245,12 +308,15 @@ def _execute(args: argparse.Namespace, *, source_adapter: Raw5mSourceAdapter | N
     _write_parquet(raw_storage_path, recording.rows)
     _write_json(raw_manifest_path, futures_partition_manifest_to_values(raw_result.partition_validation.manifest))
     _write_json(raw_quality_path, futures_quality_report_to_values(raw_result.partition_validation.quality_report))
+    real_fetch = source_adapter is None
     proof_summary = {
         "run_id": run_id,
         "status": "succeeded",
         "proof_type": "controlled_real_source_materialization",
-        "source_adapter": "moex_iss_forts_candles_5m",
-        "real_iss_fetch_performed": source_adapter is None,
+        "source_adapter": source_id,
+        "real_source_fetch_performed": real_fetch,
+        "real_iss_fetch_performed": real_fetch and source_id == MOEX_ISS_FORTS_CANDLES_SOURCE_ID,
+        "real_apim_fetch_performed": real_fetch and source_id == MOEX_APIM_FO_TRADESTATS_SOURCE_ID,
         "strategy_execution_performed": False,
         "backtest_performed": False,
         "runtime_live_performed": False,
