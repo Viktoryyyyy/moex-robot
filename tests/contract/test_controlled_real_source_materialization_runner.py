@@ -116,6 +116,10 @@ def _with_option(args: list[str], option_name: str, replacement: str) -> list[st
     return result
 
 
+def _with_added_option(args: list[str], option_name: str, value: str) -> list[str]:
+    return list(args) + [option_name, value]
+
+
 def _imported_names_from_source(source: str) -> tuple[str, ...]:
     names: list[str] = []
     for raw_line in source.splitlines():
@@ -150,7 +154,9 @@ def test_controlled_real_source_runner_writes_only_declared_artifacts(tmp_path):
     assert result.raw_quality_report_path.exists()
     assert result.proof_summary["status"] == "succeeded"
     assert result.proof_summary["source_adapter"] == "moex_iss_forts_candles_5m"
+    assert result.proof_summary["real_source_fetch_performed"] is False
     assert result.proof_summary["real_iss_fetch_performed"] is False
+    assert result.proof_summary["real_apim_fetch_performed"] is False
     assert result.proof_summary["strategy_execution_performed"] is False
     assert result.proof_summary["backtest_performed"] is False
     assert result.proof_summary["runtime_live_performed"] is False
@@ -159,6 +165,27 @@ def test_controlled_real_source_runner_writes_only_declared_artifacts(tmp_path):
         result.raw_manifest_path,
         result.raw_quality_report_path,
     }
+
+
+def test_controlled_runner_uses_explicit_apim_source_contract(tmp_path):
+    adapter = FakeRaw5mSourceAdapter(_rows())
+    args = _with_added_option(_base_args(tmp_path), "--source-id", "moex_apim_algopack_fo_tradestats_5m")
+
+    result = run_controlled_real_source_materialization(args, source_adapter=adapter)
+
+    assert adapter.read_count == 1
+    assert result.proof_summary["source_adapter"] == "moex_apim_algopack_fo_tradestats_5m"
+    assert result.proof_summary["real_source_fetch_performed"] is False
+    assert result.proof_summary["real_iss_fetch_performed"] is False
+    assert result.proof_summary["real_apim_fetch_performed"] is False
+
+
+def test_unknown_source_id_rejected(tmp_path):
+    args = _with_added_option(_base_args(tmp_path), "--source-id", "unknown_source")
+
+    exit_code = main(args)
+
+    assert exit_code == 2
 
 
 @pytest.mark.parametrize(

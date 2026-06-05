@@ -26,14 +26,22 @@ class Raw5mMaterializationBoundaryResult:
     partition_validation: Raw5mPartitionValidation
 
 
+_RAW_5M_SOURCE_CONTRACTS: Mapping[str, tuple[str, str]] = {
+    "moex_iss_forts_candles_5m": ("MOEX_ISS", "5m"),
+    "moex_apim_algopack_fo_tradestats_5m": ("MOEX_APIM_ALGOPACK", "5m"),
+}
+
+
 def validate_raw_5m_source_contract_binding(values: Mapping[str, object]) -> str:
     values = require_mapping(values, "raw_5m_source_contract")
     source_id = require_text(values.get("source_id"), "source_id")
-    if source_id != "moex_iss_forts_candles_5m":
-        raise FuturesValidationError("raw 5m boundary requires moex_iss_forts_candles_5m source")
-    if require_text(values.get("source_system"), "source_system") != "MOEX_ISS":
-        raise FuturesValidationError("raw 5m boundary requires MOEX_ISS source")
-    if require_text(values.get("native_timeframe"), "native_timeframe") != "5m":
+    expected = _RAW_5M_SOURCE_CONTRACTS.get(source_id)
+    if expected is None:
+        raise FuturesValidationError("raw 5m boundary requires a declared native 5m source")
+    expected_system, expected_timeframe = expected
+    if require_text(values.get("source_system"), "source_system") != expected_system:
+        raise FuturesValidationError("raw 5m source_system does not match declared source_id")
+    if require_text(values.get("native_timeframe"), "native_timeframe") != expected_timeframe:
         raise FuturesValidationError("raw 5m boundary requires native 5m source")
     if require_text(values.get("output_contract_ref"), "output_contract_ref") != "contracts/datasets/futures_ohlcv_5m.v1.yaml":
         raise FuturesValidationError("raw 5m source must bind futures_ohlcv_5m contract")

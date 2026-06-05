@@ -9,6 +9,12 @@ sources:
     board: RFUD
     native_timeframe: 5m
     output_contract_ref: contracts/datasets/futures_ohlcv_5m.v1.yaml
+  - source_id: moex_apim_algopack_fo_tradestats_5m
+    source_system: MOEX_APIM_ALGOPACK
+    market: FORTS
+    board: RFUD
+    native_timeframe: 5m
+    output_contract_ref: contracts/datasets/futures_ohlcv_5m.v1.yaml
   - source_id: moex_algopack_futoi_raw
     source_system: ALGOPACK
     market: FORTS
