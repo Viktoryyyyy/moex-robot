@@ -1,46 +1,64 @@
 contract_id: futures_quality_report.v1
 dataset_id: futures_quality_report
 artifact_class: external_pattern
-producer: moex_data.futures.quality_report_builder
+producer: moex_data.quality.futures_ohlcv
 consumers:
-  - moex_data.futures.refresh_validator
+  - moex_data.futures.validation
 format: json
 schema_version: futures_quality_report.v1
 storage_root_ref: MOEX_DATA_ROOT
-path_pattern: "${MOEX_DATA_ROOT}/futures/quality/run_date={YYYY-MM-DD}/run_id={RUN_ID}/quality_report.json"
+path_pattern: ${MOEX_DATA_ROOT}/futures/quality/run_date={YYYY-MM-DD}/run_id={RUN_ID}/quality_report.json
 partitioning:
   - run_date
   - run_id
-grain: dataset_quality_report
+grain: partition_quality_report
 primary_key:
-  - run_id
   - dataset_id
-  - family
-  - secid
-  - trade_date
-required_fields:
-  - run_id
-  - dataset_id
-  - family
-  - secid
-  - trade_date
-  - rows
-  - min_ts
-  - max_ts
-  - duplicate_key_count
-  - gap_count
-  - null_ohlc_count
-  - invalid_ohlc_count
-  - futoi_missing_count
-  - calendar_status
-  - quality_status
-  - notes
+  - timeframe
+  - FAMILY
+  - SECID
+  - BOARD
+  - MARKET
+  - SERIES_TYPE
+  - partition_key
+statuses:
+  - pass
+  - warn
+  - fail
 allowed_quality_status:
   - pass
   - warn
   - fail
+fail_blocks_downstream_consumption: true
+required_fields:
+  - dataset_id
+  - timeframe
+  - SERIES_TYPE
+  - FAMILY
+  - SECID
+  - BOARD
+  - MARKET
+  - partition_key
+  - status
+  - downstream_consumption_allowed
+  - row_count
+  - duplicate_ts_secid_count
+  - non_monotonic_timestamp_count
+  - invalid_ohlc_count
+  - negative_volume_count
+  - negative_value_count
+  - negative_trades_count
+hard_checks:
+  - duplicate_ts_secid_count
+  - non_monotonic_timestamp_count
+  - invalid_ohlc_count
+  - negative_volume_count
+  - negative_value_count
+  - negative_trades_count
+parent_manifest_consistency_required: true
 path_rules:
   storage_root: env_contract
   hardcoded_server_path_allowed: false
   implicit_file_selection_allowed: false
-retention_policy: keep_all_runs
+  dynamic_scan_allowed: false
+retention_policy: keep_all_partition_reports

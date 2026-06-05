@@ -1,0 +1,34 @@
+contract_id: futures_calendar_session.v1
+artifact_class: repo_relative
+repo_path: contracts/datasets/futures_calendar_session.v1.yaml
+purpose: canonical MOEX/ISS futures calendar and session resolver contract
+calendar_source: MOEX_ISS_CALENDAR
+market: FORTS
+board: RFUD
+timezone: Europe/Moscow
+session_rules:
+  timestamp_field: ts
+  trade_date_field: trade_date
+  session_date_field: session_date
+  day_session_start: "10:00"
+  evening_session_end: "23:50"
+required_bar_fields:
+  - ts
+  - trade_date
+  - session_date
+  - SECID
+  - FAMILY
+  - BOARD
+  - MARKET
+  - SERIES_TYPE
+resolver:
+  module: moex_core.calendars.futures_session
+  network_fetch_allowed: false
+  every_bar_requires_resolvable_session_date: true
+  every_bar_requires_resolvable_trade_date: true
+  non_trading_day_partition_allowed: false
+  cross_session_partition_allowed: false
+path_rules:
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+  dynamic_scan_allowed: false

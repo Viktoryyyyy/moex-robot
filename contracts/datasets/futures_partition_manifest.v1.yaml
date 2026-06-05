@@ -1,0 +1,39 @@
+contract_id: futures_partition_manifest.v1
+artifact_class: repo_relative
+repo_path: contracts/datasets/futures_partition_manifest.v1.yaml
+purpose: manifest contract for one materialized futures data partition
+producer: moex_data.futures.manifests
+format: json
+schema_version: futures_partition_manifest.v1
+required_fields:
+  - dataset_id
+  - timeframe
+  - SERIES_TYPE
+  - FAMILY
+  - SECID
+  - BOARD
+  - MARKET
+  - partition_key
+  - storage_ref
+  - row_count
+  - expected_bar_count
+  - observed_bar_count
+  - missing_bar_count
+  - calendar_contract_ref
+  - quality_report_ref
+storage_ref:
+  artifact_class: external_pattern
+  storage_root_ref: MOEX_DATA_ROOT
+  hardcoded_server_path_allowed: false
+  latest_current_autodetect_allowed: false
+  glob_discovery_allowed: false
+partition_rules:
+  partition_key_field: trade_date
+  non_trading_day_partition_allowed: false
+  cross_session_partition_allowed: false
+  observed_plus_missing_must_equal_expected: true
+  row_count_must_equal_observed_bar_count: true
+path_rules:
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+  dynamic_scan_allowed: false

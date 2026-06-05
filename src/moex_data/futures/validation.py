@@ -8,6 +8,7 @@ APPROVED_TIMEFRAMES: Final[tuple[str, ...]] = ("5m", "10m", "15m", "30m", "1h", 
 DERIVED_TIMEFRAMES: Final[tuple[str, ...]] = ("10m", "15m", "30m", "1h", "4h", "1D", "1W")
 REQUIRED_IDENTIFIER_FIELDS: Final[tuple[str, ...]] = ("FAMILY", "SECID", "BOARD", "MARKET", "SERIES_TYPE")
 FORBIDDEN_PATH_MARKERS: Final[tuple[str, ...]] = ("latest", "current", "autodetect")
+FORBIDDEN_GLOB_MARKERS: Final[tuple[str, ...]] = ("*", "?", "[")
 ALLOWED_SERIES_TYPES: Final[frozenset[str]] = frozenset({"native", "continuous"})
 
 
@@ -65,6 +66,12 @@ def require_bool(value: object, field_name: str) -> bool:
     return value
 
 
+def require_non_negative_int(value: object, field_name: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise FuturesValidationError(field_name + " must be a non-negative integer")
+    return value
+
+
 def require_text_sequence(value: object, field_name: str) -> tuple[str, ...]:
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
         raise FuturesValidationError(field_name + " must be a sequence")
@@ -85,6 +92,8 @@ def guard_text(value: str, field_name: str) -> str:
     tokens = _tokens(value)
     if any(token in FORBIDDEN_PATH_MARKERS for token in tokens):
         raise FuturesValidationError(field_name + " contains forbidden dynamic marker")
+    if any(marker in value for marker in FORBIDDEN_GLOB_MARKERS):
+        raise FuturesValidationError(field_name + " contains forbidden glob marker")
     return value
 
 
@@ -94,6 +103,8 @@ def guard_external_pattern(path_pattern: object, field_name: str = "path_pattern
         raise FuturesValidationError(field_name + " must not be absolute")
     if value.count("${MOEX_DATA_ROOT}") != 1:
         raise FuturesValidationError(field_name + " must reference MOEX_DATA_ROOT exactly once")
+    if not value.startswith("${MOEX_DATA_ROOT}/"):
+        raise FuturesValidationError(field_name + " must stay under MOEX_DATA_ROOT")
     return value
 
 
