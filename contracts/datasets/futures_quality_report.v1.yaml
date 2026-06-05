@@ -7,14 +7,10 @@ consumers:
 format: json
 schema_version: futures_quality_report.v1
 storage_root_ref: MOEX_DATA_ROOT
-path_pattern: ${MOEX_DATA_ROOT}/futures/quality/family={FAMILY}/secid={SECID}/board={BOARD}/market={MARKET}/series_type={SERIES_TYPE}/trade_date={TRADE_DATE}/report.json
+path_pattern: ${MOEX_DATA_ROOT}/futures/quality/run_date={YYYY-MM-DD}/run_id={RUN_ID}/quality_report.json
 partitioning:
-  - FAMILY
-  - SECID
-  - BOARD
-  - MARKET
-  - SERIES_TYPE
-  - TRADE_DATE
+  - run_date
+  - run_id
 grain: partition_quality_report
 primary_key:
   - dataset_id
