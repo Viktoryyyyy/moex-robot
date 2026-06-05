@@ -1,0 +1,22 @@
+schema_id: futures_instrument_registry.v1
+artifact_class: repo_relative
+repo_path: contracts/instruments/futures_instrument_registry.v1.yaml
+purpose: contract for registry-driven futures instrument identifiers
+required_fields:
+  - registry_id
+  - artifact_class
+  - repo_path
+  - instruments
+required_instrument_fields:
+  - FAMILY
+  - SECID
+  - BOARD
+  - MARKET
+  - SERIES_TYPE
+allowed_series_types:
+  - native
+  - continuous
+path_rules:
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+  dynamic_scan_allowed: false
