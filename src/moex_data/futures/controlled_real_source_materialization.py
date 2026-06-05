@@ -15,6 +15,7 @@ from moex_data.futures.contract_io import expand_contract_path, load_simple_yaml
 from moex_data.futures.iss_forts_5m import MoexIssFortsCandles5mAdapter
 from moex_data.futures.manifests import futures_partition_manifest_to_values
 from moex_data.futures.materialization import Raw5mSourceAdapter, materialize_raw_5m_boundary
+from moex_data.futures.raw_ohlcv_5m import Raw5mMaterializationRequest
 from moex_data.futures.validation import guard_text, validate_dataset_contract_values
 from moex_data.quality.futures_ohlcv import futures_quality_report_to_values
 
@@ -37,6 +38,19 @@ class ControlledRealSourceMaterializationResult:
     proof_summary_path: Path
     output_files: tuple[Path, ...]
     proof_summary: Mapping[str, object]
+
+
+class _RecordingRaw5mSourceAdapter:
+    def __init__(self, wrapped: Raw5mSourceAdapter) -> None:
+        self._wrapped = wrapped
+        self.rows: tuple[Mapping[str, object], ...] | None = None
+
+    def read_rows(self, request: Raw5mMaterializationRequest) -> Sequence[Mapping[str, object]]:
+        if self.rows is not None:
+            raise ControlledRealSourceMaterializationError("source adapter was read more than once")
+        rows = tuple(self._wrapped.read_rows(request))
+        self.rows = rows
+        return rows
 
 
 def _load_dotenv() -> None:
@@ -190,17 +204,19 @@ def _execute(args: argparse.Namespace, *, source_adapter: Raw5mSourceAdapter | N
         calendar_contract_ref=CALENDAR_CONTRACT_REF,
     )
     adapter = source_adapter if source_adapter is not None else MoexIssFortsCandles5mAdapter(base_url=iss_base_url)
+    recording_adapter = _RecordingRaw5mSourceAdapter(adapter)
     raw_result = materialize_raw_5m_boundary(
         raw_request_values,
         universe_values=universe_values,
         source_contract_values=_source_contract_values(board, market),
         calendar=calendar,
-        source_adapter=adapter,
+        source_adapter=recording_adapter,
     )
-    rows = adapter.read_rows(raw_result.request)
+    if recording_adapter.rows is None:
+        raise ControlledRealSourceMaterializationError("source adapter returned no recorded rows")
     raw_manifest_values = futures_partition_manifest_to_values(raw_result.partition_validation.manifest)
     raw_quality_values = futures_quality_report_to_values(raw_result.partition_validation.quality_report)
-    _write_parquet(raw_storage_path, rows)
+    _write_parquet(raw_storage_path, recording_adapter.rows)
     _write_json(raw_manifest_path, raw_manifest_values)
     _write_json(raw_quality_report_path, raw_quality_values)
     proof_summary_path = artifact_bundle_root / run_id / "controlled_real_source_materialization_summary.json"
