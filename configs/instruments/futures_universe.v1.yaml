@@ -8,3 +8,8 @@ instruments:
     BOARD: RFUD
     MARKET: FORTS
     SERIES_TYPE: native
+  - FAMILY: Si
+    SECID: SiM6
+    BOARD: RFUD
+    MARKET: FORTS
+    SERIES_TYPE: native
