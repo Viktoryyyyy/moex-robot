@@ -1,0 +1,10 @@
+universe_id: futures_universe.v1
+artifact_class: repo_relative
+repo_path: configs/instruments/futures_universe.v1.yaml
+dynamic_scan_allowed: false
+instruments:
+  - FAMILY: TEST_FAMILY_A
+    SECID: TEST_FAMILY_A_1
+    BOARD: RFUD
+    MARKET: FORTS
+    SERIES_TYPE: native

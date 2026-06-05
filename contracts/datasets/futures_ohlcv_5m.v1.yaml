@@ -1,0 +1,24 @@
+contract_id: futures_ohlcv_5m.v1
+dataset_id: futures_ohlcv_5m
+artifact_class: external_pattern
+producer: moex_data.futures.raw_ohlcv_5m
+consumers:
+  - moex_data.futures.resampling
+format: parquet
+schema_version: futures_ohlcv_5m.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: ${MOEX_DATA_ROOT}/futures/ohlcv_5m/family={FAMILY}/secid={SECID}/board={BOARD}/market={MARKET}/series_type={SERIES_TYPE}/trade_date={TRADE_DATE}/part.parquet
+partitioning:
+  - FAMILY
+  - SECID
+  - BOARD
+  - MARKET
+  - SERIES_TYPE
+  - TRADE_DATE
+timeframe: 5m
+required_identifier_fields:
+  - FAMILY
+  - SECID
+  - BOARD
+  - MARKET
+  - SERIES_TYPE

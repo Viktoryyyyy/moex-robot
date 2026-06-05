@@ -1,0 +1,24 @@
+schema_id: futures_universe.v1
+artifact_class: repo_relative
+repo_path: contracts/instruments/futures_universe.v1.yaml
+purpose: contract for explicit futures universe config
+required_fields:
+  - universe_id
+  - artifact_class
+  - repo_path
+  - dynamic_scan_allowed
+  - instruments
+required_instrument_fields:
+  - FAMILY
+  - SECID
+  - BOARD
+  - MARKET
+  - SERIES_TYPE
+allowed_series_types:
+  - native
+  - continuous
+constraints:
+  production_universe_complete_claim_allowed: false
+  dynamic_scan_allowed: false
+  implicit_file_selection_allowed: false
+  hardcoded_server_path_allowed: false

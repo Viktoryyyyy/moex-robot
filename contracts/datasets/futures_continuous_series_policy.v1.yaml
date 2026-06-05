@@ -1,0 +1,17 @@
+schema_id: futures_continuous_series_policy.v1
+artifact_class: repo_relative
+repo_path: contracts/datasets/futures_continuous_series_policy.v1.yaml
+purpose: fail-closed policy boundary for continuous futures series
+continuous_series_status: blocked_placeholder
+series_type: continuous
+roll_policy_required: true
+expiration_family_mapping_required: true
+materialization_allowed: false
+required_before_unblock:
+  - roll_policy_contract
+  - expiration_family_mapping_contract
+  - parent_native_series_contracts
+path_rules:
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+  dynamic_scan_allowed: false
