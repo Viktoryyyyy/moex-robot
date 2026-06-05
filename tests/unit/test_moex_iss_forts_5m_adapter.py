@@ -125,6 +125,13 @@ def test_adapter_uses_zero_trades_when_iss_response_has_no_trades_column():
     assert rows[0]["trades"] == 0.0
 
 
+def test_adapter_rejects_empty_iss_response():
+    adapter = MoexIssFortsCandles5mAdapter(http_client=FakeHttpClient(FakeResponse(200, _payload(rows=[]))))
+
+    with pytest.raises(MoexIssSourceError, match="returned no rows"):
+        adapter.read_rows(_request())
+
+
 def test_adapter_rejects_http_errors():
     adapter = MoexIssFortsCandles5mAdapter(http_client=FakeHttpClient(FakeResponse(500, _payload(rows=[]))))
 
