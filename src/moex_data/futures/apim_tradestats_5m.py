@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time
@@ -8,7 +10,8 @@ from typing import Final, Protocol
 from .raw_ohlcv_5m import Raw5mMaterializationRequest
 from .validation import FuturesValidationError, guard_text
 
-MOEX_APIM_DEFAULT_BASE_URL: Final[str] = "https://iss.moex.com"
+MOEX_APIM_DEFAULT_BASE_URL: Final[str] = "https://apim.moex.com"
+MOEX_APIM_AUTH_ENV_VAR: Final[str] = "MOEX_API_KEY"
 MOEX_APIM_FO_TRADESTATS_SOURCE_ID: Final[str] = "moex_apim_algopack_fo_tradestats_5m"
 MOEX_APIM_FO_TRADESTATS_NATIVE_TIMEFRAME: Final[str] = "5m"
 MOEX_APIM_FO_TRADESTATS_PAGE_SIZE: Final[int] = 1000
@@ -32,6 +35,8 @@ class MoexApimTradestatsSourceError(FuturesValidationError):
 
 class MoexApimTradestatsHttpResponse(Protocol):
     status_code: int
+    headers: Mapping[str, str]
+    text: str
 
     def json(self) -> Mapping[str, object]:
         pass
@@ -49,13 +54,26 @@ class MoexApimFoTradestats5mPageRequest:
 
 
 class RequestsMoexApimTradestatsHttpClient:
-    def __init__(self) -> None:
+    def __init__(self, *, auth_env_var: str = MOEX_APIM_AUTH_ENV_VAR, auth_token: str | None = None) -> None:
         import requests
 
         self._session = requests.Session()
+        self._auth_env_var = guard_text(auth_env_var, "apim_auth_env_var")
+        self._auth_token = auth_token
+
+    def _auth_headers(self) -> dict[str, str]:
+        token = self._auth_token if self._auth_token is not None else os.environ.get(self._auth_env_var)
+        if token is None or not token.strip():
+            raise MoexApimTradestatsSourceError("MOEX APIM auth env var " + self._auth_env_var + " is required")
+        return {
+            "Accept": "application/json",
+            "Authorization": "Bearer " + token.strip(),
+            "User-Agent": "moex-bot-controlled-source-materialization",
+        }
 
     def get(self, url: str, *, params: Mapping[str, object], timeout: float) -> MoexApimTradestatsHttpResponse:
-        return self._session.get(url, params=params, timeout=timeout)
+        headers = self._auth_headers()
+        return self._session.get(url, params=params, headers=headers, timeout=timeout)
 
 
 def build_moex_apim_fo_tradestats_5m_url(base_url: str) -> str:
@@ -159,8 +177,16 @@ def _normalize_columns(raw_columns: Sequence[object]) -> tuple[str, ...]:
     return columns
 
 
+def _extract_tradestats_table(payload: Mapping[str, object]) -> Mapping[str, object]:
+    if "data" in payload:
+        return _require_mapping(payload.get("data"), "APIM tradestats data table")
+    if "tradestats" in payload:
+        return _require_mapping(payload.get("tradestats"), "APIM tradestats table")
+    raise MoexApimTradestatsSourceError("APIM tradestats response missing data table")
+
+
 def _parse_tradestats_table(payload: Mapping[str, object]) -> tuple[Mapping[str, object], ...]:
-    table = _require_mapping(payload.get("tradestats"), "APIM tradestats table")
+    table = _extract_tradestats_table(payload)
     columns = _normalize_columns(_require_sequence(table.get("columns"), "APIM tradestats columns"))
     raw_rows = _require_sequence(table.get("data"), "APIM tradestats data")
     rows: list[Mapping[str, object]] = []
@@ -170,6 +196,28 @@ def _parse_tradestats_table(payload: Mapping[str, object]) -> tuple[Mapping[str,
             raise MoexApimTradestatsSourceError("APIM tradestats data row width mismatch")
         rows.append(dict(zip(columns, values)))
     return tuple(rows)
+
+
+def _response_content_type(response: MoexApimTradestatsHttpResponse) -> str:
+    headers = getattr(response, "headers", {})
+    if isinstance(headers, Mapping):
+        return str(headers.get("content-type", ""))
+    return ""
+
+
+def _safe_response_snippet(response: MoexApimTradestatsHttpResponse, *, limit: int = 180) -> str:
+    text = getattr(response, "text", "")
+    if not isinstance(text, str):
+        return ""
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", text)[:limit]
+
+
+def _response_failure_detail(response: MoexApimTradestatsHttpResponse) -> str:
+    detail = " status=" + str(response.status_code) + " content_type=" + _response_content_type(response)
+    snippet = _safe_response_snippet(response)
+    if snippet:
+        detail += " snippet=" + snippet
+    return detail
 
 
 def _normalize_tradestats_row(raw_row: Mapping[str, object], request: Raw5mMaterializationRequest) -> dict[str, object]:
@@ -232,14 +280,20 @@ class MoexApimFoTradestats5mAdapter:
                     params=page_request.params,
                     timeout=self._timeout_seconds,
                 )
+            except MoexApimTradestatsSourceError:
+                raise
             except Exception as exc:
                 raise MoexApimTradestatsSourceError("MOEX APIM tradestats request failed") from exc
             if response.status_code != 200:
-                raise MoexApimTradestatsSourceError("MOEX APIM tradestats request returned HTTP " + str(response.status_code))
+                raise MoexApimTradestatsSourceError(
+                    "MOEX APIM tradestats request returned HTTP " + str(response.status_code) + _response_failure_detail(response)
+                )
             try:
                 payload = response.json()
             except Exception as exc:
-                raise MoexApimTradestatsSourceError("MOEX APIM tradestats response is not valid JSON") from exc
+                raise MoexApimTradestatsSourceError(
+                    "MOEX APIM tradestats response is not valid JSON" + _response_failure_detail(response)
+                ) from exc
             raw_rows = _parse_tradestats_table(payload)
             if not raw_rows:
                 break
