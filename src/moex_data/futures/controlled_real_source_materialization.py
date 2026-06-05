@@ -115,9 +115,7 @@ def _complete_identity(values: Mapping[str, object]) -> dict[str, object]:
     return {field: _safe_text(values[field], field) for field in IDENTITY_FIELDS}
 
 
-def _complete_source(values: object) -> dict[str, object]:
-    if not isinstance(values, Mapping):
-        raise ControlledRealSourceMaterializationError("source contract entry must be a mapping")
+def _complete_source(values: Mapping[str, object]) -> dict[str, object]:
     missing = tuple(field for field in SOURCE_FIELDS if field not in values)
     if missing:
         raise ControlledRealSourceMaterializationError("missing source contract field: " + missing[0])
@@ -156,22 +154,51 @@ def _load_universe(repo_root: Path) -> Mapping[str, object]:
 
 
 def _load_source_contract_entries(repo_root: Path) -> tuple[Mapping[str, object], ...]:
-    values = load_simple_yaml_mapping(repo_root, RAW_SOURCE_CONTRACT_REF)
-    path_rules = values.get("path_rules")
-    if not isinstance(path_rules, Mapping):
-        raise ControlledRealSourceMaterializationError("source contract path_rules must be a mapping")
-    if path_rules.get("implicit_file_selection_allowed") is not False or path_rules.get("dynamic_scan_allowed") is not False:
+    lines = (repo_root / RAW_SOURCE_CONTRACT_REF).read_text(encoding="utf-8").splitlines()
+    sources: list[dict[str, object]] = []
+    current: dict[str, object] | None = None
+    in_sources = False
+    implicit_selection_false = False
+    dynamic_scan_false = False
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped == "sources:":
+            in_sources = True
+            continue
+        if stripped == "path_rules:":
+            if current is not None:
+                sources.append(_complete_source(current))
+            current = None
+            in_sources = False
+            continue
+        if stripped == "implicit_file_selection_allowed: false":
+            implicit_selection_false = True
+            continue
+        if stripped == "dynamic_scan_allowed: false":
+            dynamic_scan_false = True
+            continue
+        if in_sources and stripped.startswith("- "):
+            if current is not None:
+                sources.append(_complete_source(current))
+            current = {}
+            key, value = _key_value(stripped.removeprefix("- ").strip(), "source")
+            current[key] = value
+            continue
+        if in_sources and current is not None and ":" in stripped:
+            key, value = _key_value(stripped, "source")
+            current[key] = value
+    if current is not None:
+        sources.append(_complete_source(current))
+    if not implicit_selection_false or not dynamic_scan_false:
         raise ControlledRealSourceMaterializationError("source contract must reject implicit selection and dynamic scan")
-    raw_sources = values.get("sources")
-    if isinstance(raw_sources, (str, bytes)) or not isinstance(raw_sources, Sequence):
-        raise ControlledRealSourceMaterializationError("source contract sources must be a sequence")
-    sources = tuple(_complete_source(item) for item in raw_sources)
     if not sources:
         raise ControlledRealSourceMaterializationError("source contract set must be non-empty")
     source_ids = tuple(source["source_id"] for source in sources)
     if len(set(source_ids)) != len(source_ids):
         raise ControlledRealSourceMaterializationError("duplicate source_id")
-    return sources
+    return tuple(sources)
 
 
 def _contract_values(repo_root: Path, repo_relative_path: str) -> Mapping[str, object]:
