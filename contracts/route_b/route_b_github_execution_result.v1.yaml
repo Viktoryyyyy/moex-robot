@@ -1,0 +1,43 @@
+schema_version: route_b_github_execution_result.v1
+contract_id: ROUTE_B_GITHUB_EXECUTION_RESULT_V1
+project: MOEX Bot
+status: active
+required_fields:
+  - schema_version
+  - workflow_run_id
+  - request_id
+  - status
+  - repository_full_name
+  - base_branch
+  - base_sha
+  - feature_branch
+  - branch_ref
+  - branch_created_at
+  - implementation_commit_sha
+  - implementation_tree_sha
+  - changed_files
+  - pr_refs
+  - ci_refs
+  - evidence_refs
+  - authority_boundary
+  - error
+branch_ref_rules:
+  feature_branch_prefix: n8n/
+  branch_ref_must_point_to_implementation_commit: true
+changed_file_rules:
+  deleted_files_allowed: false
+  file_delete_allowed: false
+pr_rules:
+  pr_required: true
+  pr_open_without_ci_is_not_validation_proof: true
+ci_rules:
+  workflow_name: tests
+  ci_head_sha_must_equal_pr_head_sha: true
+  ci_passed_does_not_imply_approved_for_merge: true
+authority_boundary:
+  merge_authority: PM_L2_ONLY
+  merge_performed_by_executor: false
+  approved_for_merge: false
+  pm_l2_approval_claimed_by_executor: false
+  n8n_merge_allowed: false
+  direct_main_write_allowed: false
