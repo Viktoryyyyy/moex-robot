@@ -1,0 +1,37 @@
+schema_version: route_b_result_query_request.v1
+contract_id: ROUTE_B_RESULT_QUERY_REQUEST_V1
+project: MOEX Bot
+status: active
+purpose: PM L2 retrieves full Route B cycle evidence, not status only.
+required_fields:
+  - schema_version
+  - repository_full_name
+  - requested_by_role
+  - include_sections
+identity_fields:
+  workflow_run_id: optional_when_idempotency_key_present
+  idempotency_key: optional_when_workflow_run_id_present
+repository_binding:
+  repository_full_name: required
+requested_by_role:
+  allowed_value: PM_L2_PHASE_OWNER
+include_sections:
+  required_all:
+    - status
+    - pm_l3_package
+    - github_execution_result
+    - pr_validation_package
+    - pm_l3_return_package
+    - events
+    - steps
+    - authority_boundary
+rejection_rules:
+  reject_status_only_query: true
+  reject_non_pm_l2_requester: true
+  reject_missing_repository_full_name: true
+  reject_missing_workflow_run_id_and_idempotency_key: true
+  reject_repository_mismatch_when_expected_repository_is_bound: true
+  reject_dynamic_markers:
+    - latest
+    - current
+    - autodetect
