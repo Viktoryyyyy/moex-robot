@@ -1,0 +1,46 @@
+schema_version: route_b_pr_validation_package.v1
+contract_id: ROUTE_B_PR_VALIDATION_PACKAGE_V1
+project: MOEX Bot
+status: active
+required_fields:
+  - schema_version
+  - validation_package_id
+  - workflow_run_id
+  - request_id
+  - repository_full_name
+  - context_registry_binding
+  - scope_validation
+  - git_refs
+  - pr_refs
+  - ci_refs
+  - changed_file_refs
+  - pm_l3_validation
+  - pm_l2_boundary
+context_registry_binding:
+  registry_path: docs/sot/context/registry.route_b.v1.yaml
+  source_of_truth: github_repo
+scope_validation:
+  approved_scope_required: true
+  file_scope_exact: true
+  forbidden_operations_absent: true
+git_refs:
+  feature_branch_prefix: n8n/
+pr_refs:
+  pr_required: true
+ci_refs:
+  workflow_name: tests
+  ci_head_sha_must_equal_pr_head_sha: true
+changed_file_refs:
+  deleted_files_allowed: false
+pm_l3_validation:
+  validation_verdict_values:
+    - pass
+    - conditional_pass
+    - fail
+    - blocked
+pm_l2_boundary:
+  pm_l2_review_required: true
+  merge_authority: PM_L2_ONLY
+  n8n_merge_allowed: false
+  approved_for_merge: false
+  explicit_pm_l2_approval_package_ref_required_when_approved_for_merge: true
