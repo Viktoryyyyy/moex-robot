@@ -1,0 +1,66 @@
+schema_version: route_b_pm_l3_return_package.v1
+contract_id: ROUTE_B_PM_L3_RETURN_PACKAGE_V1
+project: MOEX Bot
+status: active
+purpose: Machine-readable PM L3 validation/evidence return package for PM L2 review.
+required_fields:
+  - schema_version
+  - workflow_run_id
+  - request_id
+  - repository_full_name
+  - pm_l3_validation_status
+  - acceptance_criteria_check
+  - repo_scope_check
+  - artifact_contract_check
+  - test_or_ci_check
+  - pr_refs
+  - ci_refs
+  - changed_file_refs
+  - blockers
+  - required_fixes
+  - final_pm_l2_review_required
+  - pm_l2_decision_needed
+  - authority_boundary
+pm_l3_validation_status:
+  allowed_values:
+    - pass
+    - conditional_pass
+    - fail
+    - blocked
+pm_l2_boundary:
+  final_pm_l2_review_required: true
+  pm_l2_decision_needed: required
+  pm_l3_may_mark_review_required_only: true
+  pm_l3_final_verdict_allowed: false
+  pm_l3_merge_approval_allowed: false
+authority_boundary:
+  pm_l2_final_verdict_authority: true
+  pm_l2_merge_approval_authority: true
+  pm_l3_validation_return_only: true
+  subchat_return_to_role: PM_L3_DELIVERY_VALIDATION_OWNER
+  merge_performed_by_executor: false
+  n8n_merge_allowed: false
+  direct_main_write_allowed: false
+  force_push_allowed: false
+  file_delete_allowed: false
+  approved_for_merge: false
+  ci_passed_is_merge_approval: false
+changed_file_rules:
+  file_delete_allowed: false
+  deleted_files_allowed: false
+ci_boundary:
+  ci_passed_does_not_imply_approved_for_merge: true
+rejection_rules:
+  reject_missing_workflow_run_id: true
+  reject_missing_repository_full_name: true
+  reject_final_pm_l2_review_required_false: true
+  reject_pm_l3_claiming_pm_l2_approval: true
+  reject_pm_l3_claiming_merge_approval: true
+  reject_approved_for_merge_without_explicit_pm_l2_approval_package: true
+  reject_subchat_direct_to_pm_l2: true
+  reject_merge_performed_by_executor: true
+  reject_n8n_merge: true
+  reject_direct_main_write: true
+  reject_force_push: true
+  reject_file_delete: true
+  reject_ci_passed_as_merge_approval: true
