@@ -1,0 +1,99 @@
+{
+  "registry_id": "route_b_context_registry.v1",
+  "project": "MOEX Bot",
+  "status": "active",
+  "root_path": "docs/sot/context",
+  "source_of_truth": "github_repo",
+  "workflow_state_store": "postgres",
+  "static_context_refs": {
+    "MOEX_Bot_Target_Architecture_2026_All_In_One": {
+      "path": "docs/sot/context/static/MOEX_Bot_Target_Architecture_2026_All_In_One.md",
+      "kind": "static_context",
+      "version": "2026_all_in_one"
+    },
+    "MOEX_Bot_Role_Context_Operating_Model_v1": {
+      "path": "docs/sot/context/static/MOEX_Bot_Role_Context_Operating_Model_v1.md",
+      "kind": "static_context",
+      "version": "v1"
+    },
+    "github_commit_flow_subchats_v3": {
+      "path": "docs/sot/context/static/github_commit_flow_subchats_v3.md",
+      "kind": "static_context",
+      "version": "v3"
+    }
+  },
+  "role_context_refs": {
+    "PM_L2_PHASE_OWNER": {
+      "v1": {
+        "path": "docs/sot/context/roles/PM_L2_PHASE_OWNER.v1.yaml",
+        "kind": "role_context"
+      }
+    },
+    "PM_L3_DELIVERY_VALIDATION_OWNER": {
+      "v1": {
+        "path": "docs/sot/context/roles/PM_L3_DELIVERY_VALIDATION_OWNER.v1.yaml",
+        "kind": "role_context"
+      }
+    },
+    "SUBCHAT_BASE": {
+      "v1": {
+        "path": "docs/sot/context/roles/SUBCHAT_BASE.v1.yaml",
+        "kind": "role_context"
+      }
+    },
+    "SUBCHAT_IMPLEMENTATION": {
+      "v1": {
+        "path": "docs/sot/context/roles/SUBCHAT_IMPLEMENTATION.v1.yaml",
+        "kind": "role_context"
+      }
+    },
+    "SUBCHAT_VALIDATION": {
+      "v1": {
+        "path": "docs/sot/context/roles/SUBCHAT_VALIDATION.v1.yaml",
+        "kind": "role_context"
+      }
+    },
+    "SUBCHAT_REPO_AUDIT": {
+      "v1": {
+        "path": "docs/sot/context/roles/SUBCHAT_REPO_AUDIT.v1.yaml",
+        "kind": "role_context"
+      }
+    }
+  },
+  "schema_refs": {
+    "pm_l2_to_pm_l3_request_envelope.v1": {
+      "path": "docs/sot/context/schemas/pm_l2_to_pm_l3_request_envelope.v1.md",
+      "producer": "PM_L2_PHASE_OWNER",
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER"
+    },
+    "pm_l3_to_subchat_task_package.v1": {
+      "path": "docs/sot/context/schemas/pm_l3_to_subchat_task_package.v1.md",
+      "producer": "PM_L3_DELIVERY_VALIDATION_OWNER",
+      "consumer": "SUBCHAT_BASE_or_variant"
+    },
+    "subchat_to_pm_l3_return_package.v1": {
+      "path": "docs/sot/context/schemas/subchat_to_pm_l3_return_package.v1.md",
+      "producer": "SUBCHAT_BASE_or_variant",
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER"
+    },
+    "pm_l3_to_pm_l2_validation_return_package.v1": {
+      "path": "docs/sot/context/schemas/pm_l3_to_pm_l2_validation_return_package.v1.md",
+      "producer": "PM_L3_DELIVERY_VALIDATION_OWNER",
+      "consumer": "PM_L2_PHASE_OWNER"
+    }
+  },
+  "route_b_chain": [
+    "PM_L2_PHASE_OWNER",
+    "PM_L3_DELIVERY_VALIDATION_OWNER",
+    "SUBCHAT_BASE_or_variant",
+    "PM_L3_DELIVERY_VALIDATION_OWNER",
+    "PM_L2_PHASE_OWNER"
+  ],
+  "resolver_rules": {
+    "path_mode": "repo_relative_only",
+    "unknown_ref_policy": "reject",
+    "full_context_paste_policy": "reject",
+    "subchat_return_target": "PM_L3_DELIVERY_VALIDATION_OWNER",
+    "pm_l3_return_target": "PM_L2_PHASE_OWNER"
+  }
+}
