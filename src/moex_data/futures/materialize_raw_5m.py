@@ -11,6 +11,7 @@ import tempfile
 from typing import Final
 
 import pandas as pd
+import requests
 
 from .contract_io import FuturesContractIoError, expand_contract_path, load_futures_data_lake_contract_package, reject_dynamic_markers
 from .manifest import validate_refresh_manifest_values
@@ -23,6 +24,13 @@ TARGET_CONTRACT_ID: Final[str] = "futures_raw_5m.v1"
 TARGET_TRADE_DATE: Final[str] = "2026-06-02"
 TARGET_FAMILY: Final[str] = "Si"
 TARGET_SECID: Final[str] = "SiM6"
+TARGET_MARKET: Final[str] = "FORTS"
+TARGET_BOARD: Final[str] = "RFUD"
+TARGET_SERIES_TYPE: Final[str] = "native"
+TARGET_GRANULARITY: Final[str] = "5m"
+SOURCE_CANDIDATE_APIM_TRADESTATS: Final[str] = "MOEX_ALGOPACK_FO_TRADESTATS"
+SOURCE_ENDPOINT_APIM_FO_TRADESTATS: Final[str] = "/iss/datashop/algopack/fo/tradestats.json"
+DEFAULT_APIM_BASE_URL: Final[str] = "https://apim.moex.com"
 MANIFEST_DATASET_ID: Final[str] = "futures_data_refresh_manifest"
 QUALITY_DATASET_ID: Final[str] = "futures_quality_report"
 BLOCKED_NO_SOURCE_STATUS: Final[str] = "blocked_no_source_artifact"
@@ -65,8 +73,14 @@ class Raw5mMaterializationRequest:
     trade_date: str
     family: str
     secid: str
-    source_path: Path
+    source_path: Path | None
     run_id: str
+    source_candidate: str
+    source_endpoint: str
+    market: str
+    board: str
+    series_type: str
+    granularity: str
 
 
 @dataclass(frozen=True)
@@ -84,6 +98,8 @@ class Raw5mMaterializationResult:
     manifest_path: Path
     quality_report_path: Path
     quality_status: str
+    source_candidate: str
+    source_endpoint: str
 
 
 def _fail(message: str, status: str = VALIDATION_FAILED_STATUS) -> None:
@@ -110,9 +126,9 @@ def _require_run_id(value: str | None) -> str:
     return run_id
 
 
-def _require_source_path(value: str | None) -> Path:
+def _optional_source_path(value: str | None) -> Path | None:
     if value is None or not str(value).strip():
-        _fail("source_path is required", BLOCKED_NO_SOURCE_STATUS)
+        return None
     source_text = _require_text(value, "source_path")
     source_path = Path(source_text)
     if not source_path.exists() or not source_path.is_file():
@@ -131,6 +147,35 @@ def _require_exact_target(dataset_id: str, contract_id: str, trade_date: str, fa
         _fail("family does not match controlled target partition")
     if secid != TARGET_SECID:
         _fail("secid does not match controlled target partition")
+
+
+def _require_source_contract(
+    source_candidate: str | None,
+    source_endpoint: str | None,
+    market: str | None,
+    board: str | None,
+    series_type: str | None,
+    granularity: str | None,
+) -> tuple[str, str, str, str, str, str]:
+    checked_candidate = _require_text(source_candidate, "source_candidate")
+    checked_endpoint = _require_text(source_endpoint, "source_endpoint")
+    checked_market = _require_text(market, "market").upper()
+    checked_board = _require_text(board, "board").upper()
+    checked_series_type = _require_text(series_type, "series_type")
+    checked_granularity = _require_text(granularity, "granularity")
+    if checked_candidate != SOURCE_CANDIDATE_APIM_TRADESTATS:
+        _fail("source_candidate is not the declared FORTS native 5m source")
+    if checked_endpoint != SOURCE_ENDPOINT_APIM_FO_TRADESTATS:
+        _fail("source_endpoint does not match the declared APIM tradestats source")
+    if checked_market != TARGET_MARKET:
+        _fail("market does not match controlled target partition")
+    if checked_board != TARGET_BOARD:
+        _fail("board does not match controlled target partition")
+    if checked_series_type != TARGET_SERIES_TYPE:
+        _fail("series_type does not match controlled target partition")
+    if checked_granularity != TARGET_GRANULARITY:
+        _fail("granularity does not match controlled target partition")
+    return checked_candidate, checked_endpoint, checked_market, checked_board, checked_series_type, checked_granularity
 
 
 def _contract_for(package_contracts: Mapping[str, FuturesDatasetContract], dataset_id: str, contract_id: str) -> FuturesDatasetContract:
@@ -159,6 +204,13 @@ def build_materialization_request(
     secid: str,
     source_path: str | None,
     run_id: str,
+    *,
+    source_candidate: str | None = None,
+    source_endpoint: str | None = None,
+    market: str | None = None,
+    board: str | None = None,
+    series_type: str | None = None,
+    granularity: str | None = None,
 ) -> Raw5mMaterializationRequest:
     checked_dataset_id = _require_text(dataset_id, "dataset_id")
     checked_contract_id = _require_text(contract_id, "contract_id")
@@ -166,6 +218,14 @@ def build_materialization_request(
     checked_family = _require_text(family, "family")
     checked_secid = _require_text(secid, "secid")
     _require_exact_target(checked_dataset_id, checked_contract_id, checked_trade_date, checked_family, checked_secid)
+    checked_candidate, checked_endpoint, checked_market, checked_board, checked_series_type, checked_granularity = _require_source_contract(
+        source_candidate=source_candidate,
+        source_endpoint=source_endpoint,
+        market=market,
+        board=board,
+        series_type=series_type,
+        granularity=granularity,
+    )
     return Raw5mMaterializationRequest(
         repo_root=Path(repo_root),
         dataset_id=checked_dataset_id,
@@ -173,8 +233,14 @@ def build_materialization_request(
         trade_date=checked_trade_date,
         family=checked_family,
         secid=checked_secid,
-        source_path=_require_source_path(source_path),
+        source_path=_optional_source_path(source_path),
         run_id=_require_run_id(run_id),
+        source_candidate=checked_candidate,
+        source_endpoint=checked_endpoint,
+        market=checked_market,
+        board=checked_board,
+        series_type=checked_series_type,
+        granularity=checked_granularity,
     )
 
 
@@ -251,6 +317,171 @@ def _gap_count(timestamps: pd.Series) -> int:
     ordered = timestamps.sort_values()
     deltas = ordered.diff().dropna()
     return int((deltas > pd.Timedelta(minutes=5)).sum())
+
+
+def _canonical_column(df: pd.DataFrame, candidates: Sequence[str]) -> str | None:
+    by_upper = {str(column).upper(): column for column in df.columns}
+    for candidate in candidates:
+        found = by_upper.get(candidate.upper())
+        if found is not None:
+            return found
+    return None
+
+
+def _parse_trade_date(value: object) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return pd.to_datetime(text).date().isoformat()
+    except Exception:
+        return text[:10] if len(text) >= 10 else None
+
+
+def _combine_ts(frame: pd.DataFrame, date_col: str, time_col: str | None) -> pd.Series:
+    dates = frame[date_col].map(_parse_trade_date)
+    if time_col is None:
+        return pd.to_datetime(dates, errors="coerce")
+    values: list[str | None] = []
+    for date_value, time_value in zip(dates.tolist(), frame[time_col].astype(str).str.strip().tolist()):
+        if not date_value or not time_value or time_value.lower() == "nan":
+            values.append(None)
+        elif len(time_value) >= 10 and "-" in time_value[:10]:
+            values.append(time_value)
+        else:
+            values.append(date_value + " " + time_value)
+    return pd.to_datetime(pd.Series(values), errors="coerce")
+
+
+def _block_to_frame(data: Mapping[str, object]) -> pd.DataFrame:
+    for block in ("data", "tradestats"):
+        raw = data.get(block)
+        if isinstance(raw, Mapping):
+            columns = raw.get("columns") or []
+            rows = raw.get("data") or []
+            if isinstance(columns, list) and isinstance(rows, list) and columns:
+                return pd.DataFrame(rows, columns=columns)
+    for raw in data.values():
+        if isinstance(raw, Mapping):
+            columns = raw.get("columns") or []
+            rows = raw.get("data") or []
+            if isinstance(columns, list) and isinstance(rows, list) and columns:
+                return pd.DataFrame(rows, columns=columns)
+    return pd.DataFrame()
+
+
+def _auth_headers(env: Mapping[str, str] | None) -> dict[str, str]:
+    active_env = os.environ if env is None else env
+    user_agent = str(active_env.get("MOEX_UA", "moex_bot_controlled_raw_5m_materialization/1.0")).strip()
+    headers = {"User-Agent": user_agent or "moex_bot_controlled_raw_5m_materialization/1.0"}
+    token = str(active_env.get("MOEX_API_KEY", "")).strip()
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    return headers
+
+
+def _apim_base_url(apim_base_url: str | None, env: Mapping[str, str] | None) -> str:
+    active_env = os.environ if env is None else env
+    value = str(apim_base_url or active_env.get("MOEX_API_URL", DEFAULT_APIM_BASE_URL)).strip()
+    if not value:
+        _fail("MOEX_API_URL is required for declared APIM source")
+    return value.rstrip("/")
+
+
+def _source_url(base_url: str, endpoint: str) -> str:
+    return base_url.rstrip("/") + "/" + endpoint.lstrip("/")
+
+
+def _fetch_apim_tradestats_frame(request: Raw5mMaterializationRequest, timeout: float, apim_base_url: str | None, env: Mapping[str, str] | None) -> tuple[pd.DataFrame, str]:
+    base_url = _apim_base_url(apim_base_url, env)
+    url = _source_url(base_url, request.source_endpoint)
+    params = {"secid": request.secid, "from": request.trade_date, "till": request.trade_date, "iss.meta": "off"}
+    response = requests.get(url, params=params, headers=_auth_headers(env), timeout=timeout)
+    response.raise_for_status()
+    data = response.json()
+    if not isinstance(data, Mapping):
+        _fail("APIM tradestats response JSON root is not an object")
+    frame = _block_to_frame(data)
+    source_url = str(getattr(response, "url", url))
+    if frame.empty:
+        _fail("APIM tradestats response returned no rows")
+    return frame, source_url
+
+
+def _normalize_apim_tradestats(frame: pd.DataFrame, request: Raw5mMaterializationRequest, source_url: str, ingest_ts: str) -> pd.DataFrame:
+    date_col = _canonical_column(frame, ("tradedate", "TRADEDATE", "date", "DATE"))
+    time_col = _canonical_column(frame, ("tradetime", "TRADETIME", "time", "TIME", "moment", "MOMENT"))
+    source_secid_col = _canonical_column(frame, ("secid", "SECID"))
+    open_col = _canonical_column(frame, ("pr_open", "PR_OPEN", "open", "OPEN"))
+    high_col = _canonical_column(frame, ("pr_high", "PR_HIGH", "high", "HIGH"))
+    low_col = _canonical_column(frame, ("pr_low", "PR_LOW", "low", "LOW"))
+    close_col = _canonical_column(frame, ("pr_close", "PR_CLOSE", "close", "CLOSE"))
+    volume_col = _canonical_column(frame, ("vol", "VOL", "volume", "VOLUME", "qty", "QTY"))
+    value_col = _canonical_column(frame, ("val", "VAL", "value", "VALUE", "turnover", "TURNOVER"))
+    trades_col = _canonical_column(frame, ("trades", "TRADES", "num_trades", "NUM_TRADES", "numtrades", "NUMTRADES"))
+    required = {
+        "trade_date": date_col,
+        "source_secid": source_secid_col,
+        "open": open_col,
+        "high": high_col,
+        "low": low_col,
+        "close": close_col,
+        "volume": volume_col,
+    }
+    missing = tuple(name for name, column in required.items() if column is None)
+    if missing:
+        _fail("APIM tradestats response missing required columns: " + ",".join(missing))
+    assert date_col is not None
+    assert source_secid_col is not None
+    assert open_col is not None
+    assert high_col is not None
+    assert low_col is not None
+    assert close_col is not None
+    assert volume_col is not None
+    requested_secid = request.secid.upper()
+    identity = frame[source_secid_col].astype(str).str.strip().str.upper()
+    work = frame.loc[identity == requested_secid].copy().reset_index(drop=True)
+    if work.empty:
+        _fail("APIM tradestats response contains no rows for requested secid")
+    output = pd.DataFrame()
+    output["trade_date"] = work[date_col].map(_parse_trade_date)
+    output["ts"] = _combine_ts(work, date_col, time_col)
+    output["session_date"] = output["trade_date"]
+    output["secid"] = request.secid
+    output["family"] = request.family
+    output["board"] = request.board
+    output["open"] = pd.to_numeric(work[open_col], errors="coerce")
+    output["high"] = pd.to_numeric(work[high_col], errors="coerce")
+    output["low"] = pd.to_numeric(work[low_col], errors="coerce")
+    output["close"] = pd.to_numeric(work[close_col], errors="coerce")
+    output["volume"] = pd.to_numeric(work[volume_col], errors="coerce")
+    output["value"] = pd.to_numeric(work[value_col], errors="coerce") if value_col else pd.NA
+    output["num_trades"] = pd.to_numeric(work[trades_col], errors="coerce") if trades_col else pd.NA
+    output["source"] = request.source_candidate
+    output["source_endpoint_url"] = source_url
+    output["ingest_ts"] = ingest_ts
+    return output.sort_values(["ts", "secid"]).reset_index(drop=True)
+
+
+def _source_table_for_request(request: Raw5mMaterializationRequest, timeout: float, apim_base_url: str | None, env: Mapping[str, str] | None) -> tuple[pd.DataFrame, dict[str, object]]:
+    if request.source_path is not None:
+        source_table = _load_source_table(request.source_path)
+        return source_table, {
+            "source_fetch_mode": "declared_source_path",
+            "source_path": request.source_path.as_posix(),
+            "source_candidate": request.source_candidate,
+            "source_endpoint": request.source_endpoint,
+        }
+    frame, source_url = _fetch_apim_tradestats_frame(request, timeout=timeout, apim_base_url=apim_base_url, env=env)
+    normalized = _normalize_apim_tradestats(frame, request, source_url, _utc_now())
+    return normalized, {
+        "source_fetch_mode": "declared_apim_tradestats",
+        "source_candidate": request.source_candidate,
+        "source_endpoint": request.source_endpoint,
+        "source_endpoint_url": source_url,
+    }
 
 
 def _validate_source_table(df: pd.DataFrame, trade_date: str, family: str, secid: str) -> tuple[pd.DataFrame, dict[str, object]]:
@@ -352,11 +583,35 @@ def _quality_row(request: Raw5mMaterializationRequest, metrics: Mapping[str, obj
         "futoi_missing_count": 0,
         "calendar_status": "not_checked",
         "quality_status": "pass",
-        "notes": "single_partition_minimal_materialization",
+        "notes": "single_partition_apim_tradestats_materialization",
     }
 
 
-def _manifest(request: Raw5mMaterializationRequest, paths: Raw5mMaterializationPaths) -> dict[str, object]:
+def _source_contract_manifest(request: Raw5mMaterializationRequest, source_info: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "source_candidate": request.source_candidate,
+        "source_endpoint": request.source_endpoint,
+        "source_endpoint_url": source_info.get("source_endpoint_url"),
+        "source_fetch_mode": source_info.get("source_fetch_mode"),
+        "source_path": source_info.get("source_path"),
+        "market": request.market,
+        "board": request.board,
+        "family": request.family,
+        "secid": request.secid,
+        "trade_date": request.trade_date,
+        "granularity": request.granularity,
+        "series_type": request.series_type,
+        "failure_semantics": {
+            "empty_response": "fail_closed",
+            "schema_mismatch": "fail_closed",
+            "missing_required_contract_input": "fail_closed",
+            "implicit_fallback": "forbidden",
+            "iss_candles_masking": "forbidden",
+        },
+    }
+
+
+def _manifest(request: Raw5mMaterializationRequest, paths: Raw5mMaterializationPaths, source_info: Mapping[str, object]) -> dict[str, object]:
     now = _utc_now()
     values = {
         "run_id": request.run_id,
@@ -371,6 +626,7 @@ def _manifest(request: Raw5mMaterializationRequest, paths: Raw5mMaterializationP
         "refresh_status": SUCCEEDED_STATUS,
         "started_at": now,
         "finished_at": now,
+        "source_contract": _source_contract_manifest(request, source_info),
     }
     validate_refresh_manifest_values(values)
     return values
@@ -386,6 +642,15 @@ def materialize_single_raw_5m_partition(
     source_path: str | None,
     run_id: str,
     env: Mapping[str, str] | None = None,
+    *,
+    source_candidate: str | None = None,
+    source_endpoint: str | None = None,
+    market: str | None = None,
+    board: str | None = None,
+    series_type: str | None = None,
+    granularity: str | None = None,
+    timeout: float = 60.0,
+    apim_base_url: str | None = None,
 ) -> Raw5mMaterializationResult:
     try:
         request = build_materialization_request(
@@ -397,6 +662,12 @@ def materialize_single_raw_5m_partition(
             secid=secid,
             source_path=source_path,
             run_id=run_id,
+            source_candidate=source_candidate,
+            source_endpoint=source_endpoint,
+            market=market,
+            board=board,
+            series_type=series_type,
+            granularity=granularity,
         )
         paths = materialization_target_paths(
             repo_root=request.repo_root,
@@ -408,12 +679,12 @@ def materialize_single_raw_5m_partition(
             run_id=request.run_id,
             env=env,
         )
-        source_table = _load_source_table(request.source_path)
+        source_table, source_info = _source_table_for_request(request, timeout=timeout, apim_base_url=apim_base_url, env=env)
         output_table, metrics = _validate_source_table(source_table, request.trade_date, request.family, request.secid)
         quality_row = _quality_row(request, metrics)
         validate_quality_report_rows([quality_row])
         quality_report = {"run_id": request.run_id, "rows": [quality_row]}
-        manifest = _manifest(request, paths)
+        manifest = _manifest(request, paths, source_info)
 
         _write_parquet_atomic(paths.partition_path, output_table, request.run_id)
         _write_json_atomic(paths.quality_report_path, quality_report)
@@ -425,6 +696,8 @@ def materialize_single_raw_5m_partition(
             manifest_path=paths.manifest_path,
             quality_report_path=paths.quality_report_path,
             quality_status="pass",
+            source_candidate=request.source_candidate,
+            source_endpoint=request.source_endpoint,
         )
     except Exception as exc:
         raise _as_materialization_error(exc) from exc
@@ -438,6 +711,8 @@ def _result_payload(result: Raw5mMaterializationResult) -> dict[str, object]:
         "manifest_path": result.manifest_path.as_posix(),
         "quality_report_path": result.quality_report_path.as_posix(),
         "quality_status": result.quality_status,
+        "source_candidate": result.source_candidate,
+        "source_endpoint": result.source_endpoint,
     }
 
 
@@ -453,8 +728,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--trade-date", required=True)
     parser.add_argument("--family", required=True)
     parser.add_argument("--secid", required=True)
+    parser.add_argument("--market", required=True)
+    parser.add_argument("--board", required=True)
+    parser.add_argument("--series-type", required=True)
+    parser.add_argument("--granularity", required=True)
+    parser.add_argument("--source-candidate", required=True)
+    parser.add_argument("--source-endpoint", required=True)
     parser.add_argument("--source-path", default=None)
     parser.add_argument("--run-id", required=True)
+    parser.add_argument("--timeout", type=float, default=60.0)
+    parser.add_argument("--apim-base-url", default=None)
     return parser.parse_args(argv)
 
 
@@ -470,6 +753,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             secid=args.secid,
             source_path=args.source_path,
             run_id=args.run_id,
+            source_candidate=args.source_candidate,
+            source_endpoint=args.source_endpoint,
+            market=args.market,
+            board=args.board,
+            series_type=args.series_type,
+            granularity=args.granularity,
+            timeout=args.timeout,
+            apim_base_url=args.apim_base_url,
         )
     except FuturesRaw5mMaterializationError as exc:
         print(json.dumps(_error_payload(exc), ensure_ascii=False, sort_keys=True))
