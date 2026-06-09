@@ -394,7 +394,12 @@ def _source_url(base_url: str, endpoint: str) -> str:
     return base_url.rstrip("/") + "/" + endpoint.lstrip("/")
 
 
-def _fetch_apim_tradestats_frame(request: Raw5mMaterializationRequest, timeout: float, apim_base_url: str | None, env: Mapping[str, str] | None) -> tuple[pd.DataFrame, str]:
+def _fetch_apim_tradestats_frame(
+    request: Raw5mMaterializationRequest,
+    timeout: float,
+    apim_base_url: str | None,
+    env: Mapping[str, str] | None,
+) -> tuple[pd.DataFrame, str]:
     base_url = _apim_base_url(apim_base_url, env)
     url = _source_url(base_url, request.source_endpoint)
     params = {"secid": request.secid, "from": request.trade_date, "till": request.trade_date, "iss.meta": "off"}
@@ -410,7 +415,12 @@ def _fetch_apim_tradestats_frame(request: Raw5mMaterializationRequest, timeout: 
     return frame, source_url
 
 
-def _normalize_apim_tradestats(frame: pd.DataFrame, request: Raw5mMaterializationRequest, source_url: str, ingest_ts: str) -> pd.DataFrame:
+def _normalize_apim_tradestats(
+    frame: pd.DataFrame,
+    request: Raw5mMaterializationRequest,
+    source_url: str,
+    ingest_ts: str,
+) -> pd.DataFrame:
     date_col = _canonical_column(frame, ("tradedate", "TRADEDATE", "date", "DATE"))
     time_col = _canonical_column(frame, ("tradetime", "TRADETIME", "time", "TIME", "moment", "MOMENT"))
     source_secid_col = _canonical_column(frame, ("secid", "SECID"))
@@ -440,13 +450,20 @@ def _normalize_apim_tradestats(frame: pd.DataFrame, request: Raw5mMaterializatio
     assert low_col is not None
     assert close_col is not None
     assert volume_col is not None
+
     requested_secid = request.secid.upper()
     identity = frame[source_secid_col].astype(str).str.strip().str.upper()
     work = frame.loc[identity == requested_secid].copy().reset_index(drop=True)
     if work.empty:
         _fail("APIM tradestats response contains no rows for requested secid")
+
+    work["_parsed_trade_date"] = work[date_col].map(_parse_trade_date)
+    work = work.loc[work["_parsed_trade_date"] == request.trade_date].copy().reset_index(drop=True)
+    if work.empty:
+        _fail("APIM tradestats response contains no rows for requested secid/date")
+
     output = pd.DataFrame()
-    output["trade_date"] = work[date_col].map(_parse_trade_date)
+    output["trade_date"] = work["_parsed_trade_date"]
     output["ts"] = _combine_ts(work, date_col, time_col)
     output["session_date"] = output["trade_date"]
     output["secid"] = request.secid
@@ -465,7 +482,12 @@ def _normalize_apim_tradestats(frame: pd.DataFrame, request: Raw5mMaterializatio
     return output.sort_values(["ts", "secid"]).reset_index(drop=True)
 
 
-def _source_table_for_request(request: Raw5mMaterializationRequest, timeout: float, apim_base_url: str | None, env: Mapping[str, str] | None) -> tuple[pd.DataFrame, dict[str, object]]:
+def _source_table_for_request(
+    request: Raw5mMaterializationRequest,
+    timeout: float,
+    apim_base_url: str | None,
+    env: Mapping[str, str] | None,
+) -> tuple[pd.DataFrame, dict[str, object]]:
     if request.source_path is not None:
         source_table = _load_source_table(request.source_path)
         return source_table, {
