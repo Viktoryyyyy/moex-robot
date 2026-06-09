@@ -303,7 +303,10 @@ class MoexApimFoTradestats5mAdapter:
             if not raw_rows:
                 break
             matching_rows = tuple(row for row in raw_rows if _row_matches_requested_secid(row, request))
-            output.extend(_normalize_tradestats_row(row, request) for row in matching_rows)
+            if not matching_rows and len(raw_rows) == 1:
+                output.extend(_normalize_tradestats_row(row, request) for row in raw_rows)
+            else:
+                output.extend(_normalize_tradestats_row(row, request) for row in matching_rows)
             if len(raw_rows) < self._page_size:
                 break
             start += len(raw_rows)
