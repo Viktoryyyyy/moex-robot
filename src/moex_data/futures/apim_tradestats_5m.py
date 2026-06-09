@@ -308,5 +308,5 @@ class MoexApimFoTradestats5mAdapter:
                 break
             start += len(raw_rows)
         if not output:
-            raise MoexApimTradestatsSourceError("MOEX APIM tradestats response returned no rows for requested SECID")
+            raise MoexApimTradestatsSourceError("MOEX APIM tradestats response returned no rows")
         return tuple(output)
