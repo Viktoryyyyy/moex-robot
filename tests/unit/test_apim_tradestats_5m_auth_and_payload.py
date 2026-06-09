@@ -175,7 +175,7 @@ def test_adapter_fails_closed_when_no_requested_secid_rows_remain() -> None:
     ]
     client = _FakeClient((_FakeResponse(payload=payload),))
 
-    with pytest.raises(MoexApimTradestatsSourceError, match="requested SECID"):
+    with pytest.raises(MoexApimTradestatsSourceError, match="returned no rows"):
         MoexApimFoTradestats5mAdapter(http_client=client).read_rows(_request())
 
 
