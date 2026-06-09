@@ -43,13 +43,18 @@ controlled_native_5m_materialization:
   board: RFUD
   family: Si
   secid: SiM6
-  trade_date: "2026-06-02"
+  trade_date_binding: explicit_cli_argument
+  example_trade_date: "2026-06-02"
   granularity: 5m
   series_type: native
   query_params:
+    date: "{YYYY-MM-DD}"
+    from: "{YYYY-MM-DD}"
+    till: "{YYYY-MM-DD}"
     secid: SiM6
-    from: "2026-06-02"
-    till: "2026-06-02"
+    start: "0"
+    iss.meta: "off"
+    iss.only: tradestats
   required_contract_inputs:
     - MOEX_DATA_ROOT
     - market

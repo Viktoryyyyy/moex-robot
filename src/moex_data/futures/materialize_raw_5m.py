@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -119,6 +119,18 @@ def _require_text(value: str | None, field_name: str) -> str:
         raise FuturesRaw5mMaterializationError(VALIDATION_FAILED_STATUS, str(exc)) from exc
 
 
+def _require_trade_date(value: str) -> str:
+    if len(value) != 10 or value[4] != "-" or value[7] != "-":
+        _fail("trade_date must be an explicit YYYY-MM-DD date")
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError as exc:
+        raise FuturesRaw5mMaterializationError(
+            VALIDATION_FAILED_STATUS,
+            "trade_date must be an explicit YYYY-MM-DD date",
+        ) from exc
+
+
 def _require_run_id(value: str | None) -> str:
     run_id = _require_text(value, "run_id")
     if run_id.startswith(("/", "\\")) or "/" in run_id or "\\" in run_id or run_id in (".", ".."):
@@ -141,8 +153,7 @@ def _require_exact_target(dataset_id: str, contract_id: str, trade_date: str, fa
         _fail("unsupported dataset_id")
     if contract_id != TARGET_CONTRACT_ID:
         _fail("contract_id does not match controlled materialization package")
-    if trade_date != TARGET_TRADE_DATE:
-        _fail("trade_date does not match controlled target partition")
+    _require_trade_date(trade_date)
     if family != TARGET_FAMILY:
         _fail("family does not match controlled target partition")
     if secid != TARGET_SECID:
@@ -214,7 +225,7 @@ def build_materialization_request(
 ) -> Raw5mMaterializationRequest:
     checked_dataset_id = _require_text(dataset_id, "dataset_id")
     checked_contract_id = _require_text(contract_id, "contract_id")
-    checked_trade_date = _require_text(trade_date, "trade_date")
+    checked_trade_date = _require_trade_date(_require_text(trade_date, "trade_date"))
     checked_family = _require_text(family, "family")
     checked_secid = _require_text(secid, "secid")
     _require_exact_target(checked_dataset_id, checked_contract_id, checked_trade_date, checked_family, checked_secid)
@@ -256,7 +267,7 @@ def materialization_target_paths(
 ) -> Raw5mMaterializationPaths:
     checked_dataset_id = _require_text(dataset_id, "dataset_id")
     checked_contract_id = _require_text(contract_id, "contract_id")
-    checked_trade_date = _require_text(trade_date, "trade_date")
+    checked_trade_date = _require_trade_date(_require_text(trade_date, "trade_date"))
     checked_family = _require_text(family, "family")
     checked_secid = _require_text(secid, "secid")
     checked_run_id = _require_run_id(run_id)
@@ -587,7 +598,7 @@ def _write_json_atomic(path: Path, values: Mapping[str, object]) -> None:
 
 def _write_parquet_atomic(path: Path, df: pd.DataFrame, run_id: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = path.with_name(f".{path.name}.{run_id}.tmp")
+    temporary_path = path.with_name("." + path.name + "." + run_id + ".tmp")
     try:
         df.to_parquet(temporary_path, index=False)
         temporary_path.replace(path)
