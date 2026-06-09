@@ -132,7 +132,7 @@ def test_declared_apim_tradestats_materialization_writes_consumer_boundary(tmp_p
     seen = {}
 
     class Response:
-        url = "https://apim.moex.test/iss/datashop/algopack/fo/tradestats.json?secid=SiM6&from=2026-06-02&till=2026-06-02"
+        url = "https://apim.moex.test/iss/datashop/algopack/fo/tradestats.json?date=2026-06-02&from=2026-06-02&till=2026-06-02&secid=SiM6&start=0&iss.meta=off&iss.only=tradestats"
 
         def raise_for_status(self):
             return None
@@ -162,7 +162,15 @@ def test_declared_apim_tradestats_materialization_writes_consumer_boundary(tmp_p
     assert result.rows == 2
     assert seen["url"] == "https://apim.moex.test/iss/datashop/algopack/fo/tradestats.json"
     assert "candles" not in seen["url"].casefold()
-    assert seen["params"] == {"secid": "SiM6", "from": "2026-06-02", "till": "2026-06-02", "iss.meta": "off"}
+    assert seen["params"] == {
+        "date": "2026-06-02",
+        "from": "2026-06-02",
+        "till": "2026-06-02",
+        "secid": "SiM6",
+        "start": 0,
+        "iss.meta": "off",
+        "iss.only": "tradestats",
+    }
     partition = pd.read_parquet(result.partition_path)
     assert list(partition.columns) == list(materializer.RAW_5M_REQUIRED_COLUMNS)
     assert set(partition["source"]) == {materializer.SOURCE_CANDIDATE_APIM_TRADESTATS}
