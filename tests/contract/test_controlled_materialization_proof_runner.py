@@ -104,6 +104,7 @@ def test_controlled_proof_writes_expected_files_and_summary(tmp_path):
 
 def test_missing_moex_data_root_or_cli_root_fails_closed(tmp_path, monkeypatch):
     monkeypatch.delenv("MOEX_DATA_ROOT", raising=False)
+    monkeypatch.setattr("moex_data.futures.controlled_materialization_proof._load_dotenv", lambda: None)
     exit_code = main(_without_option(_base_args(tmp_path), "--moex-data-root"))
     assert exit_code == 2
 

@@ -60,9 +60,13 @@ def _payload(rows: list[list[object]]) -> dict[str, object]:
 
 def _install_response(monkeypatch: pytest.MonkeyPatch, rows: list[list[object]]) -> None:
     def fake_get(url: str, *, params: Mapping[str, object], headers: Mapping[str, str], timeout: float) -> _FakeResponse:
-        assert params["secid"] == "SiM6"
+        assert params["date"] == "2026-06-02"
         assert params["from"] == "2026-06-02"
         assert params["till"] == "2026-06-02"
+        assert params["secid"] == "SiM6"
+        assert params["start"] == 0
+        assert params["iss.meta"] == "off"
+        assert params["iss.only"] == "tradestats"
         assert timeout == 30.0
         return _FakeResponse(_payload(rows))
 
