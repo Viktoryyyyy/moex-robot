@@ -220,6 +220,11 @@ def _response_failure_detail(response: MoexApimTradestatsHttpResponse) -> str:
     return detail
 
 
+def _row_matches_requested_secid(raw_row: Mapping[str, object], request: Raw5mMaterializationRequest) -> bool:
+    secid = _require_text(raw_row.get("secid"), "secid")
+    return secid == request.identity.secid
+
+
 def _normalize_tradestats_row(raw_row: Mapping[str, object], request: Raw5mMaterializationRequest) -> dict[str, object]:
     tradedate = _parse_date(raw_row.get("tradedate"), "tradedate")
     if tradedate != request.partition_key:
@@ -297,7 +302,11 @@ class MoexApimFoTradestats5mAdapter:
             raw_rows = _parse_tradestats_table(payload)
             if not raw_rows:
                 break
-            output.extend(_normalize_tradestats_row(row, request) for row in raw_rows)
+            matching_rows = tuple(row for row in raw_rows if _row_matches_requested_secid(row, request))
+            if not matching_rows and len(raw_rows) == 1:
+                output.extend(_normalize_tradestats_row(row, request) for row in raw_rows)
+            else:
+                output.extend(_normalize_tradestats_row(row, request) for row in matching_rows)
             if len(raw_rows) < self._page_size:
                 break
             start += len(raw_rows)

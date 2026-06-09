@@ -147,6 +147,68 @@ def test_adapter_keeps_legacy_tradestats_table_compatibility() -> None:
     assert rows[0]["open"] == 80000.0
 
 
+def test_adapter_filters_unrelated_secid_rows_before_normalization() -> None:
+    payload = _payload()
+    table = payload["data"]
+    assert isinstance(table, dict)
+    table["data"] = [
+        ["2026-06-02", "10:03", "BRM6", "BR", 1, 2, 0.5, 1.5, 10, 15, 1],
+        ["2026-06-02", "10:05", "SiM6", "Si", 80000, 80100, 79900, 80050, 100, 8005000, 12],
+        ["2026-06-03", "10:07", "CNYM6", "CNY", 1, 2, 0.5, 1.5, 10, 15, 1],
+    ]
+    client = _FakeClient((_FakeResponse(payload=payload),))
+
+    rows = MoexApimFoTradestats5mAdapter(http_client=client).read_rows(_request())
+
+    assert len(rows) == 1
+    assert rows[0]["SECID"] == "SiM6"
+    assert rows[0]["close"] == 80050.0
+
+
+def test_adapter_fails_closed_when_no_requested_secid_rows_remain() -> None:
+    payload = _payload()
+    table = payload["data"]
+    assert isinstance(table, dict)
+    table["data"] = [
+        ["2026-06-02", "10:05", "BRM6", "BR", 1, 2, 0.5, 1.5, 10, 15, 1],
+        ["2026-06-02", "10:10", "CNYM6", "CNY", 1, 2, 0.5, 1.5, 10, 15, 1],
+    ]
+    client = _FakeClient((_FakeResponse(payload=payload),))
+
+    with pytest.raises(MoexApimTradestatsSourceError, match="returned no rows"):
+        MoexApimFoTradestats5mAdapter(http_client=client).read_rows(_request())
+
+
+def test_adapter_still_fails_closed_for_requested_secid_wrong_trade_date() -> None:
+    payload = _payload()
+    table = payload["data"]
+    assert isinstance(table, dict)
+    table["data"] = [["2026-06-03", "10:05", "SiM6", "Si", 80000, 80100, 79900, 80050, 100, 8005000, 12]]
+    client = _FakeClient((_FakeResponse(payload=payload),))
+
+    with pytest.raises(MoexApimTradestatsSourceError, match="tradedate"):
+        MoexApimFoTradestats5mAdapter(http_client=client).read_rows(_request())
+
+
+def test_adapter_still_fails_closed_for_requested_secid_invalid_5m_tradetime() -> None:
+    payload = _payload()
+    table = payload["data"]
+    assert isinstance(table, dict)
+    table["data"] = [["2026-06-02", "10:03", "SiM6", "Si", 80000, 80100, 79900, 80050, 100, 8005000, 12]]
+    client = _FakeClient((_FakeResponse(payload=payload),))
+
+    with pytest.raises(MoexApimTradestatsSourceError, match="5-minute"):
+        MoexApimFoTradestats5mAdapter(http_client=client).read_rows(_request())
+
+
+def test_adapter_still_fails_closed_for_malformed_schema() -> None:
+    payload = {"data": {"columns": ["secid", "tradedate"], "data": [["SiM6", "2026-06-02"]]}}
+    client = _FakeClient((_FakeResponse(payload=payload),))
+
+    with pytest.raises(MoexApimTradestatsSourceError, match="missing column"):
+        MoexApimFoTradestats5mAdapter(http_client=client).read_rows(_request())
+
+
 def test_non_json_response_reports_status_content_type_and_safe_snippet_without_auth_secret() -> None:
     client = _FakeClient(
         (
