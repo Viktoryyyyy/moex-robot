@@ -402,7 +402,15 @@ def _fetch_apim_tradestats_frame(
 ) -> tuple[pd.DataFrame, str]:
     base_url = _apim_base_url(apim_base_url, env)
     url = _source_url(base_url, request.source_endpoint)
-    params = {"secid": request.secid, "from": request.trade_date, "till": request.trade_date, "iss.meta": "off"}
+    params = {
+        "date": request.trade_date,
+        "from": request.trade_date,
+        "till": request.trade_date,
+        "secid": request.secid,
+        "start": 0,
+        "iss.meta": "off",
+        "iss.only": "tradestats",
+    }
     response = requests.get(url, params=params, headers=_auth_headers(env), timeout=timeout)
     response.raise_for_status()
     data = response.json()
