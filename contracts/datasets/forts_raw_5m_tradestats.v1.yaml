@@ -3,6 +3,9 @@ schema_version: data_asset_contract_model.v1
 status: target_declaration
 activation_status: repo_only_not_registered_in_loaded_dataset_config
 loaded_config_mutation_allowed: false
+instrument_registry_ref:
+  registry_id: forts_instrument_registry.v1
+  repo_path: configs/instruments/forts_instrument_registry.v1.yaml
 artifacts:
   - artifact_id: external.apim.fo.tradestats.v1
     artifact_class: external_source_contract
@@ -42,8 +45,8 @@ artifacts:
     artifact_class: raw_native_dataset
     path_contract_type: external_pattern
     storage_root_ref: MOEX_DATA_ROOT
-    path_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
-    producer: moex_data.futures.materialize_raw_5m
+    path_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/trade_date={YYYY-MM-DD}/instrument_id={INSTRUMENT_ID}/secid={SECID}/part.parquet"
+    producer: moex_data.futures.materialize_forts_raw_5m_tradestats.v1
     source_artifact_id: external.apim.fo.tradestats.v1
     consumers:
       - dataset.forts.derived_d1.from_raw_5m.v1
@@ -53,7 +56,7 @@ artifacts:
     grain: 5m_bar
     partitioning:
       - trade_date
-      - family
+      - instrument_id
       - secid
     primary_key:
       - ts
@@ -63,7 +66,7 @@ artifacts:
       - ts
       - session_date
       - secid
-      - family
+      - instrument_id
       - board
       - open
       - high
@@ -104,11 +107,14 @@ raw_5m_readiness_contract:
     implicit_path_selection_allowed: false
 
   instrument_scope:
-    scope_rule: all_supported_forts_instruments_contracts_declared_by_approved_instrument_registry_or_explicit_dataset_materialization_scope
+    registry_id: forts_instrument_registry.v1
+    registry_ref: configs/instruments/forts_instrument_registry.v1.yaml
+    scope_rule: explicit_instrument_id_and_secid_from_approved_registry
     required_partition_keys:
-      - family
+      - instrument_id
       - secid
-    unresolved_universe_blocks_full_readiness: true
+    legacy_family_allowlist_allowed: false
+    unresolved_instrument_blocks_full_readiness: true
 
   readiness_evidence_required_before_D1:
     manifest_reference_required: true
@@ -121,7 +127,7 @@ raw_5m_readiness_contract:
       - data_end
       - last_valid_trade_date
       - row_count
-      - family_scope
+      - instrument_id_scope
       - secid_scope
       - calendar_contract
       - session_binding
