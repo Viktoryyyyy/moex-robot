@@ -15,7 +15,7 @@ artifacts:
     consumers:
       - experiments.d1.tsmom_minimal.run.v1
     format: parquet
-    schema_version: features.d1_tsmom_minimal.v1
+    schema_version: features.d1.tsmom_minimal.v1
     input_artifacts:
       - dataset.forts.derived_d1.from_raw_5m.v1
     materialization_status: conditional_when_research_backtest_requires_features
