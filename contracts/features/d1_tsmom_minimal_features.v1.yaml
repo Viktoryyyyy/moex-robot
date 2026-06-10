@@ -2,17 +2,20 @@ contract_package_id: d1_tsmom_minimal_features.v1
 schema_version: data_asset_contract_model.v1
 status: target_declaration
 activation_status: repo_only_not_live_authorized
+instrument_registry_ref:
+  registry_id: forts_instrument_registry.v1
+  repo_path: configs/instruments/forts_instrument_registry.v1.yaml
 artifacts:
   - artifact_id: features.d1.tsmom_minimal.v1
     artifact_class: feature_set
     path_contract_type: external_pattern
     storage_root_ref: MOEX_DATA_ROOT
-    path_pattern: "${MOEX_DATA_ROOT}/forts/features/d1_tsmom_minimal/family={FAMILY}/config_version={CONFIG_VERSION}/part.parquet"
+    path_pattern: "${MOEX_DATA_ROOT}/forts/features/d1_tsmom_minimal/instrument_id={INSTRUMENT_ID}/config_version={CONFIG_VERSION}/part.parquet"
     producer: moex_features.daily.tsmom_minimal
     consumers:
       - experiments.d1.tsmom_minimal.run.v1
     format: parquet
-    schema_version: features.d1.tsmom_minimal.v1
+    schema_version: features.d1_tsmom_minimal.v1
     input_artifacts:
       - dataset.forts.derived_d1.from_raw_5m.v1
     materialization_status: conditional_when_research_backtest_requires_features
@@ -20,16 +23,16 @@ artifacts:
     research_backtest_authorized: true
     deterministic_builder_config_version_required: true
     partitioning:
-      - family
+      - instrument_id
       - config_version
     primary_key:
       - trade_date
-      - symbol
+      - instrument_id
       - series_type
     minimal_feature_contract:
       required_inputs:
         - trade_date
-        - symbol
+        - instrument_id
         - series_type
         - close
       feature_columns:
