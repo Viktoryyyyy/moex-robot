@@ -97,17 +97,59 @@ def build_backfill_paths(artifact_version: str) -> BackfillPaths:
     )
 
 
+def _parse_scalar(value: str) -> object:
+    text = value.strip().strip('"').strip("'")
+    if text == "true":
+        return True
+    if text == "false":
+        return False
+    return text
+
+
+def _registry_entries(text: str) -> list[dict[str, object]]:
+    entries: list[dict[str, object]] = []
+    current: dict[str, object] | None = None
+    in_instruments = False
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        if stripped == "instruments:":
+            in_instruments = True
+            continue
+        if in_instruments and not raw_line.startswith(" ") and not stripped.startswith("-"):
+            break
+        if in_instruments and stripped.startswith("- "):
+            if current:
+                entries.append(current)
+            current = {}
+            payload = stripped[2:].strip()
+            if ":" in payload:
+                key, value = payload.split(":", 1)
+                current[key.strip()] = _parse_scalar(value)
+            continue
+        if in_instruments and current is not None and ":" in stripped:
+            key, value = stripped.split(":", 1)
+            current[key.strip()] = _parse_scalar(value)
+    if current:
+        entries.append(current)
+    return entries
+
+
 def registry_allows_instrument(registry_path: str | Path, instrument_id: str, secid: str) -> bool:
     text = Path(registry_path).read_text(encoding="utf-8")
     instrument = _require_token(instrument_id, "instrument_id")
     checked_secid = _require_token(secid, "secid")
-    required_lines = (
-        "instrument_id: " + instrument,
-        "secid: " + checked_secid,
-        "enabled_for_raw_5m_materialization: true",
-        "family_partition_key_allowed: false",
-    )
-    return all(line in text for line in required_lines)
+    if "family_partition_key_allowed: false" not in text:
+        return False
+    for entry in _registry_entries(text):
+        if (
+            entry.get("instrument_id") == instrument
+            and entry.get("secid") == checked_secid
+            and entry.get("enabled_for_raw_5m_materialization") is True
+        ):
+            return True
+    return False
 
 
 def _empty_source_error(error: str) -> bool:
