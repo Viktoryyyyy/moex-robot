@@ -1,0 +1,85 @@
+contract_package_id: forts_timeframe_materialization_policy.v1
+schema_version: data_asset_contract_model.v1
+status: target_declaration
+activation_status: repo_only_policy
+policy_id: policy.forts.timeframe_materialization.v1
+native_source_grain:
+  artifact_id: dataset.forts.raw_5m.tradestats.v1
+  artifact_class: raw_native_dataset
+  path_contract_type: external_pattern
+  grain: 5m_bar
+  path_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
+  materialization_authorized: true
+  authorization_scope: accepted_raw_native_source_contract_only
+authorized_derived_timeframes:
+  - artifact_id: dataset.forts.derived_d1.from_raw_5m.v1
+    artifact_class: derived_dataset
+    path_contract_type: external_pattern
+    grain: d1_bar
+    path_pattern: "${MOEX_DATA_ROOT}/forts/derived_d1/from_raw_5m/series_type={SERIES_TYPE}/family={FAMILY}/part.parquet"
+    derives_from:
+      - dataset.forts.raw_5m.tradestats.v1
+    materialization_authorized: true
+    authorization_scope: research_backtest_input_preparation_only
+future_scope_timeframes:
+  - artifact_id: dataset.forts.derived_10m.from_raw_5m.v1
+    artifact_class: derived_dataset
+    path_contract_type: external_pattern
+    grain: 10m_bar
+    path_pattern: "${MOEX_DATA_ROOT}/forts/derived_10m/from_raw_5m/family={FAMILY}/trade_date={YYYY-MM-DD}/part.parquet"
+    derives_from:
+      - dataset.forts.raw_5m.tradestats.v1
+    materialization_authorized: false
+    lifecycle_status: future_scope
+  - artifact_id: dataset.forts.derived_15m.from_raw_5m.v1
+    artifact_class: derived_dataset
+    path_contract_type: external_pattern
+    grain: 15m_bar
+    path_pattern: "${MOEX_DATA_ROOT}/forts/derived_15m/from_raw_5m/family={FAMILY}/trade_date={YYYY-MM-DD}/part.parquet"
+    derives_from:
+      - dataset.forts.raw_5m.tradestats.v1
+    materialization_authorized: false
+    lifecycle_status: future_scope
+  - artifact_id: dataset.forts.derived_30m.from_raw_5m.v1
+    artifact_class: derived_dataset
+    path_contract_type: external_pattern
+    grain: 30m_bar
+    path_pattern: "${MOEX_DATA_ROOT}/forts/derived_30m/from_raw_5m/family={FAMILY}/trade_date={YYYY-MM-DD}/part.parquet"
+    derives_from:
+      - dataset.forts.raw_5m.tradestats.v1
+    materialization_authorized: false
+    lifecycle_status: future_scope
+  - artifact_id: dataset.forts.derived_1h.from_raw_5m.v1
+    artifact_class: derived_dataset
+    path_contract_type: external_pattern
+    grain: 1h_bar
+    path_pattern: "${MOEX_DATA_ROOT}/forts/derived_1h/from_raw_5m/family={FAMILY}/trade_date={YYYY-MM-DD}/part.parquet"
+    derives_from:
+      - dataset.forts.raw_5m.tradestats.v1
+    materialization_authorized: false
+    lifecycle_status: future_scope
+  - artifact_id: dataset.forts.derived_4h.from_raw_5m.v1
+    artifact_class: derived_dataset
+    path_contract_type: external_pattern
+    grain: 4h_bar
+    path_pattern: "${MOEX_DATA_ROOT}/forts/derived_4h/from_raw_5m/family={FAMILY}/trade_date={YYYY-MM-DD}/part.parquet"
+    derives_from:
+      - dataset.forts.raw_5m.tradestats.v1
+    materialization_authorized: false
+    lifecycle_status: future_scope
+  - artifact_id: dataset.forts.derived_1w.from_d1.v1
+    artifact_class: derived_dataset
+    path_contract_type: external_pattern
+    grain: 1w_bar
+    path_pattern: "${MOEX_DATA_ROOT}/forts/derived_1w/from_d1/family={FAMILY}/part.parquet"
+    derives_from:
+      - dataset.forts.derived_d1.from_raw_5m.v1
+    materialization_authorized: false
+    lifecycle_status: future_scope
+materialization_rules:
+  exactly_one_path_contract_type_per_artifact: true
+  future_scope_declarations_authorize_materialization: false
+  implicit_latest_or_autodetect_allowed: false
+  calendar_session_contract_required: true
+  manifest_required: true
+  quality_report_required: true
