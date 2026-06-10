@@ -1,0 +1,75 @@
+contract_package_id: data_asset_manifest_quality_report.v1
+schema_version: data_asset_contract_model.v1
+status: target_declaration
+activation_status: repo_only_policy
+artifacts:
+  - artifact_id: manifest.data_asset.v1
+    artifact_class: asset_manifest
+    path_contract_type: external_pattern
+    storage_root_ref: MOEX_DATA_ROOT
+    path_pattern: "${MOEX_DATA_ROOT}/manifests/artifact_id={ARTIFACT_ID}/artifact_version={ARTIFACT_VERSION}/manifest.json"
+    producer: artifact_builder
+    consumers:
+      - reports.data_asset.quality.v1
+      - experiments.d1.tsmom_minimal.run.v1
+      - runtime.strategy_input_snapshot.v1
+    format: json
+    schema_version: manifest.data_asset.v1
+    required_fields:
+      - artifact_id
+      - artifact_class
+      - artifact_version
+      - schema_version
+      - path_contract_type
+      - artifact_uri
+      - input_references
+      - deterministic_builder_config_version
+      - build_started_at
+      - build_finished_at
+      - producer
+      - content_hash
+    path_rules:
+      hardcoded_server_path_allowed: false
+      implicit_file_selection_allowed: false
+      latest_file_fallback_allowed: false
+
+  - artifact_id: reports.data_asset.quality.v1
+    artifact_class: quality_report
+    path_contract_type: external_pattern
+    storage_root_ref: MOEX_DATA_ROOT
+    path_pattern: "${MOEX_DATA_ROOT}/quality_reports/artifact_id={ARTIFACT_ID}/artifact_version={ARTIFACT_VERSION}/quality_report.json"
+    producer: moex_data.quality
+    consumers:
+      - experiments.d1.tsmom_minimal.run.v1
+      - runtime.strategy_input_snapshot.v1
+    format: json
+    schema_version: reports.data_asset.quality.v1
+    required_fields:
+      - artifact_id
+      - artifact_class
+      - artifact_version
+      - schema_version
+      - input_references
+      - deterministic_builder_config_version
+      - quality_status
+      - checks
+      - failure_reasons
+      - checked_at
+    quality_status_values:
+      - passed
+      - failed
+    path_rules:
+      hardcoded_server_path_allowed: false
+      implicit_file_selection_allowed: false
+      latest_file_fallback_allowed: false
+canonical_proof_policy:
+  manifest_required: true
+  quality_report_required: true
+  schema_version_required: true
+  input_references_required: true
+  deterministic_builder_config_version_required: true
+  temporary_generated_data_inside_strategy_or_research_script_is_canonical_proof: false
+  stdout_only_summary_is_canonical_proof: false
+  implicit_latest_or_autodetect_allowed: false
+  missing_manifest_or_quality_report_blocks_research_closeout: true
+  missing_manifest_or_quality_report_blocks_runtime: true
