@@ -71,11 +71,14 @@ def test_backfill_writes_rollup_manifest_and_quality(tmp_path, monkeypatch):
     )
 
     assert summary.payload["status"] == "succeeded"
+    assert summary.payload["quality_status"] == "passed"
     assert summary.payload["instrument_id_scope"] == ["forts.usdrubf"]
     assert summary.payload["secid_scope"] == ["USDRUBF"]
     assert summary.payload["row_count"] == 179
     assert summary.payload["partition_count"] == 1
     assert summary.payload["skipped_empty_source_dates"] == ["2026-06-01"]
+    assert summary.payload["latest_autodetect_used"] is False
+    assert summary.payload["hardcoded_server_path_used"] is False
     assert "family_scope" not in summary.payload
     assert Path(summary.payload["manifest_reference"]).exists()
     assert Path(summary.payload["quality_report_reference"]).exists()
