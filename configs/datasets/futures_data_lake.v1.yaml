@@ -28,11 +28,16 @@ artifact_class_index:
   futures_continuous_5m.v1: external_pattern
   moex_data_root: env_contract
   futures_data_lake.v1: repo_relative
-refresh_scope:
-  default_family_allowlist:
-    - Si
-    - USDRUBF
-    - CNY
+instrument_registry_ref:
+  registry_id: forts_instrument_registry.v1
+  repo_path: configs/instruments/forts_instrument_registry.v1.yaml
+instrument_scope:
+  default_instrument_ids:
+    - forts.usdrubf
+  explicit_instrument_id_required: true
+  explicit_secid_required: true
+  legacy_family_allowlist_allowed: false
+  materialization_without_registry_entry_allowed: false
   default_granularity: 5m
   materialized_timeframes:
     - D1
