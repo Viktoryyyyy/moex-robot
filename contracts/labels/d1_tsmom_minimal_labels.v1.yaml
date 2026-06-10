@@ -1,0 +1,43 @@
+contract_package_id: d1_tsmom_minimal_labels.v1
+schema_version: data_asset_contract_model.v1
+status: target_declaration
+activation_status: repo_only_conditional
+artifacts:
+  - artifact_id: labels.d1.tsmom_minimal.research.v1
+    artifact_class: label_set
+    path_contract_type: external_pattern
+    storage_root_ref: MOEX_DATA_ROOT
+    path_pattern: "${MOEX_DATA_ROOT}/forts/labels/d1_tsmom_minimal_research/family={FAMILY}/config_version={CONFIG_VERSION}/part.parquet"
+    producer: moex_features.labels.d1_tsmom_minimal_research
+    consumers:
+      - experiments.d1.tsmom_minimal.run.v1
+    format: parquet
+    schema_version: labels.d1.tsmom_minimal.research.v1
+    input_artifacts:
+      - dataset.forts.derived_d1.from_raw_5m.v1
+    requirement_status: conditional
+    required_only_if_next_proof_uses_explicit_labels: true
+    live_runtime_authorized: false
+    research_backtest_authorized: true
+    deterministic_builder_config_version_required: true
+    partitioning:
+      - family
+      - config_version
+    primary_key:
+      - trade_date
+      - symbol
+      - series_type
+    label_contract:
+      label_known_by: after_outcome_window_close
+      may_use_future_outcome_window: true
+      may_be_used_as_runtime_input: false
+      primary_use: research_evaluation_only
+    manifest_required: true
+    quality_report_required: true
+    anti_leakage_rules:
+      label_columns_must_not_feed_signal_engine: true
+      execution_compatible_labels_must_be_declared_separately: true
+    path_rules:
+      hardcoded_server_path_allowed: false
+      implicit_file_selection_allowed: false
+      latest_file_fallback_allowed: false
