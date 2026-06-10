@@ -86,3 +86,60 @@ artifacts:
       implicit_file_selection_allowed: false
       latest_file_fallback_allowed: false
       env_credentials_as_path_contract_type_allowed: false
+
+raw_5m_readiness_contract:
+  initial_backfill:
+    data_start: "2020-01-01"
+    data_end_rule: last_completed_valid_trading_day
+    source_artifact_id: external.apim.fo.tradestats.v1
+    artifact_id: dataset.forts.raw_5m.tradestats.v1
+    execution_status: declaration_only_not_materialized_by_this_contract_patch
+
+  incremental_update:
+    start_rule: last_valid_trade_date_plus_1_valid_trading_day
+    start_rule_detail: last_valid_trade_date + 1 valid trading day
+    end_rule: last_completed_valid_trading_day
+    calendar: moex_iss_futures_calendar
+    latest_file_autodetect_allowed: false
+    implicit_path_selection_allowed: false
+
+  instrument_scope:
+    scope_rule: all_supported_forts_instruments_contracts_declared_by_approved_instrument_registry_or_explicit_dataset_materialization_scope
+    required_partition_keys:
+      - family
+      - secid
+    unresolved_universe_blocks_full_readiness: true
+
+  readiness_evidence_required_before_D1:
+    manifest_reference_required: true
+    quality_report_reference_required: true
+    required_manifest_or_quality_fields:
+      - artifact_id
+      - source_artifact_id
+      - schema_version
+      - data_start
+      - data_end
+      - last_valid_trade_date
+      - row_count
+      - family_scope
+      - secid_scope
+      - calendar_contract
+      - session_binding
+      - storage_pattern
+      - content_hash_or_partition_hashes
+      - build_started_at
+      - build_finished_at
+    readiness_blocks_if_missing:
+      - actual_manifest_reference
+      - actual_quality_report_reference
+      - data_start
+      - data_end
+      - last_valid_trade_date
+      - row_count
+      - approved_instrument_scope
+      - calendar_session_binding
+
+  raw_5m_readiness_status_rule:
+    ready_for_D1_readiness_gate: all_required_readiness_evidence_present_and_quality_status_passing
+    blocked_pending_data_materialization: contract_complete_but_no_materialized_manifest_or_quality_evidence_exists
+    not_ready: contract_declarations_or_required_evidence_fields_missing
