@@ -5,6 +5,28 @@ from moex_data.futures import resampler
 from test_materialize_raw_5m_explicit_trade_dates import _write_contract_package
 
 
+def _write_d1_ready_contract_package(repo_root):
+    _write_contract_package(repo_root)
+    (repo_root / "contracts" / "datasets" / "futures_derived_d1.v1.yaml").write_text(
+        """
+contract_id: futures_derived_d1.v1
+dataset_id: futures_derived_d1
+artifact_class: external_pattern
+producer: moex_data.futures.resampler
+consumers:
+  - test
+format: parquet
+schema_version: futures_derived_d1.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/futures/derived_d1/series_type={SERIES_TYPE}/family={FAMILY}/part.parquet"
+partitioning:
+  - series_type
+  - family
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+
 def _raw_partition_path(data_root, trade_date):
     return data_root / "futures" / "raw_5m" / ("trade_date=" + trade_date) / "family=Si" / "secid=SiM6" / "part.parquet"
 
@@ -57,7 +79,7 @@ def _prepare_repo_and_inputs(tmp_path):
     repo_root = tmp_path / "repo"
     data_root = tmp_path / "data"
     repo_root.mkdir()
-    _write_contract_package(repo_root)
+    _write_d1_ready_contract_package(repo_root)
     for index, trade_date in enumerate(resampler.APPROVED_TRADE_DATES):
         _write_raw_partition(data_root, trade_date, 100 + index * 10)
     return repo_root, data_root
