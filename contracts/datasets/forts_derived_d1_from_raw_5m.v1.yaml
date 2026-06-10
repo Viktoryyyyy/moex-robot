@@ -1,0 +1,65 @@
+contract_package_id: forts_derived_d1_from_raw_5m.v1
+schema_version: data_asset_contract_model.v1
+status: target_declaration
+activation_status: repo_only_not_registered_in_loaded_dataset_config
+loaded_config_mutation_allowed: false
+artifacts:
+  - artifact_id: dataset.forts.derived_d1.from_raw_5m.v1
+    artifact_class: derived_dataset
+    path_contract_type: external_pattern
+    storage_root_ref: MOEX_DATA_ROOT
+    path_pattern: "${MOEX_DATA_ROOT}/forts/derived_d1/from_raw_5m/series_type={SERIES_TYPE}/family={FAMILY}/part.parquet"
+    producer: moex_data.futures.resampler
+    consumers:
+      - features.d1.tsmom_minimal.v1
+      - experiments.d1.tsmom_minimal.run.v1
+      - reports.data_asset_manifest_quality_report.v1
+    format: parquet
+    schema_version: dataset.forts.derived_d1.from_raw_5m.v1
+    grain: d1_bar
+    input_artifacts:
+      - dataset.forts.raw_5m.tradestats.v1
+    derivation:
+      source_grain: 5m_bar
+      target_grain: d1_bar
+      calendar_binding: moex_iss_futures_calendar
+      session_binding: explicit_trade_date_session
+      builder_config_version_required: true
+      deterministic_ordering_required: true
+    partitioning:
+      - series_type
+      - family
+    primary_key:
+      - trade_date
+      - symbol
+      - series_type
+    required_columns:
+      - trade_date
+      - symbol
+      - family
+      - series_type
+      - open
+      - high
+      - low
+      - close
+      - volume
+      - value
+      - num_trades
+      - source_schema_version
+      - build_ts
+    manifest_required: true
+    quality_report_required: true
+    retention_policy: rebuildable_from_raw_native_inputs
+    storage_vs_recompute:
+      policy: materialize_when_authorized
+      recompute_allowed: true
+      recompute_requires:
+        - all_input_partition_references
+        - manifest_reference
+        - passing_quality_report_reference
+        - deterministic_builder_config_version
+        - calendar_session_contract_reference
+    path_rules:
+      hardcoded_server_path_allowed: false
+      implicit_file_selection_allowed: false
+      latest_file_fallback_allowed: false

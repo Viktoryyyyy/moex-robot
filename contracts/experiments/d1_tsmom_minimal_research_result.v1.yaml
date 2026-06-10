@@ -1,0 +1,50 @@
+contract_package_id: d1_tsmom_minimal_research_result.v1
+schema_version: data_asset_contract_model.v1
+status: target_declaration
+activation_status: repo_only_research_backtest_only
+artifacts:
+  - artifact_id: experiments.d1.tsmom_minimal.run.v1
+    artifact_class: research_result
+    path_contract_type: external_pattern
+    storage_root_ref: MOEX_DATA_ROOT
+    path_pattern: "${MOEX_DATA_ROOT}/forts/experiments/d1_tsmom_minimal/run_id={RUN_ID}/result.parquet"
+    producer: moex_research.runners.d1_tsmom_minimal
+    consumers:
+      - moex_research.metrics
+      - moex_research.publishers
+      - reports.data_asset_manifest_quality_report.v1
+    format: parquet
+    schema_version: experiments.d1.tsmom_minimal.run.v1
+    research_backtest_authorized: true
+    live_runtime_authorized: false
+    input_artifacts:
+      - dataset.forts.derived_d1.from_raw_5m.v1
+      - features.d1.tsmom_minimal.v1
+    optional_input_artifacts:
+      - labels.d1.tsmom_minimal.research.v1
+    experiment_registry_dependency:
+      dependency_id: experiment_registry.d1_tsmom_minimal.v1
+      dependency_role: metadata_index
+      dependency_rule: dependency_not_second_artifact_path_contract_type
+    required_metadata:
+      - run_id
+      - dataset_references
+      - feature_references
+      - optional_label_references
+      - parameter_snapshot
+      - calendar_session_contract
+      - deterministic_builder_config_version
+      - metrics
+      - artifact_references
+      - run_status
+    generation_rule:
+      deterministic_from_contract_declared_inputs: true
+      temporary_strategy_local_generated_data_is_canonical_proof: false
+      stdout_only_summary_is_canonical_proof: false
+      implicit_latest_or_autodetect_allowed: false
+    manifest_required: true
+    quality_report_required: true
+    path_rules:
+      hardcoded_server_path_allowed: false
+      implicit_file_selection_allowed: false
+      latest_file_fallback_allowed: false

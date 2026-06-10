@@ -1,0 +1,88 @@
+contract_package_id: forts_raw_5m_tradestats.v1
+schema_version: data_asset_contract_model.v1
+status: target_declaration
+activation_status: repo_only_not_registered_in_loaded_dataset_config
+loaded_config_mutation_allowed: false
+artifacts:
+  - artifact_id: external.apim.fo.tradestats.v1
+    artifact_class: external_source_contract
+    path_contract_type: repo_relative
+    repo_relative_path: contracts/datasets/forts_raw_5m_tradestats.v1.yaml
+    producer: moex_external.apim
+    consumers:
+      - dataset.forts.raw_5m.tradestats.v1
+    format: http_json
+    source:
+      endpoint: /iss/datashop/algopack/fo/tradestats.json
+      engine: futures
+      market: forts
+      board: rfud
+      native_grain: 5m
+      table: tradestats
+      required_query_params:
+        from: explicit_cli_argument
+        till: explicit_cli_argument
+        secid: explicit_cli_argument
+        start: pagination_argument
+        iss.meta: "off"
+        iss.only: tradestats
+    env_dependencies:
+      - name: MOEX_API_URL
+        purpose: endpoint_base_url
+      - name: APIM_FO_TRADESTATS_ACCESS
+        purpose: optional_access_policy_or_credentials_reference
+    env_dependency_rule: env_dependencies_are_not_artifact_path_contract_type
+    failure_semantics:
+      empty_response: fail_closed
+      schema_mismatch: fail_closed
+      unresolved_calendar_or_session: fail_closed
+      implicit_fallback: forbidden
+
+  - artifact_id: dataset.forts.raw_5m.tradestats.v1
+    artifact_class: raw_native_dataset
+    path_contract_type: external_pattern
+    storage_root_ref: MOEX_DATA_ROOT
+    path_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
+    producer: moex_data.futures.materialize_raw_5m
+    source_artifact_id: external.apim.fo.tradestats.v1
+    consumers:
+      - dataset.forts.derived_d1.from_raw_5m.v1
+      - reports.data_asset_manifest_quality_report.v1
+    format: parquet
+    schema_version: dataset.forts.raw_5m.tradestats.v1
+    grain: 5m_bar
+    partitioning:
+      - trade_date
+      - family
+      - secid
+    primary_key:
+      - ts
+      - secid
+    required_columns:
+      - trade_date
+      - ts
+      - session_date
+      - secid
+      - family
+      - board
+      - open
+      - high
+      - low
+      - close
+      - volume
+      - value
+      - num_trades
+      - source
+      - ingest_ts
+    manifest_required: true
+    quality_report_required: true
+    retention_policy: keep_all_valid_partitions
+    storage_vs_recompute:
+      policy: store_raw_native_partitions
+      recompute_allowed: false
+      overwrite_allowed: false_without_explicit_rebuild_task
+    path_rules:
+      hardcoded_server_path_allowed: false
+      implicit_file_selection_allowed: false
+      latest_file_fallback_allowed: false
+      env_credentials_as_path_contract_type_allowed: false
