@@ -21,27 +21,32 @@ def test_date_range_is_inclusive_and_limited():
     ]
 
 
-def test_registry_allows_only_explicit_instrument(tmp_path):
+def test_registry_allows_only_exact_explicit_instrument(tmp_path):
     registry = tmp_path / "registry.yaml"
     registry.write_text(
-        "instrument_id: forts.usdrubf\n"
-        "secid: USDRUBF\n"
-        "enabled_for_raw_5m_materialization: true\n"
-        "family_partition_key_allowed: false\n",
+        "instruments:\n"
+        "  - instrument_id: forts.usdrubf\n"
+        "    secid: USDRUBF\n"
+        "    enabled_for_raw_5m_materialization: true\n"
+        "rules:\n"
+        "  family_partition_key_allowed: false\n",
         encoding="utf-8",
     )
 
     assert backfill.registry_allows_instrument(registry, "forts.usdrubf", "USDRUBF") is True
+    assert backfill.registry_allows_instrument(registry, "forts.usd", "USD") is False
     assert backfill.registry_allows_instrument(registry, "forts.si", "SiM6") is False
 
 
 def test_backfill_writes_rollup_manifest_and_quality(tmp_path, monkeypatch):
     registry = tmp_path / "registry.yaml"
     registry.write_text(
-        "instrument_id: forts.usdrubf\n"
-        "secid: USDRUBF\n"
-        "enabled_for_raw_5m_materialization: true\n"
-        "family_partition_key_allowed: false\n",
+        "instruments:\n"
+        "  - instrument_id: forts.usdrubf\n"
+        "    secid: USDRUBF\n"
+        "    enabled_for_raw_5m_materialization: true\n"
+        "rules:\n"
+        "  family_partition_key_allowed: false\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
