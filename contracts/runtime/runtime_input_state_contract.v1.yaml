@@ -1,0 +1,79 @@
+contract_package_id: runtime_input_state_contract.v1
+schema_version: data_asset_contract_model.v1
+status: target_declaration
+activation_status: repo_only_future_scope
+runtime_authorization:
+  d1_tsmom_minimal_live_authorized: false
+  d1_tsmom_minimal_runtime_authorized: false
+  reason: D1 TSMOM Minimal is research/backtest only until a separate runtime approval exists.
+artifacts:
+  - artifact_id: runtime.strategy_input_snapshot.v1
+    artifact_class: runtime_input_snapshot
+    path_contract_type: external_pattern
+    storage_root_ref: MOEX_RUNTIME_ROOT
+    path_pattern: "${MOEX_RUNTIME_ROOT}/snapshots/strategy_id={STRATEGY_ID}/instrument={INSTRUMENT}/snapshot_date={YYYY-MM-DD}/input_snapshot.json"
+    producer: moex_runtime.preflight
+    consumers:
+      - moex_runtime.orchestrator
+      - strategies.live_adapter
+    format: json
+    schema_version: runtime.strategy_input_snapshot.v1
+    lifecycle_status: future_scope
+    materialization_authorized: false
+    mutability: immutable_per_snapshot
+    allowed_contents:
+      - feature_context_reference
+      - dataset_manifest_reference
+      - quality_report_reference
+      - calendar_session_reference
+      - generated_at
+      - stale_after
+    forbidden_contents:
+      - research_label_values
+      - temporary_research_outputs
+      - implicit_latest_file_pointer
+
+  - artifact_id: runtime.strategy_state.v1
+    artifact_class: runtime_state
+    path_contract_type: external_pattern
+    storage_root_ref: MOEX_RUNTIME_ROOT
+    path_pattern: "${MOEX_RUNTIME_ROOT}/state/strategy_id={STRATEGY_ID}/instrument={INSTRUMENT}/state.json"
+    producer: moex_runtime.state_store
+    consumers:
+      - moex_runtime.orchestrator
+      - moex_runtime.locks
+      - moex_runtime.risk
+    format: json
+    schema_version: runtime.strategy_state.v1
+    lifecycle_status: future_scope
+    materialization_authorized: false
+    mutability: mutable_runtime_state
+    allowed_contents:
+      - position_state
+      - lock_state
+      - heartbeat
+      - last_reconcile_status
+      - last_processed_snapshot_id
+    forbidden_contents:
+      - research_label_values
+      - strategy_local_ad_hoc_state_without_contract
+fail_closed_policy:
+  snapshot_stale: fail_closed
+  manifest_missing: fail_closed
+  quality_report_missing: fail_closed
+  quality_report_failed: fail_closed
+  calendar_session_unresolved: fail_closed
+  feature_context_snapshot_missing: fail_closed
+  runtime_state_missing: fail_closed
+  runtime_lock_missing: fail_closed
+  implicit_latest_or_autodetect_input_only: fail_closed
+fallback_policy:
+  silent_fallback_to_previous_file: forbidden
+  silent_fallback_to_latest_file: forbidden
+  silent_glob_autodetect: forbidden
+  remembered_server_path: forbidden
+separation_policy:
+  runtime_input_snapshot_is_read_only: true
+  runtime_state_is_operational_mutable_state: true
+  research_result_is_not_runtime_input: true
+  labels_are_not_runtime_input: true
