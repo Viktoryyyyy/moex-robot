@@ -138,41 +138,69 @@ def _rewrite_manifest_and_quality(
     return manifest, quality
 
 
-def refresh_incremental(
+def _is_json_decode_error(exc: Exception) -> bool:
+    return isinstance(exc, json.JSONDecodeError) or exc.__class__.__name__ == "JSONDecodeError"
+
+
+def _classified_calendar_loader(
+    calendar_loader: Callable[..., Sequence[Mapping[str, object]]],
+) -> Callable[..., Sequence[Mapping[str, object]]]:
+    def wrapped(*args: object, **kwargs: object) -> Sequence[Mapping[str, object]]:
+        try:
+            return calendar_loader(*args, **kwargs)
+        except Exception as exc:
+            if _is_json_decode_error(exc):
+                raise ValueError("calendar_fetch_non_json_response") from None
+            raise
+
+    return wrapped
+
+
+def _build_no_op_base_summary(
     *,
+    artifact_version: str,
+    base_manifest: Mapping[str, object],
+    base_manifest_path: Path,
     instrument_id: str,
     secid: str,
-    artifact_version: str,
-    registry_path: str | Path,
-    as_of_date: str | None = None,
-    date_end: str | None = None,
-    timeout: float = 60.0,
-    apim_base_url: str | None = None,
-    calendar_base_url: str | None = None,
-    calendar_rows: Sequence[Mapping[str, object]] | None = None,
-    calendar_loader: Callable[..., Sequence[Mapping[str, object]]] = base_refresh.fetch_futures_calendar_rows,
-    runner: Callable[..., object] = base_refresh.materializer.materialize_instrument_partition,
-) -> RefreshSummary:
-    checked_instrument = base_refresh._require_token(instrument_id, "instrument_id")
-    checked_secid = base_refresh._require_token(secid, "secid")
-    pointer_path = build_accepted_manifest_pointer_path()
-    previous_pointer = _load_pointer(pointer_path, checked_instrument, checked_secid)
-    base_manifest_path = _manifest_reference_from_pointer(previous_pointer)
-    summary = base_refresh.refresh_incremental(
-        instrument_id=checked_instrument,
-        secid=checked_secid,
-        base_manifest=base_manifest_path,
+    requested_end,
+) -> base_refresh.RefreshSummary:
+    paths = base_refresh.build_refresh_paths(artifact_version)
+    build_started_at = base_refresh._utc_now()
+    build_finished_at = base_refresh._utc_now()
+    manifest = base_refresh._build_manifest(
         artifact_version=artifact_version,
-        registry_path=registry_path,
-        as_of_date=as_of_date,
-        date_end=date_end,
-        timeout=timeout,
-        apim_base_url=apim_base_url,
-        calendar_base_url=calendar_base_url,
-        calendar_rows=calendar_rows,
-        calendar_loader=calendar_loader,
-        runner=runner,
+        base_manifest=base_manifest,
+        base_manifest_path=base_manifest_path,
+        instrument_id=instrument_id,
+        secid=secid,
+        last_completed_valid_trading_day=requested_end,
+        incremental_start=None,
+        requested_dates=[],
+        successes=[],
+        failures=[],
+        build_started_at=build_started_at,
+        build_finished_at=build_finished_at,
+        quality_report_path=paths.quality_report_path,
     )
+    quality = base_refresh._quality_payload(artifact_version, manifest)
+    base_refresh._write_json_atomic(paths.quality_report_path, quality)
+    base_refresh._write_json_atomic(paths.manifest_path, manifest)
+    payload = dict(manifest)
+    payload["status"] = manifest["refresh_status"]
+    payload["quality_status"] = quality["quality_status"]
+    payload["manifest_reference"] = paths.manifest_path.as_posix()
+    payload["quality_report_reference"] = paths.quality_report_path.as_posix()
+    return base_refresh.RefreshSummary(payload=payload, manifest_path=paths.manifest_path, quality_report_path=paths.quality_report_path)
+
+
+def _finalize_pointer_summary(
+    *,
+    summary: base_refresh.RefreshSummary,
+    pointer_path: Path,
+    previous_pointer: Mapping[str, object],
+    base_manifest_path: Path,
+) -> RefreshSummary:
     manifest, quality = _rewrite_manifest_and_quality(
         manifest_path=summary.manifest_path,
         quality_report_path=summary.quality_report_path,
@@ -204,6 +232,74 @@ def refresh_incremental(
         manifest_path=summary.manifest_path,
         quality_report_path=summary.quality_report_path,
         accepted_manifest_pointer_path=pointer_path,
+    )
+
+
+def refresh_incremental(
+    *,
+    instrument_id: str,
+    secid: str,
+    artifact_version: str,
+    registry_path: str | Path,
+    as_of_date: str | None = None,
+    date_end: str | None = None,
+    timeout: float = 60.0,
+    apim_base_url: str | None = None,
+    calendar_base_url: str | None = None,
+    calendar_rows: Sequence[Mapping[str, object]] | None = None,
+    calendar_loader: Callable[..., Sequence[Mapping[str, object]]] = base_refresh.fetch_futures_calendar_rows,
+    runner: Callable[..., object] = base_refresh.materializer.materialize_instrument_partition,
+) -> RefreshSummary:
+    checked_instrument = base_refresh._require_token(instrument_id, "instrument_id")
+    checked_secid = base_refresh._require_token(secid, "secid")
+    checked_version = base_refresh._require_token(artifact_version, "artifact_version")
+    if as_of_date and date_end:
+        raise ValueError("use either as_of_date or date_end, not both")
+    if not base_refresh.registry_allows_instrument(registry_path, checked_instrument, checked_secid):
+        raise ValueError("instrument is not enabled by registry")
+    pointer_path = build_accepted_manifest_pointer_path()
+    previous_pointer = _load_pointer(pointer_path, checked_instrument, checked_secid)
+    base_manifest_path = _manifest_reference_from_pointer(previous_pointer)
+    base_manifest = base_refresh._load_json(base_manifest_path, "base_manifest")
+    base_last_text = base_refresh._require_base_manifest(base_manifest, checked_instrument, checked_secid)
+    base_last = base_refresh._coerce_date(base_last_text, "base_manifest.last_valid_trade_date")
+    if date_end:
+        requested_end = base_refresh._coerce_date(date_end, "date_end")
+        if requested_end <= base_last:
+            summary = _build_no_op_base_summary(
+                artifact_version=checked_version,
+                base_manifest=base_manifest,
+                base_manifest_path=base_manifest_path,
+                instrument_id=checked_instrument,
+                secid=checked_secid,
+                requested_end=requested_end,
+            )
+            return _finalize_pointer_summary(
+                summary=summary,
+                pointer_path=pointer_path,
+                previous_pointer=previous_pointer,
+                base_manifest_path=base_manifest_path,
+            )
+    summary = base_refresh.refresh_incremental(
+        instrument_id=checked_instrument,
+        secid=checked_secid,
+        base_manifest=base_manifest_path,
+        artifact_version=checked_version,
+        registry_path=registry_path,
+        as_of_date=as_of_date,
+        date_end=date_end,
+        timeout=timeout,
+        apim_base_url=apim_base_url,
+        calendar_base_url=calendar_base_url,
+        calendar_rows=calendar_rows,
+        calendar_loader=_classified_calendar_loader(calendar_loader),
+        runner=runner,
+    )
+    return _finalize_pointer_summary(
+        summary=summary,
+        pointer_path=pointer_path,
+        previous_pointer=previous_pointer,
+        base_manifest_path=base_manifest_path,
     )
 
 
