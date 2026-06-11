@@ -68,6 +68,8 @@ artifacts:
       - MOEX_CALENDAR_BASE_URL
       - default_base_url
     moex_api_url_calendar_base_assumption_allowed: false
+    scheduler_binding_status: unresolved_for_server_scheduler
+    scheduler_blocker_note: MOEX calendar endpoint unresolved for server scheduler; use observed-source incremental mode for daily pointer refresh until endpoint contract is resolved.
     preflight_validation:
       http_status: raise_for_status
       content_type_must_contain: json
@@ -166,6 +168,8 @@ artifacts:
       - row_count
       - partition_count
       - calendar_source_artifact_id
+      - calendar_binding_status
+      - incremental_mode
       - updated_at
       - latest_autodetect_used
     update_semantics:
@@ -174,6 +178,8 @@ artifacts:
       advance_rule: only_after_quality_status_passed
       failed_quality_status_rule: pointer_must_remain_unchanged
       calendar_failure_rule: pointer_must_remain_unchanged
+      observed_source_empty_date_rule: record_in_skipped_empty_source_dates_not_failed_dates
+      observed_source_failure_rule: record_in_failed_dates_and_keep_pointer_unchanged
       latest_or_glob_discovery_allowed: false
       implicit_path_selection_allowed: false
     path_rules:
@@ -196,6 +202,32 @@ raw_5m_readiness_contract:
     base_manifest_source: state.dataset.forts.raw_5m.tradestats.current_accepted_manifest.v1
     base_manifest_source_rule: read_accepted_manifest_reference_from_stable_pointer_path
     stable_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/artifact_id=dataset.forts.raw_5m.tradestats.v1/current_accepted_manifest.json"
+    default_incremental_mode: calendar
+    supported_incremental_modes:
+      calendar:
+        cli_argument: --incremental-mode calendar
+        start_rule: pointer_accepted_manifest_last_valid_trade_date_plus_1_valid_trading_day
+        start_rule_detail: accepted manifest last_valid_trade_date + 1 valid trading day
+        end_rule: last_completed_valid_trading_day
+        calendar: moex_iss_futures_calendar.off_days.v1
+        calendar_source_artifact_id: external.moex.iss.futures_calendar.v1
+        calendar_endpoint_call_allowed: true
+      observed_source:
+        cli_argument: --incremental-mode observed-source
+        calendar_binding_status: observed_source_calendar_fallback
+        calendar_endpoint_call_allowed: false
+        calendar_endpoint_status: unresolved_for_server_scheduler
+        calendar_endpoint_unresolved_note: MOEX calendar endpoint unresolved for server scheduler; /iss/calendars.json and /iss/calendars/futures.json returned text/html in server preflight while ISS securities endpoint returned JSON.
+        start_rule: pointer_accepted_manifest_last_valid_trade_date_plus_1_calendar_day
+        start_rule_detail: accepted manifest last_valid_trade_date + 1 calendar day, without MOEX calendar endpoint call
+        end_rule: effective_upper_bound
+        end_rule_detail: normally yesterday/as_of_date - 1 unless explicit date_end is supplied
+        candidate_dates_rule: every calendar day from start_rule through effective_upper_bound inclusive
+        materializer_rule: call_existing_raw_5m_materializer_for_each_candidate_date
+        rows_present_rule: create_partition_and_include_in_manifest
+        empty_source_rule: record_date_in_skipped_empty_source_dates_and_do_not_fail_quality
+        source_network_api_schema_failure_rule: record_date_in_failed_dates_and_keep_pointer_unchanged
+        pointer_update_rule: atomically_replace_pointer_only_after_quality_status_passed
     start_rule: pointer_accepted_manifest_last_valid_trade_date_plus_1_valid_trading_day
     start_rule_detail: accepted manifest last_valid_trade_date + 1 valid trading day
     end_rule: last_completed_valid_trading_day
@@ -209,6 +241,10 @@ raw_5m_readiness_contract:
     calendar_endpoint: /iss/calendars.json
     calendar_required_table: off_days
     calendar_preflight_required: true
+    calendar_binding_status: observed_source_calendar_fallback
+    calendar_endpoint_status: unresolved_for_server_scheduler
+    observed_source_calendar_fallback_enabled: true
+    observed_source_empty_source_record_field: skipped_empty_source_dates
     calendar_failure_semantics:
       non_json_or_html_response: calendar_fetch_non_json_response
       missing_off_days_table: calendar_response_missing_off_days_table
@@ -246,6 +282,7 @@ raw_5m_readiness_contract:
       - instrument_id_scope
       - secid_scope
       - calendar_contract
+      - calendar_binding_status
       - session_binding
       - storage_pattern
       - content_hash_or_partition_hashes

@@ -108,6 +108,10 @@ def test_calendar_source_contract_is_declared():
     assert "moex_api_url_calendar_base_assumption_allowed: false" in contract_text
     assert "calendar_fetch_non_json_response" in contract_text
     assert "calendar_response_missing_off_days_table" in contract_text
+    assert "calendar_binding_status: observed_source_calendar_fallback" in contract_text
+    assert "MOEX calendar endpoint unresolved for server scheduler" in contract_text
+    assert "--incremental-mode observed-source" in contract_text
+    assert "skipped_empty_source_dates" in contract_text
 
 
 def test_stable_pointer_path_is_used_as_base_manifest_source(tmp_path, monkeypatch):
@@ -252,6 +256,146 @@ def test_calendar_base_url_uses_env_and_cli_override(tmp_path, monkeypatch):
     )
 
     assert seen_calendar_base_urls == ["https://env-calendar.example", "https://cli-calendar.example"]
+
+
+def test_observed_source_mode_does_not_call_calendar_endpoint(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
+    registry = tmp_path / "registry.yaml"
+    accepted_base = tmp_path / "accepted_base.json"
+    write_registry(registry)
+    write_base_manifest(accepted_base, last_valid="2026-06-09")
+    pointer_path = refresh.build_accepted_manifest_pointer_path()
+    write_pointer(pointer_path, accepted_base)
+    calls = []
+
+    def calendar_loader(*args, **kwargs):
+        raise AssertionError("calendar loader must not be called in observed-source mode")
+
+    def runner(**kwargs):
+        calls.append(kwargs["trade_date"])
+        return result_for_trade_date(kwargs["trade_date"], row_count=3)
+
+    summary = refresh.refresh_incremental(
+        instrument_id="forts.usdrubf",
+        secid="USDRUBF",
+        artifact_version="refresh_pointer_observed_no_calendar_v1",
+        registry_path=registry,
+        date_end="2026-06-10",
+        incremental_mode=refresh.OBSERVED_SOURCE_MODE,
+        calendar_loader=calendar_loader,
+        runner=runner,
+    )
+
+    assert calls == ["2026-06-10"]
+    assert summary.payload["quality_status"] == "passed"
+    assert summary.payload["calendar_binding_status"] == refresh.OBSERVED_SOURCE_CALENDAR_BINDING_STATUS
+    assert summary.payload["calendar_endpoint_call_allowed"] is False
+    assert summary.payload["accepted_manifest_pointer_updated"] is True
+
+
+def test_observed_source_empty_date_is_skipped_not_failed(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
+    registry = tmp_path / "registry.yaml"
+    accepted_base = tmp_path / "accepted_base.json"
+    write_registry(registry)
+    write_base_manifest(accepted_base, last_valid="2026-06-09")
+    pointer_path = refresh.build_accepted_manifest_pointer_path()
+    write_pointer(pointer_path, accepted_base)
+    calls = []
+
+    def runner(**kwargs):
+        calls.append(kwargs["trade_date"])
+        if kwargs["trade_date"] == "2026-06-10":
+            raise ValueError("APIM tradestats response returned no rows")
+        return result_for_trade_date(kwargs["trade_date"], row_count=5)
+
+    summary = refresh.refresh_incremental(
+        instrument_id="forts.usdrubf",
+        secid="USDRUBF",
+        artifact_version="refresh_pointer_observed_skip_v1",
+        registry_path=registry,
+        date_end="2026-06-11",
+        incremental_mode=refresh.OBSERVED_SOURCE_MODE,
+        runner=runner,
+    )
+
+    pointer_payload = json.loads(pointer_path.read_text(encoding="utf-8"))
+    assert calls == ["2026-06-10", "2026-06-11"]
+    assert summary.payload["skipped_empty_source_dates"] == ["2026-06-10"]
+    assert summary.payload["incremental_succeeded_dates"] == ["2026-06-11"]
+    assert summary.payload["failed_dates"] == []
+    assert summary.payload["quality_status"] == "passed"
+    assert summary.payload["accepted_manifest_pointer_updated"] is True
+    assert pointer_payload["skipped_empty_source_dates"] == ["2026-06-10"]
+    assert pointer_payload["last_valid_trade_date"] == "2026-06-11"
+
+
+def test_observed_source_successful_new_date_advances_pointer(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
+    registry = tmp_path / "registry.yaml"
+    accepted_base = tmp_path / "accepted_base.json"
+    write_registry(registry)
+    write_base_manifest(accepted_base, last_valid="2026-06-09")
+    pointer_path = refresh.build_accepted_manifest_pointer_path()
+    write_pointer(pointer_path, accepted_base)
+    original_pointer_text = pointer_path.read_text(encoding="utf-8")
+
+    def runner(**kwargs):
+        return result_for_trade_date(kwargs["trade_date"], row_count=11)
+
+    summary = refresh.refresh_incremental(
+        instrument_id="forts.usdrubf",
+        secid="USDRUBF",
+        artifact_version="refresh_pointer_observed_success_v1",
+        registry_path=registry,
+        date_end="2026-06-10",
+        incremental_mode=refresh.OBSERVED_SOURCE_MODE,
+        runner=runner,
+    )
+
+    pointer_payload = json.loads(pointer_path.read_text(encoding="utf-8"))
+    assert pointer_path.read_text(encoding="utf-8") != original_pointer_text
+    assert summary.payload["quality_status"] == "passed"
+    assert summary.payload["incremental_requested_dates"] == ["2026-06-10"]
+    assert summary.payload["incremental_succeeded_dates"] == ["2026-06-10"]
+    assert summary.payload["accepted_manifest_pointer_updated"] is True
+    assert pointer_payload["accepted_manifest_reference"] == summary.manifest_path.as_posix()
+    assert pointer_payload["incremental_mode"] == refresh.OBSERVED_SOURCE_MODE
+    assert pointer_payload["calendar_binding_status"] == refresh.OBSERVED_SOURCE_CALENDAR_BINDING_STATUS
+
+
+def test_observed_source_failure_does_not_advance_pointer(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
+    registry = tmp_path / "registry.yaml"
+    accepted_base = tmp_path / "accepted_base.json"
+    write_registry(registry)
+    write_base_manifest(accepted_base, last_valid="2026-06-09")
+    pointer_path = refresh.build_accepted_manifest_pointer_path()
+    write_pointer(pointer_path, accepted_base)
+    original_pointer_text = pointer_path.read_text(encoding="utf-8")
+
+    def calendar_loader(*args, **kwargs):
+        raise AssertionError("calendar loader must not be called in observed-source mode")
+
+    def runner(**kwargs):
+        raise RuntimeError("schema mismatch")
+
+    summary = refresh.refresh_incremental(
+        instrument_id="forts.usdrubf",
+        secid="USDRUBF",
+        artifact_version="refresh_pointer_observed_failure_v1",
+        registry_path=registry,
+        date_end="2026-06-10",
+        incremental_mode=refresh.OBSERVED_SOURCE_MODE,
+        calendar_loader=calendar_loader,
+        runner=runner,
+    )
+
+    assert summary.payload["status"] == "failed"
+    assert summary.payload["quality_status"] == "failed"
+    assert summary.payload["accepted_manifest_pointer_updated"] is False
+    assert summary.payload["failed_dates"] == [{"trade_date": "2026-06-10", "error": "schema mismatch"}]
+    assert pointer_path.read_text(encoding="utf-8") == original_pointer_text
 
 
 def test_calendar_html_response_is_classified(monkeypatch):
