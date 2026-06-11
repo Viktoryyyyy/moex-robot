@@ -51,6 +51,7 @@ artifacts:
     consumers:
       - dataset.forts.derived_d1.from_raw_5m.v1
       - reports.data_asset_manifest_quality_report.v1
+      - state.dataset.forts.raw_5m.tradestats.current_accepted_manifest.v1
     format: parquet
     schema_version: dataset.forts.raw_5m.tradestats.v1
     grain: 5m_bar
@@ -90,6 +91,52 @@ artifacts:
       latest_file_fallback_allowed: false
       env_credentials_as_path_contract_type_allowed: false
 
+  - artifact_id: state.dataset.forts.raw_5m.tradestats.current_accepted_manifest.v1
+    artifact_class: accepted_manifest_pointer
+    path_contract_type: external_pattern
+    storage_root_ref: MOEX_DATA_ROOT
+    path_pattern: "${MOEX_DATA_ROOT}/state/datasets/artifact_id=dataset.forts.raw_5m.tradestats.v1/current_accepted_manifest.json"
+    producer: moex_data.futures.refresh_forts_raw_5m_incremental_pointer.v1
+    consumers:
+      - moex_data.futures.refresh_forts_raw_5m_incremental_pointer.v1
+      - dataset.forts.derived_d1.from_raw_5m.v1
+      - reports.data_asset_manifest_quality_report.v1
+    format: json
+    schema_version: state.dataset.forts.raw_5m.tradestats.current_accepted_manifest.v1
+    target_artifact_id: dataset.forts.raw_5m.tradestats.v1
+    target_manifest_artifact_id: manifest.data_asset.v1
+    target_quality_report_artifact_id: reports.data_asset.quality.v1
+    required_fields:
+      - artifact_id
+      - artifact_class
+      - schema_version
+      - target_artifact_id
+      - accepted_manifest_reference
+      - accepted_quality_report_reference
+      - accepted_artifact_version
+      - quality_status
+      - instrument_id_scope
+      - secid_scope
+      - data_start
+      - data_end
+      - last_valid_trade_date
+      - row_count
+      - partition_count
+      - updated_at
+      - latest_autodetect_used
+    update_semantics:
+      atomic_update_required: true
+      atomic_update_rule: write_temp_file_in_pointer_directory_then_replace
+      advance_rule: only_after_quality_status_passed
+      failed_quality_status_rule: pointer_must_remain_unchanged
+      latest_or_glob_discovery_allowed: false
+      implicit_path_selection_allowed: false
+    path_rules:
+      hardcoded_server_path_allowed: false
+      implicit_file_selection_allowed: false
+      latest_file_fallback_allowed: false
+      glob_discovery_allowed: false
+
 raw_5m_readiness_contract:
   initial_backfill:
     data_start: "2020-01-01"
@@ -99,12 +146,19 @@ raw_5m_readiness_contract:
     execution_status: declaration_only_not_materialized_by_this_contract_patch
 
   incremental_update:
-    start_rule: last_valid_trade_date_plus_1_valid_trading_day
-    start_rule_detail: last_valid_trade_date + 1 valid trading day
+    producer: moex_data.futures.refresh_forts_raw_5m_incremental_pointer.v1
+    base_manifest_source: state.dataset.forts.raw_5m.tradestats.current_accepted_manifest.v1
+    base_manifest_source_rule: read_accepted_manifest_reference_from_stable_pointer_path
+    stable_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/artifact_id=dataset.forts.raw_5m.tradestats.v1/current_accepted_manifest.json"
+    start_rule: pointer_accepted_manifest_last_valid_trade_date_plus_1_valid_trading_day
+    start_rule_detail: accepted manifest last_valid_trade_date + 1 valid trading day
     end_rule: last_completed_valid_trading_day
     calendar: moex_iss_futures_calendar
+    pointer_update_rule: atomically_replace_pointer_only_after_quality_status_passed
+    failed_quality_status_rule: pointer_must_remain_unchanged
     latest_file_autodetect_allowed: false
     implicit_path_selection_allowed: false
+    glob_discovery_allowed: false
 
   instrument_scope:
     registry_id: forts_instrument_registry.v1
@@ -118,6 +172,7 @@ raw_5m_readiness_contract:
 
   readiness_evidence_required_before_D1:
     manifest_reference_required: true
+    accepted_manifest_pointer_reference_required: true
     quality_report_reference_required: true
     required_manifest_or_quality_fields:
       - artifact_id
@@ -136,6 +191,7 @@ raw_5m_readiness_contract:
       - build_started_at
       - build_finished_at
     readiness_blocks_if_missing:
+      - accepted_manifest_pointer_reference
       - actual_manifest_reference
       - actual_quality_report_reference
       - data_start
@@ -146,6 +202,6 @@ raw_5m_readiness_contract:
       - calendar_session_binding
 
   raw_5m_readiness_status_rule:
-    ready_for_D1_readiness_gate: all_required_readiness_evidence_present_and_quality_status_passing
+    ready_for_D1_readiness_gate: accepted_manifest_pointer_present_and_all_required_readiness_evidence_present_and_quality_status_passing
     blocked_pending_data_materialization: contract_complete_but_no_materialized_manifest_or_quality_evidence_exists
     not_ready: contract_declarations_or_required_evidence_fields_missing
