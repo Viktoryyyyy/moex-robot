@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Final
 
@@ -11,6 +13,11 @@ from . import refresh_forts_raw_5m_incremental as base_refresh
 
 ARTIFACT_ID: Final[str] = base_refresh.ARTIFACT_ID
 SOURCE_ARTIFACT_ID: Final[str] = base_refresh.SOURCE_ARTIFACT_ID
+CALENDAR_SOURCE_ARTIFACT_ID: Final[str] = "external.moex.iss.futures_calendar.v1"
+CALENDAR_CONTRACT_ID: Final[str] = "moex_iss_futures_calendar.off_days.v1"
+CALENDAR_ENV_NAME: Final[str] = "MOEX_CALENDAR_BASE_URL"
+CALENDAR_ENDPOINT_PATH: Final[str] = "/iss/calendars.json"
+DEFAULT_MOEX_CALENDAR_BASE_URL: Final[str] = "https://iss.moex.com"
 POINTER_ARTIFACT_ID: Final[str] = "state.dataset.forts.raw_5m.tradestats.current_accepted_manifest.v1"
 PRODUCER_ID: Final[str] = "moex_data.futures.refresh_forts_raw_5m_incremental_pointer.v1"
 REGISTRY_PATH: Final[str] = base_refresh.REGISTRY_PATH
@@ -63,6 +70,10 @@ def _manifest_reference_from_pointer(pointer_payload: Mapping[str, object]) -> P
     return Path(reference)
 
 
+def _calendar_base_url_contract() -> str:
+    return CALENDAR_ENV_NAME + " or --calendar-base-url; default " + DEFAULT_MOEX_CALENDAR_BASE_URL + "; MOEX_API_URL is not used"
+
+
 def _build_pointer_payload(
     *,
     pointer_path: Path,
@@ -78,6 +89,7 @@ def _build_pointer_payload(
         "schema_version": POINTER_ARTIFACT_ID,
         "target_artifact_id": ARTIFACT_ID,
         "source_artifact_id": SOURCE_ARTIFACT_ID,
+        "calendar_source_artifact_id": manifest.get("calendar_source_artifact_id", CALENDAR_SOURCE_ARTIFACT_ID),
         "producer": PRODUCER_ID,
         "path_contract_type": "external_pattern",
         "pointer_path": pointer_path.as_posix(),
@@ -96,6 +108,8 @@ def _build_pointer_payload(
         "row_count": manifest.get("row_count"),
         "partition_count": manifest.get("partition_count"),
         "calendar_contract": manifest.get("calendar_contract"),
+        "calendar_base_url_contract": manifest.get("calendar_base_url_contract"),
+        "calendar_endpoint": manifest.get("calendar_endpoint"),
         "session_binding": manifest.get("session_binding"),
         "updated_at": base_refresh._utc_now(),
         "atomic_update_rule": "write_temp_file_in_pointer_directory_then_replace",
@@ -120,6 +134,7 @@ def _rewrite_manifest_and_quality(
         pointer_path.as_posix(),
         base_manifest_path.as_posix(),
         SOURCE_ARTIFACT_ID,
+        CALENDAR_SOURCE_ARTIFACT_ID,
         REGISTRY_PATH,
     ]
     manifest["producer"] = PRODUCER_ID
@@ -129,10 +144,18 @@ def _rewrite_manifest_and_quality(
     manifest["input_references"] = input_references
     manifest["accepted_manifest_pointer_reference"] = pointer_path.as_posix()
     manifest["accepted_manifest_pointer_update_rule"] = "advance_only_after_quality_status_passed"
+    manifest["calendar_source_artifact_id"] = CALENDAR_SOURCE_ARTIFACT_ID
+    manifest["calendar_contract"] = CALENDAR_CONTRACT_ID
+    manifest["calendar_base_url_contract"] = _calendar_base_url_contract()
+    manifest["calendar_endpoint"] = CALENDAR_ENDPOINT_PATH
     quality["deterministic_builder_config_version"] = PRODUCER_ID
     quality["base_manifest_pointer_reference"] = pointer_path.as_posix()
     quality["input_references"] = input_references
     quality["accepted_manifest_pointer_reference"] = pointer_path.as_posix()
+    quality["calendar_source_artifact_id"] = CALENDAR_SOURCE_ARTIFACT_ID
+    quality["calendar_contract"] = CALENDAR_CONTRACT_ID
+    quality["calendar_base_url_contract"] = _calendar_base_url_contract()
+    quality["calendar_endpoint"] = CALENDAR_ENDPOINT_PATH
     base_refresh._write_json_atomic(quality_report_path, quality)
     base_refresh._write_json_atomic(manifest_path, manifest)
     return manifest, quality
@@ -140,6 +163,82 @@ def _rewrite_manifest_and_quality(
 
 def _is_json_decode_error(exc: Exception) -> bool:
     return isinstance(exc, json.JSONDecodeError) or exc.__class__.__name__ == "JSONDecodeError"
+
+
+def _resolve_calendar_base_url(calendar_base_url: str | None) -> str:
+    explicit = str(calendar_base_url or "").strip()
+    value = explicit or str(os.environ.get(CALENDAR_ENV_NAME, "")).strip() or DEFAULT_MOEX_CALENDAR_BASE_URL
+    if any(marker in value for marker in ("*", "?", "[", "]", "{", "}", "$(", "`")):
+        raise ValueError("calendar_base_url must be an explicit URL without glob/autodetect markers")
+    if not (value.startswith("https://") or value.startswith("http://")):
+        raise ValueError("calendar_base_url must be an explicit http(s) URL")
+    return value.rstrip("/")
+
+
+def _calendar_payload_from_response(response: object) -> Mapping[str, object]:
+    headers = getattr(response, "headers", {})
+    content_type = ""
+    if isinstance(headers, Mapping):
+        content_type = str(headers.get("content-type") or headers.get("Content-Type") or "").lower()
+    if "json" not in content_type:
+        raise ValueError("calendar_fetch_non_json_response: content_type=" + (content_type or "missing"))
+    try:
+        payload = response.json()
+    except Exception as exc:
+        if _is_json_decode_error(exc):
+            raise ValueError("calendar_fetch_non_json_response: invalid_json_body") from None
+        raise
+    if not isinstance(payload, Mapping):
+        raise ValueError("calendar_fetch_invalid_json_response")
+    return payload
+
+
+def fetch_futures_calendar_rows(
+    date_start: str,
+    date_end: str,
+    *,
+    timeout: float = 30.0,
+    calendar_base_url: str | None = None,
+) -> list[dict[str, object]]:
+    import requests
+
+    start_date = base_refresh._coerce_date(date_start, "date_start")
+    end_date = base_refresh._coerce_date(date_end, "date_end")
+    if start_date > end_date:
+        raise ValueError("date_start must be <= date_end")
+    base_url = _resolve_calendar_base_url(calendar_base_url)
+    endpoint = base_url + CALENDAR_ENDPOINT_PATH
+    rows: list[dict[str, object]] = []
+    for year in range(start_date.year, end_date.year + 1):
+        year_start = max(start_date, date(year, 1, 1))
+        year_end = min(end_date, date(year, 12, 31))
+        cursor_start = 0
+        while True:
+            params = {
+                "from": year_start.isoformat(),
+                "till": year_end.isoformat(),
+                "iss.only": "off_days",
+                "show_all_days": "1",
+                "start": str(cursor_start),
+            }
+            response = requests.get(endpoint, params=params, timeout=timeout)
+            response.raise_for_status()
+            payload = _calendar_payload_from_response(response)
+            table = payload.get("off_days")
+            if not isinstance(table, Mapping):
+                raise ValueError("calendar_response_missing_off_days_table")
+            columns = table.get("columns")
+            data = table.get("data")
+            if not isinstance(columns, list) or not isinstance(data, list):
+                raise ValueError("calendar_response_invalid_off_days_table_shape")
+            for item in data:
+                if isinstance(item, list):
+                    rows.append(dict(zip([str(column) for column in columns], item, strict=False)))
+            next_start = base_refresh._next_cursor_start(payload.get("off_days.cursor"))
+            if next_start is None or next_start <= cursor_start:
+                break
+            cursor_start = next_start
+    return rows
 
 
 def _classified_calendar_loader(
@@ -247,7 +346,7 @@ def refresh_incremental(
     apim_base_url: str | None = None,
     calendar_base_url: str | None = None,
     calendar_rows: Sequence[Mapping[str, object]] | None = None,
-    calendar_loader: Callable[..., Sequence[Mapping[str, object]]] = base_refresh.fetch_futures_calendar_rows,
+    calendar_loader: Callable[..., Sequence[Mapping[str, object]]] = fetch_futures_calendar_rows,
     runner: Callable[..., object] = base_refresh.materializer.materialize_instrument_partition,
 ) -> RefreshSummary:
     checked_instrument = base_refresh._require_token(instrument_id, "instrument_id")
@@ -290,7 +389,7 @@ def refresh_incremental(
         date_end=date_end,
         timeout=timeout,
         apim_base_url=apim_base_url,
-        calendar_base_url=calendar_base_url,
+        calendar_base_url=_resolve_calendar_base_url(calendar_base_url),
         calendar_rows=calendar_rows,
         calendar_loader=_classified_calendar_loader(calendar_loader),
         runner=runner,
