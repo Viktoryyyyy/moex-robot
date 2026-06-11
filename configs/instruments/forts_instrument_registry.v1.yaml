@@ -31,10 +31,39 @@ rules:
   family_partition_key_allowed: false
   default_family_allowlist_allowed: false
   materialization_without_registry_entry_allowed: false
+  accepted_pointer_scope_strategy: per_instrument
+  accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/artifact_id=dataset.forts.raw_5m.tradestats.v1/instrument_id={INSTRUMENT_ID}/secid={SECID}/current_accepted_manifest.json"
   registry_entry_must_define:
     - instrument_id
-    - secid
+    - canonical_symbol
+    - display_name
     - market
     - board
+    - secid
     - source_artifact_id
     - raw_5m_artifact_id
+    - enabled_for_raw_5m_materialization
+    - enabled_for_d1_derivation
+    - enabled_for_research
+    - storage_partition_values.instrument_id
+    - storage_partition_values.secid
+    - evidence_status
+  raw_5m_onboarding_required_steps:
+    - add_registry_entry
+    - run_one_date_pilot_materialization
+    - run_full_backfill
+    - validate_manifest_and_quality
+    - create_per_instrument_accepted_pointer
+    - run_observed_source_refresh_check
+    - enable_scheduler_only_after_refresh_check_passed
+  onboarding_evidence_status_values:
+    - pilot_required
+    - pilot_passed
+    - backfill_passed
+    - accepted_pointer_created
+    - observed_source_refresh_passed
+    - scheduler_enabled
+  production_scheduler_policy:
+    required_incremental_mode: observed-source
+    required_cli_argument: --incremental-mode observed-source
+    calendar_mode_allowed_for_server_cron: false
