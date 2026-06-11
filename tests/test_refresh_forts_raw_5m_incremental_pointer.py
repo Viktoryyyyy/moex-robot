@@ -1,6 +1,8 @@
 import json
 from dataclasses import dataclass
 
+import pytest
+
 from moex_data.futures import refresh_forts_raw_5m_incremental_pointer as refresh
 
 
@@ -151,6 +153,41 @@ def test_passed_quality_atomically_advances_pointer_to_new_manifest(tmp_path, mo
     assert pointer_payload["atomic_update_rule"] == "write_temp_file_in_pointer_directory_then_replace"
 
 
+def test_pointer_no_op_date_end_equal_base_last_skips_calendar_and_runner(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
+    registry = tmp_path / "registry.yaml"
+    accepted_base = tmp_path / "accepted_base.json"
+    write_registry(registry)
+    write_base_manifest(accepted_base, last_valid="2026-06-09")
+    pointer_path = refresh.build_accepted_manifest_pointer_path()
+    write_pointer(pointer_path, accepted_base)
+
+    def calendar_loader(*args, **kwargs):
+        raise AssertionError("calendar loader must not be called for pointer no_op")
+
+    def runner(**kwargs):
+        raise AssertionError("runner must not be called for pointer no_op")
+
+    summary = refresh.refresh_incremental(
+        instrument_id="forts.usdrubf",
+        secid="USDRUBF",
+        artifact_version="refresh_pointer_noop_v1",
+        registry_path=registry,
+        date_end="2026-06-09",
+        calendar_loader=calendar_loader,
+        runner=runner,
+    )
+
+    pointer_payload = json.loads(pointer_path.read_text(encoding="utf-8"))
+    assert summary.payload["status"] == "no_op"
+    assert summary.payload["quality_status"] == "passed"
+    assert summary.payload["incremental_requested_dates"] == []
+    assert summary.payload["incremental_requested_date_count"] == 0
+    assert summary.payload["accepted_manifest_pointer_updated"] is True
+    assert pointer_payload["accepted_manifest_reference"] == summary.manifest_path.as_posix()
+    assert pointer_payload["quality_status"] == "passed"
+
+
 def test_failed_quality_does_not_advance_pointer(tmp_path, monkeypatch):
     monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
     registry = tmp_path / "registry.yaml"
@@ -177,4 +214,35 @@ def test_failed_quality_does_not_advance_pointer(tmp_path, monkeypatch):
     assert summary.payload["status"] == "failed"
     assert summary.payload["quality_status"] == "failed"
     assert summary.payload["accepted_manifest_pointer_updated"] is False
+    assert pointer_path.read_text(encoding="utf-8") == original_pointer_text
+
+
+def test_non_json_calendar_failure_is_classified_and_does_not_advance_pointer(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
+    registry = tmp_path / "registry.yaml"
+    accepted_base = tmp_path / "accepted_base.json"
+    write_registry(registry)
+    write_base_manifest(accepted_base, last_valid="2026-06-09")
+    pointer_path = refresh.build_accepted_manifest_pointer_path()
+    write_pointer(pointer_path, accepted_base)
+    original_pointer_text = pointer_path.read_text(encoding="utf-8")
+
+    def calendar_loader(*args, **kwargs):
+        raise json.JSONDecodeError("Expecting value", "", 0)
+
+    def runner(**kwargs):
+        raise AssertionError("runner must not be called when calendar fetch fails")
+
+    with pytest.raises(ValueError, match="calendar_fetch_non_json_response") as excinfo:
+        refresh.refresh_incremental(
+            instrument_id="forts.usdrubf",
+            secid="USDRUBF",
+            artifact_version="refresh_pointer_calendar_failure_v1",
+            registry_path=registry,
+            date_end="2026-06-10",
+            calendar_loader=calendar_loader,
+            runner=runner,
+        )
+
+    assert "JSONDecodeError" not in str(excinfo.value)
     assert pointer_path.read_text(encoding="utf-8") == original_pointer_text
