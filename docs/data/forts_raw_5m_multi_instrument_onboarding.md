@@ -14,6 +14,8 @@ ${MOEX_DATA_ROOT}/state/datasets/artifact_id=dataset.forts.raw_5m.tradestats.v1/
 
 The artifact-level pointer path is legacy USDRUBF-only state and must not be used for onboarding or scheduling new instruments.
 
+Backward compatibility: the pointer runner may read and update the legacy artifact-level pointer only for `forts.usdrubf` / `USDRUBF` when the per-instrument pointer is absent. It must not use that path for any other instrument and does not silently migrate pointer state.
+
 ## Required onboarding sequence
 
 1. Add registry entry in `configs/instruments/forts_instrument_registry.v1.yaml`.

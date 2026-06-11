@@ -34,6 +34,8 @@ EMPTY_SOURCE_ERROR_MARKERS: Final[tuple[str, ...]] = (
 POINTER_ARTIFACT_ID: Final[str] = "state.dataset.forts.raw_5m.tradestats.current_accepted_manifest.v1"
 PRODUCER_ID: Final[str] = "moex_data.futures.refresh_forts_raw_5m_incremental_pointer.v1"
 REGISTRY_PATH: Final[str] = base_refresh.REGISTRY_PATH
+LEGACY_USDRUBF_INSTRUMENT_ID: Final[str] = "forts.usdrubf"
+LEGACY_USDRUBF_SECID: Final[str] = "USDRUBF"
 
 
 @dataclass(frozen=True)
@@ -48,8 +50,38 @@ def load_env_file(path: str | None) -> None:
     base_refresh.load_env_file(path)
 
 
-def build_accepted_manifest_pointer_path() -> Path:
-    return base_refresh._data_root() / "state" / "datasets" / ("artifact_id=" + ARTIFACT_ID) / "current_accepted_manifest.json"
+def _pointer_root() -> Path:
+    return base_refresh._data_root() / "state" / "datasets" / ("artifact_id=" + ARTIFACT_ID)
+
+
+def build_accepted_manifest_pointer_path(instrument_id: str, secid: str) -> Path:
+    checked_instrument = base_refresh._require_token(instrument_id, "instrument_id")
+    checked_secid = base_refresh._require_token(secid, "secid")
+    return (
+        _pointer_root()
+        / ("instrument_id=" + checked_instrument)
+        / ("secid=" + checked_secid)
+        / "current_accepted_manifest.json"
+    )
+
+
+def build_legacy_usdrubf_accepted_manifest_pointer_path() -> Path:
+    return _pointer_root() / "current_accepted_manifest.json"
+
+
+def _is_legacy_usdrubf_pointer_path(pointer_path: Path) -> bool:
+    return pointer_path == build_legacy_usdrubf_accepted_manifest_pointer_path()
+
+
+def _resolve_accepted_manifest_pointer_path(instrument_id: str, secid: str) -> Path:
+    current_pointer_path = build_accepted_manifest_pointer_path(instrument_id, secid)
+    if current_pointer_path.exists():
+        return current_pointer_path
+    if instrument_id == LEGACY_USDRUBF_INSTRUMENT_ID and secid == LEGACY_USDRUBF_SECID:
+        legacy_pointer_path = build_legacy_usdrubf_accepted_manifest_pointer_path()
+        if legacy_pointer_path.exists():
+            return legacy_pointer_path
+    return current_pointer_path
 
 
 def _safe_reference(value: object, field_name: str) -> str:
@@ -146,6 +178,7 @@ def _build_pointer_payload(
     manifest: Mapping[str, object],
     quality: Mapping[str, object],
 ) -> dict[str, object]:
+    legacy_compatibility_used = _is_legacy_usdrubf_pointer_path(pointer_path)
     return {
         "artifact_id": POINTER_ARTIFACT_ID,
         "artifact_class": "accepted_manifest_pointer",
@@ -155,7 +188,13 @@ def _build_pointer_payload(
         "calendar_source_artifact_id": manifest.get("calendar_source_artifact_id", CALENDAR_SOURCE_ARTIFACT_ID),
         "producer": PRODUCER_ID,
         "path_contract_type": "external_pattern",
+        "pointer_scope_strategy": "per_instrument",
         "pointer_path": pointer_path.as_posix(),
+        "legacy_artifact_level_pointer_compatibility_used": legacy_compatibility_used,
+        "legacy_artifact_level_pointer_compatibility_rule": (
+            "fallback_allowed_only_for_existing_usdrubf_when_per_instrument_pointer_is_absent"
+        ),
+        "new_instrument_legacy_pointer_fallback_allowed": False,
         "accepted_manifest_reference": manifest_path.as_posix(),
         "accepted_quality_report_reference": quality_report_path.as_posix(),
         "accepted_artifact_version": manifest.get("artifact_version"),
@@ -201,6 +240,7 @@ def _rewrite_manifest_and_quality(
     incremental_mode: str,
 ) -> tuple[dict[str, object], dict[str, object]]:
     mode = _normalize_incremental_mode(incremental_mode)
+    legacy_compatibility_used = _is_legacy_usdrubf_pointer_path(pointer_path)
     manifest = base_refresh._load_json(manifest_path, "refresh_manifest")
     quality = base_refresh._load_json(quality_report_path, "quality_report")
     input_references = _mode_input_references(pointer_path, base_manifest_path, mode)
@@ -211,11 +251,17 @@ def _rewrite_manifest_and_quality(
     manifest["input_references"] = input_references
     manifest["accepted_manifest_pointer_reference"] = pointer_path.as_posix()
     manifest["accepted_manifest_pointer_update_rule"] = "advance_only_after_quality_status_passed"
+    manifest["accepted_manifest_pointer_scope_strategy"] = "per_instrument"
+    manifest["legacy_artifact_level_pointer_compatibility_used"] = legacy_compatibility_used
+    manifest["new_instrument_legacy_pointer_fallback_allowed"] = False
     _apply_incremental_mode_metadata(manifest, mode)
     quality["deterministic_builder_config_version"] = PRODUCER_ID
     quality["base_manifest_pointer_reference"] = pointer_path.as_posix()
     quality["input_references"] = input_references
     quality["accepted_manifest_pointer_reference"] = pointer_path.as_posix()
+    quality["accepted_manifest_pointer_scope_strategy"] = "per_instrument"
+    quality["legacy_artifact_level_pointer_compatibility_used"] = legacy_compatibility_used
+    quality["new_instrument_legacy_pointer_fallback_allowed"] = False
     quality["skipped_empty_source_dates"] = list(manifest.get("skipped_empty_source_dates") or [])
     quality["skipped_empty_source_date_count"] = manifest.get("skipped_empty_source_date_count", 0)
     _apply_incremental_mode_metadata(quality, mode)
@@ -531,7 +577,7 @@ def refresh_incremental(
         raise ValueError("use either as_of_date or date_end, not both")
     if not base_refresh.registry_allows_instrument(registry_path, checked_instrument, checked_secid):
         raise ValueError("instrument is not enabled by registry")
-    pointer_path = build_accepted_manifest_pointer_path()
+    pointer_path = _resolve_accepted_manifest_pointer_path(checked_instrument, checked_secid)
     previous_pointer = _load_pointer(pointer_path, checked_instrument, checked_secid)
     base_manifest_path = _manifest_reference_from_pointer(previous_pointer)
     base_manifest = base_refresh._load_json(base_manifest_path, "base_manifest")

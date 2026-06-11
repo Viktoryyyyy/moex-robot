@@ -20,6 +20,9 @@ pointer_strategy:
   accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/artifact_id=dataset.forts.raw_5m.tradestats.v1/instrument_id={INSTRUMENT_ID}/secid={SECID}/current_accepted_manifest.json"
   legacy_artifact_level_pointer_path: "${MOEX_DATA_ROOT}/state/datasets/artifact_id=dataset.forts.raw_5m.tradestats.v1/current_accepted_manifest.json"
   legacy_artifact_level_pointer_status: existing_usdrubf_legacy_only_not_allowed_for_new_instrument_onboarding_or_scheduler
+  legacy_artifact_level_pointer_compatibility_rule: fallback_allowed_only_for_existing_usdrubf_when_per_instrument_pointer_is_absent
+  legacy_artifact_level_pointer_migration_rule: no_silent_migration_runner_reads_existing_usdrubf_legacy_pointer_until_operator_creates_per_instrument_pointer
+  new_instrument_legacy_pointer_fallback_allowed: false
   path_contract_type: external_pattern
   storage_root_ref: MOEX_DATA_ROOT
   path_rules:
