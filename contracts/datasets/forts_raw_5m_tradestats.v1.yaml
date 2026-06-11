@@ -35,11 +35,52 @@ artifacts:
       - name: APIM_FO_TRADESTATS_ACCESS
         purpose: optional_access_policy_or_credentials_reference
     env_dependency_rule: env_dependencies_are_not_artifact_path_contract_type
+    calendar_base_rule: MOEX_API_URL_is_not_calendar_base_url_for_incremental_refresh
     failure_semantics:
       empty_response: fail_closed
       schema_mismatch: fail_closed
       unresolved_calendar_or_session: fail_closed
       implicit_fallback: forbidden
+
+  - artifact_id: external.moex.iss.futures_calendar.v1
+    artifact_class: external_calendar_source_contract
+    path_contract_type: env_contract
+    producer: moex_external.iss_calendar
+    consumers:
+      - moex_data.futures.refresh_forts_raw_5m_incremental_pointer.v1
+      - dataset.forts.raw_5m.tradestats.v1
+    format: http_json
+    source:
+      default_base_url: https://iss.moex.com
+      base_url_env: MOEX_CALENDAR_BASE_URL
+      base_url_cli_argument: --calendar-base-url
+      endpoint: /iss/calendars.json
+      table: off_days
+      market_field: futures_
+      required_query_params:
+        from: explicit_date_argument
+        till: explicit_date_argument
+        iss.only: off_days
+        show_all_days: "1"
+        start: pagination_argument
+    base_url_resolution_order:
+      - --calendar-base-url
+      - MOEX_CALENDAR_BASE_URL
+      - default_base_url
+    moex_api_url_calendar_base_assumption_allowed: false
+    preflight_validation:
+      http_status: raise_for_status
+      content_type_must_contain: json
+      required_top_level_table: off_days
+      required_table_shape:
+        columns: list
+        data: list
+    failure_semantics:
+      non_json_or_html_response: calendar_fetch_non_json_response
+      missing_off_days_table: calendar_response_missing_off_days_table
+      invalid_off_days_shape: calendar_response_invalid_off_days_table_shape
+      implicit_fallback: forbidden
+      pointer_update_on_failure: forbidden
 
   - artifact_id: dataset.forts.raw_5m.tradestats.v1
     artifact_class: raw_native_dataset
@@ -48,6 +89,7 @@ artifacts:
     path_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/trade_date={YYYY-MM-DD}/instrument_id={INSTRUMENT_ID}/secid={SECID}/part.parquet"
     producer: moex_data.futures.materialize_forts_raw_5m_tradestats.v1
     source_artifact_id: external.apim.fo.tradestats.v1
+    calendar_source_artifact_id: external.moex.iss.futures_calendar.v1
     consumers:
       - dataset.forts.derived_d1.from_raw_5m.v1
       - reports.data_asset_manifest_quality_report.v1
@@ -106,6 +148,7 @@ artifacts:
     target_artifact_id: dataset.forts.raw_5m.tradestats.v1
     target_manifest_artifact_id: manifest.data_asset.v1
     target_quality_report_artifact_id: reports.data_asset.quality.v1
+    calendar_source_artifact_id: external.moex.iss.futures_calendar.v1
     required_fields:
       - artifact_id
       - artifact_class
@@ -122,6 +165,7 @@ artifacts:
       - last_valid_trade_date
       - row_count
       - partition_count
+      - calendar_source_artifact_id
       - updated_at
       - latest_autodetect_used
     update_semantics:
@@ -129,6 +173,7 @@ artifacts:
       atomic_update_rule: write_temp_file_in_pointer_directory_then_replace
       advance_rule: only_after_quality_status_passed
       failed_quality_status_rule: pointer_must_remain_unchanged
+      calendar_failure_rule: pointer_must_remain_unchanged
       latest_or_glob_discovery_allowed: false
       implicit_path_selection_allowed: false
     path_rules:
@@ -142,6 +187,7 @@ raw_5m_readiness_contract:
     data_start: "2020-01-01"
     data_end_rule: last_completed_valid_trading_day
     source_artifact_id: external.apim.fo.tradestats.v1
+    calendar_source_artifact_id: external.moex.iss.futures_calendar.v1
     artifact_id: dataset.forts.raw_5m.tradestats.v1
     execution_status: declaration_only_not_materialized_by_this_contract_patch
 
@@ -153,7 +199,21 @@ raw_5m_readiness_contract:
     start_rule: pointer_accepted_manifest_last_valid_trade_date_plus_1_valid_trading_day
     start_rule_detail: accepted manifest last_valid_trade_date + 1 valid trading day
     end_rule: last_completed_valid_trading_day
-    calendar: moex_iss_futures_calendar
+    calendar: moex_iss_futures_calendar.off_days.v1
+    calendar_source_artifact_id: external.moex.iss.futures_calendar.v1
+    calendar_base_url_contract:
+      env: MOEX_CALENDAR_BASE_URL
+      cli_argument: --calendar-base-url
+      default_base_url: https://iss.moex.com
+      moex_api_url_calendar_base_assumption_allowed: false
+    calendar_endpoint: /iss/calendars.json
+    calendar_required_table: off_days
+    calendar_preflight_required: true
+    calendar_failure_semantics:
+      non_json_or_html_response: calendar_fetch_non_json_response
+      missing_off_days_table: calendar_response_missing_off_days_table
+      invalid_off_days_shape: calendar_response_invalid_off_days_table_shape
+      pointer_update_rule: pointer_must_remain_unchanged
     pointer_update_rule: atomically_replace_pointer_only_after_quality_status_passed
     failed_quality_status_rule: pointer_must_remain_unchanged
     latest_file_autodetect_allowed: false
@@ -177,6 +237,7 @@ raw_5m_readiness_contract:
     required_manifest_or_quality_fields:
       - artifact_id
       - source_artifact_id
+      - calendar_source_artifact_id
       - schema_version
       - data_start
       - data_end
