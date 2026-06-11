@@ -1,0 +1,117 @@
+contract_id: forts_raw_5m_multi_instrument_onboarding.v1
+schema_version: data_asset_onboarding_contract.v1
+status: active
+scope:
+  asset: dataset.forts.raw_5m.tradestats.v1
+  market: FORTS
+  grain: 5m
+  source_artifact_id: external.apim.fo.tradestats.v1
+  registry_ref: configs/instruments/forts_instrument_registry.v1.yaml
+problem_statement:
+  current_registry_contains_only: forts.usdrubf / USDRUBF
+  previous_pointer_shape: artifact_level
+  previous_pointer_collision_risk: true
+  pointer_runner_scope_validation: pointer_scope_must_equal_exactly_one_instrument_id_and_secid
+  onboarding_by_instruction_alone_safe: false
+pointer_strategy:
+  selected_strategy: per_instrument
+  intentionally_single_instrument_only: false
+  accepted_pointer_artifact_id: state.dataset.forts.raw_5m.tradestats.current_accepted_manifest.v1
+  accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/artifact_id=dataset.forts.raw_5m.tradestats.v1/instrument_id={INSTRUMENT_ID}/secid={SECID}/current_accepted_manifest.json"
+  legacy_artifact_level_pointer_path: "${MOEX_DATA_ROOT}/state/datasets/artifact_id=dataset.forts.raw_5m.tradestats.v1/current_accepted_manifest.json"
+  legacy_artifact_level_pointer_status: existing_usdrubf_legacy_only_not_allowed_for_new_instrument_onboarding_or_scheduler
+  path_contract_type: external_pattern
+  storage_root_ref: MOEX_DATA_ROOT
+  path_rules:
+    latest_file_autodetect_allowed: false
+    glob_discovery_allowed: false
+    implicit_path_selection_allowed: false
+    hardcoded_server_path_allowed: false
+    one_pointer_per_instrument_id_secid_required: true
+required_registry_fields:
+  - instrument_id
+  - canonical_symbol
+  - display_name
+  - market
+  - board
+  - secid
+  - source_artifact_id
+  - raw_5m_artifact_id
+  - enabled_for_raw_5m_materialization
+  - enabled_for_d1_derivation
+  - enabled_for_research
+  - storage_partition_values.instrument_id
+  - storage_partition_values.secid
+  - evidence_status
+new_instrument_onboarding_sequence:
+  - step_id: add_registry_entry
+    required: true
+    instruction: Add an explicit instrument row to configs/instruments/forts_instrument_registry.v1.yaml.
+    exit_criteria:
+      - all required_registry_fields are present
+      - storage_partition_values.instrument_id equals instrument_id
+      - storage_partition_values.secid equals secid
+      - enabled_for_raw_5m_materialization is true only after scope approval
+  - step_id: run_one_date_pilot_materialization
+    required: true
+    instruction: Run one explicit trade_date pilot materialization for the new instrument.
+    exit_criteria:
+      - parquet partition exists for exactly one requested trade_date/instrument_id/secid
+      - pilot manifest exists
+      - pilot quality report exists
+      - latest/glob/autodetect was not used
+  - step_id: run_full_backfill
+    required: true
+    instruction: Run full backfill from approved data_start to approved data_end.
+    exit_criteria:
+      - manifest covers approved range
+      - quality report is present
+      - instrument_id_scope equals exactly one instrument_id
+      - secid_scope equals exactly one secid
+  - step_id: validate_manifest_and_quality
+    required: true
+    instruction: Validate manifest and quality report before pointer creation.
+    exit_criteria:
+      - quality_status is passed
+      - latest_autodetect_used is false
+      - implicit_path_selection_used is false
+      - no unrelated instrument partition is included
+  - step_id: create_per_instrument_accepted_pointer
+    required: true
+    instruction: Create accepted pointer only at accepted_pointer_path_contract.
+    exit_criteria:
+      - pointer points to the passed full backfill manifest
+      - pointer instrument_id_scope equals exactly one instrument_id
+      - pointer secid_scope equals exactly one secid
+      - pointer latest_autodetect_used is false
+  - step_id: run_observed_source_refresh_check
+    required: true
+    instruction: Run refresh check with --incremental-mode observed-source.
+    exit_criteria:
+      - MOEX calendar endpoint is not called
+      - empty observed source dates are recorded as skipped_empty_source_dates
+      - source/network/schema failures do not advance pointer
+      - passed quality atomically advances only the per-instrument pointer
+  - step_id: enable_scheduler_only_after_refresh_check_passed
+    required: true
+    instruction: Enable scheduler only after all prior steps pass.
+    exit_criteria:
+      - production scheduler uses --incremental-mode observed-source
+      - scheduler references explicit instrument_id and secid
+      - scheduler references the per-instrument pointer path
+production_scheduler_policy:
+  required_incremental_mode: observed-source
+  required_cli_argument: --incremental-mode observed-source
+  calendar_mode_allowed_for_server_cron: false
+  calendar_mode_blocked_until: moex_calendar_endpoint_contract_resolved
+  calendar_endpoint_status: unresolved_for_server_scheduler
+  calendar_endpoint_unresolved_note: MOEX calendar endpoint contract is unresolved for server cron; observed-source mode is the only allowed production scheduler mode until this is fixed.
+  cron_or_systemd_change_in_this_patch_allowed: false
+  server_apply_in_this_patch_allowed: false
+  d1_enablement_in_this_patch_allowed: false
+acceptance_guards:
+  future_subchat_can_onboard_new_instrument_from_contract: true
+  registry_required_fields_documented: true
+  pointer_path_strategy_explicit: true
+  production_scheduler_mode_explicit: observed-source
+  latest_glob_autodetect_allowed: false
