@@ -49,6 +49,9 @@ def test_multi_instrument_onboarding_contract_exists_and_declares_per_instrument
     assert "intentionally_single_instrument_only: false" in contract_text
     assert pointer_contract in contract_text
     assert "legacy_artifact_level_pointer_status: existing_usdrubf_legacy_only_not_allowed_for_new_instrument_onboarding_or_scheduler" in contract_text
+    assert "legacy_artifact_level_pointer_compatibility_rule: fallback_allowed_only_for_existing_usdrubf_when_per_instrument_pointer_is_absent" in contract_text
+    assert "legacy_artifact_level_pointer_migration_rule: no_silent_migration_runner_reads_existing_usdrubf_legacy_pointer_until_operator_creates_per_instrument_pointer" in contract_text
+    assert "new_instrument_legacy_pointer_fallback_allowed: false" in contract_text
     assert "latest_file_autodetect_allowed: false" in contract_text
     assert "glob_discovery_allowed: false" in contract_text
     assert "implicit_path_selection_allowed: false" in contract_text
@@ -73,6 +76,9 @@ def test_onboarding_sequence_is_explicit_in_contract_registry_and_docs():
     assert "Run full backfill" in docs_text
     assert "Create the per-instrument accepted pointer" in docs_text
     assert "Run observed-source refresh check" in docs_text
+    assert "Backward compatibility" in docs_text
+    assert "forts.usdrubf" in docs_text
+    assert "does not silently migrate pointer state" in docs_text
 
 
 def test_production_scheduler_policy_requires_observed_source_and_blocks_calendar_cron():
