@@ -1,0 +1,282 @@
+{
+  "name": "MOEX_ROUTE_B_PM_L3_RETURN_INTAKE_V1_10_3",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "moex/route-b/pm-l3-return",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "98d39ada-7bbe-41fb-8683-474d9521078b",
+      "name": "Webhook - PM L3 Return Intake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1120,
+        96
+      ],
+      "webhookId": "dd205ee2-dbfe-49d8-b1e2-7b6ff2a3f3b9"
+    },
+    {
+      "parameters": {
+        "jsCode": "const incoming = $input.first().json || {};\nconst body = incoming.body && typeof incoming.body === \"object\" && !Array.isArray(incoming.body) ? incoming.body : incoming;\nconst errors = [];\nconst allowedReturnTypes = new Set([\"pm_l3_after_subchat_validation\", \"pm_l3_after_github_pr_validation\", \"pm_l3_blocker_return\"]);\nconst allowedValidationStatuses = new Set([\"pass\", \"conditional_pass\", \"fail\", \"blocked\"]);\nconst workflowName = \"MOEX_ROUTE_B_PM_L3_RETURN_INTAKE_V1_10_3\";\nconst specVersion = \"1.10.3\";\nconst isPlainObject = (value) => value !== null && typeof value === \"object\" && !Array.isArray(value);\nconst hasOwn = (obj, key) => isPlainObject(obj) && Object.prototype.hasOwnProperty.call(obj, key);\nconst asTrimmedString = (value) => typeof value === \"string\" ? value.trim() : \"\";\nconst addError = (code, field, message) => errors.push({ code, field, message });\nconst report = isPlainObject(body.pm_l3_validation_report) ? body.pm_l3_validation_report : null;\nconst authorityBoundary = isPlainObject(body.authority_boundary) ? body.authority_boundary : null;\nif (body.schema_version !== \"route_b_pm_l3_return_intake_request.v1\") {\n  addError(\"invalid_schema_version\", \"schema_version\", \"schema_version must be route_b_pm_l3_return_intake_request.v1\");\n}\nif (!asTrimmedString(body.workflow_run_id)) {\n  addError(\"missing_workflow_run_id\", \"workflow_run_id\", \"workflow_run_id is required\");\n}\nif (!asTrimmedString(body.request_id)) {\n  addError(\"missing_request_id\", \"request_id\", \"request_id is required\");\n}\nif (!asTrimmedString(body.repository_full_name)) {\n  addError(\"missing_repository_full_name\", \"repository_full_name\", \"repository_full_name is required\");\n} else if (body.repository_full_name !== \"Viktoryyyyy/moex-robot\") {\n  addError(\"invalid_repository_full_name\", \"repository_full_name\", \"repository_full_name must be Viktoryyyyy/moex-robot\");\n}\nif (body.source_role !== \"PM_L3_DELIVERY_VALIDATION_OWNER\") {\n  addError(\"invalid_source_role\", \"source_role\", \"source_role must be PM_L3_DELIVERY_VALIDATION_OWNER\");\n}\nif (body.return_to_role !== \"PM_L2_PHASE_OWNER\") {\n  addError(\"invalid_return_to_role\", \"return_to_role\", \"return_to_role must be PM_L2_PHASE_OWNER\");\n}\nif (!allowedReturnTypes.has(body.return_type)) {\n  addError(\"invalid_return_type\", \"return_type\", \"return_type is outside the allowed set\");\n}\nif (!report) {\n  addError(\"missing_pm_l3_validation_report\", \"pm_l3_validation_report\", \"pm_l3_validation_report is required and must be an object\");\n} else {\n  if (!allowedValidationStatuses.has(report.validation_status)) {\n    addError(\"invalid_validation_status\", \"pm_l3_validation_report.validation_status\", \"validation_status must be pass, conditional_pass, fail, or blocked\");\n  }\n  for (const key of [\"acceptance_criteria_check\", \"repo_scope_check\", \"artifact_contract_check\", \"test_or_ci_check\"]) {\n    if (!hasOwn(report, key)) {\n      addError(\"missing_validation_report_field\", `pm_l3_validation_report.${key}`, `${key} is required`);\n    }\n  }\n  if (!Array.isArray(report.blockers)) {\n    addError(\"missing_or_invalid_blockers\", \"pm_l3_validation_report.blockers\", \"blockers must exist as an array\");\n  }\n  if (!Array.isArray(report.required_fixes)) {\n    addError(\"missing_or_invalid_required_fixes\", \"pm_l3_validation_report.required_fixes\", \"required_fixes must exist as an array\");\n  }\n}\nif (!hasOwn(body, \"evidence_refs\")) {\n  addError(\"missing_evidence_refs\", \"evidence_refs\", \"evidence_refs is required\");\n} else if (!isPlainObject(body.evidence_refs) && !Array.isArray(body.evidence_refs)) {\n  addError(\"invalid_evidence_refs\", \"evidence_refs\", \"evidence_refs must be an object or array\");\n}\nif (!authorityBoundary) {\n  addError(\"missing_authority_boundary\", \"authority_boundary\", \"authority_boundary is required and must be an object\");\n} else {\n  const requiredBoundary = {\n    merge_authority: \"PM_L2_ONLY\",\n    pm_l2_review_required: true,\n    n8n_merge_allowed: false,\n    direct_main_write_allowed: false,\n    force_push_allowed: false,\n    file_delete_allowed: false,\n    executor_merge_allowed: false,\n    ci_passed_is_not_merge_approval: true\n  };\n  for (const [key, expected] of Object.entries(requiredBoundary)) {\n    if (authorityBoundary[key] !== expected) {\n      addError(\"invalid_authority_boundary\", `authority_boundary.${key}`, `${key} must be ${JSON.stringify(expected)}`);\n    }\n  }\n  if (authorityBoundary.ci_passed_is_merge_approval === true || authorityBoundary.ci_passed_treated_as_merge_approval === true) {\n    addError(\"ci_passed_treated_as_merge_approval\", \"authority_boundary\", \"ci_passed must not be treated as merge approval\");\n  }\n}\nconst claimEntries = (key) => {\n  const entries = [];\n  if (hasOwn(body, key)) entries.push({ path: key, value: body[key] });\n  if (authorityBoundary && hasOwn(authorityBoundary, key)) entries.push({ path: `authority_boundary.${key}`, value: authorityBoundary[key] });\n  if (report && hasOwn(report, key)) entries.push({ path: `pm_l3_validation_report.${key}`, value: report[key] });\n  return entries;\n};\nconst claimValue = (key) => claimEntries(key).some((entry) => entry.value === true);\nfor (const key of [\n  \"n8n_merge_allowed\",\n  \"direct_main_write_allowed\",\n  \"force_push_allowed\",\n  \"file_delete_allowed\",\n  \"executor_merge_allowed\",\n  \"merge_performed_by_executor\",\n  \"pm_l2_approval_claimed_by_executor\"\n]) {\n  if (claimValue(key) === true) {\n    addError(\"forbidden_\" + key, key, key + \"=true is forbidden\");\n  }\n}\nif (claimValue(\"approved_for_merge\") === true) {\n  const explicitApprovalRefs = [\n    { path: \"explicit_pm_l2_approval_package_ref\", value: body.explicit_pm_l2_approval_package_ref },\n    { path: \"authority_boundary.explicit_pm_l2_approval_package_ref\", value: authorityBoundary ? authorityBoundary.explicit_pm_l2_approval_package_ref : undefined },\n    { path: \"pm_l3_validation_report.explicit_pm_l2_approval_package_ref\", value: report ? report.explicit_pm_l2_approval_package_ref : undefined },\n    { path: \"pm_l2_approval_package_ref\", value: body.pm_l2_approval_package_ref },\n    { path: \"authority_boundary.pm_l2_approval_package_ref\", value: authorityBoundary ? authorityBoundary.pm_l2_approval_package_ref : undefined },\n    { path: \"pm_l3_validation_report.pm_l2_approval_package_ref\", value: report ? report.pm_l2_approval_package_ref : undefined }\n  ].map((entry) => ({ path: entry.path, value: asTrimmedString(entry.value) })).filter((entry) => Boolean(entry.value));\n  if (explicitApprovalRefs.length === 0) {\n    for (const claim of claimEntries(\"approved_for_merge\").filter((entry) => entry.value === true)) {\n      addError(\"forbidden_approved_for_merge_claim\", claim.path, \"approved_for_merge=true requires explicit_pm_l2_approval_package_ref\");\n    }\n  }\n}\nif (hasOwn(body, \"pm_l3_final_pm_l2_verdict\") || (report && hasOwn(report, \"pm_l3_final_pm_l2_verdict\"))) {\n  addError(\"forbidden_pm_l3_final_pm_l2_verdict\", \"pm_l3_final_pm_l2_verdict\", \"PM L3 final PM L2 verdict claim is forbidden\");\n}\nif (body.subchat_return_to_role === \"PM_L2_PHASE_OWNER\") {\n  addError(\"forbidden_subchat_direct_return_to_pm_l2\", \"subchat_return_to_role\", \"sub-chat must not return directly to PM L2\");\n}\nif (typeof body.source_role === \"string\" && body.source_role.startsWith(\"SUBCHAT\")) {\n  addError(\"forbidden_subchat_source_role\", \"source_role\", \"source_role must not be a sub-chat role\");\n}\nconst refStrings = [];\nconst collectStrings = (value, path) => {\n  if (typeof value === \"string\") {\n    refStrings.push({ path, value });\n    return;\n  }\n  if (Array.isArray(value)) {\n    value.forEach((entry, index) => collectStrings(entry, `${path}[${index}]`));\n    return;\n  }\n  if (isPlainObject(value)) {\n    for (const [key, entry] of Object.entries(value)) {\n      collectStrings(entry, `${path}.${key}`);\n    }\n  }\n};\nif (hasOwn(body, \"evidence_refs\")) {\n  collectStrings(body.evidence_refs, \"evidence_refs\");\n}\nfor (const entry of [\n  { path: \"explicit_pm_l2_approval_package_ref\", value: body.explicit_pm_l2_approval_package_ref },\n  { path: \"authority_boundary.explicit_pm_l2_approval_package_ref\", value: authorityBoundary ? authorityBoundary.explicit_pm_l2_approval_package_ref : undefined },\n  { path: \"pm_l3_validation_report.explicit_pm_l2_approval_package_ref\", value: report ? report.explicit_pm_l2_approval_package_ref : undefined },\n  { path: \"pm_l2_approval_package_ref\", value: body.pm_l2_approval_package_ref },\n  { path: \"authority_boundary.pm_l2_approval_package_ref\", value: authorityBoundary ? authorityBoundary.pm_l2_approval_package_ref : undefined },\n  { path: \"pm_l3_validation_report.pm_l2_approval_package_ref\", value: report ? report.pm_l2_approval_package_ref : undefined }\n]) {\n  if (typeof entry.value === \"string\") {\n    refStrings.push({ path: entry.path, value: entry.value });\n  }\n}\nconst forbiddenMarkerPattern = /(^|[^A-Za-z0-9])(latest|current|autodetect)([^A-Za-z0-9]|$)/i;\nconst absolutePathPattern = /^(\\/|~\\/|file:\\/\\/|[A-Za-z]:[\\\\/])/;\nconst serverPathPattern = /(^|[\\s\"'`])(?:\\/home\\/|\\/tmp\\/|\\/mnt\\/|\\/var\\/|\\/root\\/|\\/srv\\/|\\/opt\\/)/;\nconst guessedPathPattern = /\\b(guessed|guess|assumed|implicit|autodetected)\\b/i;\nfor (const ref of refStrings) {\n  if (forbiddenMarkerPattern.test(ref.value)) {\n    addError(\"forbidden_ref_marker\", ref.path, \"evidence refs must not contain latest/current/autodetect markers\");\n  }\n  if (absolutePathPattern.test(ref.value) || serverPathPattern.test(ref.value)) {\n    addError(\"forbidden_absolute_or_server_ref\", ref.path, \"evidence refs must not contain absolute, server, or local filesystem paths\");\n  }\n  if (guessedPathPattern.test(ref.value)) {\n    addError(\"forbidden_guessed_ref\", ref.path, \"evidence refs must not contain guessed or assumed path markers\");\n  }\n}\nconst blockers = report && Array.isArray(report.blockers) ? report.blockers : [];\nconst requiredFixes = report && Array.isArray(report.required_fixes) ? report.required_fixes : [];\nconst validationStatus = report && typeof report.validation_status === \"string\" ? report.validation_status : null;\nconst summarize = (value) => {\n  if (typeof value === \"string\") return value;\n  try { return JSON.stringify(value); } catch (error) { return String(value); }\n};\nconst blockerSummary = [\"fail\", \"blocked\"].includes(validationStatus) ? (blockers.map(summarize).filter(Boolean).join(\"; \").slice(0, 2000) || `validation_status=${validationStatus}`) : null;\nconst normalized = {\n  workflow_name: workflowName,\n  spec_version: specVersion,\n  received_at: new Date().toISOString(),\n  schema_version: body.schema_version,\n  workflow_run_id: asTrimmedString(body.workflow_run_id),\n  request_id: asTrimmedString(body.request_id),\n  repository_full_name: asTrimmedString(body.repository_full_name),\n  source_role: body.source_role,\n  return_to_role: body.return_to_role,\n  return_type: body.return_type,\n  pm_l3_validation_report: report || body.pm_l3_validation_report || null,\n  evidence_refs: hasOwn(body, \"evidence_refs\") ? body.evidence_refs : null,\n  authority_boundary: authorityBoundary || body.authority_boundary || null,\n  blockers,\n  required_fixes: requiredFixes,\n  validation_status: validationStatus,\n  blocker_summary: blockerSummary,\n  return_request_valid: errors.length === 0,\n  errors,\n  raw_request_body: body\n};\nconst wrapper = { b64: Buffer.from(JSON.stringify(normalized), \"utf8\").toString(\"base64\") };\nreturn [{ json: { ...normalized, pg_parameter_string: JSON.stringify(wrapper), route: \"preflight\" } }];"
+      },
+      "id": "f781981f-0b00-438d-8e6e-ffa6369d1371",
+      "name": "Validate and Normalize Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -896,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH wrapper AS (\n  SELECT $1::jsonb AS w\n), payload AS (\n  SELECT convert_from(decode(w->>'b64', 'base64'), 'UTF8')::jsonb AS p\n  FROM wrapper\n), required_columns(table_name, column_name) AS (\n  VALUES\n    ('moex_n8n_workflow_runs', 'workflow_run_id'),\n    ('moex_n8n_workflow_runs', 'status'),\n    ('moex_n8n_workflow_runs', 'current_state'),\n    ('moex_n8n_workflow_runs', 'repository_full_name'),\n    ('moex_n8n_workflow_runs', 'current_phase'),\n    ('moex_n8n_workflow_runs', 'validation_verdict'),\n    ('moex_n8n_workflow_runs', 'final_pm_l2_evidence_ref'),\n    ('moex_n8n_workflow_runs', 'error_message'),\n    ('moex_n8n_workflow_runs', 'last_completed_step'),\n    ('moex_n8n_workflow_runs', 'updated_at'),\n    ('moex_n8n_workflow_run_events', 'event_id'),\n    ('moex_n8n_workflow_run_events', 'workflow_run_id'),\n    ('moex_n8n_workflow_run_events', 'previous_state'),\n    ('moex_n8n_workflow_run_events', 'new_state'),\n    ('moex_n8n_workflow_run_events', 'event_type'),\n    ('moex_n8n_workflow_run_events', 'event_payload_json'),\n    ('moex_n8n_workflow_run_events', 'created_at'),\n    ('moex_n8n_workflow_step_runs', 'workflow_run_id'),\n    ('moex_n8n_workflow_step_runs', 'step_name'),\n    ('moex_n8n_workflow_step_runs', 'status'),\n    ('moex_n8n_workflow_step_runs', 'attempt'),\n    ('moex_n8n_workflow_step_runs', 'input_hash'),\n    ('moex_n8n_workflow_step_runs', 'output_hash'),\n    ('moex_n8n_workflow_step_runs', 'started_at'),\n    ('moex_n8n_workflow_step_runs', 'completed_at'),\n    ('moex_n8n_workflow_step_runs', 'error_message'),\n    ('moex_n8n_workflow_step_runs', 'created_at'),\n    ('moex_n8n_workflow_step_runs', 'updated_at')\n), missing_columns AS (\n  SELECT COALESCE(\n    jsonb_agg(jsonb_build_object('table_name', rc.table_name, 'column_name', rc.column_name) ORDER BY rc.table_name, rc.column_name),\n    '[]'::jsonb\n  ) AS missing\n  FROM required_columns rc\n  WHERE NOT EXISTS (\n    SELECT 1\n    FROM information_schema.columns c\n    WHERE c.table_schema = current_schema()\n      AND c.table_name = rc.table_name\n      AND c.column_name = rc.column_name\n  )\n), run_lookup AS (\n  SELECT EXISTS (\n    SELECT 1\n    FROM moex_n8n_workflow_runs r\n    WHERE to_jsonb(r)->>'workflow_run_id' = p->>'workflow_run_id'\n  ) AS workflow_run_exists\n  FROM payload\n), decision AS (\n  SELECT\n    p,\n    missing,\n    workflow_run_exists,\n    COALESCE((p->>'return_request_valid')::boolean, false) AS request_valid,\n    CASE\n      WHEN COALESCE((p->>'return_request_valid')::boolean, false) = false THEN 400\n      WHEN jsonb_array_length(missing) > 0 THEN 400\n      WHEN workflow_run_exists = false THEN 404\n      ELSE 200\n    END AS http_status_code\n  FROM payload, missing_columns, run_lookup\n), response_errors AS (\n  SELECT\n    p,\n    missing,\n    workflow_run_exists,\n    request_valid,\n    http_status_code,\n    CASE\n      WHEN request_valid = false THEN COALESCE(p->'errors', '[]'::jsonb)\n      WHEN jsonb_array_length(missing) > 0 THEN COALESCE(p->'errors', '[]'::jsonb) || jsonb_build_array(jsonb_build_object('code', 'postgres_schema_missing_expected_columns', 'field', 'postgres_schema', 'message', 'expected columns are missing', 'missing_columns', missing))\n      WHEN workflow_run_exists = false THEN COALESCE(p->'errors', '[]'::jsonb) || jsonb_build_array(jsonb_build_object('code', 'workflow_run_not_found', 'field', 'workflow_run_id', 'message', 'workflow_run_id does not exist'))\n      ELSE '[]'::jsonb\n    END AS errors\n  FROM decision\n)\nSELECT\n  http_status_code,\n  (http_status_code = 200) AS should_persist,\n  CASE WHEN http_status_code = 200 THEN 'persist' ELSE 'respond_error' END AS route,\n  p->>'workflow_run_id' AS workflow_run_id,\n  p->>'request_id' AS request_id,\n  p->>'repository_full_name' AS repository_full_name,\n  p->>'source_role' AS source_role,\n  p->>'return_to_role' AS return_to_role,\n  p->>'return_type' AS return_type,\n  p->>'validation_status' AS validation_verdict,\n  (SELECT w::text FROM wrapper) AS pg_parameter_string,\n  jsonb_build_object(\n    'workflow_name', 'MOEX_ROUTE_B_PM_L3_RETURN_INTAKE_V1_10_3',\n    'spec_version', '1.10.3',\n    'http_status_code', http_status_code,\n    'accepted', false,\n    'return_request_valid', request_valid,\n    'workflow_run_id', p->>'workflow_run_id',\n    'request_id', p->>'request_id',\n    'repository_full_name', p->>'repository_full_name',\n    'source_role', p->>'source_role',\n    'return_to_role', p->>'return_to_role',\n    'return_type', p->>'return_type',\n    'status', CASE WHEN http_status_code = 404 THEN 'not_found' ELSE 'invalid_request' END,\n    'current_state', NULL,\n    'current_phase', NULL,\n    'validation_verdict', p->>'validation_status',\n    'pm_l2_review_required', false,\n    'event_type', NULL,\n    'event_ref', NULL,\n    'final_pm_l2_evidence_ref', NULL,\n    'blockers', COALESCE(p->'blockers', '[]'::jsonb),\n    'required_fixes', COALESCE(p->'required_fixes', '[]'::jsonb),\n    'authority_boundary', COALESCE(p->'authority_boundary', '{}'::jsonb),\n    'errors', errors\n  ) AS response\nFROM response_errors;",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "={{ $json.pg_parameter_string }}",
+          "largeNumbersOutput": "text"
+        }
+      },
+      "id": "17cedff1-f2af-4789-aadb-2a295f4a45d1",
+      "name": "Postgres - Preflight Validate Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -688,
+        96
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "PU85DvcSG5X2EloO",
+          "name": "postgres_moex_n8n"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $input.first().json || {};\nif (row.error) {\n  const response = {\n    workflow_name: \"MOEX_ROUTE_B_PM_L3_RETURN_INTAKE_V1_10_3\",\n    spec_version: \"1.10.3\",\n    http_status_code: 400,\n    accepted: false,\n    return_request_valid: false,\n    workflow_run_id: null,\n    request_id: null,\n    repository_full_name: null,\n    source_role: null,\n    return_to_role: null,\n    return_type: null,\n    status: \"postgres_preflight_error\",\n    current_state: null,\n    current_phase: null,\n    validation_verdict: null,\n    pm_l2_review_required: false,\n    event_type: null,\n    event_ref: null,\n    final_pm_l2_evidence_ref: null,\n    blockers: [],\n    required_fixes: [],\n    authority_boundary: {},\n    errors: [{ code: \"postgres_preflight_error\", field: \"postgres\", message: String(row.error.message || row.error) }]\n  };\n  return [{ json: { route: \"respond_error\", http_status_code: 400, response } }];\n}\nconst parseMaybeJson = (value, fallback) => {\n  if (value === undefined || value === null) return fallback;\n  if (typeof value === \"object\") return value;\n  if (typeof value === \"string\") {\n    try { return JSON.parse(value); } catch (error) { return fallback; }\n  }\n  return fallback;\n};\nconst response = parseMaybeJson(row.response, {});\nconst shouldPersist = row.should_persist === true || row.should_persist === \"true\";\nreturn [{ json: { ...row, response, http_status_code: Number(row.http_status_code || response.http_status_code || 400), route: shouldPersist ? \"persist\" : \"respond_error\" } }];"
+      },
+      "id": "79d3feda-c3bd-45d0-bfab-f9b4dee98aaf",
+      "name": "Build Preflight Route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "16777ac7-c8f8-4fb7-bae3-dfca5bc05544",
+              "leftValue": "={{ $json.route }}",
+              "rightValue": "persist",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "87b7168e-0999-4827-982a-ac6e295aa8eb",
+      "name": "IF - Request Can Persist",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -240,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH wrapper AS (\n  SELECT $1::jsonb AS w\n), payload AS (\n  SELECT convert_from(decode(w->>'b64', 'base64'), 'UTF8')::jsonb AS p\n  FROM wrapper\n), prepared AS (\n  SELECT\n    p,\n    p->>'workflow_run_id' AS workflow_run_id,\n    p->>'request_id' AS request_id,\n    p->>'repository_full_name' AS repository_full_name,\n    p->>'source_role' AS source_role,\n    p->>'return_to_role' AS return_to_role,\n    p->>'return_type' AS return_type,\n    p->>'validation_status' AS validation_status,\n    NULLIF(p->>'blocker_summary', '') AS blocker_summary,\n    md5(p::text) AS input_hash\n  FROM payload\n), prior AS (\n  SELECT\n    r.workflow_run_id,\n    r.current_state AS previous_state\n  FROM moex_n8n_workflow_runs r\n  JOIN prepared pr ON r.workflow_run_id = pr.workflow_run_id\n), event_insert AS (\n  INSERT INTO moex_n8n_workflow_run_events (\n    workflow_run_id,\n    previous_state,\n    new_state,\n    event_type,\n    event_payload_json,\n    created_at\n  )\n  SELECT\n    pr.workflow_run_id,\n    prior.previous_state,\n    'pm_l2_review_required',\n    'pm_l3_return_received',\n    pr.p,\n    now()\n  FROM prepared pr\n  JOIN prior ON prior.workflow_run_id = pr.workflow_run_id\n  RETURNING event_id::text AS event_id,\n            workflow_run_id,\n            ('postgres://moex_n8n_workflow_run_events/' || event_id::text) AS event_ref\n), run_update AS (\n  UPDATE moex_n8n_workflow_runs r\n  SET\n    status = 'pm_l2_review_required',\n    current_state = 'pm_l2_review_required',\n    current_phase = 'pm_l3_return_completed',\n    validation_verdict = pr.validation_status,\n    final_pm_l2_evidence_ref = ev.event_ref,\n    error_message = CASE WHEN pr.validation_status IN ('fail', 'blocked') THEN pr.blocker_summary ELSE NULL END,\n    last_completed_step = 'pm_l3_return_intake',\n    updated_at = now()\n  FROM prepared pr\n  JOIN event_insert ev ON ev.workflow_run_id = pr.workflow_run_id\n  WHERE r.workflow_run_id = pr.workflow_run_id\n  RETURNING r.workflow_run_id\n), step_hashes AS (\n  SELECT\n    pr.workflow_run_id,\n    pr.input_hash,\n    md5((pr.p || jsonb_build_object('event_ref', ev.event_ref, 'final_pm_l2_evidence_ref', ev.event_ref, 'status', 'pm_l2_review_required', 'current_state', 'pm_l2_review_required', 'current_phase', 'pm_l3_return_completed'))::text) AS output_hash\n  FROM prepared pr\n  JOIN event_insert ev ON ev.workflow_run_id = pr.workflow_run_id\n), step_update AS (\n  UPDATE moex_n8n_workflow_step_runs s\n  SET\n    status = 'completed',\n    attempt = COALESCE(s.attempt, 1),\n    input_hash = sh.input_hash,\n    output_hash = sh.output_hash,\n    completed_at = now(),\n    updated_at = now(),\n    error_message = NULL\n  FROM step_hashes sh\n  WHERE s.workflow_run_id = sh.workflow_run_id\n    AND s.step_name = 'pm_l3_return_intake'\n  RETURNING s.workflow_run_id\n), step_insert AS (\n  INSERT INTO moex_n8n_workflow_step_runs (\n    workflow_run_id,\n    step_name,\n    status,\n    attempt,\n    input_hash,\n    output_hash,\n    started_at,\n    completed_at,\n    error_message,\n    created_at,\n    updated_at\n  )\n  SELECT\n    sh.workflow_run_id,\n    'pm_l3_return_intake',\n    'completed',\n    1,\n    sh.input_hash,\n    sh.output_hash,\n    now(),\n    now(),\n    NULL,\n    now(),\n    now()\n  FROM step_hashes sh\n  WHERE NOT EXISTS (SELECT 1 FROM step_update su WHERE su.workflow_run_id = sh.workflow_run_id)\n  RETURNING workflow_run_id\n)\nSELECT\n  202 AS http_status_code,\n  true AS accepted,\n  jsonb_build_object(\n    'workflow_name', 'MOEX_ROUTE_B_PM_L3_RETURN_INTAKE_V1_10_3',\n    'spec_version', '1.10.3',\n    'http_status_code', 202,\n    'accepted', true,\n    'return_request_valid', true,\n    'workflow_run_id', pr.workflow_run_id,\n    'request_id', pr.request_id,\n    'repository_full_name', pr.repository_full_name,\n    'source_role', pr.source_role,\n    'return_to_role', pr.return_to_role,\n    'return_type', pr.return_type,\n    'status', 'pm_l2_review_required',\n    'current_state', 'pm_l2_review_required',\n    'current_phase', 'pm_l3_return_completed',\n    'validation_verdict', pr.validation_status,\n    'pm_l2_review_required', true,\n    'event_type', 'pm_l3_return_received',\n    'event_ref', ev.event_ref,\n    'final_pm_l2_evidence_ref', ev.event_ref,\n    'blockers', COALESCE(pr.p->'blockers', '[]'::jsonb),\n    'required_fixes', COALESCE(pr.p->'required_fixes', '[]'::jsonb),\n    'authority_boundary', COALESCE(pr.p->'authority_boundary', '{}'::jsonb),\n    'errors', '[]'::jsonb\n  ) AS response\nFROM prepared pr\nJOIN event_insert ev ON ev.workflow_run_id = pr.workflow_run_id\nJOIN run_update ru ON ru.workflow_run_id = pr.workflow_run_id;",
+        "options": {
+          "queryBatching": "transaction",
+          "queryReplacement": "={{ $json.pg_parameter_string }}",
+          "largeNumbersOutput": "text"
+        }
+      },
+      "id": "1d9f2cb1-f53e-4a1e-bbb8-65e2088fd47f",
+      "name": "Postgres - Persist PM L3 Return",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        0
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "PU85DvcSG5X2EloO",
+          "name": "postgres_moex_n8n"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $input.first().json || {};\nconst baseResponse = {\n  workflow_name: \"MOEX_ROUTE_B_PM_L3_RETURN_INTAKE_V1_10_3\",\n  spec_version: \"1.10.3\",\n  http_status_code: 400,\n  accepted: false,\n  return_request_valid: false,\n  workflow_run_id: null,\n  request_id: null,\n  repository_full_name: null,\n  source_role: null,\n  return_to_role: null,\n  return_type: null,\n  status: \"postgres_persistence_error\",\n  current_state: null,\n  current_phase: null,\n  validation_verdict: null,\n  pm_l2_review_required: false,\n  event_type: null,\n  event_ref: null,\n  final_pm_l2_evidence_ref: null,\n  blockers: [],\n  required_fixes: [],\n  authority_boundary: {},\n  errors: []\n};\nif (row.error) {\n  baseResponse.errors = [{ code: \"postgres_persistence_error\", field: \"postgres\", message: String(row.error.message || row.error) }];\n  return [{ json: { http_status_code: 400, response: baseResponse } }];\n}\nconst parseMaybeJson = (value, fallback) => {\n  if (value === undefined || value === null) return fallback;\n  if (typeof value === \"object\") return value;\n  if (typeof value === \"string\") {\n    try { return JSON.parse(value); } catch (error) { return fallback; }\n  }\n  return fallback;\n};\nconst response = parseMaybeJson(row.response, baseResponse);\nreturn [{ json: { http_status_code: Number(response.http_status_code || row.http_status_code || 202), response } }];"
+      },
+      "id": "037184e2-ffa0-4fea-9192-8d14360348c9",
+      "name": "Build Success Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response }}",
+        "options": {
+          "responseCode": "={{ $json.http_status_code }}"
+        }
+      },
+      "id": "db1c5b10-6a2e-486f-8b24-1f609e5189d3",
+      "name": "Respond - Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response }}",
+        "options": {
+          "responseCode": "={{ $json.http_status_code }}"
+        }
+      },
+      "id": "7c73a74f-0325-4928-954e-74d72da39df3",
+      "name": "Respond - Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        224
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - PM L3 Return Intake": {
+      "main": [
+        [
+          {
+            "node": "Validate and Normalize Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate and Normalize Request": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Preflight Validate Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Preflight Validate Run": {
+      "main": [
+        [
+          {
+            "node": "Build Preflight Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Preflight Route": {
+      "main": [
+        [
+          {
+            "node": "IF - Request Can Persist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Request Can Persist": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Persist PM L3 Return",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Persist PM L3 Return": {
+      "main": [
+        [
+          {
+            "node": "Build Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Success Response": {
+      "main": [
+        [
+          {
+            "node": "Respond - Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "017430a7-aca1-4760-be89-7baa63dcda19",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "62875adff27fc822d942c4254bca5bd3da9a7fd81d36718bdc0f7d5d52395a15"
+  },
+  "nodeGroups": [],
+  "id": "3IIu4PJwgBOLi5Ds",
+  "tags": []
+}

@@ -1,0 +1,2143 @@
+{
+  "name": "MOEX_ROUTE_B_GITHUB_BRANCH_PR_EXECUTOR_V1_10_3",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "ce81750f-6757-4aea-8a88-876086db5f8e",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -5072,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "248b35bf-8719-4f1f-b0ce-20f2126fdfc4",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -5072,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst randomPart = Math.random().toString(16).slice(2);\nreturn [{\n  json: {\n    workflow_name: \"MOEX_ROUTE_B_GITHUB_BRANCH_PR_EXECUTOR_V1_10_3\",\n    executor_run_id: \"route_b_github_executor_\" + now.toISOString().replace(/[-:.TZ]/g, \"\") + \"_\" + randomPart,\n    claim_token: \"route_b_github_executor_claim_\" + now.getTime() + \"_\" + randomPart,\n    started_at: now.toISOString(),\n    repository_full_name_expected: \"Viktoryyyyy/moex-robot\",\n    owner: \"Viktoryyyyy\",\n    repo: \"moex-robot\",\n    default_branch: \"main\",\n    branch_prefix: \"n8n/\",\n    rejected_branch_prefix: \"route-b/\",\n    github_actions_workflow: \"tests\",\n    route_b_context_registry_path: \"docs/sot/context/registry.route_b.v1.yaml\",\n    no_job_status: \"no_job\"\n  }\n}];"
+      },
+      "id": "dbb0f724-5586-4dcd-927b-92deb932f79c",
+      "name": "Build Executor Identity",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4848,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH input AS (\n  SELECT $1::jsonb AS j\n),\nrequired(table_name, column_name) AS (\n  VALUES\n    ('moex_n8n_workflow_runs','workflow_run_id'),\n    ('moex_n8n_workflow_runs','status'),\n    ('moex_n8n_workflow_runs','current_state'),\n    ('moex_n8n_workflow_runs','current_phase'),\n    ('moex_n8n_workflow_runs','worker_execution_id'),\n    ('moex_n8n_workflow_runs','claim_token'),\n    ('moex_n8n_workflow_runs','locked_by'),\n    ('moex_n8n_workflow_runs','lock_expires_at'),\n    ('moex_n8n_workflow_runs','last_heartbeat_at'),\n    ('moex_n8n_workflow_runs','error_message'),\n    ('moex_n8n_workflow_run_events','workflow_run_id'),\n    ('moex_n8n_workflow_run_events','event_type'),\n    ('moex_n8n_workflow_run_events','event_payload_json'),\n    ('moex_n8n_workflow_run_events','created_at'),\n    ('moex_n8n_workflow_step_runs','workflow_run_id'),\n    ('moex_n8n_workflow_step_runs','step_name'),\n    ('moex_n8n_workflow_step_runs','status'),\n    ('moex_n8n_workflow_step_runs','input_hash'),\n    ('moex_n8n_workflow_step_runs','output_hash'),\n    ('moex_n8n_workflow_step_runs','started_at'),\n    ('moex_n8n_workflow_step_runs','completed_at'),\n    ('moex_n8n_workflow_locks','lock_key'),\n    ('moex_n8n_workflow_locks','workflow_run_id'),\n    ('moex_n8n_workflow_locks','status'),\n    ('moex_n8n_workflow_locks','expires_at'),\n    ('moex_n8n_workflow_locks','last_heartbeat_at')\n),\nexisting AS (\n  SELECT table_name, column_name\n  FROM information_schema.columns\n  WHERE table_schema = current_schema()\n    AND table_name IN (\n      'moex_n8n_workflow_runs',\n      'moex_n8n_workflow_run_events',\n      'moex_n8n_workflow_step_runs',\n      'moex_n8n_workflow_locks'\n    )\n),\nmissing AS (\n  SELECT r.table_name, r.column_name\n  FROM required r\n  LEFT JOIN existing e\n    ON e.table_name = r.table_name\n   AND e.column_name = r.column_name\n  WHERE e.column_name IS NULL\n)\nSELECT jsonb_build_object(\n  'ok', NOT EXISTS (SELECT 1 FROM missing),\n  'missing_columns', COALESCE((SELECT jsonb_agg(jsonb_build_object('table', table_name, 'column', column_name)) FROM missing), '[]'::jsonb),\n  'input', (SELECT j FROM input)\n) AS result;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "f623ea77-c551-4a98-8571-c96561caf74d",
+      "name": "Check Postgres Schema",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -4624,
+        432
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "PU85DvcSG5X2EloO",
+          "name": "postgres_moex_n8n"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseMaybe(value) {\n  if (typeof value === \"string\") {\n    try { return JSON.parse(value); } catch (error) { return value; }\n  }\n  return value;\n}\nconst row = items[0] && items[0].json ? items[0].json : {};\nconst result = parseMaybe(row.result || row.jsonb_build_object || row.data || row);\nif (!result || result.ok !== true) {\n  const missing = result && result.missing_columns ? JSON.stringify(result.missing_columns) : \"unknown\";\n  throw new Error(\"postgres_schema_missing_expected_columns: \" + missing);\n}\nreturn [{ json: result.input }];"
+      },
+      "id": "c69aa0c6-b2fb-4611-9789-4d1368670e6f",
+      "name": "Validate Postgres Schema",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -4416,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH input AS (\n  SELECT $1::jsonb AS j\n),\neligible_states(state_name) AS (\n  VALUES\n    ('github_execution_requested'),\n    ('github_executor_pr_opened_waiting_ci'),\n    ('github_execution_retry_wait')\n),\nterminal_states(state_name) AS (\n  VALUES\n    ('ci_passed'),\n    ('ci_failed'),\n    ('manual_review_required'),\n    ('github_executor_ci_passed_pm_l3_validation_pending'),\n    ('github_executor_ci_failed_pm_l3_validation_pending')\n),\ncandidate_runs AS MATERIALIZED (\n  SELECT to_jsonb(r) AS row_json, r.workflow_run_id\n  FROM moex_n8n_workflow_runs r\n  WHERE COALESCE(r.current_state, '') IN (SELECT state_name FROM eligible_states)\n    AND COALESCE(r.current_state, '') NOT IN (SELECT state_name FROM terminal_states)\n    AND (\n      r.status <> 'processing'\n      OR r.lock_expires_at IS NULL\n      OR r.lock_expires_at <= now()\n    )\n  ORDER BY r.last_heartbeat_at DESC NULLS LAST\n  LIMIT 200\n),\ncandidate_events AS (\n  SELECT to_jsonb(e) AS row_json\n  FROM moex_n8n_workflow_run_events e\n  JOIN candidate_runs r\n    ON r.workflow_run_id = e.workflow_run_id\n  ORDER BY e.created_at DESC\n  LIMIT 200\n)\nSELECT jsonb_build_object(\n  'input', (SELECT j FROM input),\n  'events', COALESCE((SELECT jsonb_agg(row_json) FROM candidate_events), '[]'::jsonb),\n  'runs', COALESCE((SELECT jsonb_agg(row_json) FROM candidate_runs), '[]'::jsonb),\n  'eligible_states', (SELECT jsonb_agg(state_name) FROM eligible_states),\n  'terminal_states', (SELECT jsonb_agg(state_name) FROM terminal_states)\n) AS result;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "91a4d2ba-c10a-4fb1-a60b-88f0004c1fbe",
+      "name": "Load Candidate Execution Requests",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -4192,
+        432
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "PU85DvcSG5X2EloO",
+          "name": "postgres_moex_n8n"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function makeError(code, details) { const error = new Error(code); error.details = details || null; return error; } function fail(code, details) { throw makeError(code, details); } function parseMaybe(value) { if (typeof value === \"string\") { try { return JSON.parse(value); } catch (error) { return value; } } return value; } function parseResult(value) { const parsed = parseMaybe(value); if (parsed && parsed.result) { return parseMaybe(parsed.result); } return parsed; } function asObject(value, name) { const parsed = parseMaybe(value); if (!parsed || typeof parsed !== \"object\" || Array.isArray(parsed)) { fail(name + \"_must_be_object\"); } return parsed; } function required(obj, key, code) { if (!(key in obj) || obj[key] === null || obj[key] === undefined || obj[key] === \"\") { fail(code || (\"missing_\" + key)); } return obj[key]; } function requiredExact(obj, keys, name) { for (const key of keys) { required(obj, key, name + \"_missing_\" + key); } } function normalizeTextForMarker(value) { return String(value).toLowerCase().replace(/[\\/\\\\._\\-:{}$#?]/g, \" \"); } function walkForbidden(value, path) { const lastPathPart = path ? String(path).split(\".\").pop() : \"\"; if (lastPathPart === \"target_role_context_ref\") { fail(\"target_role_context_ref_forbidden\"); } if (typeof value === \"string\") { const normalized = normalizeTextForMarker(value); const tokens = normalized.split(/\\s+/).filter(Boolean); for (const token of [\"latest\", \"current\", \"autodetect\"]) { if (tokens.includes(token)) { fail(\"dynamic_marker_forbidden\", { path, token }); } } if (value.startsWith(\"/\") || value.startsWith(\"~\")) { fail(\"absolute_path_forbidden\", { path }); } } else if (Array.isArray(value)) { value.forEach((item, index) => walkForbidden(item, path + \"[\" + index + \"]\")); } else if (value && typeof value === \"object\") { for (const [key, item] of Object.entries(value)) { if (key === \"target_role_context_ref\") { fail(\"target_role_context_ref_forbidden\"); } walkForbidden(item, path ? path + \".\" + key : key); } } } function isFalse(obj, key) { if (obj[key] !== false) { fail(key + \"_must_be_false\"); } } function isTrue(obj, key) { if (obj[key] !== true) { fail(key + \"_must_be_true\"); } } function validateRoleRef(ref, name) { const obj = asObject(ref, name); const role = asObject(obj.role_context_ref, name + \".role_context_ref\"); required(role, \"role_id\"); required(role, \"role_context_version\"); } function validatePath(value) { if (typeof value !== \"string\" || value.trim() === \"\") { fail(\"invalid_repo_path\"); } if (value.includes(\"\\\\\")) { fail(\"unsafe_repo_path\"); } const parts = value.split(\"/\").filter(Boolean); if (parts.includes(\"..\")) { fail(\"unsafe_repo_path\"); } if (value.startsWith(\"/\") || value.startsWith(\"~\")) { fail(\"absolute_path_forbidden\"); } return value; } function sameSet(a, b) { const aa = Array.from(new Set(a)).sort(); const bb = Array.from(new Set(b)).sort(); return JSON.stringify(aa) === JSON.stringify(bb); } function subsetOf(a, b) { const allowed = new Set(b); return a.every(path => allowed.has(path)); } function findObjects(value, results, depth) { if (depth > 10 || value === null || value === undefined) { return; } const parsed = parseMaybe(value); if (parsed && typeof parsed === \"object\") { if (!Array.isArray(parsed)) { results.push(parsed); } if (Array.isArray(parsed)) { for (const item of parsed) { findObjects(item, results, depth + 1); } } else { for (const item of Object.values(parsed)) { findObjects(item, results, depth + 1); } } } } function payloadRoots(row) { const roots = []; const candidateKeys = [ \"event_payload_json\", \"payload_json\", \"payload\", \"request_payload\", \"input_payload_json\", \"output_payload_json\", \"data\", \"details\", \"metadata\", \"result\", \"body\" ]; roots.push(row); for (const key of candidateKeys) { if (key in row) { roots.push(parseMaybe(row[key])); } } return roots.filter(value => value !== null && value !== undefined); } function findRequestAndFilePayload(root) { const objects = []; findObjects(root, objects, 0); let request = null; for (const obj of objects) { if (obj.schema_version === \"route_b_github_execution_request.v1\") { request = obj; break; } } if (!request) { return null; } const fileKeys = [ \"approved_file_changes_payload\", \"approved_file_changes\", \"file_changes_payload\", \"file_changes\", \"patches\", \"approved_patches\" ]; let filePayload = null; for (const obj of objects) { for (const key of fileKeys) { const candidate = parseMaybe(obj[key]); if (candidate && typeof candidate === \"object\") { if (Array.isArray(candidate)) { filePayload = { files: candidate }; } else if (Array.isArray(candidate.files)) { filePayload = candidate; } else if (Array.isArray(candidate.changes)) { filePayload = { files: candidate.changes }; } } if (filePayload) { break; } } if (filePayload) { break; } } return { request, filePayload }; } function extractAllowedPaths(request, scope) { const sources = [ scope.allowed_paths, scope.approved_file_scope, request.approved_file_scope, request.allowed_paths ]; for (const source of sources) { if (Array.isArray(source) && source.length > 0) { return source.map(validatePath); } if (source && typeof source === \"object\" && Array.isArray(source.paths) && source.paths.length > 0) { return source.paths.map(validatePath); } } fail(\"approved_file_scope_missing\"); } function containsForbiddenScope(path) { const normalized = path.toLowerCase(); return [ \"src/moex_runtime/\", \"moex_runtime/\", \"live_adapter.py\", \"/live/\", \"broker\", \"trading\", \"runtime/live\" ].some(token => normalized.includes(token)); } function buildValidationFailure(identity, selected, code, details) { const request = selected && selected.request && typeof selected.request === \"object\" ? selected.request : {}; const eventRow = selected && selected.eventRow && typeof selected.eventRow === \"object\" ? selected.eventRow : {}; const workflowRunId = request.workflow_run_id || eventRow.workflow_run_id || identity.executor_run_id; const requestId = request.request_id || \"missing_request_id\"; const repositoryFullName = request.repository_full_name || identity.repository_full_name_expected; const baseBranch = request.base_branch || identity.default_branch; const baseSha = request.base_sha || \"missing_base_sha\"; let featureBranch = null; if (request.branch_plan && typeof request.branch_plan === \"object\" && request.branch_plan.branch_name) { featureBranch = request.branch_plan.branch_name; } const error = { code, message: \"Execution request validation failed before claim.\", details: details || null }; const executionResult = { schema_version: \"route_b_github_execution_result.v1\", workflow_run_id: workflowRunId, request_id: requestId, status: \"failed\", repository_full_name: repositoryFullName, base_branch: baseBranch, base_sha: baseSha, feature_branch: featureBranch, branch_ref: null, branch_created_at: null, implementation_commit_sha: null, implementation_tree_sha: null, changed_files: [], pr_refs: null, ci_refs: null, evidence_refs: { event_row_ref: eventRow.workflow_run_id || null, validation_stage: \"pre_claim_request_validation\" }, authority_boundary: { merge_authority: \"PM_L2_ONLY\", merge_performed_by_executor: false, approved_for_merge: false, pm_l2_approval_claimed_by_executor: false, n8n_merge_allowed: false, direct_main_write_allowed: false }, error }; return { ...identity, has_job: true, has_job_text: \"yes\", validation_ok: false, validation_ok_text: \"no\", workflow_run_id: workflowRunId, request_id: requestId, request, status: \"manual_review_required\", current_state: \"github_execution_failed\", event_type: \"github_execution_failed\", execution_result: executionResult, validation_package: null, persist_payload: { workflow_name: identity.workflow_name, workflow_run_id: workflowRunId, request_id: requestId, status: \"manual_review_required\", current_state: \"github_execution_failed\", current_phase: \"github_branch_pr_executor\", event_type: \"github_execution_failed\", request, execution_result: executionResult, validation_package: null } }; } function validateSelected(identity, result, selected) { const request = asObject(selected.request, \"execution_request\"); walkForbidden(request, \"execution_request\"); requiredExact(request, [ \"schema_version\", \"workflow_run_id\", \"request_id\", \"repository_full_name\", \"base_branch\", \"base_sha\", \"route_b_context_registry_ref\", \"pm_l2_request_ref\", \"pm_l3_package_ref\", \"execution_scope\", \"branch_plan\", \"pr_plan\", \"validation_requirements\", \"governance_flags\", \"rejection_rules\" ], \"execution_request\"); if (request.schema_version !== \"route_b_github_execution_request.v1\") { fail(\"bad_request_schema_version\"); } if (request.repository_full_name !== identity.repository_full_name_expected) { fail(\"repository_full_name_mismatch\"); } required(request, \"workflow_run_id\", \"missing_workflow_run_id\"); required(request, \"request_id\", \"missing_request_id\"); required(request, \"base_sha\", \"missing_base_sha\"); if (!/^[0-9a-f]{40}$/i.test(String(request.base_sha))) { fail(\"invalid_base_sha\"); } const pmL2Override = request.pm_l2_request_ref && request.pm_l2_request_ref.explicit_pm_l2_override && request.pm_l2_request_ref.explicit_pm_l2_override.allow_non_main_base_branch === true; if (request.base_branch !== identity.default_branch && !pmL2Override) { fail(\"base_branch_not_main_without_pm_l2_override\"); } const registry = asObject(request.route_b_context_registry_ref, \"route_b_context_registry_ref\"); const registryPath = registry.path || registry.registry_path; if (registryPath !== identity.route_b_context_registry_path || registry.source_of_truth !== \"github_repo\") { fail(\"route_b_context_registry_ref_not_canonical\"); } validateRoleRef(request.pm_l2_request_ref, \"pm_l2_request_ref\"); validateRoleRef(request.pm_l3_package_ref, \"pm_l3_package_ref\"); const scope = asObject(request.execution_scope, \"execution_scope\"); if (scope.delete_files_allowed !== false) { fail(\"delete_files_allowed_must_be_false\"); } const allowedPaths = extractAllowedPaths(request, scope); const branchPlan = asObject(request.branch_plan, \"branch_plan\"); const branchName = String(required(branchPlan, \"branch_name\", \"missing_branch_name\")); if (branchName.startsWith(identity.rejected_branch_prefix)) { fail(\"route_b_branch_prefix_rejected\"); } if (!branchName.startsWith(identity.branch_prefix)) { fail(\"branch_prefix_not_n8n\"); } if (branchName.includes(\"..\") || branchName.includes(\" \")) { fail(\"unsafe_branch_name\"); } if (branchPlan.source !== \"base_sha\") { fail(\"branch_source_must_be_base_sha\"); } const prPlan = asObject(request.pr_plan, \"pr_plan\"); if (prPlan.base_branch !== request.base_branch) { fail(\"pr_base_branch_mismatch\"); } if (prPlan.head_branch !== branchName) { fail(\"pr_head_branch_mismatch\"); } if (prPlan.draft !== false) { fail(\"draft_pr_forbidden\"); } const validation = asObject(request.validation_requirements, \"validation_requirements\"); if (validation.github_actions_workflow !== identity.github_actions_workflow) { fail(\"ci_workflow_not_tests\"); } const flags = asObject(request.governance_flags, \"governance_flags\"); for (const key of [ \"direct_main_write_allowed\", \"n8n_merge_allowed\", \"force_push_allowed\", \"file_delete_allowed\", \"production_runtime_allowed\" ]) { isFalse(flags, key); } const rejection = asObject(request.rejection_rules, \"rejection_rules\"); for (const key of [ \"reject_dynamic_marker_tokens\", \"reject_target_role_context_ref\", \"reject_missing_role_context_ref\", \"reject_non_n8n_branch_prefix\", \"reject_direct_main_write\", \"reject_n8n_merge\", \"reject_force_push\", \"reject_file_delete\", \"reject_runtime_or_broker_scope\" ]) { isTrue(rejection, key); } if (!selected.filePayload || !Array.isArray(selected.filePayload.files)) { fail(\"missing_approved_file_changes_payload\"); } const files = selected.filePayload.files.map((raw, index) => { const row = asObject(raw, \"file_change_\" + index); const filePath = validatePath(required(row, \"path\", \"missing_file_change_path\")); if (containsForbiddenScope(filePath)) { fail(\"runtime_live_trading_broker_scope_forbidden\", { filePath }); } const operation = String(row.operation || row.status || \"\").toLowerCase(); if ([\"delete\", \"deleted\", \"remove\", \"removed\"].includes(operation)) { fail(\"deleted_file_operation_forbidden\", { filePath }); } if (![\"add\", \"added\", \"create\", \"created\", \"modify\", \"modified\", \"update\", \"updated\", \"upsert\"].includes(operation)) { fail(\"unsupported_file_change_operation\", { filePath, operation }); } const hasBase64 = typeof row.content_base64 === \"string\" && row.content_base64.length > 0; const hasContent = typeof row.content === \"string\"; if (!hasBase64 && !hasContent) { fail(\"missing_file_content\", { filePath }); } const content = hasBase64 ? row.content_base64 : row.content; const encoding = hasBase64 ? \"base64\" : \"utf-8\"; if (hasBase64 && !/^[A-Za-z0-9+/=\\r\\n]+$/.test(content)) { fail(\"invalid_base64_content\", { filePath }); } return { path: filePath, operation, content, encoding, mode: \"100644\", type: \"blob\" }; }); const changedPaths = files.map(file => file.path); if (!subsetOf(changedPaths, allowedPaths)) { fail(\"changed_file_outside_approved_scope\", { changedPaths, allowedPaths }); } const exactScopeRequired = scope.file_scope_exact === true || validation.file_scope_exact === true || request.file_scope_exact === true; if (exactScopeRequired && !sameSet(changedPaths, allowedPaths)) { fail(\"changed_files_do_not_match_exact_approved_scope\"); } const runs = Array.isArray(result.runs) ? result.runs : []; const runRow = runs.find(row => row.workflow_run_id === request.workflow_run_id); if (!runRow) { fail(\"missing_workflow_run_state_row\"); } const runStatus = String(runRow.status || \"\").toLowerCase(); const runState = String(runRow.current_state || \"\").toLowerCase(); const eligibleStates = [ \"github_execution_requested\", \"github_executor_pr_opened_waiting_ci\", \"github_execution_retry_wait\" ]; const terminalStates = [ \"ci_passed\", \"ci_failed\", \"manual_review_required\", \"github_executor_ci_passed_pm_l3_validation_pending\", \"github_executor_ci_failed_pm_l3_validation_pending\" ]; if (terminalStates.includes(runState)) { fail(\"workflow_run_state_terminal_not_eligible\", { runStatus, runState }); } if (!eligibleStates.includes(runState)) { fail(\"workflow_run_state_not_eligible\", { runStatus, runState, eligibleStates }); } if (runStatus === \"processing\" && runRow.lock_expires_at) { const expiresAt = Date.parse(runRow.lock_expires_at); if (!Number.isNaN(expiresAt) && expiresAt > Date.now()) { fail(\"workflow_run_active_processing_lock_not_expired\", { runStatus, runState, lock_expires_at: runRow.lock_expires_at }); } } return { ...identity, has_job: true, has_job_text: \"yes\", validation_ok: true, validation_ok_text: \"yes\", workflow_name: identity.workflow_name, executor_run_id: identity.executor_run_id, claim_token: identity.claim_token, started_at: identity.started_at, owner: identity.owner, repo: identity.repo, repository_full_name: request.repository_full_name, base_branch: request.base_branch, base_sha: request.base_sha, branch_name: branchName, request, workflow_run_id: request.workflow_run_id, request_id: request.request_id, allowed_paths: allowedPaths, file_scope_exact: exactScopeRequired, file_changes: files, changed_files: files.map(file => ({ path: file.path, status: file.operation === \"add\" || file.operation === \"added\" || file.operation === \"create\" || file.operation === \"created\" ? \"added\" : \"modified\" })), commit_message: \"Route B GitHub executor apply \" + request.workflow_run_id + \" / \" + request.request_id, pr_title: \"Route B GitHub executor: \" + request.workflow_run_id + \" / \" + request.request_id, pr_body: [ \"Automated Route B feature branch prepared by n8n.\", \"\", \"<!-- route-b-github-executor-request -->\", \"workflow_run_id: \" + request.workflow_run_id, \"request_id: \" + request.request_id, \"base_sha: \" + request.base_sha, \"repository_full_name: \" + request.repository_full_name, \"merge_authority: PM_L2_ONLY\", \"executor_merge_allowed: false\", \"approved_for_merge: false\" ].join(\"\\n\") }; } const identity = $items(\"Build Executor Identity\")[0].json; const resultRow = items[0] && items[0].json ? items[0].json : {}; const result = parseResult(resultRow.result || resultRow.jsonb_build_object || resultRow.data || resultRow); const events = Array.isArray(result.events) ? result.events : []; let selected = null; for (const eventRow of events) { for (const root of payloadRoots(eventRow)) { const found = findRequestAndFilePayload(root); if (found) { selected = { eventRow, request: found.request, filePayload: found.filePayload }; break; } } if (selected) { break; } } if (!selected) { return [ { json: { ...identity, has_job: false, has_job_text: \"no\", validation_ok: false, validation_ok_text: \"no\", status: \"no_job\", current_state: \"no_github_execution_request_found\", message: \"No eligible GitHub execution request found.\" } } ]; } try { return [ { json: validateSelected(identity, result, selected) } ]; } catch (error) { return [ { json: buildValidationFailure( identity, selected, error.message || \"execution_request_validation_failed\", error.details || null ) } ]; }"
+      },
+      "id": "88656921-acb1-42bc-8d74-b06d268521fd",
+      "name": "Select and Validate Execution Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3968,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e7d3bf7c-1cbe-4bc0-a5aa-b7499c0af46e",
+              "leftValue": "={{ $json.has_job_text }}",
+              "rightValue": "yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4b4bbadf-2ea0-4d0a-921f-faab69047422",
+      "name": "IF Has Execution Request",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -3744,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    status: \"no_job\",\n    current_state: \"no_github_execution_request_found\",\n    message: \"Scheduled run completed cleanly with no eligible GitHub execution request.\"\n  }\n}];"
+      },
+      "id": "78db7265-b2dc-4643-abd5-483ef9413429",
+      "name": "No Job Terminal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2368,
+        784
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH input AS (\n  SELECT $1::jsonb AS j\n),\nlock_attempt AS MATERIALIZED (\n  SELECT pg_try_advisory_xact_lock(hashtext('moex_route_b_github_branch_pr_executor_v1')::bigint) AS lock_acquired\n),\nclaimed AS (\n  UPDATE moex_n8n_workflow_runs r\n  SET status = 'processing',\n      current_state = 'github_executor_claimed',\n      current_phase = 'github_branch_pr_executor',\n      worker_execution_id = (SELECT j->>'executor_run_id' FROM input),\n      claim_token = (SELECT j->>'claim_token' FROM input),\n      locked_by = 'MOEX_ROUTE_B_GITHUB_BRANCH_PR_EXECUTOR_V1_10_3',\n      lock_expires_at = now() + interval '20 minutes',\n      last_heartbeat_at = now(),\n      error_message = NULL\n  FROM input, lock_attempt\n  WHERE lock_attempt.lock_acquired\n    AND r.workflow_run_id = input.j->>'workflow_run_id'\n    AND COALESCE(r.current_state, '') IN (\n      'github_execution_requested',\n      'github_executor_pr_opened_waiting_ci',\n      'github_execution_retry_wait'\n    )\n    AND (\n      r.status <> 'processing'\n      OR r.lock_expires_at IS NULL\n      OR r.lock_expires_at <= now()\n    )\n  RETURNING to_jsonb(r) AS row_json\n)\nSELECT jsonb_build_object(\n  'input', (SELECT j FROM input),\n  'lock_acquired', (SELECT lock_acquired FROM lock_attempt),\n  'claimed', EXISTS (SELECT 1 FROM claimed),\n  'claimed_row', (SELECT row_json FROM claimed LIMIT 1)\n) AS result;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "0be31225-038f-4445-9d2f-7ec7b8eae5fe",
+      "name": "Claim Execution Request",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -3328,
+        32
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "PU85DvcSG5X2EloO",
+          "name": "postgres_moex_n8n"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseMaybe(value) {\n  if (typeof value === \"string\") {\n    try {\n      return JSON.parse(value);\n    } catch (error) {\n      return value;\n    }\n  }\n  return value;\n}\n\nfunction parseResult(row) {\n  const source = row.result || row.jsonb_build_object || row.data || row;\n  const parsed = parseMaybe(source);\n  if (parsed && parsed.result) {\n    return parseMaybe(parsed.result);\n  }\n  return parsed;\n}\n\nfunction fail(code, details) {\n  const error = new Error(code);\n  error.details = details || null;\n  throw error;\n}\n\nconst row = items[0] && items[0].json ? items[0].json : {};\nconst result = parseResult(row);\n\nif (!result || typeof result !== \"object\" || Array.isArray(result)) {\n  fail(\"claim_result_must_be_object\", { row });\n}\n\nconst input = parseMaybe(result.input || {});\nconst claimedRow = parseMaybe(result.claimed_row || null);\n\nif (result.lock_acquired !== true) {\n  fail(\"github_executor_lock_not_acquired\", { result });\n}\n\nif (result.claimed !== true || !claimedRow || typeof claimedRow !== \"object\") {\n  fail(\"github_execution_request_not_claimed\", { result });\n}\n\nif (!input || typeof input !== \"object\" || Array.isArray(input)) {\n  fail(\"claim_input_missing_or_invalid\", { result });\n}\n\nif (!input.workflow_run_id || claimedRow.workflow_run_id !== input.workflow_run_id) {\n  fail(\"claimed_workflow_run_id_mismatch\", {\n    input_workflow_run_id: input.workflow_run_id || null,\n    claimed_workflow_run_id: claimedRow.workflow_run_id || null\n  });\n}\n\nif (claimedRow.current_state !== \"github_executor_claimed\") {\n  fail(\"claimed_state_not_github_executor_claimed\", {\n    current_state: claimedRow.current_state || null\n  });\n}\n\nreturn [\n  {\n    json: {\n      ...input,\n      claimed_row: claimedRow,\n      claim_result: {\n        lock_acquired: result.lock_acquired,\n        claimed: result.claimed,\n        claimed_workflow_run_id: claimedRow.workflow_run_id,\n        claimed_state: claimedRow.current_state,\n        claimed_phase: claimedRow.current_phase\n      }\n    }\n  }\n];"
+      },
+      "id": "e7abe705-1f0a-49e4-8585-a5ab9c83dd4f",
+      "name": "Assert Execution Claim",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -3168,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ \"https://api.github.com/repos/\" + $json.owner + \"/\" + $json.repo + \"/git/ref/heads/\" + $json.base_branch }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "6c84ff78-a60d-4d62-b032-30d032a906b0",
+      "name": "Fetch Base Branch Ref",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -3008,
+        32
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "f7z5i11CHEWTZIFA",
+          "name": "github_read_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ \"https://api.github.com/repos/\" + $node[\"Assert Execution Claim\"].json.owner + \"/\" + $node[\"Assert Execution Claim\"].json.repo + \"/git/commits/\" + $node[\"Assert Execution Claim\"].json.base_sha }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "42e37592-f213-4425-84eb-927404189598",
+      "name": "Fetch Base Commit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2848,
+        32
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "f7z5i11CHEWTZIFA",
+          "name": "github_read_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "function failurePayload(context, code, message, details) {\n  const error = { code, message, details: details || null };\n  const executionResult = {\n    schema_version: \"route_b_github_execution_result.v1\",\n    workflow_run_id: context.workflow_run_id,\n    request_id: context.request_id,\n    status: \"failed\",\n    repository_full_name: context.repository_full_name,\n    base_branch: context.base_branch,\n    base_sha: context.base_sha,\n    feature_branch: context.branch_name,\n    branch_ref: context.branch_ref || null,\n    branch_created_at: context.branch_created_at || new Date().toISOString(),\n    implementation_commit_sha: context.implementation_commit_sha || null,\n    implementation_tree_sha: context.implementation_tree_sha || null,\n    changed_files: context.changed_files || [],\n    pr_refs: context.pr_refs || null,\n    ci_refs: context.ci_refs || null,\n    evidence_refs: context.evidence_refs || {},\n    authority_boundary: {\n      merge_authority: \"PM_L2_ONLY\",\n      merge_performed_by_executor: false,\n      approved_for_merge: false,\n      pm_l2_approval_claimed_by_executor: false,\n      n8n_merge_allowed: false,\n      direct_main_write_allowed: false\n    },\n    error\n  };\n  return {\n    ...context,\n    continue_text: \"no\",\n    status: \"manual_review_required\",\n    current_state: \"github_execution_failed\",\n    event_type: \"github_execution_failed\",\n    execution_result: executionResult,\n    validation_package: null,\n    persist_payload: {\n      workflow_name: context.workflow_name,\n      workflow_run_id: context.workflow_run_id,\n      request_id: context.request_id,\n      status: \"manual_review_required\",\n      current_state: \"github_execution_failed\",\n      current_phase: \"github_branch_pr_executor\",\n      event_type: \"github_execution_failed\",\n      request: context.request || null,\n      execution_result: executionResult,\n      validation_package: null\n    }\n  };\n}\n\nconst context = $items(\"Assert Execution Claim\")[0].json;\nconst baseRef = $items(\"Fetch Base Branch Ref\")[0].json || {};\nconst baseCommit = $items(\"Fetch Base Commit\")[0].json || {};\nconst baseRefSha = baseRef && baseRef.object ? baseRef.object.sha : null;\nif (!baseRefSha) {\n  return [{ json: failurePayload(context, \"missing_base_branch_ref\", \"Base branch ref was not returned by GitHub.\", { baseRef }) }];\n}\nif (baseRefSha !== context.base_sha) {\n  return [{ json: failurePayload(context, \"base_sha_not_current_base_branch\", \"Declared base_sha does not match current base branch ref.\", { baseRefSha, baseSha: context.base_sha }) }];\n}\nif (!baseCommit || !baseCommit.tree || !baseCommit.tree.sha) {\n  return [{ json: failurePayload(context, \"missing_base_tree_sha\", \"Base commit tree SHA was not returned by GitHub.\", { baseCommit }) }];\n}\nreturn [{\n  json: {\n    ...context,\n    continue_text: \"yes\",\n    base_tree_sha: baseCommit.tree.sha,\n    create_branch_body: {\n      ref: \"refs/heads/\" + context.branch_name,\n      sha: context.base_sha\n    }\n  }\n}];"
+      },
+      "id": "594450b3-4205-415c-a104-42b32a8b1f31",
+      "name": "Validate Base and Prepare Branch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2672,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2683bba9-206d-4805-8d69-ef6935db9181",
+              "leftValue": "={{ $json.continue_text }}",
+              "rightValue": "yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2e9c7950-031f-402d-bfd6-ad2dab67abad",
+      "name": "IF Continue After Base Validation",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -2512,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"https://api.github.com/repos/\" + $json.owner + \"/\" + $json.repo + \"/git/refs\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.create_branch_body) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "29870b7b-851d-423c-aa5c-49ee8a3d2290",
+      "name": "Create Feature Branch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2288,
+        16
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fuYc2Elj5Ty09D2w",
+          "name": "github_branch_write_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ \"https://api.github.com/repos/\" + $node[\"Validate Base and Prepare Branch\"].json.owner + \"/\" + $node[\"Validate Base and Prepare Branch\"].json.repo + \"/git/ref/heads/\" + $node[\"Validate Base and Prepare Branch\"].json.branch_name }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "dac380fb-69c7-4a23-9d76-f2d9cfad51bd",
+      "name": "Fetch Feature Branch Ref",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -2112,
+        16
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "f7z5i11CHEWTZIFA",
+          "name": "github_read_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ \"https://api.github.com/repos/\" + $node[\"Validate Base and Prepare Branch\"].json.owner + \"/\" + $node[\"Validate Base and Prepare Branch\"].json.repo + \"/pulls?state=open&base=\" + encodeURIComponent($node[\"Validate Base and Prepare Branch\"].json.base_branch) + \"&head=\" + encodeURIComponent($node[\"Validate Base and Prepare Branch\"].json.owner + \":\" + $node[\"Validate Base and Prepare Branch\"].json.branch_name) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "3a69f785-ff3f-4e01-9a1e-360ec44c3165",
+      "name": "Fetch Open PRs For Branch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1936,
+        16
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "f7z5i11CHEWTZIFA",
+          "name": "github_read_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "function failurePayload(context, code, message, details) {\n  const error = { code, message, details: details || null };\n  const executionResult = {\n    schema_version: \"route_b_github_execution_result.v1\",\n    workflow_run_id: context.workflow_run_id,\n    request_id: context.request_id,\n    status: \"failed\",\n    repository_full_name: context.repository_full_name,\n    base_branch: context.base_branch,\n    base_sha: context.base_sha,\n    feature_branch: context.branch_name,\n    branch_ref: context.branch_ref || null,\n    branch_created_at: context.branch_created_at || new Date().toISOString(),\n    implementation_commit_sha: context.implementation_commit_sha || null,\n    implementation_tree_sha: context.implementation_tree_sha || null,\n    changed_files: context.changed_files || [],\n    pr_refs: context.pr_refs || null,\n    ci_refs: context.ci_refs || null,\n    evidence_refs: context.evidence_refs || {},\n    authority_boundary: {\n      merge_authority: \"PM_L2_ONLY\",\n      merge_performed_by_executor: false,\n      approved_for_merge: false,\n      pm_l2_approval_claimed_by_executor: false,\n      n8n_merge_allowed: false,\n      direct_main_write_allowed: false\n    },\n    error\n  };\n\n  return {\n    ...context,\n    continue_text: \"no\",\n    status: \"manual_review_required\",\n    current_state: \"github_execution_failed\",\n    event_type: \"github_execution_failed\",\n    execution_result: executionResult,\n    validation_package: null,\n    persist_payload: {\n      workflow_name: context.workflow_name,\n      workflow_run_id: context.workflow_run_id,\n      request_id: context.request_id,\n      status: \"manual_review_required\",\n      current_state: \"github_execution_failed\",\n      current_phase: \"github_branch_pr_executor\",\n      event_type: \"github_execution_failed\",\n      request: context.request || null,\n      execution_result: executionResult,\n      validation_package: null\n    }\n  };\n}\n\nfunction collectResponses(nodeName) {\n  try {\n    const rows = $items(nodeName);\n    const out = [];\n\n    for (const item of rows) {\n      const value = item && item.json ? item.json : null;\n      if (!value) continue;\n\n      if (Array.isArray(value)) {\n        out.push(...value);\n        continue;\n      }\n\n      if (Array.isArray(value.data)) {\n        out.push(...value.data);\n        continue;\n      }\n\n      if (Array.isArray(value.body)) {\n        out.push(...value.body);\n        continue;\n      }\n\n      if (value.number && value.head && value.base) {\n        out.push(value);\n        continue;\n      }\n    }\n\n    return out;\n  } catch (error) {\n    return [];\n  }\n}\n\nfunction prBodyMatchesRequest(pr, context) {\n  const body = String(pr && pr.body ? pr.body : \"\");\n  return body.includes(\"workflow_run_id: \" + context.workflow_run_id)\n    && body.includes(\"request_id: \" + context.request_id)\n    && body.includes(\"base_sha: \" + context.base_sha)\n    && body.includes(\"repository_full_name: \" + context.repository_full_name);\n}\n\nconst context = $items(\"Validate Base and Prepare Branch\")[0].json;\nconst createResponse = $items(\"Create Feature Branch\")[0].json || {};\nconst branchRef = $items(\"Fetch Feature Branch Ref\")[0].json || {};\nconst openPrRows = collectResponses(\"Fetch Open PRs For Branch\");\n\nconst branchSha = branchRef && branchRef.object ? branchRef.object.sha : null;\n\nif (!branchSha) {\n  return [{\n    json: failurePayload(\n      context,\n      \"feature_branch_ref_missing_after_create\",\n      \"Feature branch ref is missing after create/reuse attempt.\",\n      { createResponse, branchRef }\n    )\n  }];\n}\n\nconst expectedRef = \"refs/heads/\" + context.branch_name;\nconst branchJustCreated = createResponse\n  && createResponse.ref === expectedRef\n  && createResponse.object\n  && createResponse.object.sha === context.base_sha;\n\nconst matchingPr = openPrRows.find(pr =>\n  pr\n  && pr.head\n  && pr.base\n  && pr.head.ref === context.branch_name\n  && pr.base.ref === context.base_branch\n  && pr.state === \"open\"\n) || null;\n\nconst matchingPrIsSameRequest = matchingPr ? prBodyMatchesRequest(matchingPr, context) : false;\n\nif (branchJustCreated && branchSha === context.base_sha) {\n  return [{\n    json: {\n      ...context,\n      continue_text: \"yes\",\n      mutation_required: true,\n      mutation_required_text: \"yes\",\n      existing_pr: matchingPr || null\n    }\n  }];\n}\n\nif (matchingPr && matchingPrIsSameRequest) {\n  if (branchSha === context.base_sha) {\n    return [{\n      json: {\n        ...context,\n        continue_text: \"yes\",\n        mutation_required: true,\n        mutation_required_text: \"yes\",\n        existing_pr: matchingPr,\n        branch_collision_evidence: \"same_request_pr_body\"\n      }\n    }];\n  }\n\n  return [{\n    json: {\n      ...context,\n      continue_text: \"yes\",\n      mutation_required: false,\n      mutation_required_text: \"no\",\n      implementation_commit_sha: branchSha,\n      existing_pr: matchingPr,\n      pr_number: matchingPr.number,\n      pr_url: matchingPr.html_url,\n      latest_pr_head_sha: matchingPr.head && matchingPr.head.sha ? matchingPr.head.sha : branchSha,\n      branch_collision_evidence: \"same_request_pr_body\"\n    }\n  }];\n}\n\nreturn [{\n  json: failurePayload(\n    context,\n    \"branch_collision_not_tied_to_identical_request_id_base_sha\",\n    \"Existing branch cannot be proven to belong to the same request_id/base_sha.\",\n    {\n      branchSha,\n      baseSha: context.base_sha,\n      branchJustCreated,\n      matchingPrNumber: matchingPr ? matchingPr.number : null,\n      matchingPrIsSameRequest,\n      openPrRowsCount: openPrRows.length\n    }\n  )\n}];\n"
+      },
+      "id": "8fcde005-4b90-43be-b8b9-802e72d95de9",
+      "name": "Decide Branch Mutation Mode",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1760,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4ca84408-91ab-4c16-85dc-737f62052438",
+              "leftValue": "={{ $json.continue_text }}",
+              "rightValue": "yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9d8a7887-b175-4150-9f98-3630e73ab4d6",
+      "name": "IF Continue After Branch Decision",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1552,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3dabb593-4ae9-4a42-974b-0c14137f4ceb",
+              "leftValue": "={{ $json.mutation_required_text }}",
+              "rightValue": "yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c6511f0b-45ae-4871-af92-04ced8a24683",
+      "name": "IF Mutation Required",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -1328,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const context = $items(\"Decide Branch Mutation Mode\")[0].json;\nif (context.mutation_required !== true) {\n  return [];\n}\nreturn context.file_changes.map((file, index) => ({\n  json: {\n    owner: context.owner,\n    repo: context.repo,\n    workflow_run_id: context.workflow_run_id,\n    request_id: context.request_id,\n    file_index: index,\n    path: file.path,\n    mode: file.mode,\n    type: file.type,\n    create_blob_body: {\n      content: file.content,\n      encoding: file.encoding\n    }\n  }\n}));"
+      },
+      "id": "8eca794c-b4e2-4b51-92ca-75dc8d14fd2f",
+      "name": "Build Git Blobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1008,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"https://api.github.com/repos/\" + $json.owner + \"/\" + $json.repo + \"/git/blobs\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.create_blob_body) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "bd3c2069-e3cd-4b96-8038-00cd8b713588",
+      "name": "Create Git Blob",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -752,
+        -16
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fuYc2Elj5Ty09D2w",
+          "name": "github_branch_write_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "function failurePayload(context, code, message, details) {\n  const error = { code, message, details: details || null };\n  const executionResult = {\n    schema_version: \"route_b_github_execution_result.v1\",\n    workflow_run_id: context.workflow_run_id,\n    request_id: context.request_id,\n    status: \"failed\",\n    repository_full_name: context.repository_full_name,\n    base_branch: context.base_branch,\n    base_sha: context.base_sha,\n    feature_branch: context.branch_name,\n    branch_ref: context.branch_ref || null,\n    branch_created_at: context.branch_created_at || new Date().toISOString(),\n    implementation_commit_sha: context.implementation_commit_sha || null,\n    implementation_tree_sha: context.implementation_tree_sha || null,\n    changed_files: context.changed_files || [],\n    pr_refs: context.pr_refs || null,\n    ci_refs: context.ci_refs || null,\n    evidence_refs: context.evidence_refs || {},\n    authority_boundary: {\n      merge_authority: \"PM_L2_ONLY\",\n      merge_performed_by_executor: false,\n      approved_for_merge: false,\n      pm_l2_approval_claimed_by_executor: false,\n      n8n_merge_allowed: false,\n      direct_main_write_allowed: false\n    },\n    error\n  };\n  return {\n    ...context,\n    continue_text: \"no\",\n    status: \"manual_review_required\",\n    current_state: \"github_execution_failed\",\n    event_type: \"github_execution_failed\",\n    execution_result: executionResult,\n    validation_package: null,\n    persist_payload: {\n      workflow_name: context.workflow_name,\n      workflow_run_id: context.workflow_run_id,\n      request_id: context.request_id,\n      status: \"manual_review_required\",\n      current_state: \"github_execution_failed\",\n      current_phase: \"github_branch_pr_executor\",\n      event_type: \"github_execution_failed\",\n      request: context.request || null,\n      execution_result: executionResult,\n      validation_package: null\n    }\n  };\n}\n\nconst context = $items(\"Decide Branch Mutation Mode\")[0].json;\nconst fileItems = $items(\"Build Git Blobs\").map(item => item.json);\nconst blobResponses = items.map(item => item.json);\nif (fileItems.length === 0 || blobResponses.length !== fileItems.length) {\n  return [{ json: failurePayload(context, \"blob_result_count_mismatch\", \"Git blob result count does not match file change count.\", { expected: fileItems.length, actual: blobResponses.length }) }];\n}\nconst tree = [];\nfor (let index = 0; index < fileItems.length; index++) {\n  const file = fileItems[index];\n  const response = blobResponses[index] || {};\n  const sha = response.sha || (response.data && response.data.sha);\n  if (!sha) {\n    return [{ json: failurePayload(context, \"missing_blob_sha\", \"GitHub did not return blob SHA.\", { path: file.path, response }) }];\n  }\n  tree.push({ path: file.path, mode: \"100644\", type: \"blob\", sha });\n}\nreturn [{\n  json: {\n    ...context,\n    continue_text: \"yes\",\n    tree_elements: tree,\n    create_tree_body: {\n      base_tree: context.base_tree_sha,\n      tree\n    }\n  }\n}];"
+      },
+      "id": "0075d5ef-7dc8-48cd-a17c-188f02bb900b",
+      "name": "Aggregate Blobs and Build Tree",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -512,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "032cac93-fe36-4f70-a8c4-199e17454956",
+              "leftValue": "={{ $json.continue_text }}",
+              "rightValue": "yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "978a0ae4-eb47-4480-8820-215f4dddeca2",
+      "name": "IF Continue After Blob Aggregation",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -240,
+        -16
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"https://api.github.com/repos/\" + $json.owner + \"/\" + $json.repo + \"/git/trees\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.create_tree_body) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "0e5711ed-57ba-403d-b9b2-368aa39af4dd",
+      "name": "Create Git Tree",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        -32
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fuYc2Elj5Ty09D2w",
+          "name": "github_branch_write_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"https://api.github.com/repos/\" + $node[\"Aggregate Blobs and Build Tree\"].json.owner + \"/\" + $node[\"Aggregate Blobs and Build Tree\"].json.repo + \"/git/commits\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ message: $node[\"Aggregate Blobs and Build Tree\"].json.commit_message, tree: $node[\"Create Git Tree\"].json.sha, parents: [$node[\"Aggregate Blobs and Build Tree\"].json.base_sha] }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "8056b680-c90a-45e0-b1d2-305e67ded87e",
+      "name": "Create Implementation Commit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        224,
+        -32
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fuYc2Elj5Ty09D2w",
+          "name": "github_branch_write_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ \"https://api.github.com/repos/\" + $node[\"Aggregate Blobs and Build Tree\"].json.owner + \"/\" + $node[\"Aggregate Blobs and Build Tree\"].json.repo + \"/git/refs/heads/\" + $node[\"Aggregate Blobs and Build Tree\"].json.branch_name }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ sha: $json.sha, force: false }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "be711604-0ead-4b0c-95a0-4bd77269a9c1",
+      "name": "Update Feature Branch Ref",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        432,
+        -32
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fuYc2Elj5Ty09D2w",
+          "name": "github_branch_write_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ \"https://api.github.com/repos/\" + $node[\"Aggregate Blobs and Build Tree\"].json.owner + \"/\" + $node[\"Aggregate Blobs and Build Tree\"].json.repo + \"/git/ref/heads/\" + $node[\"Aggregate Blobs and Build Tree\"].json.branch_name }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "6233aba9-2141-439e-b557-59ac312d94e0",
+      "name": "Fetch Updated Branch Ref",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        640,
+        -32
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "f7z5i11CHEWTZIFA",
+          "name": "github_read_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "function failurePayload(context, code, message, details) {\n  const error = { code, message, details: details || null };\n  const executionResult = {\n    schema_version: \"route_b_github_execution_result.v1\",\n    workflow_run_id: context.workflow_run_id,\n    request_id: context.request_id,\n    status: \"failed\",\n    repository_full_name: context.repository_full_name,\n    base_branch: context.base_branch,\n    base_sha: context.base_sha,\n    feature_branch: context.branch_name,\n    branch_ref: context.branch_ref || null,\n    branch_created_at: context.branch_created_at || new Date().toISOString(),\n    implementation_commit_sha: context.implementation_commit_sha || null,\n    implementation_tree_sha: context.implementation_tree_sha || null,\n    changed_files: context.changed_files || [],\n    pr_refs: context.pr_refs || null,\n    ci_refs: context.ci_refs || null,\n    evidence_refs: context.evidence_refs || {},\n    authority_boundary: {\n      merge_authority: \"PM_L2_ONLY\",\n      merge_performed_by_executor: false,\n      approved_for_merge: false,\n      pm_l2_approval_claimed_by_executor: false,\n      n8n_merge_allowed: false,\n      direct_main_write_allowed: false\n    },\n    error\n  };\n  return {\n    ...context,\n    continue_text: \"no\",\n    status: \"manual_review_required\",\n    current_state: \"github_execution_failed\",\n    event_type: \"github_execution_failed\",\n    execution_result: executionResult,\n    validation_package: null,\n    persist_payload: {\n      workflow_name: context.workflow_name,\n      workflow_run_id: context.workflow_run_id,\n      request_id: context.request_id,\n      status: \"manual_review_required\",\n      current_state: \"github_execution_failed\",\n      current_phase: \"github_branch_pr_executor\",\n      event_type: \"github_execution_failed\",\n      request: context.request || null,\n      execution_result: executionResult,\n      validation_package: null\n    }\n  };\n}\n\nconst context = $items(\"Aggregate Blobs and Build Tree\")[0].json;\nconst treeResponse = $items(\"Create Git Tree\")[0].json || {};\nconst commitResponse = $items(\"Create Implementation Commit\")[0].json || {};\nconst updatedRef = $items(\"Fetch Updated Branch Ref\")[0].json || {};\nconst implementationCommitSha = commitResponse.sha || (commitResponse.object && commitResponse.object.sha);\nconst implementationTreeSha = treeResponse.sha || (commitResponse.tree && commitResponse.tree.sha);\nconst updatedSha = updatedRef && updatedRef.object ? updatedRef.object.sha : null;\nif (!implementationCommitSha) {\n  return [{ json: failurePayload(context, \"missing_implementation_commit_sha\", \"GitHub did not return implementation commit SHA.\", { commitResponse }) }];\n}\nif (!implementationTreeSha) {\n  return [{ json: failurePayload(context, \"missing_implementation_tree_sha\", \"GitHub did not return implementation tree SHA.\", { treeResponse, commitResponse }) }];\n}\nif (updatedSha !== implementationCommitSha) {\n  return [{ json: failurePayload(context, \"branch_ref_does_not_point_to_implementation_commit\", \"Feature branch ref does not point to implementation commit.\", { updatedSha, implementationCommitSha }) }];\n}\nreturn [{\n  json: {\n    ...context,\n    continue_text: \"yes\",\n    implementation_commit_sha: implementationCommitSha,\n    implementation_tree_sha: implementationTreeSha,\n    branch_created_at: new Date().toISOString(),\n    branch_ref: { branch_name: context.branch_name, commit_sha: implementationCommitSha }\n  }\n}];"
+      },
+      "id": "2b52438b-d3dc-4518-b165-6bbf8404f79a",
+      "name": "Normalize New Implementation Ref",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "43d10efa-e9a8-4033-9a31-9a9a746d5371",
+              "leftValue": "={{ $json.continue_text }}",
+              "rightValue": "yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "77c47c8c-2fc2-449a-a639-7946613a99a6",
+      "name": "IF Continue After New Implementation Ref",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1104,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ \"https://api.github.com/repos/\" + $json.owner + \"/\" + $json.repo + \"/git/commits/\" + $json.implementation_commit_sha }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "79bd3d8b-c22d-406a-8b0f-58e2013d9632",
+      "name": "Fetch Reused Branch Commit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -896,
+        352
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "f7z5i11CHEWTZIFA",
+          "name": "github_read_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "function failurePayload(context, code, message, details) {\n  const error = { code, message, details: details || null };\n  const executionResult = {\n    schema_version: \"route_b_github_execution_result.v1\",\n    workflow_run_id: context.workflow_run_id,\n    request_id: context.request_id,\n    status: \"failed\",\n    repository_full_name: context.repository_full_name,\n    base_branch: context.base_branch,\n    base_sha: context.base_sha,\n    feature_branch: context.branch_name,\n    branch_ref: context.branch_ref || null,\n    branch_created_at: context.branch_created_at || new Date().toISOString(),\n    implementation_commit_sha: context.implementation_commit_sha || null,\n    implementation_tree_sha: context.implementation_tree_sha || null,\n    changed_files: context.changed_files || [],\n    pr_refs: context.pr_refs || null,\n    ci_refs: context.ci_refs || null,\n    evidence_refs: context.evidence_refs || {},\n    authority_boundary: {\n      merge_authority: \"PM_L2_ONLY\",\n      merge_performed_by_executor: false,\n      approved_for_merge: false,\n      pm_l2_approval_claimed_by_executor: false,\n      n8n_merge_allowed: false,\n      direct_main_write_allowed: false\n    },\n    error\n  };\n\n  return {\n    ...context,\n    continue_text: \"no\",\n    status: \"manual_review_required\",\n    current_state: \"github_execution_failed\",\n    event_type: \"github_execution_failed\",\n    execution_result: executionResult,\n    validation_package: null,\n    persist_payload: {\n      workflow_name: context.workflow_name,\n      workflow_run_id: context.workflow_run_id,\n      request_id: context.request_id,\n      status: \"manual_review_required\",\n      current_state: \"github_execution_failed\",\n      current_phase: \"github_branch_pr_executor\",\n      event_type: \"github_execution_failed\",\n      request: context.request || null,\n      execution_result: executionResult,\n      validation_package: null\n    }\n  };\n}\n\nfunction retryPayload(context, code, message, details) {\n  const error = { code, message, details: details || null };\n  const executionResult = {\n    schema_version: \"route_b_github_execution_result.v1\",\n    workflow_run_id: context.workflow_run_id,\n    request_id: context.request_id,\n    status: \"pr_opened\",\n    repository_full_name: context.repository_full_name,\n    base_branch: context.base_branch,\n    base_sha: context.base_sha,\n    feature_branch: context.branch_name,\n    branch_ref: context.branch_ref || null,\n    branch_created_at: context.branch_created_at || new Date().toISOString(),\n    implementation_commit_sha: context.implementation_commit_sha || null,\n    implementation_tree_sha: context.implementation_tree_sha || null,\n    changed_files: context.changed_files || [],\n    pr_refs: context.pr_refs || null,\n    ci_refs: null,\n    evidence_refs: context.evidence_refs || {},\n    authority_boundary: {\n      merge_authority: \"PM_L2_ONLY\",\n      merge_performed_by_executor: false,\n      approved_for_merge: false,\n      pm_l2_approval_claimed_by_executor: false,\n      n8n_merge_allowed: false,\n      direct_main_write_allowed: false\n    },\n    error\n  };\n\n  return {\n    ...context,\n    continue_text: \"no\",\n    status: \"retry_wait\",\n    current_state: \"github_execution_retry_wait\",\n    event_type: \"github_execution_retry_wait\",\n    execution_result: executionResult,\n    validation_package: null,\n    persist_payload: {\n      workflow_name: context.workflow_name,\n      workflow_run_id: context.workflow_run_id,\n      request_id: context.request_id,\n      status: \"retry_wait\",\n      current_state: \"github_execution_retry_wait\",\n      current_phase: \"github_branch_pr_executor\",\n      event_type: \"github_execution_retry_wait\",\n      request: context.request || null,\n      execution_result: executionResult,\n      validation_package: null\n    }\n  };\n}\n\nfunction isTransientGithubError(response) {\n  if (!response || !response.error) return false;\n  const text = JSON.stringify(response.error);\n  return text.includes(\"EAI_AGAIN\")\n    || text.includes(\"ENOTFOUND\")\n    || text.includes(\"ECONNRESET\")\n    || text.includes(\"ETIMEDOUT\")\n    || text.includes(\"502\")\n    || text.includes(\"503\")\n    || text.includes(\"504\");\n}\n\nconst context = $items(\"Decide Branch Mutation Mode\")[0].json;\nconst commitResponse = items[0] && items[0].json ? items[0].json : {};\n\nif (!context.implementation_commit_sha) {\n  return [{\n    json: failurePayload(\n      context,\n      \"missing_reused_implementation_commit_sha\",\n      \"Reused branch has no implementation commit SHA.\",\n      { commitResponse }\n    )\n  }];\n}\n\nif (isTransientGithubError(commitResponse)) {\n  return [{\n    json: retryPayload(\n      context,\n      \"github_api_transient_error\",\n      \"GitHub API transient error while fetching reused branch commit. Retry required.\",\n      { commitResponse }\n    )\n  }];\n}\n\nconst treeSha = commitResponse.tree && commitResponse.tree.sha ? commitResponse.tree.sha : null;\n\nif (!treeSha) {\n  return [{\n    json: failurePayload(\n      context,\n      \"missing_reused_implementation_tree_sha\",\n      \"Reused branch commit has no tree SHA.\",\n      { commitResponse }\n    )\n  }];\n}\n\nreturn [{\n  json: {\n    ...context,\n    continue_text: \"yes\",\n    implementation_tree_sha: treeSha,\n    branch_created_at: new Date().toISOString(),\n    branch_ref: {\n      branch_name: context.branch_name,\n      commit_sha: context.implementation_commit_sha\n    }\n  }\n}];"
+      },
+      "id": "e1dccffd-6990-4d1a-bfee-219bd6435899",
+      "name": "Normalize Reused Implementation Ref",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "1d1984ad-12e8-46e2-8743-affbc5be1a27",
+              "leftValue": "={{ $json.continue_text }}",
+              "rightValue": "yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "7bcd3463-22e2-408b-8bac-92842890a623",
+      "name": "IF Continue After Reused Implementation Ref",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -448,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return items;"
+      },
+      "id": "a03175f7-f895-46ab-89d0-370e16a3e08b",
+      "name": "Pass Implementation Ref",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"https://api.github.com/repos/\" + $json.owner + \"/\" + $json.repo + \"/pulls\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ title: $json.pr_title, head: $json.branch_name, base: $json.base_branch, body: $json.pr_body, draft: false }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "f42ccc87-87a9-4e40-9a62-c4f0f399dfcf",
+      "name": "Open Pull Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1552,
+        -48
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fuYc2Elj5Ty09D2w",
+          "name": "github_branch_write_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ \"https://api.github.com/repos/\" + $node[\"Pass Implementation Ref\"].json.owner + \"/\" + $node[\"Pass Implementation Ref\"].json.repo + \"/pulls?state=open&base=\" + encodeURIComponent($node[\"Pass Implementation Ref\"].json.base_branch) + \"&head=\" + encodeURIComponent($node[\"Pass Implementation Ref\"].json.owner + \":\" + $node[\"Pass Implementation Ref\"].json.branch_name) }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "b860016b-aa18-464a-a2f3-dc0e9bd45263",
+      "name": "Fetch Open PRs After Create",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1728,
+        -48
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "f7z5i11CHEWTZIFA",
+          "name": "github_read_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "function failurePayload(context, code, message, details) {\n  const error = { code, message, details: details || null };\n  const executionResult = {\n    schema_version: \"route_b_github_execution_result.v1\",\n    workflow_run_id: context.workflow_run_id,\n    request_id: context.request_id,\n    status: \"failed\",\n    repository_full_name: context.repository_full_name,\n    base_branch: context.base_branch,\n    base_sha: context.base_sha,\n    feature_branch: context.branch_name,\n    branch_ref: context.branch_ref || null,\n    branch_created_at: context.branch_created_at || new Date().toISOString(),\n    implementation_commit_sha: context.implementation_commit_sha || null,\n    implementation_tree_sha: context.implementation_tree_sha || null,\n    changed_files: context.changed_files || [],\n    pr_refs: context.pr_refs || null,\n    ci_refs: context.ci_refs || null,\n    evidence_refs: context.evidence_refs || {},\n    authority_boundary: {\n      merge_authority: \"PM_L2_ONLY\",\n      merge_performed_by_executor: false,\n      approved_for_merge: false,\n      pm_l2_approval_claimed_by_executor: false,\n      n8n_merge_allowed: false,\n      direct_main_write_allowed: false\n    },\n    error\n  };\n\n  return {\n    ...context,\n    continue_text: \"no\",\n    status: \"manual_review_required\",\n    current_state: \"github_execution_failed\",\n    event_type: \"github_execution_failed\",\n    execution_result: executionResult,\n    validation_package: null,\n    persist_payload: {\n      workflow_name: context.workflow_name,\n      workflow_run_id: context.workflow_run_id,\n      request_id: context.request_id,\n      status: \"manual_review_required\",\n      current_state: \"github_execution_failed\",\n      current_phase: \"github_branch_pr_executor\",\n      event_type: \"github_execution_failed\",\n      request: context.request || null,\n      execution_result: executionResult,\n      validation_package: null\n    }\n  };\n}\n\nfunction arrayFromResponse(value) {\n  if (Array.isArray(value)) return value;\n  if (value && Array.isArray(value.data)) return value.data;\n  if (value && Array.isArray(value.body)) return value.body;\n  if (value && value.number && value.head && value.base) return [value];\n  return [];\n}\n\nfunction prMatchesContext(pr, context) {\n  return Boolean(\n    pr &&\n    pr.number &&\n    pr.head &&\n    pr.base &&\n    pr.head.ref === context.branch_name &&\n    pr.base.ref === context.base_branch &&\n    pr.state === \"open\"\n  );\n}\n\nconst context = $items(\"Pass Implementation Ref\")[0].json;\nconst createPrResponse = $items(\"Open Pull Request\")[0].json || {};\nconst openPrRows = arrayFromResponse($items(\"Fetch Open PRs After Create\")[0].json || {});\n\nlet pr = null;\n\nif (prMatchesContext(createPrResponse, context)) {\n  pr = createPrResponse;\n}\n\nif (!pr && prMatchesContext(context.existing_pr, context)) {\n  pr = context.existing_pr;\n}\n\nif (!pr) {\n  pr = openPrRows.find(row => prMatchesContext(row, context)) || null;\n}\n\nif (!pr && context.pr_number && context.pr_url && context.latest_pr_head_sha) {\n  pr = {\n    number: context.pr_number,\n    html_url: context.pr_url,\n    state: \"open\",\n    head: {\n      ref: context.branch_name,\n      sha: context.latest_pr_head_sha\n    },\n    base: {\n      ref: context.base_branch\n    }\n  };\n}\n\nif (!pr) {\n  return [{\n    json: failurePayload(\n      context,\n      \"missing_pr_evidence\",\n      \"Open PR evidence is missing after create/reuse attempt.\",\n      {\n        createPrResponse,\n        openPrRows,\n        existing_pr: context.existing_pr || null,\n        context_pr_number: context.pr_number || null,\n        context_pr_url: context.pr_url || null\n      }\n    )\n  }];\n}\n\nconst latestHeadSha = pr.head && pr.head.sha ? pr.head.sha : null;\n\nif (latestHeadSha !== context.implementation_commit_sha) {\n  return [{\n    json: failurePayload(\n      context,\n      \"latest_pr_head_sha_mismatch\",\n      \"Latest PR head SHA does not equal implementation commit SHA.\",\n      {\n        latestHeadSha,\n        implementationCommitSha: context.implementation_commit_sha,\n        prNumber: pr.number\n      }\n    )\n  }];\n}\n\nreturn [{\n  json: {\n    ...context,\n    continue_text: \"yes\",\n    pr_number: pr.number,\n    pr_url: pr.html_url,\n    pr_state: pr.state,\n    latest_pr_head_sha: latestHeadSha,\n    pr_refs: {\n      pr_number: pr.number,\n      pr_url: pr.html_url,\n      head_branch: context.branch_name,\n      base_branch: context.base_branch,\n      head_sha: latestHeadSha,\n      status: pr.state\n    }\n  }\n}];"
+      },
+      "id": "592544e8-6176-40e7-acc0-40c5bd942eec",
+      "name": "Normalize PR Evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1904,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0b692730-0ec6-45b5-b386-49d06f5c5f7b",
+              "leftValue": "={{ $json.continue_text }}",
+              "rightValue": "yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d497af6a-ed67-4dc8-9c8b-403f84d71b99",
+      "name": "IF Continue After PR Evidence",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2080,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ \"https://api.github.com/repos/\" + $json.owner + \"/\" + $json.repo + \"/actions/runs?head_sha=\" + $json.latest_pr_head_sha + \"&per_page=30\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "e2cc758b-fe4e-4ab3-8c99-ab48c7e89d81",
+      "name": "Fetch CI Runs For Head SHA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2272,
+        -64
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "f7z5i11CHEWTZIFA",
+          "name": "github_read_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "function arrayFromResponse(value) {\n  if (Array.isArray(value)) return value;\n  if (value && Array.isArray(value.workflow_runs)) return value.workflow_runs;\n  if (value && value.data && Array.isArray(value.data.workflow_runs)) return value.data.workflow_runs;\n  return [];\n}\nconst context = $items(\"Normalize PR Evidence\")[0].json;\nconst runs = arrayFromResponse(items[0] && items[0].json ? items[0].json : {});\nconst testsRuns = runs\n  .filter(run => run && run.name === \"tests\" && run.head_sha === context.latest_pr_head_sha)\n  .sort((a, b) => String(b.created_at || \"\").localeCompare(String(a.created_at || \"\")));\nconst run = testsRuns[0] || null;\nconst runId = run && run.id ? run.id : 0;\nreturn [{\n  json: {\n    ...context,\n    ci_run: run,\n    ci_run_id: runId,\n    ci_jobs_url: \"https://api.github.com/repos/\" + context.owner + \"/\" + context.repo + \"/actions/runs/\" + runId + \"/jobs?per_page=100\"\n  }\n}];"
+      },
+      "id": "f78fff05-a6b5-42d8-bfb4-bea172e4e384",
+      "name": "Normalize CI Run Evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2432,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.ci_jobs_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "7e8c396b-2346-471c-bc54-d31df934d577",
+      "name": "Fetch CI Jobs For Run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2608,
+        -64
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "f7z5i11CHEWTZIFA",
+          "name": "github_read_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "function arrayFromJobs(value) {\n  if (Array.isArray(value)) return value;\n  if (value && Array.isArray(value.jobs)) return value.jobs;\n  if (value && value.data && Array.isArray(value.data.jobs)) return value.data.jobs;\n  return [];\n}\n\nfunction allowedConclusion(value) {\n  return [\"success\", \"failure\", \"cancelled\", \"timed_out\", \"action_required\", \"neutral\", \"skipped\"].includes(value);\n}\n\nfunction eventTypeForStatus(status) {\n  if (status === \"ci_passed\") return \"github_execution_ci_passed\";\n  if (status === \"ci_failed\") return \"github_execution_ci_failed\";\n  if (status === \"pr_opened\") return \"github_execution_pr_opened_waiting_ci\";\n  return \"github_execution_manual_review_required\";\n}\n\nconst context = $items(\"Normalize CI Run Evidence\")[0].json;\nconst jobs = arrayFromJobs(items[0] && items[0].json ? items[0].json : {});\nconst run = context.ci_run || null;\nconst job = jobs.find(j => j && j.name === \"python-tests\") || jobs.find(j => j && j.id) || null;\n\nlet runStatus = \"pr_opened\";\nlet currentState = \"github_executor_pr_opened_waiting_ci\";\nlet error = {\n  code: \"ci_evidence_pending\",\n  message: \"GitHub Actions tests workflow evidence is not available yet for latest PR head SHA.\"\n};\nlet ciRefs = null;\n\nif (!run) {\n  runStatus = \"pr_opened\";\n  currentState = \"github_executor_pr_opened_waiting_ci\";\n  error = {\n    code: \"ci_evidence_pending\",\n    message: \"No GitHub Actions tests workflow run found yet for latest PR head SHA.\"\n  };\n} else if (run.head_sha !== context.latest_pr_head_sha) {\n  runStatus = \"blocked\";\n  currentState = \"github_executor_blocked\";\n  error = {\n    code: \"ci_head_sha_mismatch\",\n    message: \"CI run is not tied to latest PR head SHA.\",\n    run_id: run.id,\n    run_head_sha: run.head_sha,\n    latest_pr_head_sha: context.latest_pr_head_sha\n  };\n} else if (!job || !job.id) {\n  if (run.status && run.status !== \"completed\") {\n    runStatus = \"pr_opened\";\n    currentState = \"github_executor_pr_opened_waiting_ci\";\n    error = {\n      code: \"ci_job_evidence_pending\",\n      message: \"GitHub Actions tests workflow run exists, but job evidence is not available yet.\",\n      run_id: run.id,\n      run_status: run.status\n    };\n  } else {\n    runStatus = \"blocked\";\n    currentState = \"github_executor_blocked\";\n    error = {\n      code: \"missing_ci_job_evidence\",\n      message: \"No GitHub Actions job evidence found for completed tests workflow run.\",\n      run_id: run.id\n    };\n  }\n} else {\n  const conclusion = run.conclusion || null;\n\n  ciRefs = {\n    workflow_name: \"tests\",\n    run_id: run.id,\n    run_status: run.status || null,\n    job_id: job.id,\n    job_name: job.name || \"unknown\",\n    job_status: job.status || null,\n    job_conclusion: job.conclusion || null,\n    head_sha: context.latest_pr_head_sha,\n    conclusion: conclusion,\n    run_html_url: run.html_url || null,\n    job_html_url: job.html_url || null\n  };\n\n  if (!conclusion) {\n    runStatus = \"pr_opened\";\n    currentState = \"github_executor_pr_opened_waiting_ci\";\n    error = {\n      code: \"ci_evidence_pending\",\n      message: \"GitHub Actions tests workflow is not completed for latest PR head SHA.\",\n      run_id: run.id,\n      job_id: job.id\n    };\n  } else if (!allowedConclusion(conclusion)) {\n    runStatus = \"blocked\";\n    currentState = \"github_executor_blocked\";\n    error = {\n      code: \"unsupported_ci_conclusion\",\n      message: \"Unsupported CI conclusion.\",\n      conclusion: conclusion,\n      run_id: run.id,\n      job_id: job.id\n    };\n  } else if (conclusion === \"success\") {\n    runStatus = \"ci_passed\";\n    currentState = \"github_executor_ci_passed_pm_l3_validation_pending\";\n    error = null;\n  } else {\n    runStatus = \"ci_failed\";\n    currentState = \"github_executor_ci_failed_pm_l3_validation_pending\";\n    error = {\n      code: \"ci_not_successful\",\n      message: \"GitHub Actions tests workflow did not succeed.\",\n      conclusion: conclusion,\n      run_id: run.id,\n      job_id: job.id\n    };\n  }\n}\n\nconst executionResult = {\n  schema_version: \"route_b_github_execution_result.v1\",\n  workflow_run_id: context.workflow_run_id,\n  request_id: context.request_id,\n  status: runStatus === \"ci_passed\" ? \"ci_passed\" : (runStatus === \"ci_failed\" ? \"ci_failed\" : (runStatus === \"pr_opened\" ? \"pr_opened\" : \"blocked\")),\n  repository_full_name: context.repository_full_name,\n  base_branch: context.base_branch,\n  base_sha: context.base_sha,\n  feature_branch: context.branch_name,\n  branch_ref: context.branch_ref,\n  branch_created_at: context.branch_created_at,\n  implementation_commit_sha: context.implementation_commit_sha,\n  implementation_tree_sha: context.implementation_tree_sha,\n  changed_files: context.changed_files,\n  pr_refs: context.pr_refs,\n  ci_refs: ciRefs,\n  evidence_refs: {\n    pr_url: context.pr_url,\n    actions_query_head_sha: context.latest_pr_head_sha,\n    workflow_run_url: run && run.html_url ? run.html_url : null,\n    workflow_job_url: job && job.html_url ? job.html_url : null\n  },\n  authority_boundary: {\n    merge_authority: \"PM_L2_ONLY\",\n    merge_performed_by_executor: false,\n    approved_for_merge: false,\n    pm_l2_approval_claimed_by_executor: false,\n    n8n_merge_allowed: false,\n    direct_main_write_allowed: false\n  },\n  error\n};\n\nconst validationPackage = {\n  schema_version: \"route_b_pr_validation_package.v1\",\n  validation_package_id: \"route_b_pr_validation_\" + context.workflow_run_id + \"_\" + context.request_id,\n  workflow_run_id: context.workflow_run_id,\n  request_id: context.request_id,\n  repository_full_name: context.repository_full_name,\n  context_registry_binding: {\n    registry_path: \"docs/sot/context/registry.route_b.v1.yaml\",\n    registry_ref: context.base_sha,\n    source_of_truth: \"github_repo\"\n  },\n  scope_validation: {\n    approved_scope_paths: context.allowed_paths,\n    changed_files_within_scope: true,\n    file_scope_exact: context.file_scope_exact === true,\n    forbidden_operations_absent: true\n  },\n  git_refs: {\n    base_branch: context.base_branch,\n    base_sha: context.base_sha,\n    feature_branch: context.branch_name,\n    head_sha: context.implementation_commit_sha\n  },\n  pr_refs: context.pr_refs,\n  ci_refs: ciRefs,\n  changed_file_refs: context.changed_files,\n  pm_l3_validation: {\n    validation_verdict: runStatus === \"ci_passed\" ? \"pass\" : (runStatus === \"ci_failed\" ? \"fail\" : \"blocked\"),\n    evidence_complete: runStatus === \"ci_passed\" || runStatus === \"ci_failed\"\n  },\n  pm_l2_boundary: {\n    pm_l2_review_required: true,\n    merge_authority: \"PM_L2_ONLY\",\n    n8n_merge_allowed: false,\n    approved_for_merge: false,\n    explicit_pm_l2_approval_package_ref: null\n  }\n};\n\nconst eventType = eventTypeForStatus(runStatus);\n\nreturn [{\n  json: {\n    ...context,\n    status: runStatus,\n    current_state: currentState,\n    event_type: eventType,\n    ci_refs: ciRefs,\n    execution_result: executionResult,\n    validation_package: validationPackage,\n    persist_payload: {\n      workflow_name: context.workflow_name,\n      workflow_run_id: context.workflow_run_id,\n      request_id: context.request_id,\n      status: runStatus,\n      current_state: currentState,\n      current_phase: \"github_branch_pr_executor\",\n      event_type: eventType,\n      request: context.request,\n      execution_result: executionResult,\n      validation_package: validationPackage\n    }\n  }\n}];"
+      },
+      "id": "dd22d3e5-6693-43bf-88a8-e6589d7a634a",
+      "name": "Validate PR CI Evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH input AS (\n  SELECT $1::jsonb AS j\n),\npayload AS (\n  SELECT COALESCE(j->'persist_payload', j) AS p\n  FROM input\n),\nprevious_row AS (\n  SELECT r.workflow_run_id, r.current_state AS previous_state\n  FROM moex_n8n_workflow_runs r, payload\n  WHERE r.workflow_run_id = payload.p->>'workflow_run_id'\n),\nupdated AS (\n  UPDATE moex_n8n_workflow_runs r\n  SET status = payload.p->>'status',\n      current_state = payload.p->>'current_state',\n      current_phase = COALESCE(payload.p->>'current_phase', 'github_branch_pr_executor'),\n      last_heartbeat_at = now(),\n      lock_expires_at = NULL,\n      locked_by = NULL,\n      worker_execution_id = NULL,\n      claim_token = NULL,\n      error_message = COALESCE(\n        payload.p #>> '{execution_result,error,message}',\n        payload.p #>> '{execution_result,error,code}',\n        payload.p #>> '{error,message}',\n        payload.p #>> '{error,code}'\n      )\n  FROM payload\n  WHERE r.workflow_run_id = payload.p->>'workflow_run_id'\n  RETURNING to_jsonb(r) AS row_json\n),\ninsert_event AS (\n  INSERT INTO moex_n8n_workflow_run_events (\n    workflow_run_id,\n    previous_state,\n    new_state,\n    event_type,\n    event_payload_json,\n    created_at\n  )\n  SELECT\n    payload.p->>'workflow_run_id',\n    (SELECT previous_state FROM previous_row LIMIT 1),\n    payload.p->>'current_state',\n    COALESCE(payload.p->>'event_type', 'route_b_github_executor_result'),\n    payload.p,\n    now()\n  FROM payload\n  RETURNING workflow_run_id\n),\ninsert_step AS (\n  INSERT INTO moex_n8n_workflow_step_runs (\n    workflow_run_id,\n    step_name,\n    status,\n    input_hash,\n    output_hash,\n    started_at,\n    completed_at\n  )\n  SELECT\n    payload.p->>'workflow_run_id',\n    'github_branch_pr_executor',\n    payload.p->>'status',\n    md5(COALESCE((payload.p->'request')::text, payload.p->>'request_id', '')),\n    md5(payload.p::text),\n    now(),\n    now()\n  FROM payload\n  ON CONFLICT (workflow_run_id, step_name)\n  DO UPDATE SET\n    status = EXCLUDED.status,\n    input_hash = EXCLUDED.input_hash,\n    output_hash = EXCLUDED.output_hash,\n    completed_at = EXCLUDED.completed_at\n  RETURNING workflow_run_id\n)\nSELECT jsonb_build_object(\n  'persisted', EXISTS (SELECT 1 FROM updated),\n  'event_inserted', EXISTS (SELECT 1 FROM insert_event),\n  'step_inserted', EXISTS (SELECT 1 FROM insert_step),\n  'workflow_run_id', (SELECT p->>'workflow_run_id' FROM payload),\n  'status', (SELECT p->>'status' FROM payload),\n  'current_state', (SELECT p->>'current_state' FROM payload),\n  'event_type', (SELECT COALESCE(p->>'event_type', 'route_b_github_executor_result') FROM payload),\n  'payload', (SELECT p FROM payload)\n) AS result;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json.persist_payload || $json) }}"
+        }
+      },
+      "id": "a093142b-9077-495e-8a2d-96e4beeaa4f6",
+      "name": "Persist Execution Result",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1776,
+        592
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "PU85DvcSG5X2EloO",
+          "name": "postgres_moex_n8n"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "  function parseMaybe(value) {\n  if (typeof value === \"string\") {\n    try { return JSON.parse(value); } catch (error) { return value; }\n  }\n  return value;\n}\n\nfunction firstNodeJson(nodeName) {\n  try {\n    const rows = $items(nodeName);\n    if (!rows || !rows.length) return {};\n    return rows[0].json || {};\n  } catch (error) {\n    return {};\n  }\n}\n\nfunction allNodeJson(nodeName) {\n  try {\n    const rows = $items(nodeName);\n    return rows.map((x) => x.json || {});\n  } catch (error) {\n    return [];\n  }\n}\n\nfunction collectArray(nodeName) {\n  const out = [];\n  for (const j of allNodeJson(nodeName)) {\n    if (Array.isArray(j)) out.push(...j);\n    else if (Array.isArray(j.data)) out.push(...j.data);\n    else if (Array.isArray(j.body)) out.push(...j.body);\n    else if (j && j.number) out.push(j);\n  }\n  return out;\n}\n\nfunction pickPr(context) {\n  const direct = firstNodeJson(\"Open Pull Request\");\n  if (direct && direct.number) {\n    return { pr: direct, source: \"Open Pull Request\" };\n  }\n\n  const afterCreate = collectArray(\"Fetch Open PRs After Create\");\n  const fromAfterCreate = afterCreate.find((p) =>\n    p &&\n    p.number &&\n    p.head &&\n    p.base &&\n    p.head.ref === context.branch_name &&\n    p.base.ref === context.base_branch &&\n    p.state === \"open\"\n  );\n  if (fromAfterCreate) {\n    return { pr: fromAfterCreate, source: \"Fetch Open PRs After Create\" };\n  }\n\n  const beforeCreate = collectArray(\"Fetch Open PRs For Branch\");\n  const fromBeforeCreate = beforeCreate.find((p) =>\n    p &&\n    p.number &&\n    p.head &&\n    p.base &&\n    p.head.ref === context.branch_name &&\n    p.base.ref === context.base_branch &&\n    p.state === \"open\"\n  );\n  if (fromBeforeCreate) {\n    return { pr: fromBeforeCreate, source: \"Fetch Open PRs For Branch\" };\n  }\n\n  return { pr: null, source: \"none\" };\n}\n\nconst row = items[0] && items[0].json ? items[0].json : {};\nconst persisted = parseMaybe(row.result || row.jsonb_build_object || row.data || row);\nconst payload = parseMaybe(persisted && persisted.payload ? persisted.payload : {});\nlet result = payload.execution_result || null;\nconst validation = payload.validation_package || null;\n\nconst context =\n  firstNodeJson(\"Pass Implementation Ref\") ||\n  firstNodeJson(\"Normalize PR Evidence\") ||\n  {};\n\nif (!result) {\n  result =\n    firstNodeJson(\"Validate PR CI Evidence\").execution_result ||\n    firstNodeJson(\"Normalize PR Evidence\").execution_result ||\n    null;\n}\n\nif (!result) {\n  result = {\n    schema_version: \"route_b_github_execution_result.v1\",\n    workflow_run_id: context.workflow_run_id,\n    request_id: context.request_id,\n    status: \"pr_opened\",\n    repository_full_name: context.repository_full_name,\n    base_branch: context.base_branch,\n    base_sha: context.base_sha,\n    feature_branch: context.branch_name,\n    branch_ref: context.branch_ref || null,\n    implementation_commit_sha: context.implementation_commit_sha || null,\n    implementation_tree_sha: context.implementation_tree_sha || null,\n    changed_files: context.changed_files || [],\n    pr_refs: null,\n    ci_refs: null,\n    error: null,\n    authority_boundary: {\n      merge_authority: \"PM_L2_ONLY\",\n      merge_performed_by_executor: false,\n      approved_for_merge: false,\n      pm_l2_approval_claimed_by_executor: false,\n      n8n_merge_allowed: false,\n      direct_main_write_allowed: false\n    }\n  };\n}\n\nconst prPick = pickPr(context);\nconst pr = prPick.pr;\n\nif (!result.pr_refs && pr && pr.number) {\n  result.pr_refs = {\n    pr_number: pr.number,\n    pr_url: pr.html_url || pr.url || null,\n    head_branch: pr.head && pr.head.ref ? pr.head.ref : context.branch_name,\n    head_sha: pr.head && pr.head.sha ? pr.head.sha : context.implementation_commit_sha,\n    base_branch: pr.base && pr.base.ref ? pr.base.ref : context.base_branch\n  };\n}\n\nif (!result.pr_refs || !result.pr_refs.pr_number) {\n  return [{\n    json: {\n      has_pr_comment_target: false,\n      has_pr_comment_target_text: \"no\",\n      reason: \"no_pr_comment_target\",\n      pr_candidate_source: prPick.source,\n      workflow_run_id: result.workflow_run_id || context.workflow_run_id || null,\n      request_id: result.request_id || context.request_id || null,\n      feature_branch: result.feature_branch || context.branch_name || null,\n      implementation_commit_sha: result.implementation_commit_sha || context.implementation_commit_sha || null\n    }\n  }];\n}\n\nconst repoFullName = result.repository_full_name || context.repository_full_name || \"\";\nconst repoParts = repoFullName.split(\"/\");\nconst owner = repoParts[0];\nconst repo = repoParts[1];\n\nconst implementationSha =\n  result.implementation_commit_sha ||\n  result.pr_refs.head_sha ||\n  context.implementation_commit_sha ||\n  \"unknown\";\n\nconst marker =\n  \"<!-- route-b-github-executor:\" +\n  result.workflow_run_id +\n  \":\" +\n  result.request_id +\n  \":\" +\n  implementationSha +\n  \" -->\";\n\nconst verdict =\n  validation && validation.pm_l3_validation\n    ? validation.pm_l3_validation.validation_verdict\n    : \"blocked_or_pending\";\n\nconst lines = [\n  marker,\n  \"Route B GitHub executor evidence\",\n  \"\",\n  \"workflow_run_id: \" + result.workflow_run_id,\n  \"request_id: \" + result.request_id,\n  \"status: \" + result.status,\n  \"feature_branch: \" + result.feature_branch,\n  \"pr_number: \" + result.pr_refs.pr_number,\n  \"implementation_commit_sha: \" + implementationSha,\n  \"ci_workflow: tests\",\n  \"ci_run_id: \" + (result.ci_refs ? result.ci_refs.run_id : \"missing\"),\n  \"ci_job_id: \" + (result.ci_refs ? result.ci_refs.job_id : \"missing\"),\n  \"ci_conclusion: \" + (result.ci_refs ? result.ci_refs.conclusion : \"missing\"),\n  \"pm_l2_merge_authority: PM_L2_ONLY\",\n  \"merge_performed_by_executor: false\",\n  \"approved_for_merge: false\",\n  \"pm_l3_validation_verdict: \" + verdict\n];\n\nif (result.error && result.error.code) {\n  lines.push(\"error_code: \" + result.error.code);\n}\n\nreturn [{\n  json: {\n    owner,\n    repo,\n    pr_number: Number(result.pr_refs.pr_number),\n    marker,\n    has_pr_comment_target: true,\n    has_pr_comment_target_text: \"yes\",\n    comment_body: {\n      body: lines.join(\"\\n\")\n    }\n  }\n}];"
+      },
+      "id": "cd3e8f57-8f6c-48a9-a7cc-b50a94574065",
+      "name": "Build PR Comment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3296,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9495e68d-6d87-459b-ac6f-bbdec40bae39",
+              "leftValue": "={{ $json.has_pr_comment_target_text }}",
+              "rightValue": "yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "722793d8-a0ca-4402-a447-a6d848fac6c5",
+      "name": "IF Has PR Comment Target",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3520,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ \"https://api.github.com/repos/\" + $json.owner + \"/\" + $json.repo + \"/issues/\" + $json.pr_number + \"/comments?per_page=100\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "e5d8bd23-3953-4478-82eb-9ba914992668",
+      "name": "Fetch PR Comments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3744,
+        160
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "f7z5i11CHEWTZIFA",
+          "name": "github_read_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const target = $('Build PR Comment').first().json;\n\nconst inputItems = $input.all();\nconst comments = [];\n\nfor (const item of inputItems) {\n  const j = item.json || {};\n\n  if (Array.isArray(j)) {\n    comments.push(...j);\n    continue;\n  }\n\n  if (Array.isArray(j.body)) {\n    comments.push(...j.body);\n    continue;\n  }\n\n  if (Array.isArray(j.data)) {\n    comments.push(...j.data);\n    continue;\n  }\n\n  if (j.id && typeof j.body === 'string') {\n    comments.push(j);\n  }\n}\n\nconst marker = String(target.marker || '');\nconst existing = comments.find((c) => String(c.body || '').includes(marker));\n\nconst body =\n  target.comment_body?.body ||\n  target.body ||\n  '';\n\nreturn [\n  {\n    json: {\n      owner: target.owner,\n      repo: target.repo,\n      pr_number: Number(target.pr_number),\n      marker,\n      body,\n      comment_body: {\n        body\n      },\n\n      comments_count: comments.length,\n\n      comment_id: existing?.id || null,\n      existing_comment_id: existing?.id || null,\n\n      update_existing: Boolean(existing),\n      update_existing_text: existing ? 'yes' : 'no',\n      should_update_existing: Boolean(existing),\n      should_update_existing_text: existing ? 'yes' : 'no',\n      has_existing_comment: Boolean(existing),\n      has_existing_comment_text: existing ? 'yes' : 'no',\n\n      create_comment: !existing,\n      create_comment_text: existing ? 'no' : 'yes',\n\n      operation: existing ? 'update' : 'create'\n    }\n  }\n];"
+      },
+      "id": "600346a0-5f63-4d43-b59d-142d92a12e73",
+      "name": "Decide PR Comment Upsert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3952,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "bafef475-c9fe-401c-a344-434aac04dd33",
+              "leftValue": "={{ $json.update_existing_comment_text }}",
+              "rightValue": "yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e1d6619d-5550-4bc6-b3aa-6ae73b739ba5",
+      "name": "IF Update Existing PR Comment",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4176,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ \"https://api.github.com/repos/\" + $json.owner + \"/\" + $json.repo + \"/issues/comments/\" + $json.existing_comment_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.comment_body) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "15ec08eb-ba2f-4da7-bf66-30c6f8891486",
+      "name": "Update PR Evidence Comment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4400,
+        80
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "BIfyAXMYPYXxM6W5",
+          "name": "github_pr_comment_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ \"https://api.github.com/repos/\" + $json.owner + \"/\" + $json.repo + \"/issues/\" + $json.pr_number + \"/comments\" }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.comment_body) }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "08547d19-d86c-4c9d-884e-00d42c07f23b",
+      "name": "Create PR Evidence Comment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4400,
+        240
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "BIfyAXMYPYXxM6W5",
+          "name": "github_pr_comment_moex_bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "0f6b1bb0-c78e-4f68-b158-588d320c04f3",
+              "leftValue": "={{ $json.validation_ok_text }}",
+              "rightValue": "yes",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "58614851-dcee-46a1-91ff-6d3b3d14cb2d",
+      "name": "IF Request Validation Passed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -3536,
+        352
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Executor Identity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Build Executor Identity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Executor Identity": {
+      "main": [
+        [
+          {
+            "node": "Check Postgres Schema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Postgres Schema": {
+      "main": [
+        [
+          {
+            "node": "Validate Postgres Schema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Postgres Schema": {
+      "main": [
+        [
+          {
+            "node": "Load Candidate Execution Requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Candidate Execution Requests": {
+      "main": [
+        [
+          {
+            "node": "Select and Validate Execution Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select and Validate Execution Request": {
+      "main": [
+        [
+          {
+            "node": "IF Has Execution Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has Execution Request": {
+      "main": [
+        [
+          {
+            "node": "IF Request Validation Passed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Job Terminal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Execution Request": {
+      "main": [
+        [
+          {
+            "node": "Assert Execution Claim",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Base Branch Ref": {
+      "main": [
+        [
+          {
+            "node": "Fetch Base Commit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Base Commit": {
+      "main": [
+        [
+          {
+            "node": "Validate Base and Prepare Branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Base and Prepare Branch": {
+      "main": [
+        [
+          {
+            "node": "IF Continue After Base Validation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Continue After Base Validation": {
+      "main": [
+        [
+          {
+            "node": "Create Feature Branch",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist Execution Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Feature Branch": {
+      "main": [
+        [
+          {
+            "node": "Fetch Feature Branch Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Feature Branch Ref": {
+      "main": [
+        [
+          {
+            "node": "Fetch Open PRs For Branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Open PRs For Branch": {
+      "main": [
+        [
+          {
+            "node": "Decide Branch Mutation Mode",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide Branch Mutation Mode": {
+      "main": [
+        [
+          {
+            "node": "IF Continue After Branch Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Continue After Branch Decision": {
+      "main": [
+        [
+          {
+            "node": "IF Mutation Required",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist Execution Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Mutation Required": {
+      "main": [
+        [
+          {
+            "node": "Build Git Blobs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fetch Reused Branch Commit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Git Blobs": {
+      "main": [
+        [
+          {
+            "node": "Create Git Blob",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Git Blob": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Blobs and Build Tree",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Blobs and Build Tree": {
+      "main": [
+        [
+          {
+            "node": "IF Continue After Blob Aggregation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Continue After Blob Aggregation": {
+      "main": [
+        [
+          {
+            "node": "Create Git Tree",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist Execution Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Git Tree": {
+      "main": [
+        [
+          {
+            "node": "Create Implementation Commit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Implementation Commit": {
+      "main": [
+        [
+          {
+            "node": "Update Feature Branch Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Feature Branch Ref": {
+      "main": [
+        [
+          {
+            "node": "Fetch Updated Branch Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Updated Branch Ref": {
+      "main": [
+        [
+          {
+            "node": "Normalize New Implementation Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize New Implementation Ref": {
+      "main": [
+        [
+          {
+            "node": "IF Continue After New Implementation Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Continue After New Implementation Ref": {
+      "main": [
+        [
+          {
+            "node": "Pass Implementation Ref",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist Execution Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Reused Branch Commit": {
+      "main": [
+        [
+          {
+            "node": "Normalize Reused Implementation Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Reused Implementation Ref": {
+      "main": [
+        [
+          {
+            "node": "IF Continue After Reused Implementation Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Continue After Reused Implementation Ref": {
+      "main": [
+        [
+          {
+            "node": "Pass Implementation Ref",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist Execution Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass Implementation Ref": {
+      "main": [
+        [
+          {
+            "node": "Open Pull Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Open Pull Request": {
+      "main": [
+        [
+          {
+            "node": "Fetch Open PRs After Create",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Open PRs After Create": {
+      "main": [
+        [
+          {
+            "node": "Normalize PR Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize PR Evidence": {
+      "main": [
+        [
+          {
+            "node": "IF Continue After PR Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch CI Runs For Head SHA": {
+      "main": [
+        [
+          {
+            "node": "Normalize CI Run Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize CI Run Evidence": {
+      "main": [
+        [
+          {
+            "node": "Fetch CI Jobs For Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch CI Jobs For Run": {
+      "main": [
+        [
+          {
+            "node": "Validate PR CI Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate PR CI Evidence": {
+      "main": [
+        [
+          {
+            "node": "Persist Execution Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist Execution Result": {
+      "main": [
+        [
+          {
+            "node": "Build PR Comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build PR Comment": {
+      "main": [
+        [
+          {
+            "node": "IF Has PR Comment Target",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Has PR Comment Target": {
+      "main": [
+        [
+          {
+            "node": "Fetch PR Comments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch PR Comments": {
+      "main": [
+        [
+          {
+            "node": "Decide PR Comment Upsert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide PR Comment Upsert": {
+      "main": [
+        [
+          {
+            "node": "IF Update Existing PR Comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Update Existing PR Comment": {
+      "main": [
+        [
+          {
+            "node": "Update PR Evidence Comment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create PR Evidence Comment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Continue After PR Evidence": {
+      "main": [
+        [
+          {
+            "node": "Fetch CI Runs For Head SHA",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist Execution Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Request Validation Passed": {
+      "main": [
+        [
+          {
+            "node": "Claim Execution Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist Execution Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assert Execution Claim": {
+      "main": [
+        [
+          {
+            "node": "Fetch Base Branch Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "121a01dc-b812-4187-aa32-dfcd7ed33a1b",
+  "meta": {
+    "instanceId": "62875adff27fc822d942c4254bca5bd3da9a7fd81d36718bdc0f7d5d52395a15"
+  },
+  "nodeGroups": [],
+  "id": "SeZKBHH7CsPY1776",
+  "tags": []
+}

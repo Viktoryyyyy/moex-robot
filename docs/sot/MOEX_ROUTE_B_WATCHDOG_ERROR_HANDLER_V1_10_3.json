@@ -1,0 +1,123 @@
+{
+  "name": "MOEX_ROUTE_B_WATCHDOG_ERROR_HANDLER_V1_10_3",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes"
+            }
+          ]
+        }
+      },
+      "id": "74aad7f0-4428-422f-87e5-89aa8697b2c1",
+      "name": "Watchdog Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function hash16(input) {\n  let h1 = 0xdeadbeef ^ input.length;\n  let h2 = 0x41c6ce57 ^ input.length;\n  for (let i = 0; i < input.length; i++) {\n    const ch = input.charCodeAt(i);\n    h1 = Math.imul(h1 ^ ch, 2654435761);\n    h2 = Math.imul(h2 ^ ch, 1597334677);\n  }\n  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);\n  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);\n  return ((h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0')).slice(0, 16);\n}\n\nfunction hash32(input) {\n  return hash16('a:' + input) + hash16('b:' + input);\n}\n\nconst executionId = String($execution.id || Date.now());\nconst startedAt = new Date().toISOString();\nconst watchdogExecutionId = 'n8n_watchdog_' + hash32('watchdog:' + executionId + ':' + startedAt);\n\nreturn [\n  {\n    json: {\n      workflow_name: 'MOEX_ROUTE_B_WATCHDOG_ERROR_HANDLER_V1_10_3',\n      spec_version: '1.10.3',\n      watchdog_execution_id: watchdogExecutionId,\n      started_at: startedAt,\n      repository_full_name: 'Viktoryyyyy/moex-robot',\n      advisory_lock_key: 'moex_route_b_watchdog_v1',\n      heartbeat_stale_threshold_seconds: 900,\n      initial_retry_delay_minutes: 5,\n      max_retry_delay_minutes: 30,\n      max_retries: 3,\n      retry_semantics: 'retry_count_plus_1_less_than_max_retries',\n      lock_ttl_minutes_effective_worker_waiver: 65,\n      watchdog_timeout_seconds: 60\n    }\n  }\n];"
+      },
+      "id": "ac7eba3b-7131-4d94-bcee-9eb0571df206",
+      "name": "Build Watchdog Identity",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with input_json as (select $1::jsonb as p), input_data as (select p->>'workflow_name' as workflow_name, p->>'spec_version' as spec_version, p->>'watchdog_execution_id' as watchdog_execution_id, p->>'repository_full_name' as repository_full_name, p->>'advisory_lock_key' as advisory_lock_key, coalesce((p->>'heartbeat_stale_threshold_seconds')::integer,900) as heartbeat_stale_threshold_seconds, coalesce((p->>'initial_retry_delay_minutes')::integer,5) as initial_retry_delay_minutes, coalesce((p->>'max_retry_delay_minutes')::integer,30) as max_retry_delay_minutes, coalesce((p->>'max_retries')::integer,3) as max_retries from input_json), lock_attempt AS MATERIALIZED (select pg_try_advisory_xact_lock(hashtext((select advisory_lock_key from input_data))::bigint) as lock_acquired), stale_candidates as (select r.workflow_run_id from moex_n8n_workflow_runs r cross join input_data d cross join lock_attempt la where la.lock_acquired = true and r.repository_full_name = d.repository_full_name and r.status = 'processing' and (r.lock_expires_at is null or r.lock_expires_at <= now() or r.last_heartbeat_at is null or r.last_heartbeat_at <= now() - (d.heartbeat_stale_threshold_seconds * interval '1 second')) order by r.updated_at asc for update skip locked), prepared as (select r.workflow_run_id, r.current_state as previous_state, r.status as previous_status, r.idempotency_key, r.repository_full_name, r.current_phase as previous_phase, r.retry_count as previous_retry_count, coalesce(r.retry_count,0) + 1 as next_retry_count, coalesce(r.max_retries,d.max_retries) as effective_max_retries, ((coalesce(r.retry_count,0) + 1) < coalesce(r.max_retries,d.max_retries)) as retry_allowed, least(d.max_retry_delay_minutes, d.initial_retry_delay_minutes * power(2, least(coalesce(r.retry_count,0),5))::integer) as retry_delay_minutes, r.worker_execution_id as previous_worker_execution_id, r.claim_token as previous_claim_token, r.locked_by as previous_locked_by, r.lock_expires_at as previous_lock_expires_at, r.last_heartbeat_at as previous_last_heartbeat_at from moex_n8n_workflow_runs r join stale_candidates c on c.workflow_run_id = r.workflow_run_id cross join input_data d), updated_runs as (update moex_n8n_workflow_runs r set status = case when p.retry_allowed then 'retry_wait' else 'fallback_required' end, current_state = case when p.retry_allowed then 'watchdog_retry_scheduled' else 'watchdog_fallback_required' end, current_phase = 'watchdog_error_handler', retry_count = p.next_retry_count, next_retry_at = case when p.retry_allowed then now() + (p.retry_delay_minutes * interval '1 minute') else null end, fallback_route = case when p.retry_allowed then r.fallback_route else 'manual_pm_l3_review' end, error_message = left(coalesce(nullif(r.error_message,'') || ' | ', '') || 'watchdog recovered stale processing run; previous_worker_execution_id=' || coalesce(p.previous_worker_execution_id,'null'), 8000), locked_by = null, worker_execution_id = null, claim_token = null, lock_expires_at = null, last_heartbeat_at = null, updated_at = now() from prepared p where r.workflow_run_id = p.workflow_run_id returning r.workflow_run_id, r.idempotency_key, p.previous_state, p.previous_status, r.status, r.current_state, r.current_phase, r.retry_count, r.max_retries, r.next_retry_at, r.fallback_route, r.error_message, p.retry_allowed, p.retry_delay_minutes, p.previous_worker_execution_id, p.previous_claim_token, p.previous_locked_by, p.previous_lock_expires_at, p.previous_last_heartbeat_at), released_locks as (update moex_n8n_workflow_locks l set status = 'released_by_watchdog', expires_at = now(), last_heartbeat_at = now() from updated_runs u where l.workflow_run_id = u.workflow_run_id and l.status <> 'released_by_watchdog' returning l.workflow_run_id), step_started as (insert into moex_n8n_workflow_step_runs (workflow_run_id, step_name, status, attempt, input_hash, started_at, completed_at, error_message, created_at, updated_at) select u.workflow_run_id, 'watchdog_error_handler', 'completed', u.retry_count, u.idempotency_key, now(), now(), u.error_message, now(), now() from updated_runs u where not exists (select 1 from moex_n8n_workflow_step_runs s where s.workflow_run_id = u.workflow_run_id and s.step_name = 'watchdog_error_handler' and s.attempt = u.retry_count) returning workflow_run_id), event_inserted as (insert into moex_n8n_workflow_run_events (workflow_run_id, previous_state, new_state, event_type, event_payload_json, created_at) select u.workflow_run_id, u.previous_state, u.current_state, case when u.retry_allowed then 'watchdog_retry_scheduled' else 'watchdog_fallback_required' end, jsonb_build_object('workflow_name',(select workflow_name from input_data),'spec_version',(select spec_version from input_data),'watchdog_execution_id',(select watchdog_execution_id from input_data),'previous_status',u.previous_status,'previous_state',u.previous_state,'new_status',u.status,'new_state',u.current_state,'retry_count',u.retry_count,'max_retries',u.max_retries,'next_retry_at',u.next_retry_at,'retry_allowed',u.retry_allowed,'retry_delay_minutes',u.retry_delay_minutes,'previous_worker_execution_id',u.previous_worker_execution_id,'previous_claim_token',u.previous_claim_token,'previous_locked_by',u.previous_locked_by,'previous_lock_expires_at',u.previous_lock_expires_at,'previous_last_heartbeat_at',u.previous_last_heartbeat_at,'worker_execution_id_cleared',true,'claim_token_cleared',true,'last_heartbeat_null_treated_as_stale',true,'effective_worker_lock_ttl_minutes_waiver',65), now() from updated_runs u returning event_id, workflow_run_id), summary as (select la.lock_acquired, coalesce(count(u.workflow_run_id),0)::integer as recovered_count, coalesce(count(u.workflow_run_id) filter (where u.retry_allowed),0)::integer as retry_scheduled_count, coalesce(count(u.workflow_run_id) filter (where not u.retry_allowed),0)::integer as fallback_required_count from lock_attempt la left join updated_runs u on true group by la.lock_acquired) select (select workflow_name from input_data) as workflow_name, (select spec_version from input_data) as spec_version, (select watchdog_execution_id from input_data) as watchdog_execution_id, s.lock_acquired, s.recovered_count, s.retry_scheduled_count, s.fallback_required_count, (select count(*)::integer from released_locks) as released_lock_rows, (select count(*)::integer from event_inserted) as event_rows, (select coalesce(jsonb_agg(jsonb_build_object('workflow_run_id',u.workflow_run_id,'status',u.status,'current_state',u.current_state,'retry_count',u.retry_count,'max_retries',u.max_retries,'next_retry_at',u.next_retry_at,'fallback_route',u.fallback_route,'retry_allowed',u.retry_allowed) order by u.workflow_run_id),'[]'::jsonb) from updated_runs u) as recovered_runs from summary s;",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "a9f77d77-0ff2-4378-9d50-611ddd8ffb53",
+      "name": "Run Watchdog Recovery",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        480,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "PU85DvcSG5X2EloO",
+          "name": "postgres_moex_n8n"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseJsonb(value, fallbackValue) {\n  if (value === null || value === undefined) return fallbackValue;\n  if (Array.isArray(value)) return value;\n  if (typeof value === 'object') return value;\n  if (typeof value === 'string') {\n    const trimmed = value.trim();\n    if (!trimmed) return fallbackValue;\n    try {\n      return JSON.parse(trimmed);\n    } catch (error) {\n      return fallbackValue;\n    }\n  }\n  return fallbackValue;\n}\n\nfunction asBoolean(value) {\n  if (value === true) return true;\n  if (value === false) return false;\n  if (typeof value === 'string') return value.toLowerCase() === 'true';\n  return false;\n}\n\nconst row = $input.first().json || {};\nconst recoveredRunsParsed = parseJsonb(row.recovered_runs, []);\nconst recoveredRuns = Array.isArray(recoveredRunsParsed) ? recoveredRunsParsed : [];\nconst lockAcquired = asBoolean(row.lock_acquired);\n\nreturn [\n  {\n    json: {\n      workflow_name: 'MOEX_ROUTE_B_WATCHDOG_ERROR_HANDLER_V1_10_3',\n      spec_version: '1.10.3',\n      watchdog_execution_id: row.watchdog_execution_id || null,\n      lock_acquired: lockAcquired,\n      recovered_count: Number(row.recovered_count || 0),\n      retry_scheduled_count: Number(row.retry_scheduled_count || 0),\n      fallback_required_count: Number(row.fallback_required_count || 0),\n      released_lock_rows: Number(row.released_lock_rows || 0),\n      event_rows: Number(row.event_rows || 0),\n      recovered_runs: recoveredRuns,\n      effective_worker_lock_ttl_minutes_waiver: 65,\n      watchdog_timeout_seconds: 60,\n      credentials_id_status: 'not_added_no_real_id',\n      ddl_dependency_status: {\n        moex_n8n_workflow_locks: {\n          status: 'confirmed_in_existing_ddl',\n          expires_at: 'confirmed_in_existing_ddl',\n          last_heartbeat_at: 'confirmed_in_existing_ddl'\n        }\n      },\n      status: lockAcquired ? 'watchdog_completed' : 'watchdog_skipped_lock_not_acquired'\n    }\n  }\n];"
+      },
+      "id": "066f6349-95ff-466d-b525-b3b2d9e2eac0",
+      "name": "Build Watchdog Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Watchdog Schedule": {
+      "main": [
+        [
+          {
+            "node": "Build Watchdog Identity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Watchdog Identity": {
+      "main": [
+        [
+          {
+            "node": "Run Watchdog Recovery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Watchdog Recovery": {
+      "main": [
+        [
+          {
+            "node": "Build Watchdog Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "a0776f57-570c-4e4d-bf81-c3df477a8760",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "62875adff27fc822d942c4254bca5bd3da9a7fd81d36718bdc0f7d5d52395a15"
+  },
+  "nodeGroups": [],
+  "id": "31OgHvYwsD2W0jXZ",
+  "tags": []
+}

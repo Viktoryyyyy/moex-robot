@@ -1,0 +1,148 @@
+{
+  "name": "MOEX_ROUTE_B_STATUS_QUERY_V1_10_3",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "moex/route-b/status",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "e8fd74ea-4dd2-4b64-9e56-436e998871c1",
+      "name": "Status Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "moex-route-b-status-v1-10-3"
+    },
+    {
+      "parameters": {
+        "jsCode": "function toObject(value) {\n  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};\n}\n\nfunction cleanString(value) {\n  if (value === null || value === undefined) return '';\n  return String(value).trim();\n}\n\nconst input = $input.first().json || {};\nconst query = toObject(input.query);\nconst body = toObject(input.body);\nconst params = toObject(input.params);\n\nconst workflowRunId = cleanString(query.workflow_run_id || query.run_id || body.workflow_run_id || body.run_id || params.workflow_run_id || params.run_id);\nconst idempotencyKey = cleanString(query.idempotency_key || body.idempotency_key || params.idempotency_key);\n\nreturn [\n  {\n    json: {\n      workflow_name: 'MOEX_ROUTE_B_STATUS_QUERY_V1_10_3',\n      spec_version: '1.10.3',\n      workflow_run_id: workflowRunId,\n      idempotency_key: idempotencyKey,\n      request_received_at: new Date().toISOString(),\n      status_request_valid: Boolean(workflowRunId || idempotencyKey)\n    }\n  }\n];"
+      },
+      "id": "219f6f43-dfe9-4486-a594-fb1b86661477",
+      "name": "Normalize Status Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with input_json as (select $1::jsonb as p), input_data as (select nullif(p->>'workflow_run_id','') as workflow_run_id, nullif(p->>'idempotency_key','') as idempotency_key, case when nullif(p->>'workflow_run_id','') is not null then 'workflow_run_id' when nullif(p->>'idempotency_key','') is not null then 'idempotency_key' else 'missing' end as request_identifier_kind, ((nullif(p->>'workflow_run_id','') is not null) or (nullif(p->>'idempotency_key','') is not null)) as status_request_valid from input_json), matched_run as (select r.* from moex_n8n_workflow_runs r cross join input_data d where (d.workflow_run_id is not null and r.workflow_run_id = d.workflow_run_id) or (d.workflow_run_id is null and d.idempotency_key is not null and r.idempotency_key = d.idempotency_key) order by r.created_at desc limit 1), latest_events as (select e.* from moex_n8n_workflow_run_events e where e.workflow_run_id = (select workflow_run_id from matched_run) order by e.event_id desc limit 20), event_summary as (select coalesce(jsonb_agg(jsonb_build_object('event_id', event_id, 'previous_state', previous_state, 'new_state', new_state, 'event_type', event_type, 'created_at', created_at) order by event_id), '[]'::jsonb) as events, count(*)::integer as event_count from latest_events), latest_event as (select event_id, new_state, event_type, created_at from latest_events order by event_id desc limit 1), latest_steps as (select s.* from moex_n8n_workflow_step_runs s where s.workflow_run_id = (select workflow_run_id from matched_run) order by s.created_at desc, s.started_at desc nulls last limit 20), step_summary as (select coalesce(jsonb_agg(jsonb_build_object('step_name', step_name, 'status', status, 'attempt', attempt, 'input_hash', input_hash, 'output_hash', output_hash, 'started_at', started_at, 'completed_at', completed_at, 'error_message', error_message) order by started_at nulls last, created_at), '[]'::jsonb) as steps, count(*)::integer as step_count from latest_steps) select d.status_request_valid, d.request_identifier_kind, (r.workflow_run_id is not null) as found, r.workflow_run_id, r.idempotency_key, r.status, r.current_state, r.repository_full_name, r.current_phase, r.target_branch_name, r.pr_ref, r.pr_number, r.final_pr_head_sha, r.ci_status, r.validation_verdict, r.durable_evidence_ref, r.pre_ci_branch_artifact_ref, r.final_pm_l2_evidence_ref, r.fallback_route, r.error_message, r.locked_by, r.worker_execution_id, r.claim_token, r.lock_expires_at, r.last_heartbeat_at, r.heartbeat_count, r.retry_count, r.max_retries, r.next_retry_at, r.last_completed_step, r.github_branch_name, r.github_commit_sha, r.github_pr_url, r.created_at, r.updated_at, coalesce(e.event_count, 0) as event_count, coalesce(e.events, '[]'::jsonb) as events, le.event_id as latest_event_id, le.event_type as latest_event_type, le.new_state as latest_event_state, le.created_at as latest_event_created_at, coalesce(s.step_count, 0) as step_count, coalesce(s.steps, '[]'::jsonb) as steps from input_data d left join matched_run r on true left join event_summary e on true left join latest_event le on true left join step_summary s on true;",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "f8cd54ff-29b9-473e-af0e-6ee72d4546f3",
+      "name": "Query Workflow Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        480,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "PU85DvcSG5X2EloO",
+          "name": "postgres_moex_n8n"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function parseJsonb(value, fallback) {\n  if (value === null || value === undefined) return fallback;\n  if (Array.isArray(value)) return value;\n  if (typeof value === 'object') return value;\n  try {\n    return JSON.parse(value);\n  } catch (error) {\n    return fallback;\n  }\n}\n\nfunction asBool(value) {\n  return value === true || value === 'true' || value === 1 || value === '1';\n}\n\nconst row = $input.first().json || {};\nconst found = asBool(row.found);\nconst statusRequestValid = asBool(row.status_request_valid);\nconst httpStatusCode = statusRequestValid ? 200 : 400;\n\nreturn [\n  {\n    json: {\n      workflow_name: 'MOEX_ROUTE_B_STATUS_QUERY_V1_10_3',\n      spec_version: '1.10.3',\n      http_status_code: httpStatusCode,\n      status_request_valid: statusRequestValid,\n      request_identifier_kind: row.request_identifier_kind || 'missing',\n      found,\n      workflow_run_id: row.workflow_run_id || null,\n      idempotency_key: row.idempotency_key || null,\n      status: row.status || (statusRequestValid ? 'not_found' : 'bad_request'),\n      current_state: row.current_state || null,\n      repository_full_name: row.repository_full_name || null,\n      current_phase: row.current_phase || null,\n      target_branch_name: row.target_branch_name || null,\n      retry_count: row.retry_count ?? null,\n      max_retries: row.max_retries ?? null,\n      next_retry_at: row.next_retry_at || null,\n      validation_verdict: row.validation_verdict || null,\n      ci_status: row.ci_status || null,\n      pr_number: row.pr_number || null,\n      pr_ref: row.pr_ref || null,\n      github_branch_name: row.github_branch_name || null,\n      github_commit_sha: row.github_commit_sha || null,\n      github_pr_url: row.github_pr_url || null,\n      durable_evidence_ref: row.durable_evidence_ref || null,\n      pre_ci_branch_artifact_ref: row.pre_ci_branch_artifact_ref || null,\n      final_pm_l2_evidence_ref: row.final_pm_l2_evidence_ref || null,\n      fallback_route: row.fallback_route || null,\n      last_completed_step: row.last_completed_step || null,\n      error_message: row.error_message || null,\n      lock_expires_at: row.lock_expires_at || null,\n      last_heartbeat_at: row.last_heartbeat_at || null,\n      heartbeat_count: row.heartbeat_count ?? null,\n      created_at: row.created_at || null,\n      updated_at: row.updated_at || null,\n      latest_event: row.latest_event_id ? {\n        event_id: row.latest_event_id,\n        event_type: row.latest_event_type,\n        new_state: row.latest_event_state,\n        created_at: row.latest_event_created_at\n      } : null,\n      event_count: row.event_count || 0,\n      events: parseJsonb(row.events, []),\n      step_count: row.step_count || 0,\n      steps: parseJsonb(row.steps, [])\n    }\n  }\n];"
+      },
+      "id": "a88b4ca8-3ab4-4e06-8d2b-be6580432444",
+      "name": "Build Status Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ $json.http_status_code }}"
+        }
+      },
+      "id": "6dcb4137-7581-4742-aaa5-9bd04fe576ae",
+      "name": "Respond Status",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        960,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Status Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Status Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Status Request": {
+      "main": [
+        [
+          {
+            "node": "Query Workflow Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Workflow Status": {
+      "main": [
+        [
+          {
+            "node": "Build Status Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Status Response": {
+      "main": [
+        [
+          {
+            "node": "Respond Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "5d71298e-9352-4a23-84f8-7e7d155b90f0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "62875adff27fc822d942c4254bca5bd3da9a7fd81d36718bdc0f7d5d52395a15"
+  },
+  "nodeGroups": [],
+  "id": "nrl1GR41zBTDHicQ",
+  "tags": []
+}

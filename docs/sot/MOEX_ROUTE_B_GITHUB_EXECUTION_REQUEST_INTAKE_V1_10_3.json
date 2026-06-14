@@ -1,0 +1,281 @@
+{
+  "name": "MOEX_ROUTE_B_GITHUB_EXECUTION_REQUEST_INTAKE_V1_10_3",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "moex/route-b/github-execution-request",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "16dd1ca6-953d-455b-9962-c0cf238a333b",
+      "name": "Webhook - GitHub Execution Request Intake",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1120,
+        96
+      ],
+      "webhookId": "bcdbcc51-f3de-40d5-b92b-3b04e24c62ee"
+    },
+    {
+      "parameters": {
+        "jsCode": "const incoming = $input.first().json || {};\nconst body = incoming.body && typeof incoming.body === \"object\" && !Array.isArray(incoming.body) ? incoming.body : incoming;\nconst WORKFLOW_NAME = \"MOEX_ROUTE_B_GITHUB_EXECUTION_REQUEST_INTAKE_V1_10_3\";\nconst SPEC_VERSION = \"1.10.3\";\nconst EXPECTED_REPOSITORY = \"Viktoryyyyy/moex-robot\";\nconst DEFAULT_REGISTRY_PATH = \"docs/sot/context/registry.route_b.v1.yaml\";\nconst errors = [];\n\nconst isPlainObject = (value) => value !== null && typeof value === \"object\" && !Array.isArray(value);\nconst asString = (value) => value === undefined || value === null ? \"\" : String(value).trim();\nconst addError = (code, field, message) => errors.push({ code, field, message });\n\nfunction normalizeStringArray(value) {\n  if (Array.isArray(value)) {\n    return value.map((entry) => asString(entry)).filter(Boolean);\n  }\n  if (typeof value === \"string\" && value.trim()) {\n    return value.split(\",\").map((entry) => entry.trim()).filter(Boolean);\n  }\n  return [];\n}\n\nfunction validateRepoPath(path, field) {\n  const value = asString(path);\n  if (!value) {\n    addError(\"missing_path\", field, field + \" is required\");\n    return null;\n  }\n  if (value.startsWith(\"/\") || value.startsWith(\"~\") || value.includes(\"\\\\\") || value.split(\"/\").includes(\"..\")) {\n    addError(\"unsafe_repo_path\", field, \"repo path must be relative and must not contain absolute/home/backslash/dotdot markers\");\n  }\n  const normalized = value.toLowerCase();\n  const forbidden = [\"src/moex_runtime/\", \"moex_runtime/\", \"live_adapter.py\", \"/live/\", \"broker\", \"trading\", \"runtime/live\"];\n  if (forbidden.some((token) => normalized.includes(token))) {\n    addError(\"runtime_live_trading_broker_scope_forbidden\", field, \"runtime/live/broker/trading scope is forbidden\");\n  }\n  return value;\n}\n\nfunction validateRoleRef(value, defaultRoleId, defaultRefKey, defaultRefValue) {\n  if (isPlainObject(value) && isPlainObject(value.role_context_ref)) {\n    return value;\n  }\n  const result = {\n    role_context_ref: {\n      role_id: defaultRoleId,\n      role_context_version: \"v1\"\n    }\n  };\n  result[defaultRefKey] = defaultRefValue;\n  return result;\n}\n\nif (body.schema_version !== \"route_b_github_execution_request_intake.v1\") {\n  addError(\"invalid_schema_version\", \"schema_version\", \"schema_version must be route_b_github_execution_request_intake.v1\");\n}\n\nconst workflowRunId = asString(body.workflow_run_id);\nconst requestId = asString(body.request_id);\nconst repositoryFullName = asString(body.repository_full_name || EXPECTED_REPOSITORY);\nconst baseBranch = asString(body.base_branch || \"main\");\nconst baseSha = asString(body.base_sha);\nconst featureBranch = asString(body.feature_branch || body.branch_name);\n\nif (!workflowRunId) addError(\"missing_workflow_run_id\", \"workflow_run_id\", \"workflow_run_id is required\");\nif (!requestId) addError(\"missing_request_id\", \"request_id\", \"request_id is required\");\nif (repositoryFullName !== EXPECTED_REPOSITORY) addError(\"invalid_repository_full_name\", \"repository_full_name\", \"repository_full_name must be \" + EXPECTED_REPOSITORY);\nif (baseBranch !== \"main\") addError(\"base_branch_not_main\", \"base_branch\", \"base_branch must be main\");\nif (!/^[0-9a-f]{40}$/i.test(baseSha)) addError(\"invalid_base_sha\", \"base_sha\", \"base_sha must be a 40-character commit SHA\");\nif (!featureBranch) addError(\"missing_feature_branch\", \"feature_branch\", \"feature_branch is required\");\nif (featureBranch && !featureBranch.startsWith(\"n8n/\")) addError(\"branch_prefix_not_n8n\", \"feature_branch\", \"feature_branch must start with n8n/\");\nif (featureBranch && (featureBranch.includes(\"..\") || featureBranch.includes(\" \"))) addError(\"unsafe_feature_branch\", \"feature_branch\", \"feature_branch must not contain spaces or dotdot\");\n\nconst approvedFileScope = normalizeStringArray(body.approved_file_scope || body.allowed_paths);\nif (approvedFileScope.length === 0) {\n  addError(\"missing_approved_file_scope\", \"approved_file_scope\", \"approved_file_scope must be a non-empty array\");\n}\nconst approvedPaths = approvedFileScope.map((path, index) => validateRepoPath(path, \"approved_file_scope[\" + index + \"]\")).filter(Boolean);\n\nlet filePayload = body.approved_file_changes_payload;\nif (!isPlainObject(filePayload)) {\n  filePayload = { files: Array.isArray(body.file_changes) ? body.file_changes : [] };\n}\nconst files = Array.isArray(filePayload.files) ? filePayload.files : [];\nif (files.length === 0) {\n  addError(\"missing_approved_file_changes_payload\", \"approved_file_changes_payload.files\", \"approved_file_changes_payload.files must be a non-empty array\");\n}\n\nconst normalizedFiles = [];\nconst approvedSet = new Set(approvedPaths);\nfor (let index = 0; index < files.length; index++) {\n  const raw = files[index];\n  if (!isPlainObject(raw)) {\n    addError(\"invalid_file_change\", \"approved_file_changes_payload.files[\" + index + \"]\", \"file change must be an object\");\n    continue;\n  }\n  const path = validateRepoPath(raw.path, \"approved_file_changes_payload.files[\" + index + \"].path\");\n  const operation = asString(raw.operation || raw.status || \"update\").toLowerCase();\n  if ([\"delete\", \"deleted\", \"remove\", \"removed\"].includes(operation)) {\n    addError(\"deleted_file_operation_forbidden\", \"approved_file_changes_payload.files[\" + index + \"].operation\", \"delete/remove operations are forbidden\");\n  }\n  if (![\"add\", \"added\", \"create\", \"created\", \"modify\", \"modified\", \"update\", \"updated\", \"upsert\"].includes(operation)) {\n    addError(\"unsupported_file_change_operation\", \"approved_file_changes_payload.files[\" + index + \"].operation\", \"unsupported file operation\");\n  }\n  if (path && !approvedSet.has(path)) {\n    addError(\"changed_file_outside_approved_scope\", \"approved_file_changes_payload.files[\" + index + \"].path\", \"file change path is outside approved_file_scope\");\n  }\n  const hasContent = typeof raw.content === \"string\";\n  const hasBase64 = typeof raw.content_base64 === \"string\" && raw.content_base64.length > 0;\n  if (!hasContent && !hasBase64) {\n    addError(\"missing_file_content\", \"approved_file_changes_payload.files[\" + index + \"]\", \"file change must include content or content_base64\");\n  }\n  normalizedFiles.push({\n    path,\n    operation,\n    content: hasBase64 ? raw.content_base64 : raw.content,\n    encoding: hasBase64 ? \"base64\" : \"utf-8\"\n  });\n}\n\nconst changedPaths = normalizedFiles.map((file) => file.path).filter(Boolean);\nconst exactScopeRequired = body.file_scope_exact !== false;\nif (exactScopeRequired) {\n  const a = Array.from(new Set(changedPaths)).sort();\n  const b = Array.from(new Set(approvedPaths)).sort();\n  if (JSON.stringify(a) !== JSON.stringify(b)) {\n    addError(\"changed_files_do_not_match_exact_approved_scope\", \"approved_file_changes_payload.files\", \"changed files must exactly match approved_file_scope\");\n  }\n}\n\nconst pmL2RequestRef = validateRoleRef(body.pm_l2_request_ref, \"PM_L2_PHASE_OWNER\", \"request_ref\", requestId);\nconst pmL3PackageRef = validateRoleRef(body.pm_l3_package_ref, \"PM_L3_DELIVERY_VALIDATION_OWNER\", \"package_ref\", workflowRunId);\nconst pmL3Package = isPlainObject(body.pm_l3_package) ? body.pm_l3_package : (isPlainObject(body.draft_pm_l3_package) ? body.draft_pm_l3_package : null);\n\nconst authorityBoundary = {\n  merge_authority: \"PM_L2_ONLY\",\n  pm_l2_review_required: true,\n  n8n_merge_allowed: false,\n  direct_main_write_allowed: false,\n  force_push_allowed: false,\n  file_delete_allowed: false,\n  executor_merge_allowed: false,\n  ci_passed_is_not_merge_approval: true\n};\n\nconst routeBGitHubExecutionRequest = {\n  schema_version: \"route_b_github_execution_request.v1\",\n  workflow_run_id: workflowRunId,\n  request_id: requestId,\n  repository_full_name: repositoryFullName,\n  base_branch: baseBranch,\n  base_sha: baseSha,\n  approved_file_scope: approvedPaths,\n  route_b_context_registry_ref: {\n    path: DEFAULT_REGISTRY_PATH,\n    source_of_truth: \"github_repo\",\n    ref: baseSha\n    },\n  pm_l2_request_ref: pmL2RequestRef,\n  pm_l3_package_ref: pmL3PackageRef,\n  execution_scope: {\n    allowed_paths: approvedPaths,\n    approved_file_scope: approvedPaths,\n    approved_file_changes_payload: { files: normalizedFiles },\n    file_scope_exact: exactScopeRequired,\n    delete_files_allowed: false\n  },\n  branch_plan: {\n    source: \"base_sha\",\n    branch_name: featureBranch\n  },\n  pr_plan: {\n    base_branch: baseBranch,\n    head_branch: featureBranch,\n    draft: false\n  },\n  validation_requirements: {\n    github_actions_workflow: \"tests\",\n    file_scope_exact: exactScopeRequired\n  },\n  governance_flags: {\n    direct_main_write_allowed: false,\n    n8n_merge_allowed: false,\n    force_push_allowed: false,\n    file_delete_allowed: false,\n    production_runtime_allowed: false\n  },\n  rejection_rules: {\n    reject_dynamic_marker_tokens: true,\n    reject_target_role_context_ref: true,\n    reject_missing_role_context_ref: true,\n    reject_non_n8n_branch_prefix: true,\n    reject_direct_main_write: true,\n    reject_n8n_merge: true,\n    reject_force_push: true,\n    reject_file_delete: true,\n    reject_runtime_or_broker_scope: true\n  }\n};\n\nconst approvedFileChangesPayload = { files: normalizedFiles };\n\nconst eventPayload = {\n  schema_version: \"route_b_github_execution_request_intake_event.v1\",\n  workflow_name: WORKFLOW_NAME,\n  spec_version: SPEC_VERSION,\n  received_at: new Date().toISOString(),\n  workflow_run_id: workflowRunId,\n  request_id: requestId,\n  repository_full_name: repositoryFullName,\n  route_b_github_execution_request: routeBGitHubExecutionRequest,\n  approved_file_changes_payload: approvedFileChangesPayload,\n  pm_l3_package: pmL3Package,\n  authority_boundary: authorityBoundary\n};\n\nconst normalized = {\n  workflow_name: WORKFLOW_NAME,\n  spec_version: SPEC_VERSION,\n  received_at: new Date().toISOString(),\n  schema_version: body.schema_version,\n  workflow_run_id: workflowRunId,\n  request_id: requestId,\n  repository_full_name: repositoryFullName,\n  base_branch: baseBranch,\n  base_sha: baseSha,\n  feature_branch: featureBranch,\n  approved_file_scope: approvedPaths,\n  github_request_valid: errors.length === 0,\n  errors,\n  event_payload_json: eventPayload,\n  authority_boundary: authorityBoundary,\n  raw_request_body: body\n};\n\nconst wrapper = { b64: Buffer.from(JSON.stringify(normalized), \"utf8\").toString(\"base64\") };\n\nreturn [{\n  json: {\n    ...normalized,\n    pg_parameter_string: JSON.stringify(wrapper),\n    route: \"preflight\"\n  }\n}];"
+      },
+      "id": "1bf89ee3-99bc-467d-bc50-556c29bdd9c3",
+      "name": "Validate and Normalize Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -896,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH wrapper AS (\n  SELECT $1::jsonb AS w\n),\npayload AS (\n  SELECT convert_from(decode(w->>'b64', 'base64'), 'UTF8')::jsonb AS p\n  FROM wrapper\n),\nrequired_columns(table_name, column_name) AS (\n  VALUES\n    ('moex_n8n_workflow_runs', 'workflow_run_id'),\n    ('moex_n8n_workflow_runs', 'status'),\n    ('moex_n8n_workflow_runs', 'current_state'),\n    ('moex_n8n_workflow_runs', 'repository_full_name'),\n    ('moex_n8n_workflow_runs', 'current_phase'),\n    ('moex_n8n_workflow_runs', 'target_branch_name'),\n    ('moex_n8n_workflow_runs', 'error_message'),\n    ('moex_n8n_workflow_runs', 'locked_by'),\n    ('moex_n8n_workflow_runs', 'worker_execution_id'),\n    ('moex_n8n_workflow_runs', 'claim_token'),\n    ('moex_n8n_workflow_runs', 'lock_expires_at'),\n    ('moex_n8n_workflow_runs', 'last_heartbeat_at'),\n    ('moex_n8n_workflow_runs', 'updated_at'),\n    ('moex_n8n_workflow_run_events', 'event_id'),\n    ('moex_n8n_workflow_run_events', 'workflow_run_id'),\n    ('moex_n8n_workflow_run_events', 'previous_state'),\n    ('moex_n8n_workflow_run_events', 'new_state'),\n    ('moex_n8n_workflow_run_events', 'event_type'),\n    ('moex_n8n_workflow_run_events', 'event_payload_json'),\n    ('moex_n8n_workflow_run_events', 'created_at'),\n    ('moex_n8n_workflow_step_runs', 'workflow_run_id'),\n    ('moex_n8n_workflow_step_runs', 'step_name'),\n    ('moex_n8n_workflow_step_runs', 'status'),\n    ('moex_n8n_workflow_step_runs', 'input_hash'),\n    ('moex_n8n_workflow_step_runs', 'output_hash'),\n    ('moex_n8n_workflow_step_runs', 'started_at'),\n    ('moex_n8n_workflow_step_runs', 'completed_at')\n),\nmissing_columns AS (\n  SELECT COALESCE(\n    jsonb_agg(jsonb_build_object('table_name', rc.table_name, 'column_name', rc.column_name) ORDER BY rc.table_name, rc.column_name),\n    '[]'::jsonb\n  ) AS missing\n  FROM required_columns rc\n  WHERE NOT EXISTS (\n    SELECT 1\n    FROM information_schema.columns c\n    WHERE c.table_schema = current_schema()\n      AND c.table_name = rc.table_name\n      AND c.column_name = rc.column_name\n  )\n),\nrun_lookup AS (\n  SELECT\n    r.workflow_run_id,\n    r.current_state,\n    r.status,\n    r.repository_full_name\n  FROM moex_n8n_workflow_runs r\n  JOIN payload p ON r.workflow_run_id = p->>'workflow_run_id'\n  LIMIT 1\n),\ndecision AS (\n  SELECT\n    p,\n    missing,\n    to_jsonb(run_lookup) AS run_json,\n    COALESCE((p->>'github_request_valid')::boolean, false) AS request_valid,\n    CASE\n      WHEN COALESCE((p->>'github_request_valid')::boolean, false) = false THEN 400\n      WHEN jsonb_array_length(missing) > 0 THEN 400\n      WHEN run_lookup.workflow_run_id IS NULL THEN 404\n      WHEN run_lookup.repository_full_name <> p->>'repository_full_name' THEN 400\n      WHEN COALESCE(run_lookup.current_state, '') NOT IN ('ready_for_review', 'pm_l3_package_drafted', 'github_execution_retry_wait') THEN 409\n      ELSE 200\n    END AS http_status_code\n  FROM payload\n  CROSS JOIN missing_columns\n  LEFT JOIN run_lookup ON true\n),\nresponse_errors AS (\n  SELECT\n    p,\n    missing,\n    run_json,\n    request_valid,\n    http_status_code,\n    CASE\n      WHEN request_valid = false THEN COALESCE(p->'errors', '[]'::jsonb)\n      WHEN jsonb_array_length(missing) > 0 THEN COALESCE(p->'errors', '[]'::jsonb) || jsonb_build_array(jsonb_build_object('code', 'postgres_schema_missing_expected_columns', 'field', 'postgres_schema', 'message', 'expected columns are missing', 'missing_columns', missing))\n      WHEN run_json IS NULL THEN COALESCE(p->'errors', '[]'::jsonb) || jsonb_build_array(jsonb_build_object('code', 'workflow_run_not_found', 'field', 'workflow_run_id', 'message', 'workflow_run_id does not exist'))\n      WHEN (run_json->>'repository_full_name') <> p->>'repository_full_name' THEN COALESCE(p->'errors', '[]'::jsonb) || jsonb_build_array(jsonb_build_object('code', 'repository_full_name_mismatch', 'field', 'repository_full_name', 'message', 'workflow_run repository does not match request repository'))\n      WHEN COALESCE(run_json->>'current_state', '') NOT IN ('ready_for_review', 'pm_l3_package_drafted', 'github_execution_retry_wait') THEN COALESCE(p->'errors', '[]'::jsonb) || jsonb_build_array(jsonb_build_object('code', 'workflow_run_state_not_ready_for_github_execution', 'field', 'current_state', 'message', 'workflow_run current_state is not ready_for_review/pm_l3_package_drafted/github_execution_retry_wait', 'current_state', run_json->>'current_state'))\n      ELSE '[]'::jsonb\n    END AS errors\n  FROM decision\n)\nSELECT\n  http_status_code,\n  (http_status_code = 200) AS should_persist,\n  CASE WHEN http_status_code = 200 THEN 'persist' ELSE 'respond_error' END AS route,\n  p->>'workflow_run_id' AS workflow_run_id,\n  p->>'request_id' AS request_id,\n  p->>'repository_full_name' AS repository_full_name,\n  p->>'base_branch' AS base_branch,\n  p->>'base_sha' AS base_sha,\n  p->>'feature_branch' AS feature_branch,\n  (SELECT w::text FROM wrapper) AS pg_parameter_string,\n  jsonb_build_object(\n    'workflow_name', 'MOEX_ROUTE_B_GITHUB_EXECUTION_REQUEST_INTAKE_V1_10_3',\n    'spec_version', '1.10.3',\n    'http_status_code', http_status_code,\n    'accepted', false,\n    'github_request_valid', request_valid,\n    'workflow_run_id', p->>'workflow_run_id',\n    'request_id', p->>'request_id',\n    'repository_full_name', p->>'repository_full_name',\n    'base_branch', p->>'base_branch',\n    'base_sha', p->>'base_sha',\n    'feature_branch', p->>'feature_branch',\n    'status', CASE WHEN http_status_code = 404 THEN 'not_found' WHEN http_status_code = 409 THEN 'not_ready' ELSE 'invalid_request' END,\n    'current_state', NULL,\n    'current_phase', NULL,\n    'event_type', NULL,\n    'event_ref', NULL,\n    'authority_boundary', COALESCE(p->'authority_boundary', '{}'::jsonb),\n    'errors', errors\n  ) AS response\nFROM response_errors;",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "={{ $json.pg_parameter_string }}",
+          "largeNumbersOutput": "text"
+        }
+      },
+      "id": "bde03332-75d6-4aaf-925e-f5b2fc57b69f",
+      "name": "Postgres - Preflight Validate Run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -688,
+        96
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "PU85DvcSG5X2EloO",
+          "name": "postgres_moex_n8n"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $input.first().json || {};\nif (row.error) {\n  const response = {\n    workflow_name: \"MOEX_ROUTE_B_GITHUB_EXECUTION_REQUEST_INTAKE_V1_10_3\",\n    spec_version: \"1.10.3\",\n    http_status_code: 400,\n    accepted: false,\n    github_request_valid: false,\n    workflow_run_id: null,\n    request_id: null,\n    repository_full_name: null,\n    status: \"postgres_preflight_error\",\n    current_state: null,\n    current_phase: null,\n    event_type: null,\n    event_ref: null,\n    authority_boundary: {},\n    errors: [{ code: \"postgres_preflight_error\", field: \"postgres\", message: String(row.error.message || row.error) }]\n  };\n  return [{ json: { route: \"respond_error\", http_status_code: 400, response } }];\n}\n\nfunction parseMaybeJson(value, fallback) {\n  if (value === undefined || value === null) return fallback;\n  if (typeof value === \"object\") return value;\n  if (typeof value === \"string\") {\n    try { return JSON.parse(value); } catch (error) { return fallback; }\n  }\n  return fallback;\n}\n\nconst response = parseMaybeJson(row.response, {});\nconst shouldPersist = row.should_persist === true || row.should_persist === \"true\";\nreturn [{\n  json: {\n    ...row,\n    response,\n    http_status_code: Number(row.http_status_code || response.http_status_code || 400),\n    route: shouldPersist ? \"persist\" : \"respond_error\"\n  }\n}];"
+      },
+      "id": "161dbe7f-e9da-44ef-92ae-0c9747abb581",
+      "name": "Build Preflight Route",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3dc89a2c-3857-4609-a9d7-ae15809f7ed7",
+              "leftValue": "={{ $json.route }}",
+              "rightValue": "persist",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d1f53069-f84f-42fc-a607-2c5c49277301",
+      "name": "IF - Request Can Persist",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -240,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH wrapper AS (\n  SELECT $1::jsonb AS w\n),\npayload AS (\n  SELECT convert_from(decode(w->>'b64', 'base64'), 'UTF8')::jsonb AS p\n  FROM wrapper\n),\nprepared AS (\n  SELECT\n    p,\n    p->>'workflow_run_id' AS workflow_run_id,\n    p->>'request_id' AS request_id,\n    p->>'repository_full_name' AS repository_full_name,\n    p->>'base_branch' AS base_branch,\n    p->>'base_sha' AS base_sha,\n    p->>'feature_branch' AS feature_branch,\n    p->'event_payload_json' AS event_payload_json,\n    md5(p::text) AS input_hash\n  FROM payload\n),\nprior AS (\n  SELECT\n    r.workflow_run_id,\n    r.current_state AS previous_state\n  FROM moex_n8n_workflow_runs r\n  JOIN prepared pr ON r.workflow_run_id = pr.workflow_run_id\n),\nevent_insert AS (\n  INSERT INTO moex_n8n_workflow_run_events (\n    workflow_run_id,\n    previous_state,\n    new_state,\n    event_type,\n    event_payload_json,\n    created_at\n  )\n  SELECT\n    pr.workflow_run_id,\n    prior.previous_state,\n    'github_execution_requested',\n    'github_execution_requested',\n    pr.event_payload_json,\n    now()\n  FROM prepared pr\n  JOIN prior ON prior.workflow_run_id = pr.workflow_run_id\n  RETURNING event_id::text AS event_id,\n            workflow_run_id,\n            ('postgres://moex_n8n_workflow_run_events/' || event_id::text) AS event_ref\n),\nrun_update AS (\n  UPDATE moex_n8n_workflow_runs r\n  SET\n    status = 'github_execution_requested',\n    current_state = 'github_execution_requested',\n    current_phase = 'github_branch_pr_executor_requested',\n    target_branch_name = pr.feature_branch,\n    error_message = NULL,\n    locked_by = NULL,\n    worker_execution_id = NULL,\n    claim_token = NULL,\n    lock_expires_at = NULL,\n    last_heartbeat_at = NULL,\n    updated_at = now()\n  FROM prepared pr\n  JOIN event_insert ev ON ev.workflow_run_id = pr.workflow_run_id\n  WHERE r.workflow_run_id = pr.workflow_run_id\n  RETURNING r.workflow_run_id\n),\nstep_hashes AS (\n  SELECT\n    pr.workflow_run_id,\n    pr.input_hash,\n    md5((pr.p || jsonb_build_object('event_ref', ev.event_ref, 'status', 'github_execution_requested', 'current_state', 'github_execution_requested'))::text) AS output_hash\n  FROM prepared pr\n  JOIN event_insert ev ON ev.workflow_run_id = pr.workflow_run_id\n),\nstep_update AS (\n  UPDATE moex_n8n_workflow_step_runs s\n  SET\n    status = 'completed',\n    input_hash = sh.input_hash,\n    output_hash = sh.output_hash,\n    completed_at = now(),\n    updated_at = now(),\n    error_message = NULL\n  FROM step_hashes sh\n  WHERE s.workflow_run_id = sh.workflow_run_id\n    AND s.step_name = 'github_execution_request_intake'\n  RETURNING s.workflow_run_id\n),\nstep_insert AS (\n  INSERT INTO moex_n8n_workflow_step_runs (\n    workflow_run_id,\n    step_name,\n    status,\n    attempt,\n    input_hash,\n    output_hash,\n    started_at,\n    completed_at,\n    error_message,\n    created_at,\n    updated_at\n  )\n  SELECT\n    sh.workflow_run_id,\n    'github_execution_request_intake',\n    'completed',\n    1,\n    sh.input_hash,\n    sh.output_hash,\n    now(),\n    now(),\n    NULL,\n    now(),\n    now()\n  FROM step_hashes sh\n  WHERE NOT EXISTS (SELECT 1 FROM step_update su WHERE su.workflow_run_id = sh.workflow_run_id)\n  RETURNING workflow_run_id\n)\nSELECT\n  202 AS http_status_code,\n  true AS accepted,\n  jsonb_build_object(\n    'workflow_name', 'MOEX_ROUTE_B_GITHUB_EXECUTION_REQUEST_INTAKE_V1_10_3',\n    'spec_version', '1.10.3',\n    'http_status_code', 202,\n    'accepted', true,\n    'github_request_valid', true,\n    'workflow_run_id', pr.workflow_run_id,\n    'request_id', pr.request_id,\n    'repository_full_name', pr.repository_full_name,\n    'base_branch', pr.base_branch,\n    'base_sha', pr.base_sha,\n    'feature_branch', pr.feature_branch,\n    'status', 'github_execution_requested',\n    'current_state', 'github_execution_requested',\n    'current_phase', 'github_branch_pr_executor_requested',\n    'event_type', 'github_execution_requested',\n    'event_ref', ev.event_ref,\n    'authority_boundary', COALESCE(pr.p->'authority_boundary', '{}'::jsonb),\n    'errors', '[]'::jsonb\n  ) AS response\nFROM prepared pr\nJOIN event_insert ev ON ev.workflow_run_id = pr.workflow_run_id\nJOIN run_update ru ON ru.workflow_run_id = pr.workflow_run_id;",
+        "options": {
+          "queryBatching": "transaction",
+          "queryReplacement": "={{ $json.pg_parameter_string }}",
+          "largeNumbersOutput": "text"
+        }
+      },
+      "id": "859035f4-30bb-4dec-81ac-4bc0cd8a1235",
+      "name": "Postgres - Persist GitHub Execution Request",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        0
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "PU85DvcSG5X2EloO",
+          "name": "postgres_moex_n8n"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $input.first().json || {};\nconst baseResponse = {\n  workflow_name: \"MOEX_ROUTE_B_GITHUB_EXECUTION_REQUEST_INTAKE_V1_10_3\",\n  spec_version: \"1.10.3\",\n  http_status_code: 400,\n  accepted: false,\n  github_request_valid: false,\n  workflow_run_id: null,\n  request_id: null,\n  repository_full_name: null,\n  status: \"postgres_persistence_error\",\n  current_state: null,\n  current_phase: null,\n  event_type: null,\n  event_ref: null,\n  authority_boundary: {},\n  errors: []\n};\n\nif (row.error) {\n  baseResponse.errors = [{ code: \"postgres_persistence_error\", field: \"postgres\", message: String(row.error.message || row.error) }];\n  return [{ json: { http_status_code: 400, response: baseResponse } }];\n}\n\nfunction parseMaybeJson(value, fallback) {\n  if (value === undefined || value === null) return fallback;\n  if (typeof value === \"object\") return value;\n  if (typeof value === \"string\") {\n    try { return JSON.parse(value); } catch (error) { return fallback; }\n  }\n  return fallback;\n}\n\nconst response = parseMaybeJson(row.response, baseResponse);\nreturn [{ json: { http_status_code: Number(response.http_status_code || row.http_status_code || 202), response } }];"
+      },
+      "id": "6dd90989-2725-4c83-b6a3-c3fd8052511f",
+      "name": "Build Success Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response }}",
+        "options": {
+          "responseCode": "={{ $json.http_status_code }}"
+        }
+      },
+      "id": "b2696c47-969a-4420-9ffc-11fdc81edbcc",
+      "name": "Respond - Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        448,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.response }}",
+        "options": {
+          "responseCode": "={{ $json.http_status_code }}"
+        }
+      },
+      "id": "d842f7c7-6eb1-4ed1-8ac7-5a893cec683d",
+      "name": "Respond - Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        224
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - GitHub Execution Request Intake": {
+      "main": [
+        [
+          {
+            "node": "Validate and Normalize Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate and Normalize Request": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Preflight Validate Run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Preflight Validate Run": {
+      "main": [
+        [
+          {
+            "node": "Build Preflight Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Preflight Route": {
+      "main": [
+        [
+          {
+            "node": "IF - Request Can Persist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF - Request Can Persist": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Persist GitHub Execution Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond - Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Persist GitHub Execution Request": {
+      "main": [
+        [
+          {
+            "node": "Build Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Success Response": {
+      "main": [
+        [
+          {
+            "node": "Respond - Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "2178130b-d8f6-4744-9eda-348e6db1d8ea",
+  "meta": {
+    "instanceId": "62875adff27fc822d942c4254bca5bd3da9a7fd81d36718bdc0f7d5d52395a15"
+  },
+  "nodeGroups": [],
+  "id": "3D8ZYPZoOrBCz3KW",
+  "tags": []
+}

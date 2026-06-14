@@ -1,0 +1,520 @@
+{
+  "name": "MOEX_ROUTE_B_WORKER_POLLER_V1_10_3",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "function stableStringify(value) {\n  if (value === null || typeof value !== 'object') return JSON.stringify(value);\n  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';\n  return '{' + Object.keys(value).sort().map((key) => JSON.stringify(key) + ':' + stableStringify(value[key])).join(',') + '}';\n}\n\nfunction hash16(input) {\n  let h1 = 0xdeadbeef ^ input.length;\n  let h2 = 0x41c6ce57 ^ input.length;\n  for (let i = 0; i < input.length; i++) {\n    const ch = input.charCodeAt(i);\n    h1 = Math.imul(h1 ^ ch, 2654435761);\n    h2 = Math.imul(h2 ^ ch, 1597334677);\n  }\n  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);\n  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);\n  return ((h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0')).slice(0, 16);\n}\n\nfunction hash32(input) {\n  return hash16('a:' + input) + hash16('b:' + input);\n}\n\nfunction isPlainObject(value) {\n  return value !== null && typeof value === 'object' && !Array.isArray(value);\n}\n\nfunction parseJsonIfString(value, fallback) {\n  if (typeof value !== 'string') return value;\n  try {\n    return JSON.parse(value);\n  } catch (error) {\n    return fallback;\n  }\n}\n\nfunction findFirstKey(value, names, maxDepth) {\n  const wanted = new Set(names);\n  const queue = [{ value, depth: 0 }];\n  const seen = new Set();\n  while (queue.length) {\n    const item = queue.shift();\n    if (!item || item.value === null || typeof item.value !== 'object' || item.depth > maxDepth) continue;\n    if (seen.has(item.value)) continue;\n    seen.add(item.value);\n    if (Array.isArray(item.value)) {\n      for (const child of item.value) queue.push({ value: child, depth: item.depth + 1 });\n      continue;\n    }\n    for (const key of Object.keys(item.value)) {\n      if (wanted.has(key)) return item.value[key];\n    }\n    for (const key of Object.keys(item.value)) {\n      const child = item.value[key];\n      if (child !== null && typeof child === 'object') {\n        queue.push({ value: child, depth: item.depth + 1 });\n      } else if (typeof child === 'string') {\n        const trimmedChild = child.trim();\n        if (trimmedChild.startsWith('{') || trimmedChild.startsWith('[')) {\n          const parsedChild = parseJsonIfString(trimmedChild, null);\n          if (parsedChild !== null && typeof parsedChild === 'object') queue.push({ value: parsedChild, depth: item.depth + 1 });\n        }\n      }\n    }\n  }\n  return undefined;\n}\n\nfunction normalizeRefArray(value) {\n  if (typeof value === 'string') {\n    const trimmed = value.trim();\n    if (!trimmed) return [];\n    if (trimmed.startsWith('[')) {\n      const parsed = parseJsonIfString(trimmed, null);\n      if (Array.isArray(parsed)) return normalizeRefArray(parsed);\n    }\n    return trimmed.split(',').map((v) => v.trim()).filter(Boolean);\n  }\n  if (!Array.isArray(value)) return [];\n  const refs = [];\n  for (const item of value) {\n    if (typeof item === 'string' && item.trim()) refs.push(item.trim());\n    else if (isPlainObject(item)) {\n      const ref = item.ref || item.id || item.name || item.static_context_ref || item.schema_ref;\n      if (typeof ref === 'string' && ref.trim()) refs.push(ref.trim());\n    }\n  }\n  return Array.from(new Set(refs));\n}\n\nfunction normalizeRoleRef(value) {\n  if (Array.isArray(value) && value.length > 0) value = value[0];\n  if (typeof value === 'string') {\n    const trimmed = value.trim();\n    if (!trimmed) return null;\n    return { role_id: trimmed, role_context_version: 'v1' };\n  }\n  if (!isPlainObject(value)) return null;\n  const roleId = value.role_id || value.id || value.ref || value.name;\n  const version = value.role_context_version || value.version || 'v1';\n  if (typeof roleId !== 'string' || !roleId.trim()) return null;\n  if (typeof version !== 'string' || !version.trim()) return null;\n  return { role_id: roleId.trim(), role_context_version: version.trim() };\n}\n\nfunction detectFullStaticContextPaste(root) {\n  const errors = [];\n  const disallowedKeys = new Set([\n    'static_context',\n    'static_context_text',\n    'static_contexts',\n    'static_context_blob',\n    'static_context_content',\n    'full_static_context',\n    'full_static_context_text',\n    'context_paste',\n    'pasted_static_context'\n  ]);\n  const markers = [\n    'MOEX Bot — Target Architecture 2026',\n    'Status: FROZEN TARGET SPEC',\n    'Role Context Operating Model v1',\n    'КРАТКАЯ ТЕХНИЧЕСКАЯ ИНСТРУКЦИЯ ДЛЯ SUB-ЧАТОВ',\n    'GITHUB COMMIT FLOW',\n    'GitHub = Source of Truth, Server = Applied State'\n  ];\n  const queue = [{ value: root, path: '$', depth: 0 }];\n  const seen = new Set();\n  while (queue.length) {\n    const item = queue.shift();\n    if (!item || item.value === null || item.depth > 8) continue;\n    if (typeof item.value === 'string') {\n      if (item.value.length > 1500 && markers.some((marker) => item.value.includes(marker))) {\n        errors.push('full_static_context_text_pasted_at_' + item.path);\n      }\n      const trimmedValue = item.value.trim();\n      if (trimmedValue.startsWith('{') || trimmedValue.startsWith('[')) {\n        const parsedValue = parseJsonIfString(trimmedValue, null);\n        if (parsedValue !== null && typeof parsedValue === 'object') queue.push({ value: parsedValue, path: item.path + '.$parsed', depth: item.depth + 1 });\n      }\n      continue;\n    }\n    if (typeof item.value !== 'object') continue;\n    if (seen.has(item.value)) continue;\n    seen.add(item.value);\n    if (Array.isArray(item.value)) {\n      for (let i = 0; i < item.value.length; i++) queue.push({ value: item.value[i], path: item.path + '[' + i + ']', depth: item.depth + 1 });\n      continue;\n    }\n    for (const key of Object.keys(item.value)) {\n      const lowerKey = key.toLowerCase();\n      if (disallowedKeys.has(lowerKey)) errors.push('full_static_context_field_present_' + key);\n      queue.push({ value: item.value[key], path: item.path + '.' + key, depth: item.depth + 1 });\n    }\n  }\n  return Array.from(new Set(errors));\n}\n\nconst claim = $input.first().json || {};\nif (!claim.has_job) {\n  return [];\n}\n\nlet intakePayload = claim.intake_payload_json || {};\nintakePayload = parseJsonIfString(intakePayload, {});\nif (!isPlainObject(intakePayload)) intakePayload = {};\n\nconst requestRepositoryFullName = findFirstKey(intakePayload, ['repository_full_name'], 5);\nconst staticContextRefs = normalizeRefArray(findFirstKey(intakePayload, ['static_context_refs'], 5));\nconst roleContextRef = normalizeRoleRef(findFirstKey(intakePayload, ['role_context_ref'], 5));\nconst forbiddenTargetRoleContextRef = findFirstKey(intakePayload, ['target_role_context_ref'], 5);\nconst requestedSchemaRefs = normalizeRefArray(findFirstKey(intakePayload, ['schema_refs', 'required_schema_refs'], 5));\nlet dynamicHandoff = findFirstKey(intakePayload, ['dynamic_handoff'], 5);\ndynamicHandoff = parseJsonIfString(dynamicHandoff, dynamicHandoff);\n\nconst attempt = Number(claim.attempt || (Number(claim.retry_count || 0) + 1));\nconst resolverErrors = [];\n\nif (typeof requestRepositoryFullName !== 'string' || !requestRepositoryFullName.trim()) resolverErrors.push('missing_repository_full_name_in_request_payload');\nif (typeof requestRepositoryFullName === 'string' && requestRepositoryFullName.trim() !== 'Viktoryyyyy/moex-robot') resolverErrors.push('repository_full_name_not_allowed');\nif (claim.repository_full_name !== 'Viktoryyyyy/moex-robot') resolverErrors.push('claimed_repository_full_name_not_allowed');\nif (staticContextRefs.length === 0) resolverErrors.push('missing_or_empty_static_context_refs');\nif (forbiddenTargetRoleContextRef !== undefined) resolverErrors.push('target_role_context_ref_not_allowed_use_role_context_ref');\nif (!roleContextRef) resolverErrors.push('missing_or_invalid_role_context_ref');\nif (roleContextRef && roleContextRef.role_id !== 'PM_L3_DELIVERY_VALIDATION_OWNER') resolverErrors.push('role_context_ref_must_be_PM_L3_DELIVERY_VALIDATION_OWNER');\nif (!isPlainObject(dynamicHandoff)) resolverErrors.push('missing_or_invalid_dynamic_handoff');\nfor (const ref of staticContextRefs) {\n  if (!/^[A-Za-z0-9_.-]+$/.test(ref)) resolverErrors.push('invalid_static_context_ref_syntax_' + ref);\n}\nif (roleContextRef && !/^[A-Za-z0-9_.-]+$/.test(roleContextRef.role_id)) resolverErrors.push('invalid_role_context_ref_syntax');\nif (roleContextRef && !/^[A-Za-z0-9_.-]+$/.test(roleContextRef.role_context_version)) resolverErrors.push('invalid_role_context_version_syntax');\nfor (const error of detectFullStaticContextPaste(intakePayload)) resolverErrors.push(error);\n\nreturn [\n  {\n    json: {\n      has_job: true,\n      workflow_run_id: claim.workflow_run_id,\n      idempotency_key: claim.idempotency_key,\n      repository_full_name: claim.repository_full_name,\n      request_repository_full_name: typeof requestRepositoryFullName === 'string' ? requestRepositoryFullName.trim() : null,\n      target_branch_name: claim.target_branch_name,\n      retry_count: claim.retry_count || 0,\n      max_retries: claim.max_retries || 3,\n      attempt,\n      worker_execution_id: claim.worker_execution_id,\n      claim_token: claim.claim_token,\n      intake_payload_hash: hash32(stableStringify(intakePayload)),\n      static_context_refs: staticContextRefs,\n      role_context_ref: roleContextRef,\n      dynamic_handoff: isPlainObject(dynamicHandoff) ? dynamicHandoff : null,\n      dynamic_handoff_hash: isPlainObject(dynamicHandoff) ? hash32(stableStringify(dynamicHandoff)) : null,\n      requested_schema_refs: requestedSchemaRefs,\n      resolved_context_registry_path: 'docs/sot/context/registry.route_b.v1.yaml',\n      resolved_context_registry_ref: 'main',\n      context_resolver_errors: resolverErrors\n    }\n  }\n];"
+      },
+      "id": "c7938191-62fb-4429-a5a9-81c8b259060d",
+      "name": "Prepare Context Resolver Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1184,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/Viktoryyyyy/moex-robot/contents/docs/sot/context/registry.route_b.v1.yaml?ref=main",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "cf462698-4819-44d2-8504-07b7eafae7af",
+      "name": "Fetch GitHub Context Registry",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1008,
+        256
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "BIfyAXMYPYXxM6W5",
+          "name": "github_pr_comment_moex_bot"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "function stableStringify(value) {\n  if (value === null || typeof value !== 'object') return JSON.stringify(value);\n  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';\n  return '{' + Object.keys(value).sort().map((key) => JSON.stringify(key) + ':' + stableStringify(value[key])).join(',') + '}';\n}\n\nfunction hash16(input) {\n  let h1 = 0xdeadbeef ^ input.length;\n  let h2 = 0x41c6ce57 ^ input.length;\n  for (let i = 0; i < input.length; i++) {\n    const ch = input.charCodeAt(i);\n    h1 = Math.imul(h1 ^ ch, 2654435761);\n    h2 = Math.imul(h2 ^ ch, 1597334677);\n  }\n  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);\n  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);\n  return ((h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0')).slice(0, 16);\n}\n\nfunction hash32(input) {\n  return hash16('a:' + input) + hash16('b:' + input);\n}\n\nfunction isPlainObject(value) {\n  return value !== null && typeof value === 'object' && !Array.isArray(value);\n}\n\nfunction decodeBase64(input) {\n  const compact = String(input || '').replace(/\\s+/g, '');\n  if (typeof Buffer !== 'undefined') {\n    return Buffer.from(compact, 'base64').toString('utf8');\n  }\n  if (typeof atob !== 'undefined') {\n    return decodeURIComponent(Array.prototype.map.call(atob(compact), function(c) {\n      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);\n    }).join(''));\n  }\n  throw new Error('base64_decoder_unavailable');\n}\n\nfunction decodeGitHubContent(response) {\n  if (!response || response.error) throw new Error('registry_cannot_be_fetched');\n  if (typeof response.content !== 'string') throw new Error('registry_response_missing_content');\n  const encoding = String(response.encoding || '').toLowerCase();\n  if (encoding && encoding !== 'base64') throw new Error('registry_response_unsupported_encoding');\n  return decodeBase64(response.content);\n}\n\nfunction stripComment(line) {\n  let inSingle = false;\n  let inDouble = false;\n  for (let i = 0; i < line.length; i++) {\n    const ch = line[i];\n    const prev = i > 0 ? line[i - 1] : '';\n    if (ch === \"'\" && !inDouble) inSingle = !inSingle;\n    else if (ch === '\"' && !inSingle && prev !== '\\\\') inDouble = !inDouble;\n    else if (ch === '#' && !inSingle && !inDouble) return line.slice(0, i);\n  }\n  return line;\n}\n\nfunction splitKeyValue(text) {\n  let inSingle = false;\n  let inDouble = false;\n  for (let i = 0; i < text.length; i++) {\n    const ch = text[i];\n    const prev = i > 0 ? text[i - 1] : '';\n    if (ch === \"'\" && !inDouble) inSingle = !inSingle;\n    else if (ch === '\"' && !inSingle && prev !== '\\\\') inDouble = !inDouble;\n    else if (ch === ':' && !inSingle && !inDouble) {\n      const rawKey = text.slice(0, i).trim();\n      const value = text.slice(i + 1).trim();\n      if (!rawKey) return null;\n      const key = rawKey.replace(/^['\"]|['\"]$/g, '');\n      return { key, value };\n    }\n  }\n  return null;\n}\n\nfunction parseScalar(value) {\n  const trimmed = value.trim();\n  if (trimmed === '') return {};\n  if ((trimmed.startsWith('\"') && trimmed.endsWith('\"')) || (trimmed.startsWith(\"'\") && trimmed.endsWith(\"'\"))) return trimmed.slice(1, -1);\n  if (trimmed === 'true') return true;\n  if (trimmed === 'false') return false;\n  if (trimmed === 'null' || trimmed === '~') return null;\n  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {\n    const inner = trimmed.slice(1, -1).trim();\n    if (!inner) return [];\n    return inner.split(',').map((part) => parseScalar(part.trim()));\n  }\n  if (/^-?\\d+(\\.\\d+)?$/.test(trimmed)) return Number(trimmed);\n  return trimmed;\n}\n\nfunction prepareYamlLines(text) {\n  const lines = [];\n  const rawLines = text.replace(/\\r\\n/g, '\\n').split('\\n');\n  for (const raw of rawLines) {\n    if (raw.includes('\\t')) throw new Error('registry_yaml_tab_indentation_not_supported');\n    const noComment = stripComment(raw).replace(/\\s+$/g, '');\n    if (!noComment.trim()) continue;\n    const indent = noComment.match(/^ */)[0].length;\n    lines.push({ indent, text: noComment.trim() });\n  }\n  return lines;\n}\n\nfunction parseYamlBlock(lines, start, indent) {\n  let i = start;\n  if (i >= lines.length || lines[i].indent < indent) return [null, i];\n  if (lines[i].indent !== indent) indent = lines[i].indent;\n  if (lines[i].text.startsWith('- ')) {\n    const arr = [];\n    while (i < lines.length && lines[i].indent === indent && lines[i].text.startsWith('- ')) {\n      const rest = lines[i].text.slice(2).trim();\n      i += 1;\n      let value;\n      if (!rest) {\n        if (i < lines.length && lines[i].indent > indent) {\n          const parsed = parseYamlBlock(lines, i, lines[i].indent);\n          value = parsed[0];\n          i = parsed[1];\n        } else value = null;\n      } else {\n        const kv = splitKeyValue(rest);\n        if (kv) {\n          const obj = {};\n          if (kv.value === '') {\n            if (i < lines.length && lines[i].indent > indent) {\n              const parsed = parseYamlBlock(lines, i, lines[i].indent);\n              obj[kv.key] = parsed[0];\n              i = parsed[1];\n            } else obj[kv.key] = {};\n          } else obj[kv.key] = parseScalar(kv.value);\n          if (i < lines.length && lines[i].indent > indent) {\n            const parsed = parseYamlBlock(lines, i, lines[i].indent);\n            if (isPlainObject(parsed[0])) Object.assign(obj, parsed[0]);\n            else if (parsed[0] !== null) obj.items = parsed[0];\n            i = parsed[1];\n          }\n          value = obj;\n        } else {\n          value = parseScalar(rest);\n          if (i < lines.length && lines[i].indent > indent) {\n            const parsed = parseYamlBlock(lines, i, lines[i].indent);\n            value = { value, children: parsed[0] };\n            i = parsed[1];\n          }\n        }\n      }\n      arr.push(value);\n    }\n    return [arr, i];\n  }\n  const obj = {};\n  while (i < lines.length && lines[i].indent === indent && !lines[i].text.startsWith('- ')) {\n    const kv = splitKeyValue(lines[i].text);\n    if (!kv) throw new Error('registry_yaml_invalid_mapping_line');\n    i += 1;\n    if (kv.value === '') {\n      if (i < lines.length && lines[i].indent > indent) {\n        const parsed = parseYamlBlock(lines, i, lines[i].indent);\n        obj[kv.key] = parsed[0];\n        i = parsed[1];\n      } else obj[kv.key] = {};\n    } else obj[kv.key] = parseScalar(kv.value);\n  }\n  return [obj, i];\n}\n\nfunction parseSimpleYaml(text) {\n  const lines = prepareYamlLines(text);\n  if (lines.length === 0) throw new Error('registry_yaml_empty');\n  const parsed = parseYamlBlock(lines, 0, lines[0].indent);\n  if (parsed[1] < lines.length) throw new Error('registry_yaml_unparsed_tail');\n  return parsed[0];\n}\n\nfunction parseRegistryText(text) {\n  const trimmed = String(text || '').trim();\n  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {\n    return JSON.parse(trimmed);\n  }\n  return parseSimpleYaml(text);\n}\n\nfunction extractPath(value) {\n  if (typeof value === 'string') return value;\n  if (!isPlainObject(value)) return null;\n  const candidates = ['path', 'repo_relative_path', 'file_path', 'file', 'document_path', 'schema_path'];\n  for (const key of candidates) {\n    if (typeof value[key] === 'string') return value[key];\n  }\n  return null;\n}\n\nfunction looksLikePath(value) {\n  return typeof value === 'string' && (value.includes('/') || /\\.(md|txt|yaml|yml|json)$/i.test(value));\n}\n\nfunction buildGenericRefMap(section) {\n  const map = {};\n  if (Array.isArray(section)) {\n    for (const item of section) {\n      if (!isPlainObject(item)) continue;\n      const ref = item.ref || item.id || item.name || item.context_ref || item.static_context_ref || item.schema_ref;\n      const path = extractPath(item);\n      if (typeof ref === 'string' && path) map[ref] = { ref, path };\n    }\n  } else if (isPlainObject(section)) {\n    for (const key of Object.keys(section)) {\n      const value = section[key];\n      const path = extractPath(value);\n      if (path) map[key] = { ref: key, path };\n      else if (looksLikePath(value)) map[key] = { ref: key, path: value };\n    }\n  }\n  return map;\n}\n\nfunction buildRoleRefMap(section) {\n  const map = {};\n  if (Array.isArray(section)) {\n    for (const item of section) {\n      if (!isPlainObject(item)) continue;\n      const roleId = item.role_id || item.ref || item.id || item.name;\n      const version = item.role_context_version || item.version || 'v1';\n      const path = extractPath(item);\n      if (typeof roleId === 'string' && typeof version === 'string' && path) map[roleId + '@' + version] = { role_id: roleId, role_context_version: version, path };\n    }\n  } else if (isPlainObject(section)) {\n    for (const roleId of Object.keys(section)) {\n      const value = section[roleId];\n      const directPath = extractPath(value);\n      if (directPath) {\n        const version = isPlainObject(value) && typeof value.version === 'string' ? value.version : 'v1';\n        map[roleId + '@' + version] = { role_id: roleId, role_context_version: version, path: directPath };\n      } else if (looksLikePath(value)) {\n        map[roleId + '@v1'] = { role_id: roleId, role_context_version: 'v1', path: value };\n      } else if (isPlainObject(value)) {\n        for (const version of Object.keys(value)) {\n          const nestedPath = extractPath(value[version]);\n          if (nestedPath) map[roleId + '@' + version] = { role_id: roleId, role_context_version: version, path: nestedPath };\n          else if (looksLikePath(value[version])) map[roleId + '@' + version] = { role_id: roleId, role_context_version: version, path: value[version] };\n        }\n      }\n    }\n  }\n  return map;\n}\n\nfunction collectPathValues(value, out, path) {\n  if (Array.isArray(value)) {\n    for (let i = 0; i < value.length; i++) collectPathValues(value[i], out, path + '[' + i + ']');\n    return;\n  }\n  if (!isPlainObject(value)) return;\n  for (const key of Object.keys(value)) {\n    const child = value[key];\n    const childPath = path + '.' + key;\n    if (typeof child === 'string' && (key.toLowerCase().includes('path') || key.toLowerCase() === 'file' || looksLikePath(child))) out.push({ path: child, source: childPath });\n    else collectPathValues(child, out, childPath);\n  }\n}\n\nfunction validateRepoPath(path, label) {\n  const errors = [];\n  if (typeof path !== 'string' || !path.trim()) {\n    errors.push(label + '_path_missing');\n    return errors;\n  }\n  const p = path.trim();\n  if (p.startsWith('/') || p.startsWith('~') || /^[A-Za-z]:[\\\\/]/.test(p)) errors.push(label + '_path_absolute_or_home');\n  if (p.includes('..')) errors.push(label + '_path_contains_dotdot');\n  if (p.includes('\\\\')) errors.push(label + '_path_contains_backslash');\n  if (/^[a-z]+:\\/\\//i.test(p)) errors.push(label + '_path_contains_url_scheme');\n  return errors;\n}\n\nfunction findForbiddenResolverMarkers(value, out, path) {\n  if (typeof value === 'string') {\n    const lower = value.toLowerCase();\n    for (const marker of ['latest', 'current', 'autodetect']) {\n      if (new RegExp('(^|[^a-z0-9_])' + marker + '([^a-z0-9_]|$)').test(lower)) out.push('registry_value_contains_forbidden_resolver_marker_' + marker + '_at_' + path);\n    }\n    return;\n  }\n  if (Array.isArray(value)) {\n    for (let i = 0; i < value.length; i++) findForbiddenResolverMarkers(value[i], out, path + '[' + i + ']');\n    return;\n  }\n  if (isPlainObject(value)) {\n    for (const key of Object.keys(value)) findForbiddenResolverMarkers(value[key], out, path + '.' + key);\n  }\n}\n\nfunction encodeRepoPath(path) {\n  return path.split('/').map((part) => encodeURIComponent(part)).join('/');\n}\n\nfunction firstNonEmptyObjectValue(object, keys) {\n  for (const key of keys) {\n    if (object && Object.prototype.hasOwnProperty.call(object, key)) return object[key];\n  }\n  return undefined;\n}\n\nconst resolverInput = $('Prepare Context Resolver Input').item.json || {};\nconst registryResponse = $input.first().json || {};\nconst errors = [...(resolverInput.context_resolver_errors || [])];\nlet registryText = '';\nlet registry = null;\nlet staticMap = {};\nlet roleMap = {};\nlet schemaMap = {};\n\ntry {\n  registryText = decodeGitHubContent(registryResponse);\n} catch (error) {\n  errors.push(error.message || 'registry_cannot_be_fetched');\n}\n\nif (registryText) {\n  try {\n    registry = parseRegistryText(registryText);\n  } catch (error) {\n    errors.push('registry_parse_failed:' + (error.message || 'unknown'));\n  }\n}\n\nif (registry && !isPlainObject(registry)) errors.push('registry_root_must_be_mapping');\n\nif (registry && isPlainObject(registry)) {\n  const markerErrors = [];\n  findForbiddenResolverMarkers(registry, markerErrors, '$');\n  for (const error of markerErrors) errors.push(error);\n\n  const pathValues = [];\n  collectPathValues(registry, pathValues, '$');\n  for (const item of pathValues) {\n    for (const error of validateRepoPath(item.path, 'registry_' + item.source.replace(/[^A-Za-z0-9_]+/g, '_'))) errors.push(error);\n  }\n\n  staticMap = buildGenericRefMap(firstNonEmptyObjectValue(registry, ['static_context_refs', 'static_context', 'static_refs']));\n  roleMap = buildRoleRefMap(firstNonEmptyObjectValue(registry, ['role_context_refs', 'role_contexts', 'role_refs']));\n  schemaMap = buildGenericRefMap(firstNonEmptyObjectValue(registry, ['schema_refs', 'schemas', 'schema_context_refs']));\n}\n\nconst requestedStaticRefs = resolverInput.static_context_refs || [];\nconst requestedRole = resolverInput.role_context_ref || null;\nconst requestedSchemaRefsValue = resolverInput.requested_schema_refs || [];\nconst requestedSchemaRefs = Array.isArray(requestedSchemaRefsValue) ? requestedSchemaRefsValue : [];\n\nconst resolvedStaticEntries = [];\nfor (const ref of requestedStaticRefs) {\n  if (!staticMap[ref]) errors.push('unknown_static_context_ref_' + ref);\n  else {\n    for (const error of validateRepoPath(staticMap[ref].path, 'static_context_ref_' + ref)) errors.push(error);\n    resolvedStaticEntries.push({ ref, path: staticMap[ref].path });\n  }\n}\n\nlet resolvedRoleEntry = null;\nif (requestedRole) {\n  const roleKey = requestedRole.role_id + '@' + requestedRole.role_context_version;\n  resolvedRoleEntry = roleMap[roleKey] || roleMap[requestedRole.role_id + '@v1'] || null;\n  if (!resolvedRoleEntry) errors.push('unknown_role_context_ref_' + roleKey);\n  else {\n    for (const error of validateRepoPath(resolvedRoleEntry.path, 'role_context_ref_' + roleKey)) errors.push(error);\n  }\n}\n\nlet selectedSchemaRefs = [];\nif (requestedSchemaRefs.length > 0) {\n  selectedSchemaRefs = requestedSchemaRefs;\n  for (const ref of selectedSchemaRefs) {\n    if (!schemaMap[ref]) errors.push('unknown_schema_ref_' + ref);\n  }\n} else {\n  const schemaKeywords = ['pm_l2', 'pm-l2', 'pml2', 'pm_l3', 'pm-l3', 'pml3', 'subchat', 'sub_chat', 'task_package', 'package_generation', 'route_b'];\n  selectedSchemaRefs = Object.keys(schemaMap).filter((ref) => {\n    const haystack = (ref + ' ' + schemaMap[ref].path).toLowerCase();\n    return schemaKeywords.some((keyword) => haystack.includes(keyword));\n  });\n  if (selectedSchemaRefs.length === 0 && Object.keys(schemaMap).length > 0 && Object.keys(schemaMap).length <= 5) selectedSchemaRefs = Object.keys(schemaMap);\n}\nselectedSchemaRefs = Array.from(new Set(selectedSchemaRefs));\nif (selectedSchemaRefs.length === 0) errors.push('no_required_schema_refs_resolved');\n\nconst resolvedSchemaEntries = [];\nfor (const ref of selectedSchemaRefs) {\n  if (schemaMap[ref]) {\n    for (const error of validateRepoPath(schemaMap[ref].path, 'schema_ref_' + ref)) errors.push(error);\n    resolvedSchemaEntries.push({ ref, path: schemaMap[ref].path });\n  }\n}\n\nif (errors.length > 0) {\n  return [\n    {\n      json: {\n        ...resolverInput,\n        should_fetch_context_files: false,\n        context_resolver_status: 'failed',\n        context_resolver_errors: Array.from(new Set(errors)),\n        registry_text_hash: registryText ? hash32(registryText) : null,\n        registry_static_context_refs_available: Object.keys(staticMap),\n        registry_role_context_refs_available: Object.keys(roleMap),\n        registry_schema_refs_available: Object.keys(schemaMap),\n        resolved_context_refs: resolvedStaticEntries.map((entry) => entry.ref),\n        resolved_role_context_ref: requestedRole,\n        resolved_schema_refs: resolvedSchemaEntries.map((entry) => entry.ref),\n        context_hash: null\n      }\n    }\n  ];\n}\n\nconst common = {\n  ...resolverInput,\n  context_resolver_errors: [],\n  context_resolver_status: 'fetching_context_files',\n  registry_text_hash: hash32(registryText),\n  registry_static_context_refs_available: Object.keys(staticMap),\n  registry_role_context_refs_available: Object.keys(roleMap),\n  registry_schema_refs_available: Object.keys(schemaMap),\n  resolved_context_refs: resolvedStaticEntries.map((entry) => entry.ref),\n  resolved_role_context_ref: requestedRole,\n  resolved_schema_refs: resolvedSchemaEntries.map((entry) => entry.ref),\n  resolved_static_entries: resolvedStaticEntries,\n  resolved_role_entry: resolvedRoleEntry,\n  resolved_schema_entries: resolvedSchemaEntries\n};\n\nconst fetchEntries = [];\nfor (const entry of resolvedStaticEntries) fetchEntries.push({ fetch_kind: 'static_context', ref: entry.ref, path: entry.path });\nfetchEntries.push({ fetch_kind: 'role_context', ref: requestedRole.role_id + '@' + requestedRole.role_context_version, path: resolvedRoleEntry.path });\nfor (const entry of resolvedSchemaEntries) fetchEntries.push({ fetch_kind: 'schema', ref: entry.ref, path: entry.path });\n\nreturn fetchEntries.map((entry, index) => ({\n  json: {\n    ...common,\n    should_fetch_context_files: true,\n    fetch_index: index,\n    fetch_kind: entry.fetch_kind,\n    fetch_ref: entry.ref,\n    fetch_path: entry.path,\n    github_api_url: 'https://api.github.com/repos/Viktoryyyyy/moex-robot/contents/' + encodeRepoPath(entry.path) + '?ref=main'\n  }\n}));"
+      },
+      "id": "220ed018-5e84-41fa-8525-949ed6da0d87",
+      "name": "Parse Context Registry and Build Fetch Requests",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -768,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "40cae4ea-fbea-4786-9a8a-39316d6c6577",
+              "leftValue": "={{ $json.should_fetch_context_files }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "20579ffa-908a-44f0-ac54-f72f18a90a0e",
+      "name": "Context Files Needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -576,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.github_api_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "579c4f51-0e8c-47c0-9e7c-386f146ea1b4",
+      "name": "Fetch GitHub Context File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -336,
+        240
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "BIfyAXMYPYXxM6W5",
+          "name": "github_pr_comment_moex_bot"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "function stableStringify(value) {\n  if (value === null || typeof value !== 'object') return JSON.stringify(value);\n  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';\n  return '{' + Object.keys(value).sort().map((key) => JSON.stringify(key) + ':' + stableStringify(value[key])).join(',') + '}';\n}\n\nfunction hash16(input) {\n  let h1 = 0xdeadbeef ^ input.length;\n  let h2 = 0x41c6ce57 ^ input.length;\n  for (let i = 0; i < input.length; i++) {\n    const ch = input.charCodeAt(i);\n    h1 = Math.imul(h1 ^ ch, 2654435761);\n    h2 = Math.imul(h2 ^ ch, 1597334677);\n  }\n  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);\n  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);\n  return ((h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0')).slice(0, 16);\n}\n\nfunction hash32(input) {\n  return hash16('a:' + input) + hash16('b:' + input);\n}\n\nfunction decodeBase64(input) {\n  const compact = String(input || '').replace(/\\s+/g, '');\n  if (typeof Buffer !== 'undefined') {\n    return Buffer.from(compact, 'base64').toString('utf8');\n  }\n  if (typeof atob !== 'undefined') {\n    return decodeURIComponent(Array.prototype.map.call(atob(compact), function(c) {\n      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);\n    }).join(''));\n  }\n  throw new Error('base64_decoder_unavailable');\n}\n\nfunction decodeGitHubContent(response, label) {\n  if (!response || response.error) throw new Error(label + '_fetch_failed');\n  if (typeof response.content !== 'string') throw new Error(label + '_response_missing_content');\n  const encoding = String(response.encoding || '').toLowerCase();\n  if (encoding && encoding !== 'base64') throw new Error(label + '_response_unsupported_encoding');\n  return decodeBase64(response.content);\n}\n\nconst requestItems = $('Parse Context Registry and Build Fetch Requests').all().map((item) => item.json).filter((item) => item.should_fetch_context_files);\nconst responseItems = $input.all().map((item) => item.json);\nconst base = requestItems.length > 0 ? requestItems[0] : {};\nconst errors = [...(base.context_resolver_errors || [])];\nconst staticDocs = [];\nconst schemaDocs = [];\nlet roleDoc = null;\n\nif (requestItems.length !== responseItems.length) errors.push('context_file_fetch_response_count_mismatch');\n\nconst count = Math.min(requestItems.length, responseItems.length);\nfor (let i = 0; i < count; i++) {\n  const request = requestItems[i];\n  const response = responseItems[i] || {};\n  try {\n    const content = decodeGitHubContent(response, request.fetch_kind + '_' + request.fetch_ref);\n    const doc = {\n      ref: request.fetch_ref,\n      path: request.fetch_path,\n      sha: typeof response.sha === 'string' ? response.sha : null,\n      content_hash: hash32(content),\n      content\n    };\n    if (request.fetch_kind === 'static_context') staticDocs.push(doc);\n    else if (request.fetch_kind === 'role_context') roleDoc = doc;\n    else if (request.fetch_kind === 'schema') schemaDocs.push(doc);\n  } catch (error) {\n    errors.push(error.message || ('context_file_fetch_failed_' + request.fetch_ref));\n  }\n}\n\nif (staticDocs.length !== (base.resolved_context_refs || []).length) errors.push('not_all_static_context_files_resolved');\nif (!roleDoc) errors.push('role_context_file_not_resolved');\nif (schemaDocs.length !== (base.resolved_schema_refs || []).length) errors.push('not_all_schema_files_resolved');\n\nconst evidenceDocs = {\n  registry_path: base.resolved_context_registry_path,\n  registry_ref: base.resolved_context_registry_ref,\n  registry_text_hash: base.registry_text_hash || null,\n  static_context_docs: staticDocs.map((doc) => ({ ref: doc.ref, path: doc.path, sha: doc.sha, content_hash: doc.content_hash })),\n  role_context_doc: roleDoc ? { ref: roleDoc.ref, path: roleDoc.path, sha: roleDoc.sha, content_hash: roleDoc.content_hash } : null,\n  schema_docs: schemaDocs.map((doc) => ({ ref: doc.ref, path: doc.path, sha: doc.sha, content_hash: doc.content_hash })),\n  dynamic_handoff_hash: base.dynamic_handoff_hash || null\n};\nconst contextHash = errors.length === 0 ? hash32(stableStringify(evidenceDocs)) : null;\n\nreturn [\n  {\n    json: {\n      ...base,\n      context_resolver_status: errors.length === 0 ? 'resolved' : 'failed',\n      context_resolver_errors: Array.from(new Set(errors)),\n      resolved_static_context_docs: staticDocs,\n      resolved_role_context_doc: roleDoc,\n      resolved_schema_docs: schemaDocs,\n      resolved_context_refs: base.resolved_context_refs || [],\n      resolved_role_context_ref: base.resolved_role_context_ref || null,\n      resolved_schema_refs: base.resolved_schema_refs || [],\n      context_hash: contextHash,\n      context_evidence: evidenceDocs\n    }\n  }\n];"
+      },
+      "id": "8c3e15be-9da5-4014-9eb3-61e635e2b08b",
+      "name": "Assemble Resolved Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e1bf45c4-7247-4c7a-b150-7e7ec26ddc1e",
+              "leftValue": "={{ $json.context_resolver_status }}",
+              "rightValue": "resolved",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0e013f75-a2ec-44e3-ada6-274fcd71113a",
+      "name": "Context Resolver Passed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        48,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function stableStringify(value) {\n  if (value === null || typeof value !== 'object') return JSON.stringify(value);\n  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';\n  return '{' + Object.keys(value).sort().map((key) => JSON.stringify(key) + ':' + stableStringify(value[key])).join(',') + '}';\n}\n\nfunction hash16(input) {\n  let h1 = 0xdeadbeef ^ input.length;\n  let h2 = 0x41c6ce57 ^ input.length;\n  for (let i = 0; i < input.length; i++) {\n    const ch = input.charCodeAt(i);\n    h1 = Math.imul(h1 ^ ch, 2654435761);\n    h2 = Math.imul(h2 ^ ch, 1597334677);\n  }\n  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);\n  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);\n  return ((h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0')).slice(0, 16);\n}\n\nfunction hash32(input) {\n  return hash16('a:' + input) + hash16('b:' + input);\n}\n\nconst context = $input.first().json || {};\nconst retryCount = Number(context.retry_count || 0);\nconst maxRetries = Number(context.max_retries || 3);\nconst attempt = Number(context.attempt || (retryCount + 1));\nconst nextRetryCount = retryCount + 1;\nconst canRetry = nextRetryCount < maxRetries;\nconst delayMinutes = Math.min(30, 5 * Math.pow(2, Math.max(0, nextRetryCount - 1)));\nconst nextRetryAt = new Date(Date.now() + delayMinutes * 60 * 1000).toISOString();\nconst errors = Array.isArray(context.context_resolver_errors) && context.context_resolver_errors.length > 0 ? context.context_resolver_errors : ['context_resolver_failed_closed'];\n\nlet runStatus;\nlet currentState;\nlet currentPhase;\nlet eventType;\nlet stepStatus;\nlet nextRetryValue = null;\nlet fallbackRoute = null;\n\nif (canRetry) {\n  runStatus = 'retry_wait';\n  currentState = 'retry_wait';\n  currentPhase = 'context_resolver_retry_wait';\n  eventType = 'worker_failed_retry';\n  stepStatus = 'failed_retryable';\n  nextRetryValue = nextRetryAt;\n} else {\n  runStatus = 'failed';\n  currentState = 'failed';\n  currentPhase = 'manual_review_required';\n  eventType = 'worker_failed_final';\n  stepStatus = 'failed_final';\n  fallbackRoute = 'manual_pm_l3_review';\n}\n\nconst outputPayload = {\n  workflow_name: 'MOEX_ROUTE_B_WORKER_POLLER_V1_10_3',\n  spec_version: '1.10.3',\n  workflow_run_id: context.workflow_run_id,\n  repository_full_name: context.repository_full_name,\n  attempt,\n  validation_passed: false,\n  validation_errors: errors,\n  llm_output: null,\n  raw_content_hash: null,\n  action_type: null,\n  resolved_context_registry_path: context.resolved_context_registry_path || 'docs/sot/context/registry.route_b.v1.yaml',\n  resolved_context_registry_ref: context.resolved_context_registry_ref || 'main',\n  resolved_context_refs: context.resolved_context_refs || context.static_context_refs || [],\n  resolved_role_context_ref: context.resolved_role_context_ref || context.role_context_ref || null,\n  resolved_schema_refs: context.resolved_schema_refs || [],\n  context_hash: context.context_hash || null,\n  context_resolver_status: 'failed',\n  context_resolver_errors: errors,\n  context_evidence: context.context_evidence || null,\n  dynamic_handoff_hash: context.dynamic_handoff_hash || null,\n  failed_before_ollama: true\n};\n\nreturn [\n  {\n    json: {\n      workflow_run_id: context.workflow_run_id,\n      repository_full_name: context.repository_full_name,\n      target_branch_name: context.target_branch_name,\n      worker_execution_id: context.worker_execution_id,\n      claim_token: context.claim_token,\n      attempt,\n      status: runStatus,\n      current_state: currentState,\n      current_phase: currentPhase,\n      validation_verdict: 'failed_context_resolver',\n      event_type: eventType,\n      step_status: stepStatus,\n      error_message: errors.join(';'),\n      next_retry_at: nextRetryValue,\n      fallback_route: fallbackRoute,\n      durable_evidence_ref: null,\n      increment_retry: true,\n      output_hash: hash32(stableStringify(outputPayload)),\n      event_payload_json: JSON.stringify(outputPayload)\n    }\n  }\n];"
+      },
+      "id": "b17964bf-50d7-4f9d-b890-117b329b4d6e",
+      "name": "Build Resolver Failure Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "c3e47876-82b6-4aaa-8d22-d454d399a68c",
+      "name": "Worker Schedule1",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1808,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function hash16(input) {\n  let h1 = 0xdeadbeef ^ input.length;\n  let h2 = 0x41c6ce57 ^ input.length;\n  for (let i = 0; i < input.length; i++) {\n    const ch = input.charCodeAt(i);\n    h1 = Math.imul(h1 ^ ch, 2654435761);\n    h2 = Math.imul(h2 ^ ch, 1597334677);\n  }\n  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);\n  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);\n  return ((h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0')).slice(0, 16);\n}\n\nfunction hash32(input) {\n  return hash16('a:' + input) + hash16('b:' + input);\n}\n\nconst executionId = String($execution.id || Date.now());\nconst startedAt = new Date().toISOString();\nconst workerExecutionId = 'n8n_worker_' + hash32('worker:' + executionId + ':' + startedAt);\nconst claimToken = 'claim_' + hash32('claim:' + workerExecutionId + ':' + startedAt);\n\nreturn [\n  {\n    json: {\n      workflow_name: 'MOEX_ROUTE_B_WORKER_POLLER_V1_10_3',\n      spec_version: '1.10.3',\n      worker_execution_id: workerExecutionId,\n      claim_token: claimToken,\n      locked_by: 'MOEX_ROUTE_B_WORKER_POLLER_V1_10_3',\n      repository_full_name: 'Viktoryyyyy/moex-robot',\n      lock_ttl_minutes: 65,\n      declared_lock_ttl_minutes: 30,\n      lock_ttl_reason: 'worker_timeout_60m_plus_5m_buffer_without_blocking_heartbeat',\n      heartbeat_interval_seconds: 300,\n      heartbeat_stale_threshold_seconds: 900,\n      worker_timeout_minutes: 60,\n      max_jobs_per_worker_execution: 1,\n      started_at: startedAt\n    }\n  }\n];"
+      },
+      "id": "8dc9bc56-074a-4f83-b922-4bacaaabed1d",
+      "name": "Build Worker Identity1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1600,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with input_json as (select $1::jsonb as p), input_data as (select p->>'worker_execution_id' as worker_execution_id, p->>'claim_token' as claim_token, p->>'locked_by' as locked_by, p->>'repository_full_name' as repository_full_name, (p->>'lock_ttl_minutes')::integer as lock_ttl_minutes from input_json), candidate as (select r.workflow_run_id from moex_n8n_workflow_runs r cross join input_data d where r.repository_full_name = d.repository_full_name and ((r.status = 'queued') or (r.status = 'retry_wait' and (r.next_retry_at is null or r.next_retry_at <= now())) or (r.status = 'processing' and r.lock_expires_at is not null and r.lock_expires_at <= now())) and coalesce(r.retry_count,0) < coalesce(r.max_retries,3) order by r.created_at asc for update skip locked limit 1), claimed as (update moex_n8n_workflow_runs r set status = 'processing', current_state = 'worker_claimed', current_phase = 'worker_poller', locked_by = d.locked_by, worker_execution_id = d.worker_execution_id, claim_token = d.claim_token, lock_expires_at = now() + make_interval(mins => d.lock_ttl_minutes), last_heartbeat_at = now(), heartbeat_count = coalesce(r.heartbeat_count,0) + 1, updated_at = now() from candidate c cross join input_data d where r.workflow_run_id = c.workflow_run_id returning r.workflow_run_id, r.idempotency_key, r.status, r.current_state, r.repository_full_name, r.current_phase, r.target_branch_name, r.retry_count, r.max_retries, r.next_retry_at, r.worker_execution_id, r.claim_token, r.lock_expires_at, r.created_at, r.updated_at), latest_intake_event as (select e.workflow_run_id, e.event_payload_json from moex_n8n_workflow_run_events e join claimed c on c.workflow_run_id = e.workflow_run_id where e.event_type = 'intake_ack' order by e.created_at desc limit 1), step_started as (insert into moex_n8n_workflow_step_runs (workflow_run_id, step_name, status, attempt, input_hash, started_at, created_at, updated_at) select c.workflow_run_id, 'worker_poller', 'started', coalesce(c.retry_count,0) + 1, c.idempotency_key, now(), now(), now() from claimed c on conflict (workflow_run_id, step_name) do update set status = excluded.status, attempt = excluded.attempt, input_hash = excluded.input_hash, started_at = excluded.started_at, updated_at = now() returning workflow_run_id), claim_event as (insert into moex_n8n_workflow_run_events (workflow_run_id, previous_state, new_state, event_type, event_payload_json, created_at) select c.workflow_run_id, null, c.current_state, 'worker_claimed', jsonb_build_object('workflow_name','MOEX_ROUTE_B_WORKER_POLLER_V1_10_3','worker_execution_id',c.worker_execution_id,'claim_token',c.claim_token,'lock_expires_at',c.lock_expires_at,'effective_lock_ttl_minutes',(select lock_ttl_minutes from input_data),'retry_count',c.retry_count,'max_retries',c.max_retries,'attempt',coalesce(c.retry_count,0) + 1), now() from claimed c returning event_id), selected_job as (select true as has_job, c.workflow_run_id, c.idempotency_key, c.status, c.current_state, c.repository_full_name, c.current_phase, c.target_branch_name, c.retry_count, c.max_retries, coalesce(c.retry_count,0) + 1 as attempt, c.next_retry_at, c.worker_execution_id, c.claim_token, c.lock_expires_at, c.created_at, c.updated_at, coalesce(l.event_payload_json,'{}'::jsonb) as intake_payload_json from claimed c left join latest_intake_event l on l.workflow_run_id = c.workflow_run_id) select * from selected_job union all select false as has_job, null::text as workflow_run_id, null::text as idempotency_key, null::text as status, null::text as current_state, null::text as repository_full_name, null::text as current_phase, null::text as target_branch_name, null::integer as retry_count, null::integer as max_retries, null::integer as attempt, null::timestamp as next_retry_at, null::text as worker_execution_id, null::text as claim_token, null::timestamp as lock_expires_at, null::timestamp as created_at, null::timestamp as updated_at, '{}'::jsonb as intake_payload_json where not exists (select 1 from claimed);",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "7a54f8a8-e1f8-4020-85c9-6d6b36e28981",
+      "name": "Claim One Queued Run1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1392,
+        256
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "PU85DvcSG5X2EloO",
+          "name": "postgres_moex_n8n"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function stableStringify(value) {\n  if (value === null || typeof value !== 'object') return JSON.stringify(value);\n  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';\n  return '{' + Object.keys(value).sort().map((key) => JSON.stringify(key) + ':' + stableStringify(value[key])).join(',') + '}';\n}\n\nfunction section(title, body) {\n  return ['----- ' + title + ' -----', body || '', '----- END ' + title + ' -----'].join('\\n');\n}\n\nconst context = $input.first().json || {};\nif (context.context_resolver_status !== 'resolved') {\n  return [];\n}\n\nconst staticContextText = (context.resolved_static_context_docs || []).map((doc) => section('STATIC_CONTEXT_REF ' + doc.ref + ' PATH ' + doc.path, doc.content)).join('\\n\\n');\nconst roleContextText = context.resolved_role_context_doc ? section('ROLE_CONTEXT_REF ' + context.resolved_role_context_doc.ref + ' PATH ' + context.resolved_role_context_doc.path, context.resolved_role_context_doc.content) : '';\nconst schemaContextText = (context.resolved_schema_docs || []).map((doc) => section('SCHEMA_REF ' + doc.ref + ' PATH ' + doc.path, doc.content)).join('\\n\\n');\n\nconst outputConstants = {\n  workflow_run_id: context.workflow_run_id,\n  repository_full_name: context.repository_full_name,\n  route_b_worker_output_version: '1.10.3'\n};\n\nconst systemPrompt = [\n  'You are PM_L3_DELIVERY_VALIDATION_OWNER for MOEX Bot Route B.',\n  'You convert one PM L2 dynamic handoff into one executable sub-chat task package.',\n  'Return strict JSON only. No markdown. No code fences. Do not wrap JSON in quotes.',\n  'Use only the resolved static context, resolved PM L3 role context, resolved schema docs, output constants, and dynamic_handoff supplied in this request.',\n  'Do not use prior memory, external assumptions, repository paths not supplied by the resolved registry, or full context pasted by the user.',\n  'Allowed actions: draft_pm_l3_package, return_json_candidate, propose_file_changes.',\n  'Forbidden: delete_files, file_delete, choose_branch, widen_scope, write_to_github, direct_main_write, force_push, access_credentials, broker/live/runtime activation.',\n  'Do not choose or change branch names. The workflow has already generated any branch metadata outside your output.',\n  'All output is untrusted and will be deterministically validated.'\n].join(' ');\n\nconst userPrompt = [\n  'Prepare a narrow PM L3 draft package for this queued Route B run.',\n  'The package must be suitable for routing to exactly one implementation or validation sub-chat and must preserve the PM L2 approved scope.',\n  'Return a single raw JSON object with exactly these top-level fields and no others:',\n  'route_b_worker_output_version, workflow_run_id, action_type, repository_full_name, summary, draft_pm_l3_package, proposed_file_changes, forbidden_actions_acknowledged.',\n  'route_b_worker_output_version must be \"1.10.3\".',\n  'workflow_run_id and repository_full_name must exactly match output_constants.',\n  'summary must be a non-empty string.',\n  'draft_pm_l3_package must be a JSON object and must follow the resolved schema docs where applicable.',\n  'proposed_file_changes must be an array and may be empty.',\n  'forbidden_actions_acknowledged must be true.',\n  'action_type must be draft_pm_l3_package unless the dynamic_handoff explicitly requires return_json_candidate or propose_file_changes.',\n  section('OUTPUT_CONSTANTS', stableStringify(outputConstants)),\n  section('RESOLVED_STATIC_CONTEXT', staticContextText),\n  section('RESOLVED_PM_L3_ROLE_CONTEXT', roleContextText),\n  section('RESOLVED_SCHEMA_DOCS', schemaContextText),\n  section('DYNAMIC_HANDOFF_ONLY', stableStringify(context.dynamic_handoff || {}))\n].join('\\n');\n\nconst ollamaRequest = {\n  model: 'gpt-oss:120b',\n  stream: false,\n  options: {\n    temperature: 0.1\n  },\n  messages: [\n    {\n      role: 'system',\n      content: systemPrompt\n    },\n    {\n      role: 'user',\n      content: userPrompt\n    }\n  ]\n};\n\nreturn [\n  {\n    json: {\n      has_job: true,\n      workflow_run_id: context.workflow_run_id,\n      idempotency_key: context.idempotency_key,\n      repository_full_name: context.repository_full_name,\n      target_branch_name: context.target_branch_name,\n      retry_count: context.retry_count || 0,\n      max_retries: context.max_retries || 3,\n      attempt: context.attempt,\n      worker_execution_id: context.worker_execution_id,\n      claim_token: context.claim_token,\n      dynamic_handoff_hash: context.dynamic_handoff_hash || null,\n      resolved_context_registry_path: context.resolved_context_registry_path,\n      resolved_context_registry_ref: context.resolved_context_registry_ref,\n      resolved_context_refs: context.resolved_context_refs || [],\n      resolved_role_context_ref: context.resolved_role_context_ref || null,\n      resolved_schema_refs: context.resolved_schema_refs || [],\n      context_hash: context.context_hash || null,\n      context_resolver_status: context.context_resolver_status,\n      context_resolver_errors: context.context_resolver_errors || [],\n      context_evidence: context.context_evidence || null,\n      ollama_request: ollamaRequest\n    }\n  }\n];"
+      },
+      "id": "84de09f7-6ae7-4bef-841a-0a76e88e9d85",
+      "name": "Build LLM Request1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ollama.com/api/chat",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.ollama_request }}",
+        "options": {
+          "timeout": 3600000
+        }
+      },
+      "id": "acbb8298-355d-423f-ba55-81d766bb9976",
+      "name": "Ollama Cloud Chat1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        224
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "eOtWfyYnLub48M1p",
+          "name": "ollama_cloud_moex_route_b"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "function stableStringify(value) {\n  if (value === null || typeof value !== 'object') return JSON.stringify(value);\n  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';\n  return '{' + Object.keys(value).sort().map((key) => JSON.stringify(key) + ':' + stableStringify(value[key])).join(',') + '}';\n}\n\nfunction hash16(input) {\n  let h1 = 0xdeadbeef ^ input.length;\n  let h2 = 0x41c6ce57 ^ input.length;\n  for (let i = 0; i < input.length; i++) {\n    const ch = input.charCodeAt(i);\n    h1 = Math.imul(h1 ^ ch, 2654435761);\n    h2 = Math.imul(h2 ^ ch, 1597334677);\n  }\n  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);\n  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);\n  return ((h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0')).slice(0, 16);\n}\n\nfunction hash32(input) {\n  return hash16('a:' + input) + hash16('b:' + input);\n}\n\nfunction isPlainObject(value) {\n  return value !== null && typeof value === 'object' && !Array.isArray(value);\n}\n\nfunction fail(message) {\n  validationErrors.push(message);\n}\n\nconst context = $('Build LLM Request1').item.json || {};\nconst response = $input.first().json || {};\nconst validationErrors = [];\nlet content = '';\n\nif (response.error) {\n  fail('ollama_http_error');\n} else if (response.message && typeof response.message.content === 'string') {\n  content = response.message.content.trim();\n} else if (typeof response.response === 'string') {\n  content = response.response.trim();\n} else {\n  fail('missing_ollama_message_content');\n}\n\nlet parsed = null;\nif (content) {\n  if (content.startsWith('```') || content.endsWith('```')) {\n    fail('markdown_code_fence_not_allowed');\n  } else {\n    try {\n      parsed = JSON.parse(content);\n    } catch (error) {\n      fail('llm_output_not_valid_json');\n    }\n  }\n}\n\nif (parsed && !isPlainObject(parsed)) {\n  fail('llm_output_must_be_json_object');\n}\n\nconst expectedTopLevelFields = [\n  'route_b_worker_output_version',\n  'workflow_run_id',\n  'action_type',\n  'repository_full_name',\n  'summary',\n  'draft_pm_l3_package',\n  'proposed_file_changes',\n  'forbidden_actions_acknowledged'\n];\nconst allowedActions = ['draft_pm_l3_package', 'return_json_candidate', 'propose_file_changes'];\nconst forbiddenTerms = ['delete_files','file_delete','choose_branch','widen_scope','write_to_github','direct_main_write','force_push','access_credentials','broker_integration','runtime_live_allowed'];\nconst parsedText = parsed ? stableStringify(parsed).toLowerCase() : '';\n\nif (parsed && isPlainObject(parsed)) {\n  const actualFields = Object.keys(parsed).sort();\n  const expectedFields = [...expectedTopLevelFields].sort();\n  if (stableStringify(actualFields) !== stableStringify(expectedFields)) fail('top_level_fields_not_exact');\n  if (parsed.route_b_worker_output_version !== '1.10.3') fail('missing_or_invalid_route_b_worker_output_version');\n  if (parsed.workflow_run_id !== context.workflow_run_id) fail('workflow_run_id_mismatch');\n  if (parsed.repository_full_name !== context.repository_full_name) fail('repository_full_name_mismatch');\n  if (!allowedActions.includes(parsed.action_type)) fail('invalid_action_type');\n  if (typeof parsed.summary !== 'string' || parsed.summary.trim().length === 0) fail('summary_must_be_non_empty_string');\n  if (!isPlainObject(parsed.draft_pm_l3_package)) fail('draft_pm_l3_package_must_be_object');\n  if (!Array.isArray(parsed.proposed_file_changes)) fail('proposed_file_changes_must_be_array');\n  if (parsed.forbidden_actions_acknowledged !== true) fail('forbidden_actions_acknowledged_must_be_true');\n  if (Object.prototype.hasOwnProperty.call(parsed, 'target_branch_name') || Object.prototype.hasOwnProperty.call(parsed, 'github_branch_name')) fail('llm_must_not_choose_branch');\n\n  if (Array.isArray(parsed.proposed_file_changes)) {\n    for (let i = 0; i < parsed.proposed_file_changes.length; i++) {\n      const change = parsed.proposed_file_changes[i];\n      if (!isPlainObject(change)) {\n        fail('proposed_file_change_must_be_object_' + i);\n        continue;\n      }\n      const changeText = stableStringify(change).toLowerCase();\n      if (changeText.includes('delete') || changeText.includes('remove') || changeText.includes('unlink') || changeText.includes('force_push') || changeText.includes('direct_main_write')) {\n        fail('proposed_file_change_forbidden_operation_' + i);\n      }\n    }\n  }\n\n  for (const term of forbiddenTerms) {\n    if (parsedText.includes(term)) fail('forbidden_term_detected_' + term);\n  }\n}\n\nconst isValid = validationErrors.length === 0;\nconst retryCount = Number(context.retry_count || 0);\nconst maxRetries = Number(context.max_retries || 3);\nconst attempt = Number(context.attempt || (retryCount + 1));\nconst nextRetryCount = retryCount + 1;\nconst canRetry = nextRetryCount < maxRetries;\nconst delayMinutes = Math.min(30, 5 * Math.pow(2, Math.max(0, nextRetryCount - 1)));\nconst nextRetryAt = new Date(Date.now() + delayMinutes * 60 * 1000).toISOString();\n\nlet runStatus;\nlet currentState;\nlet currentPhase;\nlet validationVerdict;\nlet eventType;\nlet stepStatus;\nlet errorMessage = null;\nlet nextRetryValue = null;\nlet fallbackRoute = null;\nlet durableEvidenceRef = null;\nlet incrementRetry = false;\n\nif (isValid) {\n  runStatus = 'ready_for_review';\n  currentState = 'ready_for_review';\n  currentPhase = 'pm_l3_package_drafted';\n  validationVerdict = 'passed_deterministic_validation';\n  eventType = 'worker_completed';\n  stepStatus = 'completed';\n  durableEvidenceRef = 'postgres:moex_n8n_workflow_run_events:' + context.workflow_run_id + ':worker_completed';\n} else if (canRetry) {\n  runStatus = 'retry_wait';\n  currentState = 'retry_wait';\n  currentPhase = 'worker_retry_wait';\n  validationVerdict = 'failed_deterministic_validation';\n  eventType = 'worker_failed_retry';\n  stepStatus = 'failed_retryable';\n  errorMessage = validationErrors.join(';');\n  nextRetryValue = nextRetryAt;\n  incrementRetry = true;\n} else {\n  runStatus = 'failed';\n  currentState = 'failed';\n  currentPhase = 'manual_review_required';\n  validationVerdict = 'failed_deterministic_validation';\n  eventType = 'worker_failed_final';\n  stepStatus = 'failed_final';\n  errorMessage = validationErrors.join(';');\n  fallbackRoute = 'manual_pm_l3_review';\n  incrementRetry = true;\n}\n\nconst outputPayload = {\n  workflow_name: 'MOEX_ROUTE_B_WORKER_POLLER_V1_10_3',\n  spec_version: '1.10.3',\n  workflow_run_id: context.workflow_run_id,\n  repository_full_name: context.repository_full_name,\n  attempt,\n  validation_passed: isValid,\n  validation_errors: validationErrors,\n  llm_output: parsed,\n  raw_content_hash: hash32(content || ''),\n  action_type: parsed && parsed.action_type ? parsed.action_type : null,\n  resolved_context_registry_path: context.resolved_context_registry_path || null,\n  resolved_context_registry_ref: context.resolved_context_registry_ref || null,\n  resolved_context_refs: context.resolved_context_refs || [],\n  resolved_role_context_ref: context.resolved_role_context_ref || null,\n  resolved_schema_refs: context.resolved_schema_refs || [],\n  context_hash: context.context_hash || null,\n  context_resolver_status: context.context_resolver_status || null,\n  context_resolver_errors: context.context_resolver_errors || [],\n  context_evidence: context.context_evidence || null,\n  dynamic_handoff_hash: context.dynamic_handoff_hash || null\n};\n\nreturn [\n  {\n    json: {\n      workflow_run_id: context.workflow_run_id,\n      repository_full_name: context.repository_full_name,\n      target_branch_name: context.target_branch_name,\n      worker_execution_id: context.worker_execution_id,\n      claim_token: context.claim_token,\n      attempt,\n      status: runStatus,\n      current_state: currentState,\n      current_phase: currentPhase,\n      validation_verdict: validationVerdict,\n      event_type: eventType,\n      step_status: stepStatus,\n      error_message: errorMessage,\n      next_retry_at: nextRetryValue,\n      fallback_route: fallbackRoute,\n      durable_evidence_ref: durableEvidenceRef,\n      increment_retry: incrementRetry,\n      output_hash: hash32(stableStringify(outputPayload)),\n      event_payload_json: JSON.stringify(outputPayload)\n    }\n  }\n];"
+      },
+      "id": "2c5d512b-e188-4854-bf96-88e01e2173b7",
+      "name": "Validate LLM Output1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with input_json as (select $1::jsonb as p), input_data as (select p->>'workflow_run_id' as workflow_run_id, p->>'worker_execution_id' as worker_execution_id, p->>'claim_token' as claim_token, coalesce((p->>'attempt')::integer,1) as attempt, p->>'status' as status, p->>'current_state' as current_state, p->>'current_phase' as current_phase, p->>'validation_verdict' as validation_verdict, p->>'event_type' as event_type, p->>'step_status' as step_status, nullif(p->>'error_message','') as error_message, nullif(p->>'next_retry_at','')::timestamp as next_retry_at, nullif(p->>'fallback_route','') as fallback_route, nullif(p->>'durable_evidence_ref','') as durable_evidence_ref, coalesce((p->>'increment_retry')::boolean,false) as increment_retry, p->>'output_hash' as output_hash, (p->>'event_payload_json')::jsonb as event_payload_json from input_json), updated_run as (update moex_n8n_workflow_runs r set status = d.status, current_state = d.current_state, current_phase = d.current_phase, validation_verdict = d.validation_verdict, durable_evidence_ref = d.durable_evidence_ref, fallback_route = d.fallback_route, error_message = d.error_message, retry_count = case when d.increment_retry then coalesce(r.retry_count,0) + 1 else r.retry_count end, next_retry_at = d.next_retry_at, locked_by = null, worker_execution_id = null, claim_token = null, lock_expires_at = null, last_heartbeat_at = now(), updated_at = now(), last_completed_step = case when d.status = 'ready_for_review' then 'worker_poller' else r.last_completed_step end from input_data d where r.workflow_run_id = d.workflow_run_id and r.worker_execution_id = d.worker_execution_id and r.claim_token = d.claim_token returning r.workflow_run_id, r.status, r.current_state, r.current_phase, r.validation_verdict, r.retry_count, r.max_retries, r.next_retry_at, r.fallback_route, r.durable_evidence_ref, r.error_message), step_completed_update as (update moex_n8n_workflow_step_runs s set status = d.step_status, output_hash = d.output_hash, completed_at = now(), error_message = d.error_message, updated_at = now() from updated_run u cross join input_data d where s.workflow_run_id = u.workflow_run_id and s.step_name = 'worker_poller' and s.attempt = d.attempt returning s.workflow_run_id), step_completed_insert as (insert into moex_n8n_workflow_step_runs (workflow_run_id, step_name, status, attempt, output_hash, completed_at, error_message, created_at, updated_at) select u.workflow_run_id, 'worker_poller', d.step_status, d.attempt, d.output_hash, now(), d.error_message, now(), now() from updated_run u cross join input_data d where not exists (select 1 from step_completed_update) returning workflow_run_id), event_inserted as (insert into moex_n8n_workflow_run_events (workflow_run_id, previous_state, new_state, event_type, event_payload_json, created_at) select u.workflow_run_id, 'worker_claimed', u.current_state, d.event_type, d.event_payload_json, now() from updated_run u cross join input_data d returning event_id) select u.*, (select event_id from event_inserted) as event_id from updated_run u;",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "9048d295-1bdf-4aa6-8bfa-e148638bee52",
+      "name": "Persist Worker Result1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        992,
+        224
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "PU85DvcSG5X2EloO",
+          "name": "postgres_moex_n8n"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Prepare Context Resolver Input": {
+      "main": [
+        [
+          {
+            "node": "Fetch GitHub Context Registry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch GitHub Context Registry": {
+      "main": [
+        [
+          {
+            "node": "Parse Context Registry and Build Fetch Requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Context Registry and Build Fetch Requests": {
+      "main": [
+        [
+          {
+            "node": "Context Files Needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Context Files Needed?": {
+      "main": [
+        [
+          {
+            "node": "Fetch GitHub Context File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Resolver Failure Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch GitHub Context File": {
+      "main": [
+        [
+          {
+            "node": "Assemble Resolved Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assemble Resolved Context": {
+      "main": [
+        [
+          {
+            "node": "Context Resolver Passed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Context Resolver Passed?": {
+      "main": [
+        [
+          {
+            "node": "Build LLM Request1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Resolver Failure Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Resolver Failure Result": {
+      "main": [
+        [
+          {
+            "node": "Persist Worker Result1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Worker Schedule1": {
+      "main": [
+        [
+          {
+            "node": "Build Worker Identity1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Worker Identity1": {
+      "main": [
+        [
+          {
+            "node": "Claim One Queued Run1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim One Queued Run1": {
+      "main": [
+        [
+          {
+            "node": "Prepare Context Resolver Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build LLM Request1": {
+      "main": [
+        [
+          {
+            "node": "Ollama Cloud Chat1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Cloud Chat1": {
+      "main": [
+        [
+          {
+            "node": "Validate LLM Output1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate LLM Output1": {
+      "main": [
+        [
+          {
+            "node": "Persist Worker Result1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "35405257-56a4-4c54-af43-ef778168f350",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "62875adff27fc822d942c4254bca5bd3da9a7fd81d36718bdc0f7d5d52395a15"
+  },
+  "nodeGroups": [],
+  "id": "oE9TAXp9kMtIwJ3w",
+  "tags": []
+}
