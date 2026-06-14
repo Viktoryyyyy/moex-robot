@@ -1,0 +1,156 @@
+{
+  "name": "MOEX_ROUTE_B_RESULT_QUERY_V1_10_3",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "moex/route-b/result",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b299c6de-897a-4606-9f14-6be86d055fd5",
+      "name": "Webhook - Route B Result Query",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "7c5f3de0-00a6-4727-b9b3-00d3a74f1d59"
+    },
+    {
+      "parameters": {
+        "jsCode": "const WORKFLOW_NAME = \"MOEX_ROUTE_B_RESULT_QUERY_V1_10_3\";\nconst SPEC_VERSION = \"1.10.3\";\nconst EXPECTED_REPOSITORY = \"Viktoryyyyy/moex-robot\";\nconst EXPECTED_ROLE = \"PM_L2_PHASE_OWNER\";\n\nconst raw = ($input.first() && $input.first().json) ? $input.first().json : {};\nconst query = raw.query && typeof raw.query === \"object\" && !Array.isArray(raw.query) ? raw.query : raw;\n\nfunction firstScalar(value) {\n  if (Array.isArray(value)) {\n    return value.length > 0 ? value[0] : undefined;\n  }\n  return value;\n}\n\nfunction cleanString(value) {\n  const scalar = firstScalar(value);\n  if (scalar === undefined || scalar === null) {\n    return \"\";\n  }\n  return String(scalar).trim();\n}\n\nfunction normalizeSection(value) {\n  return String(value || \"\").trim().toLowerCase().replace(/-/g, \"_\");\n}\n\nfunction parseSections(value) {\n  if (value === undefined || value === null) {\n    return { provided: false, sections: [] };\n  }\n\n  const rawValues = Array.isArray(value) ? value : [value];\n  const sections = [];\n\n  for (const entry of rawValues) {\n    for (const part of String(entry).split(\",\")) {\n      const normalized = normalizeSection(part);\n      if (normalized) {\n        sections.push(normalized);\n      }\n    }\n  }\n\n  return { provided: true, sections: [...new Set(sections)] };\n}\n\nconst workflowRunId = cleanString(query.workflow_run_id);\nconst idempotencyKey = cleanString(query.idempotency_key);\nconst repositoryFullName = cleanString(query.repository_full_name);\nconst requestedByRole = cleanString(query.requested_by_role);\nconst includeSectionsParsed = parseSections(query.include_sections);\n\nconst identifierCount = (workflowRunId ? 1 : 0) + (idempotencyKey ? 1 : 0);\nconst errors = [];\n\nif (identifierCount !== 1) {\n  errors.push(\"Provide exactly one identifier: workflow_run_id OR idempotency_key.\");\n}\n\nif (!repositoryFullName) {\n  errors.push(\"repository_full_name is required.\");\n} else if (repositoryFullName !== EXPECTED_REPOSITORY) {\n  errors.push(\"repository_full_name must be Viktoryyyyy/moex-robot.\");\n}\n\nif (!requestedByRole) {\n  errors.push(\"requested_by_role is required.\");\n} else if (requestedByRole !== EXPECTED_ROLE) {\n  errors.push(\"requested_by_role must be PM_L2_PHASE_OWNER.\");\n}\n\nconst evidenceSections = new Set([\n  \"pm_l3_package\",\n  \"github_execution_result\",\n  \"pr_validation_package\",\n  \"pm_l3_return_package\",\n  \"evidence_refs\",\n  \"pr_refs\",\n  \"ci_refs\",\n  \"changed_file_refs\",\n  \"blockers\",\n  \"required_fixes\",\n  \"authority_boundary\",\n  \"events\",\n  \"steps\",\n  \"events_summary\",\n  \"steps_summary\"\n]);\n\nconst metadataSections = new Set([\n  \"status\",\n  \"status_only\",\n  \"current_state\",\n  \"current_phase\",\n  \"metadata\",\n  \"identity\",\n  \"request\"\n]);\n\nlet includeAll = true;\nlet includeSections = [];\n\nif (includeSectionsParsed.provided) {\n  includeSections = includeSectionsParsed.sections;\n\n  if (includeSections.length === 0) {\n    errors.push(\"include_sections was provided but no valid section names were found.\");\n  }\n\n  const hasFullAlias = includeSections.includes(\"full\") || includeSections.includes(\"all\");\n\n  const unknownSections = includeSections.filter((section) => {\n    return !evidenceSections.has(section) && !metadataSections.has(section) && section !== \"full\" && section !== \"all\";\n  });\n\n  if (unknownSections.length > 0) {\n    errors.push(\"Unknown include_sections values: \" + unknownSections.join(\", \") + \".\");\n  }\n\n  const hasEvidenceSection = includeSections.some((section) => evidenceSections.has(section)) || hasFullAlias;\n\n  if (!hasEvidenceSection) {\n    errors.push(\"Result Query v2 rejects status-only include_sections; use Status Query workflow.\");\n  }\n\n  includeAll = hasFullAlias;\n}\n\nconst requestIdentifierKind = workflowRunId ? \"workflow_run_id\" : (idempotencyKey ? \"idempotency_key\" : null);\n\nreturn [\n  {\n    json: {\n      workflow_name: WORKFLOW_NAME,\n      spec_version: SPEC_VERSION,\n      query_received: query,\n      workflow_run_id: workflowRunId || null,\n      idempotency_key: idempotencyKey || null,\n      repository_full_name: repositoryFullName || null,\n      requested_by_role: requestedByRole || null,\n      include_sections: includeSections,\n      include_all: includeAll,\n      include_sections_provided: includeSectionsParsed.provided,\n      request_identifier_kind: requestIdentifierKind,\n      result_request_valid: errors.length === 0,\n      validation_errors: errors\n    }\n  }\n];"
+      },
+      "id": "d4edc80c-0ea3-4486-b0dc-e4159156d045",
+      "name": "Normalize and Validate Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        272,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH input_json AS (\n  SELECT $1::jsonb AS p\n),\nexpected_columns(table_name, column_name) AS (\n  VALUES\n    ('moex_n8n_workflow_runs','workflow_run_id'),\n    ('moex_n8n_workflow_runs','idempotency_key'),\n    ('moex_n8n_workflow_runs','status'),\n    ('moex_n8n_workflow_runs','current_state'),\n    ('moex_n8n_workflow_runs','repository_full_name'),\n    ('moex_n8n_workflow_runs','current_phase'),\n    ('moex_n8n_workflow_runs','target_branch_name'),\n    ('moex_n8n_workflow_runs','pr_ref'),\n    ('moex_n8n_workflow_runs','pr_number'),\n    ('moex_n8n_workflow_runs','final_pr_head_sha'),\n    ('moex_n8n_workflow_runs','ci_status'),\n    ('moex_n8n_workflow_runs','validation_verdict'),\n    ('moex_n8n_workflow_runs','durable_evidence_ref'),\n    ('moex_n8n_workflow_runs','pre_ci_branch_artifact_ref'),\n    ('moex_n8n_workflow_runs','final_pm_l2_evidence_ref'),\n    ('moex_n8n_workflow_runs','fallback_route'),\n    ('moex_n8n_workflow_runs','error_message'),\n    ('moex_n8n_workflow_runs','locked_by'),\n    ('moex_n8n_workflow_runs','worker_execution_id'),\n    ('moex_n8n_workflow_runs','claim_token'),\n    ('moex_n8n_workflow_runs','lock_expires_at'),\n    ('moex_n8n_workflow_runs','last_heartbeat_at'),\n    ('moex_n8n_workflow_runs','heartbeat_count'),\n    ('moex_n8n_workflow_runs','retry_count'),\n    ('moex_n8n_workflow_runs','max_retries'),\n    ('moex_n8n_workflow_runs','next_retry_at'),\n    ('moex_n8n_workflow_runs','last_completed_step'),\n    ('moex_n8n_workflow_runs','github_branch_name'),\n    ('moex_n8n_workflow_runs','github_commit_sha'),\n    ('moex_n8n_workflow_runs','github_pr_url'),\n    ('moex_n8n_workflow_runs','updated_at'),\n    ('moex_n8n_workflow_runs','created_at'),\n    ('moex_n8n_workflow_run_events','event_id'),\n    ('moex_n8n_workflow_run_events','workflow_run_id'),\n    ('moex_n8n_workflow_run_events','previous_state'),\n    ('moex_n8n_workflow_run_events','new_state'),\n    ('moex_n8n_workflow_run_events','event_type'),\n    ('moex_n8n_workflow_run_events','event_payload_json'),\n    ('moex_n8n_workflow_run_events','created_at'),\n    ('moex_n8n_workflow_step_runs','workflow_run_id'),\n    ('moex_n8n_workflow_step_runs','step_name'),\n    ('moex_n8n_workflow_step_runs','status'),\n    ('moex_n8n_workflow_step_runs','attempt'),\n    ('moex_n8n_workflow_step_runs','input_hash'),\n    ('moex_n8n_workflow_step_runs','output_hash'),\n    ('moex_n8n_workflow_step_runs','started_at'),\n    ('moex_n8n_workflow_step_runs','completed_at'),\n    ('moex_n8n_workflow_step_runs','error_message'),\n    ('moex_n8n_workflow_step_runs','created_at'),\n    ('moex_n8n_workflow_step_runs','updated_at')\n),\nactual_columns AS (\n  SELECT table_name, column_name\n  FROM information_schema.columns\n  WHERE table_schema NOT IN ('pg_catalog','information_schema')\n    AND table_name IN ('moex_n8n_workflow_runs','moex_n8n_workflow_run_events','moex_n8n_workflow_step_runs')\n),\nmissing_columns AS (\n  SELECT e.table_name, e.column_name\n  FROM expected_columns e\n  LEFT JOIN actual_columns a\n    ON a.table_name = e.table_name\n   AND a.column_name = e.column_name\n  WHERE a.column_name IS NULL\n),\nrequest_values AS (\n  SELECT\n    p,\n    COALESCE((p->>'result_request_valid')::boolean, false) AS result_request_valid,\n    p->>'request_identifier_kind' AS request_identifier_kind,\n    p->>'workflow_run_id' AS workflow_run_id,\n    p->>'idempotency_key' AS idempotency_key,\n    p->>'repository_full_name' AS repository_full_name\n  FROM input_json\n),\nselected_run AS (\n  SELECT to_jsonb(r) AS run_json\n  FROM moex_n8n_workflow_runs r\n  CROSS JOIN request_values q\n  WHERE q.result_request_valid\n    AND NOT EXISTS (SELECT 1 FROM missing_columns)\n    AND to_jsonb(r)->>'repository_full_name' = q.repository_full_name\n    AND (\n      (q.request_identifier_kind = 'workflow_run_id' AND to_jsonb(r)->>'workflow_run_id' = q.workflow_run_id)\n      OR\n      (q.request_identifier_kind = 'idempotency_key' AND to_jsonb(r)->>'idempotency_key' = q.idempotency_key)\n    )\n  ORDER BY to_jsonb(r)->>'updated_at' DESC NULLS LAST, to_jsonb(r)->>'created_at' DESC NULLS LAST\n  LIMIT 1\n),\nevents_raw AS (\n  SELECT to_jsonb(e) AS event_json\n  FROM moex_n8n_workflow_run_events e\n  CROSS JOIN selected_run sr\n  WHERE to_jsonb(e)->>'workflow_run_id' = sr.run_json->>'workflow_run_id'\n  ORDER BY to_jsonb(e)->>'created_at' ASC NULLS LAST, to_jsonb(e)->>'event_id' ASC NULLS LAST\n),\nsteps_raw AS (\n  SELECT to_jsonb(s) AS step_json\n  FROM moex_n8n_workflow_step_runs s\n  CROSS JOIN selected_run sr\n  WHERE to_jsonb(s)->>'workflow_run_id' = sr.run_json->>'workflow_run_id'\n  ORDER BY to_jsonb(s)->>'created_at' ASC NULLS LAST, to_jsonb(s)->>'started_at' ASC NULLS LAST, to_jsonb(s)->>'step_name' ASC NULLS LAST\n),\nevents_agg AS (\n  SELECT COALESCE(jsonb_agg(event_json ORDER BY event_json->>'created_at', event_json->>'event_id'), '[]'::jsonb) AS events_json\n  FROM events_raw\n),\nsteps_agg AS (\n  SELECT COALESCE(jsonb_agg(step_json ORDER BY step_json->>'created_at', step_json->>'started_at', step_json->>'step_name'), '[]'::jsonb) AS steps_json\n  FROM steps_raw\n)\nSELECT\n  (SELECT p FROM input_json) AS request_json,\n  NOT EXISTS (SELECT 1 FROM missing_columns) AS expected_columns_ok,\n  COALESCE((SELECT jsonb_agg(jsonb_build_object('table_name', table_name, 'column_name', column_name) ORDER BY table_name, column_name) FROM missing_columns), '[]'::jsonb) AS missing_expected_columns,\n  (SELECT run_json FROM selected_run) AS run_json,\n  (SELECT events_json FROM events_agg) AS events_json,\n  (SELECT steps_json FROM steps_agg) AS steps_json",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "67f73960-4044-45f7-bdcb-89406f6601a5",
+      "name": "Postgres - Read Result Evidence Package",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        560,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "PU85DvcSG5X2EloO",
+          "name": "postgres_moex_n8n"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const WORKFLOW_NAME = \"MOEX_ROUTE_B_RESULT_QUERY_V1_10_3\";\nconst SPEC_VERSION = \"1.10.3\";\nfunction parseMaybeJson(value, fallback) {\n  if (value === undefined || value === null) {\n    return fallback;\n  }\n  if (typeof value === \"string\") {\n    try {\n      return JSON.parse(value);\n    } catch (error) {\n      return fallback;\n    }\n  }\n  return value;\n}\nfunction asObject(value) {\n  const parsed = parseMaybeJson(value, null);\n  return parsed && typeof parsed === \"object\" && !Array.isArray(parsed) ? parsed : null;\n}\nfunction asArray(value) {\n  const parsed = parseMaybeJson(value, []);\n  return Array.isArray(parsed) ? parsed : [];\n}\nfunction getPath(source, path) {\n  let current = source;\n  for (const key of path) {\n    if (!current || typeof current !== \"object\" || !(key in current)) {\n      return undefined;\n    }\n    current = current[key];\n  }\n  return current;\n}\nfunction eventPayload(eventRow) {\n  return asObject(eventRow.event_payload_json) || {};\n}\nfunction latestExtract(events, extractor) {\n  for (let index = events.length - 1; index >= 0; index -= 1) {\n    const payload = eventPayload(events[index]);\n    const value = extractor(payload, events[index]);\n    if (value !== undefined && value !== null) {\n      return value;\n    }\n  }\n  return null;\n}\nfunction isEmpty(value) {\n  if (value === null || value === undefined) {\n    return true;\n  }\n  if (Array.isArray(value)) {\n    return value.length === 0;\n  }\n  if (typeof value === \"object\") {\n    return Object.keys(value).length === 0;\n  }\n  return String(value).trim() === \"\";\n}\nfunction addAny(target, value) {\n  if (value === undefined || value === null || value === \"\") {\n    return;\n  }\n  if (Array.isArray(value)) {\n    for (const item of value) {\n      addAny(target, item);\n    }\n    return;\n  }\n  target.push(value);\n}\nfunction uniqueValues(values) {\n  const seen = new Set();\n  const output = [];\n  for (const value of values) {\n    if (value === undefined || value === null || value === \"\") {\n      continue;\n    }\n    const key = typeof value === \"object\" ? JSON.stringify(value) : String(value);\n    if (!seen.has(key)) {\n      seen.add(key);\n      output.push(value);\n    }\n  }\n  return output;\n}\nfunction collectKeys(packages, keys) {\n  const values = [];\n  for (const item of packages) {\n    if (!item || typeof item !== \"object\") {\n      continue;\n    }\n    for (const key of keys) {\n      addAny(values, item[key]);\n    }\n  }\n  return uniqueValues(values);\n}\nfunction collectText(packages, keys) {\n  const values = [];\n  for (const item of packages) {\n    if (!item || typeof item !== \"object\") {\n      continue;\n    }\n    for (const key of keys) {\n      const rawValue = item[key];\n      if (Array.isArray(rawValue)) {\n        for (const entry of rawValue) {\n          if (entry !== undefined && entry !== null && entry !== \"\") {\n            values.push(typeof entry === \"string\" ? entry : JSON.stringify(entry));\n          }\n        }\n      } else if (rawValue !== undefined && rawValue !== null && rawValue !== \"\") {\n        values.push(typeof rawValue === \"string\" ? rawValue : JSON.stringify(rawValue));\n      }\n    }\n  }\n  return uniqueValues(values);\n}\nfunction hasExplicitPmL2Approval(events) {\n  for (const event of events) {\n    const payload = eventPayload(event);\n    const approval = payload.pm_l2_approval_package || payload.pm_l2_review_package || payload.pm_l2_merge_approval;\n    if (approval && typeof approval === \"object\" && approval.approved_for_merge === true) {\n      return true;\n    }\n  }\n  return false;\n}\nfunction sectionIncluded(request, section) {\n  if (request.include_all !== false) {\n    return true;\n  }\n  const requested = Array.isArray(request.include_sections) ? request.include_sections : [];\n  return requested.includes(section);\n}\nfunction sectionValue(request, section, value) {\n  return sectionIncluded(request, section) ? value : null;\n}\nfunction baseResponse(statusCode, request, found, run, overrides) {\n  return Object.assign({\n    workflow_name: WORKFLOW_NAME,\n    spec_version: SPEC_VERSION,\n    http_status_code: statusCode,\n    result_request_valid: Boolean(request.result_request_valid),\n    request_identifier_kind: request.request_identifier_kind || null,\n    found,\n    workflow_run_id: run && run.workflow_run_id !== undefined ? run.workflow_run_id : (request.workflow_run_id || null),\n    idempotency_key: run && run.idempotency_key !== undefined ? run.idempotency_key : (request.idempotency_key || null),\n    repository_full_name: run && run.repository_full_name !== undefined ? run.repository_full_name : (request.repository_full_name || null),\n    status: null,\n    current_state: null,\n    current_phase: null,\n    pm_l3_package: null,\n    github_execution_result: null,\n    pr_validation_package: null,\n    pm_l3_return_package: null,\n    evidence_refs: [],\n    pr_refs: [],\n    ci_refs: [],\n    changed_file_refs: [],\n    blockers: [],\n    required_fixes: [],\n    missing_sections: [],\n    pm_l2_review_required: true,\n    authority_boundary: {\n      merge_authority: \"PM_L2_ONLY\",\n      n8n_merge_allowed: false,\n      direct_main_write_allowed: false,\n      force_push_allowed: false,\n      file_delete_allowed: false,\n      executor_merge_allowed: false,\n      ci_passed_is_not_merge_approval: true\n    },\n    events_summary: [],\n    steps_summary: [],\n    created_at: run && run.created_at !== undefined ? run.created_at : null,\n    updated_at: run && run.updated_at !== undefined ? run.updated_at : null\n  }, overrides || {});\n}\nconst row = ($input.first() && $input.first().json) ? $input.first().json : {};\nconst request = asObject(row.request_json) || {};\nconst expectedColumnsOk = row.expected_columns_ok === true || row.expected_columns_ok === \"true\";\nconst missingExpectedColumns = asArray(row.missing_expected_columns);\nconst run = asObject(row.run_json);\nconst events = asArray(row.events_json);\nconst steps = asArray(row.steps_json);\nif (!request.result_request_valid) {\n  const response = baseResponse(400, request, false, null, {\n    blockers: Array.isArray(request.validation_errors) ? request.validation_errors : [\"Invalid Result Query v2 request.\"],\n    required_fixes: [\"Correct query parameters and retry.\"],\n    missing_sections: []\n  });\n  return [{ json: response }];\n}\nif (!expectedColumnsOk) {\n  const details = missingExpectedColumns.map((item) => item.table_name + \".\" + item.column_name);\n  const response = baseResponse(500, request, false, null, {\n    blockers: [\"Postgres schema contract mismatch: missing expected columns: \" + details.join(\", \")],\n    required_fixes: [\"Restore the expected Route B Postgres schema before using Result Query v2.\"],\n    missing_sections: [\"postgres_schema_contract\"]\n  });\n  return [{ json: response }];\n}\nif (!run) {\n  const response = baseResponse(404, request, false, null, {\n    blockers: [\"workflow_run_id or idempotency_key was not found for repository_full_name.\"],\n    required_fixes: [\"Check the identifier and repository_full_name, or use Status Query if only status is needed.\"],\n    missing_sections: []\n  });\n  return [{ json: response }];\n}\nconst pmL3Package = latestExtract(events, (payload) => getPath(payload, [\"llm_output\", \"draft_pm_l3_package\"]) || payload.draft_pm_l3_package || payload.pm_l3_package);\nconst githubExecutionResult = latestExtract(events, (payload) => payload.execution_result || payload.github_execution_result);\nconst prValidationPackage = latestExtract(events, (payload) => payload.validation_package || payload.pr_validation_package);\nconst pmL3ReturnPackage = latestExtract(events, (payload) => payload.pm_l3_return_package || payload.pm_l3_validation_report);\nconst packages = [pmL3Package, githubExecutionResult, prValidationPackage, pmL3ReturnPackage].filter((item) => item && typeof item === \"object\");\nconst evidenceRefsRaw = [];\naddAny(evidenceRefsRaw, run.durable_evidence_ref);\naddAny(evidenceRefsRaw, run.pre_ci_branch_artifact_ref);\naddAny(evidenceRefsRaw, run.final_pm_l2_evidence_ref);\naddAny(evidenceRefsRaw, collectKeys(packages, [\"evidence_refs\", \"evidence_ref\", \"durable_evidence_ref\", \"artifact_refs\", \"output_artifacts_created\", \"result_storage_ref\"]));\nconst evidenceRefs = uniqueValues(evidenceRefsRaw);\nconst prRefsRaw = [];\nif (run.pr_ref || run.pr_number || run.github_pr_url || run.target_branch_name || run.github_branch_name || run.final_pr_head_sha || run.github_commit_sha) {\n  prRefsRaw.push({\n    source: \"workflow_run\",\n    pr_ref: run.pr_ref || null,\n    pr_number: run.pr_number || null,\n    github_pr_url: run.github_pr_url || null,\n    target_branch_name: run.target_branch_name || null,\n    github_branch_name: run.github_branch_name || null,\n    final_pr_head_sha: run.final_pr_head_sha || null,\n    github_commit_sha: run.github_commit_sha || null\n  });\n}\naddAny(prRefsRaw, collectKeys(packages, [\"pr_refs\", \"pr_ref\", \"github_pr_url\", \"pr_url\", \"pull_request\", \"pull_request_ref\"]));\nconst prRefs = uniqueValues(prRefsRaw);\nconst ciRefsRaw = [];\nif (run.ci_status || run.validation_verdict || run.final_pr_head_sha) {\n  ciRefsRaw.push({\n    source: \"workflow_run\",\n    ci_status: run.ci_status || null,\n    validation_verdict: run.validation_verdict || null,\n    final_pr_head_sha: run.final_pr_head_sha || null\n  });\n}\naddAny(ciRefsRaw, collectKeys(packages, [\"ci_refs\", \"github_actions_refs\", \"workflow_run_refs\", \"ci_status\", \"validation_verdict\", \"github_actions_run_url\", \"workflow_run_url\"]));\nconst ciRefs = uniqueValues(ciRefsRaw);\nconst changedFileRefs = collectKeys(packages, [\"changed_file_refs\", \"changed_files\", \"exact_new_changed_file_paths\", \"files_changed\", \"changed_paths\"]);\nconst blockersRaw = collectText(packages, [\"blockers\", \"open_blockers\", \"remaining_gaps\", \"gaps\", \"required_blockers\", \"blocker\"]);\nif (run.error_message) {\n  blockersRaw.push(\"workflow_run_error: \" + run.error_message);\n}\nif (run.fallback_route) {\n  blockersRaw.push(\"fallback_route_present: \" + run.fallback_route);\n}\nconst requiredFixesRaw = collectText(packages, [\"required_fixes\", \"required_fix\", \"required_corrections\", \"required_corrections_before_repo_execution\", \"fixes_required\"]);\nconst eventsSummary = events.map((event) => ({\n  event_id: event.event_id !== undefined ? event.event_id : null,\n  event_type: event.event_type !== undefined ? event.event_type : null,\n  previous_state: event.previous_state !== undefined ? event.previous_state : null,\n  new_state: event.new_state !== undefined ? event.new_state : null,\n  created_at: event.created_at !== undefined ? event.created_at : null\n}));\nconst stepsSummary = steps.map((step) => ({\n  step_name: step.step_name !== undefined ? step.step_name : null,\n  status: step.status !== undefined ? step.status : null,\n  attempt: step.attempt !== undefined ? step.attempt : null,\n  input_hash: step.input_hash !== undefined ? step.input_hash : null,\n  output_hash: step.output_hash !== undefined ? step.output_hash : null,\n  started_at: step.started_at !== undefined ? step.started_at : null,\n  completed_at: step.completed_at !== undefined ? step.completed_at : null,\n  error_message: step.error_message !== undefined ? step.error_message : null\n}));\nconst finalValues = {\n  pm_l3_package: sectionValue(request, \"pm_l3_package\", pmL3Package),\n  github_execution_result: sectionValue(request, \"github_execution_result\", githubExecutionResult),\n  pr_validation_package: sectionValue(request, \"pr_validation_package\", prValidationPackage),\n  pm_l3_return_package: sectionValue(request, \"pm_l3_return_package\", pmL3ReturnPackage),\n  evidence_refs: sectionValue(request, \"evidence_refs\", evidenceRefs),\n  pr_refs: sectionValue(request, \"pr_refs\", prRefs),\n  ci_refs: sectionValue(request, \"ci_refs\", ciRefs),\n  changed_file_refs: sectionValue(request, \"changed_file_refs\", changedFileRefs),\n  events_summary: sectionValue(request, \"events_summary\", eventsSummary),\n  steps_summary: sectionValue(request, \"steps_summary\", stepsSummary)\n};\nconst missingSections = [];\nfor (const [section, value] of Object.entries(finalValues)) {\n  if (sectionIncluded(request, section) && isEmpty(value)) {\n    missingSections.push(section);\n  }\n}\nfor (const section of missingSections) {\n  blockersRaw.push(\"evidence_gap: \" + section + \" is missing from Route B result evidence.\");\n}\nconst pmL2ApprovalExists = hasExplicitPmL2Approval(events);\nconst response = baseResponse(200, request, true, run, {\n  status: run.status !== undefined ? run.status : null,\n  current_state: run.current_state !== undefined ? run.current_state : null,\n  current_phase: run.current_phase !== undefined ? run.current_phase : null,\n  pm_l3_package: finalValues.pm_l3_package,\n  github_execution_result: finalValues.github_execution_result,\n  pr_validation_package: finalValues.pr_validation_package,\n  pm_l3_return_package: finalValues.pm_l3_return_package,\n  evidence_refs: finalValues.evidence_refs,\n  pr_refs: finalValues.pr_refs,\n  ci_refs: finalValues.ci_refs,\n  changed_file_refs: finalValues.changed_file_refs,\n  blockers: uniqueValues(blockersRaw),\n  required_fixes: uniqueValues(requiredFixesRaw),\n  missing_sections: uniqueValues(missingSections),\n  pm_l2_review_required: !pmL2ApprovalExists,\n  events_summary: finalValues.events_summary,\n  steps_summary: finalValues.steps_summary,\n  created_at: run.created_at !== undefined ? run.created_at : null,\n  updated_at: run.updated_at !== undefined ? run.updated_at : null\n});\nreturn [{ json: response }];"
+      },
+      "id": "09b3e83f-0b69-46e0-824d-1c5873ec7e14",
+      "name": "Build Result Query Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        864,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ $json.http_status_code }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "fa222a14-3975-48aa-af19-f2b2a6f40df7",
+      "name": "Respond - Result Query",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1152,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook - Route B Result Query": {
+      "main": [
+        [
+          {
+            "node": "Normalize and Validate Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize and Validate Request": {
+      "main": [
+        [
+          {
+            "node": "Postgres - Read Result Evidence Package",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres - Read Result Evidence Package": {
+      "main": [
+        [
+          {
+            "node": "Build Result Query Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Result Query Response": {
+      "main": [
+        [
+          {
+            "node": "Respond - Result Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "41b33c69-8081-4c77-bff0-dd358f1d6bc7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "62875adff27fc822d942c4254bca5bd3da9a7fd81d36718bdc0f7d5d52395a15"
+  },
+  "nodeGroups": [],
+  "id": "oQUGMV8Y9sVuWhK3",
+  "tags": []
+}

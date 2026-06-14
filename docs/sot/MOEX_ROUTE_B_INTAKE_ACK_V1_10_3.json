@@ -1,0 +1,125 @@
+{
+  "name": "MOEX_ROUTE_B_INTAKE_ACK_V1_10_3",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "moex/route-b/intake",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "6fd93baf-8e3e-442d-9a34-c427b0f8becc",
+      "name": "Intake Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "moex-route-b-intake-v1-10-3"
+    },
+    {
+      "parameters": {
+        "jsCode": "function stableStringify(value) {\n  if (value === null || typeof value !== 'object') return JSON.stringify(value);\n  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';\n  return '{' + Object.keys(value).sort().map((key) => JSON.stringify(key) + ':' + stableStringify(value[key])).join(',') + '}';\n}\n\nfunction hash16(input) {\n  let h1 = 0xdeadbeef ^ input.length;\n  let h2 = 0x41c6ce57 ^ input.length;\n  for (let i = 0; i < input.length; i++) {\n    const ch = input.charCodeAt(i);\n    h1 = Math.imul(h1 ^ ch, 2654435761);\n    h2 = Math.imul(h2 ^ ch, 1597334677);\n  }\n  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);\n  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);\n  return ((h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0')).slice(0, 16);\n}\n\nfunction hash32(input) {\n  return hash16('a:' + input) + hash16('b:' + input);\n}\n\nfunction isSensitiveKey(key) {\n  const k = String(key || '').toLowerCase();\n  const compact = k.replace(/[^a-z0-9]/g, '');\n  return k.includes('authorization') || k.includes('cookie') || k.includes('token') || k.includes('secret') || k.includes('password') || k.includes('credential') || k.includes('api-key') || k.includes('api_key') || compact.includes('apikey') || compact.includes('accesskey') || compact.includes('privatekey') || compact.includes('clientsecret');\n}\n\nfunction redactValue(value) {\n  if (value === null || value === undefined) return value;\n  if (Array.isArray(value)) return value.map(redactValue);\n  if (typeof value !== 'object') return value;\n  const result = {};\n  for (const [rawKey, rawValue] of Object.entries(value)) {\n    const key = String(rawKey || '').toLowerCase();\n    result[key] = isSensitiveKey(key) ? '[REDACTED]' : redactValue(rawValue);\n  }\n  return result;\n}\n\nconst input = $input.first().json || {};\nconst rawBody = input.body || {};\nconst rawQuery = input.query || {};\nconst rawHeaders = input.headers || {};\nconst headerMap = Object.fromEntries(Object.entries(rawHeaders).map(([key, value]) => [String(key).toLowerCase(), value]));\nconst body = redactValue(rawBody);\nconst query = redactValue(rawQuery);\nconst headers = redactValue(rawHeaders);\nconst repositoryFullName = rawBody.repository_full_name || rawQuery.repository_full_name || 'Viktoryyyyy/moex-robot';\n\nif (repositoryFullName !== 'Viktoryyyyy/moex-robot') {\n  throw new Error('Unsupported repository_full_name');\n}\n\nconst clientIdempotencyKey = headerMap['idempotency-key'] || headerMap['x-idempotency-key'] || rawBody.idempotency_key || rawQuery.idempotency_key || '';\nconst idempotencySource = clientIdempotencyKey || stableStringify({ project: 'MOEX Bot', route: 'Route B', spec_version: '1.10.3', repository_full_name: repositoryFullName, body: rawBody, query: rawQuery });\nconst idempotencyKey = String(clientIdempotencyKey || hash32(idempotencySource));\nconst runHash = hash32('workflow_run_id:' + idempotencyKey);\nconst workflowRunId = 'route_b_' + runHash;\nconst targetBranchName = 'n8n/route-b-' + runHash.slice(0, 12);\n\nconst intakePayload = {\n  received_at: new Date().toISOString(),\n  workflow_name: 'MOEX_ROUTE_B_INTAKE_ACK_V1_10_3',\n  spec_version: '1.10.3',\n  request: {\n    headers,\n    query,\n    body\n  },\n  controls: {\n    async_dispatch: 'postgres_queue_only',\n    execute_subworkflow_primary_dispatch: false,\n    max_retries: 3,\n    branch_source: 'deterministic_workflow_generated'\n  }\n};\n\nreturn [\n  {\n    json: {\n      workflow_run_id: workflowRunId,\n      idempotency_key: idempotencyKey,\n      repository_full_name: repositoryFullName,\n      current_phase: 'intake_ack',\n      target_branch_name: targetBranchName,\n      status: 'queued',\n      current_state: 'queued',\n      max_retries: 3,\n      event_type: 'intake_ack',\n      event_payload_json: JSON.stringify(intakePayload)\n    }\n  }\n];"
+      },
+      "id": "888396e3-244f-43c0-9fab-3e64bdd6838d",
+      "name": "Normalize Intake",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with input_json as (select $1::jsonb as p), input_data as (select p->>'workflow_run_id' as workflow_run_id, p->>'idempotency_key' as idempotency_key, p->>'status' as status, p->>'current_state' as current_state, p->>'repository_full_name' as repository_full_name, p->>'current_phase' as current_phase, p->>'target_branch_name' as target_branch_name, (p->>'max_retries')::integer as max_retries, p->>'event_type' as event_type, (p->>'event_payload_json')::jsonb as event_payload_json from input_json), upserted_run as (insert into moex_n8n_workflow_runs (workflow_run_id, idempotency_key, status, current_state, repository_full_name, current_phase, target_branch_name, max_retries, created_at, updated_at) select workflow_run_id, idempotency_key, status, current_state, repository_full_name, current_phase, target_branch_name, max_retries, now(), now() from input_data on conflict (workflow_run_id) do update set idempotency_key = moex_n8n_workflow_runs.idempotency_key, status = moex_n8n_workflow_runs.status, current_state = moex_n8n_workflow_runs.current_state, repository_full_name = moex_n8n_workflow_runs.repository_full_name, current_phase = moex_n8n_workflow_runs.current_phase, target_branch_name = moex_n8n_workflow_runs.target_branch_name, max_retries = moex_n8n_workflow_runs.max_retries, updated_at = moex_n8n_workflow_runs.updated_at returning workflow_run_id, status, current_state, repository_full_name, current_phase, target_branch_name, retry_count, max_retries, created_at, updated_at, (xmax = 0) as inserted), inserted_event as (insert into moex_n8n_workflow_run_events (workflow_run_id, previous_state, new_state, event_type, event_payload_json, created_at) select u.workflow_run_id, null, u.current_state, d.event_type, d.event_payload_json, now() from upserted_run u cross join input_data d where u.inserted = true returning event_id) select u.workflow_run_id, u.status, u.current_state, u.repository_full_name, u.current_phase, u.target_branch_name, u.retry_count, u.max_retries, u.created_at, u.updated_at, u.inserted, e.event_id from upserted_run u left join inserted_event e on true;",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "865bcc17-c7db-4c02-801f-0c06dc050c45",
+      "name": "Queue Run And Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        480,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "PU85DvcSG5X2EloO",
+          "name": "postgres_moex_n8n"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: true, workflow_name: 'MOEX_ROUTE_B_INTAKE_ACK_V1_10_3', spec_version: '1.10.3', workflow_run_id: $json.workflow_run_id, status: $json.status, current_state: $json.current_state, repository_full_name: $json.repository_full_name, target_branch_name: $json.target_branch_name, idempotent_replay: !$json.inserted } }}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "id": "b1e35496-e47c-45f8-9e8b-2bfd39ade1d8",
+      "name": "Respond Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        720,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Intake Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Intake",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Intake": {
+      "main": [
+        [
+          {
+            "node": "Queue Run And Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Run And Event": {
+      "main": [
+        [
+          {
+            "node": "Respond Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "c95ba0ce-f87e-4d50-9aea-9dec27c15e7c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "62875adff27fc822d942c4254bca5bd3da9a7fd81d36718bdc0f7d5d52395a15"
+  },
+  "nodeGroups": [],
+  "id": "SbYY04lVbRMeVMNX",
+  "tags": []
+}
