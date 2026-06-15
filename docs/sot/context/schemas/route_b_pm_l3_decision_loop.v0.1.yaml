@@ -1,0 +1,91 @@
+schema_id: route_b_pm_l3_decision_loop.v0.1
+project: MOEX Bot
+status: proposed
+source_of_truth: github_repo
+artifact_class: repo_relative
+artifact_path: docs/sot/context/schemas/route_b_pm_l3_decision_loop.v0.1.yaml
+producer: PM_L2_PHASE_OWNER
+consumer: PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER
+
+purpose:
+  - Define PM L3 decision loop behavior inside the Universal Role Runner target model.
+  - Preserve PM L3 as a normal role_id execution.
+  - Preserve PM L2 as the only phase closeout and merge authority.
+
+pm_l3_role_execution:
+  role_id: PM_L3_DELIVERY_VALIDATION_OWNER
+  executed_through: route_b_universal_role_runner.v0.1
+  role_is_role_id_value_not_separate_workflow: true
+  one_universal_runner_pattern: true
+
+allowed_pm_l3_decisions:
+  create_next_role_task:
+    allowed: true
+    target_table: route_b_role_task_queue
+    next_role_id_source: pm_l3_decision_json.next_role_id
+    output: next role_task queued
+  request_github_execution_package:
+    allowed: true
+    target: separate_github_pr_only_executor
+    github_executor_remains_separate_pr_only_executor: true
+    direct_github_mutation_by_pm_l3_ai_allowed: false
+  return_blocker:
+    allowed: true
+    output_state: blocked
+    required_fields:
+      - blocker_code
+      - blocker_reason
+      - required_fixes
+  return_final_pm_l3_evidence_package:
+    allowed: true
+    target_role: PM_L2_PHASE_OWNER
+    pm_l2_review_required: true
+
+forbidden_pm_l3_decisions:
+  issue_pm_l2_final_verdict:
+    allowed: false
+    invariant: PM L3 cannot issue PM L2 final verdict
+  approve_merge:
+    allowed: false
+    invariant: PM L3 cannot approve merge
+  bypass_pm_l2:
+    allowed: false
+    invariant: PM L3 cannot bypass PM L2
+  send_subchat_output_directly_to_pm_l2:
+    allowed: false
+    invariant: sub-chat output must be validated by PM L3 before PM L2 review
+  mutate_github_directly:
+    allowed: false
+  run_server_commands:
+    allowed: false
+  access_production_secrets:
+    allowed: false
+
+decision_output_contract:
+  pm_l3_decision:
+    required_fields:
+      - phase_run_id
+      - workflow_run_id
+      - role_task_id
+      - decision_type
+      - decision_payload_json
+      - authority_boundary
+      - created_at
+    decision_type_allowed_values:
+      - create_next_role_task
+      - request_github_execution_package
+      - return_blocker
+      - return_final_pm_l3_evidence_package
+  authority_boundary:
+    merge_authority: PM_L2_ONLY
+    pm_l2_review_required: true
+    pm_l3_final_pm_l2_verdict_allowed: false
+    pm_l3_merge_approval_allowed: false
+    n8n_merge_allowed: false
+    direct_main_write_allowed: false
+    force_push_allowed: false
+    file_delete_allowed: false
+    runtime_live_trading_allowed: false
+    broker_execution_allowed: false
+    server_apply_allowed: false
+    production_secret_access_allowed: false

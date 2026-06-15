@@ -1,0 +1,72 @@
+schema_id: route_b_ollama_role_prompt_contract.v0.1
+project: MOEX Bot
+status: proposed
+source_of_truth: github_repo
+artifact_class: repo_relative
+artifact_path: docs/sot/context/schemas/route_b_ollama_role_prompt_contract.v0.1.yaml
+producer: PM_L2_PHASE_OWNER
+consumer: PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER
+
+purpose:
+  - Define prompt assembly and Ollama call contract for Universal Role Runner.
+  - Bind role_id, context refs, schema refs, and strict JSON output.
+  - Prevent external assumptions and unsafe authority expansion.
+
+ollama_prompt_contract:
+  system_prompt_template:
+    required: true
+    must_include:
+      - project
+      - role_id
+      - role_context_ref
+      - authority_boundary
+      - strict_JSON_only
+      - no_markdown
+      - no_code_fences
+      - no_external_assumptions
+  user_prompt_template:
+    required: true
+    must_include:
+      - workflow_run_id
+      - phase_run_id
+      - role_task_id
+      - task_type
+      - task_payload_json
+      - context_refs_json
+      - expected_output_schema_ref
+  role_id_injection:
+    source: role_task.role_id
+    invariant_role_task_role_id_equals_role_context_ref_role_id: true
+  context_refs_injection:
+    static_context_refs_source: role_task.context_refs_json.static_context_refs
+    role_context_ref_source: role_task.context_refs_json.role_context_ref
+    full_static_context_paste_allowed: false
+  schema_refs_injection:
+    source: role_task.context_refs_json.schema_refs
+    expected_output_schema_ref_source: role_task.expected_output_schema_ref
+  output_schema_binding:
+    required: true
+    strict_validation_before_persist: true
+  strict_JSON_only: true
+  no_markdown: true
+  no_code_fences: true
+  no_external_assumptions: true
+
+ollama_model_call:
+  transport: ollama_chat
+  stream: false
+  temperature_default: 0.1
+  raw_content_hash_required: true
+  parsed_json_required: true
+  deterministic_validation_required: true
+
+forbidden_prompt_capabilities:
+  direct_github_change_scope: not_exposed
+  server_command_scope: not_exposed
+  runtime_live_trading_scope: not_exposed
+  broker_execution_scope: not_exposed
+  server_apply_scope: not_exposed
+  production_secret_scope: not_exposed
+  pm_l3_merge_approval_allowed: false
+  pm_l3_pm_l2_final_verdict_allowed: false
+  subchat_direct_return_to_pm_l2_allowed: false

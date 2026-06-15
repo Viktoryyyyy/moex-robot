@@ -1,0 +1,80 @@
+schema_id: route_b_multi_role_phase_state_machine.v0.1
+project: MOEX Bot
+status: proposed
+source_of_truth: github_repo
+artifact_class: repo_relative
+artifact_path: docs/sot/context/schemas/route_b_multi_role_phase_state_machine.v0.1.yaml
+producer: PM_L2_PHASE_OWNER
+consumer: PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER
+
+purpose:
+  - Define target Route B phase state machine for DB-driven multi-role execution.
+  - Support many role tasks per phase_run_id.
+  - Preserve GitHub executor as a separate PR-only executor.
+
+phase_state_machine:
+  supports_many_role_tasks_per_phase: true
+  role_tasks_are_db_rows: true
+  roles_are_role_id_values_not_separate_workflows: true
+  one_universal_runner_pattern: true
+  minimum_states:
+    - phase_queued
+    - pm_l3_planning
+    - role_task_ready
+    - role_task_running
+    - role_task_completed
+    - role_task_failed
+    - pm_l3_validating
+    - github_execution_requested
+    - github_executor_pr_opened_waiting_ci
+    - pm_l3_finalizing
+    - pm_l2_review_required
+    - blocked
+    - failed
+
+allowed_transitions:
+  phase_queued:
+    - pm_l3_planning
+  pm_l3_planning:
+    - role_task_ready
+    - github_execution_requested
+    - blocked
+  role_task_ready:
+    - role_task_running
+  role_task_running:
+    - role_task_completed
+    - role_task_failed
+  role_task_completed:
+    - pm_l3_validating
+    - role_task_ready
+  role_task_failed:
+    - role_task_ready
+    - blocked
+    - failed
+  pm_l3_validating:
+    - role_task_ready
+    - github_execution_requested
+    - pm_l3_finalizing
+    - blocked
+  github_execution_requested:
+    - github_executor_pr_opened_waiting_ci
+    - blocked
+    - failed
+  github_executor_pr_opened_waiting_ci:
+    - pm_l3_validating
+    - blocked
+    - failed
+  pm_l3_finalizing:
+    - pm_l2_review_required
+    - blocked
+  pm_l2_review_required: []
+  blocked: []
+  failed: []
+
+state_invariants:
+  subchat_cannot_return_directly_to_pm_l2: true
+  pm_l3_cannot_issue_pm_l2_final_verdict: true
+  pm_l3_cannot_approve_merge: true
+  github_executor_remains_separate_pr_only_executor: true
+  no_runtime_live_broker_server_apply_or_secret_scope: true
+  worker_poller_pm_l3_only_assumption_status: migration_target_not_target_behavior

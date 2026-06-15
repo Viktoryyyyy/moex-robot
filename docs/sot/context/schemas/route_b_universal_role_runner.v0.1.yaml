@@ -1,0 +1,148 @@
+schema_id: route_b_universal_role_runner.v0.1
+project: MOEX Bot
+status: proposed
+source_of_truth: github_repo
+artifact_class: repo_relative
+artifact_path: docs/sot/context/schemas/route_b_universal_role_runner.v0.1.yaml
+producer: PM_L2_PHASE_OWNER
+consumer: PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER
+
+purpose:
+  - Define the target DB-driven Universal Role Runner contract for Route B.
+  - Execute PM L3 and SUBCHAT roles through one universal runner pattern.
+  - Document legacy Worker Poller PM_L3-only behavior as migration target, not target behavior.
+
+role_runner:
+  role_runner_id: route_b_universal_role_runner.v0.1
+  runner_pattern: one_universal_runner_pattern
+  target_behavior:
+    roles_are_role_id_values_not_separate_workflows: true
+    one_workflow_per_role_allowed: false
+    one_ai_node_per_role_allowed: false
+    universal_runner_selects_execution_by_role_id: true
+  input_source:
+    class: db_table
+    table: route_b_role_task_queue
+    ref: route_b_role_task_queue.v0.1
+  output_target:
+    class: db_table
+    table: route_b_role_outputs
+    ref: route_b_universal_role_runner_db_contract.v0.1
+  supported_role_ids:
+    - PM_L3_DELIVERY_VALIDATION_OWNER
+    - SUBCHAT_REPO_AUDIT
+    - SUBCHAT_SPEC_CONTRACT_DESIGNER
+    - SUBCHAT_IMPLEMENTATION
+    - SUBCHAT_VALIDATION
+    - SUBCHAT_DATA_STEWARD
+    - SUBCHAT_EXPERIMENT_DESIGNER
+    - SUBCHAT_RESEARCH_CRITIC
+    - SUBCHAT_RESEARCH_EXECUTION
+
+role_binding_rules:
+  role_task_role_id_field: role_task.role_id
+  role_context_ref_field: role_task.context_refs_json.role_context_ref
+  invariant_role_task_role_id_equals_role_context_ref_role_id: true
+  required_match_rule: role_task.role_id must equal role_context_ref.role_id
+  mismatch_handling:
+    status: blocked
+    blocker_code: role_context_ref_role_id_mismatch
+    retry_allowed: false
+
+context_resolution_rules:
+  registry_path: docs/sot/context/registry.route_b.v1.yaml
+  registry_ref_source: github_repo_ref_from_phase_or_task
+  allowed_ref_classes:
+    - static_context_refs
+    - role_context_ref
+    - schema_refs
+  static_context_refs_usage:
+    source_field: role_task.context_refs_json.static_context_refs
+    rule: resolve registered refs only
+    full_context_paste_allowed: false
+  role_context_ref_usage:
+    source_field: role_task.context_refs_json.role_context_ref
+    required_fields:
+      - role_id
+      - role_context_version
+  schema_refs_usage:
+    source_field: role_task.context_refs_json.schema_refs
+    rule: bind expected output schema before prompt assembly
+  implicit_path_discovery_allowed: false
+  server_filesystem_as_architectural_proof_allowed: false
+
+prompt_assembly_contract:
+  prompt_contract_ref: route_b_ollama_role_prompt_contract.v0.1
+  required_inputs:
+    - role_runner_id
+    - role_task_id
+    - phase_run_id
+    - workflow_run_id
+    - role_id
+    - task_type
+    - task_payload_json
+    - static_context_refs
+    - role_context_ref
+    - schema_refs
+    - expected_output_schema_ref
+  assembly_order:
+    - system_prompt_template
+    - resolved_static_context_refs
+    - resolved_role_context_ref
+    - resolved_schema_refs
+    - dynamic_task_payload
+    - output_schema_binding
+
+ollama_model_call_contract:
+  provider: Ollama
+  call_shape_ref: route_b_ollama_role_prompt_contract.v0.1
+  model_selected_by: route_b_runtime_config
+  ai_role_direct_github_mutation_allowed: false
+  ai_role_server_command_execution_allowed: false
+  ai_role_production_secret_access_allowed: false
+
+strict_json_output_contract:
+  json_object_required: true
+  markdown_allowed: false
+  code_fences_allowed: false
+  additional_top_level_fields_allowed: false
+  expected_output_schema_ref_required: true
+  validation_before_persist: true
+  raw_output_persisted_for_evidence: true
+
+failure_handling:
+  parse_failure:
+    status: role_task_failed
+    blocker_code: llm_output_not_valid_json
+    retry_allowed: true
+  schema_validation_failure:
+    status: role_task_failed
+    blocker_code: role_output_schema_validation_failed
+    retry_allowed: true
+  max_retries_exhausted:
+    status: blocked
+    blocker_code: role_task_retries_exhausted
+  context_resolution_failure:
+    status: blocked
+    blocker_code: context_resolution_failed
+    retry_allowed: false
+
+authority_boundary:
+  no_direct_github_mutation_by_ai_role: true
+  no_server_command_execution_by_ai_role: true
+  no_runtime_live_trading_scope: true
+  no_broker_execution_scope: true
+  no_server_apply_scope: true
+  no_production_secret_scope: true
+  github_executor_remains_separate_pr_only_executor: true
+  subchat_output_never_returns_directly_to_pm_l2: true
+  pm_l3_cannot_issue_pm_l2_final_verdict: true
+  pm_l3_cannot_approve_merge: true
+  pm_l2_review_required: true
+
+migration_notes:
+  existing_worker_poller_pm_l3_only_assumption:
+    status: migration_target_not_target_behavior
+    observed_assumption: role_context_ref.role_id currently constrained to PM_L3_DELIVERY_VALIDATION_OWNER
+    target_replacement: DB-driven role_task.role_id selection through Universal Role Runner
+    separate_workflows_per_role_allowed: false
