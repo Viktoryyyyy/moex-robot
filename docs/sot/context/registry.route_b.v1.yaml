@@ -145,6 +145,11 @@
       "path": "docs/sot/context/schemas/route_b_universal_role_runner_db_migration_rollback.v0.1.sql",
       "producer": "SUBCHAT_IMPLEMENTATION",
       "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_DB_OPERATOR_AFTER_PM_L2_APPROVAL"
+    },
+    "route_b_worker_poller_db_adapter_contract.v0.1": {
+      "path": "docs/sot/context/schemas/route_b_worker_poller_db_adapter_contract.v0.1.yaml",
+      "producer": "SUBCHAT_IMPLEMENTATION",
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER"
     }
   },
   "route_b_chain": [
