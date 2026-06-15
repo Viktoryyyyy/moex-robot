@@ -1,0 +1,357 @@
+schema_id: route_b_worker_poller_db_adapter_contract.v0.1
+project: MOEX Bot
+status: repo_side_contract
+source_of_truth: github_repo
+artifact_class: repo_relative
+artifact_path: docs/sot/context/schemas/route_b_worker_poller_db_adapter_contract.v0.1.yaml
+producer: SUBCHAT_IMPLEMENTATION
+consumer: PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER
+
+scope_boundary:
+  repo_only_contract: true
+  sql_execution_allowed: false
+  server_db_mutation_allowed: false
+  production_n8n_workflow_mutation_allowed: false
+  endpoint_smoke_allowed: false
+  ollama_production_call_allowed: false
+  runtime_live_broker_trading_scope_allowed: false
+  secrets_or_auth_scope_allowed: false
+  direct_main_write_allowed: false
+  merge_allowed_by_this_adapter: false
+
+source_artifacts:
+  db_contract_artifact: docs/sot/context/schemas/route_b_universal_role_runner_db_contract.v0.1.yaml
+  role_task_queue_contract_artifact: docs/sot/context/schemas/route_b_role_task_queue.v0.1.yaml
+  accepted_db_migration_execution_artifact: docs/sot/context/schemas/route_b_universal_role_runner_db_migration_execution.v0.1.sql
+  accepted_db_migration_proposal_artifact: docs/sot/context/schemas/route_b_universal_role_runner_db_migration_proposal.v0.1.sql
+
+runtime_table_bindings:
+  role_task_queue:
+    runtime_table: public.route_b_role_task_queue
+    schema_source: accepted_db_migration_execution_artifact
+    forbidden_runtime_adapter_table_names:
+      - public.route_b_role_tasks
+    required_columns_from_db_migration:
+      - phase_run_id
+      - workflow_run_id
+      - role_task_id
+      - parent_role_task_id
+      - sequence_no
+      - role_id
+      - task_type
+      - task_payload_json
+      - context_refs_json
+      - expected_output_schema_ref
+      - status
+      - attempt
+      - max_retries
+      - blocker_code
+      - created_at
+      - claimed_at
+      - completed_at
+    allowed_statuses_from_db_migration:
+      - role_task_ready
+      - role_task_running
+      - role_task_completed
+      - role_task_failed
+      - blocked
+  role_outputs:
+    runtime_table: public.route_b_role_outputs
+    schema_source: accepted_db_migration_execution_artifact
+    required_columns_from_db_migration:
+      - role_output_id
+      - phase_run_id
+      - role_task_id
+      - workflow_run_id
+      - role_id
+      - output_json
+      - output_schema_ref
+      - validation_status
+      - validation_errors_json
+      - raw_content_hash
+      - created_at
+    allowed_validation_statuses_from_db_migration:
+      - not_validated
+      - pass
+      - conditional_pass
+      - fail
+      - blocked
+  pm_l3_decisions:
+    runtime_table: public.route_b_pm_l3_decisions
+    schema_source: accepted_db_migration_execution_artifact
+    required_columns_from_db_migration:
+      - pm_l3_decision_id
+      - phase_run_id
+      - workflow_run_id
+      - role_task_id
+      - decision_type
+      - decision_payload_json
+      - authority_boundary_json
+      - blocker_code
+      - created_at
+    allowed_decision_types_from_db_migration:
+      - create_next_role_task
+      - request_github_execution_package
+      - return_blocker
+      - return_final_pm_l3_evidence_package
+      - no_op
+
+claim_role_task_contract:
+  table: public.route_b_role_task_queue
+  operation_kind: transactional_claim_one
+  eligible_state: role_task_ready
+  claimed_state: role_task_running
+  max_rows_per_claim: 1
+  deterministic_order:
+    - phase_run_id
+    - sequence_no
+    - created_at
+    - role_task_id
+  concurrent_worker_semantics:
+    row_level_locking: FOR UPDATE SKIP LOCKED
+    transaction_required: true
+    no_advisory_lock_required_by_accepted_schema: true
+  retry_attempt_semantics:
+    attempt_column: attempt
+    max_retries_column: max_retries
+    eligibility_rule: attempt < max_retries
+    claim_side_effect: attempt = attempt + 1
+    claim_timestamp_column: claimed_at
+  role_binding:
+    role_id_parameter: role_id
+    role_context_ref_source: context_refs_json.role_context_ref.role_id
+    role_context_ref_must_match_role_id: true
+    pm_l3_only_hardcode_allowed: false
+  query_template: |
+    WITH candidate AS MATERIALIZED (
+        SELECT
+            phase_run_id,
+            workflow_run_id,
+            role_task_id,
+            parent_role_task_id,
+            sequence_no,
+            role_id,
+            task_type,
+            task_payload_json,
+            context_refs_json,
+            expected_output_schema_ref,
+            status,
+            attempt,
+            max_retries,
+            blocker_code,
+            created_at,
+            claimed_at,
+            completed_at
+        FROM public.route_b_role_task_queue
+        WHERE status = 'role_task_ready'
+          AND attempt < max_retries
+          AND role_id = :role_id
+          AND context_refs_json #>> '{role_context_ref,role_id}' = role_id
+        ORDER BY phase_run_id ASC, sequence_no ASC, created_at ASC, role_task_id ASC
+        FOR UPDATE SKIP LOCKED
+        LIMIT 1
+    ),
+    claimed AS (
+        UPDATE public.route_b_role_task_queue q
+        SET
+            status = 'role_task_running',
+            attempt = q.attempt + 1,
+            claimed_at = COALESCE(q.claimed_at, now())
+        FROM candidate c
+        WHERE q.role_task_id = c.role_task_id
+          AND q.status = 'role_task_ready'
+          AND q.attempt < q.max_retries
+        RETURNING
+            q.phase_run_id,
+            q.workflow_run_id,
+            q.role_task_id,
+            q.parent_role_task_id,
+            q.sequence_no,
+            q.role_id,
+            q.task_type,
+            q.task_payload_json,
+            q.context_refs_json,
+            q.expected_output_schema_ref,
+            q.status,
+            q.attempt,
+            q.max_retries,
+            q.blocker_code,
+            q.created_at,
+            q.claimed_at,
+            q.completed_at
+    )
+    SELECT * FROM claimed;
+
+write_role_output_contract:
+  table: public.route_b_role_outputs
+  operation_kind: transactional_insert_one_untrusted_output
+  binds_to_claimed_role_task_using_columns:
+    - phase_run_id
+    - workflow_run_id
+    - role_task_id
+    - role_id
+  raw_output_preservation:
+    output_json_is_raw_untrusted_role_output: true
+    raw_content_hash_required: true
+    validation_status_default: not_validated
+    validation_errors_json_default: []
+    trusted_or_accepted_by_default: false
+  deterministic_evidence_reference:
+    format: route_b_role_outputs.role_output_id={role_output_id};raw_content_hash={raw_content_hash}
+    server_filesystem_path_allowed: false
+    absolute_path_allowed: false
+  query_template: |
+    WITH claimed_role_task AS MATERIALIZED (
+        SELECT
+            phase_run_id,
+            workflow_run_id,
+            role_task_id,
+            role_id,
+            expected_output_schema_ref
+        FROM public.route_b_role_task_queue
+        WHERE role_task_id = :role_task_id
+          AND workflow_run_id = :workflow_run_id
+          AND role_id = :role_id
+          AND status = 'role_task_running'
+        LIMIT 1
+    ),
+    inserted AS (
+        INSERT INTO public.route_b_role_outputs (
+            role_output_id,
+            phase_run_id,
+            role_task_id,
+            workflow_run_id,
+            role_id,
+            output_json,
+            output_schema_ref,
+            validation_status,
+            validation_errors_json,
+            raw_content_hash
+        )
+        SELECT
+            :role_output_id,
+            phase_run_id,
+            role_task_id,
+            workflow_run_id,
+            role_id,
+            :output_json::jsonb,
+            :output_schema_ref,
+            'not_validated',
+            '[]'::jsonb,
+            :raw_content_hash
+        FROM claimed_role_task
+        ON CONFLICT (role_task_id, output_schema_ref) DO NOTHING
+        RETURNING
+            role_output_id,
+            phase_run_id,
+            role_task_id,
+            workflow_run_id,
+            role_id,
+            output_schema_ref,
+            validation_status,
+            validation_errors_json,
+            raw_content_hash,
+            created_at
+    ),
+    existing AS (
+        SELECT
+            role_output_id,
+            phase_run_id,
+            role_task_id,
+            workflow_run_id,
+            role_id,
+            output_schema_ref,
+            validation_status,
+            validation_errors_json,
+            raw_content_hash,
+            created_at
+        FROM public.route_b_role_outputs
+        WHERE role_task_id = :role_task_id
+          AND output_schema_ref = :output_schema_ref
+          AND NOT EXISTS (SELECT 1 FROM inserted)
+    )
+    SELECT * FROM inserted
+    UNION ALL
+    SELECT * FROM existing;
+
+persist_pm_l3_decision_contract:
+  table: public.route_b_pm_l3_decisions
+  operation_kind: transactional_insert_one_pm_l3_decision
+  persisted_separately_from_raw_role_output: true
+  binds_to_role_task_using_columns:
+    - phase_run_id
+    - workflow_run_id
+    - role_task_id
+  allowed_decision_types_source: accepted_db_migration_execution_artifact
+  authority_boundary:
+    merge_authority: PM_L2_ONLY
+    pm_l2_review_required: true
+    n8n_merge_allowed: false
+    direct_main_write_allowed: false
+    force_push_allowed: false
+    file_delete_allowed: false
+    executor_merge_allowed: false
+    ci_passed_is_not_merge_approval: true
+    runtime_live_trading_allowed: false
+    broker_execution_allowed: false
+    server_apply_allowed: false
+    production_secret_access_allowed: false
+    pm_l2_approval_claimed: false
+    executor_merge_enabled: false
+    subchat_return_target: PM_L3_DELIVERY_VALIDATION_OWNER
+  query_template: |
+    INSERT INTO public.route_b_pm_l3_decisions (
+        pm_l3_decision_id,
+        phase_run_id,
+        workflow_run_id,
+        role_task_id,
+        decision_type,
+        decision_payload_json,
+        authority_boundary_json,
+        blocker_code
+    )
+    VALUES (
+        :pm_l3_decision_id,
+        :phase_run_id,
+        :workflow_run_id,
+        :role_task_id,
+        :decision_type,
+        :decision_payload_json::jsonb,
+        jsonb_build_object(
+            'merge_authority', 'PM_L2_ONLY',
+            'pm_l2_review_required', true,
+            'n8n_merge_allowed', false,
+            'direct_main_write_allowed', false,
+            'force_push_allowed', false,
+            'file_delete_allowed', false,
+            'executor_merge_allowed', false,
+            'ci_passed_is_not_merge_approval', true,
+            'runtime_live_trading_allowed', false,
+            'broker_execution_allowed', false,
+            'server_apply_allowed', false,
+            'production_secret_access_allowed', false,
+            'pm_l2_approval_claimed', false,
+            'executor_merge_enabled', false,
+            'subchat_return_target', 'PM_L3_DELIVERY_VALIDATION_OWNER'
+        ),
+        :blocker_code
+    )
+    ON CONFLICT (pm_l3_decision_id) DO NOTHING
+    RETURNING
+        pm_l3_decision_id,
+        phase_run_id,
+        workflow_run_id,
+        role_task_id,
+        decision_type,
+        decision_payload_json,
+        authority_boundary_json,
+        blocker_code,
+        created_at;
+
+idempotency_and_boundary_notes:
+  claim_one_task_is_idempotency_boundary: role_task_id
+  role_output_idempotency_boundary: role_task_id_plus_output_schema_ref
+  pm_l3_decision_idempotency_boundary: pm_l3_decision_id
+  ci_success_is_evidence_only_not_merge_approval: true
+  worker_poller_adapter_must_not_update_or_merge_pr: true
+  worker_poller_adapter_must_not_write_main: true
