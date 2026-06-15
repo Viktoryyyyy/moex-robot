@@ -16,6 +16,7 @@ NEW_SCHEMA_REFS = {
     "route_b_multi_role_phase_state_machine.v0.1": "route_b_multi_role_phase_state_machine.v0.1.yaml",
     "route_b_ollama_role_prompt_contract.v0.1": "route_b_ollama_role_prompt_contract.v0.1.yaml",
     "route_b_universal_role_runner_db_contract.v0.1": "route_b_universal_role_runner_db_contract.v0.1.yaml",
+    "route_b_universal_role_runner_db_migration_proposal.v0.1": "route_b_universal_role_runner_db_migration_proposal.v0.1.sql",
 }
 
 SUPPORTED_ROLE_IDS = {
