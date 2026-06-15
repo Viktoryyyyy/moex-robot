@@ -29,6 +29,12 @@ REQUIRED_SCHEMAS = {
     "route_b_pm_l2_console_actions_adapter.v0.1",
     "route_b_pm_l2_console_actions_openapi.v0.1",
     "route_b_pm_l2_console_owner_wiring.v0.1",
+    "route_b_universal_role_runner.v0.1",
+    "route_b_role_task_queue.v0.1",
+    "route_b_pm_l3_decision_loop.v0.1",
+    "route_b_multi_role_phase_state_machine.v0.1",
+    "route_b_ollama_role_prompt_contract.v0.1",
+    "route_b_universal_role_runner_db_contract.v0.1",
 }
 REQUIRED_ROLE_FIELDS = (
     "mandate:",
