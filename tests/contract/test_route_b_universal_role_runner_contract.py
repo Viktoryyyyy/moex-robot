@@ -9,6 +9,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = REPO_ROOT / "docs/sot/context/registry.route_b.v1.yaml"
 SCHEMA_DIR = REPO_ROOT / "docs/sot/context/schemas"
 
+ACCEPTED_SCHEMA_REFS = {
+    "route_b_universal_role_runner.v0.1",
+    "route_b_role_task_queue.v0.1",
+    "route_b_pm_l3_decision_loop.v0.1",
+    "route_b_multi_role_phase_state_machine.v0.1",
+    "route_b_ollama_role_prompt_contract.v0.1",
+    "route_b_universal_role_runner_db_contract.v0.1",
+}
+
+DB_MIGRATION_PROPOSAL_REF = "route_b_universal_role_runner_db_migration_proposal.v0.1"
+
 NEW_SCHEMA_REFS = {
     "route_b_universal_role_runner.v0.1": "route_b_universal_role_runner.v0.1.yaml",
     "route_b_role_task_queue.v0.1": "route_b_role_task_queue.v0.1.yaml",
@@ -16,6 +27,7 @@ NEW_SCHEMA_REFS = {
     "route_b_multi_role_phase_state_machine.v0.1": "route_b_multi_role_phase_state_machine.v0.1.yaml",
     "route_b_ollama_role_prompt_contract.v0.1": "route_b_ollama_role_prompt_contract.v0.1.yaml",
     "route_b_universal_role_runner_db_contract.v0.1": "route_b_universal_role_runner_db_contract.v0.1.yaml",
+    DB_MIGRATION_PROPOSAL_REF: "route_b_universal_role_runner_db_migration_proposal.v0.1.sql",
 }
 
 SUPPORTED_ROLE_IDS = {
@@ -95,6 +107,12 @@ def test_registry_contains_all_new_schema_refs() -> None:
         assert entry["path"] == "docs/sot/context/schemas/" + filename
         assert entry["producer"] == "PM_L2_PHASE_OWNER"
         assert entry["consumer"] == "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER"
+
+
+def test_db_migration_proposal_schema_ref_is_included_without_removing_existing_refs() -> None:
+    assert DB_MIGRATION_PROPOSAL_REF in NEW_SCHEMA_REFS
+    for ref in ACCEPTED_SCHEMA_REFS:
+        assert ref in NEW_SCHEMA_REFS
 
 
 def test_universal_role_runner_supported_role_allowlist_is_complete() -> None:
