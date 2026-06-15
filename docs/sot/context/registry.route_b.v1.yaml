@@ -80,6 +80,11 @@
       "path": "docs/sot/context/schemas/pm_l3_to_pm_l2_validation_return_package.v1.md",
       "producer": "PM_L3_DELIVERY_VALIDATION_OWNER",
       "consumer": "PM_L2_PHASE_OWNER"
+    },
+    "route_b_pm_l2_console_actions.v0.1": {
+      "path": "docs/sot/context/schemas/route_b_pm_l2_console_actions.v0.1.yaml",
+      "producer": "PM_L2_PHASE_OWNER",
+      "consumer": "PM_L2_CONSOLE"
     }
   },
   "route_b_chain": [
