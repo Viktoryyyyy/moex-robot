@@ -1,0 +1,112 @@
+schema_id: route_b_role_task_queue.v0.1
+project: MOEX Bot
+status: proposed
+source_of_truth: github_repo
+artifact_class: repo_relative
+artifact_path: docs/sot/context/schemas/route_b_role_task_queue.v0.1.yaml
+producer: PM_L2_PHASE_OWNER
+consumer: PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER
+
+purpose:
+  - Define the DB role task queue contract used by the Universal Role Runner.
+  - Persist every PM L3 and SUBCHAT execution request as a DB task.
+  - Allow many role tasks per phase_run_id without creating per-role workflows.
+
+role_task_queue:
+  storage_class: db_table_contract
+  table_name: route_b_role_task_queue
+  proposal_only: true
+  many_role_tasks_per_phase: true
+  role_tasks_are_role_id_values_not_separate_workflows: true
+  fields:
+    phase_run_id:
+      type: text
+      required: true
+    workflow_run_id:
+      type: text
+      required: true
+    role_task_id:
+      type: text
+      required: true
+      uniqueness: primary_identifier
+    parent_role_task_id:
+      type: text
+      required: false
+      purpose: links child SUBCHAT task to PM L3 planner or validator task
+    sequence_no:
+      type: integer
+      required: true
+      purpose: deterministic ordering inside one phase_run_id
+    role_id:
+      type: text
+      required: true
+      allowed_values:
+        - PM_L3_DELIVERY_VALIDATION_OWNER
+        - SUBCHAT_REPO_AUDIT
+        - SUBCHAT_SPEC_CONTRACT_DESIGNER
+        - SUBCHAT_IMPLEMENTATION
+        - SUBCHAT_VALIDATION
+        - SUBCHAT_DATA_STEWARD
+        - SUBCHAT_EXPERIMENT_DESIGNER
+        - SUBCHAT_RESEARCH_CRITIC
+        - SUBCHAT_RESEARCH_EXECUTION
+    task_type:
+      type: text
+      required: true
+      examples:
+        - pm_l3_planning
+        - subchat_execution
+        - pm_l3_validation
+        - pm_l3_finalization
+    task_payload_json:
+      type: jsonb
+      required: true
+      purpose: dynamic task handoff only
+    context_refs_json:
+      type: jsonb
+      required: true
+      required_children:
+        - static_context_refs
+        - role_context_ref
+        - schema_refs
+    expected_output_schema_ref:
+      type: text
+      required: true
+    status:
+      type: text
+      required: true
+      allowed_values:
+        - role_task_ready
+        - role_task_running
+        - role_task_completed
+        - role_task_failed
+        - blocked
+    attempt:
+      type: integer
+      required: true
+      default: 0
+    max_retries:
+      type: integer
+      required: true
+      default: 3
+    blocker_code:
+      type: text
+      required: false
+    created_at:
+      type: timestamptz
+      required: true
+    claimed_at:
+      type: timestamptz
+      required: false
+    completed_at:
+      type: timestamptz
+      required: false
+
+invariants:
+  role_task.role_id_equals_role_context_ref.role_id: true
+  subchat_return_target: PM_L3_DELIVERY_VALIDATION_OWNER
+  pm_l2_direct_subchat_return_allowed: false
+  one_universal_runner_pattern: true
+  one_workflow_per_role_allowed: false
+  one_ai_node_per_role_allowed: false
+  no_runtime_live_broker_server_apply_or_secret_scope: true
