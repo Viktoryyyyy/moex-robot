@@ -1,0 +1,100 @@
+schema_id: route_b_universal_role_runner_db_contract.v0.1
+project: MOEX Bot
+status: proposed
+source_of_truth: github_repo
+artifact_class: repo_relative
+artifact_path: docs/sot/context/schemas/route_b_universal_role_runner_db_contract.v0.1.yaml
+producer: PM_L2_PHASE_OWNER
+consumer: PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER
+
+proposal_only: true
+production_migration_executed: false
+server_apply_executed: false
+executed_db_changes: false
+
+purpose:
+  - Propose target DB contract for Universal Role Runner persistence.
+  - Do not execute migration in this phase.
+  - Define future status/result extension shape for PM L2 review.
+
+db_contract:
+  proposal_only: true
+  no_production_migration: true
+  no_server_apply: true
+  no_executed_db_changes: true
+
+proposed_tables:
+  route_b_phase_runs:
+    purpose: phase-level run state
+    key_fields:
+      - phase_run_id
+      - workflow_run_id
+      - status
+      - created_at
+      - updated_at
+  route_b_role_task_queue:
+    purpose: queued PM L3 and SUBCHAT role tasks
+    contract_ref: route_b_role_task_queue.v0.1
+  route_b_role_outputs:
+    purpose: strict JSON outputs from Universal Role Runner
+    key_fields:
+      - phase_run_id
+      - workflow_run_id
+      - role_task_id
+      - role_id
+      - output_json
+      - validation_status
+      - raw_content_hash
+      - created_at
+  route_b_pm_l3_decisions:
+    purpose: PM L3 planning, validation, GitHub request, blocker, and final evidence decisions
+    key_fields:
+      - phase_run_id
+      - workflow_run_id
+      - role_task_id
+      - decision_type
+      - decision_payload_json
+      - created_at
+
+future_result_status_extension_contract:
+  phase_run:
+    required: true
+  role_tasks:
+    type: array
+    required: true
+  role_outputs:
+    type: array
+    required: true
+  pm_l3_decisions:
+    type: array
+    required: true
+  github_execution_result:
+    source: separate_pr_only_github_executor
+    required: false
+  pm_l3_return_package:
+    required: false
+  authority_boundary:
+    merge_authority: PM_L2_ONLY
+    n8n_merge_allowed: false
+    direct_main_write_allowed: false
+    force_push_allowed: false
+    file_delete_allowed: false
+    executor_merge_allowed: false
+    runtime_live_trading_allowed: false
+    broker_execution_allowed: false
+    server_apply_allowed: false
+    production_secret_access_allowed: false
+  blockers:
+    type: array
+    required: true
+  required_fixes:
+    type: array
+    required: true
+
+migration_notes:
+  worker_poller_pm_l3_only_assumption:
+    status: migration_target_not_target_behavior
+    target: universal_role_runner_reads_role_task_queue
+  github_executor:
+    status: remains_separate_pr_only_executor
+    merge_allowed: false
