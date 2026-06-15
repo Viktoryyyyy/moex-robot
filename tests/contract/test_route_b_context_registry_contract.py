@@ -36,6 +36,8 @@ REQUIRED_SCHEMAS = {
     "route_b_ollama_role_prompt_contract.v0.1",
     "route_b_universal_role_runner_db_contract.v0.1",
     "route_b_universal_role_runner_db_migration_proposal.v0.1",
+    "route_b_universal_role_runner_db_migration_execution.v0.1",
+    "route_b_universal_role_runner_db_migration_rollback.v0.1",
 }
 REQUIRED_ROLE_FIELDS = (
     "mandate:",
@@ -139,3 +141,27 @@ def test_route_b_schema_direction_is_explicit() -> None:
     assert "expected_return_to: PM_L3_DELIVERY_VALIDATION_OWNER" in schema_text["pm_l3_to_subchat_task_package.v1"]
     assert "return_to: PM_L3_DELIVERY_VALIDATION_OWNER" in schema_text["subchat_to_pm_l3_return_package.v1"]
     assert "return_to: PM_L2_PHASE_OWNER" in schema_text["pm_l3_to_pm_l2_validation_return_package.v1"]
+
+
+def test_route_b_registry_binds_db_migration_execution_refs() -> None:
+    registry = _load_registry()
+    schemas = registry["schema_refs"]
+    assert isinstance(schemas, dict)
+    assert schemas["route_b_universal_role_runner_db_migration_execution.v0.1"][
+        "path"
+    ] == "docs/sot/context/schemas/route_b_universal_role_runner_db_migration_execution.v0.1.sql"
+    assert schemas["route_b_universal_role_runner_db_migration_rollback.v0.1"][
+        "path"
+    ] == "docs/sot/context/schemas/route_b_universal_role_runner_db_migration_rollback.v0.1.sql"
+
+
+def test_route_b_registry_keeps_proposal_and_db_contract_refs_intact() -> None:
+    registry = _load_registry()
+    schemas = registry["schema_refs"]
+    assert isinstance(schemas, dict)
+    assert schemas["route_b_universal_role_runner_db_contract.v0.1"][
+        "path"
+    ] == "docs/sot/context/schemas/route_b_universal_role_runner_db_contract.v0.1.yaml"
+    assert schemas["route_b_universal_role_runner_db_migration_proposal.v0.1"][
+        "path"
+    ] == "docs/sot/context/schemas/route_b_universal_role_runner_db_migration_proposal.v0.1.sql"
