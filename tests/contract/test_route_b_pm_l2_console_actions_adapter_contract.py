@@ -106,6 +106,17 @@ def _section_mapping(section_name: str) -> dict[str, object]:
     return mapping
 
 
+def _openapi_path_section(path: str, next_path: str | None = None) -> str:
+    text = _text()
+    if next_path:
+        pattern = r"^\s{4}" + re.escape(path) + r":[\s\S]+?^\s{4}" + re.escape(next_path) + r":"
+    else:
+        pattern = r"^\s{4}" + re.escape(path) + r":[\s\S]+?^operations:"
+    match = re.search(pattern, text, flags=re.MULTILINE)
+    assert match, path
+    return match.group(0)
+
+
 def test_adapter_file_exists_and_is_valid_yaml_subset() -> None:
     assert ADAPTER_PATH.is_file()
     text = _text()
@@ -192,13 +203,7 @@ def test_result_operation_requires_pm_l2_repository_guard_and_rejects_status_onl
     result_operation = _operations()["get_route_b_result"]
     assert result_operation["status_only"] is False
     assert result_operation["rejects_status_only_semantics"] is True
-    result_section = re.search(
-        r"/moex/route-b/result:[\s\S]+?^\s{4}/moex/|\Z",
-        _text(),
-        flags=re.MULTILINE,
-    )
-    assert result_section
-    result_text = result_section.group(0)
+    result_text = _openapi_path_section("/moex/route-b/result")
     assert "required: true" in result_text
     assert "name: repository_full_name" in result_text
     assert "name: requested_by_role" in result_text
@@ -210,10 +215,5 @@ def test_result_operation_requires_pm_l2_repository_guard_and_rejects_status_onl
 def test_status_operation_remains_status_only() -> None:
     status_operation = _operations()["get_route_b_status"]
     assert status_operation["status_only"] is True
-    status_section = re.search(
-        r"/moex/route-b/status:[\s\S]+?^\s{4}/moex/route-b/result:",
-        _text(),
-        flags=re.MULTILINE,
-    )
-    assert status_section
-    assert "x-status-only: true" in status_section.group(0)
+    status_text = _openapi_path_section("/moex/route-b/status", "/moex/route-b/result")
+    assert "x-status-only: true" in status_text
