@@ -1,0 +1,238 @@
+schema_id: route_b_pm_l2_console_actions.v0.1
+project: MOEX Bot
+scope: Route B PM L2 Console
+status: proposed
+source_of_truth: github_repo
+artifact_class: repo_relative
+artifact_path: docs/sot/context/schemas/route_b_pm_l2_console_actions.v0.1.yaml
+version: v0.1
+
+purpose:
+  - Provide a PM-readable and mobile-first console action contract for Route B.
+  - Expose exactly three PM L2 console actions.
+  - Bind each console action to existing Route B workflow semantics without adding merge, runtime, live trading, broker, or production secret authority.
+
+console_actions:
+  submit_route_b_run:
+    action_id: submit_route_b_run
+    display_name: Submit Route B run
+    bound_workflow_name: MOEX_ROUTE_B_INTAKE_ACK_V1_10_3
+    bound_workflow_version: "1.10.3"
+    workflow_semantics:
+      request_type: intake_ack
+      transport: n8n_webhook
+      webhook_path_contract: moex/route-b/intake
+      expected_http_status: 202
+      async_behavior: postgres_queue_only
+      idempotency: idempotency_key_or_deterministic_request_hash
+    allowed_request_fields:
+      - repository_full_name
+      - static_context_refs
+      - role_context_ref
+      - dynamic_handoff
+      - schema_refs
+      - idempotency_key
+    required_request_fields:
+      - repository_full_name
+      - static_context_refs
+      - role_context_ref
+      - dynamic_handoff
+    response_summary_fields:
+      - accepted
+      - workflow_name
+      - spec_version
+      - workflow_run_id
+      - status
+      - current_state
+      - repository_full_name
+      - target_branch_name
+      - idempotent_replay
+    pm_readable_success_state: queued
+    authority_boundary:
+      merge_authority: PM_L2_ONLY
+      n8n_merge_allowed: false
+      direct_main_write_allowed: false
+      force_push_allowed: false
+      file_delete_allowed: false
+      executor_merge_allowed: false
+      ci_passed_is_not_merge_approval: true
+      runtime_live_trading_allowed: false
+      broker_execution_allowed: false
+    pm_l2_review_required: true
+
+  get_route_b_status:
+    action_id: get_route_b_status
+    display_name: Get Route B status
+    bound_workflow_name: MOEX_ROUTE_B_STATUS_QUERY_V1_10_3
+    bound_workflow_version: "1.10.3"
+    workflow_semantics:
+      request_type: status_query
+      transport: n8n_webhook
+      webhook_path_contract: moex/route-b/status
+      expected_http_status_valid_request: 200
+      expected_http_status_invalid_request: 400
+      lookup_keys:
+        - workflow_run_id
+        - idempotency_key
+      status_only: true
+      must_not_call_result_query: true
+    allowed_request_fields:
+      - workflow_run_id
+      - run_id
+      - idempotency_key
+    required_request_rule: provide workflow_run_id or idempotency_key
+    response_summary_fields:
+      - workflow_name
+      - spec_version
+      - http_status_code
+      - status_request_valid
+      - request_identifier_kind
+      - found
+      - workflow_run_id
+      - idempotency_key
+      - status
+      - current_state
+      - current_phase
+      - target_branch_name
+      - retry_count
+      - max_retries
+      - validation_verdict
+      - ci_status
+      - pr_number
+      - github_commit_sha
+      - github_pr_url
+      - last_completed_step
+      - error_message
+      - latest_event
+      - event_count
+      - step_count
+    pm_readable_success_state: status_returned
+    authority_boundary:
+      merge_authority: PM_L2_ONLY
+      n8n_merge_allowed: false
+      direct_main_write_allowed: false
+      force_push_allowed: false
+      file_delete_allowed: false
+      executor_merge_allowed: false
+      ci_passed_is_not_merge_approval: true
+      runtime_live_trading_allowed: false
+      broker_execution_allowed: false
+    pm_l2_review_required: true
+
+  get_route_b_result:
+    action_id: get_route_b_result
+    display_name: Get Route B result evidence
+    bound_workflow_name: MOEX_ROUTE_B_RESULT_QUERY_V1_10_3
+    bound_workflow_version: "1.10.3"
+    workflow_semantics:
+      request_type: result_query
+      transport: n8n_webhook
+      webhook_path_contract: moex/route-b/result
+      expected_http_status_valid_request: 200
+      expected_http_status_invalid_request: 400
+      expected_http_status_not_found: 404
+      lookup_rule: provide exactly one identifier, workflow_run_id or idempotency_key
+      repository_guard: repository_full_name must equal Viktoryyyyy/moex-robot
+      requester_guard: requested_by_role must equal PM_L2_PHASE_OWNER
+      status_only_requests_rejected: true
+      status_only_requests_must_use_action: get_route_b_status
+    allowed_request_fields:
+      - workflow_run_id
+      - idempotency_key
+      - repository_full_name
+      - requested_by_role
+      - include_sections
+    required_request_fields:
+      - repository_full_name
+      - requested_by_role
+    required_request_rule: provide exactly one of workflow_run_id or idempotency_key
+    evidence_sections:
+      - pm_l3_package
+      - github_execution_result
+      - pr_validation_package
+      - pm_l3_return_package
+      - evidence_refs
+      - pr_refs
+      - ci_refs
+      - changed_file_refs
+      - blockers
+      - required_fixes
+      - authority_boundary
+      - events_summary
+      - steps_summary
+    response_summary_fields:
+      - workflow_name
+      - spec_version
+      - http_status_code
+      - result_request_valid
+      - request_identifier_kind
+      - found
+      - workflow_run_id
+      - idempotency_key
+      - repository_full_name
+      - status
+      - current_state
+      - current_phase
+      - pm_l3_package
+      - github_execution_result
+      - pr_validation_package
+      - pm_l3_return_package
+      - evidence_refs
+      - pr_refs
+      - ci_refs
+      - changed_file_refs
+      - blockers
+      - required_fixes
+      - missing_sections
+      - pm_l2_review_required
+      - authority_boundary
+      - events_summary
+      - steps_summary
+    required_response_fields:
+      - authority_boundary
+      - pm_l2_review_required
+    pm_readable_success_state: result_evidence_returned
+    authority_boundary:
+      merge_authority: PM_L2_ONLY
+      n8n_merge_allowed: false
+      direct_main_write_allowed: false
+      force_push_allowed: false
+      file_delete_allowed: false
+      executor_merge_allowed: false
+      ci_passed_is_not_merge_approval: true
+      runtime_live_trading_allowed: false
+      broker_execution_allowed: false
+    pm_l2_review_required: true
+
+invariants:
+  exact_console_action_count: 3
+  production_secrets_allowed: false
+  server_first_assumptions_allowed: false
+  workflow_json_relocation_allowed: false
+  merge_authority_exposed_to_n8n: false
+  ci_passed_is_pm_l2_approval: false
+  status_only_requests_use_status_query: true
+  result_output_includes_authority_boundary: true
+  result_output_includes_pm_l2_review_required: true
+  runtime_live_trading_allowed: false
+  broker_execution_allowed: false
+
+mobile_first_pm_view:
+  submit_route_b_run:
+    label: Submit
+    after_success: Save workflow_run_id, then use get_route_b_status.
+  get_route_b_status:
+    label: Status
+    after_success: Use for progress checks only. Do not use Result Query for status-only checks.
+  get_route_b_result:
+    label: Result
+    after_success: Review authority_boundary and pm_l2_review_required before any PM L2 decision.
+
+non_goals:
+  - production_secret_wiring
+  - server_apply
+  - workflow_export_relocation
+  - direct_main_write
+  - merge_automation
+  - runtime_or_live_trading
+  - broker_execution_logic
