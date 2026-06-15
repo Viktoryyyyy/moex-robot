@@ -25,6 +25,7 @@ REQUIRED_SCHEMAS = {
     "pm_l3_to_subchat_task_package.v1",
     "subchat_to_pm_l3_return_package.v1",
     "pm_l3_to_pm_l2_validation_return_package.v1",
+    "route_b_pm_l2_console_actions.v0.1",
 }
 REQUIRED_ROLE_FIELDS = (
     "mandate:",
