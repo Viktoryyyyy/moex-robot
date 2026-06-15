@@ -38,6 +38,7 @@ REQUIRED_SCHEMAS = {
     "route_b_universal_role_runner_db_migration_proposal.v0.1",
     "route_b_universal_role_runner_db_migration_execution.v0.1",
     "route_b_universal_role_runner_db_migration_rollback.v0.1",
+    "route_b_worker_poller_db_adapter_contract.v0.1",
 }
 REQUIRED_ROLE_FIELDS = (
     "mandate:",
@@ -165,3 +166,12 @@ def test_route_b_registry_keeps_proposal_and_db_contract_refs_intact() -> None:
     assert schemas["route_b_universal_role_runner_db_migration_proposal.v0.1"][
         "path"
     ] == "docs/sot/context/schemas/route_b_universal_role_runner_db_migration_proposal.v0.1.sql"
+
+
+def test_route_b_registry_binds_worker_poller_db_adapter_contract_ref() -> None:
+    registry = _load_registry()
+    schemas = registry["schema_refs"]
+    assert isinstance(schemas, dict)
+    assert schemas["route_b_worker_poller_db_adapter_contract.v0.1"][
+        "path"
+    ] == "docs/sot/context/schemas/route_b_worker_poller_db_adapter_contract.v0.1.yaml"
