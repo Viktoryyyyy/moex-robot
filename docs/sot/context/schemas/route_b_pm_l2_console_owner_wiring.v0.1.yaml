@@ -1,0 +1,40 @@
+owner_wiring_id: route_b_pm_l2_console_owner_wiring.v0.1
+source_adapter_ref: route_b_pm_l2_console_actions_adapter.v0.1
+openapi_artifact_ref: route_b_pm_l2_console_actions_openapi.v0.1
+source_of_truth: github_repo
+artifact_class: repo_relative
+intended_owner: PM_L2_PHASE_OWNER
+intended_consumer: PM_L2_CONSOLE
+production_secret_wiring_in_repo: false
+runtime_endpoint_smoke_in_scope: false
+manual_owner_inputs:
+  - N8N_PUBLIC_WEBHOOK_BASE_URL
+  - ROUTE_B_PM_L2_CONSOLE_BEARER_TOKEN
+setup_steps:
+  - copy OpenAPI artifact content into Custom GPT Actions schema
+  - set server URL manually in GPT Actions UI or environment
+  - set bearer auth manually in GPT Actions UI secrets area
+  - do not paste secrets into repo
+  - do not run endpoint smoke until separate PM approval
+post_setup_checks:
+  - schema imports successfully
+  - exactly 3 actions visible
+  - no merge action visible
+  - no direct-main action visible
+  - no runtime or live trading action visible
+  - no broker or execution action visible
+hard_invariants:
+  exact_action_count: 3
+  production_secrets_allowed: false
+  production_secret_wiring_in_repo: false
+  runtime_endpoint_smoke_in_scope: false
+  server_first_assumptions_allowed: false
+  workflow_json_relocation_allowed: false
+  merge_authority_exposed_to_n8n: false
+  ci_passed_is_pm_l2_approval: false
+  runtime_live_trading_allowed: false
+  broker_execution_allowed: false
+  direct_main_write_allowed: false
+  force_push_allowed: false
+  file_delete_allowed: false
+  executor_merge_allowed: false
