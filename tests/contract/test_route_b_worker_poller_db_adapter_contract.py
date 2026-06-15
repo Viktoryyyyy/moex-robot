@@ -66,6 +66,28 @@ def _constraint_values(sql: str, constraint_name: str) -> set[str]:
     return values
 
 
+def _yaml_mapping_block(text: str, key: str, indent: int) -> str:
+    prefix = " " * indent
+    match = re.search(
+        r"^"
+        + re.escape(prefix + key)
+        + r":\n.*?(?=^"
+        + re.escape(prefix)
+        + r"[a-z_][a-z0-9_]*:\n|\Z)",
+        text,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    assert match, key
+    return match.group(0)
+
+
+def _runtime_table_binding_section(spec: str, binding_name: str) -> str:
+    bindings_block = _yaml_mapping_block(spec, "runtime_table_bindings", indent=0)
+    section = _yaml_mapping_block(bindings_block, binding_name, indent=2)
+    assert "runtime_table: public." in section, binding_name
+    return section
+
+
 def _changed_files() -> set[str]:
     base_ref = os.environ.get("GITHUB_BASE_REF", "").strip()
     commands: list[list[str]] = []
@@ -144,18 +166,14 @@ def test_adapter_references_accepted_db_contract_and_migration_artifacts() -> No
 def test_required_columns_are_derived_from_accepted_db_migration() -> None:
     spec = _read(SPEC_PATH)
     sql = _read(MIGRATION_SQL_PATH)
-    for table_name in (
-        "route_b_role_task_queue",
-        "route_b_role_outputs",
-        "route_b_pm_l3_decisions",
-    ):
-        section_match = re.search(
-            re.escape(table_name) + r".*?(?=\n  [a-z_]+:\n|\Z)",
-            spec,
-            flags=re.DOTALL,
-        )
-        assert section_match, table_name
-        section = section_match.group(0)
+    table_bindings = {
+        "route_b_role_task_queue": "role_task_queue",
+        "route_b_role_outputs": "role_outputs",
+        "route_b_pm_l3_decisions": "pm_l3_decisions",
+    }
+    for table_name, binding_name in table_bindings.items():
+        section = _runtime_table_binding_section(spec, binding_name)
+        assert "runtime_table: public." + table_name in section, table_name
         for column_name in _column_names(sql, table_name):
             assert re.search(r"\b" + re.escape(column_name) + r"\b", section), (
                 table_name,
@@ -173,13 +191,7 @@ def test_allowed_statuses_are_derived_from_accepted_db_migration() -> None:
     }
     for constraint_name, spec_section_name in status_constraints.items():
         values = _constraint_values(sql, constraint_name)
-        section_match = re.search(
-            spec_section_name + r":.*?(?=\n  [a-z_]+:\n|\Z)",
-            spec,
-            flags=re.DOTALL,
-        )
-        assert section_match, spec_section_name
-        section = section_match.group(0)
+        section = _runtime_table_binding_section(spec, spec_section_name)
         for value in values:
             assert value in section, (constraint_name, value)
 
