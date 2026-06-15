@@ -1,0 +1,138 @@
+openapi: 3.1.0
+x-artifact-id: route_b_pm_l2_console_actions_openapi.v0.1
+x-source-adapter-ref: route_b_pm_l2_console_actions_adapter.v0.1
+x-source-schema-ref: route_b_pm_l2_console_actions.v0.1
+x-artifact-class: repo_relative
+x-source-of-truth: github_repo
+x-intended-consumer: PM_L2_CONSOLE
+info:
+  title: MOEX Route B PM L2 Console Actions
+  version: v0.1
+servers:
+  - url: ${N8N_PUBLIC_WEBHOOK_BASE_URL}
+security:
+  - routeBConsoleAuth: []
+components:
+  securitySchemes:
+    routeBConsoleAuth:
+      type: http
+      scheme: bearer
+paths:
+  /moex/route-b/intake:
+    post:
+      operationId: submit_route_b_run
+      x-maps-to-workflow: MOEX_ROUTE_B_INTAKE_ACK_V1_10_3
+      x-authority-boundary:
+        merge_authority_exposed_to_n8n: false
+        ci_passed_is_pm_l2_approval: false
+        runtime_live_trading_allowed: false
+        broker_execution_allowed: false
+        direct_main_write_allowed: false
+        force_push_allowed: false
+        file_delete_allowed: false
+        executor_merge_allowed: false
+      responses:
+        "202":
+          description: Route B run accepted and queued.
+  /moex/route-b/status:
+    get:
+      operationId: get_route_b_status
+      x-maps-to-workflow: MOEX_ROUTE_B_STATUS_QUERY_V1_10_3
+      x-status-only: true
+      x-authority-boundary:
+        merge_authority_exposed_to_n8n: false
+        ci_passed_is_pm_l2_approval: false
+        runtime_live_trading_allowed: false
+        broker_execution_allowed: false
+        direct_main_write_allowed: false
+        force_push_allowed: false
+        file_delete_allowed: false
+        executor_merge_allowed: false
+      parameters:
+        - name: workflow_run_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: run_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: idempotency_key
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Status-only Route B progress response.
+        "400":
+          description: Invalid status request.
+  /moex/route-b/result:
+    get:
+      operationId: get_route_b_result
+      x-maps-to-workflow: MOEX_ROUTE_B_RESULT_QUERY_V1_10_3
+      x-status-only: false
+      x-rejects-status-only-semantics: true
+      x-requires:
+        - repository_full_name
+        - requested_by_role
+      x-authority-boundary:
+        merge_authority_exposed_to_n8n: false
+        ci_passed_is_pm_l2_approval: false
+        runtime_live_trading_allowed: false
+        broker_execution_allowed: false
+        direct_main_write_allowed: false
+        force_push_allowed: false
+        file_delete_allowed: false
+        executor_merge_allowed: false
+      parameters:
+        - name: workflow_run_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: idempotency_key
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: repository_full_name
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: requested_by_role
+          in: query
+          required: true
+          schema:
+            type: string
+            const: PM_L2_PHASE_OWNER
+        - name: include_sections
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Result evidence response for PM L2 review.
+        "400":
+          description: Invalid result request or status-only semantics rejected.
+        "404":
+          description: Route B run not found.
+x-invariants:
+  exact_action_count: 3
+  production_secrets_allowed: false
+  production_secret_wiring_in_repo: false
+  runtime_endpoint_smoke_in_scope: false
+  server_first_assumptions_allowed: false
+  workflow_json_relocation_allowed: false
+  merge_authority_exposed_to_n8n: false
+  ci_passed_is_pm_l2_approval: false
+  runtime_live_trading_allowed: false
+  broker_execution_allowed: false
+  direct_main_write_allowed: false
+  force_push_allowed: false
+  file_delete_allowed: false
+  executor_merge_allowed: false
