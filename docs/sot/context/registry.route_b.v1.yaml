@@ -130,6 +130,11 @@
       "path": "docs/sot/context/schemas/route_b_universal_role_runner_db_contract.v0.1.yaml",
       "producer": "PM_L2_PHASE_OWNER",
       "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER"
+    },
+    "route_b_universal_role_runner_db_migration.v0.1": {
+      "path": "docs/sot/context/schemas/route_b_universal_role_runner_db_migration.v0.1.sql",
+      "producer": "PM_L2_PHASE_OWNER",
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER"
     }
   },
   "route_b_chain": [
