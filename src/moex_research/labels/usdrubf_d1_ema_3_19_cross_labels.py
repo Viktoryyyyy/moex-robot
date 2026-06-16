@@ -86,6 +86,10 @@ def _excursions_h5(daily: pd.DataFrame, event_index: int, direction: float) -> t
     return adverse, favorable
 
 
+def _allow_trade_h5(signed_ret_o2o_h5: float | None) -> int:
+    return int(signed_ret_o2o_h5 is not None and signed_ret_o2o_h5 > 0.0)
+
+
 def build_ema_3_19_cross_labels(event_frame: pd.DataFrame, d1_ohlc_frame: pd.DataFrame) -> pd.DataFrame:
     events = _normalize_events(event_frame)
     daily = _normalize_d1_frame(d1_ohlc_frame)
@@ -103,7 +107,7 @@ def build_ema_3_19_cross_labels(event_frame: pd.DataFrame, d1_ohlc_frame: pd.Dat
         h2 = _signed_open_to_open(daily, event_index, direction, 2)
         h5 = _signed_open_to_open(daily, event_index, direction, 5)
         adverse_h5, favorable_h5 = _excursions_h5(daily, event_index, direction)
-        allow_trade_h5 = int(h5 is not None and adverse_h5 is not None and favorable_h5 is not None)
+        allow_trade_h5 = _allow_trade_h5(h5)
 
         rows.append(
             {
