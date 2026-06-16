@@ -20,7 +20,9 @@
     "earliest_outcome_anchor": "D+1 open",
     "future_outcomes_only": true,
     "no_same_bar_leakage": true,
-    "labels_must_not_enter_feature_rows": true
+    "labels_must_not_enter_feature_rows": true,
+    "allow_trade_h5_source_label": "signed_ret_o2o_h5",
+    "allow_trade_h5_positive_only": true
   },
   "required_columns": [
     "instrument_id",
