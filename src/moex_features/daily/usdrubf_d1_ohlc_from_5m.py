@@ -76,6 +76,28 @@ def normalize_intraday_5m_frame(
     return work.reset_index(drop=True)
 
 
+def _drop_incomplete_trailing_bucket(work: pd.DataFrame) -> pd.DataFrame:
+    bucket_stats = (
+        work.groupby("trade_date", sort=True)
+        .agg(bar_count=("end", "size"), final_end=("end", "max"))
+        .reset_index()
+    )
+    if len(bucket_stats) < 2:
+        return work
+
+    reference = bucket_stats.iloc[:-1]
+    expected_count = int(reference["bar_count"].mode().iloc[0])
+    expected_final_time = reference["final_end"].dt.time.mode().iloc[0]
+    last = bucket_stats.iloc[-1]
+    last_count = int(last["bar_count"])
+    last_final_time = pd.Timestamp(last["final_end"]).time()
+
+    if last_count < expected_count and last_final_time != expected_final_time:
+        last_trade_date = last["trade_date"]
+        return work[work["trade_date"] != last_trade_date].reset_index(drop=True)
+    return work
+
+
 def build_d1_ohlc_from_5m_frame(
     frame: pd.DataFrame,
     *,
@@ -84,6 +106,7 @@ def build_d1_ohlc_from_5m_frame(
 ) -> pd.DataFrame:
     work = normalize_intraday_5m_frame(frame, instrument_id=instrument_id, timezone_name=timezone_name)
     work["trade_date"] = work["end"].dt.normalize()
+    work = _drop_incomplete_trailing_bucket(work)
 
     rows: list[dict[str, object]] = []
     for _, group in work.groupby("trade_date", sort=True):
