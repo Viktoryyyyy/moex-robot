@@ -155,17 +155,28 @@ def build_ema_3_19_cross_context_frame(d1_frame: pd.DataFrame) -> pd.DataFrame:
 def materialize_feature_frame(
     *,
     d1_ohlc_frame: pd.DataFrame | None = None,
+    source_feature_artifact_path: str | Path | None = None,
     dataset_artifact_path: str | Path | None = None,
     instrument_id: str = "usdrubf",
     timezone_name: str = "Europe/Moscow",
 ) -> pd.DataFrame:
     if d1_ohlc_frame is None:
-        if dataset_artifact_path is None:
-            raise ValueError("either d1_ohlc_frame or dataset_artifact_path is required")
-        source = pd.read_csv(Path(dataset_artifact_path))
-        d1_ohlc_frame = build_d1_ohlc_from_5m_frame(
-            source,
-            instrument_id=instrument_id,
-            timezone_name=timezone_name,
-        )
+        path_value = source_feature_artifact_path
+        if path_value is None:
+            path_value = dataset_artifact_path
+        if path_value is None:
+            raise ValueError("either d1_ohlc_frame, source_feature_artifact_path, or dataset_artifact_path is required")
+        path = Path(path_value)
+        if path.suffix.lower() == ".parquet":
+            source = pd.read_parquet(path)
+        else:
+            source = pd.read_csv(path)
+        if set(_REQUIRED_D1_COLUMNS).issubset(source.columns):
+            d1_ohlc_frame = source
+        else:
+            d1_ohlc_frame = build_d1_ohlc_from_5m_frame(
+                source,
+                instrument_id=instrument_id,
+                timezone_name=timezone_name,
+            )
     return build_ema_3_19_cross_context_frame(d1_ohlc_frame)
