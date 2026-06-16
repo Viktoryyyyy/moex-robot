@@ -67,6 +67,13 @@ def test_mutation_package_file_exists_and_is_repo_only() -> None:
     package = _read(PACKAGE_PATH)
     assert "schema_id: route_b_worker_poller_workflow_mutation_package.v0.1" in package
     assert "repo_only_package: true" in package
+    assert "sql_execution_allowed: false" in package
+    assert "server_db_mutation_allowed: false" in package
+    assert "production_n8n_workflow_mutation_allowed: false" in package
+    assert "endpoint_smoke_allowed: false" in package
+    assert "ollama_production_call_allowed: false" in package
+    assert "runtime_live_broker_trading_scope_allowed: false" in package
+    assert "secrets_or_auth_scope_allowed: false" in package
     assert "workflow_export_mutation_mode: formal_mutation_package" in package
 
 
@@ -99,6 +106,8 @@ def test_claim_role_task_uses_role_task_queue_and_lock_safe_semantics() -> None:
     assert "status = 'role_task_running'" in package
     assert "attempt < max_retries" in package
     assert "attempt = q.attempt + 1" in package
+    assert "claimed_at = now()" in package
+    assert "ORDER BY phase_run_id ASC, sequence_no ASC, created_at ASC, role_task_id ASC" in package
 
 
 def test_universal_role_input_resolves_static_role_and_schema_refs() -> None:
@@ -113,8 +122,10 @@ def test_universal_role_input_resolves_static_role_and_schema_refs() -> None:
         "source: context_refs_json.role_context_ref",
         "role_id_must_equal_claimed_role_id: true",
         "context_refs_json.schema_refs",
+        "expected_output_schema_ref",
         "repo_relative_only: true",
         "reject_unknown_ref: true",
+        "implicit_path_autodetect",
     )
     for token in required_tokens:
         assert token in package, token
@@ -131,6 +142,11 @@ def test_prompt_contract_is_single_ai_node_role_id_driven_strict_json() -> None:
         "strict_json_output_only: true",
         "markdown_allowed: false",
         "code_fences_allowed: false",
+        "prose_outside_json_allowed: false",
+        "github_direct_call_instruction_allowed: false",
+        "Do not use markdown.",
+        "Do not use code fences.",
+        "Do not call GitHub.",
     )
     for token in required_tokens:
         assert token in package, token
@@ -151,6 +167,8 @@ def test_persist_role_output_keeps_untrusted_validation_fields() -> None:
         "validation_status_on_insert: not_validated",
         "raw_output_trusted_on_insert: false",
         "output_not_trusted_until_this_step_passes: true",
+        "'not_validated'",
+        "raw_content_hash",
     )
     for token in required_tokens:
         assert token in package, token
@@ -176,6 +194,29 @@ def test_pm_l3_decision_and_github_handoff_preserve_authority_boundaries() -> No
     )
     for token in required_tokens:
         assert token in package, token
+
+
+def test_authority_boundaries_disallow_merge_direct_main_force_push_and_server_apply() -> None:
+    package = _read(PACKAGE_PATH)
+    required_tokens = (
+        "merge_authority: PM_L2_ONLY",
+        "pm_l2_review_required: true",
+        "n8n_merge_allowed: false",
+        "direct_main_write_allowed: false",
+        "force_push_allowed: false",
+        "file_delete_allowed: false",
+        "executor_merge_allowed: false",
+        "ci_passed_is_not_merge_approval: true",
+        "worker_poller_may_merge_pr: false",
+        "github_executor_may_merge_pr: false",
+        "subchat_runtime_may_call_github: false",
+        "server_apply_allowed: false",
+    )
+    for token in required_tokens:
+        assert token in package, token
+    assert "approved_for_merge: true" not in package
+    assert "executor_merge_allowed: true" not in package
+    assert "direct_main_write_allowed: true" not in package
 
 
 def test_registry_binds_worker_poller_workflow_mutation_package() -> None:
