@@ -87,6 +87,36 @@ def test_label_builder_uses_future_outcomes_only_not_event_day_ohlc() -> None:
     assert labels_before.loc[0, columns].to_dict() == labels_after.loc[0, columns].to_dict()
 
 
+def test_allow_trade_h5_is_one_only_when_signed_ret_h5_is_positive() -> None:
+    daily = _d1_frame(30)
+    cross_up_events = pd.DataFrame(
+        [
+            {
+                "instrument_id": "usdrubf",
+                "end": daily.loc[19, "end"],
+                "cross_dir": "cross_up",
+            }
+        ]
+    )
+    cross_down_events = pd.DataFrame(
+        [
+            {
+                "instrument_id": "usdrubf",
+                "end": daily.loc[19, "end"],
+                "cross_dir": "cross_down",
+            }
+        ]
+    )
+
+    cross_up_labels = build_ema_3_19_cross_labels(cross_up_events, daily)
+    cross_down_labels = build_ema_3_19_cross_labels(cross_down_events, daily)
+
+    assert cross_up_labels.loc[0, "signed_ret_o2o_h5"] > 0.0
+    assert cross_up_labels.loc[0, "allow_trade_h5"] == 1
+    assert cross_down_labels.loc[0, "signed_ret_o2o_h5"] < 0.0
+    assert cross_down_labels.loc[0, "allow_trade_h5"] == 0
+
+
 def test_allow_trade_h5_is_zero_when_future_anchor_is_unavailable() -> None:
     daily = _d1_frame(24)
     events = pd.DataFrame(
