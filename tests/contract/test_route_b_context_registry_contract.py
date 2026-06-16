@@ -39,6 +39,7 @@ REQUIRED_SCHEMAS = {
     "route_b_universal_role_runner_db_migration_execution.v0.1",
     "route_b_universal_role_runner_db_migration_rollback.v0.1",
     "route_b_worker_poller_db_adapter_contract.v0.1",
+    "route_b_worker_poller_workflow_mutation_package.v0.1",
 }
 REQUIRED_ROLE_FIELDS = (
     "mandate:",
@@ -102,7 +103,7 @@ def test_route_b_registry_paths_are_repo_relative_and_existing() -> None:
         assert not path.is_absolute()
         assert ".." not in path.parts
         assert not str(path_value).startswith(("/", "~"))
-        assert "\\" not in path_value
+        assert chr(92) not in path_value
         assert (REPO_ROOT / path).is_file(), path_value
 
 
@@ -175,3 +176,12 @@ def test_route_b_registry_binds_worker_poller_db_adapter_contract_ref() -> None:
     assert schemas["route_b_worker_poller_db_adapter_contract.v0.1"][
         "path"
     ] == "docs/sot/context/schemas/route_b_worker_poller_db_adapter_contract.v0.1.yaml"
+
+
+def test_route_b_registry_binds_worker_poller_workflow_mutation_package_ref() -> None:
+    registry = _load_registry()
+    schemas = registry["schema_refs"]
+    assert isinstance(schemas, dict)
+    assert schemas["route_b_worker_poller_workflow_mutation_package.v0.1"][
+        "path"
+    ] == "docs/sot/context/schemas/route_b_worker_poller_workflow_mutation_package.v0.1.yaml"
