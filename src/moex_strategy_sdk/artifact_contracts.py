@@ -61,10 +61,15 @@ class ArtifactContract:
         artifact_class: str | None = None,
         consumer: str | None = None,
     ) -> None:
+        legacy_artifact_class_was_provided = artifact_class is not None
+
         if artifact_role is None and artifact_class is not None:
             artifact_role = artifact_class
         elif artifact_class is not None and artifact_role != artifact_class:
             raise ArtifactContractValidationError("artifact_class conflicts with artifact_role")
+
+        if contract_class is None and legacy_artifact_class_was_provided:
+            contract_class = "repo_relative"
 
         if consumers is None and consumer is not None:
             consumers = (consumer,)
