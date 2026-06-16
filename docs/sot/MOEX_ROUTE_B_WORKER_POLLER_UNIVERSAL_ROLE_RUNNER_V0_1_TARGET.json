@@ -1,0 +1,270 @@
+{
+  "name": "MOEX_ROUTE_B_WORKER_POLLER_UNIVERSAL_ROLE_RUNNER_V0_1_TARGET",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "target-001",
+      "name": "Worker Schedule - Universal Role Runner Target",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1400,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const started_at = new Date().toISOString();\nconst worker_execution_id = 'urr_' + String($execution.id || Date.now());\nreturn [{json:{workflow_name:'MOEX_ROUTE_B_WORKER_POLLER_UNIVERSAL_ROLE_RUNNER_V0_1_TARGET',spec_version:'0.1',worker_execution_id,claim_token:'claim_' + worker_execution_id,source_baseline_workflow_export:'docs/sot/MOEX_ROUTE_B_WORKER_POLLER_V1_10_3.json',mutation_package_ref:'docs/sot/context/schemas/route_b_worker_poller_workflow_mutation_package.v0.1.yaml',role_task_queue_table:'public.route_b_role_task_queue',role_outputs_table:'public.route_b_role_outputs',pm_l3_decisions_table:'public.route_b_pm_l3_decisions',eligible_status:'role_task_ready',running_status:'role_task_running',max_role_tasks_per_worker_execution:1,merge_authority:'PM_L2_ONLY',n8n_merge_allowed:false,worker_poller_workflow_calls_github_directly:false,started_at}}];"
+      },
+      "id": "target-002",
+      "name": "Build Worker Identity - Universal Role Runner",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1160,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH input_json AS (SELECT $1::jsonb AS p), input_data AS (SELECT p->>'worker_execution_id' AS worker_execution_id, p->>'claim_token' AS claim_token FROM input_json), candidate AS MATERIALIZED (SELECT q.phase_run_id, q.workflow_run_id, q.role_task_id, q.parent_role_task_id, q.sequence_no, q.role_id, q.task_type, q.task_payload_json, q.context_refs_json, q.expected_output_schema_ref, q.status, q.attempt, q.max_retries, q.blocker_code, q.created_at, q.claimed_at, q.completed_at FROM public.route_b_role_task_queue q WHERE q.status = 'role_task_ready' AND q.attempt < q.max_retries AND q.context_refs_json #>> '{role_context_ref,role_id}' = q.role_id ORDER BY q.phase_run_id ASC, q.sequence_no ASC, q.created_at ASC, q.role_task_id ASC FOR UPDATE SKIP LOCKED LIMIT 1), claimed AS (UPDATE public.route_b_role_task_queue q SET status = 'role_task_running', attempt = q.attempt + 1, claimed_at = now() FROM candidate c WHERE q.role_task_id = c.role_task_id AND q.status = 'role_task_ready' AND q.attempt < q.max_retries RETURNING q.phase_run_id, q.workflow_run_id, q.role_task_id, q.parent_role_task_id, q.sequence_no, q.role_id, q.task_type, q.task_payload_json, q.context_refs_json, q.expected_output_schema_ref, q.status, q.attempt, q.max_retries, q.blocker_code, q.created_at, q.claimed_at, q.completed_at) SELECT true AS has_job, c.*, d.worker_execution_id, d.claim_token FROM claimed c CROSS JOIN input_data d UNION ALL SELECT false AS has_job, null::text AS phase_run_id, null::text AS workflow_run_id, null::text AS role_task_id, null::text AS parent_role_task_id, null::integer AS sequence_no, null::text AS role_id, null::text AS task_type, '{}'::jsonb AS task_payload_json, '{}'::jsonb AS context_refs_json, null::text AS expected_output_schema_ref, null::text AS status, null::integer AS attempt, null::integer AS max_retries, null::text AS blocker_code, null::timestamptz AS created_at, null::timestamptz AS claimed_at, null::timestamptz AS completed_at, d.worker_execution_id, d.claim_token FROM input_data d WHERE NOT EXISTS (SELECT 1 FROM claimed);",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "target-003",
+      "name": "Claim One Role Task From DB Queue",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -920,
+        120
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "PU85DvcSG5X2EloO",
+          "name": "postgres_moex_n8n"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "target-004a",
+              "leftValue": "={{ $json.has_job }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "target-004",
+      "name": "Role Task Claimed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -680,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "function obj(v){if(typeof v==='string'){try{return JSON.parse(v)}catch(e){return {}}} return v&&typeof v==='object'&&!Array.isArray(v)?v:{}}\nconst t=$input.first().json;if(!t.has_job)return [];\nconst task_payload_json=obj(t.task_payload_json);const context_refs_json=obj(t.context_refs_json);\nconst authority_boundary={merge_authority:'PM_L2_ONLY',pm_l2_review_required:true,n8n_merge_allowed:false,direct_main_write_allowed:false,force_push_allowed:false,file_delete_allowed:false,executor_merge_allowed:false,ci_passed_is_not_merge_approval:true,worker_poller_workflow_calls_github_directly:false,worker_poller_may_merge_pr:false,github_execution_request_json_is_structured_handoff:true,server_apply_allowed:false};\nconst system='You are executing one Route B role task. role_id is supplied by public.route_b_role_task_queue.role_id and drives behavior. Return strict JSON only. No markdown. No code fences. Your output is untrusted until deterministic validation passes. Do not call GitHub. GitHub execution is structured handoff only. Do not merge. Do not claim PM L2 approval. Preserve PM_L2_ONLY merge authority.';\nconst user='role_id='+t.role_id+'\ntask_payload_json='+JSON.stringify(task_payload_json)+'\ncontext_refs_json='+JSON.stringify(context_refs_json)+'\nexpected_output_schema_ref='+t.expected_output_schema_ref+'\nauthority_boundary='+JSON.stringify(authority_boundary);\nreturn [{json:{has_job:true,phase_run_id:t.phase_run_id,workflow_run_id:t.workflow_run_id,role_task_id:t.role_task_id,role_id:t.role_id,task_payload_json,context_refs_json,expected_output_schema_ref:t.expected_output_schema_ref,worker_execution_id:t.worker_execution_id,claim_token:t.claim_token,authority_boundary,ollama_request:{model:'gpt-oss:120b',stream:false,options:{temperature:0.1},messages:[{role:'system',content:system},{role:'user',content:user}]}}}];"
+      },
+      "id": "target-005",
+      "name": "Build Universal Role Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -440,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://ollama.com/api/chat",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.ollama_request }}",
+        "options": {
+          "timeout": 3600000
+        }
+      },
+      "id": "target-006",
+      "name": "Ollama Cloud Chat - Universal Role Runner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -200,
+        40
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "eOtWfyYnLub48M1p",
+          "name": "ollama_cloud_moex_route_b"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "function h(s){let x=0;for(let i=0;i<s.length;i++)x=Math.imul(31,x)+s.charCodeAt(i)|0;return Math.abs(x).toString(16)}\nfunction isObj(v){return v&&typeof v==='object'&&!Array.isArray(v)}\nconst c=$('Build Universal Role Input').item.json;const r=$input.first().json;let raw='';let errors=[];\nif(r.error)errors.push('ollama_http_error');else if(r.message&&typeof r.message.content==='string')raw=r.message.content.trim();else if(typeof r.response==='string')raw=r.response.trim();else errors.push('missing_ollama_message_content');\nlet parsed=null;if(raw){if(raw.startsWith('```')||raw.endsWith('```'))errors.push('markdown_code_fence_not_allowed');else{try{parsed=JSON.parse(raw)}catch(e){errors.push('role_output_not_valid_json')}}}\nif(parsed&&!isObj(parsed))errors.push('role_output_must_be_json_object');const txt=parsed?JSON.stringify(parsed).toLowerCase():'';\nfor(const s of ['direct_main_write_allowed\":true','n8n_merge_allowed\":true','executor_merge_allowed\":true','force_push_allowed\":true','file_delete_allowed\":true','pm_l2_approval_claimed\":true','worker_poller_called_github\":true','server_apply_performed\":true']){if(txt.includes(s))errors.push('forbidden_authority_claim')}\nlet output_json=isObj(parsed)?parsed:{raw_role_output_unparsed:raw||null,parse_status:'failed'};\nlet decision_type='no_op';let decision_payload_json={};let blocker_code=null;if(c.role_id==='PM_L3_DELIVERY_VALIDATION_OWNER'&&isObj(output_json)){const nd=isObj(output_json.next_decision)?output_json.next_decision:{};decision_type=output_json.decision_type||nd.decision_type||'no_op';if(!['create_next_role_task','request_github_execution_package','return_blocker','return_final_pm_l3_evidence_package','no_op'].includes(decision_type))decision_type='no_op';decision_payload_json=isObj(output_json.decision_payload_json)?output_json.decision_payload_json:{};if(decision_type==='request_github_execution_package'&&!decision_payload_json.github_execution_request_json)errors.push('missing_github_execution_request_json_for_structured_handoff');if(decision_type==='return_blocker')blocker_code=output_json.blocker_code||'pm_l3_blocker'}\nconst raw_content_hash=h(raw);return [{json:{phase_run_id:c.phase_run_id,workflow_run_id:c.workflow_run_id,role_task_id:c.role_task_id,role_id:c.role_id,role_output_id:'role_output_'+h(c.role_task_id+raw_content_hash),output_json,output_schema_ref:c.expected_output_schema_ref,validation_status:errors.length?'fail':'pass',validation_errors_json:errors,raw_content_hash,pm_l3_decision_id:'pm_l3_decision_'+h(c.role_task_id+decision_type+raw_content_hash),decision_type,decision_payload_json,blocker_code,authority_boundary_json:c.authority_boundary,ai_output_treated_as_untrusted_before_deterministic_validation:true,github_execution_handoff_only:true,worker_poller_workflow_calls_github_directly:false,worker_poller_may_merge_pr:false,pm_l2_merge_authority_preserved:true}}];"
+      },
+      "id": "target-007",
+      "name": "Validate AI Role Output Deterministically",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        40,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH input_json AS (SELECT $1::jsonb AS p), input_data AS (SELECT p, p->>'role_output_id' AS role_output_id, p->>'phase_run_id' AS phase_run_id, p->>'role_task_id' AS role_task_id, p->>'workflow_run_id' AS workflow_run_id, p->>'role_id' AS role_id, COALESCE(p->'output_json','{}'::jsonb) AS output_json, p->>'output_schema_ref' AS output_schema_ref, p->>'validation_status' AS validation_status, COALESCE(p->'validation_errors_json','[]'::jsonb) AS validation_errors_json, p->>'raw_content_hash' AS raw_content_hash, p->>'pm_l3_decision_id' AS pm_l3_decision_id, COALESCE(p->>'decision_type','no_op') AS decision_type, COALESCE(p->'decision_payload_json','{}'::jsonb) AS decision_payload_json, NULLIF(p->>'blocker_code','') AS blocker_code FROM input_json), role_output AS (INSERT INTO public.route_b_role_outputs (role_output_id, phase_run_id, role_task_id, workflow_run_id, role_id, output_json, output_schema_ref, validation_status, validation_errors_json, raw_content_hash) SELECT role_output_id, phase_run_id, role_task_id, workflow_run_id, role_id, output_json, output_schema_ref, validation_status, validation_errors_json, raw_content_hash FROM input_data ON CONFLICT (role_task_id, output_schema_ref) DO UPDATE SET output_json=EXCLUDED.output_json, validation_status=EXCLUDED.validation_status, validation_errors_json=EXCLUDED.validation_errors_json, raw_content_hash=EXCLUDED.raw_content_hash RETURNING role_output_id, validation_status, validation_errors_json, raw_content_hash), task_update AS (UPDATE public.route_b_role_task_queue q SET status=CASE WHEN d.validation_status IN ('pass','conditional_pass') THEN 'role_task_completed' WHEN d.validation_status='blocked' THEN 'blocked' ELSE 'role_task_failed' END, blocker_code=CASE WHEN d.validation_status IN ('fail','blocked') THEN COALESCE(q.blocker_code,'role_output_validation_failed') ELSE q.blocker_code END, completed_at=now() FROM input_data d WHERE q.role_task_id=d.role_task_id AND q.workflow_run_id=d.workflow_run_id AND q.role_id=d.role_id AND q.status='role_task_running' RETURNING q.role_task_id, q.status), pm_l3_decision AS (INSERT INTO public.route_b_pm_l3_decisions (pm_l3_decision_id, phase_run_id, workflow_run_id, role_task_id, decision_type, decision_payload_json, authority_boundary_json, blocker_code) SELECT pm_l3_decision_id, phase_run_id, workflow_run_id, role_task_id, decision_type, decision_payload_json, jsonb_build_object('merge_authority','PM_L2_ONLY','pm_l2_review_required',true,'n8n_merge_allowed',false,'direct_main_write_allowed',false,'force_push_allowed',false,'file_delete_allowed',false,'executor_merge_allowed',false,'ci_passed_is_not_merge_approval',true,'runtime_live_trading_allowed',false,'broker_execution_allowed',false,'server_apply_allowed',false,'production_secret_access_allowed',false,'pm_l2_approval_claimed',false,'github_execution_request_json_is_structured_handoff',true,'worker_poller_workflow_calls_github_directly',false,'worker_poller_may_merge_pr',false), blocker_code FROM input_data WHERE role_id='PM_L3_DELIVERY_VALIDATION_OWNER' AND decision_type IN ('create_next_role_task','request_github_execution_package','return_blocker','return_final_pm_l3_evidence_package','no_op') ON CONFLICT (pm_l3_decision_id) DO NOTHING RETURNING pm_l3_decision_id, decision_type, decision_payload_json, authority_boundary_json) SELECT d.p AS worker_result_json, ro.role_output_id, ro.validation_status, ro.validation_errors_json, ro.raw_content_hash, tu.status AS role_task_status, dec.pm_l3_decision_id, dec.decision_type, dec.decision_payload_json, dec.authority_boundary_json FROM input_data d LEFT JOIN role_output ro ON true LEFT JOIN task_update tu ON true LEFT JOIN pm_l3_decision dec ON true;",
+        "options": {
+          "queryBatching": "transaction",
+          "queryReplacement": "={{ JSON.stringify($json) }}",
+          "largeNumbersOutput": "text"
+        }
+      },
+      "id": "target-008",
+      "name": "Persist Role Output And PM L3 Decision Handoff",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        280,
+        40
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "PU85DvcSG5X2EloO",
+          "name": "postgres_moex_n8n"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Worker Schedule - Universal Role Runner Target": {
+      "main": [
+        [
+          {
+            "node": "Build Worker Identity - Universal Role Runner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Worker Identity - Universal Role Runner": {
+      "main": [
+        [
+          {
+            "node": "Claim One Role Task From DB Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim One Role Task From DB Queue": {
+      "main": [
+        [
+          {
+            "node": "Role Task Claimed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Role Task Claimed?": {
+      "main": [
+        [
+          {
+            "node": "Build Universal Role Input",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Build Universal Role Input": {
+      "main": [
+        [
+          {
+            "node": "Ollama Cloud Chat - Universal Role Runner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Cloud Chat - Universal Role Runner": {
+      "main": [
+        [
+          {
+            "node": "Validate AI Role Output Deterministically",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate AI Role Output Deterministically": {
+      "main": [
+        [
+          {
+            "node": "Persist Role Output And PM L3 Decision Handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "target-v0-1-repo-artifact-not-production",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "62875adff27fc822d942c4254bca5bd3da9a7fd81d36718bdc0f7d5d52395a15"
+  },
+  "nodeGroups": [],
+  "id": "route-b-worker-poller-urr-v0-1-target",
+  "tags": []
+}
