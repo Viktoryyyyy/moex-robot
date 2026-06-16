@@ -42,6 +42,24 @@ def test_artifact_contract_accepts_canonical_role_and_consumers() -> None:
     assert validate_artifact_contract(contract) is contract
 
 
+def test_artifact_contract_accepts_legacy_constructor_aliases_as_read_only_views() -> None:
+    contract = ArtifactContract(
+        artifact_id="legacy_output",
+        artifact_class="output",
+        contract_class="external_pattern",
+        producer="legacy_producer",
+        consumer="legacy_consumer",
+        format="table",
+        schema_version="legacy.v1",
+    )
+
+    assert contract.artifact_role == "output"
+    assert contract.consumers == ("legacy_consumer",)
+    assert contract.artifact_class == "output"
+    assert contract.consumer == "legacy_consumer"
+    assert validate_artifact_contract(contract) is contract
+
+
 def test_supported_contract_classes_are_exact() -> None:
     assert ALLOWED_CONTRACT_CLASSES == frozenset(
         {"repo_relative", "external_pattern", "cli_argument", "env_contract"}
@@ -55,14 +73,21 @@ def test_supported_contract_classes_are_exact() -> None:
 @pytest.mark.parametrize(
     "overrides",
     (
+        {"artifact_id": None},
         {"artifact_id": ""},
+        {"artifact_role": None},
         {"artifact_role": ""},
+        {"producer": None},
         {"producer": ""},
+        {"consumers": None},
         {"consumers": ()},
+        {"consumers": ("",)},
         {"contract_class": "unsupported"},
+        {"schema_version": None},
         {"schema_version": 0},
         {"schema_version": ""},
         {"schema_version": True},
+        {"schema_version": []},
     ),
 )
 def test_validate_artifact_contract_rejects_invalid_contracts(overrides: dict[str, object]) -> None:
