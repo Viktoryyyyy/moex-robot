@@ -1,0 +1,34 @@
+{
+  "artifact_id": "usdrubf_d1_ohlc_from_5m",
+  "artifact_role": "feature",
+  "contract_class": "repo_relative",
+  "producer_ref": "src.moex_features.daily.usdrubf_d1_ohlc_from_5m:materialize_feature_frame",
+  "consumer_refs": [
+    "src.moex_features.daily.usdrubf_d1_ema_3_19_cross_context:materialize_feature_frame",
+    "src.moex_research.labels.usdrubf_d1_ema_3_19_cross_labels:materialize_label_frame"
+  ],
+  "format": "dataframe",
+  "schema_version": 1,
+  "partitioning": "unpartitioned",
+  "source_dataset_ref": "contracts/datasets/research_usdrubf_5m_full_history.json",
+  "locator_ref": "data/features/usdrubf_d1_ohlc_from_5m.parquet",
+  "calendar_contract": "moex_futures",
+  "timezone": "Europe/Moscow",
+  "required_columns": [
+    "instrument_id",
+    "end",
+    "open",
+    "high",
+    "low",
+    "close"
+  ],
+  "optional_columns": [
+    "volume"
+  ],
+  "time_semantics": {
+    "event_day_symbol": "D",
+    "known_by_when": "D close after finalized D1 bar",
+    "earliest_executable_point": "D+1 open",
+    "no_same_bar_leakage": true
+  }
+}
