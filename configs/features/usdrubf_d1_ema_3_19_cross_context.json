@@ -1,0 +1,20 @@
+{
+  "feature_id": "usdrubf_d1_ema_3_19_cross_context",
+  "version": "1.0.0",
+  "instrument_ids": [
+    "usdrubf"
+  ],
+  "granularity": "D1",
+  "source_feature_ref": "contracts/features/usdrubf_d1_ohlc_from_5m.json",
+  "artifact_ref": "contracts/features/usdrubf_d1_ema_3_19_cross_context.json",
+  "producer_ref": "src.moex_features.daily.usdrubf_d1_ema_3_19_cross_context:materialize_feature_frame",
+  "calendar_contract": "moex_futures",
+  "timezone": "Europe/Moscow",
+  "fast_ema_window": 3,
+  "slow_ema_window": 19,
+  "ema_alpha_formula": "2/(window+1)",
+  "warmup_full_d1_bars_before_first_event": 19,
+  "is_research_allowed": true,
+  "is_runtime_allowed": false,
+  "status": "active"
+}
