@@ -1,0 +1,48 @@
+{
+  "artifact_id": "usdrubf_d1_ema_3_19_cross_context",
+  "artifact_role": "feature",
+  "contract_class": "repo_relative",
+  "producer_ref": "src.moex_features.daily.usdrubf_d1_ema_3_19_cross_context:materialize_feature_frame",
+  "consumer_refs": [
+    "src.moex_research.labels.usdrubf_d1_ema_3_19_cross_labels:materialize_label_frame",
+    "future_strategy_package_usdrubf_ema_3_19_d1_ai_filter"
+  ],
+  "format": "dataframe",
+  "schema_version": 1,
+  "partitioning": "unpartitioned",
+  "source_feature_ref": "contracts/features/usdrubf_d1_ohlc_from_5m.json",
+  "locator_ref": "data/features/usdrubf_d1_ema_3_19_cross_context.parquet",
+  "calendar_contract": "moex_futures",
+  "timezone": "Europe/Moscow",
+  "required_columns": [
+    "instrument_id",
+    "end",
+    "open",
+    "high",
+    "low",
+    "close",
+    "ema3",
+    "ema19",
+    "ema_diff",
+    "ema_diff_prev",
+    "cross_dir",
+    "bars_since_prev_cross",
+    "ret_1d",
+    "ret_3d",
+    "ret_5d",
+    "rolling_vol_5d",
+    "rolling_vol_20d"
+  ],
+  "optional_columns": [
+    "volume"
+  ],
+  "event_contract": "one row per D1 EMA(3/19) crossover",
+  "ema_alpha_formula": "2/(window+1)",
+  "warmup_full_d1_bars_before_first_event": 19,
+  "time_semantics": {
+    "event_day_symbol": "D",
+    "known_by_when": "D close after finalized D1 bar",
+    "earliest_executable_point": "D+1 open",
+    "no_same_bar_leakage": true
+  }
+}

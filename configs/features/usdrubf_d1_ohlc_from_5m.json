@@ -1,0 +1,19 @@
+{
+  "feature_id": "usdrubf_d1_ohlc_from_5m",
+  "version": "1.0.0",
+  "instrument_ids": [
+    "usdrubf"
+  ],
+  "granularity": "D1",
+  "source_dataset_id": "research_usdrubf_5m_full_history",
+  "source_dataset_config_ref": "configs/datasets/research_usdrubf_5m_full_history.json",
+  "source_dataset_contract_ref": "contracts/datasets/research_usdrubf_5m_full_history.json",
+  "artifact_ref": "contracts/features/usdrubf_d1_ohlc_from_5m.json",
+  "producer_ref": "src.moex_features.daily.usdrubf_d1_ohlc_from_5m:materialize_feature_frame",
+  "calendar_contract": "moex_futures",
+  "timezone": "Europe/Moscow",
+  "session_semantics": "finalized_bar_end",
+  "is_research_allowed": true,
+  "is_runtime_allowed": false,
+  "status": "active"
+}

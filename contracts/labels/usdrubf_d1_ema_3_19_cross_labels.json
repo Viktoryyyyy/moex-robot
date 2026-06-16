@@ -1,0 +1,38 @@
+{
+  "artifact_id": "usdrubf_d1_ema_3_19_cross_labels",
+  "artifact_role": "label",
+  "contract_class": "repo_relative",
+  "producer_ref": "src.moex_research.labels.usdrubf_d1_ema_3_19_cross_labels:materialize_label_frame",
+  "consumer_refs": [
+    "research_only_model_training_future_phase"
+  ],
+  "format": "dataframe",
+  "schema_version": 1,
+  "partitioning": "unpartitioned",
+  "source_feature_ref": "contracts/features/usdrubf_d1_ema_3_19_cross_context.json",
+  "source_dataset_ref": "contracts/features/usdrubf_d1_ohlc_from_5m.json",
+  "locator_ref": "data/labels/usdrubf_d1_ema_3_19_cross_labels.parquet",
+  "calendar_contract": "moex_futures",
+  "timezone": "Europe/Moscow",
+  "label_policy": {
+    "scope": "research_only",
+    "runtime_consumption_allowed": false,
+    "earliest_outcome_anchor": "D+1 open",
+    "future_outcomes_only": true,
+    "no_same_bar_leakage": true,
+    "labels_must_not_enter_feature_rows": true,
+    "allow_trade_h5_source_label": "signed_ret_o2o_h5",
+    "allow_trade_h5_positive_only": true
+  },
+  "required_columns": [
+    "instrument_id",
+    "end",
+    "cross_dir",
+    "signed_ret_o2o_h1",
+    "signed_ret_o2o_h2",
+    "signed_ret_o2o_h5",
+    "allow_trade_h5",
+    "max_adverse_excursion_h5",
+    "max_favorable_excursion_h5"
+  ]
+}
