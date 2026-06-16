@@ -125,6 +125,8 @@ def test_label_contract_declares_research_only_future_outcome_policy() -> None:
     assert policy["earliest_outcome_anchor"] == "D+1 open"
     assert policy["future_outcomes_only"] is True
     assert policy["labels_must_not_enter_feature_rows"] is True
+    assert policy["allow_trade_h5_source_label"] == "signed_ret_o2o_h5"
+    assert policy["allow_trade_h5_positive_only"] is True
 
 
 def test_new_modules_import_successfully() -> None:
