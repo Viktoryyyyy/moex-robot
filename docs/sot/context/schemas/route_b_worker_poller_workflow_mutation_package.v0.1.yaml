@@ -1,0 +1,238 @@
+schema_id: route_b_worker_poller_workflow_mutation_package.v0.1
+project: MOEX Bot
+status: repo_side_workflow_mutation_package
+source_of_truth: github_repo
+artifact_class: repo_relative
+artifact_path: docs/sot/context/schemas/route_b_worker_poller_workflow_mutation_package.v0.1.yaml
+producer: SUBCHAT_IMPLEMENTATION
+consumer: PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER
+
+scope_boundary:
+  repo_only_package: true
+  production_n8n_workflow_mutation_allowed: false
+  server_apply_allowed: false
+  endpoint_smoke_allowed: false
+  live_ollama_call_allowed: false
+  db_migration_execution_allowed: false
+  sql_execution_allowed: false
+  secrets_or_auth_scope_allowed: false
+  runtime_live_broker_trading_scope_allowed: false
+  direct_github_mutation_by_ai_role_allowed: false
+  direct_main_write_allowed: false
+  force_push_allowed: false
+  file_delete_allowed: false
+  merge_allowed: false
+
+repo_artifact_inspection:
+  inspected_ref: main
+  worker_poller_workflow_name: MOEX_ROUTE_B_WORKER_POLLER_V1_10_3
+  worker_poller_artifact_found_in_repo: false
+  worker_poller_artifact_paths: []
+  formal_mutation_package_required: true
+  exact_repo_artifacts_found:
+    worker_poller_db_adapter_contract: docs/sot/context/schemas/route_b_worker_poller_db_adapter_contract.v0.1.yaml
+    route_b_context_registry: docs/sot/context/registry.route_b.v1.yaml
+    worker_poller_db_adapter_contract_tests: tests/contract/test_route_b_worker_poller_db_adapter_contract.py
+  repo_search_terms_used:
+    - MOEX_ROUTE_B_WORKER_POLLER_V1_10_3
+    - MOEX_ROUTE_B_WORKER_POLLER
+    - WORKER_POLLER
+    - route_b_role_task_queue
+
+workflow_target:
+  workflow_name: MOEX_ROUTE_B_WORKER_POLLER_V1_10_3
+  target_behavior: db_driven_universal_role_runner_by_role_id
+  one_universal_ai_role_runner_pattern: true
+  target_ai_node_count: 1
+  one_ai_node_per_role_allowed: false
+  one_workflow_per_role_allowed: false
+  existing_ai_node_should_become_role_id_driven: true
+  github_executor_remains_separate_pr_only_executor: true
+  ai_role_direct_github_execution_allowed: false
+  github_execution_request_json_required: true
+
+source_artifacts:
+  worker_poller_db_adapter_contract: docs/sot/context/schemas/route_b_worker_poller_db_adapter_contract.v0.1.yaml
+  role_task_queue_contract: docs/sot/context/schemas/route_b_role_task_queue.v0.1.yaml
+  universal_role_runner_contract: docs/sot/context/schemas/route_b_universal_role_runner.v0.1.yaml
+  ollama_role_prompt_contract: docs/sot/context/schemas/route_b_ollama_role_prompt_contract.v0.1.yaml
+  universal_role_runner_db_contract: docs/sot/context/schemas/route_b_universal_role_runner_db_contract.v0.1.yaml
+  universal_role_runner_db_migration_execution_contract: docs/sot/context/schemas/route_b_universal_role_runner_db_migration_execution.v0.1.sql
+
+workflow_mutation_contract:
+  claim_role_task_step:
+    table: public.route_b_role_task_queue
+    operation: transactional_claim_one_ready_role_task
+    eligible_status: role_task_ready
+    claimed_status: role_task_running
+    max_rows_per_claim: 1
+    deterministic_order:
+      - phase_run_id
+      - sequence_no
+      - created_at
+      - role_task_id
+    transaction_required: true
+    concurrency: FOR UPDATE SKIP LOCKED
+    role_binding_required: true
+    role_id_source: role_task.role_id
+    role_context_ref_source: role_task.context_refs_json.role_context_ref
+    invariant_role_id_equals_role_context_ref_role_id: true
+    pm_l3_only_hardcode_allowed: false
+    attempt_increment_required: true
+    forbidden_runtime_table_names:
+      - public.route_b_role_tasks
+    query_template: |
+      WITH candidate AS MATERIALIZED (
+          SELECT
+              phase_run_id,
+              workflow_run_id,
+              role_task_id,
+              parent_role_task_id,
+              sequence_no,
+              role_id,
+              task_type,
+              task_payload_json,
+              context_refs_json,
+              expected_output_schema_ref,
+              status,
+              attempt,
+              max_retries,
+              blocker_code,
+              created_at,
+              claimed_at,
+              completed_at
+          FROM public.route_b_role_task_queue
+          WHERE status = 'role_task_ready'
+            AND attempt < max_retries
+            AND context_refs_json #>> '{role_context_ref,role_id}' = role_id
+          ORDER BY phase_run_id ASC, sequence_no ASC, created_at ASC, role_task_id ASC
+          FOR UPDATE SKIP LOCKED
+          LIMIT 1
+      ),
+      claimed AS (
+          UPDATE public.route_b_role_task_queue q
+          SET
+              status = 'role_task_running',
+              attempt = q.attempt + 1,
+              claimed_at = COALESCE(q.claimed_at, now())
+          FROM candidate c
+          WHERE q.role_task_id = c.role_task_id
+            AND q.status = 'role_task_ready'
+            AND q.attempt < q.max_retries
+          RETURNING
+              q.phase_run_id,
+              q.workflow_run_id,
+              q.role_task_id,
+              q.parent_role_task_id,
+              q.sequence_no,
+              q.role_id,
+              q.task_type,
+              q.task_payload_json,
+              q.context_refs_json,
+              q.expected_output_schema_ref,
+              q.status,
+              q.attempt,
+              q.max_retries,
+              q.blocker_code,
+              q.created_at,
+              q.claimed_at,
+              q.completed_at
+      )
+      SELECT * FROM claimed;
+
+  build_universal_role_input_step:
+    input_source: claimed_role_task_row
+    required_fields:
+      - role_id
+      - task_payload_json
+      - context_refs_json
+      - expected_output_schema_ref
+    required_context_resolution:
+      static_context_refs: context_refs_json.static_context_refs
+      role_context_ref: context_refs_json.role_context_ref
+      schema_refs: context_refs_json.schema_refs
+    registry_path: docs/sot/context/registry.route_b.v1.yaml
+    registry_source_of_truth: github_repo
+    implicit_path_discovery_allowed: false
+    full_static_context_paste_allowed: false
+
+  prompt_assembly_step:
+    one_ai_node_only: true
+    role_id_source: role_task.role_id
+    inject_role_id: true
+    inject_role_context: true
+    inject_task_payload_json: true
+    inject_schema_refs: true
+    inject_expected_output_schema_ref: true
+    strict_json_output_only: true
+    markdown_allowed: false
+    code_fences_allowed: false
+    external_assumptions_allowed: false
+
+  ai_call_step:
+    provider: Ollama
+    existing_ai_node_reused: true
+    additional_ai_nodes_allowed: false
+    stream: false
+    production_live_run_in_this_phase_allowed: false
+
+  deterministic_validation_step:
+    parsed_json_required: true
+    expected_output_schema_ref_required: true
+    deterministic_validation_before_persist_required: true
+    ai_role_output_untrusted_until_validation_passes: true
+    raw_content_hash_required: true
+    invalid_json_status: role_task_failed
+    invalid_json_blocker_code: llm_output_not_valid_json
+
+  role_output_persistence_step:
+    table: public.route_b_role_outputs
+    include_columns:
+      - role_task_id
+      - workflow_run_id
+      - role_id
+      - output_json
+      - output_schema_ref
+      - validation_status
+      - validation_errors_json
+      - raw_content_hash
+    output_json_is_raw_untrusted_role_output: true
+    validation_status_default: not_validated
+    trusted_or_accepted_by_default: false
+    raw_content_hash_required: true
+    idempotency_boundary: role_task_id_plus_output_schema_ref
+
+  pm_l3_decision_persistence_step:
+    applies_when_role_id: PM_L3_DELIVERY_VALIDATION_OWNER
+    table: public.route_b_pm_l3_decisions
+    allowed_decision_types:
+      - create_next_role_task
+      - request_github_execution_package
+      - return_blocker
+      - return_final_pm_l3_evidence_package
+      - no_op
+    github_execution_request_json_required_for_github_handoff: true
+    authority_boundary_required: true
+    merge_authority: PM_L2_ONLY
+    pm_l2_review_required: true
+
+  github_execution_handoff_step:
+    applies_when_output_contains: github_execution_request_json
+    route_to_existing_github_executor_only: true
+    worker_poller_must_not_execute_github: true
+    ai_node_must_not_execute_github: true
+    existing_github_executor_pr_only: true
+    executor_merge_allowed: false
+    direct_main_write_allowed: false
+
+  authority_boundary_step:
+    merge_authority: PM_L2_ONLY
+    n8n_merge_allowed: false
+    direct_main_write_allowed: false
+    force_push_allowed: false
+    file_delete_allowed: false
+    executor_merge_allowed: false
+    ci_passed_is_not_merge_approval: true
+    runtime_live_trading_allowed: false
+    broker_execution_allowed: false
+    server_apply_allowed_without_pm_l2: false
