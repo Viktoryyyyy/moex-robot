@@ -79,8 +79,6 @@ workflow_mutation_contract:
     invariant_role_id_equals_role_context_ref_role_id: true
     pm_l3_only_hardcode_allowed: false
     attempt_increment_required: true
-    forbidden_runtime_table_names:
-      - public.route_b_role_tasks
     query_template: |
       WITH candidate AS MATERIALIZED (
           SELECT phase_run_id, workflow_run_id, role_task_id, parent_role_task_id, sequence_no, role_id, task_type, task_payload_json, context_refs_json, expected_output_schema_ref, status, attempt, max_retries, blocker_code, created_at, claimed_at, completed_at
