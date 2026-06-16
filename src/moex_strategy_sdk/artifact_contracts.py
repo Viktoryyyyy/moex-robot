@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from .errors import ArtifactContractValidationError
 
@@ -32,7 +32,7 @@ def _normalize_consumers(consumers: object) -> tuple[str, ...]:
     return normalized
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class ArtifactContract:
     artifact_id: str
     artifact_role: str
@@ -44,6 +44,47 @@ class ArtifactContract:
     partitioning_rule: str | None = None
     retention_policy: str | None = None
     locator_ref: str | None = None
+
+    def __init__(
+        self,
+        *,
+        artifact_id: str | None = None,
+        artifact_role: str | None = None,
+        contract_class: str | None = None,
+        producer: str | None = None,
+        consumers: object = None,
+        format: str | None = None,
+        schema_version: str | int | None = None,
+        partitioning_rule: str | None = None,
+        retention_policy: str | None = None,
+        locator_ref: str | None = None,
+        artifact_class: str | None = None,
+        consumer: str | None = None,
+    ) -> None:
+        if artifact_role is None and artifact_class is not None:
+            artifact_role = artifact_class
+        elif artifact_class is not None and artifact_role != artifact_class:
+            raise ArtifactContractValidationError("artifact_class conflicts with artifact_role")
+
+        if consumers is None and consumer is not None:
+            consumers = (consumer,)
+        elif consumers is not None and consumer is not None:
+            normalized_consumers = _normalize_consumers(consumers)
+            if normalized_consumers[0] != consumer:
+                raise ArtifactContractValidationError("consumer conflicts with consumers")
+            consumers = normalized_consumers
+
+        object.__setattr__(self, "artifact_id", artifact_id)
+        object.__setattr__(self, "artifact_role", artifact_role)
+        object.__setattr__(self, "contract_class", contract_class)
+        object.__setattr__(self, "producer", producer)
+        object.__setattr__(self, "consumers", consumers)
+        object.__setattr__(self, "format", format)
+        object.__setattr__(self, "schema_version", schema_version)
+        object.__setattr__(self, "partitioning_rule", partitioning_rule)
+        object.__setattr__(self, "retention_policy", retention_policy)
+        object.__setattr__(self, "locator_ref", locator_ref)
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         _require_non_empty_string("artifact_id", self.artifact_id)
@@ -62,7 +103,9 @@ class ArtifactContract:
         if isinstance(self.schema_version, int):
             if self.schema_version < 1:
                 raise ArtifactContractValidationError("schema_version must be >= 1")
-        elif not isinstance(self.schema_version, str) or not self.schema_version.strip():
+        elif not isinstance(self.schema_version, str):
+            raise ArtifactContractValidationError("invalid schema_version")
+        elif not self.schema_version.strip():
             raise ArtifactContractValidationError("schema_version is required")
 
     @property
