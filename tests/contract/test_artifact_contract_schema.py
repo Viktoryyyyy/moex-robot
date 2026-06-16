@@ -60,6 +60,28 @@ def test_artifact_contract_accepts_legacy_constructor_aliases_as_read_only_views
     assert validate_artifact_contract(contract) is contract
 
 
+def test_artifact_contract_accepts_legacy_constructor_without_contract_class() -> None:
+    contract = ArtifactContract(
+        artifact_id="signals_table",
+        artifact_class="experiment_table",
+        producer="strategy.d1_tsmom",
+        consumer="moex_backtest",
+        format="parquet",
+        schema_version="signals.v1",
+    )
+
+    assert contract.artifact_id == "signals_table"
+    assert contract.artifact_role == "experiment_table"
+    assert contract.artifact_class == "experiment_table"
+    assert contract.contract_class == "repo_relative"
+    assert contract.producer == "strategy.d1_tsmom"
+    assert contract.consumers == ("moex_backtest",)
+    assert contract.consumer == "moex_backtest"
+    assert contract.format == "parquet"
+    assert contract.schema_version == "signals.v1"
+    assert validate_artifact_contract(contract) is contract
+
+
 def test_supported_contract_classes_are_exact() -> None:
     assert ALLOWED_CONTRACT_CLASSES == frozenset(
         {"repo_relative", "external_pattern", "cli_argument", "env_contract"}
