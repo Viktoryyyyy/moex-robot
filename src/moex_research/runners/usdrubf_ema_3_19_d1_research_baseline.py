@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,9 @@ FUTURE_CONTEXT_MARKERS = (
     "max_favorable",
 )
 
+SOURCE_PATH_ALIAS_TOKENS = ("latest", "current", "autodetect")
+_FILENAME_STEM_TOKEN_SPLIT_RE = re.compile(r"[^A-Za-z0-9]+")
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -77,13 +81,62 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _path_alias_tokens(path_value: str) -> list[str]:
+    path_components = [
+        component.lower()
+        for component in re.split(r"[\\/]+", path_value)
+        if component and component not in {".", ".."}
+    ]
+    filename = path_components[-1] if path_components else ""
+    filename_stem = Path(filename).stem
+    filename_stem_tokens = [
+        token.lower()
+        for token in _FILENAME_STEM_TOKEN_SPLIT_RE.split(filename_stem)
+        if token
+    ]
+
+    component_tokens = set(path_components)
+    stem_tokens = set(filename_stem_tokens)
+    return [
+        token
+        for token in SOURCE_PATH_ALIAS_TOKENS
+        if token in component_tokens or token in stem_tokens
+    ]
+
+
+def _source_dataset_path_alias_tokens(raw_source_dataset_path: str) -> list[str]:
+    raw_path = raw_source_dataset_path.strip()
+    candidate_paths = [raw_path]
+    try:
+        resolved_path = str(Path(raw_path).expanduser().resolve(strict=False))
+    except (OSError, RuntimeError):
+        resolved_path = str(Path(raw_path).expanduser().absolute())
+    if resolved_path != raw_path:
+        candidate_paths.append(resolved_path)
+
+    rejected_tokens: list[str] = []
+    for candidate_path in candidate_paths:
+        for token in _path_alias_tokens(candidate_path):
+            if token not in rejected_tokens:
+                rejected_tokens.append(token)
+    return rejected_tokens
+
+
 def _validate_cli_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> tuple[Path, Path, str]:
-    source_dataset_path = Path(args.source_dataset_path)
+    raw_source_dataset_path = str(args.source_dataset_path).strip()
     output_dir = Path(args.output_dir)
     run_id = str(args.run_id).strip()
 
-    if not str(args.source_dataset_path).strip():
+    if not raw_source_dataset_path:
         parser.error("--source-dataset-path must be non-empty")
+    rejected_alias_tokens = _source_dataset_path_alias_tokens(raw_source_dataset_path)
+    if rejected_alias_tokens:
+        parser.error(
+            "--source-dataset-path must not use mutable alias token(s): "
+            + ", ".join(rejected_alias_tokens)
+        )
+
+    source_dataset_path = Path(raw_source_dataset_path)
     if not source_dataset_path.exists():
         parser.error("--source-dataset-path must reference an existing file")
     if not source_dataset_path.is_file():
@@ -272,6 +325,10 @@ def _build_quality_report(
         "source_dataset_path": str(source_dataset_path),
         "output_dir": str(output_dir),
         "declared_outputs": list(DECLARED_OUTPUT_FILES),
+        "event_count": int(len(cross_context)),
+        "label_row_count": int(len(labels)),
+        "d1_ohlc_row_count": int(len(d1_ohlc)),
+        "baseline_summary_row_count": int(len(summary)),
         "artifact_groups": {
             "feature_context_artifacts": [
                 {
