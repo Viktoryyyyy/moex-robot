@@ -1,0 +1,153 @@
+{
+  "experiment_id": "usdrubf_ema_3_19_d1_research_baseline_v1",
+  "schema_version": 1,
+  "producer": {
+    "module": "src.moex_research.runners.usdrubf_ema_3_19_d1_research_baseline",
+    "invocation": "python -m src.moex_research.runners.usdrubf_ema_3_19_d1_research_baseline"
+  },
+  "input_contracts": [
+    {
+      "artifact_id": "research_usdrubf_5m_full_history",
+      "contract_ref": "contracts/datasets/research_usdrubf_5m_full_history.json",
+      "contract_class": "cli_argument",
+      "cli_arg": "--source-dataset-path",
+      "format": "csv"
+    },
+    {
+      "artifact_id": "usdrubf_d1_ohlc_from_5m",
+      "contract_ref": "contracts/features/usdrubf_d1_ohlc_from_5m.json",
+      "producer_ref": "src.moex_features.daily.usdrubf_d1_ohlc_from_5m:materialize_feature_frame",
+      "format": "dataframe"
+    },
+    {
+      "artifact_id": "usdrubf_d1_ema_3_19_cross_context",
+      "contract_ref": "contracts/features/usdrubf_d1_ema_3_19_cross_context.json",
+      "producer_ref": "src.moex_features.daily.usdrubf_d1_ema_3_19_cross_context:materialize_feature_frame",
+      "format": "dataframe"
+    },
+    {
+      "artifact_id": "usdrubf_d1_ema_3_19_cross_labels",
+      "contract_ref": "contracts/labels/usdrubf_d1_ema_3_19_cross_labels.json",
+      "producer_ref": "src.moex_research.labels.usdrubf_d1_ema_3_19_cross_labels:materialize_label_frame",
+      "format": "dataframe"
+    }
+  ],
+  "required_cli_args": [
+    "--source-dataset-path",
+    "--output-dir",
+    "--run-id"
+  ],
+  "output_artifacts": [
+    {
+      "artifact_id": "run_metadata",
+      "filename": "run_metadata.json",
+      "artifact_role": "metadata",
+      "format": "json",
+      "schema_version": 1
+    },
+    {
+      "artifact_id": "usdrubf_d1_ohlc",
+      "filename": "usdrubf_d1_ohlc.csv",
+      "artifact_role": "feature_context",
+      "format": "csv",
+      "schema_version": 1,
+      "known_by_when": "D close after finalized D1 bar"
+    },
+    {
+      "artifact_id": "usdrubf_d1_ema_3_19_cross_context",
+      "filename": "usdrubf_d1_ema_3_19_cross_context.csv",
+      "artifact_role": "feature_context",
+      "format": "csv",
+      "schema_version": 1,
+      "event_contract": "one row per finalized D1 EMA(3/19) crossover",
+      "known_by_when": "D close after finalized D1 bar"
+    },
+    {
+      "artifact_id": "usdrubf_d1_ema_3_19_cross_labels",
+      "filename": "usdrubf_d1_ema_3_19_cross_labels.csv",
+      "artifact_role": "research_label",
+      "format": "csv",
+      "schema_version": 1,
+      "label_policy": {
+        "scope": "research_only",
+        "earliest_outcome_anchor": "D+1 open",
+        "labels_must_not_enter_feature_rows": true
+      }
+    },
+    {
+      "artifact_id": "usdrubf_ema_3_19_raw_baseline_summary",
+      "filename": "usdrubf_ema_3_19_raw_baseline_summary.csv",
+      "artifact_role": "raw_research_summary",
+      "format": "csv",
+      "schema_version": 1
+    },
+    {
+      "artifact_id": "usdrubf_ema_3_19_quality_report",
+      "filename": "usdrubf_ema_3_19_quality_report.json",
+      "artifact_role": "quality_report",
+      "format": "json",
+      "schema_version": 1
+    }
+  ],
+  "formats": {
+    "json": [
+      "run_metadata.json",
+      "usdrubf_ema_3_19_quality_report.json"
+    ],
+    "csv": [
+      "usdrubf_d1_ohlc.csv",
+      "usdrubf_d1_ema_3_19_cross_context.csv",
+      "usdrubf_d1_ema_3_19_cross_labels.csv",
+      "usdrubf_ema_3_19_raw_baseline_summary.csv"
+    ]
+  },
+  "artifact_write_policy": {
+    "output_dir_arg": "--output-dir",
+    "declared_outputs_only": true,
+    "no_external_writes": true
+  },
+  "path_semantics_rejections": {
+    "latest": true,
+    "current": true,
+    "autodetect": true,
+    "absolute_hardcoded_server_paths": true
+  },
+  "research_semantics": {
+    "instrument_id": "usdrubf",
+    "not_instrument": "Si",
+    "timeframe": "D1",
+    "ema_windows": [
+      3,
+      19
+    ],
+    "event_contract": "one row per finalized D1 EMA(3/19) crossover",
+    "d_close_known_by_when": "D close after finalized D1 bar",
+    "earliest_label_outcome_anchor": "D+1 open",
+    "feature_context_uses_d_plus_1_values": false,
+    "labels_are_research_only": true
+  },
+  "baseline_scope": {
+    "raw_ema_baseline_only": true,
+    "metrics": [
+      "event_count",
+      "cross_up_count",
+      "cross_down_count",
+      "signed_ret_o2o_h1_summary",
+      "signed_ret_o2o_h2_summary",
+      "signed_ret_o2o_h5_summary",
+      "allow_trade_h5_rate",
+      "max_adverse_excursion_h5_summary",
+      "split_by_cross_dir",
+      "split_by_year_when_rows_are_sufficient"
+    ],
+    "deferred": [
+      "logistic_baseline",
+      "gradient_boosting_baseline",
+      "threshold_artifacts",
+      "model_artifacts"
+    ]
+  },
+  "no_runtime_consumption": true,
+  "no_broker_execution": true,
+  "no_latest_autodetect": true
+}
