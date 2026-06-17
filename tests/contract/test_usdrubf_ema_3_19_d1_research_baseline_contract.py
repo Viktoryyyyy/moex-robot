@@ -20,6 +20,13 @@ EXPECTED_REQUIRED_CLI_ARGS = [
     "--run-id",
 ]
 
+EXPECTED_QUALITY_REPORT_TOP_LEVEL_FIELDS = [
+    "event_count",
+    "label_row_count",
+    "d1_ohlc_row_count",
+    "baseline_summary_row_count",
+]
+
 
 def _load_contract() -> dict[str, object]:
     with CONTRACT_PATH.open("r", encoding="utf-8") as handle:
@@ -53,6 +60,7 @@ def test_contract_json_required_fields() -> None:
         "required_cli_args",
         "formats",
         "schema_version",
+        "quality_report_top_level_fields",
         "no_runtime_consumption",
         "no_broker_execution",
         "no_latest_autodetect",
@@ -91,6 +99,18 @@ def test_required_cli_args_exactly_declared() -> None:
     assert payload["artifact_write_policy"]["output_dir_arg"] == "--output-dir"
     assert payload["artifact_write_policy"]["declared_outputs_only"] is True
     assert payload["artifact_write_policy"]["no_external_writes"] is True
+
+
+def test_quality_report_top_level_fields_declared() -> None:
+    payload = _load_contract()
+
+    assert payload["quality_report_top_level_fields"] == EXPECTED_QUALITY_REPORT_TOP_LEVEL_FIELDS
+    quality_artifact = next(
+        item
+        for item in payload["output_artifacts"]
+        if item["filename"] == "usdrubf_ema_3_19_quality_report.json"
+    )
+    assert quality_artifact["top_level_fields"] == EXPECTED_QUALITY_REPORT_TOP_LEVEL_FIELDS
 
 
 def test_research_no_runtime_or_broker_flags() -> None:
