@@ -123,6 +123,73 @@ def test_role_prompt_is_role_id_driven_strict_json_and_github_handoff_only() -> 
         assert token in js_code, token
 
 
+def test_pm_l3_prompt_contains_hard_decision_output_contract_examples_and_safe_rules() -> None:
+    workflow = _workflow(TARGET_PATH)
+    js_code = _js(_node(workflow, "Build Universal Role Prompt"))
+
+    required_contract_tokens = (
+        "PM_L3_DELIVERY_VALIDATION_OWNER hard output contract applies when role_id = PM_L3_DELIVERY_VALIDATION_OWNER",
+        "Required PM_L3 output fields: role_id, validation_status, decision_type, decision_payload_json, summary, role_step_report.",
+        "Allowed decision_type values: create_next_role_task, request_github_execution_package, return_blocker, return_final_pm_l3_evidence_package, no_op.",
+        "Allowed validation_status values: pass, conditional_pass, fail, blocked.",
+        "role_id",
+        "validation_status",
+        "decision_type",
+        "decision_payload_json",
+        "summary",
+        "role_step_report",
+    )
+
+    for token in required_contract_tokens:
+        assert token in js_code, token
+
+    required_example_tokens = (
+        "valid no_op JSON example",
+        '"decision_type":"no_op"',
+        '"validation_status":"pass"',
+        '"decision_payload_json":{}',
+        "valid return_blocker JSON example",
+        '"decision_type":"return_blocker"',
+        '"validation_status":"blocked"',
+        '"blocker_code":"insufficient_safe_action_fields"',
+        "valid create_next_role_task JSON example",
+        '"decision_type":"create_next_role_task"',
+        '"next_role_id":"SUBCHAT_IMPLEMENTATION"',
+        '"next_task_payload_json"',
+        "valid request_github_execution_package JSON example",
+        '"decision_type":"request_github_execution_package"',
+        '"github_execution_request_json"',
+        "valid return_final_pm_l3_evidence_package JSON example",
+        '"decision_type":"return_final_pm_l3_evidence_package"',
+        '"final_pm_l3_package_json"',
+    )
+
+    for token in required_example_tokens:
+        assert token in js_code, token
+
+    required_safe_rule_tokens = (
+        "Safe cutover smoke rule",
+        "cutover smoke only",
+        "n8n_cutover_smoke_only",
+        "endpoint smoke only",
+        "no real downstream role execution is allowed",
+        "return decision_type no_op",
+        "validation_status must be pass",
+        "decision_payload_json must be {}",
+        "do not create next role task",
+        "do not request GitHub execution",
+        "do not claim PM L2 approval",
+        "Safe fallback rule",
+        "required fields are insufficient for a safe next action",
+        "return decision_type return_blocker",
+        "validation_status must be blocked",
+        "blocker_code must be non-empty",
+    )
+
+    for token in required_safe_rule_tokens:
+        assert token in js_code, token
+
+
 def test_persist_role_output_uses_query_replacement_and_untrusted_output_contract() -> None:
     workflow = _workflow(TARGET_PATH)
     node = _node(workflow, "Persist Raw AI Role Output")
