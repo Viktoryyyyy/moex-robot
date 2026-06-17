@@ -77,6 +77,98 @@ def test_missing_source_dataset_rejection(tmp_path: Path) -> None:
         )
 
 
+def test_explicit_source_dataset_path_accepted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    relative_source = Path("data/master/usdrubf_5m_2022-04-26_2026-04-06.csv")
+    source = tmp_path / relative_source
+    source.parent.mkdir(parents=True, exist_ok=True)
+    _write_source_dataset(source)
+    output_dir = tmp_path / "out"
+
+    monkeypatch.chdir(tmp_path)
+
+    assert runner.main(
+        [
+            "--source-dataset-path",
+            str(relative_source),
+            "--output-dir",
+            str(output_dir),
+            "--run-id",
+            "explicit-source",
+        ]
+    ) == 0
+
+    assert (output_dir / runner.OUTPUT_QUALITY_REPORT).is_file()
+
+
+@pytest.mark.parametrize(
+    "relative_source_path",
+    [
+        Path("LaTeSt") / "source.csv",
+        Path("data") / "CURRENT" / "source.csv",
+        Path("data") / "AutoDetect" / "source.csv",
+        Path("data") / "master" / "usdrubf_LaTeSt.csv",
+        Path("data") / "master" / "usdrubf_CURRENT.csv",
+        Path("data") / "master" / "usdrubf_AutoDetect.csv",
+    ],
+)
+def test_source_dataset_path_alias_rejection_case_insensitive_before_output_writes(
+    tmp_path: Path,
+    relative_source_path: Path,
+) -> None:
+    source = tmp_path / relative_source_path
+    source.parent.mkdir(parents=True, exist_ok=True)
+    _write_source_dataset(source)
+    output_dir = tmp_path / "out"
+
+    with pytest.raises(SystemExit):
+        runner.main(
+            [
+                "--source-dataset-path",
+                str(source),
+                "--output-dir",
+                str(output_dir),
+                "--run-id",
+                "alias-source",
+            ]
+        )
+
+    assert not output_dir.exists()
+    for filename in runner.DECLARED_OUTPUT_FILES:
+        assert not (tmp_path / filename).exists()
+
+
+@pytest.mark.parametrize("alias_dir_name", ["LaTeSt", "CURRENT", "AutoDetect"])
+def test_relative_source_dataset_path_alias_cwd_rejection_before_output_writes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    alias_dir_name: str,
+) -> None:
+    cwd = tmp_path / alias_dir_name
+    cwd.mkdir()
+    source = cwd / "source.csv"
+    _write_source_dataset(source)
+    output_dir = tmp_path / "out"
+
+    monkeypatch.chdir(cwd)
+
+    with pytest.raises(SystemExit):
+        runner.main(
+            [
+                "--source-dataset-path",
+                "source.csv",
+                "--output-dir",
+                str(output_dir),
+                "--run-id",
+                "alias-cwd-source",
+            ]
+        )
+
+    assert not output_dir.exists()
+    for filename in runner.DECLARED_OUTPUT_FILES:
+        assert not (cwd / filename).exists()
+        assert not (tmp_path / filename).exists()
+
+
 def test_output_dir_only_artifact_writes_and_declared_output_filenames(tmp_path: Path) -> None:
     source = tmp_path / "source.csv"
     output_dir = tmp_path / "out"
@@ -126,6 +218,23 @@ def test_raw_baseline_summary_fields(tmp_path: Path) -> None:
     assert int(total["event_count"]) > 0
     assert int(total["cross_up_count"]) > 0
     assert int(total["cross_down_count"]) > 0
+
+
+def test_quality_report_exposes_top_level_count_keys(tmp_path: Path) -> None:
+    output_dir = _run(tmp_path)
+    quality = json.loads((output_dir / runner.OUTPUT_QUALITY_REPORT).read_text(encoding="utf-8"))
+
+    required_keys = {
+        "event_count",
+        "label_row_count",
+        "d1_ohlc_row_count",
+        "baseline_summary_row_count",
+    }
+    assert required_keys.issubset(quality)
+    assert quality["event_count"] == quality["row_counts"]["cross_context"]
+    assert quality["label_row_count"] == quality["row_counts"]["cross_labels"]
+    assert quality["d1_ohlc_row_count"] == quality["row_counts"]["d1_ohlc"]
+    assert quality["baseline_summary_row_count"] == quality["row_counts"]["raw_baseline_summary"]
 
 
 def test_feature_context_vs_labels_separation(tmp_path: Path) -> None:
