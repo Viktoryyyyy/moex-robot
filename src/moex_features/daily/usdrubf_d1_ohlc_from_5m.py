@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from datetime import time
 from pathlib import Path
 
 import pandas as pd
 
 _REQUIRED_INTRADAY_COLUMNS = ("end", "open", "high", "low", "close")
 _PRICE_COLUMNS = ("open", "high", "low", "close")
+_MIN_FINALIZED_D1_END_TIME = time(18, 50)
 
 
 def _normalize_timestamps(values: pd.Series, timezone_name: str) -> pd.Series:
@@ -76,6 +78,11 @@ def normalize_intraday_5m_frame(
     return work.reset_index(drop=True)
 
 
+def _is_complete_d1_bucket(day: pd.DataFrame) -> bool:
+    last_end = pd.Timestamp(day.iloc[-1]["end"])
+    return last_end.time() >= _MIN_FINALIZED_D1_END_TIME
+
+
 def build_d1_ohlc_from_5m_frame(
     frame: pd.DataFrame,
     *,
@@ -92,6 +99,9 @@ def build_d1_ohlc_from_5m_frame(
         if instrument_values != {instrument_id}:
             raise ValueError("mixed instrument_id values found inside a D1 aggregation bucket")
 
+        if not _is_complete_d1_bucket(day):
+            continue
+
         row: dict[str, object] = {
             "instrument_id": instrument_id,
             "end": pd.Timestamp(day.iloc[-1]["end"]),
@@ -106,7 +116,7 @@ def build_d1_ohlc_from_5m_frame(
 
     daily = pd.DataFrame(rows).reset_index(drop=True)
     if daily.empty:
-        raise ValueError("D1 aggregation produced zero rows")
+        raise ValueError("D1 aggregation produced zero complete finalized rows")
     _validate_strictly_increasing_end(daily)
     return daily
 

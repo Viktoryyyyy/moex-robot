@@ -4,8 +4,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.moex_features.daily.usdrubf_d1_ohlc_from_5m import build_d1_ohlc_from_5m_frame
-
 _REQUIRED_D1_COLUMNS = ("instrument_id", "end", "open", "high", "low", "close")
 _PRICE_COLUMNS = ("open", "high", "low", "close")
 _LABEL_LIKE_PREFIXES = ("signed_ret_", "allow_trade_", "max_adverse_", "max_favorable_")
@@ -24,6 +22,16 @@ def calculate_ema(values: pd.Series, *, window: int) -> pd.Series:
     if numeric.isna().any():
         raise ValueError("EMA input contains non-numeric or missing values")
     return numeric.ewm(alpha=ema_alpha(window), adjust=False).mean()
+
+
+def read_d1_ohlc_artifact(path: str | Path) -> pd.DataFrame:
+    artifact_path = Path(path)
+    suffix = artifact_path.suffix.lower()
+    if suffix == ".parquet":
+        return pd.read_parquet(artifact_path)
+    if suffix == ".csv":
+        return pd.read_csv(artifact_path)
+    raise ValueError("D1 OHLC artifact path must end with .parquet or .csv")
 
 
 def _normalize_d1_frame(frame: pd.DataFrame) -> pd.DataFrame:
@@ -152,20 +160,36 @@ def build_ema_3_19_cross_context_frame(d1_frame: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(event_rows, columns=columns)
 
 
+def _resolve_source_artifact_path(
+    *,
+    source_feature_artifact_path: str | Path | None,
+    dataset_artifact_path: str | Path | None,
+) -> str | Path | None:
+    if source_feature_artifact_path is None:
+        return dataset_artifact_path
+    if dataset_artifact_path is not None and Path(source_feature_artifact_path) != Path(dataset_artifact_path):
+        raise ValueError("source_feature_artifact_path conflicts with dataset_artifact_path")
+    return source_feature_artifact_path
+
+
 def materialize_feature_frame(
     *,
     d1_ohlc_frame: pd.DataFrame | None = None,
+    source_feature_artifact_path: str | Path | None = None,
     dataset_artifact_path: str | Path | None = None,
     instrument_id: str = "usdrubf",
     timezone_name: str = "Europe/Moscow",
 ) -> pd.DataFrame:
+    del timezone_name
+    if instrument_id != "usdrubf":
+        raise ValueError("instrument_id must equal 'usdrubf'")
+
     if d1_ohlc_frame is None:
-        if dataset_artifact_path is None:
-            raise ValueError("either d1_ohlc_frame or dataset_artifact_path is required")
-        source = pd.read_csv(Path(dataset_artifact_path))
-        d1_ohlc_frame = build_d1_ohlc_from_5m_frame(
-            source,
-            instrument_id=instrument_id,
-            timezone_name=timezone_name,
+        artifact_path = _resolve_source_artifact_path(
+            source_feature_artifact_path=source_feature_artifact_path,
+            dataset_artifact_path=dataset_artifact_path,
         )
+        if artifact_path is None:
+            raise ValueError("either d1_ohlc_frame or source_feature_artifact_path is required")
+        d1_ohlc_frame = read_d1_ohlc_artifact(artifact_path)
     return build_ema_3_19_cross_context_frame(d1_ohlc_frame)
