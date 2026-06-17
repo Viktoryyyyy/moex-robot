@@ -6,7 +6,9 @@ import pytest
 from src.moex_features.daily.usdrubf_d1_ema_3_19_cross_context import (
     calculate_ema,
     build_ema_3_19_cross_context_frame,
+    materialize_feature_frame,
 )
+from src.moex_features.daily.usdrubf_d1_ohlc_from_5m import build_d1_ohlc_from_5m_frame
 
 
 def _d1_frame(closes: list[float]) -> pd.DataFrame:
@@ -98,3 +100,70 @@ def test_event_feature_rows_do_not_contain_d_plus_1_or_label_values() -> None:
         "max_favorable_excursion_h5",
     }
     assert forbidden.isdisjoint(set(events.columns))
+
+
+def test_materialize_feature_frame_reads_declared_d1_feature_artifact(tmp_path) -> None:
+    pytest.importorskip("pyarrow")
+    closes = [100.0 - i for i in range(25)]
+    closes.extend([76.0 + i * 3.0 for i in range(25)])
+    d1_frame = _d1_frame(closes)
+    artifact_path = tmp_path / "usdrubf_d1_ohlc_from_5m.parquet"
+    d1_frame.to_parquet(artifact_path, index=False)
+
+    expected = build_ema_3_19_cross_context_frame(d1_frame)
+    actual = materialize_feature_frame(source_feature_artifact_path=artifact_path)
+
+    pd.testing.assert_frame_equal(actual, expected)
+
+
+def test_d1_ohlc_builder_drops_incomplete_final_bucket() -> None:
+    frame = pd.DataFrame(
+        [
+            {
+                "instrument_id": "usdrubf",
+                "end": "2024-01-02 10:00:00",
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.5,
+                "volume": 10.0,
+            },
+            {
+                "instrument_id": "usdrubf",
+                "end": "2024-01-02 18:50:00",
+                "open": 100.5,
+                "high": 103.0,
+                "low": 100.0,
+                "close": 102.0,
+                "volume": 15.0,
+            },
+            {
+                "instrument_id": "usdrubf",
+                "end": "2024-01-03 10:00:00",
+                "open": 103.0,
+                "high": 104.0,
+                "low": 102.0,
+                "close": 103.5,
+                "volume": 11.0,
+            },
+            {
+                "instrument_id": "usdrubf",
+                "end": "2024-01-03 14:30:00",
+                "open": 103.5,
+                "high": 105.0,
+                "low": 103.0,
+                "close": 104.0,
+                "volume": 12.0,
+            },
+        ]
+    )
+
+    daily = build_d1_ohlc_from_5m_frame(frame)
+
+    assert len(daily) == 1
+    assert daily.loc[0, "end"] == pd.Timestamp("2024-01-02 18:50:00")
+    assert daily.loc[0, "open"] == 100.0
+    assert daily.loc[0, "high"] == 103.0
+    assert daily.loc[0, "low"] == 99.0
+    assert daily.loc[0, "close"] == 102.0
+    assert daily.loc[0, "volume"] == 25.0
