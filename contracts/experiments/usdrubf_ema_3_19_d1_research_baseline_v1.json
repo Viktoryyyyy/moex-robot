@@ -86,8 +86,20 @@
       "filename": "usdrubf_ema_3_19_quality_report.json",
       "artifact_role": "quality_report",
       "format": "json",
-      "schema_version": 1
+      "schema_version": 1,
+      "top_level_fields": [
+        "event_count",
+        "label_row_count",
+        "d1_ohlc_row_count",
+        "baseline_summary_row_count"
+      ]
     }
+  ],
+  "quality_report_top_level_fields": [
+    "event_count",
+    "label_row_count",
+    "d1_ohlc_row_count",
+    "baseline_summary_row_count"
   ],
   "formats": {
     "json": [
