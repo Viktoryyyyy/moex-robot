@@ -1,0 +1,124 @@
+{
+  "name": "MOEX_ROUTE_B_INTAKE_ACK_ROLE_TASK_ADAPTER_V0_1_TARGET",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "moex/route-b/intake",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "1d2ad65c-3508-5c69-9b1a-f28641e9bb4b",
+      "name": "Intake Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "moex-route-b-intake-role-task-adapter-v0-1"
+    },
+    {
+      "parameters": {
+        "jsCode": "function stableStringify(value) {\n  if (value === null || typeof value !== 'object') return JSON.stringify(value);\n  if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';\n  return '{' + Object.keys(value).sort().map((key) => JSON.stringify(key) + ':' + stableStringify(value[key])).join(',') + '}';\n}\n\nfunction hash16(input) {\n  let h1 = 0xdeadbeef ^ input.length;\n  let h2 = 0x41c6ce57 ^ input.length;\n  for (let i = 0; i < input.length; i++) {\n    const ch = input.charCodeAt(i);\n    h1 = Math.imul(h1 ^ ch, 2654435761);\n    h2 = Math.imul(h2 ^ ch, 1597334677);\n  }\n  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);\n  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);\n  return ((h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0')).slice(0, 16);\n}\n\nfunction hash32(input) {\n  return hash16('a:' + input) + hash16('b:' + input);\n}\n\nfunction isPlainObject(value) {\n  return value !== null && typeof value === 'object' && !Array.isArray(value);\n}\n\nfunction parseJsonIfString(value, fallback) {\n  if (typeof value !== 'string') return value;\n  try {\n    return JSON.parse(value);\n  } catch (error) {\n    return fallback;\n  }\n}\n\nfunction isSensitiveKey(key) {\n  const k = String(key || '').toLowerCase();\n  const compact = k.replace(/[^a-z0-9]/g, '');\n  return k.includes('authorization') || k.includes('cookie') || k.includes('token') || k.includes('secret') || k.includes('password') || k.includes('credential') || k.includes('api-key') || k.includes('api_key') || compact.includes('apikey') || compact.includes('accesskey') || compact.includes('privatekey') || compact.includes('clientsecret');\n}\n\nfunction redactValue(value) {\n  if (value === null || value === undefined) return value;\n  if (Array.isArray(value)) return value.map(redactValue);\n  if (typeof value !== 'object') return value;\n  const result = {};\n  for (const [rawKey, rawValue] of Object.entries(value)) {\n    const key = String(rawKey || '').toLowerCase();\n    result[key] = isSensitiveKey(key) ? '[REDACTED]' : redactValue(rawValue);\n  }\n  return result;\n}\n\nfunction normalizeStringArray(value, fallback) {\n  value = parseJsonIfString(value, value);\n  let refs = [];\n  if (Array.isArray(value)) {\n    refs = value.map((item) => {\n      if (typeof item === 'string') return item.trim();\n      if (isPlainObject(item)) return String(item.ref || item.id || item.name || '').trim();\n      return '';\n    }).filter(Boolean);\n  } else if (typeof value === 'string' && value.trim()) {\n    refs = value.split(',').map((item) => item.trim()).filter(Boolean);\n  }\n  if (refs.length === 0) refs = fallback;\n  return Array.from(new Set(refs));\n}\n\nfunction normalizeRoleContextRef(value) {\n  value = parseJsonIfString(value, value);\n  if (Array.isArray(value) && value.length > 0) value = value[0];\n  if (isPlainObject(value)) {\n    const roleId = String(value.role_id || value.id || value.ref || '').trim();\n    const version = String(value.role_context_version || value.version || 'v1').trim();\n    if (roleId === 'PM_L3_DELIVERY_VALIDATION_OWNER' && version) {\n      return { role_id: roleId, role_context_version: version };\n    }\n  }\n  return { role_id: 'PM_L3_DELIVERY_VALIDATION_OWNER', role_context_version: 'v1' };\n}\n\nconst input = $input.first().json || {};\nconst rawBody = isPlainObject(input.body) ? input.body : {};\nconst rawQuery = isPlainObject(input.query) ? input.query : {};\nconst rawHeaders = isPlainObject(input.headers) ? input.headers : {};\nconst headerMap = Object.fromEntries(Object.entries(rawHeaders).map(([key, value]) => [String(key).toLowerCase(), value]));\nconst body = redactValue(rawBody);\nconst query = redactValue(rawQuery);\nconst headers = redactValue(rawHeaders);\nconst repositoryFullName = rawBody.repository_full_name || rawQuery.repository_full_name || 'Viktoryyyyy/moex-robot';\n\nif (repositoryFullName !== 'Viktoryyyyy/moex-robot') {\n  throw new Error('Unsupported repository_full_name');\n}\n\nconst clientIdempotencyKey = headerMap['idempotency-key'] || headerMap['x-idempotency-key'] || rawBody.idempotency_key || rawQuery.idempotency_key || '';\nconst idempotencySource = clientIdempotencyKey || stableStringify({\n  project: 'MOEX Bot',\n  route: 'Route B',\n  spec_version: 'intake_role_task_adapter_v0.1',\n  repository_full_name: repositoryFullName,\n  body: rawBody,\n  query: rawQuery\n});\nconst idempotencyKey = String(clientIdempotencyKey || hash32(idempotencySource));\nconst runHash = hash32('workflow_run_id:' + idempotencyKey);\nconst workflowRunId = 'route_b_' + runHash;\nconst phaseRunId = 'phase_run_' + hash32('phase_run_id:' + workflowRunId);\nconst roleTaskId = 'role_task_' + hash32(phaseRunId + ':PM_L3_DELIVERY_VALIDATION_OWNER:1');\nconst targetBranchName = 'n8n/route-b-' + runHash.slice(0, 12);\nconst receivedAt = new Date().toISOString();\n\nconst defaultStaticContextRefs = [\n  'MOEX_Bot_Target_Architecture_2026_All_In_One',\n  'MOEX_Bot_Role_Context_Operating_Model_v1',\n  'github_commit_flow_subchats_v3'\n];\nconst staticContextRefs = normalizeStringArray(rawBody.static_context_refs || rawQuery.static_context_refs, defaultStaticContextRefs);\nconst roleContextRef = normalizeRoleContextRef(rawBody.role_context_ref || rawQuery.role_context_ref);\nconst schemaRefs = normalizeStringArray(rawBody.schema_refs || rawQuery.schema_refs || rawBody.required_schema_refs, [\n  'pm_l2_to_pm_l3_request_envelope.v1',\n  'pm_l3_to_subchat_task_package.v1',\n  'subchat_to_pm_l3_return_package.v1',\n  'pm_l3_to_pm_l2_validation_return_package.v1',\n  'route_b_universal_role_runner.v0.1',\n  'route_b_role_task_queue.v0.1',\n  'route_b_pm_l3_decision_loop.v0.1',\n  'route_b_universal_role_runner_db_contract.v0.1'\n]);\nconst expectedOutputSchemaRef = 'route_b_pm_l3_decision_loop.v0.1';\n\nconst suppliedDynamicHandoff = parseJsonIfString(rawBody.dynamic_handoff || rawQuery.dynamic_handoff, null);\nconst dynamicHandoff = isPlainObject(suppliedDynamicHandoff) ? redactValue(suppliedDynamicHandoff) : {\n  original_task: redactValue(rawBody.original_task || rawBody.root_task || rawBody.task || rawBody),\n  execution_mode: rawBody.execution_mode || rawQuery.execution_mode || 'route_b_n8n_universal_role_runner',\n  current_goal: rawBody.current_goal || rawBody.phase_goal || rawBody.goal || 'Route_B_Intake_To_Role_Task_Queue_Adapter_v0_1',\n  approved_scope: rawBody.approved_scope || rawBody.approved_file_scope || [],\n  not_in_scope: rawBody.not_in_scope || [],\n  acceptance_criteria: rawBody.acceptance_criteria || []\n};\n\nconst rootTaskJson = {\n  workflow_name: 'MOEX_ROUTE_B_INTAKE_ACK_ROLE_TASK_ADAPTER_V0_1_TARGET',\n  spec_version: 'intake_role_task_adapter_v0.1',\n  workflow_run_id: workflowRunId,\n  phase_run_id: phaseRunId,\n  repository_full_name: repositoryFullName,\n  target_branch_name: targetBranchName,\n  idempotency_key: idempotencyKey,\n  dynamic_handoff: dynamicHandoff,\n  request: {\n    query: query,\n    body: body\n  }\n};\n\nconst taskPayloadJson = {\n  role_id: 'PM_L3_DELIVERY_VALIDATION_OWNER',\n  task_type: 'pm_l3_planning',\n  workflow_run_id: workflowRunId,\n  phase_run_id: phaseRunId,\n  repository_full_name: repositoryFullName,\n  target_branch_name: targetBranchName,\n  idempotency_key: idempotencyKey,\n  dynamic_handoff: dynamicHandoff,\n  pm_l2_request_json: body.pm_l2_request_json || body,\n  intake_adapter: {\n    workflow_name: 'MOEX_ROUTE_B_INTAKE_ACK_ROLE_TASK_ADAPTER_V0_1_TARGET',\n    received_at: receivedAt,\n    initial_role_task_status: 'role_task_ready',\n    expected_output_schema_ref: expectedOutputSchemaRef\n  }\n};\n\nconst contextRefsJson = {\n  static_context_refs: staticContextRefs,\n  role_context_ref: roleContextRef,\n  schema_refs: schemaRefs\n};\n\nconst intakePayload = {\n  received_at: receivedAt,\n  workflow_name: 'MOEX_ROUTE_B_INTAKE_ACK_ROLE_TASK_ADAPTER_V0_1_TARGET',\n  spec_version: 'intake_role_task_adapter_v0.1',\n  request: {\n    headers: headers,\n    query: query,\n    body: body\n  },\n  controls: {\n    async_dispatch: 'postgres_legacy_queue_plus_role_task_queue',\n    execute_subworkflow_primary_dispatch: false,\n    max_retries: 3,\n    branch_source: 'deterministic_workflow_generated',\n    initial_role_id: 'PM_L3_DELIVERY_VALIDATION_OWNER',\n    initial_role_task_status: 'role_task_ready',\n    expected_output_schema_ref: expectedOutputSchemaRef\n  }\n};\n\nreturn [\n  {\n    json: {\n      workflow_run_id: workflowRunId,\n      phase_run_id: phaseRunId,\n      role_task_id: roleTaskId,\n      idempotency_key: idempotencyKey,\n      repository_full_name: repositoryFullName,\n      current_phase: 'intake_ack',\n      target_branch_name: targetBranchName,\n      status: 'queued',\n      current_state: 'queued',\n      max_retries: 3,\n      event_type: 'intake_ack',\n      event_payload_json: intakePayload,\n      root_task_json: rootTaskJson,\n      task_payload_json: taskPayloadJson,\n      context_refs_json: contextRefsJson,\n      expected_output_schema_ref: expectedOutputSchemaRef\n    }\n  }\n];"
+      },
+      "id": "1c3e8619-e32b-5299-98ed-f6501ff50134",
+      "name": "Normalize Intake For Role Task Queue",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH input_json AS ( SELECT $1::jsonb AS p ), input_data AS ( SELECT p->>'workflow_run_id' AS workflow_run_id, p->>'phase_run_id' AS phase_run_id, p->>'role_task_id' AS role_task_id, p->>'idempotency_key' AS idempotency_key, p->>'status' AS status, p->>'current_state' AS current_state, p->>'repository_full_name' AS repository_full_name, p->>'current_phase' AS current_phase, p->>'target_branch_name' AS target_branch_name, (p->>'max_retries')::integer AS max_retries, p->>'event_type' AS event_type, COALESCE(p->'event_payload_json', '{}'::jsonb) AS event_payload_json, COALESCE(p->'root_task_json', '{}'::jsonb) AS root_task_json, COALESCE(p->'task_payload_json', '{}'::jsonb) AS task_payload_json, COALESCE(p->'context_refs_json', '{}'::jsonb) AS context_refs_json, p->>'expected_output_schema_ref' AS expected_output_schema_ref FROM input_json ), upserted_run AS ( INSERT INTO moex_n8n_workflow_runs ( workflow_run_id, idempotency_key, status, current_state, repository_full_name, current_phase, target_branch_name, max_retries, created_at, updated_at ) SELECT workflow_run_id, idempotency_key, status, current_state, repository_full_name, current_phase, target_branch_name, max_retries, now(), now() FROM input_data ON CONFLICT (workflow_run_id) DO UPDATE SET idempotency_key = moex_n8n_workflow_runs.idempotency_key, status = moex_n8n_workflow_runs.status, current_state = moex_n8n_workflow_runs.current_state, repository_full_name = moex_n8n_workflow_runs.repository_full_name, current_phase = moex_n8n_workflow_runs.current_phase, target_branch_name = moex_n8n_workflow_runs.target_branch_name, max_retries = moex_n8n_workflow_runs.max_retries, updated_at = moex_n8n_workflow_runs.updated_at RETURNING workflow_run_id, status, current_state, repository_full_name, current_phase, target_branch_name, retry_count, max_retries, created_at, updated_at, (xmax = 0) AS inserted ), inserted_event AS ( INSERT INTO moex_n8n_workflow_run_events ( workflow_run_id, previous_state, new_state, event_type, event_payload_json, created_at ) SELECT u.workflow_run_id, NULL, u.current_state, d.event_type, d.event_payload_json, now() FROM upserted_run u CROSS JOIN input_data d WHERE u.inserted = true RETURNING event_id ), phase_run AS ( INSERT INTO public.route_b_phase_runs ( phase_run_id, workflow_run_id, repository_full_name, root_task_json, status, created_at, updated_at ) SELECT phase_run_id, workflow_run_id, repository_full_name, root_task_json, 'phase_run_created', now(), now() FROM input_data ON CONFLICT (phase_run_id) DO UPDATE SET workflow_run_id = public.route_b_phase_runs.workflow_run_id, repository_full_name = public.route_b_phase_runs.repository_full_name, root_task_json = public.route_b_phase_runs.root_task_json, status = public.route_b_phase_runs.status, updated_at = public.route_b_phase_runs.updated_at RETURNING phase_run_id, status AS phase_run_status ), initial_pm_l3_role_task AS ( INSERT INTO public.route_b_role_task_queue ( phase_run_id, workflow_run_id, role_task_id, parent_role_task_id, sequence_no, role_id, task_type, task_payload_json, context_refs_json, expected_output_schema_ref, status, attempt, max_retries, blocker_code, created_at, claimed_at, completed_at ) SELECT phase_run_id, workflow_run_id, role_task_id, NULL, 1, 'PM_L3_DELIVERY_VALIDATION_OWNER', 'pm_l3_planning', task_payload_json, context_refs_json, expected_output_schema_ref, 'role_task_ready', 0, 3, NULL, now(), NULL, NULL FROM input_data ON CONFLICT (role_task_id) DO NOTHING RETURNING role_task_id ), existing_pm_l3_role_task AS ( SELECT q.role_task_id FROM public.route_b_role_task_queue q JOIN input_data d ON q.role_task_id = d.role_task_id LIMIT 1 ) SELECT u.workflow_run_id, u.status, u.current_state, u.repository_full_name, u.current_phase, u.target_branch_name, u.retry_count, u.max_retries, u.created_at, u.updated_at, u.inserted, e.event_id, p.phase_run_id, p.phase_run_status, COALESCE(i.role_task_id, x.role_task_id) AS initial_role_task_id, (i.role_task_id IS NOT NULL) AS initial_role_task_inserted FROM upserted_run u CROSS JOIN phase_run p LEFT JOIN inserted_event e ON true LEFT JOIN initial_pm_l3_role_task i ON true LEFT JOIN existing_pm_l3_role_task x ON true;",
+        "options": {
+          "queryBatching": "transaction",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "d19977c1-bc01-5573-a8cc-e0081640981f",
+      "name": "Queue Legacy Run Event Phase And PM L3 Task",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        520,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "PU85DvcSG5X2EloO",
+          "name": "postgres_moex_n8n"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { accepted: true, workflow_name: 'MOEX_ROUTE_B_INTAKE_ACK_ROLE_TASK_ADAPTER_V0_1_TARGET', spec_version: 'intake_role_task_adapter_v0.1', workflow_run_id: $json.workflow_run_id, status: $json.status, current_state: $json.current_state, repository_full_name: $json.repository_full_name, target_branch_name: $json.target_branch_name, idempotent_replay: !$json.inserted } }}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "id": "668ed958-23d1-5ed4-8935-d169325ad81d",
+      "name": "Respond Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        800,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Intake Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Intake For Role Task Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Intake For Role Task Queue": {
+      "main": [
+        [
+          {
+            "node": "Queue Legacy Run Event Phase And PM L3 Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queue Legacy Run Event Phase And PM L3 Task": {
+      "main": [
+        [
+          {
+            "node": "Respond Accepted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "b52f62b0-7f58-5d06-8941-f1d65af4ab7e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "62875adff27fc822d942c4254bca5bd3da9a7fd81d36718bdc0f7d5d52395a15"
+  },
+  "nodeGroups": [],
+  "tags": []
+}
