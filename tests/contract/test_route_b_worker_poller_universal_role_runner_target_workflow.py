@@ -296,11 +296,38 @@ def test_finalize_updates_validation_and_persists_pm_l3_decision_with_boundaries
         "'ci_passed_is_not_merge_approval',true",
         "'server_apply_allowed',false",
         "'pm_l2_approval_claimed',false",
+        "production_secret_access_allowed",
+        "'production_secret_access_allowed',false",
         "role_task_completed",
         "role_task_failed",
     )
 
     for token in required_tokens:
+        assert token in query, token
+
+
+def test_finalization_sql_authority_boundary_matches_pm_l3_db_constraint() -> None:
+    workflow = _workflow(TARGET_PATH)
+    query = _query(_node(workflow, "Finalize Role Task and PM L3 Decision"))
+
+    assert "authority_boundary_json" in query
+    assert "production_secret_access_allowed" in query
+    assert "'production_secret_access_allowed',false" in query
+
+    required_constraint_tokens = (
+        "'merge_authority','PM_L2_ONLY'",
+        "'n8n_merge_allowed',false",
+        "'force_push_allowed',false",
+        "'file_delete_allowed',false",
+        "'server_apply_allowed',false",
+        "'executor_merge_allowed',false",
+        "'broker_execution_allowed',false",
+        "'direct_main_write_allowed',false",
+        "'runtime_live_trading_allowed',false",
+        "'production_secret_access_allowed',false",
+    )
+
+    for token in required_constraint_tokens:
         assert token in query, token
 
 
