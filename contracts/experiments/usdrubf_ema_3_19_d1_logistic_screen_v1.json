@@ -1,0 +1,280 @@
+{
+  "experiment_id": "usdrubf_ema_3_19_d1_logistic_screen_v1",
+  "schema_version": 1,
+  "producer": {
+    "module": "src.moex_research.runners.usdrubf_ema_3_19_d1_logistic_screen",
+    "invocation": "python -m src.moex_research.runners.usdrubf_ema_3_19_d1_logistic_screen"
+  },
+  "status": {
+    "result_status": "provisional_screening",
+    "screening_only": true,
+    "model_promotion_allowed": false,
+    "strategy_package_ready": false,
+    "runtime_ready": false,
+    "production_or_trading_conclusion_allowed": false
+  },
+  "required_cli_args": [
+    "--d1-ohlc-path",
+    "--context-path",
+    "--labels-path",
+    "--output-dir",
+    "--run-id"
+  ],
+  "input_artifacts": [
+    {
+      "artifact_id": "usdrubf_d1_ohlc",
+      "contract_class": "cli_argument",
+      "cli_arg": "--d1-ohlc-path",
+      "format": "csv",
+      "sha256_required": true,
+      "implicit_discovery_allowed": false
+    },
+    {
+      "artifact_id": "usdrubf_d1_ema_3_19_cross_context",
+      "contract_class": "cli_argument",
+      "cli_arg": "--context-path",
+      "format": "csv",
+      "sha256_required": true,
+      "implicit_discovery_allowed": false
+    },
+    {
+      "artifact_id": "usdrubf_d1_ema_3_19_cross_labels",
+      "contract_class": "cli_argument",
+      "cli_arg": "--labels-path",
+      "format": "csv",
+      "sha256_required": true,
+      "implicit_discovery_allowed": false
+    }
+  ],
+  "input_path_semantics": {
+    "all_inputs_explicit": true,
+    "glob_discovery_allowed": false,
+    "fallback_paths_allowed": false,
+    "mutable_aliases_rejected": [
+      "latest",
+      "current",
+      "autodetect"
+    ],
+    "join_keys": [
+      "instrument_id",
+      "end",
+      "cross_dir"
+    ],
+    "join_cardinality": "one_to_one",
+    "duplicate_keys_rejected": true,
+    "unmatched_keys_rejected": true,
+    "event_ordering": "chronological_by_end"
+  },
+  "feature_contract": {
+    "numeric_allowlist": [
+      "ema_diff",
+      "ema_diff_prev",
+      "bars_since_prev_cross",
+      "ret_1d",
+      "ret_3d",
+      "ret_5d",
+      "rolling_vol_5d",
+      "rolling_vol_20d"
+    ],
+    "categorical_allowlist": [
+      "cross_dir"
+    ],
+    "exact_allowlist_enforced": true,
+    "undeclared_model_features_rejected": true,
+    "forbidden_model_features": [
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume",
+      "end",
+      "year",
+      "signed_ret_*",
+      "allow_trade_*",
+      "max_adverse_*",
+      "max_favorable_*",
+      "D+1_or_future_outcome_fields"
+    ],
+    "preprocessing": {
+      "numeric_imputation": "median",
+      "numeric_imputer_fit_scope": "training_fold_only",
+      "standard_scaler_fit_scope": "training_fold_only",
+      "categorical_encoding": "OneHotEncoder_inside_sklearn_pipeline",
+      "full_data_preprocessing_before_oos": false
+    }
+  },
+  "target_contract": {
+    "primary": {
+      "name": "allow_trade_h5_observed",
+      "eligibility": "signed_ret_o2o_h5_non_null",
+      "recomputation": "signed_ret_o2o_h5_greater_than_zero",
+      "stored_consistency_field": "allow_trade_h5",
+      "stored_consistency_assertion_required": true,
+      "missing_outcome_policy": "exclude",
+      "screening_verdict_target": true
+    },
+    "secondary": {
+      "name": "positive_signed_ret_o2o_h1",
+      "eligibility": "signed_ret_o2o_h1_non_null",
+      "recomputation": "signed_ret_o2o_h1_greater_than_zero",
+      "missing_outcome_policy": "exclude",
+      "screening_verdict_target": false
+    },
+    "label_imputation_allowed": false,
+    "unavailable_target_training_allowed": false,
+    "target_semantics_mixing_allowed": false
+  },
+  "validation_protocol": {
+    "ordering": "chronological",
+    "mode": "expanding_walk_forward",
+    "shuffle": false,
+    "random_split": false,
+    "minimum_initial_train_events_after_purge": 32,
+    "test_block_events": 8,
+    "final_partial_test_block_allowed": true,
+    "purge_d1_sessions": 6,
+    "purge_rule": "training_event_session_index_plus_6_less_than_first_test_event_session_index",
+    "model": {
+      "estimator": "sklearn.linear_model.LogisticRegression",
+      "C": 1.0,
+      "class_weight": "balanced",
+      "solver": "liblinear",
+      "random_state": 0,
+      "threshold": 0.5
+    },
+    "threshold_tuning_allowed": false,
+    "c_sensitivity": {
+      "values": [
+        0.1,
+        1.0,
+        10.0
+      ],
+      "descriptive_only": true,
+      "selection_or_promotion_allowed": false
+    }
+  },
+  "baseline_protocol": {
+    "probability_baseline": "corresponding_training_fold_prevalence",
+    "class_baseline": "corresponding_training_fold_majority_class",
+    "majority_tie_break": 0,
+    "global_future_aware_prevalence_allowed": false,
+    "random_baseline_as_sole_comparator_allowed": false
+  },
+  "required_metrics": {
+    "aggregate_oos": [
+      "sample_count",
+      "positive_rate",
+      "roc_auc",
+      "pr_auc",
+      "brier_score",
+      "accuracy",
+      "balanced_accuracy",
+      "precision",
+      "recall",
+      "f1"
+    ],
+    "naive_comparison": [
+      "prevalence_baseline_brier",
+      "majority_baseline_accuracy",
+      "model_minus_baseline_brier"
+    ],
+    "primary_decision_diagnostics": [
+      "all_eligible_oos_mean_signed_ret_o2o_h5",
+      "retained_mean_signed_ret_o2o_h5",
+      "retained_event_count",
+      "retained_event_share"
+    ],
+    "splits": [
+      "total",
+      "cross_up",
+      "cross_down",
+      "fold"
+    ],
+    "single_class_metric_policy": "null_with_explicit_reason"
+  },
+  "output_artifacts": [
+    {
+      "filename": "run_metadata.json",
+      "format": "json",
+      "artifact_role": "metadata"
+    },
+    {
+      "filename": "m3_oos_predictions.csv",
+      "format": "csv",
+      "artifact_role": "oos_predictions",
+      "minimum_fields": [
+        "instrument_id",
+        "end",
+        "cross_dir",
+        "target",
+        "target_value",
+        "probability",
+        "fold"
+      ]
+    },
+    {
+      "filename": "m3_metrics.json",
+      "format": "json",
+      "artifact_role": "aggregate_metrics"
+    },
+    {
+      "filename": "m3_fold_metrics.csv",
+      "format": "csv",
+      "artifact_role": "fold_metrics"
+    },
+    {
+      "filename": "m3_coefficients.csv",
+      "format": "csv",
+      "artifact_role": "fold_training_coefficients",
+      "full_sample_fit_allowed": false
+    },
+    {
+      "filename": "m3_c_sensitivity.csv",
+      "format": "csv",
+      "artifact_role": "descriptive_c_sensitivity"
+    },
+    {
+      "filename": "m3_quality_report.json",
+      "format": "json",
+      "artifact_role": "quality_report"
+    }
+  ],
+  "formats": {
+    "json": [
+      "run_metadata.json",
+      "m3_metrics.json",
+      "m3_quality_report.json"
+    ],
+    "csv": [
+      "m3_oos_predictions.csv",
+      "m3_fold_metrics.csv",
+      "m3_coefficients.csv",
+      "m3_c_sensitivity.csv"
+    ]
+  },
+  "artifact_write_policy": {
+    "output_dir_arg": "--output-dir",
+    "all_outputs_below_output_dir": true,
+    "declared_outputs_only": true,
+    "stdout_only_result_allowed": false,
+    "serialized_model_allowed": false,
+    "promotion_artifact_allowed": false
+  },
+  "screening_verdict": {
+    "result_status": "provisional_screening",
+    "supported_for_next_model_phase_only_if": [
+      "primary_oos_roc_auc_greater_than_0_55",
+      "primary_brier_better_than_fold_prevalence_baseline",
+      "retained_h5_mean_exceeds_all_oos_h5_mean",
+      "at_least_two_oos_folds_have_positive_retained_minus_all_h5_mean"
+    ],
+    "otherwise": "not_supported_or_hold",
+    "production_or_model_promotion_conclusion_allowed": false,
+    "small_sample_caution_required": true
+  },
+  "no_model_artifact": true,
+  "no_promotion_artifact": true,
+  "no_strategy_package": true,
+  "no_runtime_consumption": true,
+  "no_broker_execution": true
+}
