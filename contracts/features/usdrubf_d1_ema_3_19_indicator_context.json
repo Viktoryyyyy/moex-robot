@@ -1,0 +1,54 @@
+{
+  "artifact_id": "usdrubf_d1_ema_3_19_indicator_context",
+  "artifact_role": "feature",
+  "contract_class": "repo_relative",
+  "producer_ref": "src.moex_features.daily.usdrubf_d1_ema_3_19_indicator_context:materialize_feature_frame",
+  "consumer_refs": [
+    "src.moex_research.runners.usdrubf_ema_3_19_d1_indicators_horizons:run_research_package",
+    "future_model_screening_phase"
+  ],
+  "format": "dataframe",
+  "schema_version": 1,
+  "partitioning": "unpartitioned",
+  "source_event_ref": "contracts/features/usdrubf_d1_ema_3_19_cross_context.json",
+  "source_indicator_ref": "contracts/features/usdrubf_d1_classical_indicators.json",
+  "locator_ref": "data/features/usdrubf_d1_ema_3_19_indicator_context.csv",
+  "calendar_contract": "moex_futures",
+  "timezone": "Europe/Moscow",
+  "join_keys": [
+    "instrument_id",
+    "end"
+  ],
+  "join_cardinality": "one_to_one",
+  "retain_all_event_rows": true,
+  "preserve_cross_dir": true,
+  "required_columns": [
+    "instrument_id",
+    "end",
+    "cross_dir",
+    "session_index",
+    "rsi_14",
+    "roc_10",
+    "stoch_k_14",
+    "stoch_d_3",
+    "adx_14",
+    "di_spread_14",
+    "macd_hist_12_26_9_pct",
+    "atr_14_pct",
+    "bb_percent_b_20_2",
+    "bb_bandwidth_20_2",
+    "indicator_ready"
+  ],
+  "forbidden_column_classes": [
+    "returns",
+    "labels",
+    "future outcomes",
+    "entry or exit values",
+    "completion or censoring fields"
+  ],
+  "time_semantics": {
+    "known_by_when": "D close",
+    "earliest_executable_point": "D+1 open",
+    "no_same_bar_leakage": true
+  }
+}
