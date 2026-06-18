@@ -1,0 +1,79 @@
+{
+  "artifact_id": "usdrubf_d1_ema_3_19_multi_horizon_labels",
+  "artifact_role": "label",
+  "contract_class": "repo_relative",
+  "producer_ref": "src.moex_features.labels.usdrubf_d1_ema_3_19_multi_horizon_labels:materialize_label_frame",
+  "consumer_refs": [
+    "src.moex_research.runners.usdrubf_ema_3_19_d1_indicators_horizons:run_research_package",
+    "future_model_training_phase"
+  ],
+  "format": "dataframe",
+  "schema_version": 1,
+  "partitioning": "unpartitioned",
+  "source_event_ref": "contracts/features/usdrubf_d1_ema_3_19_cross_context.json",
+  "source_d1_ref": "contracts/features/usdrubf_d1_ohlc_from_5m.json",
+  "locator_ref": "data/labels/usdrubf_d1_ema_3_19_multi_horizon_labels.csv",
+  "calendar_contract": "moex_futures",
+  "timezone": "Europe/Moscow",
+  "required_columns": [
+    "instrument_id",
+    "end",
+    "cross_dir",
+    "event_session_index",
+    "entry_session_index",
+    "h1_completion_index",
+    "h1_signed_return",
+    "h1_allow_trade",
+    "h1_opposite_cross_before_exit",
+    "h2_completion_index",
+    "h2_signed_return",
+    "h2_allow_trade",
+    "h2_opposite_cross_before_exit",
+    "h3_completion_index",
+    "h3_signed_return",
+    "h3_allow_trade",
+    "h3_opposite_cross_before_exit",
+    "h5_completion_index",
+    "h5_signed_return",
+    "h5_allow_trade",
+    "h5_opposite_cross_before_exit",
+    "h10_completion_index",
+    "h10_signed_return",
+    "h10_allow_trade",
+    "h10_opposite_cross_before_exit",
+    "reverse_event_session_index",
+    "reverse_completion_index",
+    "holding_sessions_to_reverse_exit",
+    "reverse_signed_return",
+    "reverse_allow_trade",
+    "reverse_label_censored"
+  ],
+  "direction": {
+    "cross_up": 1,
+    "cross_down": -1
+  },
+  "fixed_horizons": {
+    "h1": "D+2 open",
+    "h2": "D+3 open",
+    "h3": "D+4 open",
+    "h5": "D+6 open",
+    "h10": "D+11 open"
+  },
+  "entry": "D+1 open",
+  "signed_return": "direction * (exit_open / entry_open - 1)",
+  "allow_trade": "int(signed_return > 0) when observed; null otherwise",
+  "opposite_cross_before_exit": "only an opposite event known at a close strictly before the exit open",
+  "reverse_horizon": {
+    "opposite_event": "first later event with opposite cross_dir",
+    "known": "R close",
+    "exit": "R+1 open",
+    "holding_sessions": "reverse completion index minus entry index",
+    "censor_if": [
+      "no later opposite event",
+      "R+1 open unavailable",
+      "entry or return unavailable"
+    ]
+  },
+  "missing_outcome_policy": "signed return and allow_trade remain null; never coerce to class 0",
+  "runtime_consumption_allowed": false
+}
