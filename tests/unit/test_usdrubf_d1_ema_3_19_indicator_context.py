@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.moex_features.daily.usdrubf_d1_classical_indicators import (
+from src.moex_features.daily.usdrubf_d1_ema_3_19_classical_indicators import (
     INDICATOR_COLUMNS,
     build_classical_indicators_frame,
 )
@@ -76,6 +76,21 @@ def test_join_retains_event_rows_preserves_cross_dir_and_adds_all_indicators() -
     assert "signed_return_h5" not in actual.columns
     assert "allow_trade_h5" not in actual.columns
     assert "reverse_label_censored" not in actual.columns
+
+
+def test_join_recomputes_indicator_ready_from_all_ten_indicator_values() -> None:
+    d1 = _d1_frame()
+    indicators = build_classical_indicators_frame(d1)
+    events = _events(d1)
+
+    indicators.loc[45, "indicator_ready"] = "False"
+    actual = build_ema_3_19_indicator_context_frame(events, indicators)
+    assert bool(actual.loc[1, "indicator_ready"]) is True
+
+    indicators.loc[45, "rsi_14"] = np.nan
+    indicators.loc[45, "indicator_ready"] = "True"
+    actual = build_ema_3_19_indicator_context_frame(events, indicators)
+    assert bool(actual.loc[1, "indicator_ready"]) is False
 
 
 def test_join_is_exact_one_to_one_and_rejects_unmatched_event_key() -> None:
