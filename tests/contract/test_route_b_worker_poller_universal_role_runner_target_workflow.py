@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -10,6 +11,17 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TARGET_PATH = REPO_ROOT / "docs/sot/MOEX_ROUTE_B_WORKER_POLLER_UNIVERSAL_ROLE_RUNNER_V0_1_TARGET.json"
 BASELINE_PATH = REPO_ROOT / "docs/sot/MOEX_ROUTE_B_WORKER_POLLER_V1_10_3.json"
+INTAKE_ADAPTER_PATH = (
+    REPO_ROOT / "docs/sot/MOEX_ROUTE_B_INTAKE_ACK_ROLE_TASK_ADAPTER_V0_1_TARGET.json"
+)
+BASELINE_BLOB_SHA = "513b70e52294d66e9478a55765fa2f72eec4baec"
+INTAKE_ADAPTER_BLOB_SHA = "b2a19654add077f0ad72dd13b4e270bbcd21f44d"
+
+
+def _git_blob_sha(path: Path) -> str:
+    content = path.read_bytes()
+    header = f"blob {len(content)}\0".encode()
+    return hashlib.sha1(header + content).hexdigest()
 
 
 def _workflow(path: Path) -> dict:
@@ -45,18 +57,23 @@ def _assert_no_named_sql_placeholders(query: str) -> None:
     assert named_placeholders == []
 
 
-def test_target_workflow_artifact_exists_and_preserves_baseline_export() -> None:
+def test_target_workflow_artifact_exists_and_preserves_protected_exports() -> None:
     assert TARGET_PATH.is_file()
     assert BASELINE_PATH.is_file()
+    assert INTAKE_ADAPTER_PATH.is_file()
 
     target = _workflow(TARGET_PATH)
     baseline = _workflow(BASELINE_PATH)
+    intake_adapter = _workflow(INTAKE_ADAPTER_PATH)
 
     assert target["name"] == "MOEX_ROUTE_B_WORKER_POLLER_UNIVERSAL_ROLE_RUNNER_V0_1_TARGET"
     assert baseline["name"] == "MOEX_ROUTE_B_WORKER_POLLER_V1_10_3"
+    assert intake_adapter["name"] == "MOEX_ROUTE_B_INTAKE_ACK_ROLE_TASK_ADAPTER_V0_1_TARGET"
     assert target["name"] != baseline["name"]
     assert target.get("active") is False
     assert baseline.get("active") is True or baseline.get("active") is False
+    assert _git_blob_sha(BASELINE_PATH) == BASELINE_BLOB_SHA
+    assert _git_blob_sha(INTAKE_ADAPTER_PATH) == INTAKE_ADAPTER_BLOB_SHA
 
 
 def test_target_uses_one_ai_node_and_no_role_specific_ai_nodes() -> None:
@@ -187,6 +204,29 @@ def test_pm_l3_prompt_contains_hard_decision_output_contract_examples_and_safe_r
     )
 
     for token in required_safe_rule_tokens:
+        assert token in js_code, token
+
+
+def test_pm_l3_prompt_contains_controlled_create_next_role_task_smoke_rule() -> None:
+    workflow = _workflow(TARGET_PATH)
+    js_code = _js(_node(workflow, "Build Universal Role Prompt"))
+
+    required_tokens = (
+        "Controlled create_next_role_task smoke rule",
+        "urr_create_next_role_task_smoke_only",
+        "controlled_create_next_role_task_path",
+        "no GitHub execution, no merge, no server apply, and no broker/live/runtime",
+        '"next_role_id":"PM_L3_DELIVERY_VALIDATION_OWNER"',
+        '"next_task_payload_json"',
+        '"required_decision_type":"no_op"',
+        "Return decision_type no_op. Do not create another role task.",
+        "Controlled DB queue orchestration smoke only",
+        "next role task is created in the DB queue only",
+        "no external execution is allowed",
+        "must instruct the follow-up PM_L3 task to return no_op and not create another task",
+    )
+
+    for token in required_tokens:
         assert token in js_code, token
 
 
@@ -350,6 +390,58 @@ def test_finalization_sql_inserts_pm_l3_decisions_only_for_valid_passes() -> Non
         assert token in query, token
 
 
+def test_finalization_sql_enqueues_next_role_task_for_valid_create_decision() -> None:
+    workflow = _workflow(TARGET_PATH)
+    query = _query(_node(workflow, "Finalize Role Task and PM L3 Decision"))
+    queue_ctes = query.split("next_role_task_candidate AS", 1)[1].split(
+        "task_update AS", 1
+    )[0]
+
+    required_tokens = (
+        "INSERT INTO public.route_b_role_task_queue",
+        "'role_task_'||md5(",
+        "d.phase_run_id",
+        "d.workflow_run_id",
+        "d.role_task_id AS parent_role_task_id",
+        "COALESCE(( SELECT MAX(q.sequence_no)",
+        "d.decision_payload_json->>'next_role_id' AS role_id",
+        "d.decision_payload_json->'next_task_payload_json' AS task_payload_json",
+        "d.decision_type='create_next_role_task'",
+        "jsonb_typeof(d.decision_payload_json)='object'",
+        "d.decision_payload_json ? 'next_role_id'",
+        "d.decision_payload_json ? 'next_task_payload_json'",
+        "AND EXISTS(SELECT 1 FROM pm_l3_decision)",
+        "'role_task_ready', 0, n.max_retries",
+        "LEAST(GREATEST(COALESCE(parent.max_retries,3),1),3)",
+        "ON CONFLICT (role_task_id) DO NOTHING",
+    )
+
+    for token in required_tokens:
+        assert token in queue_ctes, token
+
+
+def test_finalization_sql_builds_claim_compatible_context_for_next_role() -> None:
+    workflow = _workflow(TARGET_PATH)
+    claim_query = _query(_node(workflow, "Claim One Role Task"))
+    finalization_query = _query(
+        _node(workflow, "Finalize Role Task and PM L3 Decision")
+    )
+
+    assert (
+        "q.context_refs_json #>> '{role_context_ref,role_id}' = q.role_id"
+        in claim_query
+    )
+    required_tokens = (
+        "jsonb_build_object( 'role_context_ref'",
+        "jsonb_build_object( 'role_id', d.decision_payload_json->>'next_role_id' )",
+        "AS context_refs_json",
+        "WHERE n.context_refs_json #>> '{role_context_ref,role_id}' = n.role_id",
+    )
+
+    for token in required_tokens:
+        assert token in finalization_query, token
+
+
 def test_finalization_sql_never_inserts_pm_l3_decision_for_fail_or_blocked() -> None:
     workflow = _workflow(TARGET_PATH)
     query = _query(_node(workflow, "Finalize Role Task and PM L3 Decision"))
@@ -401,9 +493,9 @@ def test_finalization_sql_updates_legacy_workflow_run_for_failed_validation() ->
     query = _query(_node(workflow, "Finalize Role Task and PM L3 Decision"))
 
     required_tokens = (
-        "UPDATE moex_n8n_workflow_runs r SET status=CASE WHEN d.validation_status IN ('fail','blocked') THEN 'failed' ELSE 'ready_for_review' END",
-        "current_state=CASE WHEN d.validation_status IN ('fail','blocked') THEN 'failed' ELSE 'ready_for_review' END",
-        "current_phase=CASE WHEN d.validation_status IN ('fail','blocked') THEN 'manual_review_required' ELSE 'pm_l3_package_drafted' END",
+        "UPDATE moex_n8n_workflow_runs r SET status=CASE WHEN d.validation_status IN ('fail','blocked') THEN 'failed'",
+        "current_state=CASE WHEN d.validation_status IN ('fail','blocked') THEN 'failed'",
+        "current_phase=CASE WHEN d.validation_status IN ('fail','blocked') THEN 'manual_review_required'",
         "error_message=CASE WHEN d.validation_status IN ('fail','blocked')",
         "locked_by=NULL",
         "worker_execution_id=NULL",
@@ -416,13 +508,42 @@ def test_finalization_sql_updates_legacy_workflow_run_for_failed_validation() ->
         assert token in query, token
 
 
-def test_finalization_sql_updates_legacy_workflow_run_for_success_to_non_queued_state() -> None:
+def test_finalization_sql_keeps_no_op_ready_for_review() -> None:
     workflow = _workflow(TARGET_PATH)
     query = _query(_node(workflow, "Finalize Role Task and PM L3 Decision"))
+    legacy_cte = query.split("legacy_run_update AS", 1)[1].split(
+        "legacy_event AS", 1
+    )[0]
 
-    assert "ELSE 'ready_for_review'" in query
-    assert "ELSE 'pm_l3_package_drafted'" in query
-    assert "last_completed_step=CASE WHEN d.validation_status IN ('pass','conditional_pass') THEN 'urr_role_task_finalization'" in query
+    required_tokens = (
+        "WHEN d.decision_type='create_next_role_task' AND EXISTS(SELECT 1 FROM next_role_task) THEN 'queued' ELSE 'ready_for_review' END",
+        "WHEN d.decision_type='create_next_role_task' AND EXISTS(SELECT 1 FROM next_role_task) THEN 'role_task_ready' ELSE 'ready_for_review' END",
+        "WHEN d.decision_type='create_next_role_task' AND EXISTS(SELECT 1 FROM next_role_task) THEN 'next_role_task_queued' ELSE 'pm_l3_package_drafted' END",
+        "ELSE 'urr_role_task_finalization' END",
+    )
+
+    for token in required_tokens:
+        assert token in legacy_cte, token
+
+
+def test_finalization_sql_keeps_create_next_role_task_in_queued_state() -> None:
+    workflow = _workflow(TARGET_PATH)
+    query = _query(_node(workflow, "Finalize Role Task and PM L3 Decision"))
+    legacy_cte = query.split("legacy_run_update AS", 1)[1].split(
+        "legacy_event AS", 1
+    )[0]
+
+    required_tokens = (
+        "d.decision_type='create_next_role_task'",
+        "EXISTS(SELECT 1 FROM next_role_task)",
+        "THEN 'queued'",
+        "THEN 'role_task_ready'",
+        "THEN 'next_role_task_queued'",
+        "THEN 'urr_create_next_role_task'",
+    )
+
+    for token in required_tokens:
+        assert token in legacy_cte, token
 
 
 def test_finalization_sql_writes_urr_role_task_finalization_event() -> None:
@@ -432,8 +553,13 @@ def test_finalization_sql_writes_urr_role_task_finalization_event() -> None:
     required_tokens = (
         "INSERT INTO moex_n8n_workflow_run_events",
         "urr_role_task_finalized",
+        "'role_task_id',d.role_task_id",
+        "'validation_status',d.validation_status",
+        "'decision_type',d.decision_type",
         "role_task_terminal_status",
         "pm_l3_decision_inserted",
+        "next_role_task_inserted",
+        "next_role_id",
     )
 
     for token in required_tokens:
