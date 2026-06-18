@@ -11,7 +11,7 @@
   "schema_version": 1,
   "partitioning": "unpartitioned",
   "source_event_ref": "contracts/features/usdrubf_d1_ema_3_19_cross_context.json",
-  "source_indicator_ref": "contracts/features/usdrubf_d1_classical_indicators.json",
+  "source_indicator_ref": "contracts/features/usdrubf_d1_ema_3_19_classical_indicators.json",
   "locator_ref": "data/features/usdrubf_d1_ema_3_19_indicator_context.csv",
   "calendar_contract": "moex_futures",
   "timezone": "Europe/Moscow",
