@@ -1,0 +1,135 @@
+{
+  "experiment_id": "usdrubf_ema_3_19_d1_indicators_horizons_v1",
+  "schema_version": 1,
+  "producer": {
+    "module": "src.moex_research.runners.usdrubf_ema_3_19_d1_indicators_horizons",
+    "invocation": "python -m src.moex_research.runners.usdrubf_ema_3_19_d1_indicators_horizons"
+  },
+  "status": {
+    "research_foundation_only": true,
+    "model_training_allowed": false,
+    "runtime_ready": false,
+    "trading_conclusion_allowed": false
+  },
+  "required_cli_args": [
+    "--d1-ohlc-path",
+    "--crossover-context-path",
+    "--output-dir",
+    "--run-id",
+    "--git-commit-sha"
+  ],
+  "input_artifacts": [
+    {
+      "artifact_id": "usdrubf_d1_ohlc",
+      "contract_class": "cli_argument",
+      "cli_arg": "--d1-ohlc-path",
+      "formats": [
+        "csv",
+        "parquet"
+      ],
+      "sha256_required_before_transformation": true,
+      "implicit_discovery_allowed": false
+    },
+    {
+      "artifact_id": "usdrubf_d1_ema_3_19_cross_context",
+      "contract_class": "cli_argument",
+      "cli_arg": "--crossover-context-path",
+      "formats": [
+        "csv",
+        "parquet"
+      ],
+      "sha256_required_before_transformation": true,
+      "implicit_discovery_allowed": false
+    }
+  ],
+  "input_path_semantics": {
+    "all_inputs_explicit": true,
+    "glob_discovery_allowed": false,
+    "fallback_paths_allowed": false,
+    "mutable_aliases_rejected": [
+      "latest",
+      "current",
+      "autodetect"
+    ]
+  },
+  "validation": {
+    "instrument_id": "usdrubf only",
+    "D1_ordering": "chronological finalized rows",
+    "duplicate_keys_rejected": true,
+    "event_to_D1_join_keys": [
+      "instrument_id",
+      "end"
+    ],
+    "event_to_D1_cardinality": "one_to_one",
+    "authoritative_event_stream": "supplied crossover context"
+  },
+  "layer_boundaries": {
+    "src/moex_features/daily": [
+      "indicator formulas",
+      "event-to-indicator join"
+    ],
+    "src/moex_features/labels": [
+      "fixed-horizon label formulas",
+      "reverse-exit and censoring formulas"
+    ],
+    "src/moex_research/runners": [
+      "CLI parsing",
+      "path and input validation",
+      "builder orchestration",
+      "summary/report generation",
+      "declared artifact writes"
+    ]
+  },
+  "output_artifacts": [
+    {
+      "filename": "run_metadata.json",
+      "format": "json",
+      "artifact_role": "metadata"
+    },
+    {
+      "filename": "usdrubf_d1_classical_indicators.csv",
+      "format": "csv",
+      "artifact_role": "D1_indicator_features"
+    },
+    {
+      "filename": "usdrubf_d1_ema_3_19_indicator_context.csv",
+      "format": "csv",
+      "artifact_role": "event_indicator_features"
+    },
+    {
+      "filename": "usdrubf_d1_ema_3_19_multi_horizon_labels.csv",
+      "format": "csv",
+      "artifact_role": "research_labels"
+    },
+    {
+      "filename": "usdrubf_ema_3_19_horizon_baseline_summary.csv",
+      "format": "csv",
+      "artifact_role": "descriptive_baseline_summary"
+    },
+    {
+      "filename": "usdrubf_ema_3_19_indicator_horizon_quality_report.json",
+      "format": "json",
+      "artifact_role": "quality_report"
+    }
+  ],
+  "artifact_write_policy": {
+    "output_dir_arg": "--output-dir",
+    "absent_or_empty_required": true,
+    "all_outputs_below_output_dir": true,
+    "declared_outputs_only": true,
+    "stdout_only_result_allowed": false
+  },
+  "canonical_semantics": {
+    "session_index": "zero_based chronological finalized D1 order",
+    "crossover_known": "D close",
+    "entry": "D+1 open",
+    "reverse_cross_known": "R close",
+    "reverse_exit": "R+1 open",
+    "missing_outcome_allow_trade": null
+  },
+  "no_external_TA_dependency": true,
+  "no_model_training": true,
+  "no_strategy_package": true,
+  "no_runtime_consumption": true,
+  "no_broker_execution": true
+}

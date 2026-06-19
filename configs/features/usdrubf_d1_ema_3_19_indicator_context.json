@@ -1,0 +1,29 @@
+{
+  "feature_id": "usdrubf_d1_ema_3_19_indicator_context",
+  "version": "1.0.0",
+  "instrument_ids": [
+    "usdrubf"
+  ],
+  "granularity": "D1_event",
+  "source_event_ref": "contracts/features/usdrubf_d1_ema_3_19_cross_context.json",
+  "source_indicator_ref": "contracts/features/usdrubf_d1_ema_3_19_classical_indicators.json",
+  "artifact_ref": "contracts/features/usdrubf_d1_ema_3_19_indicator_context.json",
+  "producer_ref": "src.moex_features.daily.usdrubf_d1_ema_3_19_indicator_context:materialize_feature_frame",
+  "calendar_contract": "moex_futures",
+  "timezone": "Europe/Moscow",
+  "join_keys": [
+    "instrument_id",
+    "end"
+  ],
+  "join_cardinality": "one_to_one",
+  "authoritative_event_stream": "supplied crossover context",
+  "preserve_cross_dir": true,
+  "forbidden_output_fields": [
+    "return fields",
+    "label fields",
+    "future-outcome fields"
+  ],
+  "is_research_allowed": true,
+  "is_runtime_allowed": false,
+  "status": "active"
+}
