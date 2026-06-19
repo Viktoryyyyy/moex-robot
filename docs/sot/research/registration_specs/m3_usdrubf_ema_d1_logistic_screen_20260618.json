@@ -1,0 +1,28 @@
+{
+  "artifacts": [
+    {"artifact_class":"run_metadata","artifact_id":"run_metadata","artifact_role":"run_metadata","consumer":"moex_research.registry","filename":"run_metadata.json","format":"json","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_logistic_screen","required_for_canonical":true,"schema_version":"1"},
+    {"artifact_class":"oos_predictions","artifact_id":"m3_oos_predictions","artifact_role":"primary_result","consumer":"moex_research.registry","filename":"m3_oos_predictions.csv","format":"csv","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_logistic_screen","required_for_canonical":true,"schema_version":"1"},
+    {"artifact_class":"metrics_report","artifact_id":"m3_metrics","artifact_role":"metrics","consumer":"moex_research.registry","filename":"m3_metrics.json","format":"json","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_logistic_screen","required_for_canonical":true,"schema_version":"1"},
+    {"artifact_class":"diagnostic_table","artifact_id":"m3_fold_metrics","artifact_role":"fold_metrics","consumer":"moex_research.registry","filename":"m3_fold_metrics.csv","format":"csv","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_logistic_screen","required_for_canonical":false,"schema_version":"1"},
+    {"artifact_class":"diagnostic_table","artifact_id":"m3_coefficients","artifact_role":"fold_training_coefficients","consumer":"moex_research.registry","filename":"m3_coefficients.csv","format":"csv","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_logistic_screen","required_for_canonical":false,"schema_version":"1"},
+    {"artifact_class":"diagnostic_table","artifact_id":"m3_c_sensitivity","artifact_role":"descriptive_c_sensitivity","consumer":"moex_research.registry","filename":"m3_c_sensitivity.csv","format":"csv","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_logistic_screen","required_for_canonical":false,"schema_version":"1"},
+    {"artifact_class":"quality_report","artifact_id":"m3_quality_report","artifact_role":"quality_report","consumer":"moex_research.registry","filename":"m3_quality_report.json","format":"json","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_logistic_screen","required_for_canonical":false,"schema_version":"1"}
+  ],
+  "canonicality_status":"canonical",
+  "created_ts":"2026-06-18T00:00:00Z",
+  "dataset_refs":["contracts/datasets/research_usdrubf_5m_full_history.json"],
+  "feature_refs":["contracts/features/usdrubf_d1_ohlc_from_5m.json","contracts/features/usdrubf_d1_ema_3_19_cross_context.json"],
+  "instrument_scope":["USDRUBF"],
+  "label_refs":["contracts/labels/usdrubf_d1_ema_3_19_cross_labels.json"],
+  "metrics":{"brier_score":0.3019281918872732,"prevalence_baseline_brier":0.2506863700880736,"primary_oos_rows":30,"roc_auc":0.39819004524886875,"screening_support":"not_supported_or_hold"},
+  "parameter_set":{"C":1.0,"categorical_features":["cross_dir"],"class_weight":"balanced","minimum_initial_train_events_after_purge":32,"model":"sklearn.linear_model.LogisticRegression","numeric_features":["ema_diff","ema_diff_prev","bars_since_prev_cross","ret_1d","ret_3d","ret_5d","rolling_vol_5d","rolling_vol_20d"],"primary_target":"allow_trade_h5_observed","purge_d1_sessions":6,"random_state":0,"secondary_target":"positive_signed_ret_o2o_h1","solver":"liblinear","test_block_events":8,"threshold":0.5},
+  "repo_commit":"dbca89179d764afa9972c3ec592c1ca5898b4f66",
+  "result_status":"not_supported_canonical",
+  "run_id":"m3_usdrubf_ema_d1_logistic_screen_20260618",
+  "run_status":"executed",
+  "schema_version":"research_run_registration.v1",
+  "strategy_id":"ema_3_19_ai",
+  "strategy_version":"research.v1",
+  "test_type":"expanding_walk_forward_logistic_screen",
+  "timeframe_scope":["D1"]
+}
