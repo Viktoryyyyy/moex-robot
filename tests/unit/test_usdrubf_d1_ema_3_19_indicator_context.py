@@ -83,6 +83,8 @@ def test_join_recomputes_indicator_ready_from_all_ten_indicator_values() -> None
     indicators = build_classical_indicators_frame(d1)
     events = _events(d1)
 
+    # Use object dtype so the test can represent a stale serialized flag on pandas 2.x and 3.x.
+    indicators["indicator_ready"] = indicators["indicator_ready"].astype(object)
     indicators.loc[45, "indicator_ready"] = "False"
     actual = build_ema_3_19_indicator_context_frame(events, indicators)
     assert bool(actual.loc[1, "indicator_ready"]) is True
