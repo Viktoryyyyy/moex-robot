@@ -1,0 +1,27 @@
+{
+  "artifacts": [
+    {"artifact_class":"run_metadata","artifact_id":"run_metadata","artifact_role":"run_metadata","consumer":"moex_research.registry","filename":"run_metadata.json","format":"json","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_research_baseline","required_for_canonical":true,"schema_version":"1"},
+    {"artifact_class":"feature_table","artifact_id":"usdrubf_d1_ohlc","artifact_role":"feature_context","consumer":"moex_research.registry","filename":"usdrubf_d1_ohlc.csv","format":"csv","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_research_baseline","required_for_canonical":false,"schema_version":"1"},
+    {"artifact_class":"feature_table","artifact_id":"usdrubf_d1_ema_3_19_cross_context","artifact_role":"feature_context","consumer":"moex_research.registry","filename":"usdrubf_d1_ema_3_19_cross_context.csv","format":"csv","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_research_baseline","required_for_canonical":false,"schema_version":"1"},
+    {"artifact_class":"label_table","artifact_id":"usdrubf_d1_ema_3_19_cross_labels","artifact_role":"labels","consumer":"moex_research.registry","filename":"usdrubf_d1_ema_3_19_cross_labels.csv","format":"csv","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_research_baseline","required_for_canonical":false,"schema_version":"1"},
+    {"artifact_class":"research_result_table","artifact_id":"usdrubf_ema_3_19_raw_baseline_summary","artifact_role":"primary_result","consumer":"moex_research.registry","filename":"usdrubf_ema_3_19_raw_baseline_summary.csv","format":"csv","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_research_baseline","required_for_canonical":true,"schema_version":"1"},
+    {"artifact_class":"metrics_report","artifact_id":"usdrubf_ema_3_19_quality_report","artifact_role":"metrics","consumer":"moex_research.registry","filename":"usdrubf_ema_3_19_quality_report.json","format":"json","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_research_baseline","required_for_canonical":true,"schema_version":"1"}
+  ],
+  "canonicality_status":"canonical",
+  "created_ts":"2026-06-18T00:00:00Z",
+  "dataset_refs":["contracts/datasets/research_usdrubf_5m_full_history.json"],
+  "feature_refs":["contracts/features/usdrubf_d1_ohlc_from_5m.json","contracts/features/usdrubf_d1_ema_3_19_cross_context.json"],
+  "instrument_scope":["USDRUBF"],
+  "label_refs":["contracts/labels/usdrubf_d1_ema_3_19_cross_labels.json"],
+  "metrics":{"baseline_summary_row_count":8,"d1_ohlc_row_count":980,"event_count":64,"label_row_count":64},
+  "parameter_set":{"earliest_label_outcome_anchor":"D+1 open","ema_fast":3,"ema_slow":19,"instrument_id":"usdrubf","research_horizons":[1,2,5],"timeframe":"D1","year_split_min_rows":5},
+  "repo_commit":"9eb16539ee9c11f9a23d02ea858ff97b345c00a8",
+  "result_status":"evidence_canonical",
+  "run_id":"m2_1_usdrubf_ema_d1_baseline_20260618",
+  "run_status":"executed",
+  "schema_version":"research_run_registration.v1",
+  "strategy_id":"ema_3_19_ai",
+  "strategy_version":"research.v1",
+  "test_type":"research_baseline",
+  "timeframe_scope":["D1"]
+}
