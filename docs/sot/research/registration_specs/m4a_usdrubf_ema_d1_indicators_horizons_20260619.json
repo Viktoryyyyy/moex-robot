@@ -1,0 +1,27 @@
+{
+  "artifacts": [
+    {"artifact_class":"run_metadata","artifact_id":"run_metadata","artifact_role":"run_metadata","consumer":"moex_research.registry","filename":"run_metadata.json","format":"json","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_indicators_horizons","required_for_canonical":true,"schema_version":"1"},
+    {"artifact_class":"feature_table","artifact_id":"usdrubf_d1_classical_indicators","artifact_role":"feature_set","consumer":"moex_research.registry","filename":"usdrubf_d1_classical_indicators.csv","format":"csv","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_indicators_horizons","required_for_canonical":false,"schema_version":"1"},
+    {"artifact_class":"feature_table","artifact_id":"usdrubf_d1_ema_3_19_indicator_context","artifact_role":"feature_set","consumer":"moex_research.registry","filename":"usdrubf_d1_ema_3_19_indicator_context.csv","format":"csv","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_indicators_horizons","required_for_canonical":false,"schema_version":"1"},
+    {"artifact_class":"label_table","artifact_id":"usdrubf_d1_ema_3_19_multi_horizon_labels","artifact_role":"labels","consumer":"moex_research.registry","filename":"usdrubf_d1_ema_3_19_multi_horizon_labels.csv","format":"csv","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_indicators_horizons","required_for_canonical":false,"schema_version":"1"},
+    {"artifact_class":"research_result_table","artifact_id":"usdrubf_ema_3_19_horizon_baseline_summary","artifact_role":"primary_result","consumer":"moex_research.registry","filename":"usdrubf_ema_3_19_horizon_baseline_summary.csv","format":"csv","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_indicators_horizons","required_for_canonical":true,"schema_version":"1"},
+    {"artifact_class":"metrics_report","artifact_id":"usdrubf_ema_3_19_indicator_horizon_quality_report","artifact_role":"metrics","consumer":"moex_research.registry","filename":"usdrubf_ema_3_19_indicator_horizon_quality_report.json","format":"json","producer":"src.moex_research.runners.usdrubf_ema_3_19_d1_indicators_horizons","required_for_canonical":true,"schema_version":"1"}
+  ],
+  "canonicality_status":"canonical",
+  "created_ts":"2026-06-19T00:00:00Z",
+  "dataset_refs":["contracts/datasets/research_usdrubf_5m_full_history.json"],
+  "feature_refs":["contracts/features/usdrubf_d1_ohlc_from_5m.json","contracts/features/usdrubf_d1_ema_3_19_cross_context.json","contracts/features/usdrubf_d1_ema_3_19_classical_indicators.json","contracts/features/usdrubf_d1_ema_3_19_indicator_context.json"],
+  "instrument_scope":["USDRUBF"],
+  "label_refs":["contracts/labels/usdrubf_d1_ema_3_19_multi_horizon_labels.json"],
+  "metrics":{"d1_rows":980,"event_rows":64,"h10_mean_signed_return":-0.003034,"h1_mean_signed_return":0.001551,"h2_mean_signed_return":0.001671,"h5_mean_signed_return":-0.000169,"indicator_ready_events":63},
+  "parameter_set":{"crossover_known":"D close","ema_fast":3,"ema_slow":19,"entry":"D+1 open","fixed_horizons":[1,2,5,10],"indicator_ready_requires_all_ten_indicators":true,"instrument_id":"usdrubf","reverse_exit":"R+1 open","timeframe":"D1"},
+  "repo_commit":"522bf0600131065d983a3125029d9fafdac17f37",
+  "result_status":"evidence_canonical",
+  "run_id":"m4a_usdrubf_ema_d1_indicators_horizons_20260619",
+  "run_status":"executed",
+  "schema_version":"research_run_registration.v1",
+  "strategy_id":"ema_3_19_ai",
+  "strategy_version":"research.v1",
+  "test_type":"indicator_horizon_research_foundation",
+  "timeframe_scope":["D1"]
+}

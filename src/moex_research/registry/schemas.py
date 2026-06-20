@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Final, Iterable, Mapping
@@ -25,6 +26,8 @@ class ResultStatus(str, Enum):
     NOT_SUPPORTED_PROVISIONAL = "not_supported_provisional"
     BLOCKED = "blocked"
     INVALIDATED = "invalidated"
+    EVIDENCE_CANONICAL = "evidence_canonical"
+    EVIDENCE_PROVISIONAL = "evidence_provisional"
 
 
 class CanonicalityStatus(str, Enum):
@@ -35,10 +38,25 @@ class CanonicalityStatus(str, Enum):
 
 
 ALLOWED_RUN_STATUSES: Final[frozenset[str]] = frozenset(item.value for item in RunStatus)
-ALLOWED_RESULT_STATUSES: Final[frozenset[str]] = frozenset(item.value for item in ResultStatus)
+# Retained as the legacy public set so existing callers that compare it exactly stay compatible.
+ALLOWED_RESULT_STATUSES: Final[frozenset[str]] = frozenset(
+    {
+        ResultStatus.SUPPORTED_CANONICAL.value,
+        ResultStatus.NOT_SUPPORTED_CANONICAL.value,
+        ResultStatus.SUPPORTED_PROVISIONAL.value,
+        ResultStatus.NOT_SUPPORTED_PROVISIONAL.value,
+        ResultStatus.BLOCKED.value,
+        ResultStatus.INVALIDATED.value,
+    }
+)
+ACCEPTED_RESULT_STATUSES: Final[frozenset[str]] = frozenset(item.value for item in ResultStatus)
 ALLOWED_CANONICALITY_STATUSES: Final[frozenset[str]] = frozenset(item.value for item in CanonicalityStatus)
 CANONICAL_RESULT_STATUSES: Final[frozenset[str]] = frozenset(
-    {ResultStatus.SUPPORTED_CANONICAL.value, ResultStatus.NOT_SUPPORTED_CANONICAL.value}
+    {
+        ResultStatus.SUPPORTED_CANONICAL.value,
+        ResultStatus.NOT_SUPPORTED_CANONICAL.value,
+        ResultStatus.EVIDENCE_CANONICAL.value,
+    }
 )
 REQUIRED_CANONICAL_ARTIFACT_ROLES: Final[tuple[str, ...]] = ("run_metadata", "metrics", "primary_result")
 
@@ -79,9 +97,11 @@ REQUIRED_EXPERIMENT_REGISTRY_FIELDS: Final[tuple[str, ...]] = (
 )
 
 _FORBIDDEN_PATH_TOKENS: Final[tuple[str, ...]] = ("*", "?", "[", "]", "{", "}")
+_FORBIDDEN_PATH_ALIASES: Final[tuple[str, ...]] = ("latest", "current", "autodetect")
 _FORBIDDEN_PROMOTION_METRIC_KEYS: Final[frozenset[str]] = frozenset(
     {"promotion", "promotion_status", "promotion_verdict", "promotion_decision", "promote_to_runtime", "promote_to_live"}
 )
+_SHA256_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
 def _require_text(value: str, field_name: str) -> str:
@@ -91,14 +111,19 @@ def _require_text(value: str, field_name: str) -> str:
 
 
 def _require_tuple(value: Iterable[str], field_name: str) -> tuple[str, ...]:
+    items = _coerce_string_tuple(value, field_name)
+    if not items:
+        raise RegistryValidationError(f"{field_name} must be non-empty")
+    return items
+
+
+def _coerce_string_tuple(value: Iterable[str], field_name: str) -> tuple[str, ...]:
     if isinstance(value, (str, bytes)):
-        raise RegistryValidationError(f"{field_name} must be a non-empty tuple of strings")
+        raise RegistryValidationError(f"{field_name} must be a tuple of strings")
     try:
         items = tuple(value)
     except TypeError as exc:
-        raise RegistryValidationError(f"{field_name} must be a non-empty tuple of strings") from exc
-    if not items:
-        raise RegistryValidationError(f"{field_name} must be non-empty")
+        raise RegistryValidationError(f"{field_name} must be a tuple of strings") from exc
     if any(not isinstance(item, str) or not item.strip() for item in items):
         raise RegistryValidationError(f"{field_name} must contain non-empty strings")
     return items
@@ -112,6 +137,8 @@ def _require_bool(value: bool, field_name: str) -> bool:
 
 def _validate_explicit_artifact_path(path: str) -> str:
     path = _require_text(path, "path")
+    if "\x00" in path:
+        raise RegistryValidationError("artifact path must not contain NUL")
     if path.strip().casefold() == "stdout":
         raise RegistryValidationError("stdout-only artifact path is invalid")
     if any(token in path for token in _FORBIDDEN_PATH_TOKENS):
@@ -119,9 +146,12 @@ def _validate_explicit_artifact_path(path: str) -> str:
     normalized = path.replace("\\", "/")
     if "//" in normalized:
         raise RegistryValidationError("artifact path must not contain empty path segments")
-    segments = [segment.casefold() for segment in normalized.split("/") if segment]
-    if any("latest" in segment for segment in segments):
-        raise RegistryValidationError("artifact path must not refer to a guessed latest folder")
+    raw_segments = [segment for segment in normalized.split("/") if segment]
+    lowered_segments = [segment.casefold() for segment in raw_segments]
+    if any(segment in {".", ".."} for segment in raw_segments):
+        raise RegistryValidationError("artifact path must not contain traversal segments")
+    if any(alias in segment for segment in lowered_segments for alias in _FORBIDDEN_PATH_ALIASES):
+        raise RegistryValidationError("artifact path must not refer to a mutable alias")
     if normalized in {".", "./"} or normalized.endswith("/"):
         raise RegistryValidationError("artifact path must point to an explicit artifact, not a directory")
     return path
@@ -139,6 +169,28 @@ def _validate_metrics(metrics: Mapping[str, Any]) -> Mapping[str, Any]:
     return metrics
 
 
+def _validate_parameter_set(parameter_set: Mapping[str, Any]) -> Mapping[str, Any]:
+    if not isinstance(parameter_set, Mapping):
+        raise RegistryValidationError("parameter_set must be a mapping")
+    return parameter_set
+
+
+def _validate_sha256(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not _SHA256_RE.fullmatch(value):
+        raise RegistryValidationError("sha256 must be a 64-character hexadecimal digest")
+    return value.lower()
+
+
+def _validate_size_bytes(value: int | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise RegistryValidationError("size_bytes must be a non-negative integer")
+    return value
+
+
 @dataclass(frozen=True)
 class ArtifactManifestItem:
     artifact_id: str
@@ -150,6 +202,8 @@ class ArtifactManifestItem:
     schema_version: str
     path: str
     required_for_canonical: bool
+    sha256: str | None = None
+    size_bytes: int | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "artifact_id", _require_text(self.artifact_id, "artifact_id"))
@@ -163,6 +217,8 @@ class ArtifactManifestItem:
         object.__setattr__(self, "schema_version", _require_text(self.schema_version, "schema_version"))
         object.__setattr__(self, "path", _validate_explicit_artifact_path(self.path))
         object.__setattr__(self, "required_for_canonical", _require_bool(self.required_for_canonical, "required_for_canonical"))
+        object.__setattr__(self, "sha256", _validate_sha256(self.sha256))
+        object.__setattr__(self, "size_bytes", _validate_size_bytes(self.size_bytes))
 
 
 @dataclass(frozen=True)
@@ -212,6 +268,10 @@ class ExperimentRegistryEntry:
     created_ts: str
     metrics: Mapping[str, Any] = field(default_factory=dict)
     promotion_verdict_ref: str | None = None
+    dataset_refs: tuple[str, ...] = ()
+    feature_refs: tuple[str, ...] = ()
+    label_refs: tuple[str, ...] = ()
+    parameter_set: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "registry_entry_id", _require_text(self.registry_entry_id, "registry_entry_id"))
@@ -226,7 +286,7 @@ class ExperimentRegistryEntry:
         object.__setattr__(self, "canonicality_status", _require_text(self.canonicality_status, "canonicality_status"))
         if self.run_status not in ALLOWED_RUN_STATUSES:
             raise RegistryValidationError("unsupported run_status")
-        if self.result_status not in ALLOWED_RESULT_STATUSES:
+        if self.result_status not in ACCEPTED_RESULT_STATUSES:
             raise RegistryValidationError("unsupported result_status")
         if self.canonicality_status not in ALLOWED_CANONICALITY_STATUSES:
             raise RegistryValidationError("unsupported canonicality_status")
@@ -236,3 +296,7 @@ class ExperimentRegistryEntry:
         object.__setattr__(self, "metrics", _validate_metrics(self.metrics))
         if self.promotion_verdict_ref is not None:
             object.__setattr__(self, "promotion_verdict_ref", _require_text(self.promotion_verdict_ref, "promotion_verdict_ref"))
+        object.__setattr__(self, "dataset_refs", _coerce_string_tuple(self.dataset_refs, "dataset_refs"))
+        object.__setattr__(self, "feature_refs", _coerce_string_tuple(self.feature_refs, "feature_refs"))
+        object.__setattr__(self, "label_refs", _coerce_string_tuple(self.label_refs, "label_refs"))
+        object.__setattr__(self, "parameter_set", _validate_parameter_set(self.parameter_set))
