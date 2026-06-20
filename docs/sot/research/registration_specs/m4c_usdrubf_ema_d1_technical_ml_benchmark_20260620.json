@@ -1,0 +1,207 @@
+{
+  "artifacts": [
+    {
+      "artifact_class": "run_metadata",
+      "artifact_id": "run_metadata",
+      "artifact_role": "run_metadata",
+      "consumer": "moex_research.registry",
+      "filename": "run_metadata.json",
+      "format": "json",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_technical_ml_benchmark",
+      "required_for_canonical": true,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "oos_predictions",
+      "artifact_id": "m4c_oos_predictions",
+      "artifact_role": "primary_result",
+      "consumer": "moex_research.registry",
+      "filename": "m4c_oos_predictions.csv",
+      "format": "csv",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_technical_ml_benchmark",
+      "required_for_canonical": true,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "metrics_table",
+      "artifact_id": "m4c_model_metrics",
+      "artifact_role": "model_metrics",
+      "consumer": "moex_research.registry",
+      "filename": "m4c_model_metrics.csv",
+      "format": "csv",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_technical_ml_benchmark",
+      "required_for_canonical": false,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "metrics_table",
+      "artifact_id": "m4c_fixed_rule_metrics",
+      "artifact_role": "fixed_rule_metrics",
+      "consumer": "moex_research.registry",
+      "filename": "m4c_fixed_rule_metrics.csv",
+      "format": "csv",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_technical_ml_benchmark",
+      "required_for_canonical": false,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "diagnostic_table",
+      "artifact_id": "m4c_fold_metrics",
+      "artifact_role": "fold_metrics",
+      "consumer": "moex_research.registry",
+      "filename": "m4c_fold_metrics.csv",
+      "format": "csv",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_technical_ml_benchmark",
+      "required_for_canonical": false,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "diagnostic_table",
+      "artifact_id": "m4c_direction_metrics",
+      "artifact_role": "direction_metrics",
+      "consumer": "moex_research.registry",
+      "filename": "m4c_direction_metrics.csv",
+      "format": "csv",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_technical_ml_benchmark",
+      "required_for_canonical": false,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "diagnostic_table",
+      "artifact_id": "m4c_coefficients",
+      "artifact_role": "fold_training_coefficients",
+      "consumer": "moex_research.registry",
+      "filename": "m4c_coefficients.csv",
+      "format": "csv",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_technical_ml_benchmark",
+      "required_for_canonical": false,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "calibration_table",
+      "artifact_id": "m4c_calibration_bins",
+      "artifact_role": "calibration_diagnostics",
+      "consumer": "moex_research.registry",
+      "filename": "m4c_calibration_bins.csv",
+      "format": "csv",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_technical_ml_benchmark",
+      "required_for_canonical": false,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "statistical_control",
+      "artifact_id": "m4c_permutation_control",
+      "artifact_role": "negative_control",
+      "consumer": "moex_research.registry",
+      "filename": "m4c_permutation_control.json",
+      "format": "json",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_technical_ml_benchmark",
+      "required_for_canonical": false,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "quality_report",
+      "artifact_id": "m4c_quality_report",
+      "artifact_role": "quality_report",
+      "consumer": "moex_research.registry",
+      "filename": "m4c_quality_report.json",
+      "format": "json",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_technical_ml_benchmark",
+      "required_for_canonical": false,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "metrics_report",
+      "artifact_id": "m4c_decision",
+      "artifact_role": "metrics",
+      "consumer": "moex_research.registry",
+      "filename": "m4c_decision.json",
+      "format": "json",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_technical_ml_benchmark",
+      "required_for_canonical": true,
+      "schema_version": "1"
+    }
+  ],
+  "canonicality_status": "canonical",
+  "created_ts": "2026-06-20T00:00:00Z",
+  "dataset_refs": [
+    "contracts/datasets/research_usdrubf_5m_full_history.json"
+  ],
+  "feature_refs": [
+    "contracts/features/usdrubf_d1_ohlc_from_5m.json",
+    "contracts/features/usdrubf_d1_ema_3_19_cross_context.json",
+    "contracts/features/usdrubf_d1_ema_3_19_classical_indicators.json",
+    "contracts/features/usdrubf_d1_ema_3_19_indicator_context.json"
+  ],
+  "instrument_scope": [
+    "USDRUBF"
+  ],
+  "label_refs": [
+    "contracts/labels/usdrubf_d1_ema_3_19_multi_horizon_labels.json"
+  ],
+  "metrics": {
+    "best_fixed_rule": "adx_di_momentum",
+    "best_fixed_rule_accepted_events": 7,
+    "best_fixed_rule_policy_h2_mean_return_per_signal": 0.00010736159631883329,
+    "direction_only_brier_score": 0.2515687142994726,
+    "direction_only_policy_h2_mean_return_per_signal": 0.00010432801425303341,
+    "direction_only_roc_auc": 0.47685185185185186,
+    "full_technical_brier_score": 0.29419771913907555,
+    "full_technical_policy_h2_mean_return_per_signal": -0.0004660015994326667,
+    "full_technical_roc_auc": 0.4212962962962963,
+    "momentum_brier_score": 0.2684443744380725,
+    "momentum_policy_h2_mean_return_per_signal": 0.0007884219725700001,
+    "momentum_roc_auc": 0.49537037037037035,
+    "no_gate_policy_h2_mean_return_per_signal": 0.00114894727896,
+    "oos_events": 30,
+    "technical_ml_result": "technical_ml_not_supported",
+    "trend_brier_score": 0.2561816222609894,
+    "trend_policy_h2_mean_return_per_signal": 0.00034233690479119997,
+    "trend_roc_auc": 0.5416666666666667,
+    "volatility_brier_score": 0.274453334901639,
+    "volatility_policy_h2_mean_return_per_signal": -0.0008823812077698,
+    "volatility_roc_auc": 0.41203703703703703
+  },
+  "parameter_set": {
+    "candidate_feature_groups": [
+      "momentum",
+      "trend",
+      "volatility",
+      "full_technical"
+    ],
+    "classification_threshold": 0.5,
+    "direction_only_negative_control": true,
+    "model": {
+      "C": 1.0,
+      "class_weight": "balanced",
+      "estimator": "sklearn.linear_model.LogisticRegression",
+      "random_state": 319,
+      "solver": "liblinear"
+    },
+    "permutation_control": {
+      "adjustment": "one_sided_max_statistic_across_four_candidate_groups",
+      "repetitions": 1000,
+      "seed": 319,
+      "training_labels_only": true
+    },
+    "primary_target": "h2_allow_trade",
+    "validation": {
+      "minimum_initial_train_events_after_purge": 32,
+      "mode": "expanding_walk_forward",
+      "purge_d1_sessions": 3,
+      "shuffle": false,
+      "test_block_events": 8
+    }
+  },
+  "repo_commit": "190806ca1a285bda25ab77a5625783d57fb0e853",
+  "result_status": "not_supported_canonical",
+  "run_id": "m4c_usdrubf_ema_d1_technical_ml_benchmark_20260620",
+  "run_status": "executed",
+  "schema_version": "research_run_registration.v1",
+  "strategy_id": "ema_3_19_ai",
+  "strategy_version": "research.v1",
+  "test_type": "technical_feature_group_walk_forward_ml_benchmark",
+  "timeframe_scope": [
+    "D1"
+  ]
+}
