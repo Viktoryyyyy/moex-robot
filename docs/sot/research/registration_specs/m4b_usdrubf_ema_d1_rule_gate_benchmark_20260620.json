@@ -1,0 +1,198 @@
+{
+  "artifacts": [
+    {
+      "artifact_class": "run_metadata",
+      "artifact_id": "run_metadata",
+      "artifact_role": "run_metadata",
+      "consumer": "moex_research.registry",
+      "filename": "run_metadata.json",
+      "format": "json",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_rule_gate_benchmark",
+      "required_for_canonical": true,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "diagnostic_table",
+      "artifact_id": "m4b_formal_horizon_diagnostics",
+      "artifact_role": "horizon_diagnostics",
+      "consumer": "moex_research.registry",
+      "filename": "m4b_formal_horizon_diagnostics.csv",
+      "format": "csv",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_rule_gate_benchmark",
+      "required_for_canonical": false,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "research_result_table",
+      "artifact_id": "m4b_rule_gate_metrics",
+      "artifact_role": "primary_result",
+      "consumer": "moex_research.registry",
+      "filename": "m4b_rule_gate_metrics.csv",
+      "format": "csv",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_rule_gate_benchmark",
+      "required_for_canonical": true,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "diagnostic_table",
+      "artifact_id": "m4b_rule_gate_year_metrics",
+      "artifact_role": "year_metrics",
+      "consumer": "moex_research.registry",
+      "filename": "m4b_rule_gate_year_metrics.csv",
+      "format": "csv",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_rule_gate_benchmark",
+      "required_for_canonical": false,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "diagnostic_table",
+      "artifact_id": "m4b_rule_gate_direction_metrics",
+      "artifact_role": "direction_metrics",
+      "consumer": "moex_research.registry",
+      "filename": "m4b_rule_gate_direction_metrics.csv",
+      "format": "csv",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_rule_gate_benchmark",
+      "required_for_canonical": false,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "statistical_control",
+      "artifact_id": "m4b_random_gate_null",
+      "artifact_role": "random_gate_null",
+      "consumer": "moex_research.registry",
+      "filename": "m4b_random_gate_null.json",
+      "format": "json",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_rule_gate_benchmark",
+      "required_for_canonical": false,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "statistical_control",
+      "artifact_id": "m4b_bootstrap_intervals",
+      "artifact_role": "bootstrap_intervals",
+      "consumer": "moex_research.registry",
+      "filename": "m4b_bootstrap_intervals.json",
+      "format": "json",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_rule_gate_benchmark",
+      "required_for_canonical": false,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "quality_report",
+      "artifact_id": "m4b_quality_report",
+      "artifact_role": "quality_report",
+      "consumer": "moex_research.registry",
+      "filename": "m4b_quality_report.json",
+      "format": "json",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_rule_gate_benchmark",
+      "required_for_canonical": false,
+      "schema_version": "1"
+    },
+    {
+      "artifact_class": "metrics_report",
+      "artifact_id": "m4b_decision",
+      "artifact_role": "metrics",
+      "consumer": "moex_research.registry",
+      "filename": "m4b_decision.json",
+      "format": "json",
+      "producer": "src.moex_research.runners.usdrubf_ema_3_19_d1_rule_gate_benchmark",
+      "required_for_canonical": true,
+      "schema_version": "1"
+    }
+  ],
+  "canonicality_status": "canonical",
+  "created_ts": "2026-06-20T00:00:00Z",
+  "dataset_refs": [
+    "contracts/datasets/research_usdrubf_5m_full_history.json"
+  ],
+  "feature_refs": [
+    "contracts/features/usdrubf_d1_ohlc_from_5m.json",
+    "contracts/features/usdrubf_d1_ema_3_19_cross_context.json",
+    "contracts/features/usdrubf_d1_ema_3_19_classical_indicators.json",
+    "contracts/features/usdrubf_d1_ema_3_19_indicator_context.json"
+  ],
+  "instrument_scope": [
+    "USDRUBF"
+  ],
+  "label_refs": [
+    "contracts/labels/usdrubf_d1_ema_3_19_multi_horizon_labels.json"
+  ],
+  "metrics": {
+    "adx_di_acceptance_rate": 0.3333333333333333,
+    "adx_di_accepted_events": 21,
+    "adx_di_h10_persistence_max_stat_adjusted_p_value": 0.3772622737726227,
+    "adx_di_h2_max_stat_adjusted_p_value": 0.40005999400059994,
+    "adx_di_momentum_acceptance_rate": 0.19047619047619047,
+    "adx_di_momentum_accepted_events": 12,
+    "adx_di_momentum_h10_persistence_max_stat_adjusted_p_value": 0.6083391660833917,
+    "adx_di_momentum_h2_max_stat_adjusted_p_value": 0.31596840315968405,
+    "indicator_ready_events": 63,
+    "moderate_trend_confirmation_acceptance_rate": 0.19047619047619047,
+    "moderate_trend_confirmation_accepted_events": 12,
+    "moderate_trend_confirmation_h10_persistence_max_stat_adjusted_p_value": 0.9364063593640636,
+    "moderate_trend_confirmation_h2_max_stat_adjusted_p_value": 0.5388461153884612,
+    "no_gate_h10_mean_signed_return": -0.0014948150779793867,
+    "no_gate_h10_persistence_rate": 0.41935483870967744,
+    "no_gate_h2_mean_signed_return": 0.001958001376627322,
+    "no_gate_h2_median_signed_return": 0.0008621870550485,
+    "no_gate_h2_win_rate": 0.5645161290322581,
+    "rule_gate_result": "rule_gate_not_supported"
+  },
+  "parameter_set": {
+    "bootstrap": {
+      "confidence_level": 0.9,
+      "repetitions": 5000,
+      "seed": 319
+    },
+    "candidate_limits": {
+      "maximum_acceptance_rate": 0.6,
+      "minimum_acceptance_rate": 0.2,
+      "minimum_accepted_events": 12
+    },
+    "direction": {
+      "cross_down": -1,
+      "cross_up": 1
+    },
+    "primary_target": "h2",
+    "random_gate": {
+      "adjustment": "max_statistic_across_three_candidate_gates",
+      "matching": "exact_accepted_count_with_calendar_year_x_cross_dir_strata",
+      "repetitions": 10000,
+      "seed": 319
+    },
+    "rules": {
+      "adx_di": [
+        "adx_14 >= 25",
+        "direction * di_spread_14 > 0"
+      ],
+      "adx_di_momentum": [
+        "adx_14 >= 25",
+        "direction * di_spread_14 > 0",
+        "direction * roc_10 > 0",
+        "direction * (rsi_14 - 50) > 0"
+      ],
+      "moderate_trend_confirmation": [
+        "adx_14 >= 20",
+        "direction * di_spread_14 > 0",
+        "direction * macd_hist_12_26_9_pct > 0",
+        "direction * (bb_percent_b_20_2 - 0.5) > 0"
+      ],
+      "no_gate": [
+        "indicator_ready"
+      ]
+    },
+    "secondary_target": "h10_no_opposite_cross",
+    "threshold_sweep": false
+  },
+  "repo_commit": "0053c037b7e167d5d085cb64aa3e85fe6f02e00d",
+  "result_status": "not_supported_canonical",
+  "run_id": "m4b_usdrubf_ema_d1_rule_gate_benchmark_20260620",
+  "run_status": "executed",
+  "schema_version": "research_run_registration.v1",
+  "strategy_id": "ema_3_19_ai",
+  "strategy_version": "research.v1",
+  "test_type": "fixed_interpretable_rule_gate_benchmark",
+  "timeframe_scope": [
+    "D1"
+  ]
+}
