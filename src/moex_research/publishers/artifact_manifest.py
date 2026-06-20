@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from moex_research.registry.schemas import ArtifactManifest, ArtifactManifestItem
-from moex_research.registry.validation import validate_artifact_manifest
+from ..registry.schemas import ArtifactManifest, ArtifactManifestItem
+from ..registry.validation import validate_artifact_manifest
 
 
 def build_artifact_manifest(
