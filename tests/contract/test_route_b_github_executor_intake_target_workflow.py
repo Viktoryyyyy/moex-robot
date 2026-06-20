@@ -137,12 +137,6 @@ def test_is_validation_and_normalization_only() -> None:
         assert token in script
 
     serialized = json.dumps(target, sort_keys=True).lower()
-    urls = [
-        str(item.get("parameters", {}).get("url", "")).strip().lower()
-        for item in target["nodes"]
-        if str(item.get("parameters", {}).get("url", "")).strip()
-    ]
-    assert urls == []
     for forbidden in (
         "api.github.com",
         "merge_pull_request",
@@ -154,6 +148,19 @@ def test_is_validation_and_normalization_only() -> None:
         "n8n-nodes-base.executecommand",
         "process.env",
         "$env",
+    ):
+        assert forbidden not in serialized
+
+    urls = [
+        str(item.get("parameters", {}).get("url", "")).strip().lower()
+        for item in target["nodes"]
+        if str(item.get("parameters", {}).get("url", "")).strip()
+    ]
+    assert urls == []
+    webhook_path = node("GitHub Executor Intake Webhook")["parameters"]["path"]
+    assert webhook_path == "moex/route-b/github-executor-intake-v0-1"
+    endpoint_surface = "\n".join(urls + [webhook_path.lower()])
+    for forbidden in (
         "alor",
         "tinkoff",
         "broker-api",
@@ -161,10 +168,7 @@ def test_is_validation_and_normalization_only() -> None:
         "live_trading",
         "runtime/execution",
     ):
-        assert forbidden not in serialized
-
-    webhook_path = node("GitHub Executor Intake Webhook")["parameters"]["path"]
-    assert webhook_path == "moex/route-b/github-executor-intake-v0-1"
+        assert forbidden not in endpoint_surface
 
 
 def test_old_route_b_exports_are_byte_for_byte_unchanged() -> None:
