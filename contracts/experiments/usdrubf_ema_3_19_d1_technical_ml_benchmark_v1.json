@@ -1,0 +1,263 @@
+{
+  "experiment_id": "usdrubf_ema_3_19_d1_technical_ml_benchmark_v1",
+  "schema_version": 1,
+  "producer": {
+    "module": "src.moex_research.runners.usdrubf_ema_3_19_d1_technical_ml_benchmark",
+    "invocation": "python -m src.moex_research.runners.usdrubf_ema_3_19_d1_technical_ml_benchmark"
+  },
+  "status": {
+    "research_benchmark_only": true,
+    "model_training_allowed_inside_walk_forward_folds": true,
+    "persistent_model_artifact_allowed": false,
+    "model_promotion_allowed": false,
+    "strategy_promotion_allowed": false,
+    "runtime_ready": false,
+    "trading_conclusion_allowed": false
+  },
+  "required_cli_args": [
+    "--indicator-context-path",
+    "--labels-path",
+    "--quality-report-path",
+    "--m4b-decision-path",
+    "--output-dir",
+    "--run-id",
+    "--git-commit-sha"
+  ],
+  "input_artifacts": [
+    {
+      "artifact_id": "usdrubf_d1_ema_3_19_indicator_context",
+      "contract_class": "cli_argument",
+      "cli_arg": "--indicator-context-path",
+      "formats": ["csv", "parquet"],
+      "sha256_required_before_analysis": true,
+      "implicit_discovery_allowed": false
+    },
+    {
+      "artifact_id": "usdrubf_d1_ema_3_19_multi_horizon_labels",
+      "contract_class": "cli_argument",
+      "cli_arg": "--labels-path",
+      "formats": ["csv", "parquet"],
+      "sha256_required_before_analysis": true,
+      "implicit_discovery_allowed": false
+    },
+    {
+      "artifact_id": "usdrubf_ema_3_19_indicator_horizon_quality_report",
+      "contract_class": "cli_argument",
+      "cli_arg": "--quality-report-path",
+      "formats": ["json"],
+      "sha256_required_before_analysis": true,
+      "implicit_discovery_allowed": false
+    },
+    {
+      "artifact_id": "m4b_rule_gate_decision",
+      "contract_class": "cli_argument",
+      "cli_arg": "--m4b-decision-path",
+      "formats": ["json"],
+      "sha256_required_before_analysis": true,
+      "implicit_discovery_allowed": false
+    }
+  ],
+  "input_path_semantics": {
+    "all_inputs_explicit": true,
+    "glob_discovery_allowed": false,
+    "fallback_paths_allowed": false,
+    "mutable_aliases_rejected": ["latest", "current", "autodetect"]
+  },
+  "lineage": {
+    "m4a_source_experiment_id": "usdrubf_ema_3_19_d1_indicators_horizons_v1",
+    "m4b_source_experiment_id": "usdrubf_ema_3_19_d1_rule_gate_benchmark_v1",
+    "required_m4b_result": "rule_gate_not_supported",
+    "required_m4b_selected_rule": null
+  },
+  "target": {
+    "primary": "h2_allow_trade",
+    "return_field": "h2_signed_return",
+    "eligibility": "indicator_ready and observed h2_signed_return",
+    "recomputation": "int(h2_signed_return > 0)",
+    "stored_consistency_assertion": "h2_allow_trade",
+    "future_or_label_field_allowed_as_feature": false
+  },
+  "derived_signal_time_features": {
+    "dir_roc_10": "direction * roc_10",
+    "dir_rsi_centered": "direction * (rsi_14 - 50)",
+    "dir_stoch_k_centered": "direction * (stoch_k_14 - 50)",
+    "dir_stoch_d_centered": "direction * (stoch_d_3 - 50)",
+    "dir_di_spread": "direction * di_spread_14",
+    "dir_macd_hist": "direction * macd_hist_12_26_9_pct",
+    "dir_bb_position": "direction * (bb_percent_b_20_2 - 0.5)"
+  },
+  "feature_groups": {
+    "direction_only": {
+      "numeric": [],
+      "categorical": ["cross_dir"],
+      "candidate": false
+    },
+    "momentum": {
+      "numeric": [
+        "dir_roc_10",
+        "dir_rsi_centered",
+        "dir_stoch_k_centered",
+        "dir_stoch_d_centered"
+      ],
+      "categorical": ["cross_dir"],
+      "candidate": true
+    },
+    "trend": {
+      "numeric": ["adx_14", "dir_di_spread", "dir_macd_hist"],
+      "categorical": ["cross_dir"],
+      "candidate": true
+    },
+    "volatility": {
+      "numeric": ["atr_14_pct", "dir_bb_position", "bb_bandwidth_20_2"],
+      "categorical": ["cross_dir"],
+      "candidate": true
+    },
+    "full_technical": {
+      "numeric": [
+        "dir_roc_10",
+        "dir_rsi_centered",
+        "dir_stoch_k_centered",
+        "dir_stoch_d_centered",
+        "adx_14",
+        "dir_di_spread",
+        "dir_macd_hist",
+        "atr_14_pct",
+        "dir_bb_position",
+        "bb_bandwidth_20_2"
+      ],
+      "categorical": ["cross_dir"],
+      "candidate": true
+    }
+  },
+  "model": {
+    "estimator": "sklearn.linear_model.LogisticRegression",
+    "C": 1.0,
+    "class_weight": "balanced",
+    "solver": "liblinear",
+    "random_state": 319,
+    "probability_mode": "native logistic probability",
+    "post_hoc_calibrator": null,
+    "persistent_model_artifact": false
+  },
+  "preprocessing": {
+    "numeric_missing_values": "training-fold median",
+    "numeric_scaling": "training-fold StandardScaler",
+    "categorical_encoding": "training-fold OneHotEncoder with frozen cross_dir categories",
+    "fit_scope": "training fold only"
+  },
+  "validation_protocol": {
+    "mode": "expanding_walk_forward",
+    "shuffle": false,
+    "minimum_initial_train_events_after_purge": 32,
+    "test_block_events": 8,
+    "final_partial_test_block_allowed": true,
+    "purge_d1_sessions": 3,
+    "classification_threshold": 0.5,
+    "threshold_tuning": false,
+    "hyperparameter_search": false,
+    "preprocessing_fit_scope": "training fold only"
+  },
+  "probability_evaluation": {
+    "metrics": [
+      "roc_auc",
+      "pr_auc",
+      "brier_score",
+      "fold_prevalence_baseline_brier",
+      "expected_calibration_error"
+    ],
+    "calibration_bins": 5,
+    "post_hoc_calibration": false
+  },
+  "policy_evaluation": {
+    "threshold": 0.5,
+    "metrics": [
+      "accepted_events",
+      "acceptance_rate",
+      "retained_h2_mean_signed_return",
+      "retained_h2_median_signed_return",
+      "retained_h2_win_rate",
+      "policy_h2_mean_return_per_signal"
+    ],
+    "rejected_event_return_in_policy_metric": 0.0
+  },
+  "baselines": {
+    "no_gate": "all OOS H2-eligible indicator-ready events",
+    "fixed_rules": [
+      "adx_di",
+      "adx_di_momentum",
+      "moderate_trend_confirmation"
+    ],
+    "fixed_rule_semantics_source": "src.moex_research.runners.usdrubf_ema_3_19_d1_rule_gate_benchmark",
+    "best_fixed_rule_metric": "highest OOS policy_h2_mean_return_per_signal"
+  },
+  "negative_controls": {
+    "direction_only_feature_group": true,
+    "training_label_permutation": {
+      "seed": 319,
+      "repetitions": 1000,
+      "scope": "training labels independently inside each walk-forward fold",
+      "oos_labels_unchanged": true,
+      "adjustment": "one-sided max-statistic across four candidate feature groups"
+    }
+  },
+  "decision_conditions": {
+    "candidate_limits": {
+      "minimum_oos_events": 24,
+      "minimum_retained_events": 8,
+      "minimum_retention_rate": 0.2,
+      "maximum_retention_rate": 0.6
+    },
+    "supported_only_if_all": [
+      "ROC AUC > 0.55",
+      "Brier score beats fold-local prevalence baseline",
+      "Brier score beats direction-only control",
+      "retained H2 mean exceeds no_gate",
+      "retained H2 median exceeds no_gate",
+      "retained H2 win rate exceeds no_gate",
+      "policy H2 mean per signal exceeds no_gate",
+      "policy H2 mean per signal exceeds the best fixed rule",
+      "policy H2 mean per signal exceeds direction-only control",
+      "positive policy uplift appears in at least two OOS folds",
+      "no single fold supplies more than 70% of positive cumulative policy uplift",
+      "max-stat adjusted ROC AUC uplift p-value <= 0.10",
+      "max-stat adjusted policy uplift p-value <= 0.10"
+    ],
+    "fallback_result": "technical_ml_not_supported",
+    "supported_result": "technical_ml_supported_for_next_research_phase",
+    "model_promotion_allowed": false,
+    "strategy_promotion_allowed": false,
+    "runtime_or_trading_action_allowed": false
+  },
+  "output_artifacts": [
+    {"filename": "run_metadata.json", "format": "json", "artifact_role": "run_metadata"},
+    {"filename": "m4c_oos_predictions.csv", "format": "csv", "artifact_role": "primary_result"},
+    {"filename": "m4c_model_metrics.csv", "format": "csv", "artifact_role": "model_metrics"},
+    {"filename": "m4c_fixed_rule_metrics.csv", "format": "csv", "artifact_role": "fixed_rule_metrics"},
+    {"filename": "m4c_fold_metrics.csv", "format": "csv", "artifact_role": "fold_metrics"},
+    {"filename": "m4c_direction_metrics.csv", "format": "csv", "artifact_role": "direction_metrics"},
+    {"filename": "m4c_coefficients.csv", "format": "csv", "artifact_role": "fold_training_coefficients"},
+    {"filename": "m4c_calibration_bins.csv", "format": "csv", "artifact_role": "calibration_diagnostics"},
+    {"filename": "m4c_permutation_control.json", "format": "json", "artifact_role": "negative_control"},
+    {"filename": "m4c_quality_report.json", "format": "json", "artifact_role": "quality_report"},
+    {"filename": "m4c_decision.json", "format": "json", "artifact_role": "decision"}
+  ],
+  "artifact_write_policy": {
+    "output_dir_arg": "--output-dir",
+    "absent_or_empty_required": true,
+    "all_outputs_below_output_dir": true,
+    "declared_outputs_only": true,
+    "stdout_only_result_allowed": false
+  },
+  "not_in_scope": [
+    "HistGradientBoosting",
+    "XGBoost",
+    "hyperparameter optimization",
+    "threshold optimization",
+    "post-hoc feature selection",
+    "nontechnical data",
+    "cost or funding implementation",
+    "persistent model serialization",
+    "strategy package",
+    "runtime, live, broker, or trading"
+  ]
+}
