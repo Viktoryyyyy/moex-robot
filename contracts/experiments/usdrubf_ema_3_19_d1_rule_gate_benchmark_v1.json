@@ -1,0 +1,254 @@
+{
+  "experiment_id": "usdrubf_ema_3_19_d1_rule_gate_benchmark_v1",
+  "schema_version": 1,
+  "producer": {
+    "module": "src.moex_research.runners.usdrubf_ema_3_19_d1_rule_gate_benchmark",
+    "invocation": "python -m src.moex_research.runners.usdrubf_ema_3_19_d1_rule_gate_benchmark"
+  },
+  "status": {
+    "research_benchmark_only": true,
+    "model_training_allowed": false,
+    "threshold_optimization_allowed": false,
+    "runtime_ready": false,
+    "trading_conclusion_allowed": false
+  },
+  "required_cli_args": [
+    "--indicator-context-path",
+    "--labels-path",
+    "--quality-report-path",
+    "--output-dir",
+    "--run-id",
+    "--git-commit-sha"
+  ],
+  "input_artifacts": [
+    {
+      "artifact_id": "usdrubf_d1_ema_3_19_indicator_context",
+      "contract_class": "cli_argument",
+      "cli_arg": "--indicator-context-path",
+      "formats": [
+        "csv",
+        "parquet"
+      ],
+      "source_experiment_id": "usdrubf_ema_3_19_d1_indicators_horizons_v1",
+      "sha256_required_before_analysis": true,
+      "implicit_discovery_allowed": false
+    },
+    {
+      "artifact_id": "usdrubf_d1_ema_3_19_multi_horizon_labels",
+      "contract_class": "cli_argument",
+      "cli_arg": "--labels-path",
+      "formats": [
+        "csv",
+        "parquet"
+      ],
+      "source_experiment_id": "usdrubf_ema_3_19_d1_indicators_horizons_v1",
+      "sha256_required_before_analysis": true,
+      "implicit_discovery_allowed": false
+    },
+    {
+      "artifact_id": "usdrubf_ema_3_19_indicator_horizon_quality_report",
+      "contract_class": "cli_argument",
+      "cli_arg": "--quality-report-path",
+      "formats": [
+        "json"
+      ],
+      "source_experiment_id": "usdrubf_ema_3_19_d1_indicators_horizons_v1",
+      "sha256_required_before_analysis": true,
+      "implicit_discovery_allowed": false
+    }
+  ],
+  "input_path_semantics": {
+    "all_inputs_explicit": true,
+    "glob_discovery_allowed": false,
+    "fallback_paths_allowed": false,
+    "mutable_aliases_rejected": [
+      "latest",
+      "current",
+      "autodetect"
+    ]
+  },
+  "join_validation": {
+    "keys": [
+      "instrument_id",
+      "end",
+      "cross_dir"
+    ],
+    "cardinality": "one_to_one",
+    "same_event_set_required": true,
+    "session_index_must_equal_event_session_index": true,
+    "instrument_id": "usdrubf only"
+  },
+  "direction": {
+    "cross_up": 1,
+    "cross_down": -1
+  },
+  "derived_signal_time_values": {
+    "dir_di_spread": "direction * di_spread_14",
+    "dir_roc_10": "direction * roc_10",
+    "dir_macd_hist": "direction * macd_hist_12_26_9_pct",
+    "dir_rsi_centered": "direction * (rsi_14 - 50)",
+    "dir_bb_position": "direction * (bb_percent_b_20_2 - 0.5)"
+  },
+  "frozen_rules": {
+    "no_gate": [
+      "indicator_ready"
+    ],
+    "adx_di": [
+      "adx_14 >= 25",
+      "dir_di_spread > 0"
+    ],
+    "adx_di_momentum": [
+      "adx_14 >= 25",
+      "dir_di_spread > 0",
+      "dir_roc_10 > 0",
+      "dir_rsi_centered > 0"
+    ],
+    "moderate_trend_confirmation": [
+      "adx_14 >= 20",
+      "dir_di_spread > 0",
+      "dir_macd_hist > 0",
+      "dir_bb_position > 0"
+    ]
+  },
+  "rule_constraints": {
+    "thresholds_frozen": true,
+    "threshold_sweep_allowed": false,
+    "post_hoc_alternative_rules_allowed": false,
+    "ml_estimator_allowed": false,
+    "probability_model_allowed": false,
+    "label_or_future_field_in_gate_allowed": false,
+    "opposite_cross_before_exit_in_gate_allowed": false
+  },
+  "targets": {
+    "primary": {
+      "horizon": "h2",
+      "fields": [
+        "h2_signed_return",
+        "h2_allow_trade"
+      ]
+    },
+    "secondary": {
+      "target": "h10_no_opposite_cross",
+      "derive_as": "not h10_opposite_cross_before_exit",
+      "restriction": "evaluation label only, never a gate feature"
+    },
+    "diagnostic_horizons": [
+      "h1",
+      "h3",
+      "h5",
+      "h10",
+      "reverse"
+    ]
+  },
+  "random_gate_control": {
+    "seed": 319,
+    "repetitions": 10000,
+    "matching": [
+      "same accepted count",
+      "preserve calendar_year x cross_dir strata where feasible"
+    ],
+    "adjustment": "one-sided max-statistic across the three nontrivial gates",
+    "tested_statistics": [
+      "h2 mean signed-return uplift",
+      "h10 persistence-rate uplift"
+    ]
+  },
+  "bootstrap_control": {
+    "seed": 319,
+    "repetitions": 5000,
+    "confidence_level": 0.9,
+    "method": "paired percentile bootstrap over the indicator_ready event universe",
+    "resampling_unit": "event row"
+  },
+  "decision_conditions": {
+    "candidate_limits": {
+      "minimum_accepted_events": 12,
+      "minimum_acceptance_rate": 0.2,
+      "maximum_acceptance_rate": 0.6
+    },
+    "h2_rule_supported_only_if": [
+      "accepted H2 mean > no_gate H2 mean",
+      "accepted H2 median > no_gate H2 median",
+      "accepted H2 win rate > no_gate H2 win rate",
+      "max-stat adjusted H2 mean-uplift p-value <= 0.10",
+      "positive H2 mean uplift appears in at least two calendar years",
+      "no single year supplies more than 70% of positive cumulative uplift"
+    ],
+    "h10_persistence_supported_only_if": [
+      "accepted persistence rate > no_gate persistence rate",
+      "accepted H10 mean signed return > 0",
+      "max-stat adjusted persistence p-value <= 0.10",
+      "accepted events >= 12",
+      "acceptance rate within 0.20 to 0.60"
+    ],
+    "positive_cumulative_uplift_definition": "max(year H2 mean uplift, 0) multiplied by accepted observed H2 rows in that year",
+    "fallback_result": "rule_gate_not_supported"
+  },
+  "output_artifacts": [
+    {
+      "filename": "run_metadata.json",
+      "format": "json",
+      "artifact_role": "metadata"
+    },
+    {
+      "filename": "m4b_formal_horizon_diagnostics.csv",
+      "format": "csv",
+      "artifact_role": "formal horizon diagnostics"
+    },
+    {
+      "filename": "m4b_rule_gate_metrics.csv",
+      "format": "csv",
+      "artifact_role": "primary and secondary gate metrics"
+    },
+    {
+      "filename": "m4b_rule_gate_year_metrics.csv",
+      "format": "csv",
+      "artifact_role": "calendar-year robustness metrics"
+    },
+    {
+      "filename": "m4b_rule_gate_direction_metrics.csv",
+      "format": "csv",
+      "artifact_role": "cross-direction diagnostics"
+    },
+    {
+      "filename": "m4b_random_gate_null.json",
+      "format": "json",
+      "artifact_role": "stratified random-gate max-statistic control"
+    },
+    {
+      "filename": "m4b_bootstrap_intervals.json",
+      "format": "json",
+      "artifact_role": "bootstrap confidence intervals"
+    },
+    {
+      "filename": "m4b_quality_report.json",
+      "format": "json",
+      "artifact_role": "quality and anti-leakage report"
+    },
+    {
+      "filename": "m4b_decision.json",
+      "format": "json",
+      "artifact_role": "mechanical frozen-condition decision"
+    }
+  ],
+  "artifact_write_policy": {
+    "output_dir_arg": "--output-dir",
+    "absent_or_empty_required": true,
+    "all_outputs_below_output_dir": true,
+    "declared_outputs_only": true,
+    "stdout_only_result_allowed": false
+  },
+  "not_in_scope": [
+    "logistic regression",
+    "HistGradientBoosting",
+    "XGBoost",
+    "threshold optimization",
+    "feature selection",
+    "cross_down-only model",
+    "nontechnical data implementation",
+    "cost or funding implementation",
+    "strategy package",
+    "canonical backtest changes",
+    "runtime, live, broker, or trading"
+  ]
+}
