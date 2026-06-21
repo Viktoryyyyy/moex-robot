@@ -20,12 +20,18 @@ HTTP_NODES = {
     "Fetch Base Branch Ref",
     "Fetch Base Commit",
     "Create Feature Branch",
-    "Create Git Blob",
     "Create Git Tree",
     "Create Implementation Commit",
     "Update Feature Branch Ref",
     "Open Pull Request",
-    "Fetch CI Runs For Branch",
+}
+POSTGRES_NODES = {
+    "Load Execution Evidence Registry",
+    "Load Workflow Run Projection",
+    "Load Step Run Idempotency Checkpoint",
+    "Persist Accepted Execution Evidence",
+    "Persist Blocked Execution Evidence",
+    "Persist Final Execution Evidence",
 }
 
 
@@ -53,52 +59,55 @@ def test_workflow_is_inactive_and_exactly_scoped() -> None:
     assert target["name"] == "MOEX_ROUTE_B_GITHUB_EXECUTOR_CREDENTIALED_RUNTIME_V0_1_TARGET"
     assert target["active"] is False
     assert set(target["meta"]["artifactChangeScope"]) == APPROVED_SCOPE
-    assert target["meta"]["targetMode"] == "credentialed-runtime-controlled-single-file-v0-1"
+    assert target["meta"]["targetMode"] == "credentialed-runtime-evidence-registry-v0-1"
     assert target["meta"]["runtimeCreatedBranchPrefix"] == "n8n/"
-    assert target["meta"]["supportedFileCount"] == 1
+    assert target["meta"]["exactFileChangesRequired"] is True
+    assert target["meta"]["evidenceRegistryTable"] == "public.moex_n8n_workflow_run_events"
+    assert target["meta"]["currentStateProjectionTable"] == "public.moex_n8n_workflow_runs"
+    assert target["meta"]["idempotencyCheckpointTable"] == "public.moex_n8n_workflow_step_runs"
+    assert target["meta"]["supportedFileCount"] == "multi"
     assert target["meta"]["normalizedIntakeOnly"] is True
     assert target["meta"]["secretsEmbedded"] is False
     assert target["meta"]["mergeAuthority"] == "PM_L2_ONLY"
 
 
-def test_contains_real_github_http_runtime_nodes_with_credential_refs_only() -> None:
+def test_contains_real_github_http_nodes_and_postgres_registry_nodes_with_credential_refs_only() -> None:
     target = workflow()
     http_nodes = [item for item in target["nodes"] if item["type"] == "n8n-nodes-base.httpRequest"]
+    postgres_nodes = [item for item in target["nodes"] if item["type"] == "n8n-nodes-base.postgres"]
     assert {item["name"] for item in http_nodes} == HTTP_NODES
+    assert {item["name"] for item in postgres_nodes} == POSTGRES_NODES
+
     surface = serialized()
     assert "api.github.com/repos/" in surface
     assert "github_read_moex_bot" in surface
     assert "github_branch_write_moex_bot" in surface
-    for forbidden in ("ghp_", "github_pat_", "Bearer ", "process.env", "$env"):
+    assert "route_b_executor_runtime_pg" in surface
+    for forbidden in ("ghp_", "github_pat_", "Bearer ", "password", "process.env", "$env"):
         assert forbidden not in surface
 
 
-def test_runtime_surface_is_pr_only_without_merge_or_server_apply() -> None:
-    surface = serialized().lower()
+def test_runtime_uses_event_payload_as_full_registry_workflow_runs_as_projection_and_step_runs_as_checkpoint() -> None:
+    surface = serialized()
     for required in (
-        "/git/ref/heads/main",
-        "/git/commits/",
-        "/git/refs",
-        "/git/blobs",
-        "/git/trees",
-        "/git/commits",
-        "/git/refs/heads/",
-        "/pulls",
-        "/actions/runs",
+        "public.moex_n8n_workflow_run_events",
+        "event_payload_json",
+        "public.moex_n8n_workflow_runs",
+        "current_state_json",
+        "public.moex_n8n_workflow_step_runs",
+        "input_json",
+        "output_json",
+        "route_b_github_executor_execution_accepted",
+        "route_b_github_executor_execution_blocked",
+        "route_b_github_executor_execution_result",
     ):
         assert required in surface
-    for forbidden in (
-        "/pulls/merge",
-        "force:true",
-        "approved_for_merge:true",
-        "merge_performed:true",
-        "server_apply_allowed:true",
-        "direct_main_write_allowed:true",
-    ):
-        assert forbidden not in surface
+    assert "Load Execution Evidence Registry" in surface
+    assert "Load Workflow Run Projection" in surface
+    assert "Load Step Run Idempotency Checkpoint" in surface
 
 
-def test_validator_enforces_normalized_intake_n8n_branch_and_single_file_scope() -> None:
+def test_validator_enforces_normalized_intake_identity_exact_file_changes_and_no_task_id_fallback() -> None:
     script = node("Validate Normalized Runtime Request")["parameters"]["jsCode"]
     for token in (
         "raw_github_execution_request_json_forbidden",
@@ -108,43 +117,116 @@ def test_validator_enforces_normalized_intake_n8n_branch_and_single_file_scope()
         "valid_base_sha_required",
         "branch_name_must_use_n8n_prefix",
         "branch_name_forbidden",
-        "approved_file_scope_must_contain_exactly_one_file_for_v0_1_runtime",
-        "exactly_one_file_change_required",
-        "file_change_operation_must_be_create_or_update",
-        "delete_operation_rejected",
+        "execution_request_id_required",
+        "workflow_run_id_required",
+        "role_task_id_required",
+        "request_fingerprint_sha256_required",
+        "execution_request_id_task_id_fallback_forbidden",
+        "approved_file_scope_must_not_be_empty",
+        "exact_file_changes_required",
+        "file_change_count_must_equal_approved_file_scope",
         "file_change_path_must_equal_approved_file_scope",
+        "file_change_operation_must_be_create_or_update",
         "merge_authority_must_equal_PM_L2_ONLY",
+    ):
+        assert token in script
+    assert "request.execution_request_id || request.task_id" not in script
+    assert "request.execution_request_id||request.task_id" not in script
+
+
+def test_resolution_logic_is_idempotent_and_reuses_existing_commit_or_pr_deterministically() -> None:
+    script = node("Resolve Execution Evidence State")["parameters"]["jsCode"]
+    for token in (
+        "same_execution_request_id_different_fingerprint",
+        "resolution: 'blocked'",
+        "resolution: 'return_existing_result'",
+        "resolution: 'resume_or_return_existing_result'",
+        "resolution: 'proceed_new_execution'",
+        "request_fingerprint_sha256",
+        "existing_result",
+        "create_implementation_commit",
+        "open_pull_request",
+        "implementation_commit_sha",
+        "pr_number",
+        "pr_url",
+        "approved_for_merge: false",
+        "merge_performed: false",
     ):
         assert token in script
 
 
-def test_runtime_preserves_base_tree_before_commit() -> None:
-    assert node("Fetch Base Commit")["type"] == "n8n-nodes-base.httpRequest"
-    assert node("Create Git Tree")["parameters"]["method"] == "POST"
+def test_runtime_surface_is_pr_only_without_merge_or_server_apply() -> None:
+    surface = serialized().lower()
+    for required in (
+        "/git/ref/heads/main",
+        "/git/commits/",
+        "/git/refs",
+        "/git/trees",
+        "/git/commits",
+        "/git/refs/heads/",
+        "/pulls",
+    ):
+        assert required in surface
+    for forbidden in (
+        "/pulls/merge",
+        "force:true",
+        "approved_for_merge:true",
+        "merge_performed:true",
+        "server_apply_allowed:true",
+        "direct_main_write_allowed:true",
+        "git push",
+        "git reset",
+        "n8n-nodes-base.ssh",
+        "n8n-nodes-base.executecommand",
+    ):
+        assert forbidden not in surface
+
+
+def test_tree_creation_uses_exact_file_changes_with_base_tree_before_commit() -> None:
+    assert node("Build Git Tree Elements From Exact File Changes")["type"] == "n8n-nodes-base.code"
+    build_script = node("Build Git Tree Elements From Exact File Changes")["parameters"]["jsCode"]
+    assert "request.file_changes.map" in build_script
+    assert "path: change.path" in build_script
+    assert "content: change.content" in build_script
+    assert "type: 'blob'" in build_script
+    assert "mode: '100644'" in build_script
+
     create_tree_body = node("Create Git Tree")["parameters"]["jsonBody"]
     assert "base_tree" in create_tree_body
     assert "base_tree_sha" in create_tree_body
-    assert "tree:[" in create_tree_body
-    assert "sha:$node['Create Git Blob'].json.sha" in create_tree_body
+    assert "tree:$node['Build Git Tree Elements From Exact File Changes'].json.tree_elements" in create_tree_body
 
     base_script = node("Validate Base Ref")["parameters"]["jsCode"]
     assert "base_sha_not_current_main" in base_script
     assert "missing_base_tree_sha" in base_script
 
 
-def test_terminal_result_preserves_pm_l2_boundary() -> None:
-    script = node("Build Terminal Runtime Result")["parameters"]["jsCode"]
+def test_terminal_result_and_persisted_events_keep_merge_flags_explicitly_false() -> None:
+    terminal_script = node("Build Terminal Runtime Result")["parameters"]["jsCode"]
+    final_query = node("Persist Final Execution Evidence")["parameters"]["query"]
     for token in (
+        "execution_request_id",
+        "request_fingerprint_sha256",
         "implementation_commit_sha",
         "pr_number",
         "pr_url",
         "pr_head_sha",
-        "ci_workflow:'tests'",
-        "approved_for_merge:false",
-        "merge_performed:false",
+        "ci_workflow: 'tests'",
+        "approved_for_merge: false",
+        "merge_performed: false",
         "github_mutation_performed",
     ):
-        assert token in script
+        assert token in terminal_script
+    for token in (
+        "approved_for_merge: false",
+        "merge_performed: false",
+        "execution_request_id",
+        "request_fingerprint_sha256",
+        "file_changes",
+        "implementation_commit_sha",
+        "pr_number",
+    ):
+        assert token in final_query
 
 
 def test_protected_route_b_exports_unchanged() -> None:
