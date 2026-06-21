@@ -40,6 +40,7 @@ REQUIRED_SCHEMAS = {
     "route_b_universal_role_runner_db_migration_rollback.v0.1",
     "route_b_worker_poller_db_adapter_contract.v0.1",
     "route_b_worker_poller_workflow_mutation_package.v0.1",
+    "route_b_github_executor_execution_evidence_registry.v0.1",
 }
 REQUIRED_ROLE_FIELDS = (
     "mandate:",
@@ -185,3 +186,12 @@ def test_route_b_registry_binds_worker_poller_workflow_mutation_package_ref() ->
     assert schemas["route_b_worker_poller_workflow_mutation_package.v0.1"][
         "path"
     ] == "docs/sot/context/schemas/route_b_worker_poller_workflow_mutation_package.v0.1.yaml"
+
+
+def test_route_b_registry_binds_github_executor_execution_evidence_registry_ref() -> None:
+    registry = _load_registry()
+    schemas = registry["schema_refs"]
+    assert isinstance(schemas, dict)
+    assert schemas["route_b_github_executor_execution_evidence_registry.v0.1"][
+        "path"
+    ] == "docs/sot/context/schemas/route_b_github_executor_execution_evidence_registry.v0.1.yaml"
