@@ -1,0 +1,175 @@
+{
+  "experiment_id": "usdrubf_ema_3_19_d1_economic_cost_capacity_v1",
+  "schema_version": 1,
+  "producer": {
+    "module": "src.moex_research.runners.usdrubf_ema_3_19_d1_economic_cost_capacity",
+    "invocation": "python -m src.moex_research.runners.usdrubf_ema_3_19_d1_economic_cost_capacity"
+  },
+  "status": {
+    "research_benchmark_only": true,
+    "canonical_backtest_engine_required": true,
+    "actual_market_costs_bound": false,
+    "contract_multiplier_bound": false,
+    "funding_or_roll_bound": false,
+    "strategy_promotion_allowed": false,
+    "runtime_ready": false,
+    "trading_conclusion_allowed": false
+  },
+  "required_cli_args": [
+    "--d1-ohlc-path",
+    "--cross-context-path",
+    "--m2-quality-report-path",
+    "--m4b-decision-path",
+    "--m4c-decision-path",
+    "--output-dir",
+    "--run-id",
+    "--git-commit-sha"
+  ],
+  "input_artifacts": [
+    {
+      "artifact_id": "usdrubf_d1_ohlc",
+      "contract_class": "cli_argument",
+      "cli_arg": "--d1-ohlc-path",
+      "formats": ["csv", "parquet"],
+      "source_experiment_id": "usdrubf_ema_3_19_d1_research_baseline_v1",
+      "sha256_required_before_analysis": true,
+      "implicit_discovery_allowed": false
+    },
+    {
+      "artifact_id": "usdrubf_d1_ema_3_19_cross_context",
+      "contract_class": "cli_argument",
+      "cli_arg": "--cross-context-path",
+      "formats": ["csv", "parquet"],
+      "source_experiment_id": "usdrubf_ema_3_19_d1_research_baseline_v1",
+      "sha256_required_before_analysis": true,
+      "implicit_discovery_allowed": false
+    },
+    {
+      "artifact_id": "usdrubf_ema_3_19_quality_report",
+      "contract_class": "cli_argument",
+      "cli_arg": "--m2-quality-report-path",
+      "formats": ["json"],
+      "source_experiment_id": "usdrubf_ema_3_19_d1_research_baseline_v1",
+      "sha256_required_before_analysis": true,
+      "implicit_discovery_allowed": false
+    },
+    {
+      "artifact_id": "m4b_rule_gate_decision",
+      "contract_class": "cli_argument",
+      "cli_arg": "--m4b-decision-path",
+      "formats": ["json"],
+      "source_experiment_id": "usdrubf_ema_3_19_d1_rule_gate_benchmark_v1",
+      "sha256_required_before_analysis": true,
+      "implicit_discovery_allowed": false
+    },
+    {
+      "artifact_id": "m4c_technical_ml_decision",
+      "contract_class": "cli_argument",
+      "cli_arg": "--m4c-decision-path",
+      "formats": ["json"],
+      "source_experiment_id": "usdrubf_ema_3_19_d1_technical_ml_benchmark_v1",
+      "sha256_required_before_analysis": true,
+      "implicit_discovery_allowed": false
+    }
+  ],
+  "input_path_semantics": {
+    "all_inputs_explicit": true,
+    "glob_discovery_allowed": false,
+    "fallback_paths_allowed": false,
+    "mutable_aliases_rejected": ["latest", "current", "autodetect"]
+  },
+  "lineage": {
+    "required_m4b_result": "rule_gate_not_supported",
+    "required_m4b_selected_rule": null,
+    "required_m4c_result": "technical_ml_not_supported",
+    "required_m4c_selected_feature_group": null,
+    "economic_candidate": "unfiltered EMA(3/19) crossover baseline"
+  },
+  "strategy_signal_semantics": {
+    "instrument_id": "usdrubf",
+    "timeframe": "D1",
+    "signal_timestamp": "finalized crossover day D close",
+    "cross_up_target_position": 1,
+    "cross_down_target_position": -1,
+    "flat_between_crosses": false,
+    "position_rule": "hold the most recent crossover direction until reversal or terminal close"
+  },
+  "canonical_backtest_semantics": {
+    "engine": "moex_backtest.engine.canonical.CanonicalBacktestEngine",
+    "engine_id": "canonical_backtest_engine_minimal_v1",
+    "fill_model_id": "next_bar_open",
+    "execution_delay": "strictly next finalized D1 bar after signal timestamp",
+    "signal_trade_price": "next D1 open",
+    "reversal": "target-position delta at next D1 open; quantity two when reversing between +1 and -1",
+    "terminal_close": "last valid D1 close",
+    "missing_next_bar": "reject signal",
+    "invalid_next_bar": "reject signal",
+    "position_size": "one normalized contract unit",
+    "commission_bps": 0.0,
+    "slippage_bps": 0.0,
+    "simulation_role": "gross execution baseline and turnover source only"
+  },
+  "economic_measurement": {
+    "pnl_unit": "underlying price units at contract multiplier one",
+    "gross_turnover_notional": "sum(abs(fill quantity) * raw fill price)",
+    "break_even_all_in_bps_per_traded_notional": "gross total PnL / gross turnover notional * 10000",
+    "all_in_bps_definition": "commission_bps plus slippage_bps applied to every traded notional unit",
+    "net_pnl_equation": "gross_pnl_price_units - gross_turnover_notional * all_in_bps / 10000",
+    "cash_baseline_pnl": 0.0,
+    "actual_market_cost_claim_allowed": false
+  },
+  "required_unbound_economic_inputs": [
+    "broker commission schedule",
+    "exchange and clearing fees",
+    "empirical bid-ask or executable slippage",
+    "USDRUBF contract multiplier and monetary point value",
+    "contract roll and expiry handling",
+    "funding or carry semantics when applicable"
+  ],
+  "decision_conditions": {
+    "gross_rejection_if": "gross total PnL <= 0",
+    "gross_rejection_result": "economic_baseline_not_supported_gross",
+    "positive_gross_result": "economic_cost_binding_required",
+    "positive_gross_interpretation": "positive gross result establishes only cost capacity; it does not establish net profitability",
+    "full_economic_support_result_available": false,
+    "strategy_promotion_allowed": false,
+    "runtime_or_trading_action_allowed": false
+  },
+  "known_limitations": {
+    "daily_mark_to_market_path_available": false,
+    "engine_drawdown_scope": "fill-event marks only",
+    "ruble_pnl_available": false,
+    "roll_adjusted_continuous_contract_available": false,
+    "real_cost_scenario_available": false
+  },
+  "output_artifacts": [
+    {"filename": "run_metadata.json", "format": "json", "artifact_role": "run_metadata"},
+    {"filename": "m5a_signal_table.csv", "format": "csv", "artifact_role": "signal_table"},
+    {"filename": "m5a_fill_table.csv", "format": "csv", "artifact_role": "primary_result"},
+    {"filename": "m5a_cost_table.csv", "format": "csv", "artifact_role": "cost_table"},
+    {"filename": "m5a_position_path.csv", "format": "csv", "artifact_role": "position_path"},
+    {"filename": "m5a_economic_metrics.json", "format": "json", "artifact_role": "metrics"},
+    {"filename": "m5a_cost_capacity.json", "format": "json", "artifact_role": "cost_capacity"},
+    {"filename": "m5a_quality_report.json", "format": "json", "artifact_role": "quality_report"},
+    {"filename": "m5a_decision.json", "format": "json", "artifact_role": "decision"}
+  ],
+  "artifact_write_policy": {
+    "output_dir_arg": "--output-dir",
+    "absent_or_empty_required": true,
+    "all_outputs_below_output_dir": true,
+    "declared_outputs_only": true,
+    "stdout_only_result_allowed": false
+  },
+  "not_in_scope": [
+    "new technical filters",
+    "machine learning",
+    "threshold search",
+    "custom strategy-local PnL engine",
+    "actual broker or exchange tariff implementation",
+    "bid-ask reconstruction",
+    "contract roll implementation",
+    "funding implementation",
+    "strategy package",
+    "runtime, live, broker, or trading"
+  ]
+}
