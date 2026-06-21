@@ -33,35 +33,52 @@ POSTGRES_NODES = {
     "Persist Blocked Execution Evidence",
     "Persist Final Execution Evidence",
 }
-TERMINAL_NODES = {
-    "Persist Blocked Execution Evidence",
-    "Return Runtime Result",
-}
 WEBHOOK_NODE = "GitHub Executor Runtime Webhook"
 VALIDATOR_NODE = "Validate Normalized Runtime Request"
+RESOLVE_NODE = "Resolve Execution Evidence State"
+SWITCH_NODE = "Route Execution Resolution"
+RETURN_NODE = "Return Runtime Result"
+GITHUB_MUTATION_CHAIN = [
+    "Fetch Base Branch Ref",
+    "Fetch Base Commit",
+    "Validate Base Ref",
+    "Build Git Tree Elements From Exact File Changes",
+    "Create Feature Branch",
+    "Create Git Tree",
+    "Create Implementation Commit",
+    "Update Feature Branch Ref",
+    "Open Pull Request",
+    "Persist Final Execution Evidence",
+]
+GITHUB_MUTATION_NODES = set(GITHUB_MUTATION_CHAIN)
 EXPECTED_CONNECTIONS = {
-    WEBHOOK_NODE: [VALIDATOR_NODE],
-    VALIDATOR_NODE: ["Load Execution Evidence Registry"],
-    "Load Execution Evidence Registry": ["Load Workflow Run Projection"],
-    "Load Workflow Run Projection": ["Load Step Run Idempotency Checkpoint"],
-    "Load Step Run Idempotency Checkpoint": ["Resolve Execution Evidence State"],
-    "Resolve Execution Evidence State": [
-        "Persist Accepted Execution Evidence",
-        "Persist Blocked Execution Evidence",
+    WEBHOOK_NODE: [[VALIDATOR_NODE]],
+    VALIDATOR_NODE: [["Load Execution Evidence Registry"]],
+    "Load Execution Evidence Registry": [["Load Workflow Run Projection"]],
+    "Load Workflow Run Projection": [["Load Step Run Idempotency Checkpoint"]],
+    "Load Step Run Idempotency Checkpoint": [[RESOLVE_NODE]],
+    RESOLVE_NODE: [[SWITCH_NODE]],
+    SWITCH_NODE: [
+        ["Persist Accepted Execution Evidence"],
+        ["Persist Blocked Execution Evidence"],
+        [RETURN_NODE],
+        [RETURN_NODE],
     ],
-    "Persist Accepted Execution Evidence": ["Fetch Base Branch Ref"],
-    "Fetch Base Branch Ref": ["Fetch Base Commit"],
-    "Fetch Base Commit": ["Validate Base Ref"],
-    "Validate Base Ref": ["Build Git Tree Elements From Exact File Changes"],
-    "Build Git Tree Elements From Exact File Changes": ["Create Feature Branch"],
-    "Create Feature Branch": ["Create Git Tree"],
-    "Create Git Tree": ["Create Implementation Commit"],
-    "Create Implementation Commit": ["Update Feature Branch Ref"],
-    "Update Feature Branch Ref": ["Open Pull Request"],
-    "Open Pull Request": ["Persist Final Execution Evidence"],
-    "Persist Final Execution Evidence": ["Build Terminal Runtime Result"],
-    "Build Terminal Runtime Result": ["Return Runtime Result"],
+    "Persist Accepted Execution Evidence": [["Fetch Base Branch Ref"]],
+    "Fetch Base Branch Ref": [["Fetch Base Commit"]],
+    "Fetch Base Commit": [["Validate Base Ref"]],
+    "Validate Base Ref": [["Build Git Tree Elements From Exact File Changes"]],
+    "Build Git Tree Elements From Exact File Changes": [["Create Feature Branch"]],
+    "Create Feature Branch": [["Create Git Tree"]],
+    "Create Git Tree": [["Create Implementation Commit"]],
+    "Create Implementation Commit": [["Update Feature Branch Ref"]],
+    "Update Feature Branch Ref": [["Open Pull Request"]],
+    "Open Pull Request": [["Persist Final Execution Evidence"]],
+    "Persist Final Execution Evidence": [["Build Terminal Runtime Result"]],
+    "Build Terminal Runtime Result": [[RETURN_NODE]],
+    "Persist Blocked Execution Evidence": [[RETURN_NODE]],
 }
+TERMINAL_NODES = {RETURN_NODE}
 FORBIDDEN_FALSE_CONTROLS = {
     "direct_main_write_allowed",
     "force_push_allowed",
@@ -96,10 +113,31 @@ def serialized() -> str:
     return json.dumps(workflow(), sort_keys=True)
 
 
-def outgoing_targets(target: dict, node_name: str) -> list[str]:
+def connection_outputs(target: dict, node_name: str) -> list[list[str]]:
     outputs = target["connections"][node_name]["main"]
+    return [[edge["node"] for edge in output] for output in outputs]
+
+
+def outgoing_targets(target: dict, node_name: str) -> list[str]:
+    outputs = connection_outputs(target, node_name)
     assert len(outputs) == 1
-    return [edge["node"] for edge in outputs[0]]
+    return outputs[0]
+
+
+def reachable_nodes_from_output(target: dict, start_node: str, output_index: int) -> set[str]:
+    outputs = target["connections"][start_node]["main"]
+    stack = [edge["node"] for edge in outputs[output_index]]
+    seen: set[str] = set()
+
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        for output in target.get("connections", {}).get(current, {}).get("main", []):
+            stack.extend(edge["node"] for edge in output)
+
+    return seen
 
 
 def reachable_nodes(target: dict, start_node: str) -> set[str]:
@@ -157,7 +195,43 @@ def test_forbidden_merge_server_live_and_broker_controls_remain_false() -> None:
         assert f"{control_name}_must_be_false" in script
 
 
-def test_connections_are_not_empty_and_match_expected_sequential_graph() -> None:
+def test_switch_node_routes_execution_resolution_by_json_resolution() -> None:
+    target = workflow()
+    switch = node(SWITCH_NODE)
+    assert switch["type"] == "n8n-nodes-base.switch"
+
+    rules = switch["parameters"]["rules"]["values"]
+    assert [rule["outputKey"] for rule in rules] == [
+        "proceed_new_execution",
+        "blocked",
+        "return_existing_result",
+        "resume_or_return_existing_result",
+    ]
+
+    for rule in rules:
+        conditions = rule["conditions"]["conditions"]
+        assert len(conditions) == 1
+        condition = conditions[0]
+        assert condition["leftValue"] == "={{ $json.resolution }}"
+        assert condition["operator"]["operation"] == "equals"
+        assert condition["rightValue"] == rule["outputKey"]
+
+    assert connection_outputs(target, SWITCH_NODE) == [
+        ["Persist Accepted Execution Evidence"],
+        ["Persist Blocked Execution Evidence"],
+        [RETURN_NODE],
+        [RETURN_NODE],
+    ]
+
+
+def test_resolve_evidence_state_routes_only_to_switch_and_has_no_unsafe_direct_fanout() -> None:
+    target = workflow()
+    assert outgoing_targets(target, RESOLVE_NODE) == [SWITCH_NODE]
+    assert "Persist Accepted Execution Evidence" not in outgoing_targets(target, RESOLVE_NODE)
+    assert "Persist Blocked Execution Evidence" not in outgoing_targets(target, RESOLVE_NODE)
+
+
+def test_connections_are_not_empty_and_match_expected_conditional_graph() -> None:
     target = workflow()
     assert target["connections"]
 
@@ -165,8 +239,8 @@ def test_connections_are_not_empty_and_match_expected_sequential_graph() -> None
     non_terminal = node_names - TERMINAL_NODES
     assert non_terminal == set(EXPECTED_CONNECTIONS)
 
-    for source, expected_targets in EXPECTED_CONNECTIONS.items():
-        assert outgoing_targets(target, source) == expected_targets
+    for source, expected_outputs in EXPECTED_CONNECTIONS.items():
+        assert connection_outputs(target, source) == expected_outputs
 
     for terminal in TERMINAL_NODES:
         assert terminal not in target["connections"]
@@ -175,6 +249,21 @@ def test_connections_are_not_empty_and_match_expected_sequential_graph() -> None
 def test_expected_graph_is_connected_from_webhook_trigger() -> None:
     target = workflow()
     assert reachable_nodes(target, WEBHOOK_NODE) == {item["name"] for item in target["nodes"]}
+
+
+def test_only_switch_output_zero_can_reach_github_mutation_nodes() -> None:
+    target = workflow()
+
+    proceed = reachable_nodes_from_output(target, SWITCH_NODE, 0)
+    assert GITHUB_MUTATION_NODES.issubset(proceed)
+
+    for output_index in (1, 2, 3):
+        branch_reachable = reachable_nodes_from_output(target, SWITCH_NODE, output_index)
+        assert RETURN_NODE in branch_reachable
+        assert not (branch_reachable & GITHUB_MUTATION_NODES), (
+            output_index,
+            branch_reachable & GITHUB_MUTATION_NODES,
+        )
 
 
 def test_all_nodes_have_readable_non_collapsed_positions() -> None:
@@ -258,7 +347,7 @@ def test_validator_enforces_normalized_intake_identity_exact_file_changes_and_no
 
 
 def test_resolution_logic_is_idempotent_and_reuses_existing_commit_or_pr_deterministically() -> None:
-    script = node("Resolve Execution Evidence State")["parameters"]["jsCode"]
+    script = node(RESOLVE_NODE)["parameters"]["jsCode"]
     for token in (
         "same_execution_request_id_different_fingerprint",
         "resolution: 'blocked'",
