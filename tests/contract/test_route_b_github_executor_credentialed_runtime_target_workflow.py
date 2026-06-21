@@ -33,6 +33,48 @@ POSTGRES_NODES = {
     "Persist Blocked Execution Evidence",
     "Persist Final Execution Evidence",
 }
+TERMINAL_NODES = {
+    "Persist Blocked Execution Evidence",
+    "Return Runtime Result",
+}
+WEBHOOK_NODE = "GitHub Executor Runtime Webhook"
+VALIDATOR_NODE = "Validate Normalized Runtime Request"
+EXPECTED_CONNECTIONS = {
+    WEBHOOK_NODE: [VALIDATOR_NODE],
+    VALIDATOR_NODE: ["Load Execution Evidence Registry"],
+    "Load Execution Evidence Registry": ["Load Workflow Run Projection"],
+    "Load Workflow Run Projection": ["Load Step Run Idempotency Checkpoint"],
+    "Load Step Run Idempotency Checkpoint": ["Resolve Execution Evidence State"],
+    "Resolve Execution Evidence State": [
+        "Persist Accepted Execution Evidence",
+        "Persist Blocked Execution Evidence",
+    ],
+    "Persist Accepted Execution Evidence": ["Fetch Base Branch Ref"],
+    "Fetch Base Branch Ref": ["Fetch Base Commit"],
+    "Fetch Base Commit": ["Validate Base Ref"],
+    "Validate Base Ref": ["Build Git Tree Elements From Exact File Changes"],
+    "Build Git Tree Elements From Exact File Changes": ["Create Feature Branch"],
+    "Create Feature Branch": ["Create Git Tree"],
+    "Create Git Tree": ["Create Implementation Commit"],
+    "Create Implementation Commit": ["Update Feature Branch Ref"],
+    "Update Feature Branch Ref": ["Open Pull Request"],
+    "Open Pull Request": ["Persist Final Execution Evidence"],
+    "Persist Final Execution Evidence": ["Build Terminal Runtime Result"],
+    "Build Terminal Runtime Result": ["Return Runtime Result"],
+}
+FORBIDDEN_FALSE_CONTROLS = {
+    "direct_main_write_allowed",
+    "force_push_allowed",
+    "file_delete_allowed",
+    "n8n_merge_allowed",
+    "executor_merge_allowed",
+    "server_apply_allowed",
+    "broker_execution_allowed",
+    "live_trading_allowed",
+    "runtime_allowed",
+    "production_secret_access_allowed",
+    "pm_l2_approval_claimed",
+}
 
 
 def workflow() -> dict:
@@ -54,6 +96,28 @@ def serialized() -> str:
     return json.dumps(workflow(), sort_keys=True)
 
 
+def outgoing_targets(target: dict, node_name: str) -> list[str]:
+    outputs = target["connections"][node_name]["main"]
+    assert len(outputs) == 1
+    return [edge["node"] for edge in outputs[0]]
+
+
+def reachable_nodes(target: dict, start_node: str) -> set[str]:
+    seen: set[str] = set()
+    stack = [start_node]
+
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+
+        for output in target.get("connections", {}).get(current, {}).get("main", []):
+            stack.extend(edge["node"] for edge in output)
+
+    return seen
+
+
 def test_workflow_is_inactive_and_exactly_scoped() -> None:
     target = workflow()
     assert target["name"] == "MOEX_ROUTE_B_GITHUB_EXECUTOR_CREDENTIALED_RUNTIME_V0_1_TARGET"
@@ -69,6 +133,65 @@ def test_workflow_is_inactive_and_exactly_scoped() -> None:
     assert target["meta"]["normalizedIntakeOnly"] is True
     assert target["meta"]["secretsEmbedded"] is False
     assert target["meta"]["mergeAuthority"] == "PM_L2_ONLY"
+    assert target["meta"]["mergeAllowed"] is False
+    assert target["meta"]["serverApplyAllowed"] is False
+
+
+def test_webhook_trigger_node_routes_runtime_requests_to_validator() -> None:
+    target = workflow()
+    webhook = node(WEBHOOK_NODE)
+    assert webhook["type"] == "n8n-nodes-base.webhook"
+    assert webhook["parameters"]["httpMethod"] == "POST"
+    assert outgoing_targets(target, WEBHOOK_NODE) == [VALIDATOR_NODE]
+
+
+def test_forbidden_merge_server_live_and_broker_controls_remain_false() -> None:
+    target = workflow()
+    controls = target["meta"]["forbiddenControls"]
+    assert set(controls) == FORBIDDEN_FALSE_CONTROLS
+    for control_name in FORBIDDEN_FALSE_CONTROLS:
+        assert controls[control_name] is False
+
+    script = node(VALIDATOR_NODE)["parameters"]["jsCode"]
+    for control_name in FORBIDDEN_FALSE_CONTROLS:
+        assert f"{control_name}_must_be_false" in script
+
+
+def test_connections_are_not_empty_and_match_expected_sequential_graph() -> None:
+    target = workflow()
+    assert target["connections"]
+
+    node_names = {item["name"] for item in target["nodes"]}
+    non_terminal = node_names - TERMINAL_NODES
+    assert non_terminal == set(EXPECTED_CONNECTIONS)
+
+    for source, expected_targets in EXPECTED_CONNECTIONS.items():
+        assert outgoing_targets(target, source) == expected_targets
+
+    for terminal in TERMINAL_NODES:
+        assert terminal not in target["connections"]
+
+
+def test_expected_graph_is_connected_from_webhook_trigger() -> None:
+    target = workflow()
+    assert reachable_nodes(target, WEBHOOK_NODE) == {item["name"] for item in target["nodes"]}
+
+
+def test_all_nodes_have_readable_non_collapsed_positions() -> None:
+    target = workflow()
+    positions = []
+
+    for item in target["nodes"]:
+        assert "position" in item, item["name"]
+        position = item["position"]
+        assert isinstance(position, list), item["name"]
+        assert len(position) == 2, item["name"]
+        assert all(isinstance(value, (int, float)) for value in position), item["name"]
+        positions.append(tuple(position))
+
+    assert any(position != (0, 0) for position in positions)
+    assert len(set(positions)) > 1
+    assert len(set(positions)) == len(target["nodes"])
 
 
 def test_contains_real_github_http_nodes_and_postgres_registry_nodes_with_credential_refs_only() -> None:
@@ -108,7 +231,7 @@ def test_runtime_uses_event_payload_as_full_registry_workflow_runs_as_projection
 
 
 def test_validator_enforces_normalized_intake_identity_exact_file_changes_and_no_task_id_fallback() -> None:
-    script = node("Validate Normalized Runtime Request")["parameters"]["jsCode"]
+    script = node(VALIDATOR_NODE)["parameters"]["jsCode"]
     for token in (
         "raw_github_execution_request_json_forbidden",
         "validated_normalized_github_execution_request_required",
