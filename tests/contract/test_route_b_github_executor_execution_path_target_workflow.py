@@ -29,8 +29,6 @@ PROTECTED_EXPORTS = {
         "ef7daafdf22e92ba1546b892b69178cc9d74a852",
     ROOT / "docs/sot/MOEX_ROUTE_B_INTAKE_ACK_ROLE_TASK_ADAPTER_V0_1_TARGET.json":
         "b2a19654add077f0ad72dd13b4e270bbcd21f44d",
-    ROOT / "docs/sot/MOEX_ROUTE_B_GITHUB_EXECUTOR_INTAKE_V0_1_TARGET.json":
-        "e97dbf55d6dcb11bb36091082d8283d496386882",
 }
 REQUIRED_FALSE_FLAGS = {
     "runtime_allowed",
