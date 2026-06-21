@@ -18,6 +18,7 @@ APPROVED_SCOPE = {
 }
 HTTP_NODES = {
     "Fetch Base Branch Ref",
+    "Fetch Base Commit",
     "Create Feature Branch",
     "Create Git Blob",
     "Create Git Tree",
@@ -75,6 +76,8 @@ def test_contains_real_github_http_runtime_nodes_with_credential_refs_only() -> 
 def test_runtime_surface_is_pr_only_without_merge_or_server_apply() -> None:
     surface = serialized().lower()
     for required in (
+        "/git/ref/heads/main",
+        "/git/commits/",
         "/git/refs",
         "/git/blobs",
         "/git/trees",
@@ -102,14 +105,31 @@ def test_validator_enforces_normalized_intake_n8n_branch_and_single_file_scope()
         "validated_normalized_github_execution_request_required",
         "repository_full_name_not_allowed",
         "base_ref_must_equal_origin_main",
+        "valid_base_sha_required",
         "branch_name_must_use_n8n_prefix",
         "branch_name_forbidden",
+        "approved_file_scope_must_contain_exactly_one_file_for_v0_1_runtime",
         "exactly_one_file_change_required",
         "file_change_operation_must_be_create_or_update",
         "delete_operation_rejected",
+        "file_change_path_must_equal_approved_file_scope",
         "merge_authority_must_equal_PM_L2_ONLY",
     ):
         assert token in script
+
+
+def test_runtime_preserves_base_tree_before_commit() -> None:
+    assert node("Fetch Base Commit")["type"] == "n8n-nodes-base.httpRequest"
+    assert node("Create Git Tree")["parameters"]["method"] == "POST"
+    create_tree_body = node("Create Git Tree")["parameters"]["jsonBody"]
+    assert "base_tree" in create_tree_body
+    assert "base_tree_sha" in create_tree_body
+    assert "tree:[" in create_tree_body
+    assert "sha:$node['Create Git Blob'].json.sha" in create_tree_body
+
+    base_script = node("Validate Base Ref")["parameters"]["jsCode"]
+    assert "base_sha_not_current_main" in base_script
+    assert "missing_base_tree_sha" in base_script
 
 
 def test_terminal_result_preserves_pm_l2_boundary() -> None:
