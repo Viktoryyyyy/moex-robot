@@ -445,3 +445,98 @@ def test_protected_route_b_exports_unchanged() -> None:
     for path, expected_sha in PROTECTED_EXPORTS.items():
         assert path.is_file(), path
         assert blob_sha(path) == expected_sha, path
+
+
+def test_owner_repo_are_derived_from_repository_full_name_and_token_required() -> None:
+    script = node(VALIDATOR_NODE)["parameters"]["jsCode"]
+    assert "repository_full_name_parts_required" in script
+    assert "repository_full_name.split('/')" in script
+    assert "const owner=repository_full_name_parts[0]" in script
+    assert "const repo=repository_full_name_parts[1]" in script
+    assert "repository_full_name!=='Viktoryyyyy/moex-robot'" in script
+    assert "owner,repo,approved_for_merge:false,merge_performed:false" in script
+
+
+def test_load_execution_evidence_registry_is_scoped_not_event_type_only() -> None:
+    query = node("Load Execution Evidence Registry")["parameters"]["query"]
+    assert "event_type IN" in query
+    assert "workflow_run_id = '{{ $json.workflow_run_id }}'" in query
+    assert "event_payload_json->>'execution_request_id'" in query
+    assert "event_payload_json->>'request_fingerprint_sha256'" in query
+    assert " OR " in query
+    assert workflow()["meta"]["evidenceRegistryOrdering"] == "not_declared"
+    assert (
+        "deterministic_ordering_blocked_no_known_timestamp_or_id_column_in_scope"
+        in workflow()["meta"]["remainingGaps"]
+    )
+
+
+def test_resolve_execution_evidence_state_has_no_stub_logic_and_reads_payload_rows() -> None:
+    script = node(RESOLVE_NODE)["parameters"]["jsCode"]
+    compact_script = "".join(script.split())
+    for forbidden in ("constexisting_result=null", "if(false)"):
+        assert forbidden not in compact_script
+    for required in (
+        "$items('LoadExecutionEvidenceRegistry')",
+        "event_payload_json",
+        "same_execution_request_id_different_fingerprint",
+        "resolution:'blocked'",
+        "resolution:'return_existing_result'",
+        "resolution:'resume_or_return_existing_result'",
+        "resolution:'proceed_new_execution'",
+        "implementation_commit_sha",
+        "pr_number",
+        "pr_url",
+        "approved_for_merge:false",
+        "merge_performed:false",
+    ):
+        assert required in compact_script
+
+
+def test_persist_accepted_and_blocked_events_are_not_empty_jsonb() -> None:
+    accepted = node("Persist Accepted Execution Evidence")["parameters"]["query"]
+    blocked = node("Persist Blocked Execution Evidence")["parameters"]["query"]
+    assert "'{}'::jsonb" not in accepted
+    assert "'{}'::jsonb" not in blocked
+    for required in (
+        "execution_request_id",
+        "request_fingerprint_sha256",
+        "workflow_run_id",
+        "role_task_id",
+        "status:'accepted'",
+        "approved_for_merge:false",
+        "merge_performed:false",
+    ):
+        assert required in accepted
+    for required in (
+        "execution_request_id",
+        "request_fingerprint_sha256",
+        "workflow_run_id",
+        "role_task_id",
+        "status:'blocked'",
+        "blocker_code",
+        "error",
+        "approved_for_merge:false",
+        "merge_performed:false",
+    ):
+        assert required in blocked
+
+
+def test_blocked_existing_and_resume_paths_cannot_reach_github_mutation_nodes() -> None:
+    target = workflow()
+    assert connection_outputs(target, SWITCH_NODE) == [
+        ["Persist Accepted Execution Evidence"],
+        ["Persist Blocked Execution Evidence"],
+        [RETURN_NODE],
+        [RETURN_NODE],
+    ]
+    assert GITHUB_MUTATION_NODES.issubset(
+        reachable_nodes_from_output(target, SWITCH_NODE, 0)
+    )
+    for output_index in (1, 2, 3):
+        branch_reachable = reachable_nodes_from_output(target, SWITCH_NODE, output_index)
+        assert RETURN_NODE in branch_reachable
+        assert not (branch_reachable & GITHUB_MUTATION_NODES), (
+            output_index,
+            branch_reachable & GITHUB_MUTATION_NODES,
+        )
