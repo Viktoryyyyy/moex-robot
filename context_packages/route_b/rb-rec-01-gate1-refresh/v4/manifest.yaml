@@ -1,0 +1,97 @@
+context_package:
+  package_id: RB-REC-01-GATE1-CONTEXT-REFRESH
+  package_version: 4
+  root_task_id: RB-REC-01-CONTEXT-FRESHNESS-ROUTING
+  publication_task_id: RB-REC-01A-SANITIZED-EXPORT-PUBLICATION
+  source_task: RB-REC-01A-FRESHNESS-REFRESH
+  lane: route_b_n8n
+  execution_mode: browser_chatgpt_github_direct
+
+  produced_by: SUBCHAT_REPO_AUDIT
+  produced_at: 2026-06-23T22:43:41+05:00
+  supersedes_package_version: 3
+  context_publication_only: true
+
+  intended_consumer: PM_L2_PHASE_OWNER
+  intended_consumers:
+    - PM_L2_PHASE_OWNER
+
+  source_context_ref:
+    repository_full_name: Viktoryyyyy/moex-robot
+    commit_sha: 0df6fec11f046979f0cbd2e99d895af7d4bf1bb1
+    manifest_path: context_packages/route_b/rb-rec-01-gate1-refresh/v3/manifest.yaml
+    package_id: RB-REC-01-GATE1-CONTEXT-REFRESH
+    package_version: 3
+
+  source_state:
+    repository_full_name: Viktoryyyyy/moex-robot
+    origin_main_sha: 613cb593445e452d9a81918721d9292c876fd45d
+    server_head_sha: cd0c2e9e494e582692cfeb61a0e47264ea42bb48
+    server_origin_main_sha: 613cb593445e452d9a81918721d9292c876fd45d
+    server_branch: main
+    server_worktree_clean: true
+    server_ahead: 0
+    server_behind: 2
+    n8n_workflow_id: Kldo3tG9fbZAXk7e
+    n8n_version_or_updated_at: 7113e23f-1992-4ace-9e34-efd1b1685a54
+    n8n_active_state: false
+    n8n_publication_state: unverified
+    n8n_raw_export_sha256: 4f29a99f87b9daa2d7846693df679862aade4500ff8dfa32360e9a5defbc9138
+    captured_at: 2026-06-23T21:36:41+05:00
+
+  artifacts:
+    - artifact_id: rb_rec_01a_freshness_refresh_sanitized_n8n_export
+      required: true
+      transport: repo_ref
+      locator:
+        repository_full_name: Viktoryyyyy/moex-robot
+        commit_sha: 3cef600135d66f54a0e86a17967a3ed2de7e753c
+        path: context_packages/route_b/rb-rec-01-gate1-refresh/v4/artifacts/RB-REC-01A_FRESHNESS_REFRESH_SANITIZED_N8N_EXPORT.json
+      content_hash_sha256: a47ed66a020b8fa06018ee00d39e529de7996d76afc24edd98f52db5a91eb439
+      purpose: Validated sanitized n8n export supporting the RB-REC-01A GitHub, server and n8n freshness evidence packet.
+      intended_consumer: PM_L2_PHASE_OWNER
+      intended_consumers:
+        - PM_L2_PHASE_OWNER
+      sensitivity: internal_project
+
+  required_facts:
+    - fact_id: current_github_main_sha
+      statement: GitHub main is 613cb593445e452d9a81918721d9292c876fd45d.
+      supported_by_artifact_id: rb_rec_01a_freshness_refresh_sanitized_n8n_export
+    - fact_id: server_checked_out_main_is_stale
+      statement: Server HEAD cd0c2e9e494e582692cfeb61a0e47264ea42bb48 is clean and behind refreshed origin/main 613cb593445e452d9a81918721d9292c876fd45d by 2 commits.
+      supported_by_artifact_id: rb_rec_01a_freshness_refresh_sanitized_n8n_export
+    - fact_id: current_n8n_identity
+      statement: The current export is workflow Kldo3tG9fbZAXk7e, version 7113e23f-1992-4ace-9e34-efd1b1685a54, active false.
+      supported_by_artifact_id: rb_rec_01a_freshness_refresh_sanitized_n8n_export
+    - fact_id: current_n8n_export_hash
+      statement: The validated sanitized export SHA-256 is a47ed66a020b8fa06018ee00d39e529de7996d76afc24edd98f52db5a91eb439 and the source raw export SHA-256 is 4f29a99f87b9daa2d7846693df679862aade4500ff8dfa32360e9a5defbc9138.
+      supported_by_artifact_id: rb_rec_01a_freshness_refresh_sanitized_n8n_export
+    - fact_id: github_to_n8n_drift
+      statement: GitHub-to-n8n substantive configuration drift remains; the current n8n version and raw hash are unchanged from the prior baseline.
+      supported_by_artifact_id: rb_rec_01a_freshness_refresh_sanitized_n8n_export
+
+  decisions_already_made:
+    - This package is context publication only.
+    - The RB-REC-01A audit must not be repeated.
+    - PostgreSQL inspection must not be repeated.
+    - No implementation file, canonical workflow JSON, test, DB file or migration is authorized for modification.
+    - No n8n edit, publication, activation, runtime smoke, server apply, PR creation or merge is authorized.
+
+  blockers:
+    - n8n publication state remains unverified because the downloaded export does not provide independently verifiable publication status.
+
+  acceptance_criteria:
+    - The sanitized export is readable from its immutable repo_ref.
+    - The sanitized export content SHA-256 equals a47ed66a020b8fa06018ee00d39e529de7996d76afc24edd98f52db5a91eb439.
+    - The package is delivered to PM_L2_PHASE_OWNER by exact repository, full commit SHA and manifest path.
+    - Only the two approved v4 context paths are introduced by this publication cycle.
+    - No audit, PostgreSQL inspection, implementation mutation, n8n mutation, runtime smoke, server apply, PR or merge occurs.
+
+  expiry_condition:
+    - The sanitized export content hash changes.
+    - The n8n workflow version, export, active state or publication state changes.
+    - GitHub main changes from 613cb593445e452d9a81918721d9292c876fd45d.
+    - Server repository state changes from the captured values.
+    - PM L2 explicitly supersedes this package.
+    - A newer complete freshness context package supersedes package version 4.
