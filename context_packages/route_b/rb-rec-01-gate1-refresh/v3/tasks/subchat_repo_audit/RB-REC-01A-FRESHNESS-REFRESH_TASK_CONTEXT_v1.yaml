@@ -1,0 +1,212 @@
+task_context_package:
+  task_context_id: RB-REC-01A-FRESHNESS-REFRESH-TASK-CONTEXT-v1
+  task_context_version: 1
+  root_task_id: RB-REC-01-CONTEXT-FRESHNESS-ROUTING
+  task_id: RB-REC-01A-FRESHNESS-REFRESH
+  lane: route_b_n8n
+  execution_mode: browser_chatgpt_github_direct
+  produced_by: PM_L3_DELIVERY_VALIDATION_OWNER
+  produced_at: 2026-06-23T16:49:06+05:00
+  context_publication_only: true
+
+  target_role: SUBCHAT_REPO_AUDIT
+  role_context_ref:
+    role_id: SUBCHAT_REPO_AUDIT
+    role_context_version: v1
+
+  authority:
+    merge_authority: PM_L2_ONLY
+    server_apply_authority: PM_L2_ONLY_OR_EXPLICIT_PM_L2_TASK
+    github_access_policy: direct_browser_tools_allowed
+    server_command_policy: may_write_owner_commands
+    runtime_allowed: false
+    ci_required: false
+
+  source_context_ref:
+    repository_full_name: Viktoryyyyy/moex-robot
+    commit_sha: 0df6fec11f046979f0cbd2e99d895af7d4bf1bb1
+    manifest_path: context_packages/route_b/rb-rec-01-gate1-refresh/v3/manifest.yaml
+    package_id: RB-REC-01-GATE1-CONTEXT-REFRESH
+    package_version: 3
+
+  source_artifacts_consumed_and_validated_by_pm_l3:
+    - artifact_id: rb_rec_01_gate1_source_context_v3
+      repository_full_name: Viktoryyyyy/moex-robot
+      commit_sha: f9166c410ad57dcdb4b1c8720f032465f84975b1
+      path: context_packages/route_b/rb-rec-01-gate1-refresh/v3/artifacts/RB-REC-01_GATE1_SOURCE_CONTEXT_v3.md
+      content_hash_sha256: 053aab79a2c72b9cd72d9d5ba59028d480aec4feaa3c259347a57290ccaea2d1
+      validation_status: pass
+
+  required_artifacts_for_target_role: []
+
+  evidence_routing:
+    prior_evidence_id: RB-REC-01A-APPLIED-STATE-BASELINE-v2
+    prior_evidence_status: expired
+    upstream_evidence_action: evidence_expired_request_new_analysis
+    analysis_mode: targeted_gap_check_only
+    analysis_owner: SUBCHAT_REPO_AUDIT
+
+  relevant_facts:
+    - fact_id: package_baseline_main
+      statement: GitHub main was 613cb593445e452d9a81918721d9292c876fd45d when the source package was captured after PR 217.
+    - fact_id: canonical_workflow_baseline
+      statement: The canonical workflow path is docs/sot/MOEX_ROUTE_B_GITHUB_EXECUTOR_CREDENTIALED_RUNTIME_V0_1_TARGET.json and its Git blob SHA was e2ff4c078ec4bcaa69d5691e02b4c1d68a453e75.
+    - fact_id: prior_rb_rec_01a_expired
+      statement: RB-REC-01A v2 expired because GitHub main changed from cd0c2e9e494e582692cfeb61a0e47264ea42bb48.
+    - fact_id: prior_n8n_identity
+      statement: The prior capture used workflow ID Kldo3tG9fbZAXk7e and version ID 7113e23f-1992-4ace-9e34-efd1b1685a54.
+    - fact_id: prior_hashes
+      statement: The prior GitHub workflow raw SHA-256 was 0aaaace52fa92db0b9ac3a3fd9d1e72e157605a0a204bd40248d5178efc2f57c and the prior n8n export raw SHA-256 was 4f29a99f87b9daa2d7846693df679862aade4500ff8dfa32360e9a5defbc9138.
+    - fact_id: db_evidence_reusable
+      statement: RB-REC-01B plus GAP-01 is complete for the requested PostgreSQL metadata scope and must not be repeated.
+    - fact_id: freshness_unknowns
+      statement: Current server HEAD and worktree plus current n8n version, export and hash are unknown after PR 217.
+
+  decisions_already_made:
+    - Gate 1 remains open pending targeted GitHub, server and n8n freshness evidence.
+    - Credentialed runtime remains frozen.
+    - PostgreSQL inspection is excluded and must not be repeated.
+    - No implementation or applied-state mutation is authorized.
+    - No workflow publication, activation, runtime smoke, merge or server apply is authorized.
+    - The audit must remain limited to current GitHub, server and n8n freshness and comparisons.
+
+  task_contract:
+    objective: Produce one fresh read-only evidence packet for current GitHub, server and n8n state, then compare those states with the prior RB-REC-01A v2 baseline.
+    approved_inspection_scope:
+      - Confirm current GitHub main SHA.
+      - Confirm the canonical workflow Git blob SHA and raw SHA-256 at current GitHub main.
+      - Capture current server repository root, HEAD SHA, origin/main SHA, checked-out branch, worktree status, changed files and ahead/behind status.
+      - Capture current n8n workflow ID, version ID or updated_at, active state, publication state when verifiable, sanitized raw export and raw export SHA-256.
+      - Compare GitHub main with server HEAD and server origin/main.
+      - Compare the canonical GitHub workflow with the current n8n export at raw-hash and substantive configuration levels.
+      - Compare current values with the prior RB-REC-01A v2 identifiers and hashes.
+    owner_command_requirements:
+      - Commands must be read-only evidence collection only.
+      - Use the canonical command prefix: cd ~/moex_bot && source venv/bin/activate && cd moex-robot
+      - git fetch origin main is allowed only as a metadata refresh; checkout, pull, reset, commit and push are forbidden.
+      - Provide one command block at a time and do not use heredoc.
+      - Sanitize tokens, passwords, cookies and secret-bearing payloads before returning evidence.
+    forbidden_actions:
+      - PostgreSQL inspection or any DB query.
+      - Editing implementation, workflow JSON, tests, migrations or any repository file.
+      - n8n workflow edit, import, publication, activation or execution.
+      - Runtime smoke or endpoint invocation.
+      - GitHub branch mutation, commit, PR, merge or direct-main write.
+      - Server apply or server filesystem authoring.
+      - Scope expansion into architecture or implementation recommendations.
+
+  acceptance_criteria:
+    - The task-context package is fetched at its exact immutable commit and context_ready is true before audit work begins.
+    - Current GitHub main SHA and canonical workflow blob SHA plus raw SHA-256 are reported.
+    - Current server HEAD, origin/main, branch, worktree state, changed files and ahead/behind result are reported.
+    - Current n8n workflow identity, version or updated_at, active state, publication state, sanitized export and raw SHA-256 are reported.
+    - GitHub-to-server and GitHub-to-n8n comparisons are explicit and evidence-based.
+    - The prior RB-REC-01A v2 baseline is used only for comparison and is not reused as current evidence.
+    - PostgreSQL inspection and all mutation actions remain absent.
+    - Any unavailable evidence is reported as a precise blocker rather than inferred.
+
+  not_in_scope:
+    - PostgreSQL schema or data inspection.
+    - Workflow correction or implementation design.
+    - Any repository mutation outside or inside the context package.
+    - PR creation, CI, merge, n8n publication, activation, runtime smoke or server apply.
+    - Revalidation of RB-REC-01B or GAP-01.
+
+  stop_conditions:
+    - context_delivery_incomplete
+    - package_expired
+    - scope_conflict
+    - required_current_state_evidence_unavailable
+    - secret_exposure_risk
+
+  expiry_condition:
+    - GitHub main differs from 613cb593445e452d9a81918721d9292c876fd45d before the audit capture begins.
+    - The canonical workflow blob differs from e2ff4c078ec4bcaa69d5691e02b4c1d68a453e75 before the audit capture begins.
+    - The approved task scope changes.
+    - PM L2 supersedes this task context.
+    - A newer complete GitHub, server and n8n freshness packet supersedes this task.
+
+  expected_first_return:
+    context_preflight:
+      receiver_role: SUBCHAT_REPO_AUDIT
+      repository_full_name: Viktoryyyyy/moex-robot
+      commit_sha: exact_task_context_commit_sha
+      manifest_path: context_packages/route_b/rb-rec-01-gate1-refresh/v3/tasks/subchat_repo_audit/RB-REC-01A-FRESHNESS-REFRESH_TASK_CONTEXT_v1.yaml
+      manifest_loaded: true
+      package_id: RB-REC-01A-FRESHNESS-REFRESH-TASK-CONTEXT-v1
+      package_version: 1
+      target_role_matches: true
+      required_artifacts_available: true
+      required_artifacts_readable: true
+      hashes_match: true
+      package_not_expired: true
+      task_supported_by_context: true
+      context_ready: true
+      missing_artifacts: []
+      blocker_code: null
+    context_delivery_receipt:
+      receiver_role: SUBCHAT_REPO_AUDIT
+      repository_full_name: Viktoryyyyy/moex-robot
+      commit_sha: exact_task_context_commit_sha
+      manifest_path: context_packages/route_b/rb-rec-01-gate1-refresh/v3/tasks/subchat_repo_audit/RB-REC-01A-FRESHNESS-REFRESH_TASK_CONTEXT_v1.yaml
+      package_id: RB-REC-01A-FRESHNESS-REFRESH-TASK-CONTEXT-v1
+      package_version: 1
+      manifest_loaded: true
+      expected_artifacts: []
+      received_artifacts: []
+      readable_artifacts: []
+      missing_artifacts: []
+      hash_mismatches: []
+      package_expired: false
+      task_supported_by_context: true
+      context_ready: true
+
+  expected_final_return:
+    evidence_action: targeted_gap_check
+    evidence_packet:
+      evidence_id: RB-REC-01A-APPLIED-STATE-FRESHNESS-v1
+      source_ref: exact_current_github_main_sha
+      captured_at: ISO-8601
+      inspected_scope:
+        - github
+        - server_repository_state
+        - n8n_workflow_state
+      github_state:
+        main_sha: exact_full_sha
+        canonical_workflow_path: exact_repo_relative_path
+        canonical_workflow_blob_sha: exact_blob_sha
+        canonical_workflow_raw_sha256: exact_sha256
+      server_state:
+        repo_root: exact_path
+        head_sha: exact_full_sha
+        origin_main_sha: exact_full_sha
+        branch: exact_branch
+        worktree_clean: true_or_false
+        changed_files: []
+        ahead_behind: exact_counts
+        github_server_status: exact_match_or_drift
+      n8n_state:
+        workflow_id: exact_id
+        version_id_or_updated_at: exact_value
+        active_state: exact_value
+        publication_state: verified_value_or_unknown_with_reason
+        sanitized_export_ref: exact_evidence_locator_or_inline_sanitized_capture
+        export_raw_sha256: exact_sha256
+      comparisons:
+        prior_main_to_current: exact_result
+        prior_n8n_to_current: exact_result
+        github_to_server: exact_result
+        github_to_n8n: exact_result
+        drift_summary: []
+      findings: []
+      gaps: []
+      risks: []
+      recommended_action_type: evidence_only_no_implementation_decision
+      confidence: high_or_medium_or_low
+      expiry_condition: []
+    role_step_report:
+      alignment_with_root_task: exact_statement
+      done: []
+      not_done: []
+      blockers: []
+      next_step: return_evidence_to_PM_L3
