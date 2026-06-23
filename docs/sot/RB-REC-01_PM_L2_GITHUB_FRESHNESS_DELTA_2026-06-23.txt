@@ -1,0 +1,21 @@
+freshness_delta_id: RB-REC-01-PM-L2-GITHUB-FRESHNESS-DELTA-2026-06-23
+produced_by: PM_L2_PHASE_OWNER
+checked_at: 2026-06-23T12:46:17+05:00
+repository_full_name: Viktoryyyyy/moex-robot
+previous_evidence_main_sha: cd0c2e9e494e582692cfeb61a0e47264ea42bb48
+current_github_main_sha: 613cb593445e452d9a81918721d9292c876fd45d
+current_main_commit: Merge pull request #217 — [route_b_n8n] Record PostgreSQL schema evidence RB-REC-01B
+pr_217:
+  merged: true
+  merge_commit_sha: 613cb593445e452d9a81918721d9292c876fd45d
+  changed_files:
+    - docs/sot/RB-REC-01B_POSTGRES_SCHEMA_EVIDENCE_v1.md
+  server_apply_status_from_pr_body: not_done
+canonical_credentialed_runtime_workflow_changed_by_pr_217: false
+server_head_after_pr_217: unknown_requires_read_only_refresh
+n8n_version_after_pr_217: unknown_requires_read_only_refresh
+db_schema_refresh_required: no_new_db_mutation_authorized_or_reported
+expiry_assessment:
+  rb_rec_01a_applied_state_baseline_v2: expired
+  reason: GitHub main changed, which is an explicit expiry condition in RB-REC-01A v2.
+required_action: targeted GitHub/server/n8n freshness refresh by SUBCHAT_REPO_AUDIT; do not repeat DB schema inspection.
