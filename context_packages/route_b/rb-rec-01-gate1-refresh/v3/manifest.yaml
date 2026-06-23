@@ -1,0 +1,84 @@
+context_package:
+  package_id: RB-REC-01-GATE1-CONTEXT-REFRESH
+  package_version: 3
+  root_task_id: RB-REC-01-CONTEXT-FRESHNESS-ROUTING
+  lane: route_b_n8n
+  execution_mode: browser_chatgpt_github_direct
+
+  produced_by: PM_L2_PHASE_OWNER
+  produced_at: 2026-06-23T16:13:02+05:00
+  supersedes_package_version: 2
+  supersession_reason: Role Context Operating Model v4 requires GitHub-only immutable repo_ref delivery; the attachment-based v2 transport is invalid.
+
+  intended_consumers:
+    - PM_L3_DELIVERY_VALIDATION_OWNER
+
+  source_state:
+    repository_full_name: Viktoryyyyy/moex-robot
+    origin_main_sha: 613cb593445e452d9a81918721d9292c876fd45d
+    server_head_sha: null
+    n8n_workflow_id: Kldo3tG9fbZAXk7e
+    n8n_version_or_updated_at: freshness_unknown_after_pr_217
+    captured_at: 2026-06-23T16:13:02+05:00
+
+  artifacts:
+    - artifact_id: rb_rec_01_gate1_source_context_v3
+      required: true
+      transport: repo_ref
+      locator:
+        repository_full_name: Viktoryyyyy/moex-robot
+        commit_sha: f9166c410ad57dcdb4b1c8720f032465f84975b1
+        path: context_packages/route_b/rb-rec-01-gate1-refresh/v3/artifacts/RB-REC-01_GATE1_SOURCE_CONTEXT_v3.md
+      content_hash_sha256: 053aab79a2c72b9cd72d9d5ba59028d480aec4feaa3c259347a57290ccaea2d1
+      purpose: Consolidated delivered evidence for PM L3 routing of the targeted GitHub/server/n8n freshness refresh.
+      intended_consumers:
+        - PM_L3_DELIVERY_VALIDATION_OWNER
+      sensitivity: internal_project
+
+  required_facts:
+    - fact_id: current_main_sha
+      statement: GitHub main is 613cb593445e452d9a81918721d9292c876fd45d after merged PR #217.
+      supported_by_artifact_id: rb_rec_01_gate1_source_context_v3
+    - fact_id: canonical_workflow_unchanged_by_pr_217
+      statement: PR #217 did not change docs/sot/MOEX_ROUTE_B_GITHUB_EXECUTOR_CREDENTIALED_RUNTIME_V0_1_TARGET.json; its current blob SHA remains e2ff4c078ec4bcaa69d5691e02b4c1d68a453e75.
+      supported_by_artifact_id: rb_rec_01_gate1_source_context_v3
+    - fact_id: prior_applied_state_baseline_expired
+      statement: RB-REC-01A v2 expired because GitHub main changed after its capture.
+      supported_by_artifact_id: rb_rec_01_gate1_source_context_v3
+    - fact_id: db_schema_evidence_reusable
+      statement: RB-REC-01B plus GAP-01 is complete for the requested metadata scope and must not be repeated in the freshness cycle.
+      supported_by_artifact_id: rb_rec_01_gate1_source_context_v3
+    - fact_id: next_analysis_owner
+      statement: The next analysis owner is SUBCHAT_REPO_AUDIT for task RB-REC-01A-FRESHNESS-REFRESH.
+      supported_by_artifact_id: rb_rec_01_gate1_source_context_v3
+
+  decisions_already_made:
+    - context_publication_only: true
+    - Credentialed runtime remains frozen.
+    - Gate 1 remains open pending targeted GitHub/server/n8n freshness evidence.
+    - No PostgreSQL re-audit is authorized.
+    - No implementation, DB migration, n8n edit/publication, activation, runtime smoke, merge or server apply is authorized.
+    - PM L3 must publish a role-specific task context package before routing SUBCHAT_REPO_AUDIT.
+
+  blockers:
+    - Current server HEAD/worktree after PR #217 is unknown.
+    - Current n8n workflow export/version/hash after PR #217 is unknown.
+    - The old attachment-based PM L3 receipt is superseded and cannot satisfy v4.
+
+  acceptance_criteria:
+    - PM L3 fetches this manifest at the exact package commit.
+    - PM L3 fetches the required artifact at its exact repo_ref and verifies SHA-256.
+    - PM L3 returns context_preflight and context_delivery_receipt with context_ready=true.
+    - PM L3 selects evidence_action=evidence_expired_request_new_analysis for RB-REC-01A v2.
+    - PM L3 does not repeat the audit.
+    - PM L3 publishes one role-specific task context package for SUBCHAT_REPO_AUDIT.
+    - The task context limits scope to current GitHub/server/n8n freshness and comparisons.
+    - PostgreSQL inspection and all mutations remain excluded.
+
+  expiry_condition:
+    - GitHub main changes from 613cb593445e452d9a81918721d9292c876fd45d.
+    - Canonical workflow blob changes from e2ff4c078ec4bcaa69d5691e02b4c1d68a453e75.
+    - Artifact SHA-256 does not match.
+    - Approved scope changes.
+    - A newer server or n8n snapshot supersedes this routing package.
+    - PM L2 explicitly supersedes this package.
