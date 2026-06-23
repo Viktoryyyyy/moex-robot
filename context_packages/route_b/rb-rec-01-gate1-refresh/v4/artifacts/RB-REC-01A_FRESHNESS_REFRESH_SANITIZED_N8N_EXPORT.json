@@ -1,0 +1,809 @@
+{
+  "name": "MOEX_ROUTE_B_GITHUB_EXECUTOR_CREDENTIALED_RUNTIME_V0_1_TARGET",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "moex/route-b/github-executor-credentialed-runtime-v0-1",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "812a6290-f8a5-4e6f-940b-574e9540da80",
+      "name": "GitHub Executor Runtime Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -2096,
+        528
+      ],
+      "webhookId": "REDACTED"
+    },
+    {
+      "parameters": {
+        "jsCode": "const envelope=($input.first().json||{}).body||$input.first().json||{};const request=envelope.normalized_github_execution_request_json||{};const errors=[];const repository_full_name=String(request.repository_full_name||'');const repository_full_name_parts=repository_full_name.split('/');if(repository_full_name_parts.length!==2||!repository_full_name_parts[0]||!repository_full_name_parts[1])errors.push('repository_full_name_parts_required');const owner=repository_full_name_parts[0];const repo=repository_full_name_parts[1];if(envelope.github_execution_request_json)errors.push('raw_github_execution_request_json_forbidden');if(!(envelope.accepted===true&&envelope.validation_status==='pass'))errors.push('validated_normalized_github_execution_request_required');if(repository_full_name!=='Viktoryyyyy/moex-robot')errors.push('repository_full_name_not_allowed');if(request.base_ref!=='origin/main')errors.push('base_ref_must_equal_origin_main');if(!/^[0-9a-f]{40}$/i.test(String(request.base_sha||'')))errors.push('valid_base_sha_required');if(!String(request.branch_name||'').startsWith('n8n/'))errors.push('branch_name_must_use_n8n_prefix');if(String(request.branch_name||'').startsWith('route-b/')||['main','master','refs/heads/main','refs/heads/master'].includes(String(request.branch_name||'').toLowerCase()))errors.push('branch_name_forbidden');if(!String(request.execution_request_id||'').trim())errors.push('execution_request_id_required');if(!String(request.workflow_run_id||'').trim())errors.push('workflow_run_id_required');if(!String(request.role_task_id||'').trim())errors.push('role_task_id_required');if(!/^[0-9a-f]{64}$/i.test(String(request.request_fingerprint_sha256||'')))errors.push('request_fingerprint_sha256_required');if(request.execution_request_id===request.task_id)errors.push('execution_request_id_task_id_fallback_forbidden');if(request.merge_authority!=='PM_L2_ONLY')errors.push('merge_authority_must_equal_PM_L2_ONLY');const forbiddenFalseControlErrors={direct_main_write_allowed:'direct_main_write_allowed_must_be_false',force_push_allowed:'force_push_allowed_must_be_false',file_delete_allowed:'file_delete_allowed_must_be_false',n8n_merge_allowed:'n8n_merge_allowed_must_be_false',executor_merge_allowed:'executor_merge_allowed_must_be_false',server_apply_allowed:'server_apply_allowed_must_be_false',broker_execution_allowed:'broker_execution_allowed_must_be_false',live_trading_allowed:'live_trading_allowed_must_be_false',runtime_allowed:'runtime_allowed_must_be_false',production_secret_access_allowed:'production_secret_access_allowed_must_be_false',pm_l2_approval_claimed:'pm_l2_approval_claimed_must_be_false'};for(const [control,token]of Object.entries(forbiddenFalseControlErrors)){if(request[control]!==false)errors.push(token);}const approvedFileScope=Array.isArray(request.approved_file_scope)?request.approved_file_scope:[];const fileChanges=Array.isArray(request.file_changes)?request.file_changes:[];if(approvedFileScope.length===0)errors.push('approved_file_scope_must_not_be_empty');if(fileChanges.length===0)errors.push('exact_file_changes_required');if(approvedFileScope.length!==fileChanges.length)errors.push('file_change_count_must_equal_approved_file_scope');for(const change of fileChanges){if(!approvedFileScope.includes(change.path))errors.push('file_change_path_must_equal_approved_file_scope');if(!['create','update'].includes(String(change.operation||'').toLowerCase()))errors.push('file_change_operation_must_be_create_or_update');}if(errors.length)throw new Error(errors.join('|'));return[{json:{...request,owner,repo,approved_for_merge:false,merge_performed:false}}];"
+      },
+      "id": "9244d296-e34f-4a3c-98ab-045190c2a52b",
+      "name": "Validate Normalized Runtime Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1808,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT event_payload_json FROM public.moex_n8n_workflow_run_events WHERE workflow_run_id = '{{ $json.workflow_run_id }}' AND event_type IN ('route_b_github_executor_execution_accepted','route_b_github_executor_execution_blocked','route_b_github_executor_execution_result') AND ((event_payload_json->>'execution_request_id') = '{{ $json.execution_request_id }}' OR (event_payload_json->>'request_fingerprint_sha256') = '{{ $json.request_fingerprint_sha256 }}');",
+        "options": {}
+      },
+      "id": "0b6dcc24-8ab8-4fb5-ab09-e75436ee1b5d",
+      "name": "Load Execution Evidence Registry",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -1504,
+        272
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REDACTED",
+          "name": "REDACTED"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT NULL::jsonb AS current_state_json;",
+        "options": {}
+      },
+      "id": "b1d56682-410f-4134-a5ec-5131fbe077bc",
+      "name": "Load Workflow Run Projection",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -1200,
+        272
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REDACTED",
+          "name": "REDACTED"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT NULL::jsonb AS input_json, NULL::jsonb AS output_json;",
+        "options": {}
+      },
+      "id": "fa7b4db0-35f7-475e-bb28-5ab8169f7b6e",
+      "name": "Load Step Run Idempotency Checkpoint",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        -896,
+        272
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "REDACTED",
+          "name": "REDACTED"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const request=$node['Validate Normalized Runtime Request'].json;const evidenceItems=$items('Load Execution Evidence Registry')||[];const projectionItems=$items('Load Workflow Run Projection')||[];const checkpointItems=$items('Load Step Run Idempotency Checkpoint')||[];const commit_step='create_implementation_commit';const pr_step='open_pull_request';function parsePayload(value){if(!value)return null;if(typeof value==='object')return value;try{return JSON.parse(value);}catch(error){return {error:String(error)};}}const evidencePayloads=evidenceItems.map(item=>parsePayload((item.json||{}).event_payload_json)).filter(Boolean);const projectionPayloads=projectionItems.map(item=>parsePayload((item.json||{}).current_state_json)).filter(Boolean);const registryPayloads=[...evidencePayloads,...projectionPayloads];for(const payload of registryPayloads){if(payload.execution_request_id===request.execution_request_id&&payload.request_fingerprint_sha256&&payload.request_fingerprint_sha256!==request.request_fingerprint_sha256){return[{json:{...request,resolution: 'blocked',blocker_code:'same_execution_request_id_different_fingerprint',error:'same execution_request_id different request_fingerprint_sha256',approved_for_merge: false,merge_performed: false}}];}}for(const payload of registryPayloads){const same=payload.execution_request_id===request.execution_request_id&&payload.request_fingerprint_sha256===request.request_fingerprint_sha256;const terminal=Boolean(payload.implementation_commit_sha||payload.pr_number||payload.pr_url||payload.pr_head_sha);if(same&&terminal)return[{json:{...request,resolution: 'return_existing_result',existing_result:payload,approved_for_merge: false,merge_performed: false}}];}for(const item of checkpointItems){const output=parsePayload((item.json||{}).output_json)||{};const input=parsePayload((item.json||{}).input_json)||{};const same=(output.execution_request_id||input.execution_request_id)===request.execution_request_id&&(output.request_fingerprint_sha256||input.request_fingerprint_sha256)===request.request_fingerprint_sha256;const stepName=String(output.step_name||input.step_name||'');const checkpoint=Boolean(output.implementation_commit_sha||output.pr_number||output.pr_url||output.pr_head_sha||stepName===commit_step||stepName===pr_step);if(same&&checkpoint)return[{json:{...request,resolution: 'resume_or_return_existing_result',existing_result:output,approved_for_merge: false,merge_performed: false}}];}return[{json:{...request,resolution: 'proceed_new_execution',existing_result:null,request_fingerprint_sha256:request.request_fingerprint_sha256,approved_for_merge: false,merge_performed: false}}];"
+      },
+      "id": "3f1f854c-c71f-4c94-9aae-fee537de5fb7",
+      "name": "Resolve Execution Evidence State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -608,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.resolution }}",
+                    "rightValue": "proceed_new_execution",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              }
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.resolution }}",
+                    "rightValue": "blocked",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              }
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.resolution }}",
+                    "rightValue": "return_existing_result",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              }
+            },
+            {
+              "conditions": {
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.resolution }}",
+                    "rightValue": "resume_or_return_existing_result",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and",
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                }
+              }
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "none"
+        }
+      },
+      "id": "a0ae0d4d-0e6c-4c82-9304-df2a4da6635b",
+      "name": "Route Execution Resolution",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        -304,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO public.moex_n8n_workflow_run_events (workflow_run_id,event_type,event_payload_json,new_state) VALUES ('{{ $json.workflow_run_id }}','route_b_github_executor_execution_accepted','{{ JSON.stringify({execution_request_id:$json.execution_request_id,request_fingerprint_sha256:$json.request_fingerprint_sha256,workflow_run_id:$json.workflow_run_id,role_task_id:$json.role_task_id,status:'accepted',approved_for_merge:false,merge_performed:false}) }}'::jsonb,'{{ JSON.stringify({execution_request_id:$json.execution_request_id,request_fingerprint_sha256:$json.request_fingerprint_sha256,workflow_run_id:$json.workflow_run_id,role_task_id:$json.role_task_id,status:'accepted',approved_for_merge:false,merge_performed:false}) }}'::jsonb);",
+        "options": {}
+      },
+      "id": "5468c03c-0cab-4f25-a785-a925f05346b7",
+      "name": "Persist Accepted Execution Evidence",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REDACTED",
+          "name": "REDACTED"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO public.moex_n8n_workflow_run_events (workflow_run_id,event_type,event_payload_json,new_state) VALUES ('{{ $json.workflow_run_id }}','route_b_github_executor_execution_blocked','{{ JSON.stringify({execution_request_id:$json.execution_request_id,request_fingerprint_sha256:$json.request_fingerprint_sha256,workflow_run_id:$json.workflow_run_id,role_task_id:$json.role_task_id,status:'blocked',blocker_code:$json.blocker_code,error:$json.error,approved_for_merge:false,merge_performed:false}) }}'::jsonb,'{{ JSON.stringify({execution_request_id:$json.execution_request_id,request_fingerprint_sha256:$json.request_fingerprint_sha256,workflow_run_id:$json.workflow_run_id,role_task_id:$json.role_task_id,status:'blocked',blocker_code:$json.blocker_code,error:$json.error,approved_for_merge:false,merge_performed:false}) }}'::jsonb);",
+        "options": {}
+      },
+      "id": "dbdcf3e3-5647-4494-bbe7-e3d7a28c7f6e",
+      "name": "Persist Blocked Execution Evidence",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        0,
+        352
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REDACTED",
+          "name": "REDACTED"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://api.github.com/repos/' + $node['Validate Normalized Runtime Request'].json.owner + '/' + $node['Validate Normalized Runtime Request'].json.repo + '/git/ref/heads/main' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "options": {}
+      },
+      "id": "805bb70c-3859-4c9e-9efd-cfa6b208b8c9",
+      "name": "Fetch Base Branch Ref",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        304,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED",
+          "name": "REDACTED"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://api.github.com/repos/' + $node['Validate Normalized Runtime Request'].json.owner + '/' + $node['Validate Normalized Runtime Request'].json.repo + '/git/commits/' + $node['Validate Normalized Runtime Request'].json.base_sha }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "options": {}
+      },
+      "id": "15abade8-28d6-4042-8d78-35e36e8352f7",
+      "name": "Fetch Base Commit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        608,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED",
+          "name": "REDACTED"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const request=$node['Validate Normalized Runtime Request'].json;const ref=$node['Fetch Base Branch Ref'].json||{};const commit=$node['Fetch Base Commit'].json||{};if(!ref.object||ref.object.sha!==request.base_sha)throw new Error('base_sha_not_current_main');if(!commit.tree||!commit.tree.sha)throw new Error('missing_base_tree_sha');return[{json:{...request,base_tree_sha:commit.tree.sha}}];"
+      },
+      "id": "b27429e8-0688-40e1-b488-8f68ce451498",
+      "name": "Validate Base Ref",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const request = $node['Validate Base Ref'].json;const tree_elements = request.file_changes.map((change) => ({path: change.path,content: change.content,type: 'blob',mode: '100644'}));return [{json:{...request, tree_elements}}];"
+      },
+      "id": "8bde82a8-d4f6-4b8a-9d48-5087e4a7b326",
+      "name": "Build Git Tree Elements From Exact File Changes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.github.com/repos/' + $json.owner + '/' + $json.repo + '/git/refs' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ref:'refs/heads/'+$json.branch_name,sha:$json.base_sha}) }}",
+        "options": {}
+      },
+      "id": "cc27dbe7-456b-48be-b958-07f9163d164d",
+      "name": "Create Feature Branch",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1504,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED",
+          "name": "REDACTED"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.github.com/repos/' + $node['Validate Base Ref'].json.owner + '/' + $node['Validate Base Ref'].json.repo + '/git/trees' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({base_tree:$node['Validate Base Ref'].json.base_tree_sha,tree:$node['Build Git Tree Elements From Exact File Changes'].json.tree_elements}) }}",
+        "options": {}
+      },
+      "id": "9f2e3254-3ba0-4bed-81f6-3e2ab94d6131",
+      "name": "Create Git Tree",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1808,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED",
+          "name": "REDACTED"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.github.com/repos/' + $node['Validate Base Ref'].json.owner + '/' + $node['Validate Base Ref'].json.repo + '/git/commits' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({message:'Evidence registry '+$node['Validate Base Ref'].json.execution_request_id,tree:$node['Create Git Tree'].json.sha,parents:[$node['Validate Base Ref'].json.base_sha]}) }}",
+        "options": {}
+      },
+      "id": "af4ab6e5-0105-4259-834f-a5d4ea53d2e4",
+      "name": "Create Implementation Commit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2112,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED",
+          "name": "REDACTED"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "={{ 'https://api.github.com/repos/' + $node['Validate Base Ref'].json.owner + '/' + $node['Validate Base Ref'].json.repo + '/git/refs/heads/' + $node['Validate Base Ref'].json.branch_name }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({sha:$node['Create Implementation Commit'].json.sha,force:false}) }}",
+        "options": {}
+      },
+      "id": "1504c79c-396a-44f4-a227-2ccb013b43e3",
+      "name": "Update Feature Branch Ref",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2400,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED",
+          "name": "REDACTED"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://api.github.com/repos/' + $node['Validate Base Ref'].json.owner + '/' + $node['Validate Base Ref'].json.repo + '/pulls' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({title:'[route_b_n8n] Evidence registry '+$node['Validate Base Ref'].json.branch_name,head:$node['Validate Base Ref'].json.branch_name,base:'main',body:'merge_authority: PM_L2_ONLY; approved_for_merge: false; merge_performed: false',draft:false}) }}",
+        "options": {}
+      },
+      "id": "a03893c4-67cc-4a10-add1-35ef2535bc63",
+      "name": "Open Pull Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2704,
+        0
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REDACTED",
+          "name": "REDACTED"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO public.moex_n8n_workflow_run_events (workflow_run_id,event_type,event_payload_json,new_state) VALUES ('{{ $node[\"Validate Base Ref\"].json.workflow_run_id }}','route_b_github_executor_execution_result','{{ JSON.stringify({execution_request_id:$node[\"Validate Base Ref\"].json.execution_request_id,request_fingerprint_sha256:$node[\"Validate Base Ref\"].json.request_fingerprint_sha256,file_changes:$node[\"Validate Base Ref\"].json.file_changes,implementation_commit_sha:$node[\"Create Implementation Commit\"].json.sha,pr_number:$node[\"Open Pull Request\"].json.number,approved_for_merge:false,merge_performed:false}) }}'::jsonb,'{{ JSON.stringify({execution_request_id:$node[\"Validate Base Ref\"].json.execution_request_id,request_fingerprint_sha256:$node[\"Validate Base Ref\"].json.request_fingerprint_sha256,file_changes:$node[\"Validate Base Ref\"].json.file_changes,implementation_commit_sha:$node[\"Create Implementation Commit\"].json.sha,pr_number:$node[\"Open Pull Request\"].json.number,approved_for_merge:false,merge_performed:false}) }}'::jsonb);",
+        "options": {}
+      },
+      "id": "bcc70e54-d7c4-4ccc-961d-126af3d8a648",
+      "name": "Persist Final Execution Evidence",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3008,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REDACTED",
+          "name": "REDACTED"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const request=$node['Validate Base Ref'].json;const pr=$node['Open Pull Request'].json||{};const commit=$node['Create Implementation Commit'].json||{};return[{json:{execution_request_id:request.execution_request_id,request_fingerprint_sha256:request.request_fingerprint_sha256,implementation_commit_sha:commit.sha||null,pr_number:pr.number||null,pr_url:pr.html_url||pr.url||null,pr_head_sha:commit.sha||null,ci_workflow: 'tests',approved_for_merge: false,merge_performed: false,github_mutation_performed:Boolean(commit.sha||pr.number)}}];"
+      },
+      "id": "c426135f-f80c-466c-b8f9-9506b6e8904e",
+      "name": "Build Terminal Runtime Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3312,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {
+          "responseCode": "={{ 200 }}"
+        }
+      },
+      "id": "b73f3ac3-8f2a-44de-85f7-0f7dc62338d9",
+      "name": "Return Runtime Result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        3600,
+        272
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "GitHub Executor Runtime Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Normalized Runtime Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Normalized Runtime Request": {
+      "main": [
+        [
+          {
+            "node": "Load Execution Evidence Registry",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Execution Evidence Registry": {
+      "main": [
+        [
+          {
+            "node": "Load Workflow Run Projection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Workflow Run Projection": {
+      "main": [
+        [
+          {
+            "node": "Load Step Run Idempotency Checkpoint",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Step Run Idempotency Checkpoint": {
+      "main": [
+        [
+          {
+            "node": "Resolve Execution Evidence State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Execution Evidence State": {
+      "main": [
+        [
+          {
+            "node": "Route Execution Resolution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Execution Resolution": {
+      "main": [
+        [
+          {
+            "node": "Persist Accepted Execution Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist Blocked Execution Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Runtime Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Runtime Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist Accepted Execution Evidence": {
+      "main": [
+        [
+          {
+            "node": "Fetch Base Branch Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Base Branch Ref": {
+      "main": [
+        [
+          {
+            "node": "Fetch Base Commit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Base Commit": {
+      "main": [
+        [
+          {
+            "node": "Validate Base Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Base Ref": {
+      "main": [
+        [
+          {
+            "node": "Build Git Tree Elements From Exact File Changes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Git Tree Elements From Exact File Changes": {
+      "main": [
+        [
+          {
+            "node": "Create Feature Branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Feature Branch": {
+      "main": [
+        [
+          {
+            "node": "Create Git Tree",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Git Tree": {
+      "main": [
+        [
+          {
+            "node": "Create Implementation Commit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Implementation Commit": {
+      "main": [
+        [
+          {
+            "node": "Update Feature Branch Ref",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Feature Branch Ref": {
+      "main": [
+        [
+          {
+            "node": "Open Pull Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Open Pull Request": {
+      "main": [
+        [
+          {
+            "node": "Persist Final Execution Evidence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist Final Execution Evidence": {
+      "main": [
+        [
+          {
+            "node": "Build Terminal Runtime Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Terminal Runtime Result": {
+      "main": [
+        [
+          {
+            "node": "Return Runtime Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist Blocked Execution Evidence": {
+      "main": [
+        [
+          {
+            "node": "Return Runtime Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "7113e23f-1992-4ace-9e34-efd1b1685a54",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "REDACTED"
+  },
+  "nodeGroups": [],
+  "id": "Kldo3tG9fbZAXk7e",
+  "tags": []
+}
