@@ -35,8 +35,12 @@ RUNTIME_AI_ASSISTANT_MUST_NOT_CONSUME = (
 
 NON_RUNTIME_FIELDS = frozenset(
     {
+        "session_date",
         "phase_label",
+        "phase_label_meaning",
         "source_interval_id",
+        "interval_start_date",
+        "interval_end_date",
         "transition_exit_day",
         "phase_remaining_sessions",
         "current_regime_ends_within_1d",
