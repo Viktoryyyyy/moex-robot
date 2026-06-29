@@ -15,107 +15,31 @@
     "superseded_if_raw_csv_xlsx_provided": true,
     "source_note": "User confirmed B = buy/long, S = sell/short, OUT = horizontal/sideways out-of-market regime where EMA 3/19 loses edge. Labels are based on daily candles. Boundaries are inclusive."
   },
-  "allowed_labels": [
-    "B",
-    "S",
-    "OUT"
-  ],
+  "allowed_labels": ["B", "S", "OUT"],
   "label_meanings": {
     "B": "buy_long_regime",
     "S": "sell_short_regime",
     "OUT": "sideways_out_of_market_regime_where_EMA_3_19_loses_effectiveness"
   },
   "raw_interval_schema": {
-    "interval_id": {
-      "type": "string",
-      "required": true,
-      "stable": true
-    },
-    "start_date": {
-      "type": "string",
-      "format": "DD.MM.YYYY",
-      "required": true
-    },
-    "end_date": {
-      "type": "string",
-      "format": "DD.MM.YYYY",
-      "required": true
-    },
-    "label": {
-      "type": "string",
-      "allowed_values": [
-        "B",
-        "S",
-        "OUT"
-      ],
-      "required": true
-    }
+    "interval_id": {"type": "string", "required": true, "stable": true},
+    "start_date": {"type": "string", "format": "DD.MM.YYYY", "required": true},
+    "end_date": {"type": "string", "format": "DD.MM.YYYY", "required": true},
+    "label": {"type": "string", "allowed_values": ["B", "S", "OUT"], "required": true}
   },
   "normalized_session_schema": {
-    "session_date": {
-      "type": "string",
-      "format": "YYYY-MM-DD",
-      "source": "caller_supplied_D1_session_universe"
-    },
-    "phase_label": {
-      "type": "string",
-      "allowed_values": [
-        "B",
-        "S",
-        "OUT"
-      ],
-      "primary_runtime_target": true
-    },
-    "phase_label_meaning": {
-      "type": "string"
-    },
-    "source_interval_id": {
-      "type": "string",
-      "runtime_feature": false
-    },
-    "interval_start_date": {
-      "type": "string",
-      "format": "YYYY-MM-DD",
-      "runtime_feature": false
-    },
-    "interval_end_date": {
-      "type": "string",
-      "format": "YYYY-MM-DD",
-      "runtime_feature": false
-    },
-    "transition_exit_day": {
-      "type": "boolean",
-      "runtime_feature": false
-    },
-    "phase_remaining_sessions": {
-      "type": "integer",
-      "runtime_feature": false
-    },
-    "current_regime_ends_within_1d": {
-      "type": "boolean",
-      "runtime_feature": false
-    },
-    "current_regime_ends_within_3d": {
-      "type": "boolean",
-      "runtime_feature": false
-    },
-    "current_regime_ends_within_5d": {
-      "type": "boolean",
-      "runtime_feature": false
-    },
-    "next_regime_if_current_ends": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "allowed_values": [
-        "B",
-        "S",
-        "OUT",
-        null
-      ],
-      "runtime_feature": false
-    }
+    "session_date": {"type": "string", "format": "YYYY-MM-DD", "source": "caller_supplied_D1_session_universe", "runtime_feature": false},
+    "phase_label": {"type": "string", "allowed_values": ["B", "S", "OUT"], "primary_runtime_target": true, "runtime_feature": false},
+    "phase_label_meaning": {"type": "string", "runtime_feature": false},
+    "source_interval_id": {"type": "string", "runtime_feature": false},
+    "interval_start_date": {"type": "string", "format": "YYYY-MM-DD", "runtime_feature": false},
+    "interval_end_date": {"type": "string", "format": "YYYY-MM-DD", "runtime_feature": false},
+    "transition_exit_day": {"type": "boolean", "runtime_feature": false},
+    "phase_remaining_sessions": {"type": "integer", "runtime_feature": false},
+    "current_regime_ends_within_1d": {"type": "boolean", "runtime_feature": false},
+    "current_regime_ends_within_3d": {"type": "boolean", "runtime_feature": false},
+    "current_regime_ends_within_5d": {"type": "boolean", "runtime_feature": false},
+    "next_regime_if_current_ends": {"type": ["string", "null"], "allowed_values": ["B", "S", "OUT", null], "runtime_feature": false}
   },
   "boundary_semantics": {
     "start_date": "inclusive",
@@ -154,6 +78,9 @@
     "phase_remaining_sessions_not_runtime_feature": true,
     "next_phase_label_not_runtime_feature": true,
     "source_interval_id_not_runtime_feature": true,
+    "interval_boundary_dates_not_runtime_features": true,
+    "phase_label_meaning_not_runtime_feature": true,
+    "session_date_not_runtime_feature": true,
     "runtime_AI_assistant_may_consume": [
       "model_outputs",
       "prediction_confidence",
@@ -167,8 +94,12 @@
       "next_phase_label_from_manual_labels"
     ],
     "non_runtime_fields": [
+      "session_date",
       "phase_label",
+      "phase_label_meaning",
       "source_interval_id",
+      "interval_start_date",
+      "interval_end_date",
       "transition_exit_day",
       "phase_remaining_sessions",
       "current_regime_ends_within_1d",
@@ -178,22 +109,10 @@
     ]
   },
   "execution_blockers": {
-    "source_data_coverage_gap_for_execution": {
-      "status": "active",
-      "meaning": "current source data does not cover full label range through 2026-06-26"
-    },
-    "raw_csv_xlsx_missing_for_final_validation": {
-      "status": "active_but_not_blocking_contract_implementation",
-      "meaning": "raw file is preferred later for final provenance; curated v1 transcription is accepted for this contract implementation"
-    },
-    "calendar_contract_partial": {
-      "status": "active",
-      "meaning": "D1 OHLC rows may be used as session universe for tests; explicit MOEX futures calendar artifact is not approved in this task"
-    },
-    "external_factor_sources_unknown": {
-      "status": "active_for_later_model_layer",
-      "meaning": "external factor sources are out of scope for this contract implementation"
-    }
+    "source_data_coverage_gap_for_execution": {"status": "active", "meaning": "current source data does not cover full label range through 2026-06-26"},
+    "raw_csv_xlsx_missing_for_final_validation": {"status": "active_but_not_blocking_contract_implementation", "meaning": "raw file is preferred later for final provenance; curated v1 transcription is accepted for this contract implementation"},
+    "calendar_contract_partial": {"status": "active", "meaning": "D1 OHLC rows may be used as session universe for tests; explicit MOEX futures calendar artifact is not approved in this task"},
+    "external_factor_sources_unknown": {"status": "active_for_later_model_layer", "meaning": "external factor sources are out of scope for this contract implementation"}
   },
   "forbidden_outputs_for_this_task": [
     "data/labels/usdrubf_d1_manual_phase_labels_v1.csv",
@@ -203,215 +122,40 @@
     "server-side artifacts"
   ],
   "manual_phase_labels": [
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_001",
-      "start_date": "05.08.2024",
-      "end_date": "27.11.2024",
-      "label": "B"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_002",
-      "start_date": "28.11.2024",
-      "end_date": "06.12.2024",
-      "label": "S"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_003",
-      "start_date": "07.12.2024",
-      "end_date": "16.01.2025",
-      "label": "OUT"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_004",
-      "start_date": "17.01.2025",
-      "end_date": "25.02.2025",
-      "label": "S"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_005",
-      "start_date": "26.02.2025",
-      "end_date": "05.03.2025",
-      "label": "B"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_006",
-      "start_date": "06.03.2025",
-      "end_date": "17.03.2025",
-      "label": "S"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_007",
-      "start_date": "18.03.2025",
-      "end_date": "07.04.2025",
-      "label": "B"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_008",
-      "start_date": "08.04.2025",
-      "end_date": "08.04.2025",
-      "label": "OUT"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_009",
-      "start_date": "09.04.2025",
-      "end_date": "10.06.2025",
-      "label": "S"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_010",
-      "start_date": "11.06.2025",
-      "end_date": "21.07.2025",
-      "label": "OUT"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_011",
-      "start_date": "22.07.2025",
-      "end_date": "29.07.2025",
-      "label": "B"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_012",
-      "start_date": "30.07.2025",
-      "end_date": "01.08.2025",
-      "label": "S"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_013",
-      "start_date": "04.08.2025",
-      "end_date": "02.09.2025",
-      "label": "OUT"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_014",
-      "start_date": "03.09.2025",
-      "end_date": "11.09.2025",
-      "label": "B"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_015",
-      "start_date": "11.09.2025",
-      "end_date": "23.09.2025",
-      "label": "OUT"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_016",
-      "start_date": "24.09.2025",
-      "end_date": "02.10.2025",
-      "label": "S"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_017",
-      "start_date": "03.10.2025",
-      "end_date": "03.10.2025",
-      "label": "B"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_018",
-      "start_date": "06.10.2025",
-      "end_date": "15.10.2025",
-      "label": "S"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_019",
-      "start_date": "16.10.2025",
-      "end_date": "17.10.2025",
-      "label": "B"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_020",
-      "start_date": "20.10.2025",
-      "end_date": "18.11.2025",
-      "label": "OUT"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_021",
-      "start_date": "19.11.2025",
-      "end_date": "04.12.2025",
-      "label": "S"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_022",
-      "start_date": "05.12.2025",
-      "end_date": "17.12.2025",
-      "label": "B"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_023",
-      "start_date": "18.12.2025",
-      "end_date": "26.12.2025",
-      "label": "S"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_024",
-      "start_date": "29.12.2025",
-      "end_date": "05.01.2026",
-      "label": "B"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_025",
-      "start_date": "06.01.2026",
-      "end_date": "22.01.2026",
-      "label": "S"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_026",
-      "start_date": "23.01.2026",
-      "end_date": "24.02.2026",
-      "label": "OUT"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_027",
-      "start_date": "25.02.2026",
-      "end_date": "19.03.2026",
-      "label": "B"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_028",
-      "start_date": "20.03.2026",
-      "end_date": "23.03.2026",
-      "label": "S"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_029",
-      "start_date": "24.03.2026",
-      "end_date": "31.03.2026",
-      "label": "OUT"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_030",
-      "start_date": "01.04.2026",
-      "end_date": "14.04.2026",
-      "label": "S"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_031",
-      "start_date": "15.04.2026",
-      "end_date": "05.05.2026",
-      "label": "OUT"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_032",
-      "start_date": "06.05.2026",
-      "end_date": "19.05.2026",
-      "label": "S"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_033",
-      "start_date": "20.05.2026",
-      "end_date": "03.06.2026",
-      "label": "B"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_034",
-      "start_date": "04.06.2026",
-      "end_date": "09.06.2026",
-      "label": "S"
-    },
-    {
-      "interval_id": "usdrubf_d1_manual_phase_v1_035",
-      "start_date": "10.06.2026",
-      "end_date": "26.06.2026",
-      "label": "B"
-    }
+    {"interval_id": "usdrubf_d1_manual_phase_v1_001", "start_date": "05.08.2024", "end_date": "27.11.2024", "label": "B"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_002", "start_date": "28.11.2024", "end_date": "06.12.2024", "label": "S"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_003", "start_date": "07.12.2024", "end_date": "16.01.2025", "label": "OUT"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_004", "start_date": "17.01.2025", "end_date": "25.02.2025", "label": "S"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_005", "start_date": "26.02.2025", "end_date": "05.03.2025", "label": "B"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_006", "start_date": "06.03.2025", "end_date": "17.03.2025", "label": "S"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_007", "start_date": "18.03.2025", "end_date": "07.04.2025", "label": "B"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_008", "start_date": "08.04.2025", "end_date": "08.04.2025", "label": "OUT"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_009", "start_date": "09.04.2025", "end_date": "10.06.2025", "label": "S"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_010", "start_date": "11.06.2025", "end_date": "21.07.2025", "label": "OUT"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_011", "start_date": "22.07.2025", "end_date": "29.07.2025", "label": "B"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_012", "start_date": "30.07.2025", "end_date": "01.08.2025", "label": "S"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_013", "start_date": "04.08.2025", "end_date": "02.09.2025", "label": "OUT"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_014", "start_date": "03.09.2025", "end_date": "11.09.2025", "label": "B"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_015", "start_date": "11.09.2025", "end_date": "23.09.2025", "label": "OUT"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_016", "start_date": "24.09.2025", "end_date": "02.10.2025", "label": "S"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_017", "start_date": "03.10.2025", "end_date": "03.10.2025", "label": "B"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_018", "start_date": "06.10.2025", "end_date": "15.10.2025", "label": "S"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_019", "start_date": "16.10.2025", "end_date": "17.10.2025", "label": "B"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_020", "start_date": "20.10.2025", "end_date": "18.11.2025", "label": "OUT"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_021", "start_date": "19.11.2025", "end_date": "04.12.2025", "label": "S"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_022", "start_date": "05.12.2025", "end_date": "17.12.2025", "label": "B"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_023", "start_date": "18.12.2025", "end_date": "26.12.2025", "label": "S"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_024", "start_date": "29.12.2025", "end_date": "05.01.2026", "label": "B"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_025", "start_date": "06.01.2026", "end_date": "22.01.2026", "label": "S"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_026", "start_date": "23.01.2026", "end_date": "24.02.2026", "label": "OUT"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_027", "start_date": "25.02.2026", "end_date": "19.03.2026", "label": "B"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_028", "start_date": "20.03.2026", "end_date": "23.03.2026", "label": "S"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_029", "start_date": "24.03.2026", "end_date": "31.03.2026", "label": "OUT"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_030", "start_date": "01.04.2026", "end_date": "14.04.2026", "label": "S"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_031", "start_date": "15.04.2026", "end_date": "05.05.2026", "label": "OUT"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_032", "start_date": "06.05.2026", "end_date": "19.05.2026", "label": "S"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_033", "start_date": "20.05.2026", "end_date": "03.06.2026", "label": "B"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_034", "start_date": "04.06.2026", "end_date": "09.06.2026", "label": "S"},
+    {"interval_id": "usdrubf_d1_manual_phase_v1_035", "start_date": "10.06.2026", "end_date": "26.06.2026", "label": "B"}
   ]
 }
