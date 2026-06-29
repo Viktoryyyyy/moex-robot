@@ -88,7 +88,10 @@ def test_runtime_feature_filter_excludes_manual_labels_and_future_targets():
         "ema_3",
         "ema_19",
         "phase_label",
+        "phase_label_meaning",
         "source_interval_id",
+        "interval_start_date",
+        "interval_end_date",
         "transition_exit_day",
         "phase_remaining_sessions",
         "current_regime_ends_within_1d",
@@ -100,4 +103,35 @@ def test_runtime_feature_filter_excludes_manual_labels_and_future_targets():
     runtime_fields = runtime_feature_fields(candidate_fields)
 
     assert runtime_fields == {"ema_3", "ema_19"}
-    assert "phase_label" in NON_RUNTIME_FIELDS
+    assert {
+        "phase_label",
+        "phase_label_meaning",
+        "source_interval_id",
+        "interval_start_date",
+        "interval_end_date",
+    }.issubset(NON_RUNTIME_FIELDS)
+
+
+def test_runtime_feature_filter_excludes_all_normalized_label_row_metadata():
+    rows = materialize_phase_label_dicts(
+        session_dates=["2025-02-26"],
+        intervals=[interval("i1", "2025-02-26", "2025-02-26", "B")],
+    )
+
+    runtime_fields = runtime_feature_fields(rows[0].keys())
+
+    assert runtime_fields == set()
+    assert {
+        "session_date",
+        "phase_label",
+        "phase_label_meaning",
+        "source_interval_id",
+        "interval_start_date",
+        "interval_end_date",
+        "transition_exit_day",
+        "phase_remaining_sessions",
+        "current_regime_ends_within_1d",
+        "current_regime_ends_within_3d",
+        "current_regime_ends_within_5d",
+        "next_regime_if_current_ends",
+    }.issubset(NON_RUNTIME_FIELDS)
