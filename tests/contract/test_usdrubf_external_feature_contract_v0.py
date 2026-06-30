@@ -74,6 +74,13 @@ REQUIRED_SOURCE_IDS = {
     "news_events.event_schema_only",
 }
 
+RUNTIME_READY_SOURCE_IDS = {
+    "internal.usdrubf_d1_ohlc_from_5m",
+    "internal.usdrubf_d1_ema_3_19_cross_context",
+    "internal.usdrubf_d1_classical_indicators",
+    "calendar.moex_forts_session",
+}
+
 
 def load_contract():
     return json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
@@ -171,6 +178,37 @@ def test_source_registry_contains_all_required_sources_and_schema_keys():
     for source in source_registry:
         assert MANDATORY_SOURCE_KEYS.issubset(source)
         assert source["source_group"] in REQUIRED_FEATURE_GROUPS
+
+
+def test_source_registry_allowed_for_runtime_is_boolean_and_not_string():
+    contract = load_contract()
+
+    source_by_id = {row["source_id"]: row for row in contract["source_registry"]}
+
+    for source in contract["source_registry"]:
+        allowed_for_runtime = source["allowed_for_runtime"]
+        assert isinstance(allowed_for_runtime, bool)
+        assert not isinstance(allowed_for_runtime, str)
+
+    assert (
+        source_by_id["positioning.moex_algopack_futoi_raw"]["allowed_for_runtime"]
+        is False
+    )
+    assert source_by_id["dollar_index.dxy"]["allowed_for_runtime"] is False
+    assert (
+        source_by_id["calendar.futures_expiry_rollover_placeholder"][
+            "allowed_for_runtime"
+        ]
+        is False
+    )
+    assert source_by_id["news_events.event_schema_only"]["allowed_for_runtime"] is False
+
+    for source_id in RUNTIME_READY_SOURCE_IDS:
+        assert source_by_id[source_id]["allowed_for_runtime"] is True
+
+    for source_id, source in source_by_id.items():
+        if source_id not in RUNTIME_READY_SOURCE_IDS:
+            assert source["allowed_for_runtime"] is False
 
 
 def test_alignment_rules_enforce_availability_timestamp_and_no_default_forward_fill():
