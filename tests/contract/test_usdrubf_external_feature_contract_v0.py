@@ -257,6 +257,10 @@ def test_dependency_classification_preserves_mandatory_classes():
     assert "DXY" in dependency["requires_new_ingestion"]
     assert "oil proxy" in dependency["requires_new_ingestion"]
     assert "CNYRUB proxy" in dependency["requires_new_ingestion"]
+    assert dependency["blocked_by_data_coverage"] == [
+        "internal USDRUBF research feature coverage ends 2026-04-06 while labels "
+        "extend through 2026-06-26"
+    ]
 
 
 def test_forbidden_outputs_and_actions_are_represented():
