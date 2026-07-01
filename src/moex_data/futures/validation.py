@@ -6,7 +6,16 @@ from typing import Any, Final
 
 APPROVED_TIMEFRAMES: Final[tuple[str, ...]] = ("5m", "10m", "15m", "30m", "1h", "4h", "1D", "1W")
 DERIVED_TIMEFRAMES: Final[tuple[str, ...]] = ("10m", "15m", "30m", "1h", "4h", "1D", "1W")
-REQUIRED_IDENTIFIER_FIELDS: Final[tuple[str, ...]] = ("FAMILY", "SECID", "BOARD", "MARKET", "SERIES_TYPE")
+REQUIRED_IDENTIFIER_FIELDS: Final[tuple[str, ...]] = (
+    "INSTRUMENT_ID",
+    "SOURCE_ID",
+    "SECID",
+    "BOARD",
+    "MARKET",
+    "ENGINE",
+    "SERIES_TYPE",
+)
+LEGACY_IDENTIFIER_FIELDS: Final[tuple[str, ...]] = ("FAMILY", "SECID", "BOARD", "MARKET", "SERIES_TYPE")
 FORBIDDEN_PATH_MARKERS: Final[tuple[str, ...]] = ("latest", "current", "autodetect")
 FORBIDDEN_GLOB_MARKERS: Final[tuple[str, ...]] = ("*", "?", "[")
 ALLOWED_SERIES_TYPES: Final[frozenset[str]] = frozenset({"native", "continuous"})
@@ -18,11 +27,14 @@ class FuturesValidationError(ValueError):
 
 @dataclass(frozen=True)
 class FuturesInstrumentIdentity:
-    family: str
+    instrument_id: str
+    source_id: str
     secid: str
     board: str
     market: str
+    engine: str
     series_type: str
+    family: str | None = None
 
 
 @dataclass(frozen=True)
@@ -108,21 +120,51 @@ def guard_external_pattern(path_pattern: object, field_name: str = "path_pattern
     return value
 
 
-def validate_identifier_values(values: Mapping[str, object]) -> FuturesInstrumentIdentity:
-    values = require_mapping(values, "identifier")
+def _validate_canonical_identifier_values(values: Mapping[str, object]) -> FuturesInstrumentIdentity:
     missing = tuple(field for field in REQUIRED_IDENTIFIER_FIELDS if field not in values)
     if missing:
         raise FuturesValidationError("missing identifier field: " + missing[0])
     identity = FuturesInstrumentIdentity(
-        family=require_text(values["FAMILY"], "FAMILY"),
+        instrument_id=require_text(values["INSTRUMENT_ID"], "INSTRUMENT_ID"),
+        source_id=require_text(values["SOURCE_ID"], "SOURCE_ID"),
         secid=require_text(values["SECID"], "SECID"),
         board=require_text(values["BOARD"], "BOARD"),
         market=require_text(values["MARKET"], "MARKET"),
+        engine=require_text(values["ENGINE"], "ENGINE"),
         series_type=require_text(values["SERIES_TYPE"], "SERIES_TYPE"),
+        family=require_text(values["FAMILY"], "FAMILY") if "FAMILY" in values else None,
     )
     if identity.series_type not in ALLOWED_SERIES_TYPES:
         raise FuturesValidationError("SERIES_TYPE is unsupported")
     return identity
+
+
+def _validate_legacy_identifier_values(values: Mapping[str, object]) -> FuturesInstrumentIdentity:
+    missing = tuple(field for field in LEGACY_IDENTIFIER_FIELDS if field not in values)
+    if missing:
+        raise FuturesValidationError("missing identifier field: " + missing[0])
+    family = require_text(values["FAMILY"], "FAMILY")
+    secid = require_text(values["SECID"], "SECID")
+    identity = FuturesInstrumentIdentity(
+        instrument_id=family,
+        source_id=secid,
+        secid=secid,
+        board=require_text(values["BOARD"], "BOARD"),
+        market=require_text(values["MARKET"], "MARKET"),
+        engine=require_text(values["ENGINE"], "ENGINE") if "ENGINE" in values else "legacy",
+        series_type=require_text(values["SERIES_TYPE"], "SERIES_TYPE"),
+        family=family,
+    )
+    if identity.series_type not in ALLOWED_SERIES_TYPES:
+        raise FuturesValidationError("SERIES_TYPE is unsupported")
+    return identity
+
+
+def validate_identifier_values(values: Mapping[str, object]) -> FuturesInstrumentIdentity:
+    values = require_mapping(values, "identifier")
+    if "INSTRUMENT_ID" in values or "SOURCE_ID" in values:
+        return _validate_canonical_identifier_values(values)
+    return _validate_legacy_identifier_values(values)
 
 
 def validate_timeframe(value: object, *, derived_only: bool = False) -> str:
@@ -145,9 +187,12 @@ def validate_dataset_contract_values(values: Mapping[str, object]) -> FuturesDat
         raise FuturesValidationError("storage_root_ref must be MOEX_DATA_ROOT")
     path_pattern = guard_external_pattern(values.get("path_pattern"))
     partitioning = require_text_sequence(values.get("partitioning"), "partitioning")
-    required_identifiers = require_text_sequence(values.get("required_identifier_fields"), "required_identifier_fields")
-    if tuple(required_identifiers) != REQUIRED_IDENTIFIER_FIELDS:
-        raise FuturesValidationError("required identifier fields must match universal futures identity")
+    required_identifiers = ()
+    if "required_identifier_fields" in values:
+        required_identifiers = require_text_sequence(values.get("required_identifier_fields"), "required_identifier_fields")
+        allowed_identifier_sets = {REQUIRED_IDENTIFIER_FIELDS, LEGACY_IDENTIFIER_FIELDS}
+        if tuple(required_identifiers) not in allowed_identifier_sets:
+            raise FuturesValidationError("required identifier fields must match futures identity")
     timeframe = None
     if "timeframe" in values:
         timeframe = validate_timeframe(values.get("timeframe"))
