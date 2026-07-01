@@ -16,6 +16,13 @@ CONTRACT_IDS = (
     "futures_quality_report.v1",
     "futures_continuous_5m.v1",
 )
+FIXTURE_INSTRUMENT_ID = "forts.test.si"
+FIXTURE_SOURCE_ID = "moex_algopack_fo_tradestats_snapshot.v1"
+FIXTURE_SECID = "SiM6"
+FIXTURE_FAMILY = "Si"
+FIXTURE_MARKET = "FORTS"
+FIXTURE_BOARD = "RFUD"
+FIXTURE_ENGINE = "futures"
 
 
 def _dataset_id(contract_id: str) -> str:
@@ -24,7 +31,10 @@ def _dataset_id(contract_id: str) -> str:
 
 def _path_pattern(contract_id: str) -> str:
     if contract_id == "futures_raw_5m.v1":
-        return "${MOEX_DATA_ROOT}/futures/raw_5m/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
+        return (
+            "${MOEX_DATA_ROOT}/market/raw/timeframe=5m/"
+            "instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet"
+        )
     if contract_id == "futures_data_refresh_manifest.v1":
         return "${MOEX_DATA_ROOT}/futures/runs/raw_5m/trade_date={YYYY-MM-DD}/run_id={RUN_ID}/manifest.json"
     if contract_id == "futures_quality_report.v1":
@@ -98,17 +108,20 @@ def _call_kwargs(repo_root: Path, data_root: Path, trade_date: str) -> dict[str,
         "dataset_id": materializer.TARGET_DATASET_ID,
         "contract_id": materializer.TARGET_CONTRACT_ID,
         "trade_date": trade_date,
-        "family": materializer.TARGET_FAMILY,
-        "secid": materializer.TARGET_SECID,
+        "instrument_id": FIXTURE_INSTRUMENT_ID,
+        "source_id": FIXTURE_SOURCE_ID,
+        "secid": FIXTURE_SECID,
         "source_path": None,
         "run_id": "run_apim_explicit_date",
         "env": {"MOEX_DATA_ROOT": str(data_root), "MOEX_API_URL": "https://apim.moex.test", "MOEX_UA": "pytest"},
         "source_candidate": materializer.SOURCE_CANDIDATE_APIM_TRADESTATS,
         "source_endpoint": materializer.SOURCE_ENDPOINT_APIM_FO_TRADESTATS,
-        "market": materializer.TARGET_MARKET,
-        "board": materializer.TARGET_BOARD,
+        "market": FIXTURE_MARKET,
+        "board": FIXTURE_BOARD,
+        "engine": FIXTURE_ENGINE,
         "series_type": materializer.TARGET_SERIES_TYPE,
         "granularity": materializer.TARGET_GRANULARITY,
+        "family": FIXTURE_FAMILY,
         "timeout": 3.0,
         "apim_base_url": "https://apim.moex.test",
     }
@@ -133,8 +146,8 @@ def test_non_default_explicit_trade_date_materializes_contract_partition(tmp_pat
                 "data": {
                     "columns": ["tradedate", "tradetime", "secid", "pr_open", "pr_high", "pr_low", "pr_close", "vol", "val", "trades"],
                     "data": [
-                        [trade_date, "10:00:00", "SiM6", 100, 110, 99, 105, 10, 1000, 2],
-                        [trade_date, "10:05:00", "SiM6", 105, 111, 104, 108, 12, 1200, 3],
+                        [trade_date, "10:00:00", FIXTURE_SECID, 100, 110, 99, 105, 10, 1000, 2],
+                        [trade_date, "10:05:00", FIXTURE_SECID, 105, 111, 104, 108, 12, 1200, 3],
                     ],
                 }
             }
@@ -155,20 +168,26 @@ def test_non_default_explicit_trade_date_materializes_contract_partition(tmp_pat
         "date": trade_date,
         "from": trade_date,
         "till": trade_date,
-        "secid": "SiM6",
+        "secid": FIXTURE_SECID,
         "start": 0,
         "iss.meta": "off",
         "iss.only": "tradestats",
     }
+    assert "instrument_id=forts.test.si" in result.partition_path.as_posix()
     assert "trade_date=2026-06-03" in result.partition_path.as_posix()
+    assert "source=moex_algopack_fo_tradestats_snapshot.v1" in result.partition_path.as_posix()
     partition = pd.read_parquet(result.partition_path)
     assert set(partition["trade_date"]) == {trade_date}
-    assert set(partition["secid"]) == {"SiM6"}
+    assert set(partition["instrument_id"]) == {FIXTURE_INSTRUMENT_ID}
+    assert set(partition["source_id"]) == {FIXTURE_SOURCE_ID}
+    assert set(partition["secid"]) == {FIXTURE_SECID}
     quality_report = json.loads(result.quality_report_path.read_text(encoding="utf-8"))
     assert quality_report["rows"][0]["quality_status"] == "pass"
     assert quality_report["rows"][0]["trade_date"] == trade_date
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
     assert manifest["source_contract"]["trade_date"] == trade_date
+    assert manifest["source_contract"]["instrument_id"] == FIXTURE_INSTRUMENT_ID
+    assert manifest["source_contract"]["source_id"] == FIXTURE_SOURCE_ID
     assert manifest["source_contract"]["source_fetch_mode"] == "declared_apim_tradestats"
 
 
@@ -181,14 +200,17 @@ def test_non_explicit_trade_date_fails_closed(tmp_path):
             dataset_id=materializer.TARGET_DATASET_ID,
             contract_id=materializer.TARGET_CONTRACT_ID,
             trade_date="2026-06",
-            family=materializer.TARGET_FAMILY,
-            secid=materializer.TARGET_SECID,
+            instrument_id=FIXTURE_INSTRUMENT_ID,
+            source_id=FIXTURE_SOURCE_ID,
+            secid=FIXTURE_SECID,
             source_path=None,
             run_id="run_bad_date",
             source_candidate=materializer.SOURCE_CANDIDATE_APIM_TRADESTATS,
             source_endpoint=materializer.SOURCE_ENDPOINT_APIM_FO_TRADESTATS,
-            market=materializer.TARGET_MARKET,
-            board=materializer.TARGET_BOARD,
+            market=FIXTURE_MARKET,
+            board=FIXTURE_BOARD,
+            engine=FIXTURE_ENGINE,
             series_type=materializer.TARGET_SERIES_TYPE,
             granularity=materializer.TARGET_GRANULARITY,
+            family=FIXTURE_FAMILY,
         )
