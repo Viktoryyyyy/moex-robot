@@ -8,7 +8,7 @@ consumers:
 format: json
 schema_version: futures_data_refresh_manifest.v1
 storage_root_ref: MOEX_DATA_ROOT
-path_pattern: "${MOEX_DATA_ROOT}/futures/runs/refresh/run_date={YYYY-MM-DD}/run_id={RUN_ID}/manifest.json"
+path_pattern: "${MOEX_DATA_ROOT}/state/refresh/run_date={YYYY-MM-DD}/run_id={RUN_ID}/manifest.json"
 partitioning:
   - run_date
   - run_id
@@ -20,7 +20,7 @@ required_fields:
   - run_date
   - requested_from
   - requested_till
-  - family_scope
+  - instrument_scope
   - dataset_contract_refs
   - partitions_written
   - partitions_skipped
@@ -28,10 +28,14 @@ required_fields:
   - refresh_status
   - started_at
   - finished_at
+  - source_contract
 allowed_refresh_status:
   - succeeded
   - failed
   - partial
+identity_model:
+  canonical_identity_field: instrument_id
+  family_scope_allowed: false
 path_rules:
   storage_root: env_contract
   hardcoded_server_path_allowed: false
