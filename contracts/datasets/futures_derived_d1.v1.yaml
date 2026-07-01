@@ -9,22 +9,22 @@ consumers:
 format: parquet
 schema_version: futures_derived_d1.v1
 storage_root_ref: MOEX_DATA_ROOT
-path_pattern: "${MOEX_DATA_ROOT}/futures/derived_d1/series_type={SERIES_TYPE}/family={FAMILY}/part.parquet"
+path_pattern: "${MOEX_DATA_ROOT}/futures/derived_d1/instrument_id={INSTRUMENT_ID}/series_type={SERIES_TYPE}/part.parquet"
 partitioning:
+  - instrument_id
   - series_type
-  - family
 grain: d1_bar
 source_contracts:
   - futures_raw_5m.v1
   - futures_continuous_5m.v1
 primary_key:
   - trade_date
-  - symbol
+  - instrument_id
   - series_type
 required_columns:
   - trade_date
+  - instrument_id
   - symbol
-  - family
   - series_type
   - open
   - high
@@ -39,7 +39,7 @@ quality_checks:
   - non_null_ohlc
   - high_ge_low
   - no_future_source_rows
-  - duplicate_trade_date_symbol_count
+  - duplicate_trade_date_instrument_id_series_type_count
 path_rules:
   storage_root: env_contract
   hardcoded_server_path_allowed: false
