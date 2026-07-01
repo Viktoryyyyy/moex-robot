@@ -7,21 +7,32 @@ consumers:
 format: parquet
 schema_version: futures_futoi_raw.v1
 storage_root_ref: MOEX_DATA_ROOT
-path_pattern: ${MOEX_DATA_ROOT}/futures/futoi_raw/family={FAMILY}/secid={SECID}/board={BOARD}/market={MARKET}/series_type={SERIES_TYPE}/trade_date={TRADE_DATE}/part.parquet
+path_pattern: "${MOEX_DATA_ROOT}/market/supplementary/dataset_id=futures_futoi_raw/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet"
 partitioning:
-  - FAMILY
-  - SECID
-  - BOARD
-  - MARKET
-  - SERIES_TYPE
-  - TRADE_DATE
+  - dataset_id
+  - instrument_id
+  - trade_date
+  - source_id
 grain: futoi_observation
+identity_model:
+  canonical_identity_field: instrument_id
+  source_identity_fields:
+    - secid
+    - board
+    - market
+    - engine
+  optional_source_grouping_fields:
+    - family
+  family_as_canonical_identity_allowed: false
 required_identifier_fields:
   - FAMILY
   - SECID
   - BOARD
   - MARKET
   - SERIES_TYPE
+availability:
+  availability_timestamp_required: true
+  source_id_required: true
 path_rules:
   storage_root: env_contract
   hardcoded_server_path_allowed: false

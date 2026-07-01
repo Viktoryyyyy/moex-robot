@@ -19,6 +19,8 @@ CONTROLLED_READ_SOURCE_PATHS = (
     "src/moex_data/futures/contract_io.py",
     "src/moex_data/futures/controlled_read.py",
 )
+_CANONICAL_INSTRUMENT_ID = "forts.test.si"
+_CANONICAL_SOURCE_ID = "moex_algopack_fo_tradestats_snapshot.v1"
 
 
 def _plan(**overrides: object) -> ControlledReadPlan:
@@ -28,9 +30,20 @@ def _plan(**overrides: object) -> ControlledReadPlan:
         "family": "Si",
         "secid": "SiM6",
         "trade_date": "2026-06-02",
+        "instrument_id": _CANONICAL_INSTRUMENT_ID,
+        "source_id": _CANONICAL_SOURCE_ID,
     }
     values.update(overrides)
     return ControlledReadPlan(**values)
+
+
+def _raw_path(root: Path, trade_date: str = "2026-06-02") -> Path:
+    return root / (
+        "market/raw/timeframe=5m/"
+        f"instrument_id={_CANONICAL_INSTRUMENT_ID}/"
+        f"trade_date={trade_date}/"
+        f"source={_CANONICAL_SOURCE_ID}/part.parquet"
+    )
 
 
 def _token(*codes: int) -> str:
@@ -88,9 +101,7 @@ def test_explicit_env_rooted_path_expansion_works(tmp_path):
 
     paths = controlled_read_paths(package, _plan(), env={"MOEX_DATA_ROOT": str(tmp_path)})
 
-    assert paths == (
-        tmp_path / "futures/raw_5m/trade_date=2026-06-02/family=Si/secid=SiM6/part.parquet",
-    )
+    assert paths == (_raw_path(tmp_path),)
 
 
 def test_controlled_probe_returns_blocked_no_server_artifact_when_missing(tmp_path):
@@ -102,7 +113,7 @@ def test_controlled_probe_returns_blocked_no_server_artifact_when_missing(tmp_pa
 
 
 def test_controlled_probe_returns_available_for_existing_explicit_artifact(tmp_path):
-    target = tmp_path / "futures/raw_5m/trade_date=2026-06-02/family=Si/secid=SiM6/part.parquet"
+    target = _raw_path(tmp_path)
     target.parent.mkdir(parents=True)
     target.write_bytes(b"PAR1")
 
@@ -186,8 +197,8 @@ def test_bounded_date_range_uses_explicit_contract_expansion(tmp_path):
     )
 
     assert len(paths) == 3
-    assert paths[0].as_posix().endswith("trade_date=2026-06-01/family=Si/secid=SiM6/part.parquet")
-    assert paths[-1].as_posix().endswith("trade_date=2026-06-03/family=Si/secid=SiM6/part.parquet")
+    assert paths[0] == _raw_path(tmp_path, "2026-06-01")
+    assert paths[-1] == _raw_path(tmp_path, "2026-06-03")
 
 
 def test_no_forbidden_imports_in_controlled_read_boundary():

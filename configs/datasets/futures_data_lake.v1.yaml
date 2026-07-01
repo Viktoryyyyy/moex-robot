@@ -1,6 +1,7 @@
 config_id: futures_data_lake.v1
 artifact_class: repo_relative
 repo_path: configs/datasets/futures_data_lake.v1.yaml
+architecture_contract_ref: contracts/architecture/moex_data_access_canon_v1.yaml
 external_storage_root:
   artifact_id: moex_data_root
   artifact_class: env_contract
@@ -32,9 +33,9 @@ instrument_registry_ref:
   registry_id: forts_instrument_registry.v1
   repo_path: configs/instruments/forts_instrument_registry.v1.yaml
 instrument_scope:
-  default_instrument_ids:
-    - forts.usdrubf
+  default_instrument_ids: []
   explicit_instrument_id_required: true
+  explicit_source_id_required: true
   explicit_secid_required: true
   legacy_family_allowlist_allowed: false
   materialization_without_registry_entry_allowed: false
