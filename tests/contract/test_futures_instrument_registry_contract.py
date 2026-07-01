@@ -6,8 +6,8 @@ from moex_data.futures.validation import FuturesValidationError, REQUIRED_IDENTI
 
 def _identity(**overrides):
     values = {
-        "FAMILY": "TEST_FAMILY_A",
-        "SECID": "TEST_CONTRACT_A",
+        "INSTRUMENT_ID": "fixture.instrument.a",
+        "SECID": "FIXTURE_A",
         "BOARD": "RFUD",
         "MARKET": "FORTS",
         "SERIES_TYPE": "native",
@@ -20,17 +20,23 @@ def _registry(*items):
     return {"registry_id": "futures_instrument_registry.v1", "instruments": tuple(items or (_identity(),))}
 
 
-def test_registry_accepts_universal_identifier_fields():
+def test_registry_accepts_generic_identifier_fields():
     registry = validate_futures_instrument_registry_values(_registry())
 
     assert registry.registry_id == "futures_instrument_registry.v1"
     assert len(registry.instruments) == 1
-    assert tuple(REQUIRED_IDENTIFIER_FIELDS) == ("FAMILY", "SECID", "BOARD", "MARKET", "SERIES_TYPE")
-    assert registry.instruments[0].family == "TEST_FAMILY_A"
+    assert tuple(REQUIRED_IDENTIFIER_FIELDS) == ("INSTRUMENT_ID", "SECID", "BOARD", "MARKET", "SERIES_TYPE")
+    assert registry.instruments[0].instrument_id == "fixture.instrument.a"
     assert registry.instruments[0].series_type == "native"
 
 
-@pytest.mark.parametrize("field_name", ("FAMILY", "SECID", "BOARD", "MARKET", "SERIES_TYPE"))
+def test_generic_registry_allows_empty_declaration_set():
+    registry = validate_futures_instrument_registry_values({"registry_id": "futures_instrument_registry.v1", "instruments": ()})
+
+    assert registry.instruments == ()
+
+
+@pytest.mark.parametrize("field_name", ("INSTRUMENT_ID", "SECID", "BOARD", "MARKET", "SERIES_TYPE"))
 def test_registry_rejects_missing_required_identifier(field_name):
     values = _identity()
     values.pop(field_name)
