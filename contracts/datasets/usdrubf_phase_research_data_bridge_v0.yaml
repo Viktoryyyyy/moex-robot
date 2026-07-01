@@ -1,0 +1,118 @@
+contract_id: usdrubf_phase_research_data_bridge_v0
+contract_version: 0
+project: MOEX Bot
+lane: ema_3_19_ai
+created_at: "2026-06-30"
+purpose: Explicit transition boundary for USDRUBF phase research data from legacy repo-relative CSV compatibility to canonical external Parquet dataset contracts.
+
+identity:
+  contract_id: usdrubf_phase_research_data_bridge_v0
+  status: design_bridge_only
+  project: MOEX Bot
+  lane: ema_3_19_ai
+  instrument: USDRUBF
+  family: Si
+
+readiness_claims:
+  runtime_readiness_claim: false
+  ingestion_implemented: false
+  data_artifacts_generated: false
+  feature_builders_migrated: false
+  server_materialized: false
+  backtest_run: false
+  model_training_run: false
+
+bridge_purpose:
+  - explicit_transition_boundary
+  - legacy_csv_compatibility_only
+  - canonical_external_parquet_for_new_data
+
+canonical_refs:
+  raw_5m_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
+  derived_d1_contract_ref: contracts/datasets/futures_derived_d1.v1.yaml
+
+legacy_compatibility_ref:
+  dataset_contract_ref: contracts/datasets/research_usdrubf_5m_full_history.json
+  locator_ref: data/master/usdrubf_5m_2022-04-26_2026-04-06.csv
+  role: compatibility_only
+  canonical_for_new_data: false
+
+canonical_raw_5m_locator_rules:
+  pattern: "${MOEX_DATA_ROOT}/futures/raw_5m/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
+  required_bindings:
+    - MOEX_DATA_ROOT
+    - trade_date
+    - family
+    - secid
+  placeholder_binding_map:
+    MOEX_DATA_ROOT: MOEX_DATA_ROOT
+    YYYY-MM-DD: trade_date
+    FAMILY: family
+    SECID: secid
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+
+canonical_derived_d1_locator_rules:
+  pattern: "${MOEX_DATA_ROOT}/futures/derived_d1/series_type={SERIES_TYPE}/family={FAMILY}/part.parquet"
+  required_bindings:
+    - MOEX_DATA_ROOT
+    - series_type
+    - family
+  placeholder_binding_map:
+    MOEX_DATA_ROOT: MOEX_DATA_ROOT
+    SERIES_TYPE: series_type
+    FAMILY: family
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+
+no_fallback_policy:
+  implicit_fallback_from_parquet_to_csv: forbidden
+  implicit_fallback_from_missing_partition_to_legacy_csv: forbidden
+  latest_current_autodetect_glob_locators: forbidden
+  missing_partition_behavior: fail_closed
+  legacy_csv_use: explicitly_declared_legacy_consumers_only
+
+availability_rules:
+  raw_5m_rows_available_after: actual_source_ingestion_timestamp
+  derived_d1_known_by_when: D close after finalized D1 bar
+  derived_d1_earliest_executable_point: D+1 open
+  manual_phase_labels_runtime_feature: false
+  future_derived_targets_runtime_feature: false
+
+quality_rules:
+  raw_5m_checks:
+    - non_null_ohlc
+    - high_ge_low
+    - open_high_low_close_inside_range
+    - duplicate_ts_secid_count
+    - monotonic_ts_by_secid
+  derived_d1_checks:
+    - non_null_ohlc
+    - high_ge_low
+    - no_future_source_rows
+    - duplicate_trade_date_symbol_count
+  bridge_quality_report_fields:
+    - coverage_start
+    - coverage_end
+    - missing_trade_dates
+    - source_contract_refs
+    - build_ts
+    - input_manifest_ref
+    - raw_quality_report_ref
+    - derived_quality_report_ref
+
+migration_policy:
+  legacy_contract_remains_unchanged_initially: true
+  future_consumers_must_explicitly_reference_bridge: true
+  feature_contract_migration_required_later: true
+  server_materialization_required_later: true
+  validation_required_before_research_enablement: true
+
+forbidden_now:
+  - modifying legacy CSV locator contract
+  - modifying feature contracts
+  - generating data artifacts
+  - server execution
+  - runtime
+  - backtest
+  - model training
