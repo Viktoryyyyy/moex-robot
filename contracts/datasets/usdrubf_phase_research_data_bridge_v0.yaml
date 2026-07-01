@@ -44,6 +44,11 @@ canonical_raw_5m_locator_rules:
     - trade_date
     - family
     - secid
+  placeholder_binding_map:
+    MOEX_DATA_ROOT: MOEX_DATA_ROOT
+    YYYY-MM-DD: trade_date
+    FAMILY: family
+    SECID: secid
   hardcoded_server_path_allowed: false
   implicit_file_selection_allowed: false
 
@@ -53,6 +58,10 @@ canonical_derived_d1_locator_rules:
     - MOEX_DATA_ROOT
     - series_type
     - family
+  placeholder_binding_map:
+    MOEX_DATA_ROOT: MOEX_DATA_ROOT
+    SERIES_TYPE: series_type
+    FAMILY: family
   hardcoded_server_path_allowed: false
   implicit_file_selection_allowed: false
 
