@@ -1,6 +1,6 @@
 registry_id: forts_instrument_registry.v1
 schema_version: instrument_registry.v1
-status: target_declaration
+status: generic_registry_contract
 activation_status: repo_only
 scope_policy:
   explicit_instrument_id_required: true
@@ -9,22 +9,7 @@ scope_policy:
   latest_autodetect_allowed: false
   implicit_contract_selection_allowed: false
   unresolved_instrument_blocks_materialization: true
-instruments:
-  - instrument_id: forts.usdrubf
-    canonical_symbol: USDRUBF
-    display_name: USDRUBF
-    market: FORTS
-    board: RFUD
-    secid: USDRUBF
-    source_artifact_id: external.apim.fo.tradestats.v1
-    raw_5m_artifact_id: dataset.forts.raw_5m.tradestats.v1
-    enabled_for_raw_5m_materialization: true
-    enabled_for_d1_derivation: false
-    enabled_for_research: false
-    storage_partition_values:
-      instrument_id: forts.usdrubf
-      secid: USDRUBF
-    evidence_status: pilot_required
+instruments: []
 rules:
   storage_partition_key: instrument_id
   secid_partition_key: secid
@@ -32,7 +17,7 @@ rules:
   default_family_allowlist_allowed: false
   materialization_without_registry_entry_allowed: false
   accepted_pointer_scope_strategy: per_instrument
-  accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/artifact_id=dataset.forts.raw_5m.tradestats.v1/instrument_id={INSTRUMENT_ID}/secid={SECID}/current_accepted_manifest.json"
+  accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/artifact_id={RAW_5M_ARTIFACT_ID}/instrument_id={INSTRUMENT_ID}/secid={SECID}/current_accepted_manifest.json"
   registry_entry_must_define:
     - instrument_id
     - canonical_symbol
