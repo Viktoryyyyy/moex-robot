@@ -8,22 +8,24 @@ consumers:
 format: parquet
 schema_version: futures_raw_5m.v1
 storage_root_ref: MOEX_DATA_ROOT
-path_pattern: "${MOEX_DATA_ROOT}/futures/raw_5m/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
+path_pattern: "${MOEX_DATA_ROOT}/futures/raw_5m/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/secid={SECID}/part.parquet"
 partitioning:
+  - instrument_id
   - trade_date
-  - family
   - secid
 grain: 5m_bar
 primary_key:
+  - instrument_id
   - ts
   - secid
 required_columns:
+  - instrument_id
   - trade_date
   - ts
   - session_date
   - secid
-  - family
   - board
+  - market
   - open
   - high
   - low
@@ -33,33 +35,30 @@ required_columns:
   - num_trades
   - source
   - ingest_ts
-controlled_native_5m_materialization:
+native_5m_materialization:
   producer: moex_data.futures.materialize_raw_5m
   source_candidate: MOEX_ALGOPACK_FO_TRADESTATS
   source_endpoint: /iss/datashop/algopack/fo/tradestats.json
   endpoint_base_env_var: MOEX_API_URL
   fallback_endpoints_allowed: false
-  market: FORTS
-  board: RFUD
-  family: Si
-  secid: SiM6
+  instrument_id: explicit_input
+  secid: explicit_input
   trade_date_binding: explicit_cli_argument
-  example_trade_date: "2026-06-02"
   granularity: 5m
   series_type: native
   query_params:
     date: "{YYYY-MM-DD}"
     from: "{YYYY-MM-DD}"
     till: "{YYYY-MM-DD}"
-    secid: SiM6
+    secid: "{SECID}"
     start: "0"
     iss.meta: "off"
     iss.only: tradestats
   required_contract_inputs:
     - MOEX_DATA_ROOT
+    - instrument_id
     - market
     - board
-    - family
     - secid
     - trade_date
     - series_type
@@ -78,8 +77,8 @@ quality_checks:
   - non_null_ohlc
   - high_ge_low
   - open_high_low_close_inside_range
-  - duplicate_ts_secid_count
-  - monotonic_ts_by_secid
+  - duplicate_instrument_ts_secid_count
+  - monotonic_ts_by_instrument_id_and_secid
 path_rules:
   storage_root: env_contract
   hardcoded_server_path_allowed: false
