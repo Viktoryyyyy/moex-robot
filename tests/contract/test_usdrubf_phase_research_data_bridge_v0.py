@@ -25,6 +25,9 @@ FORBIDDEN_LITERAL_PATH_FRAGMENTS = [
 ]
 
 
+PLACEHOLDER_RE = re.compile(r"\$\{(?P<env>[A-Z0-9_]+)\}|\{(?P<braced>[^{}]+)\}")
+
+
 def load_contract_text():
     return CONTRACT_PATH.read_text(encoding="utf-8")
 
@@ -66,6 +69,39 @@ def list_items(text, key):
         for line in match.group("body").splitlines()
         if "- " in line
     ]
+
+
+def mapping_items(text, key):
+    match = re.search(
+        rf"^\s*{re.escape(key)}:\s*\n(?P<body>(?:\s{{4}}[A-Za-z0-9_-]+:\s*.+\n)+)",
+        text,
+        re.MULTILINE,
+    )
+    assert match is not None, f"Missing mapping key: {key}"
+    mapping = {}
+    for line in match.group("body").splitlines():
+        placeholder, binding = line.strip().split(":", 1)
+        mapping[placeholder.strip()] = binding.strip()
+    return mapping
+
+
+def placeholders_from_pattern(pattern):
+    placeholders = set()
+    for match in PLACEHOLDER_RE.finditer(pattern):
+        placeholders.add(match.group("env") or match.group("braced"))
+    return placeholders
+
+
+def assert_placeholder_bindings_are_explicit(locator_rules):
+    pattern = scalar_value(locator_rules, "pattern")
+    required_bindings = set(list_items(locator_rules, "required_bindings"))
+    placeholder_map = mapping_items(locator_rules, "placeholder_binding_map")
+    placeholders = placeholders_from_pattern(pattern)
+
+    assert placeholders
+    assert placeholders == set(placeholder_map)
+    assert set(placeholder_map.values()).issubset(required_bindings)
+
 
 
 def test_contract_identity_and_design_bridge_status():
@@ -121,6 +157,13 @@ def test_canonical_raw_5m_locator_is_external_parquet_pattern():
         "family",
         "secid",
     ]
+    assert mapping_items(raw_rules, "placeholder_binding_map") == {
+        "MOEX_DATA_ROOT": "MOEX_DATA_ROOT",
+        "YYYY-MM-DD": "trade_date",
+        "FAMILY": "family",
+        "SECID": "secid",
+    }
+    assert_placeholder_bindings_are_explicit(raw_rules)
     assert scalar_value(raw_rules, "hardcoded_server_path_allowed") is False
     assert scalar_value(raw_rules, "implicit_file_selection_allowed") is False
 
@@ -139,6 +182,12 @@ def test_canonical_derived_d1_locator_is_external_parquet_pattern():
         "series_type",
         "family",
     ]
+    assert mapping_items(derived_rules, "placeholder_binding_map") == {
+        "MOEX_DATA_ROOT": "MOEX_DATA_ROOT",
+        "SERIES_TYPE": "series_type",
+        "FAMILY": "family",
+    }
+    assert_placeholder_bindings_are_explicit(derived_rules)
     assert scalar_value(derived_rules, "hardcoded_server_path_allowed") is False
     assert scalar_value(derived_rules, "implicit_file_selection_allowed") is False
 
