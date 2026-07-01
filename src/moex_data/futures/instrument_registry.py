@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from .validation import FuturesInstrumentIdentity, FuturesValidationError, validate_identifier_values
@@ -19,14 +19,20 @@ def validate_futures_instrument_registry_values(values: Mapping[str, object]) ->
     if not isinstance(registry_id, str) or not registry_id.strip():
         raise FuturesValidationError("registry_id is required")
     raw_items = values.get("instruments")
-    if not isinstance(raw_items, tuple):
-        raise FuturesValidationError("instruments must be a tuple")
+    if isinstance(raw_items, str) or not isinstance(raw_items, Sequence):
+        raise FuturesValidationError("instruments must be a sequence")
     items = tuple(validate_identifier_values(item) for item in raw_items)
-    if not items:
-        raise FuturesValidationError("instruments must be non-empty")
     seen = set()
     for item in items:
-        key = (item.family, item.secid, item.board, item.market, item.series_type)
+        key = (
+            item.instrument_id,
+            item.source_id,
+            item.secid,
+            item.board,
+            item.market,
+            item.engine,
+            item.series_type,
+        )
         if key in seen:
             raise FuturesValidationError("duplicate identity")
         seen.add(key)
