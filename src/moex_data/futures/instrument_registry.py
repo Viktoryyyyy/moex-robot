@@ -22,11 +22,17 @@ def validate_futures_instrument_registry_values(values: Mapping[str, object]) ->
     if not isinstance(raw_items, tuple):
         raise FuturesValidationError("instruments must be a tuple")
     items = tuple(validate_identifier_values(item) for item in raw_items)
-    if not items:
-        raise FuturesValidationError("instruments must be non-empty")
     seen = set()
     for item in items:
-        key = (item.family, item.secid, item.board, item.market, item.series_type)
+        key = (
+            item.instrument_id,
+            item.source_id,
+            item.secid,
+            item.board,
+            item.market,
+            item.engine,
+            item.series_type,
+        )
         if key in seen:
             raise FuturesValidationError("duplicate identity")
         seen.add(key)
