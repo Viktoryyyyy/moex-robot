@@ -46,12 +46,16 @@ required_source_columns:
   - trades
   - SYSTIME
 field_mapping_to_futures_raw_5m:
+  instrument_id: forts.test.si
   trade_date: tradedate
   ts: tradedate + tradetime
   session_date: tradedate
   secid: secid
   family: asset_code
   board: RFUD
+  market: FORTS
+  engine: stock
+  source_id: moex_algopack_fo_tradestats_snapshot.v1
   open: pr_open
   high: pr_high
   low: pr_low
