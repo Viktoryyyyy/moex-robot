@@ -25,13 +25,11 @@ identity_model:
     - family
   family_as_canonical_identity_allowed: false
 required_identifier_fields:
-  - instrument_id
-  - source_id
-  - secid
-  - board
-  - market
-  - engine
-  - trade_date
+  - FAMILY
+  - SECID
+  - BOARD
+  - MARKET
+  - SERIES_TYPE
 availability:
   availability_timestamp_required: true
   source_id_required: true
