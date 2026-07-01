@@ -41,8 +41,8 @@ instrument_scope:
   materialization_without_registry_entry_allowed: false
   default_granularity: 5m
   materialized_timeframes:
-    - 1D
-    - 1W
+    - D1
+    - W1
   on_demand_timeframes:
     - 15m
     - 30m
@@ -54,4 +54,3 @@ path_rules:
   external_root_source: env_contract
   hardcoded_server_path_allowed: false
   implicit_file_selection_allowed: false
-  latest_autodetect_allowed: false
