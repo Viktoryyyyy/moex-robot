@@ -25,15 +25,24 @@ rules:
   registry_entry_must_define:
     - instrument_id
     - canonical_symbol
+    - display_name
     - source_system
     - source_id
     - secid
     - board
     - market
     - engine
+    - source_artifact_id
+    - raw_5m_artifact_id
     - enabled_for_loading
     - enabled_for_update
     - enabled_for_retrieval
+    - enabled_for_raw_5m_materialization
+    - enabled_for_d1_derivation
+    - enabled_for_research
+    - storage_partition_values.instrument_id
+    - storage_partition_values.secid
+    - evidence_status
   raw_5m_onboarding_required_steps:
     - add_registry_entry
     - run_one_date_pilot_materialization
