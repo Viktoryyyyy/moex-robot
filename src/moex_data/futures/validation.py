@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Final
 
 APPROVED_TIMEFRAMES: Final[tuple[str, ...]] = ("5m", "10m", "15m", "30m", "1h", "4h", "1D", "1W")
 DERIVED_TIMEFRAMES: Final[tuple[str, ...]] = ("10m", "15m", "30m", "1h", "4h", "1D", "1W")
@@ -27,14 +27,20 @@ class FuturesValidationError(ValueError):
 
 @dataclass(frozen=True)
 class FuturesInstrumentIdentity:
-    instrument_id: str
-    source_id: str
+    family: str | None
     secid: str
     board: str
     market: str
-    engine: str
     series_type: str
-    family: str | None = None
+    instrument_id: str | None = None
+    source_id: str | None = None
+    engine: str = "legacy"
+
+    def __post_init__(self) -> None:
+        if self.instrument_id is None:
+            object.__setattr__(self, "instrument_id", self.family or self.secid)
+        if self.source_id is None:
+            object.__setattr__(self, "source_id", self.secid)
 
 
 @dataclass(frozen=True)
@@ -125,14 +131,14 @@ def _validate_canonical_identifier_values(values: Mapping[str, object]) -> Futur
     if missing:
         raise FuturesValidationError("missing identifier field: " + missing[0])
     identity = FuturesInstrumentIdentity(
-        instrument_id=require_text(values["INSTRUMENT_ID"], "INSTRUMENT_ID"),
-        source_id=require_text(values["SOURCE_ID"], "SOURCE_ID"),
+        family=require_text(values["FAMILY"], "FAMILY") if "FAMILY" in values else None,
         secid=require_text(values["SECID"], "SECID"),
         board=require_text(values["BOARD"], "BOARD"),
         market=require_text(values["MARKET"], "MARKET"),
-        engine=require_text(values["ENGINE"], "ENGINE"),
         series_type=require_text(values["SERIES_TYPE"], "SERIES_TYPE"),
-        family=require_text(values["FAMILY"], "FAMILY") if "FAMILY" in values else None,
+        instrument_id=require_text(values["INSTRUMENT_ID"], "INSTRUMENT_ID"),
+        source_id=require_text(values["SOURCE_ID"], "SOURCE_ID"),
+        engine=require_text(values["ENGINE"], "ENGINE"),
     )
     if identity.series_type not in ALLOWED_SERIES_TYPES:
         raise FuturesValidationError("SERIES_TYPE is unsupported")
@@ -143,17 +149,13 @@ def _validate_legacy_identifier_values(values: Mapping[str, object]) -> FuturesI
     missing = tuple(field for field in LEGACY_IDENTIFIER_FIELDS if field not in values)
     if missing:
         raise FuturesValidationError("missing identifier field: " + missing[0])
-    family = require_text(values["FAMILY"], "FAMILY")
-    secid = require_text(values["SECID"], "SECID")
     identity = FuturesInstrumentIdentity(
-        instrument_id=family,
-        source_id=secid,
-        secid=secid,
+        family=require_text(values["FAMILY"], "FAMILY"),
+        secid=require_text(values["SECID"], "SECID"),
         board=require_text(values["BOARD"], "BOARD"),
         market=require_text(values["MARKET"], "MARKET"),
-        engine=require_text(values["ENGINE"], "ENGINE") if "ENGINE" in values else "legacy",
         series_type=require_text(values["SERIES_TYPE"], "SERIES_TYPE"),
-        family=family,
+        engine=require_text(values["ENGINE"], "ENGINE") if "ENGINE" in values else "legacy",
     )
     if identity.series_type not in ALLOWED_SERIES_TYPES:
         raise FuturesValidationError("SERIES_TYPE is unsupported")
