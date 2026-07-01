@@ -33,7 +33,7 @@ instrument_registry_ref:
   repo_path: configs/instruments/forts_instrument_registry.v1.yaml
 instrument_scope:
   default_instrument_ids:
-    - forts.usdrubf
+    - explicit_instrument_required_no_default
   explicit_instrument_id_required: true
   explicit_secid_required: true
   legacy_family_allowlist_allowed: false
