@@ -16,6 +16,24 @@ CANONICAL_SYMBOL = "SiM6"
 
 def _write_d1_ready_contract_package(repo_root):
     _write_contract_package(repo_root)
+    (repo_root / "contracts" / "datasets" / "futures_derived_d1.v1.yaml").write_text(
+        """
+contract_id: futures_derived_d1.v1
+dataset_id: futures_derived_d1
+artifact_class: external_pattern
+producer: moex_data.futures.resampler
+consumers:
+  - test
+format: parquet
+schema_version: futures_derived_d1.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/market/derived/timeframe=1D/instrument_id={INSTRUMENT_ID}/part.parquet"
+partitioning:
+  - timeframe
+  - instrument_id
+""".lstrip(),
+        encoding="utf-8",
+    )
 
 
 def _raw_partition_path(data_root, trade_date):
