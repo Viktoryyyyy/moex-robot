@@ -1,3 +1,4 @@
+from . import resampler_compat as resampler
 from .config import FuturesConfigValidationError, validate_futures_data_lake_config_values
 from .contract_io import (
     FuturesContractIoError,
@@ -86,6 +87,7 @@ __all__ = (
     "load_simple_yaml_mapping",
     "materialization_target_paths",
     "materialize_single_raw_5m_partition",
+    "resampler",
     "validate_dataset_contract_set",
     "validate_dataset_contract_values",
     "validate_futures_data_lake_config_values",
