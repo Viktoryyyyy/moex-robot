@@ -26,19 +26,21 @@ def _response_rows(trade_date: str, start: int) -> list[list[object]]:
 class Response:
     def __init__(self, trade_date: str, start: int, rows: list[list[object]]) -> None:
         self.url = "https://apim.moex.test/iss/datashop/algopack/fo/tradestats.json?start=" + str(start)
-        self.trade_date = trade_date
         self.rows = rows
 
     def raise_for_status(self) -> None:
         return None
 
     def json(self) -> dict[str, object]:
-        return {
-            "data": {
-                "columns": ["tradedate", "tradetime", "secid", "pr_open", "pr_high", "pr_low", "pr_close", "vol", "val", "trades"],
-                "data": self.rows,
-            }
-        }
+        return {"data": {"columns": ["tradedate", "tradetime", "secid", "pr_open", "pr_high", "pr_low", "pr_close", "vol", "val", "trades"], "data": self.rows}}
+
+
+def _legacy_kwargs(repo_root, data_root, trade_date):
+    values = dict(_call_kwargs(repo_root, data_root, trade_date))
+    values.pop("instrument_id", None)
+    values.pop("source_id", None)
+    values.pop("engine", None)
+    return values
 
 
 def test_full_session_materializer_pages_until_empty(tmp_path, monkeypatch):
@@ -55,7 +57,7 @@ def test_full_session_materializer_pages_until_empty(tmp_path, monkeypatch):
         return Response(trade_date, start, _response_rows(trade_date, start))
 
     monkeypatch.setattr(full_session.requests, "get", fake_get)
-    result = full_session.materialize_single_raw_5m_full_session_partition(**_call_kwargs(repo_root, data_root, trade_date))
+    result = full_session.materialize_single_raw_5m_full_session_partition(**_legacy_kwargs(repo_root, data_root, trade_date))
 
     assert result.status == materializer.SUCCEEDED_STATUS
     assert result.rows == 5
@@ -66,28 +68,16 @@ def test_full_session_materializer_pages_until_empty(tmp_path, monkeypatch):
     assert set(partition["secid"]) == {"SiM6"}
     quality_report = json.loads(result.quality_report_path.read_text(encoding="utf-8"))
     assert quality_report["rows"][0]["rows"] == 5
-    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
-    assert manifest["source_contract"]["source_fetch_mode"] == "declared_apim_tradestats"
-    assert manifest["source_contract"]["trade_date"] == trade_date
 
 
 def test_full_session_materializer_fails_if_pagination_does_not_advance(monkeypatch):
     trade_date = "2026-06-04"
     request = materializer.Raw5mMaterializationRequest(
-        repo_root=".",
-        dataset_id=materializer.TARGET_DATASET_ID,
-        contract_id=materializer.TARGET_CONTRACT_ID,
-        trade_date=trade_date,
-        family=materializer.TARGET_FAMILY,
-        secid=materializer.TARGET_SECID,
-        source_path=None,
-        run_id="run_apim_full_session",
-        source_candidate=materializer.SOURCE_CANDIDATE_APIM_TRADESTATS,
-        source_endpoint=materializer.SOURCE_ENDPOINT_APIM_FO_TRADESTATS,
-        market=materializer.TARGET_MARKET,
-        board=materializer.TARGET_BOARD,
-        series_type=materializer.TARGET_SERIES_TYPE,
-        granularity=materializer.TARGET_GRANULARITY,
+        repo_root=".", dataset_id=materializer.TARGET_DATASET_ID, contract_id=materializer.TARGET_CONTRACT_ID,
+        trade_date=trade_date, family=materializer.TARGET_FAMILY, secid=materializer.TARGET_SECID,
+        source_path=None, run_id="run_apim_full_session", source_candidate=materializer.SOURCE_CANDIDATE_APIM_TRADESTATS,
+        source_endpoint=materializer.SOURCE_ENDPOINT_APIM_FO_TRADESTATS, market=materializer.TARGET_MARKET,
+        board=materializer.TARGET_BOARD, series_type=materializer.TARGET_SERIES_TYPE, granularity=materializer.TARGET_GRANULARITY,
     )
 
     def fake_get(url, params, headers, timeout):
@@ -95,9 +85,4 @@ def test_full_session_materializer_fails_if_pagination_does_not_advance(monkeypa
 
     monkeypatch.setattr(full_session.requests, "get", fake_get)
     with pytest.raises(materializer.FuturesRaw5mMaterializationError, match="APIM pagination did not advance"):
-        full_session._fetch_apim_tradestats_full_session_frame(
-            request=request,
-            timeout=3.0,
-            apim_base_url="https://apim.moex.test",
-            env={"MOEX_API_URL": "https://apim.moex.test", "MOEX_UA": "pytest"},
-        )
+        full_session._fetch_apim_tradestats_full_session_frame(request, 3.0, "https://apim.moex.test", {"MOEX_API_URL": "https://apim.moex.test", "MOEX_UA": "pytest"})

@@ -184,6 +184,15 @@ def _require_placeholder_value(value: str | None, field_name: str) -> str:
     return guarded
 
 
+def _with_legacy_aliases(placeholders: Mapping[str, str | None]) -> dict[str, str | None]:
+    values = dict(placeholders)
+    if "INSTRUMENT_ID" not in values and "FAMILY" in values:
+        values["INSTRUMENT_ID"] = values["FAMILY"]
+    if "SOURCE_ID" not in values and "SECID" in values:
+        values["SOURCE_ID"] = values["SECID"]
+    return values
+
+
 def expand_contract_path(
     path_pattern: str,
     env_root: str,
@@ -198,7 +207,7 @@ def expand_contract_path(
     if not env_root or not str(env_root).strip():
         raise FuturesContractIoError("MOEX_DATA_ROOT is required")
     expanded = pattern.removeprefix(prefix)
-    for key, value in placeholders.items():
+    for key, value in _with_legacy_aliases(placeholders).items():
         token = "{" + key + "}"
         if token in expanded:
             expanded = expanded.replace(token, _require_placeholder_value(value, key))
