@@ -1,4 +1,4 @@
-from . import resampler_compat as resampler
+from . import resampler
 from .config import FuturesConfigValidationError, validate_futures_data_lake_config_values
 from .contract_io import (
     FuturesContractIoError,
