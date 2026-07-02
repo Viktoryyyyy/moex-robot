@@ -50,7 +50,7 @@ accepted_pointer_policy:
     dataset_selection: explicit_dataset_id
     instrument_selection: explicit_instrument_id
     directory_scan_allowed: false
-    implicit_latest_allowed: false
+    implicit_dynamic_selection_allowed: false
 path_rules:
   storage_root: env_contract
   hardcoded_server_path_allowed: false
