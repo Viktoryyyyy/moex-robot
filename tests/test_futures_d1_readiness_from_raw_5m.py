@@ -5,30 +5,30 @@ from moex_data.futures import resampler
 from test_materialize_raw_5m_explicit_trade_dates import _write_contract_package
 
 
+INSTRUMENT_ID = "forts.test.si"
+SOURCE_ID = "moex_algopack_fo_tradestats_snapshot.v1"
+SECID = "SiM6"
+BOARD = "RFUD"
+MARKET = "FORTS"
+ENGINE = "futures"
+CANONICAL_SYMBOL = "SiM6"
+
+
 def _write_d1_ready_contract_package(repo_root):
     _write_contract_package(repo_root)
-    (repo_root / "contracts" / "datasets" / "futures_derived_d1.v1.yaml").write_text(
-        """
-contract_id: futures_derived_d1.v1
-dataset_id: futures_derived_d1
-artifact_class: external_pattern
-producer: moex_data.futures.resampler
-consumers:
-  - test
-format: parquet
-schema_version: futures_derived_d1.v1
-storage_root_ref: MOEX_DATA_ROOT
-path_pattern: "${MOEX_DATA_ROOT}/futures/derived_d1/series_type={SERIES_TYPE}/family={FAMILY}/part.parquet"
-partitioning:
-  - series_type
-  - family
-""".lstrip(),
-        encoding="utf-8",
-    )
 
 
 def _raw_partition_path(data_root, trade_date):
-    return data_root / "futures" / "raw_5m" / ("trade_date=" + trade_date) / "family=Si" / "secid=SiM6" / "part.parquet"
+    return (
+        data_root
+        / "market"
+        / "raw"
+        / "timeframe=5m"
+        / ("instrument_id=" + INSTRUMENT_ID)
+        / ("trade_date=" + trade_date)
+        / ("source=" + SOURCE_ID)
+        / "part.parquet"
+    )
 
 
 def _write_raw_partition(data_root, trade_date, base):
@@ -37,12 +37,15 @@ def _write_raw_partition(data_root, trade_date, base):
     pd.DataFrame(
         [
             {
+                "instrument_id": INSTRUMENT_ID,
                 "trade_date": trade_date,
                 "ts": trade_date + " 10:00:00",
                 "session_date": trade_date,
-                "secid": "SiM6",
-                "family": "Si",
-                "board": "RFUD",
+                "secid": SECID,
+                "board": BOARD,
+                "market": MARKET,
+                "engine": ENGINE,
+                "source_id": SOURCE_ID,
                 "open": base,
                 "high": base + 4,
                 "low": base - 2,
@@ -54,12 +57,15 @@ def _write_raw_partition(data_root, trade_date, base):
                 "ingest_ts": trade_date + "T12:00:00+00:00",
             },
             {
+                "instrument_id": INSTRUMENT_ID,
                 "trade_date": trade_date,
                 "ts": trade_date + " 10:05:00",
                 "session_date": trade_date,
-                "secid": "SiM6",
-                "family": "Si",
-                "board": "RFUD",
+                "secid": SECID,
+                "board": BOARD,
+                "market": MARKET,
+                "engine": ENGINE,
+                "source_id": SOURCE_ID,
                 "open": base + 1,
                 "high": base + 6,
                 "low": base - 1,
@@ -85,31 +91,39 @@ def _prepare_repo_and_inputs(tmp_path):
     return repo_root, data_root
 
 
-def test_controlled_d1_readiness_derives_one_row_per_approved_trade_date(tmp_path):
-    repo_root, data_root = _prepare_repo_and_inputs(tmp_path)
-    env = {"MOEX_DATA_ROOT": str(data_root)}
-
-    result = resampler.derive_d1_readiness_from_raw_5m_partitions(
+def _derive(repo_root, data_root):
+    return resampler.derive_d1_readiness_from_raw_5m_partitions(
         repo_root=repo_root,
         trade_dates=resampler.APPROVED_TRADE_DATES,
-        family="Si",
-        secid="SiM6",
+        instrument_id=INSTRUMENT_ID,
+        source_id=SOURCE_ID,
+        secid=SECID,
+        board=BOARD,
+        market=MARKET,
+        engine=ENGINE,
+        canonical_symbol=CANONICAL_SYMBOL,
         series_type="native",
-        env=env,
+        env={"MOEX_DATA_ROOT": str(data_root)},
     )
+
+
+def test_controlled_d1_readiness_derives_one_row_per_approved_trade_date(tmp_path):
+    repo_root, data_root = _prepare_repo_and_inputs(tmp_path)
+
+    result = _derive(repo_root, data_root)
 
     assert result.status == resampler.SUCCEEDED_STATUS
     assert result.rows == 4
     assert result.trade_dates == resampler.APPROVED_TRADE_DATES
-    assert result.symbols == ("SiM6",)
+    assert result.symbols == (CANONICAL_SYMBOL,)
     assert result.rows_per_trade_date == {trade_date: 1 for trade_date in resampler.APPROVED_TRADE_DATES}
-    assert result.output_partition_path == data_root / "futures" / "derived_d1" / "series_type=native" / "family=Si" / "part.parquet"
+    assert result.output_partition_path == data_root / "market" / "derived" / "timeframe=1D" / ("instrument_id=" + INSTRUMENT_ID) / "part.parquet"
 
     output = pd.read_parquet(result.output_partition_path)
     assert list(output["trade_date"]) == list(resampler.APPROVED_TRADE_DATES)
-    assert set(output["symbol"]) == {"SiM6"}
-    assert set(output["secid"]) == {"SiM6"}
-    assert set(output["series_type"]) == {"native"}
+    assert set(output["instrument_id"]) == {INSTRUMENT_ID}
+    assert set(output["canonical_symbol"]) == {CANONICAL_SYMBOL}
+    assert set(output["timeframe"]) == {"1D"}
     assert set(output["source_schema_version"]) == {resampler.RAW_5M_CONTRACT_ID}
     assert set(output["input_manifest_quality_linkage_status"]) == {resampler.MANIFEST_QUALITY_LINKAGE_STATUS}
 
@@ -123,14 +137,7 @@ def test_controlled_d1_readiness_derives_one_row_per_approved_trade_date(tmp_pat
     assert row["num_trades"] == 5
 
     first = output.copy()
-    second_result = resampler.derive_d1_readiness_from_raw_5m_partitions(
-        repo_root=repo_root,
-        trade_dates=resampler.APPROVED_TRADE_DATES,
-        family="Si",
-        secid="SiM6",
-        series_type="native",
-        env=env,
-    )
+    second_result = _derive(repo_root, data_root)
     second = pd.read_parquet(second_result.output_partition_path)
     pd.testing.assert_frame_equal(first, second)
 
@@ -141,9 +148,10 @@ def test_controlled_d1_readiness_rejects_unapproved_trade_date_scope(tmp_path):
         resampler.derive_d1_readiness_from_raw_5m_partitions(
             repo_root=repo_root,
             trade_dates=("2026-06-02", "2026-06-03", "2026-06-04"),
-            family="Si",
-            secid="SiM6",
-            series_type="native",
+            instrument_id=INSTRUMENT_ID,
+            source_id=SOURCE_ID,
+            secid=SECID,
+            canonical_symbol=CANONICAL_SYMBOL,
             env={"MOEX_DATA_ROOT": str(data_root)},
         )
 
@@ -156,11 +164,4 @@ def test_controlled_d1_readiness_rejects_mixed_secid_input(tmp_path):
     bad.to_parquet(bad_path, index=False)
 
     with pytest.raises(resampler.FuturesD1ReadinessError, match="secid values"):
-        resampler.derive_d1_readiness_from_raw_5m_partitions(
-            repo_root=repo_root,
-            trade_dates=resampler.APPROVED_TRADE_DATES,
-            family="Si",
-            secid="SiM6",
-            series_type="native",
-            env={"MOEX_DATA_ROOT": str(data_root)},
-        )
+        _derive(repo_root, data_root)
