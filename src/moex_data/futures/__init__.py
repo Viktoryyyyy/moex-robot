@@ -1,4 +1,10 @@
 from . import resampler
+from .accepted_manifest import (
+    AcceptedManifestPointer,
+    FuturesAcceptedManifestError,
+    read_accepted_manifest_pointer,
+    write_accepted_manifest_pointer,
+)
 from .config import FuturesConfigValidationError, validate_futures_data_lake_config_values
 from .contract_io import (
     FuturesContractIoError,
@@ -48,6 +54,7 @@ from .schemas import (
 )
 
 __all__ = (
+    "AcceptedManifestPointer",
     "BLOCKED_NO_SOURCE_STATUS",
     "ControlledReadEvidence",
     "ControlledReadPathProbe",
@@ -57,6 +64,7 @@ __all__ = (
     "EXPECTED_DATASET_CONTRACT_IDS",
     "EXPECTED_DATASET_CONTRACT_PATHS",
     "EXPECTED_STORAGE_ROOT_REF",
+    "FuturesAcceptedManifestError",
     "FuturesConfigValidationError",
     "FuturesContractIoError",
     "FuturesContractPackage",
@@ -87,6 +95,7 @@ __all__ = (
     "load_simple_yaml_mapping",
     "materialization_target_paths",
     "materialize_single_raw_5m_partition",
+    "read_accepted_manifest_pointer",
     "resampler",
     "validate_dataset_contract_set",
     "validate_dataset_contract_values",
@@ -94,4 +103,5 @@ __all__ = (
     "validate_quality_report_rows",
     "validate_quality_row_values",
     "validate_refresh_manifest_values",
+    "write_accepted_manifest_pointer",
 )
