@@ -39,6 +39,18 @@ identity_model:
   canonical_identity_field: instrument_id
   source_identity_field: source_id
   family_scope_allowed: false
+accepted_pointer_policy:
+  writer: moex_data.futures.accepted_manifest.write_accepted_manifest_pointer
+  reader: moex_data.futures.accepted_manifest.read_accepted_manifest_pointer
+  write_gate:
+    refresh_status: succeeded
+    quality_status: pass
+    instrument_scope: explicit_single_instrument_id
+  read_gate:
+    dataset_selection: explicit_dataset_id
+    instrument_selection: explicit_instrument_id
+    directory_scan_allowed: false
+    implicit_latest_allowed: false
 path_rules:
   storage_root: env_contract
   hardcoded_server_path_allowed: false
