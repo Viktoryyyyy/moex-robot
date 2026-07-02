@@ -36,6 +36,12 @@ def _require_sequence(value: object, field_name: str) -> tuple[str, ...]:
     return tuple(_guard_text(_require_text(item, field_name), field_name) for item in value)
 
 
+def _require_pointer_text(value: object, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise FuturesManifestValidationError(f"{field_name} must be text")
+    return value.strip()
+
+
 def validate_refresh_manifest_values(values: Mapping[str, object]) -> FuturesRefreshManifest:
     values = _require_mapping(values, "manifest")
     missing = tuple(field for field in _REQUIRED_FIELDS if field not in values)
@@ -57,5 +63,5 @@ def validate_refresh_manifest_values(values: Mapping[str, object]) -> FuturesRef
         refresh_status=refresh_status,
         instrument_scope=_require_sequence(values["instrument_scope"], "instrument_scope"),
         source_scope=_require_sequence(values["source_scope"], "source_scope"),
-        accepted_manifest_ref=_require_text(values["accepted_manifest_ref"], "accepted_manifest_ref"),
+        accepted_manifest_ref=_require_pointer_text(values["accepted_manifest_ref"], "accepted_manifest_ref"),
     )
