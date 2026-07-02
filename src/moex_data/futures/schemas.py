@@ -67,14 +67,21 @@ class FuturesRefreshManifest:
     partitions_skipped: tuple[str, ...]
     quality_report_ref: str
     refresh_status: str
+    instrument_scope: tuple[str, ...]
+    source_scope: tuple[str, ...]
+    accepted_manifest_ref: str
 
 
 @dataclass(frozen=True)
 class FuturesQualityRow:
     run_id: str
     dataset_id: str
-    family: str
+    instrument_id: str
+    source_id: str
     secid: str
+    board: str
+    market: str
+    engine: str
     trade_date: str
     rows: int
     duplicate_key_count: int
@@ -84,6 +91,7 @@ class FuturesQualityRow:
     futoi_missing_count: int
     calendar_status: str
     quality_status: str
+    family: str | None = None
 
 
 @dataclass(frozen=True)
