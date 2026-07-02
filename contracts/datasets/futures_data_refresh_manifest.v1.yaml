@@ -21,10 +21,12 @@ required_fields:
   - requested_from
   - requested_till
   - instrument_scope
+  - source_scope
   - dataset_contract_refs
   - partitions_written
   - partitions_skipped
   - quality_report_ref
+  - accepted_manifest_ref
   - refresh_status
   - started_at
   - finished_at
@@ -35,6 +37,7 @@ allowed_refresh_status:
   - partial
 identity_model:
   canonical_identity_field: instrument_id
+  source_identity_field: source_id
   family_scope_allowed: false
 path_rules:
   storage_root: env_contract

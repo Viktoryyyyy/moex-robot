@@ -469,16 +469,20 @@ def _quality_family(request: Raw5mMaterializationRequest) -> str:
 
 
 def _quality_row(request: Raw5mMaterializationRequest, metrics: Mapping[str, object]) -> dict[str, object]:
-    return {"run_id": request.run_id, "dataset_id": request.dataset_id, "family": _quality_family(request), "secid": request.secid, "trade_date": request.trade_date, "rows": int(metrics["rows"]), "min_ts": str(metrics["min_ts"]), "max_ts": str(metrics["max_ts"]), "duplicate_key_count": int(metrics["duplicate_key_count"]), "gap_count": int(metrics["gap_count"]), "null_ohlc_count": int(metrics["null_ohlc_count"]), "invalid_ohlc_count": int(metrics["invalid_ohlc_count"]), "futoi_missing_count": 0, "calendar_status": "not_checked", "quality_status": "pass", "notes": "single_partition_apim_tradestats_materialization"}
+    return {"run_id": request.run_id, "dataset_id": request.dataset_id, "instrument_id": request.instrument_id, "source_id": request.source_id, "secid": request.secid, "board": request.board, "market": request.market, "engine": request.engine, "family": _quality_family(request), "trade_date": request.trade_date, "rows": int(metrics["rows"]), "min_ts": str(metrics["min_ts"]), "max_ts": str(metrics["max_ts"]), "duplicate_key_count": int(metrics["duplicate_key_count"]), "gap_count": int(metrics["gap_count"]), "null_ohlc_count": int(metrics["null_ohlc_count"]), "invalid_ohlc_count": int(metrics["invalid_ohlc_count"]), "futoi_missing_count": 0, "calendar_status": "not_checked", "quality_status": "pass", "notes": "single_partition_apim_tradestats_materialization"}
 
 
 def _source_contract_manifest(request: Raw5mMaterializationRequest, source_info: Mapping[str, object]) -> dict[str, object]:
     return {"source_candidate": request.source_candidate, "source_endpoint": request.source_endpoint, "source_endpoint_url": source_info.get("source_endpoint_url"), "source_fetch_mode": source_info.get("source_fetch_mode"), "source_path": source_info.get("source_path"), "instrument_id": request.instrument_id, "source_id": request.source_id, "market": request.market, "board": request.board, "engine": request.engine, "family": request.family, "secid": request.secid, "trade_date": request.trade_date, "granularity": request.granularity, "series_type": request.series_type, "failure_semantics": {"empty_response": "fail_closed", "schema_mismatch": "fail_closed", "missing_required_contract_input": "fail_closed", "implicit_fallback": "forbidden", "iss_candles_masking": "forbidden"}}
 
 
+def _accepted_manifest_ref(request: Raw5mMaterializationRequest) -> str:
+    return "${MOEX_DATA_ROOT}/state/datasets/dataset_id=" + str(request.dataset_id) + "/instrument_id=" + str(request.instrument_id) + "/current_accepted_manifest.json"
+
+
 def _manifest(request: Raw5mMaterializationRequest, paths: Raw5mMaterializationPaths, source_info: Mapping[str, object]) -> dict[str, object]:
     now = _utc_now()
-    values = {"run_id": request.run_id, "run_date": request.trade_date, "requested_from": request.trade_date, "requested_till": request.trade_date, "instrument_scope": [request.instrument_id], "family_scope": [_quality_family(request)], "dataset_contract_refs": list(EXPECTED_DATASET_CONTRACT_IDS), "partitions_written": [paths.partition_path.as_posix()], "partitions_skipped": [], "quality_report_ref": paths.quality_report_path.as_posix(), "refresh_status": SUCCEEDED_STATUS, "started_at": now, "finished_at": now, "source_contract": _source_contract_manifest(request, source_info)}
+    values = {"run_id": request.run_id, "run_date": request.trade_date, "requested_from": request.trade_date, "requested_till": request.trade_date, "instrument_scope": [request.instrument_id], "source_scope": [request.source_id], "family_scope": [_quality_family(request)], "dataset_contract_refs": list(EXPECTED_DATASET_CONTRACT_IDS), "partitions_written": [paths.partition_path.as_posix()], "partitions_skipped": [], "quality_report_ref": paths.quality_report_path.as_posix(), "accepted_manifest_ref": _accepted_manifest_ref(request), "refresh_status": SUCCEEDED_STATUS, "started_at": now, "finished_at": now, "source_contract": _source_contract_manifest(request, source_info)}
     validate_refresh_manifest_values(values)
     return values
 
