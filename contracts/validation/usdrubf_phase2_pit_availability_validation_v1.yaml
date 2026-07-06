@@ -1,0 +1,119 @@
+validation_contract_id: usdrubf_phase2_pit_availability_validation_v1
+status: design_only
+lane: ema_3_19_ai
+runtime_authorized: false
+tests_authorized: false
+server_apply_authorized: false
+
+purpose: >
+  Design-only validation rules for future Phase 2 point-in-time availability
+  checks. This file defines rules only; it does not create tests or execute
+  validation.
+
+canonical_fields:
+  availability_ts_utc:
+    required: true
+    type: utc_datetime
+    rule: "Canonical point-in-time availability timestamp."
+  availability_timestamp:
+    required: false
+    strict_alias_of: availability_ts_utc
+    rule: >
+      If present in upstream artifacts, it must be converted to UTC and compared
+      as availability_ts_utc. Rows that cannot be converted to UTC must be
+      rejected or excluded.
+  forecast_anchor_ts:
+    required: true
+    type: utc_datetime
+    rule: "UTC representation of the 06:00 Europe/Moscow forecast anchor."
+
+forecast_anchor:
+  local_time: "06:00 Europe/Moscow"
+  d1_rule: "D1 trade_date T is usable only from T+1 06:00 Europe/Moscow or later."
+  governing_rule: >
+    Existing D+1 open wording must not weaken the stricter 06:00
+    Europe/Moscow Phase 2.2 rule.
+
+validation_rules:
+  - rule_id: PIT_001_AVAILABILITY_TS_EXISTS
+    severity: error
+    description: "availability_ts_utc must exist for every eligible feature row."
+
+  - rule_id: PIT_002_AVAILABILITY_TS_UTC_PARSEABLE
+    severity: error
+    description: >
+      availability_ts_utc must be parseable as UTC. Rows that cannot be
+      converted to UTC are rejected or excluded.
+
+  - rule_id: PIT_003_AVAILABILITY_LE_ANCHOR
+    severity: error
+    description: "availability_ts_utc must be <= forecast_anchor_ts."
+
+  - rule_id: PIT_004_D1_T_PLUS_1_0600_MOSCOW
+    severity: error
+    description: >
+      D1 trade_date T must not be used before T+1 06:00 Europe/Moscow.
+
+  - rule_id: PIT_005_UNKNOWN_RELEASE_TIMESTAMP
+    severity: error
+    description: >
+      If exact release timestamp is unknown, the row must be shifted by at least
+      one trading day or excluded.
+
+  - rule_id: PIT_006_NO_LABEL_ANNOTATION_FEATURE_EVIDENCE
+    severity: error
+    denied_fields:
+      - phase_label
+      - phase_remaining_sessions
+      - current_regime_ends_within_*
+      - next_regime_if_current_ends
+      - interval_id
+      - interval_start
+      - interval_end
+      - annotation_*
+      - label_derived_*
+    description: >
+      Labels, annotations, interval boundaries, future targets, and label-derived
+      metadata must not appear as model features or source availability evidence.
+
+  - rule_id: PIT_007_NO_POST_FACT_CALENDAR_OUTCOMES
+    severity: error
+    denied_namespaces:
+      - post_fact_outcome.*
+      - realized_decision.*
+      - post_event_narrative.*
+      - realized_flow_estimate.*
+    description: >
+      Calendar schedules known before anchor must be separated from post-fact
+      outcomes. Post-fact outcomes are denied unless a later PM-approved PIT
+      source contract permits them.
+
+  - rule_id: PIT_008_NO_PROVIDER_SPECIFIC_APPROVAL_INFERENCE
+    severity: error
+    description: >
+      Placeholder provider/source/calendar references must not be treated as
+      provider approval, ingestion readiness, modeling readiness, or runtime
+      readiness.
+
+  - rule_id: PIT_009_NO_RUNTIME_SCOPE
+    severity: error
+    description: >
+      Validation design must not trigger loader, materialization, ingestion,
+      backfill, feature computation, model fitting, prediction, or server apply.
+
+calendar_namespace_policy:
+  schedule_known_before_anchor:
+    allowed_design_only: true
+    rule: "Only deterministic schedule fields known before forecast_anchor_ts may be considered in future approved tasks."
+  post_fact_outcome:
+    allowed_design_only: false
+    rule: "Realized outcomes, decisions, and narratives are denied before PIT source approval."
+
+non_authorizations:
+  - no test creation
+  - no validation run
+  - no runtime command
+  - no source/provider file
+  - no calendar/provider file
+  - no registry update
+  - no server apply
