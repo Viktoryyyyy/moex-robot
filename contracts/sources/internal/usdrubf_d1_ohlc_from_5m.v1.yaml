@@ -1,0 +1,95 @@
+contract_id: internal.usdrubf_d1_ohlc_from_5m.v1
+status: design_only
+lane: ema_3_19_ai
+artifact_kind: source_placeholder_contract
+source_family: internal.usdrubf_d1_ohlc_from_5m
+instrument_scope:
+  - USDRUBF
+  - Si
+
+readiness_flags:
+  design_only: true
+  ingestion_ready: false
+  runtime_ready: false
+  loader_ready: false
+  materialization_ready: false
+  feature_computation_ready: false
+  modeling_ready: false
+  registry_mutation_ready: false
+  provider_approved_for_ingestion: false
+  provider_approved_for_runtime: false
+  provider_approved_for_modeling: false
+
+purpose: >
+  Design-only placeholder contract for future daily OHLC rows derived from
+  internal 5-minute USDRUBF / Si bars. This file documents PIT requirements
+  only and does not authorize ingestion, materialization, registry mutation,
+  runtime use, feature computation, modeling, or server apply.
+
+canonical_time_fields:
+  trade_date:
+    timezone: Europe/Moscow
+    description: Trading date T represented by the D1 OHLC row.
+  forecast_anchor_ts:
+    timezone: UTC
+    local_anchor: "06:00 Europe/Moscow"
+    description: Forecast anchor timestamp converted to UTC.
+  availability_ts_utc:
+    required: true
+    timezone: UTC
+    source: internal_materialization_audit_or_enforceable_provider_timestamp
+    description: Timestamp when the D1 row became available to the forecast process.
+
+availability_rules:
+  timezone_conversion_to_utc_required: true
+  d1_default_lag_rule: >
+    D1 trade_date T is unavailable until at least T+1 06:00 Europe/Moscow,
+    converted to UTC, unless an enforceable provider timestamp proves earlier
+    availability.
+  no_same_day_close_before_anchor: true
+  eligibility_rule: availability_ts_utc <= forecast_anchor_ts
+  unknown_availability_ts_utc_rule: >
+    If availability_ts_utc is unknown or cannot be converted to UTC, exclude
+    the row from the anchor or shift it by at least one trading day.
+  revisions_and_restatements: >
+    Revisions or restatements require PIT revision history. Without PIT revision
+    history, revised values must be excluded from prior forecast anchors.
+
+allowed_fields_design_only:
+  - instrument_id
+  - trade_date
+  - open
+  - high
+  - low
+  - close
+  - volume
+  - source_id
+  - source_bar_granularity
+  - availability_ts_utc
+  - forecast_anchor_ts
+
+excluded_input_fields:
+  - B/S/OUT labels
+  - EMA cross labels
+  - future returns
+  - future volatility
+  - drawdown
+  - phase-completion targets
+  - LLM classifications
+  - post-fact annotations
+  - realized event outcomes
+
+explicit_non_authorizations:
+  - no registry mutation
+  - no configs mutation
+  - no src implementation
+  - no tests
+  - no data loading
+  - no ingestion
+  - no backfill
+  - no materialization
+  - no runtime
+  - no feature computation
+  - no modeling
+  - no prediction
+  - no server apply
