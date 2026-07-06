@@ -1,0 +1,69 @@
+contract_id: futures_roll_expiry_mapping.v1
+status: design_only
+lane: ema_3_19_ai
+runtime_authorized: false
+registry_update_authorized: false
+server_apply_authorized: false
+
+purpose: >
+  Design-only roll/expiry mapping contract for future USDRUBF / Si daily
+  phase research alignment. This contract does not register a dataset and does
+  not create or update any runtime mapping.
+
+instrument_scope:
+  - USDRUBF
+  - Si
+
+required_mapping_fields:
+  - continuous_symbol
+  - contract_code
+  - trade_date
+  - expiry_date
+  - roll_effective_date
+  - mapping_fixed_ts_utc
+  - mapping_rule_id
+  - source_id
+
+point_in_time_rules:
+  canonical_availability_field: availability_ts_utc
+  forecast_anchor_field: forecast_anchor_ts
+  forecast_anchor_local: "06:00 Europe/Moscow"
+  eligibility_rule: "availability_ts_utc <= forecast_anchor_ts"
+  fixed_before_anchor_requirement: >
+    The contract-to-continuous mapping for any forecast anchor must be fixed
+    before that anchor. Mapping changes decided after the anchor cannot be
+    applied retroactively to that anchor.
+  unknown_timestamp_rule: >
+    If mapping_fixed_ts_utc or availability_ts_utc cannot be proven, the mapped
+    row must be shifted by at least one trading day or excluded.
+
+roll_decision_policy:
+  prohibited_future_optimized_roll_decisions:
+    - future liquidity optimized roll date
+    - future return optimized roll date
+    - roll choice selected using post-anchor volume/open-interest outcomes
+    - roll choice selected using future realized slippage
+    - roll choice selected using future model performance
+  allowed_design_principle: >
+    A future implementation must use a deterministic mapping rule fixed before
+    the affected forecast anchor and documented as point-in-time safe.
+
+source_policy:
+  provider_specific_source_files_created_now: false
+  calendar_specific_files_created_now: false
+  source_approval_implied: false
+  notes:
+    - Exchange schedules and internal instrument metadata may be candidates for
+      later contracts, but this Phase 2.3 artifact approves no provider-specific
+      source or calendar file.
+    - This mapping is context / data alignment evidence only, not label evidence.
+
+non_authorizations:
+  - no registry update
+  - no src mutation
+  - no tests
+  - no data files
+  - no materialization
+  - no backfill
+  - no modeling
+  - no server apply
