@@ -48,13 +48,27 @@ Manual labels must never be used as:
 - production context fields;
 - execution signals.
 
-## 4. 2025-09-11 OUT rule
+## 4. 2025-09-11 overlap-day boundary note
 
-The manual research label for `2025-09-11` is `OUT`.
+`2025-09-11` may be referenced by this docs package only as a manual interval boundary / research note.
 
-This is a target / annotation rule only.
+This boundary note does not define the primary daily supervised label for that session.
 
-It must not be converted into runtime state, model input, assistant context, feature value, or execution rule.
+The primary daily supervised label used by the repo contract remains governed by the repository's canonical label / materializer contract.
+
+For the current overlap-day contract, the primary label semantics are:
+
+```text
+previous_interval_wins_for_primary_label_on_overlap_date
+primary_label_for_2025_09_11 = B
+primary_label_for_2025_09_12 = OUT
+```
+
+Therefore, this document must not be read as asserting that the primary daily supervised label for `2025-09-11` is `OUT`.
+
+The existence of an `OUT` interval start around this boundary may be documented only as a manual interval boundary / research note, not as the primary label for the overlap date.
+
+This docs artifact does not override, replace, or mutate canonical labels, contracts, tests, configs, materialization behavior, runtime behavior, or server state.
 
 ## 5. EMA 3/19 boundary
 
