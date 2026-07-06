@@ -107,6 +107,22 @@
       "provider_specific_file_required_later": false
     },
     {
+      "source_id": "internal.usdrubf_d1_classical_indicators",
+      "provider_status": "approved_internal_context",
+      "phase_2_usage_status": "design_only",
+      "availability_rule": "Inherits D1 OHLC availability; D1 trade_date T usable only from T+1 06:00 Europe/Moscow or later.",
+      "provider_specific_file_required_later": false,
+      "semantics": "Lagged classical D1 indicator context only; not labels."
+    },
+    {
+      "source_id": "futures.roll_expiry_mapping",
+      "provider_status": "approved_internal_context",
+      "phase_2_usage_status": "design_only",
+      "availability_rule": "Mapping must be fixed before forecast_anchor_ts; availability_ts_utc <= forecast_anchor_ts; unknown timestamp must shift or exclude.",
+      "provider_specific_file_required_later": false,
+      "semantics": "Fixed-before-anchor roll/expiry context only; not future-optimized roll decision."
+    },
+    {
       "source_id": "futoi.participant_positioning",
       "provider_status": "design_placeholder",
       "phase_2_usage_status": "future_gate_required",
