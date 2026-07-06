@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contracts/features/usdrubf_futoi_participant_positioning_phase_features_v1.json",
+  "contract_id": "usdrubf_futoi_participant_positioning_phase_features_v1",
+  "status": "design_only",
+  "lane": "ema_3_19_ai",
+  "instrument_scope": [
+    "USDRUBF",
+    "Si"
+  ],
+  "runtime_authorized": false,
+  "ingestion_authorized": false,
+  "feature_computation_authorized": false,
+  "modeling_authorized": false,
+  "purpose": "Design-only participant positioning semantics for potential future FUTOI-derived Phase 2 features.",
+  "semantic_boundary": {
+    "futoi_means": "participant positioning / participant position structure",
+    "futoi_does_not_mean": "open interest",
+    "open_interest_rule": "No open interest interpretation is allowed without a separate PM-approved open-interest source and contract."
+  },
+  "source_id_mapping": {
+    "canonical_semantic_source_id": "futoi.participant_positioning",
+    "raw_provider_family_alias": "positioning.moex_algopack_futoi_raw",
+    "mapping_rule": "positioning.moex_algopack_futoi_raw may map into futoi.participant_positioning only as a raw provider-family alias after a later source/provider contract approves exact schema, timestamps, and revision behavior.",
+    "provider_approval_implied": false
+  },
+  "candidate_feature_semantics_design_only": [
+    {
+      "feature_family": "participant_position_direction",
+      "meaning": "Direction of participant positioning change after PIT-safe availability.",
+      "not_authorized_now": true
+    },
+    {
+      "feature_family": "participant_position_pressure",
+      "meaning": "Relative pressure or imbalance in participant positioning after PIT-safe availability.",
+      "not_authorized_now": true
+    },
+    {
+      "feature_family": "participant_group_divergence",
+      "meaning": "Potential divergence between participant groups, if the later approved schema supports it.",
+      "not_authorized_now": true
+    }
+  ],
+  "availability_rule": {
+    "required_field": "availability_ts_utc",
+    "forecast_anchor_field": "forecast_anchor_ts",
+    "eligibility_rule": "availability_ts_utc <= forecast_anchor_ts",
+    "conservative_rule_if_release_ts_unresolved": "If exact release timestamp is unresolved, shift by at least one trading day or exclude from the export.",
+    "d1_anchor_rule": "D1 trade_date T is usable only from T+1 06:00 Europe/Moscow or later unless a later approved FUTOI source contract imposes a stricter lag."
+  },
+  "pit_and_revision_requirements_for_future_gate": [
+    "Exact release timestamp or conservative lag rule.",
+    "UTC conversion rule for availability_ts_utc.",
+    "Revision/restatement behavior.",
+    "Join key to USDRUBF / Si trade date.",
+    "Explicit handling of holidays and missing reports.",
+    "Schema proof that fields represent participant positioning, not open interest."
+  ],
+  "explicit_exclusions": [
+    "No FUTOI ingestion.",
+    "No FUTOI raw dataset creation.",
+    "No feature computation.",
+    "No open-interest feature interpretation.",
+    "No source/provider approval.",
+    "No modeling readiness."
+  ]
+}
