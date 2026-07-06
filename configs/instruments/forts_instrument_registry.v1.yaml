@@ -11,7 +11,93 @@ scope_policy:
   latest_autodetect_allowed: false
   implicit_contract_selection_allowed: false
   unresolved_instrument_blocks_materialization: true
-instruments: []
+instruments:
+  - instrument_id: usdrubf_futures_family
+    canonical_symbol: USDRUBF
+    display_name: USDRUBF futures family design binding
+    source_system: moex_iss_forts
+    source_id: moex_forts_usdrubf_design_placeholder
+    secid: USDRUBF
+    board: RFUD
+    market: forts
+    engine: futures
+    source_artifact_id: internal.usdrubf_d1_ohlc_from_5m.v1
+    raw_5m_artifact_id: futures_raw_5m.v1
+    enabled_for_loading: false
+    enabled_for_update: false
+    enabled_for_retrieval: false
+    enabled_for_raw_5m_materialization: false
+    enabled_for_d1_derivation: false
+    enabled_for_research: false
+    storage_partition_values:
+      instrument_id: usdrubf_futures_family
+      secid: USDRUBF
+    evidence_status: pilot_required
+    phase2_6_binding:
+      status: design_config_binding_only
+      data_availability_status: not_proven
+      ingestion_status: not_ready
+      materialization_status: not_ready
+      modeling_status: blocked
+      runtime_status: not_ready
+      timezone_policy:
+        market_timezone: Europe/Moscow
+        forecast_anchor_local_time: "06:00 Europe/Moscow"
+        forecast_anchor_timezone: UTC
+      source_contract_refs:
+        - contracts/sources/internal/usdrubf_d1_ohlc_from_5m.v1.yaml
+        - contracts/sources/internal/usdrubf_d1_ema_3_19_cross_context.v1.yaml
+        - contracts/sources/internal/usdrubf_d1_classical_indicators.v1.yaml
+      roll_expiry_mapping_ref: contracts/sources/futures/roll_expiry_mapping.v1.yaml
+      explicit_non_authorizations:
+        - no current contract month selection automation
+        - no continuous contract runtime selection
+        - no loader readiness
+        - no materialization readiness
+        - no modeling readiness
+  - instrument_id: si_futures_family
+    canonical_symbol: Si
+    display_name: Si futures family design binding
+    source_system: moex_iss_forts
+    source_id: moex_forts_si_design_placeholder
+    secid: Si
+    board: RFUD
+    market: forts
+    engine: futures
+    source_artifact_id: internal.usdrubf_d1_ohlc_from_5m.v1
+    raw_5m_artifact_id: futures_raw_5m.v1
+    enabled_for_loading: false
+    enabled_for_update: false
+    enabled_for_retrieval: false
+    enabled_for_raw_5m_materialization: false
+    enabled_for_d1_derivation: false
+    enabled_for_research: false
+    storage_partition_values:
+      instrument_id: si_futures_family
+      secid: Si
+    evidence_status: pilot_required
+    phase2_6_binding:
+      status: design_config_binding_only
+      data_availability_status: not_proven
+      ingestion_status: not_ready
+      materialization_status: not_ready
+      modeling_status: blocked
+      runtime_status: not_ready
+      timezone_policy:
+        market_timezone: Europe/Moscow
+        forecast_anchor_local_time: "06:00 Europe/Moscow"
+        forecast_anchor_timezone: UTC
+      source_contract_refs:
+        - contracts/sources/internal/usdrubf_d1_ohlc_from_5m.v1.yaml
+        - contracts/sources/internal/usdrubf_d1_ema_3_19_cross_context.v1.yaml
+        - contracts/sources/internal/usdrubf_d1_classical_indicators.v1.yaml
+      roll_expiry_mapping_ref: contracts/sources/futures/roll_expiry_mapping.v1.yaml
+      explicit_non_authorizations:
+        - no current contract month selection automation
+        - no continuous contract runtime selection
+        - no loader readiness
+        - no materialization readiness
+        - no modeling readiness
 rules:
   storage_partition_key: instrument_id
   source_partition_key: source_id

@@ -33,7 +33,9 @@ instrument_registry_ref:
   registry_id: forts_instrument_registry.v1
   repo_path: configs/instruments/forts_instrument_registry.v1.yaml
 instrument_scope:
-  default_instrument_ids: []
+  default_instrument_ids:
+    - usdrubf_futures_family
+    - si_futures_family
   explicit_instrument_id_required: true
   explicit_source_id_required: true
   explicit_secid_required: true
@@ -48,6 +50,46 @@ instrument_scope:
     - 30m
     - 1h
     - 4h
+phase2_6_source_bindings:
+  status: design_config_binding_only
+  readiness_flags:
+    design_binding_created: true
+    ingestion_ready: false
+    runtime_ready: false
+    loader_ready: false
+    materialization_ready: false
+    feature_computation_ready: false
+    modeling_ready: false
+  forecast_anchor:
+    local_anchor: "06:00 Europe/Moscow"
+    timezone: UTC
+  availability_policy:
+    availability_ts_utc_required: true
+    eligibility_rule: availability_ts_utc <= forecast_anchor_ts
+    unknown_availability_ts_utc_rule: exclude_or_shift_by_at_least_one_trading_day
+  approved_source_contract_refs:
+    - contracts/sources/internal/usdrubf_d1_ohlc_from_5m.v1.yaml
+    - contracts/sources/internal/usdrubf_d1_ema_3_19_cross_context.v1.yaml
+    - contracts/sources/internal/usdrubf_d1_classical_indicators.v1.yaml
+    - contracts/sources/futures/roll_expiry_mapping.v1.yaml
+    - contracts/calendars/rates/cbr_key_rate_calendar.v1.yaml
+    - contracts/calendars/calendar/ru_tax_periods.v1.yaml
+    - contracts/calendars/calendar/ru_us_holidays.v1.yaml
+  blocked_source_refs:
+    - contracts/sources/futoi/participant_positioning.v1.yaml
+    - contracts/sources/oil/**
+    - contracts/sources/dollar_index/**
+    - contracts/sources/currency/**
+    - news_events.raw_ingestion
+    - news_events.llm_classification
+  explicit_non_authorizations:
+    - no external provider ingestion
+    - no generated data path
+    - no runtime loader
+    - no materialization job
+    - no feature computation
+    - no model fitting
+    - no prediction
 blocked_contracts:
   - futures_continuous_5m.v1
 path_rules:
