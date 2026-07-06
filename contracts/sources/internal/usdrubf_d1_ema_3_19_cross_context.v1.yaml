@@ -1,0 +1,94 @@
+contract_id: internal.usdrubf_d1_ema_3_19_cross_context.v1
+status: design_only
+lane: ema_3_19_ai
+artifact_kind: source_placeholder_contract
+source_family: internal.usdrubf_d1_ema_3_19_cross_context
+instrument_scope:
+  - USDRUBF
+  - Si
+
+readiness_flags:
+  design_only: true
+  ingestion_ready: false
+  runtime_ready: false
+  loader_ready: false
+  materialization_ready: false
+  feature_computation_ready: false
+  modeling_ready: false
+  registry_mutation_ready: false
+  provider_approved_for_ingestion: false
+  provider_approved_for_runtime: false
+  provider_approved_for_modeling: false
+
+purpose: >
+  Design-only placeholder for future EMA 3/19 cross context derived from
+  PIT-eligible D1 OHLC rows. EMA context may be used only as diagnostic/context
+  design metadata and is not a B/S/OUT label source.
+
+upstream_dependency:
+  source_contract: internal.usdrubf_d1_ohlc_from_5m.v1
+  inherits_pit_eligibility: true
+  inherits_d1_t_plus_1_0600_moscow_rule: true
+
+canonical_time_fields:
+  forecast_anchor_ts:
+    timezone: UTC
+    local_anchor: "06:00 Europe/Moscow"
+  availability_ts_utc:
+    required: true
+    timezone: UTC
+    source: inherited_from_latest_input_ohlc_row_or_later_computation_audit
+  timezone_conversion_to_utc_required: true
+
+availability_rules:
+  d1_default_lag_rule: >
+    D1 trade_date T and any EMA value derived from it are unavailable until at
+    least T+1 06:00 Europe/Moscow, converted to UTC, unless an enforceable
+    upstream timestamp proves earlier availability.
+  eligibility_rule: availability_ts_utc <= forecast_anchor_ts
+  rolling_input_rule: >
+    EMA values may include only OHLC rows whose availability_ts_utc is less than
+    or equal to the same forecast_anchor_ts.
+  no_post_anchor_rows: true
+  unknown_availability_ts_utc_rule: >
+    Unknown availability_ts_utc means exclude the EMA value or shift by at least
+    one trading day.
+  revisions_and_restatements: >
+    Revised upstream OHLC values cannot be applied retroactively without PIT
+    revision history.
+
+ema_boundary:
+  allowed_design_only:
+    - EMA 3 value as context
+    - EMA 19 value as context
+    - EMA spread as context
+    - cross state as diagnostic context
+  forbidden:
+    - EMA as B/S/OUT label source
+    - EMA cross label as input feature
+    - EMA as phase-completion target
+    - same-day close before anchor
+    - post-anchor row use
+
+excluded_input_fields:
+  - B/S/OUT labels
+  - EMA cross labels
+  - future returns
+  - future volatility
+  - drawdown
+  - phase-completion targets
+  - LLM classifications
+  - post-fact annotations
+  - realized event outcomes
+
+explicit_non_authorizations:
+  - no registry mutation
+  - no configs mutation
+  - no src implementation
+  - no tests
+  - no ingestion
+  - no materialization
+  - no runtime
+  - no feature computation
+  - no modeling
+  - no server apply
