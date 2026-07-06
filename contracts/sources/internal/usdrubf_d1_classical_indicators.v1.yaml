@@ -1,0 +1,90 @@
+contract_id: internal.usdrubf_d1_classical_indicators.v1
+status: design_only
+lane: ema_3_19_ai
+artifact_kind: source_placeholder_contract
+source_family: internal.usdrubf_d1_classical_indicators
+instrument_scope:
+  - USDRUBF
+  - Si
+
+readiness_flags:
+  design_only: true
+  ingestion_ready: false
+  runtime_ready: false
+  loader_ready: false
+  materialization_ready: false
+  feature_computation_ready: false
+  modeling_ready: false
+  registry_mutation_ready: false
+  provider_approved_for_ingestion: false
+  provider_approved_for_runtime: false
+  provider_approved_for_modeling: false
+
+purpose: >
+  Design-only placeholder for future classical D1 indicator context derived from
+  PIT-eligible USDRUBF / Si D1 OHLC rows. This contract documents timing and
+  leakage constraints only.
+
+upstream_dependency:
+  source_contract: internal.usdrubf_d1_ohlc_from_5m.v1
+  inherits_pit_eligibility: true
+  inherits_d1_t_plus_1_0600_moscow_rule: true
+
+canonical_time_fields:
+  forecast_anchor_ts:
+    timezone: UTC
+    local_anchor: "06:00 Europe/Moscow"
+  availability_ts_utc:
+    required: true
+    timezone: UTC
+    source: latest_input_row_availability_or_later_computation_audit
+  timezone_conversion_to_utc_required: true
+
+availability_rules:
+  d1_default_lag_rule: >
+    D1 trade_date T and indicators derived from it are unavailable until at
+    least T+1 06:00 Europe/Moscow, converted to UTC, unless an enforceable
+    upstream timestamp proves earlier availability.
+  eligibility_rule: availability_ts_utc <= forecast_anchor_ts
+  no_post_anchor_rows: true
+  rolling_window_rule: >
+    Rolling windows must include only rows whose availability_ts_utc is less
+    than or equal to the same forecast_anchor_ts. No post-anchor rows, revised
+    values, or future rows may enter a rolling calculation.
+  unknown_availability_ts_utc_rule: >
+    Unknown availability_ts_utc means exclude the indicator row or shift by at
+    least one trading day.
+  revisions_and_restatements: >
+    Revised upstream values require PIT revision history or exclusion from prior
+    forecast anchors.
+
+allowed_indicator_families_design_only:
+  - lagged_return_context
+  - true_range_or_range_context
+  - rolling_volatility_context
+  - rolling_momentum_context
+  - rolling_volume_context
+
+excluded_input_fields:
+  - B/S/OUT labels
+  - EMA cross labels
+  - future returns
+  - future volatility
+  - drawdown
+  - phase-completion targets
+  - LLM classifications
+  - post-fact annotations
+  - realized event outcomes
+
+explicit_non_authorizations:
+  - no registry mutation
+  - no configs mutation
+  - no src implementation
+  - no tests
+  - no ingestion
+  - no backfill
+  - no materialization
+  - no runtime
+  - no feature computation
+  - no modeling
+  - no server apply

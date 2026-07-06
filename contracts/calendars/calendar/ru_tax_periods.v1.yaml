@@ -1,0 +1,91 @@
+contract_id: calendar.ru_tax_periods.v1
+status: design_only
+lane: ema_3_19_ai
+artifact_kind: calendar_placeholder_contract
+source_family: calendar.ru_tax_periods
+calendar_scope: russian_tax_periods
+
+readiness_flags:
+  design_only: true
+  ingestion_ready: false
+  runtime_ready: false
+  loader_ready: false
+  materialization_ready: false
+  feature_computation_ready: false
+  modeling_ready: false
+  registry_mutation_ready: false
+  provider_approved_for_ingestion: false
+  provider_approved_for_runtime: false
+  provider_approved_for_modeling: false
+
+purpose: >
+  Design-only deterministic calendar placeholder for Russian tax-period schedule
+  context. Phase 2.5 allows only schedule-known-before-anchor fields and blocks
+  realized tax-flow or liquidity outcomes.
+
+canonical_time_fields:
+  forecast_anchor_ts:
+    timezone: UTC
+    local_anchor: "06:00 Europe/Moscow"
+  availability_ts_utc:
+    required: true
+    timezone: UTC
+    source: calendar_version_publication_or_internal_version_audit
+  calendar_version_availability_ts_utc:
+    required: true
+    timezone: UTC
+  timezone_conversion_to_utc_required: true
+
+namespaces:
+  schedule_known_before_anchor:
+    status: allowed_design_only
+    example_fields:
+      - tax_period_type
+      - tax_due_date
+      - period_start_date
+      - period_end_date
+      - days_to_tax_due_date
+      - days_since_tax_due_date
+      - calendar_version_id
+    eligibility_rule: availability_ts_utc <= forecast_anchor_ts
+  post_fact_outcome:
+    status: blocked
+    blocked_fields:
+      - realized_tax_payment_flow
+      - realized_liquidity_impact
+      - realized_market_reaction
+      - post_fact_payment_estimate
+      - after_event_commentary
+
+availability_rules:
+  deterministic_schedule_only: true
+  eligibility_rule: availability_ts_utc <= forecast_anchor_ts
+  unknown_availability_ts_utc_rule: >
+    If calendar version availability_ts_utc is unknown, exclude the row or shift
+    by at least one trading day.
+  revision_policy: >
+    Late tax-calendar revisions require their own availability_ts_utc and cannot
+    be retroactively applied to anchors before the revision became available.
+
+excluded_input_fields:
+  - B/S/OUT labels
+  - EMA cross labels
+  - future returns
+  - future volatility
+  - drawdown
+  - phase-completion targets
+  - LLM classifications
+  - post-fact annotations
+  - realized event outcomes
+
+explicit_non_authorizations:
+  - no registry mutation
+  - no configs mutation
+  - no src implementation
+  - no tests
+  - no ingestion
+  - no materialization
+  - no runtime
+  - no feature computation
+  - no modeling
+  - no server apply

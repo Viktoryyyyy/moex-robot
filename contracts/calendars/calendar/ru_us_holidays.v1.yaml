@@ -1,0 +1,92 @@
+contract_id: calendar.ru_us_holidays.v1
+status: design_only
+lane: ema_3_19_ai
+artifact_kind: calendar_placeholder_contract
+source_family: calendar.ru_us_holidays
+calendar_scope: ru_us_holidays_and_trading_calendar_context
+
+readiness_flags:
+  design_only: true
+  ingestion_ready: false
+  runtime_ready: false
+  loader_ready: false
+  materialization_ready: false
+  feature_computation_ready: false
+  modeling_ready: false
+  registry_mutation_ready: false
+  provider_approved_for_ingestion: false
+  provider_approved_for_runtime: false
+  provider_approved_for_modeling: false
+
+purpose: >
+  Design-only calendar placeholder for preannounced Russian and US holidays and
+  trading-calendar context. Only official preannounced fields are allowed in
+  Phase 2.5.
+
+canonical_time_fields:
+  forecast_anchor_ts:
+    timezone: UTC
+    local_anchor: "06:00 Europe/Moscow"
+  availability_ts_utc:
+    required: true
+    timezone: UTC
+    source: official_calendar_publication_or_calendar_version_audit
+  calendar_version_availability_ts_utc:
+    required: true
+    timezone: UTC
+  timezone_conversion_to_utc_required: true
+
+namespaces:
+  schedule_known_before_anchor:
+    status: allowed_design_only
+    example_fields:
+      - country_code
+      - holiday_date
+      - holiday_name
+      - trading_session_status
+      - settlement_calendar_status
+      - days_to_next_holiday
+      - days_since_previous_holiday
+      - calendar_version_id
+    eligibility_rule: availability_ts_utc <= forecast_anchor_ts
+  post_fact_outcome:
+    status: blocked
+    blocked_fields:
+      - realized_liquidity_effect
+      - realized_gap_after_holiday
+      - realized_volatility_after_holiday
+      - post_fact_market_commentary
+      - event_outcome_annotation
+
+availability_rules:
+  official_preannounced_fields_only: true
+  eligibility_rule: availability_ts_utc <= forecast_anchor_ts
+  unknown_availability_ts_utc_rule: >
+    If the holiday or trading-calendar version availability timestamp is
+    unknown, exclude the row or shift by at least one trading day.
+  late_revision_policy: >
+    Late revisions require availability_ts_utc and cannot be retroactively
+    applied to anchors before the revision was available.
+
+excluded_input_fields:
+  - B/S/OUT labels
+  - EMA cross labels
+  - future returns
+  - future volatility
+  - drawdown
+  - phase-completion targets
+  - LLM classifications
+  - post-fact annotations
+  - realized event outcomes
+
+explicit_non_authorizations:
+  - no registry mutation
+  - no configs mutation
+  - no src implementation
+  - no tests
+  - no ingestion
+  - no materialization
+  - no runtime
+  - no feature computation
+  - no modeling
+  - no server apply
