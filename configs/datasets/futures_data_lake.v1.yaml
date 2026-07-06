@@ -29,13 +29,6 @@ artifact_class_index:
   futures_continuous_5m.v1: external_pattern
   moex_data_root: env_contract
   futures_data_lake.v1: repo_relative
-  internal.usdrubf_d1_ohlc_from_5m.v1: source_placeholder_contract
-  internal.usdrubf_d1_ema_3_19_cross_context.v1: source_placeholder_contract
-  internal.usdrubf_d1_classical_indicators.v1: source_placeholder_contract
-  futures.roll_expiry_mapping.v1: source_placeholder_contract
-  rates.cbr_key_rate_calendar.v1: calendar_placeholder_contract
-  calendar.ru_tax_periods.v1: calendar_placeholder_contract
-  calendar.ru_us_holidays.v1: calendar_placeholder_contract
 instrument_registry_ref:
   registry_id: forts_instrument_registry.v1
   repo_path: configs/instruments/forts_instrument_registry.v1.yaml
