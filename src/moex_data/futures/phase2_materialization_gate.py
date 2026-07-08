@@ -34,6 +34,40 @@ READINESS_CAPABILITIES: tuple[str, ...] = (
     "prediction",
 )
 
+DATASET_READINESS_FALSE_FLAGS: tuple[str, ...] = (
+    "ingestion_ready",
+    "runtime_ready",
+    "loader_ready",
+    "materialization_ready",
+    "feature_computation_ready",
+    "modeling_ready",
+)
+
+REGISTRY_ENABLEMENT_FALSE_FLAGS: tuple[str, ...] = (
+    "enabled_for_loading",
+    "enabled_for_update",
+    "enabled_for_retrieval",
+    "enabled_for_raw_5m_materialization",
+    "enabled_for_d1_derivation",
+    "enabled_for_research",
+)
+
+EXECUTION_AUTHORIZATION_TRUE_KEYS: tuple[str, ...] = tuple(
+    key
+    for capability in READINESS_CAPABILITIES
+    for key in (
+        capability,
+        f"{capability}_ready",
+        f"{capability}_allowed",
+        f"{capability}_authorized",
+        f"can_run_{capability}",
+    )
+) + (
+    "can_compute_features",
+    "can_model",
+    "runtime_loader_authorized",
+)
+
 REQUIRED_REPOSITORY_FILES: tuple[str, ...] = (
     "configs/instruments/forts_instrument_registry.v1.yaml",
     "configs/datasets/futures_data_lake.v1.yaml",
@@ -84,6 +118,9 @@ def build_materialization_gate_report(repo_root: str | Path) -> dict[str, Any]:
         "blocked_provider_refs_declared": all(ref in blocked_refs for ref in BLOCKED_PROVIDER_REFS),
         "phase2_6_readiness_flags_blocked": _dataset_readiness_flags_blocked(dataset_text),
         "instrument_registry_loading_flags_blocked": _registry_loading_flags_blocked(registry_text),
+        "execution_authorization_true_values_absent": _execution_authorization_true_values_absent(
+            registry_text, dataset_text
+        ),
         "generated_data_path_not_authorized": "no generated data path" in dataset_text,
         "current_contract_month_selection_not_authorized": (
             "no current contract month selection automation" in registry_text
@@ -101,15 +138,8 @@ def build_materialization_gate_report(repo_root: str | Path) -> dict[str, Any]:
             ),
         ),
         "label_leakage_denylist_declared": _label_denylist_declared(feature_contract),
-        "phase2_7_test_coverage_assumptions_present": _contains_all(
-            phase2_6_test_text + "\n" + phase2_7_pit_test_text,
-            (
-                "APPROVED_PHASE2_6_SOURCE_REFS",
-                "BLOCKED_SOURCE_REF_MARKERS",
-                "test_pit_time_fields_and_d1_forecast_anchor_rules_are_declared",
-                "test_label_leakage_denylist_blocks_labels_intervals_future_targets_and_annotations",
-                "test_contracts_do_not_authorize_runtime_data_loading_feature_computation_or_modeling",
-            ),
+        "phase2_7_test_coverage_assumptions_present": _phase2_test_coverage_assumptions_present(
+            phase2_6_test_text, phase2_7_pit_test_text
         ),
     }
 
@@ -223,33 +253,70 @@ def _contains_all(text: str, markers: tuple[str, ...]) -> bool:
     return all(marker.lower() in lowered for marker in markers)
 
 
-def _dataset_readiness_flags_blocked(dataset_text: str) -> bool:
-    required_false_flags = (
-        "ingestion_ready",
-        "runtime_ready",
-        "loader_ready",
-        "materialization_ready",
-        "feature_computation_ready",
-        "modeling_ready",
+def _yaml_flag_false_and_not_true(text: str, flag: str) -> bool:
+    return bool(
+        re.search(rf"^\s*{re.escape(flag)}:\s*false\s*(?:#.*)?$", text, flags=re.MULTILINE)
+    ) and not bool(
+        re.search(rf"^\s*{re.escape(flag)}:\s*true\s*(?:#.*)?$", text, flags=re.MULTILINE)
     )
+
+
+def _yaml_key_true_absent(text: str, key: str) -> bool:
+    return not bool(
+        re.search(rf"^\s*{re.escape(key)}:\s*true\s*(?:#.*)?$", text, flags=re.MULTILINE)
+    )
+
+
+def _dataset_readiness_flags_blocked(dataset_text: str) -> bool:
     return all(
-        re.search(rf"^\s*{flag}:\s*false\s*$", dataset_text, flags=re.MULTILINE)
-        for flag in required_false_flags
+        _yaml_flag_false_and_not_true(dataset_text, flag)
+        for flag in DATASET_READINESS_FALSE_FLAGS
     )
 
 
 def _registry_loading_flags_blocked(registry_text: str) -> bool:
-    required_false_flags = (
-        "enabled_for_loading",
-        "enabled_for_update",
-        "enabled_for_retrieval",
-        "enabled_for_raw_5m_materialization",
-        "enabled_for_d1_derivation",
-        "enabled_for_research",
-    )
     return all(
-        re.search(rf"^\s*{flag}:\s*false\s*$", registry_text, flags=re.MULTILINE)
-        for flag in required_false_flags
+        _yaml_flag_false_and_not_true(registry_text, flag)
+        for flag in REGISTRY_ENABLEMENT_FALSE_FLAGS
+    )
+
+
+def _execution_authorization_true_values_absent(*texts: str) -> bool:
+    combined_text = "\n".join(texts)
+    return all(
+        _yaml_key_true_absent(combined_text, key)
+        for key in EXECUTION_AUTHORIZATION_TRUE_KEYS
+    )
+
+
+def _phase2_test_coverage_assumptions_present(
+    phase2_6_test_text: str, phase2_7_pit_test_text: str
+) -> bool:
+    return (
+        all(ref in phase2_6_test_text for ref in APPROVED_PHASE2_SOURCE_REFS)
+        and all(ref in phase2_6_test_text for ref in BLOCKED_PROVIDER_REFS)
+        and all(flag in phase2_6_test_text for flag in DATASET_READINESS_FALSE_FLAGS)
+        and all(flag in phase2_6_test_text for flag in REGISTRY_ENABLEMENT_FALSE_FLAGS)
+        and _contains_all(
+            phase2_6_test_text,
+            (
+                "test_registry_and_dataset_readiness_flags_do_not_authorize_execution",
+                "test_no_generated_data_runtime_loader_or_current_contract_automation_is_authorized",
+                "no runtime loader",
+                "no materialization job",
+                "no feature computation",
+                "no model fitting",
+                "no prediction",
+            ),
+        )
+        and _contains_all(
+            phase2_7_pit_test_text,
+            (
+                "test_pit_time_fields_and_d1_forecast_anchor_rules_are_declared",
+                "test_label_leakage_denylist_blocks_labels_intervals_future_targets_and_annotations",
+                "test_contracts_do_not_authorize_runtime_data_loading_feature_computation_or_modeling",
+            ),
+        )
     )
 
 
