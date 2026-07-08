@@ -71,13 +71,19 @@ def _write_raw_partition(data_root: Path, trade_date: str) -> Path:
     return path
 
 
-def _request(data_root: Path, *, run_id: str = "test_run") -> builder.D1PanelBuildRequest:
+def _request(
+    data_root: Path,
+    *,
+    run_id: str = "test_run",
+    start_date: str = "2026-06-11",
+    end_date: str = "2026-06-11",
+) -> builder.D1PanelBuildRequest:
     return builder.D1PanelBuildRequest(
         data_root=data_root,
         instrument_id="forts.usdrubf",
         secid="USDRUBF",
-        start_date=builder._parse_iso_date("2026-06-11", "start_date"),
-        end_date=builder._parse_iso_date("2026-06-11", "end_date"),
+        start_date=builder._parse_iso_date(start_date, "start_date"),
+        end_date=builder._parse_iso_date(end_date, "end_date"),
         run_id=run_id,
         no_overwrite=True,
     )
@@ -91,6 +97,24 @@ def test_contract_uses_moex_data_root_and_no_hardcoded_server_path() -> None:
     assert "/home/trader" not in text
     assert "usdrubf_phase2_d1_panel.v1" in text
     assert "hardcoded_server_path_allowed: false" in text
+
+
+def test_contract_references_forts_raw_5m_tradestats_source_contract() -> None:
+    contract_path = ROOT / "contracts/datasets/usdrubf_phase2_d1_panel.v1.yaml"
+    source_contract_path = ROOT / "contracts/datasets/forts_raw_5m_tradestats.v1.yaml"
+
+    contract = contract_path.read_text(encoding="utf-8")
+    source_contract = source_contract_path.read_text(encoding="utf-8")
+
+    assert "dataset_id: dataset.forts.raw_5m.tradestats.v1" in contract
+    assert "contract_path: contracts/datasets/forts_raw_5m_tradestats.v1.yaml" in contract
+    assert "contract_id: futures_raw_5m.v1" not in contract
+    assert 'default_input_raw_5m_root_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats"' in contract
+    assert (
+        'path_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/'
+        'trade_date={YYYY-MM-DD}/instrument_id={INSTRUMENT_ID}/secid={SECID}/part.parquet"'
+        in source_contract
+    )
 
 
 def test_builder_cli_parser_requires_explicit_date_range_and_no_overwrite() -> None:
@@ -188,6 +212,36 @@ def test_builder_writes_only_panel_and_manifest_under_approved_target_root(tmp_p
         result.manifest_path.as_posix(),
     ]
     assert manifest["side_effect_summary"]["network_calls"] is False
+
+
+def test_builder_counts_source_partitions_per_d1_row_for_five_date_panel(tmp_path: Path) -> None:
+    data_root = tmp_path / "data"
+    trade_dates = [
+        "2026-06-11",
+        "2026-06-15",
+        "2026-06-16",
+        "2026-06-17",
+        "2026-06-18",
+    ]
+    for trade_date in trade_dates:
+        _write_raw_partition(data_root, trade_date)
+
+    result = builder.build_panel(
+        _request(
+            data_root,
+            run_id="five_date_panel",
+            start_date="2026-06-11",
+            end_date="2026-06-18",
+        )
+    )
+
+    panel = pd.read_parquet(result.output_path)
+    assert panel["trade_date"].tolist() == trade_dates
+    assert panel["source_raw_5m_partition_count"].tolist() == [1, 1, 1, 1, 1]
+
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["row_count"] == 5
+    assert manifest["input_partition_count"] == 5
 
 
 def test_builder_refuses_overwrite_when_target_exists(tmp_path: Path) -> None:
