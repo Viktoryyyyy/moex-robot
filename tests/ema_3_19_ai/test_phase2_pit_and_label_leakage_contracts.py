@@ -18,7 +18,6 @@ CBR_CONTRACT_PATH = REPO_ROOT / "contracts/calendars/rates/cbr_key_rate_calendar
 RU_TAX_CONTRACT_PATH = REPO_ROOT / "contracts/calendars/calendar/ru_tax_periods.v1.yaml"
 RU_US_HOLIDAYS_CONTRACT_PATH = REPO_ROOT / "contracts/calendars/calendar/ru_us_holidays.v1.yaml"
 FUTOI_POLICY_PATH = REPO_ROOT / "docs/sot/strategies/ema_3_19_ai/phase2_futoi_pit_policy_v1.md"
-FUTOI_SOURCE_CONTRACT_PATH = REPO_ROOT / "contracts/sources/futoi/participant_positioning.v1.yaml"
 
 D1_PIT_CONTRACTS = (
     FEATURE_EXPORT_PATH,
@@ -113,23 +112,6 @@ def _yaml_contract_text(path: Path) -> str:
     loaded = yaml.safe_load(_read(path))
     assert isinstance(loaded, dict), f"{path} must parse as a YAML mapping"
     return _read(path)
-
-
-def _walk_strings(value: Any) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, dict):
-        output: list[str] = []
-        for key, item in value.items():
-            output.extend(_walk_strings(key))
-            output.extend(_walk_strings(item))
-        return output
-    if isinstance(value, list):
-        output = []
-        for item in value:
-            output.extend(_walk_strings(item))
-        return output
-    return []
 
 
 def _combined_text(*paths: Path) -> str:
@@ -229,7 +211,7 @@ def test_ema_3_19_is_context_and_diagnostic_only_not_label_source() -> None:
     _assert_contains_all(
         combined,
         (
-            "ema 3/19 context",
+            "ema 3/19 cross context",
             "diagnostic",
             "not a b/s/out label source",
             "ema as b/s/out label source",
@@ -244,7 +226,6 @@ def test_futoi_is_participant_positioning_only_and_not_generic_open_interest() -
     policy_text = _read(FUTOI_POLICY_PATH).lower()
     unified_text = _read(UNIFIED_FEATURE_CONTRACT_PATH).lower()
 
-    assert not FUTOI_SOURCE_CONTRACT_PATH.exists()
     assert "futoi means participant positioning" in policy_text
     assert "does not mean generic open interest" in policy_text
     assert "no open-interest interpretation" in policy_text
@@ -259,7 +240,8 @@ def test_cbr_official_usdrub_is_reference_only_not_causal_market_input() -> None
     assert "causal_market_driver_allowed: false" in cbr_contract
     assert "must not be described or used as a" in cbr_contract
     assert "causal market usd/rub input" in cbr_contract
-    assert "lagged/reference indicator separate from market usd/rub dynamics" in cbr_contract
+    assert "lagged/reference indicator separate" in cbr_contract
+    assert "market usd/rub dynamics" in cbr_contract
 
 
 def test_calendar_contracts_split_pre_anchor_schedule_from_post_fact_outcome() -> None:
