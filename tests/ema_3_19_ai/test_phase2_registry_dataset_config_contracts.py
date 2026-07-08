@@ -151,7 +151,7 @@ def test_registry_and_dataset_configs_exist_and_parse_as_yaml() -> None:
 def test_phase2_6_source_bindings_reference_only_approved_phase2_5_placeholders() -> None:
     dataset_text = _read(DATASET_CONFIG_PATH)
     binding = _section(dataset_text, "phase2_6_source_bindings:")
-    approved_section = _section(binding, "  approved_source_contract_refs:")
+    approved_section = _section(binding, "approved_source_contract_refs:")
     approved_refs = set(_list_values(approved_section))
 
     assert approved_refs == APPROVED_PHASE2_6_SOURCE_REFS
@@ -166,8 +166,8 @@ def test_phase2_6_source_bindings_reference_only_approved_phase2_5_placeholders(
 def test_blocked_provider_refs_remain_excluded_from_approved_bindings() -> None:
     dataset_text = _read(DATASET_CONFIG_PATH)
     binding = _section(dataset_text, "phase2_6_source_bindings:")
-    approved_section = _section(binding, "  approved_source_contract_refs:")
-    blocked_section = _section(binding, "  blocked_source_refs:")
+    approved_section = _section(binding, "approved_source_contract_refs:")
+    blocked_section = _section(binding, "blocked_source_refs:")
 
     approved_text = approved_section.lower()
     for marker in BLOCKED_SOURCE_REF_MARKERS:
