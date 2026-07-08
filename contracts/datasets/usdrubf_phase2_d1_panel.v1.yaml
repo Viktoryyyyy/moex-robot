@@ -1,0 +1,79 @@
+contract_id: usdrubf_phase2_d1_panel.v1
+dataset_id: usdrubf_phase2_d1_panel
+schema_version: usdrubf_phase2_d1_panel.v1
+status: controlled_builder_contract
+lane: ema_3_19_ai
+storage_root_ref: MOEX_DATA_ROOT
+artifact_class: derived_research_dataset
+format: parquet
+producer: moex_data.futures.usdrubf_phase2_d1_panel_builder
+default_instrument_id: forts.usdrubf
+default_secid: USDRUBF
+source_dataset:
+  dataset_id: futures_raw_5m
+  contract_id: futures_raw_5m.v1
+  default_input_raw_5m_root_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats"
+  raw_5m_partition_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/trade_date={YYYY-MM-DD}/instrument_id=forts.usdrubf/secid=USDRUBF/part.parquet"
+artifacts:
+  panel:
+    path_pattern: "${MOEX_DATA_ROOT}/research/ema_3_19_ai/usdrubf_phase2_d1_panel.v1/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}/part.parquet"
+  manifest:
+    path_pattern: "${MOEX_DATA_ROOT}/research/ema_3_19_ai/usdrubf_phase2_d1_panel.v1/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}/manifest.json"
+partitioning:
+  - instrument_id
+  - run_id
+grain: one_row_per_trade_date_per_instrument
+primary_key:
+  - trade_date
+  - instrument_id
+  - secid
+required_columns:
+  - trade_date
+  - instrument_id
+  - secid
+  - open
+  - high
+  - low
+  - close
+  - source_raw_5m_partition_count
+  - panel_schema_version
+  - build_run_id
+optional_derivable_columns:
+  - volume
+  - value
+  - num_trades
+  - first_ts
+  - last_ts
+forbidden_feature_columns:
+  - phase_label
+  - B
+  - S
+  - OUT
+  - target
+  - y
+  - future_return
+overwrite_policy:
+  default: no-overwrite
+  overwrite_allowed: false
+  future_override_requires: explicit_PM_L2_approval
+build_authority:
+  repo_code_authorized: true
+  server_build_authorized_now: false
+  future_server_build_requires: separate_PM_L2_approval
+side_effect_policy:
+  network_allowed: false
+  subprocess_allowed: false
+  model_fitting_allowed: false
+  prediction_allowed: false
+  broker_or_trading_allowed: false
+  writes_allowed_only_when_cli_explicitly_run:
+    - panel parquet
+    - manifest json
+path_rules:
+  storage_root: env_or_cli_data_root_bound_to_MOEX_DATA_ROOT
+  hardcoded_server_path_allowed: false
+  implicit_latest_file_selection_allowed: false
+  output_must_stay_under_declared_research_root: true
+labels_policy:
+  labels_may_be_joined_later_for_supervised_analysis: true
+  labels_must_not_be_output_feature_columns_in_this_builder: true
