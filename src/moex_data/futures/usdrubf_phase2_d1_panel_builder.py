@@ -205,7 +205,7 @@ def _build_panel_frame(partitions: list[Path], request: D1PanelBuildRequest) -> 
                 trade_date=trade_date,
                 partition=partition,
                 request=request,
-                partition_count=len(partitions),
+                source_partitions=(partition,),
             )
         )
 
@@ -221,7 +221,7 @@ def _build_single_trade_date_row(
     trade_date: str,
     partition: Path,
     request: D1PanelBuildRequest,
-    partition_count: int,
+    source_partitions: tuple[Path, ...],
 ) -> dict[str, object]:
     if frame.empty:
         raise D1PanelBuilderError(f"raw 5m partition is empty: {partition.as_posix()}")
@@ -262,7 +262,7 @@ def _build_single_trade_date_row(
         "close": float(ordered.iloc[-1]["close"]),
         "first_ts": ordered_ts.iloc[0].isoformat(),
         "last_ts": ordered_ts.iloc[-1].isoformat(),
-        "source_raw_5m_partition_count": int(partition_count),
+        "source_raw_5m_partition_count": int(len(source_partitions)),
         "panel_schema_version": PANEL_SCHEMA_VERSION,
         "build_run_id": request.run_id,
     }
