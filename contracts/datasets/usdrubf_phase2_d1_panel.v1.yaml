@@ -10,8 +10,8 @@ producer: moex_data.futures.usdrubf_phase2_d1_panel_builder
 default_instrument_id: forts.usdrubf
 default_secid: USDRUBF
 source_dataset:
-  dataset_id: futures_raw_5m
-  contract_id: futures_raw_5m.v1
+  dataset_id: dataset.forts.raw_5m.tradestats.v1
+  contract_path: contracts/datasets/forts_raw_5m_tradestats.v1.yaml
   default_input_raw_5m_root_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats"
   raw_5m_partition_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/trade_date={YYYY-MM-DD}/instrument_id=forts.usdrubf/secid=USDRUBF/part.parquet"
 artifacts:
