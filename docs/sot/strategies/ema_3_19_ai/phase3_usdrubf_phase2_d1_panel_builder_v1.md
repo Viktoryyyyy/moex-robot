@@ -38,6 +38,13 @@ Manifest output pattern:
 ${MOEX_DATA_ROOT}/research/ema_3_19_ai/usdrubf_phase2_d1_panel.v1/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}/manifest.json
 ```
 
+Source raw dataset contract:
+
+```text
+dataset_id: dataset.forts.raw_5m.tradestats.v1
+contract_path: contracts/datasets/forts_raw_5m_tradestats.v1.yaml
+```
+
 Default raw 5m input root pattern:
 
 ```text
@@ -97,6 +104,7 @@ The builder:
 - uses available `trade_date=YYYY-MM-DD` partitions in the requested date range;
 - fails closed when no raw 5m partitions are found;
 - builds one D1 session row per discovered raw 5m trade-date partition;
+- reports `source_raw_5m_partition_count` as the source partition count for that specific D1 row, which is `1` under the current one-raw-partition-per-trade-date model;
 - writes only the panel parquet and manifest JSON when explicitly run;
 - refuses existing output or manifest paths when `--no-overwrite` is set;
 - writes deterministic metadata columns:
