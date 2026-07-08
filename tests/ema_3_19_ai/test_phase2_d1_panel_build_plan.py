@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
-from src.moex_data.futures import phase2_d1_panel_build_plan as plan_module
-
 ROOT = Path(__file__).resolve().parents[2]
+SRC = ROOT / "src"
+
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from moex_data.futures import phase2_d1_panel_build_plan as plan_module  # noqa: E402
 
 
 def test_phase2_d1_panel_build_plan_imports_and_builds_from_repo_files() -> None:
