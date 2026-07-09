@@ -1,0 +1,127 @@
+contract_id: usdrubf_phase6_internal_modeling_dataset.v1
+dataset_id: usdrubf_phase6_internal_modeling_dataset.v1
+project: MOEX Bot
+lane: ema_3_19_ai
+status: repository_contract_only
+phase: "6.0"
+purpose: >
+  Define the deterministic internal-only supervised modeling dataset builder for
+  later USDRUBF / Si D1 factor-batch modeling. This contract authorizes code,
+  tests, documentation, and repository contracts only. It does not authorize
+  server materialization, external data ingestion, model fitting, prediction, or
+  trading.
+
+scope:
+  internal_d1_only: true
+  external_data_allowed: false
+  provider_api_calls_allowed: false
+  model_fitting_allowed: false
+  prediction_allowed: false
+  trading_allowed: false
+  runtime_allowed: false
+  generated_repository_data_allowed: false
+
+inputs_later_server_execution_only:
+  panel_path:
+    flag: --panel-path
+    source: existing Phase 3.4 internal D1 panel parquet
+  panel_manifest_path:
+    flag: --panel-manifest-path
+    source: existing D1 panel manifest JSON
+  label_contract_path:
+    flag: --label-contract-path
+    source: checked-in manual B/S/OUT label contract JSON
+  manual_label_materializer:
+    path: src/moex_research/labels/usdrubf_d1_manual_phase_labels.py
+    role: target materialization only
+
+required_cli_flags:
+  - --panel-path
+  - --panel-manifest-path
+  - --label-contract-path
+  - --output-dir
+  - --run-id
+  - --internal-d1-only
+  - --no-external-data
+  - --no-model-fitting
+  - --no-prediction
+  - --no-trading
+  - --no-overwrite
+
+outputs_later_server_execution_only:
+  output_dir_flag: --output-dir
+  overwrite_policy:
+    no_overwrite_required: true
+    non_empty_output_dir_refused: true
+  artifacts:
+    - modeling_dataset.parquet
+    - manifest.json
+    - feature_schema.json
+    - dataset_preview.csv
+    - target_distribution.csv
+
+target_columns:
+  - target_phase_label
+  - target_is_labeled
+  - target_source
+  - target_trade_date
+  - target_instrument_id
+target_source_value: manual_phase_labels_v1
+
+feature_schema_contract:
+  path: contracts/features/usdrubf_phase6_internal_factor_batches_v1.json
+  schema_id: usdrubf_phase6_internal_factor_batches_v1
+
+leakage_rules:
+  labels_are_targets_only: true
+  label_values_as_features_allowed: false
+  label_availability_as_features_allowed: false
+  manual_phase_metadata_as_features_allowed: false
+  phase_boundary_metadata_as_features_allowed: false
+  same_day_target_ohlcv_features_allowed: false
+  features_must_be_lagged_or_session_index_context: true
+  ema_3_19_role: lagged_diagnostic_baseline_context_only
+  external_factors_included: false
+
+forbidden_feature_columns:
+  - phase_label
+  - B
+  - S
+  - OUT
+  - target
+  - y
+  - future_return
+  - source_interval_id
+  - phase_remaining_sessions
+  - next_regime_if_current_ends
+  - transition_exit_day
+  - boundary_distance
+  - future_phase
+  - future_volatility
+  - label_annotation
+  - annotator
+  - label_availability_ts
+
+side_effect_policy:
+  allowed_writes_after_later_pm_l2_server_approval:
+    - --output-dir/modeling_dataset.parquet
+    - --output-dir/manifest.json
+    - --output-dir/feature_schema.json
+    - --output-dir/dataset_preview.csv
+    - --output-dir/target_distribution.csv
+  network_calls: false
+  external_provider_calls: false
+  subprocess_calls: false
+  model_fitting: false
+  prediction: false
+  trading_or_broker_actions: false
+
+authority_boundary:
+  repository_pr_outputs_now:
+    - builder code
+    - tests
+    - docs
+    - dataset contract
+    - feature contract
+  server_materialization_authority: PM_L2_ONLY_after_merge_and_separate_server_execution_approval
+  merge_authority: PM_L2_ONLY
