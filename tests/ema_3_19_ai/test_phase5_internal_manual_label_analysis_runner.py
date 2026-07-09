@@ -27,8 +27,8 @@ REQUIRED_OUTPUTS = {
 }
 
 
-def _write_synthetic_panel(path: Path) -> None:
-    frame = pd.DataFrame(
+def _synthetic_panel_frame() -> pd.DataFrame:
+    return pd.DataFrame(
         {
             "trade_date": [
                 "2025-09-09",
@@ -50,6 +50,13 @@ def _write_synthetic_panel(path: Path) -> None:
             "num_trades": [1, 2, 2, 3, 3, 4, 4],
         }
     )
+
+
+def _write_synthetic_panel(path: Path, extra_columns: dict[str, object] | None = None) -> None:
+    frame = _synthetic_panel_frame()
+    if extra_columns:
+        for column, value in extra_columns.items():
+            frame[column] = value
     frame.to_parquet(path, index=False)
 
 
@@ -90,34 +97,58 @@ def _write_synthetic_label_contract(path: Path) -> None:
     )
 
 
-def _run_fixture(tmp_path: Path, output_name: str = "out") -> Path:
+def _write_fixture_inputs(
+    tmp_path: Path, *, extra_panel_columns: dict[str, object] | None = None
+) -> tuple[Path, Path, Path]:
     panel_path = tmp_path / "panel.parquet"
     panel_manifest_path = tmp_path / "manifest.input.json"
     label_contract_path = tmp_path / "label_contract.json"
-    output_dir = tmp_path / output_name
 
-    _write_synthetic_panel(panel_path)
+    _write_synthetic_panel(panel_path, extra_columns=extra_panel_columns)
     _write_synthetic_manifest(panel_manifest_path)
     _write_synthetic_label_contract(label_contract_path)
 
+    return panel_path, panel_manifest_path, label_contract_path
+
+
+def _runner_argv(
+    *,
+    panel_path: Path,
+    panel_manifest_path: Path,
+    label_contract_path: Path,
+    output_dir: Path,
+    run_id: str = "phase5_test_run",
+) -> list[str]:
+    return [
+        "--panel-path",
+        panel_path.as_posix(),
+        "--panel-manifest-path",
+        panel_manifest_path.as_posix(),
+        "--label-contract-path",
+        label_contract_path.as_posix(),
+        "--output-dir",
+        output_dir.as_posix(),
+        "--run-id",
+        run_id,
+        "--internal-d1-only",
+        "--no-external-data",
+        "--no-model-fitting",
+        "--no-prediction",
+        "--no-trading",
+    ]
+
+
+def _run_fixture(tmp_path: Path, output_name: str = "out") -> Path:
+    panel_path, panel_manifest_path, label_contract_path = _write_fixture_inputs(tmp_path)
+    output_dir = tmp_path / output_name
+
     exit_code = runner.main(
-        [
-            "--panel-path",
-            panel_path.as_posix(),
-            "--panel-manifest-path",
-            panel_manifest_path.as_posix(),
-            "--label-contract-path",
-            label_contract_path.as_posix(),
-            "--output-dir",
-            output_dir.as_posix(),
-            "--run-id",
-            "phase5_test_run",
-            "--internal-d1-only",
-            "--no-external-data",
-            "--no-model-fitting",
-            "--no-prediction",
-            "--no-trading",
-        ]
+        _runner_argv(
+            panel_path=panel_path,
+            panel_manifest_path=panel_manifest_path,
+            label_contract_path=label_contract_path,
+            output_dir=output_dir,
+        )
     )
 
     assert exit_code == 0
@@ -150,6 +181,66 @@ def test_cli_safety_gates_fail_before_reading_or_writing(tmp_path: Path) -> None
         runner.run_analysis_from_args(args)
 
     assert not output_dir.exists()
+
+
+def test_runner_rejects_target_like_input_panel_before_artifacts(tmp_path: Path) -> None:
+    panel_path, panel_manifest_path, label_contract_path = _write_fixture_inputs(
+        tmp_path, extra_panel_columns={"future_return": [0.0] * 7}
+    )
+    output_dir = tmp_path / "must_not_exist"
+
+    with pytest.raises(runner.Phase5RunnerError, match="future_return"):
+        runner.main(
+            _runner_argv(
+                panel_path=panel_path,
+                panel_manifest_path=panel_manifest_path,
+                label_contract_path=label_contract_path,
+                output_dir=output_dir,
+            )
+        )
+
+    assert not output_dir.exists()
+
+
+def test_runner_rejects_phase_label_input_panel_before_artifacts(tmp_path: Path) -> None:
+    panel_path, panel_manifest_path, label_contract_path = _write_fixture_inputs(
+        tmp_path, extra_panel_columns={"phase_label": ["B"] * 7}
+    )
+    output_dir = tmp_path / "must_not_exist"
+
+    with pytest.raises(runner.Phase5RunnerError, match="phase_label"):
+        runner.main(
+            _runner_argv(
+                panel_path=panel_path,
+                panel_manifest_path=panel_manifest_path,
+                label_contract_path=label_contract_path,
+                output_dir=output_dir,
+            )
+        )
+
+    assert not output_dir.exists()
+
+
+def test_runner_rejects_non_empty_output_directory_before_new_artifacts(tmp_path: Path) -> None:
+    panel_path, panel_manifest_path, label_contract_path = _write_fixture_inputs(tmp_path)
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    stale_artifact = output_dir / "joined_panel.parquet"
+    stale_artifact.write_text("stale", encoding="utf-8")
+
+    with pytest.raises(runner.Phase5RunnerError, match="non-empty"):
+        runner.main(
+            _runner_argv(
+                panel_path=panel_path,
+                panel_manifest_path=panel_manifest_path,
+                label_contract_path=label_contract_path,
+                output_dir=output_dir,
+            )
+        )
+
+    assert {path.name for path in output_dir.iterdir()} == {"joined_panel.parquet"}
+    assert stale_artifact.read_text(encoding="utf-8") == "stale"
+    assert REQUIRED_OUTPUTS.isdisjoint({path.name for path in output_dir.iterdir()})
 
 
 def test_runner_produces_required_output_artifacts_only_by_default(tmp_path: Path) -> None:
