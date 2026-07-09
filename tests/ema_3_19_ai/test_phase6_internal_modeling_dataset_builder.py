@@ -57,6 +57,21 @@ def _panel_frame() -> pd.DataFrame:
     )
 
 
+def _multi_instrument_panel_frame() -> pd.DataFrame:
+    second_instrument = _panel_frame().assign(
+        instrument_id="forts.si",
+        secid="Si",
+        open=[1000.0, 2000.0, 3000.0],
+        high=[1010.0, 2010.0, 3010.0],
+        low=[990.0, 1990.0, 2990.0],
+        close=[1005.0, 2005.0, 3005.0],
+        volume=[1000.0, 2000.0, 3000.0],
+        value=[100000.0, 200000.0, 300000.0],
+        num_trades=[100.0, 200.0, 300.0],
+    )
+    return pd.concat([_panel_frame(), second_instrument], ignore_index=True)
+
+
 def _label_contract() -> dict[str, object]:
     return {
         "contract_id": "usdrubf_d1_manual_phase_labels.v1",
@@ -230,6 +245,24 @@ def test_builder_refuses_forbidden_target_like_columns_in_input_panel(tmp_path: 
     ):
         builder.build_modeling_dataset_frame(
             panel=panel,
+            label_contract=_label_contract(),
+        )
+
+
+def test_builder_refuses_multi_instrument_panel_before_lag_windows_can_leak(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_if_diagnostics_run(panel: pd.DataFrame) -> pd.DataFrame:
+        raise AssertionError("diagnostic feature generation must not run")
+
+    monkeypatch.setattr(builder, "_add_past_only_diagnostics", fail_if_diagnostics_run)
+
+    with pytest.raises(
+        builder.Phase6DatasetBuilderError,
+        match="single instrument_id only.*cross-instrument lag/rolling/EWM leakage",
+    ):
+        builder.build_modeling_dataset_frame(
+            panel=_multi_instrument_panel_frame(),
             label_contract=_label_contract(),
         )
 
