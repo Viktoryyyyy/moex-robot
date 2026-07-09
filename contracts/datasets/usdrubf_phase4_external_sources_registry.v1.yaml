@@ -1,0 +1,202 @@
+registry_version: '1.0'
+schema_version: usdrubf_phase4_external_sources_registry.v1
+task_id: ema_3_19_ai_market_phase_phase_4_0_external_data_backlog_contracts
+lane: ema_3_19_ai
+purpose: Design-only registry of external source candidates for Phase 4 provider decisions.
+design_only: true
+execution_authorized: false
+no_provider_calls: true
+no_ingestion: true
+no_generated_data: true
+no_secrets_or_credentials: true
+strict_rub_rate_rule:
+  cbr_official_exchange_rate: not causal driver
+  market_fx_proxies:
+    - market USD/RUB
+    - market CNY/RUB
+    - futures/spot proxies
+  cbr_key_rate_calendar: schedule/reference only
+sources:
+  - source_id: futoi_participant_positioning
+    priority: priority_A
+    source_name: FUTOI / participant positioning
+    readiness_status: blocked
+    provider_candidate_status: not_approved_exact_provider_required
+    provider_candidate: TBD exact FUTOI provider; not approved in repository evidence.
+    dataset_candidate: TBD exact schema, publication timestamp, contract mapping, and storage contract.
+    license_access_status: blocked_until_provider_license_and_access_terms_are_documented
+    pit_requirement: Blocked until each observation has as-of timestamp, publication/availability time, instrument mapping, and no-lookahead evidence.
+    timestamp_publication_time_policy: Store provider timestamp, exchange/session timestamp if applicable, and availability timestamp before D1 use.
+    storage_contract_placeholder: contracts/datasets/futoi_participant_positioning.v1.yaml after provider approval only.
+    join_grain_to_d1_panel: instrument_id + trade_date after PIT availability alignment.
+    expected_feature_family: [participant_positioning, open_interest_structure, position_change]
+    blockers_or_open_questions: [exact_provider, exact_schema, publication_timestamp_policy, storage_contract, license_access_terms]
+  - source_id: oil_proxy_brent
+    priority: priority_A
+    source_name: Oil proxy Brent or approved oil futures/index provider
+    readiness_status: needs_provider_decision
+    provider_candidate_status: candidate_required_not_approved
+    provider_candidate: TBD approved Brent/oil futures or index provider.
+    dataset_candidate: TBD Brent continuous futures, front-month futures, settlement series, or approved index proxy.
+    license_access_status: needs_provider_decision
+    pit_requirement: Use only prices, settlements, and rolls available as of D1 decision cutoff; roll construction must be PIT.
+    timestamp_publication_time_policy: Store observation timestamp, session close, settlement publication timestamp if used, and provider availability timestamp.
+    storage_contract_placeholder: contracts/datasets/oil_proxy_brent.v1.yaml placeholder; no ingestion authorized.
+    join_grain_to_d1_panel: trade_date/session_date aligned to USDRUBF D1 trade_date.
+    expected_feature_family: [commodity_price, returns, trend_regime, volatility]
+    blockers_or_open_questions: [provider_license, roll_policy, settlement_cutoff]
+  - source_id: cnyrub_market_quote
+    priority: priority_A
+    source_name: CNY/RUB market quote
+    readiness_status: needs_provider_decision
+    provider_candidate_status: candidate_required_not_approved
+    provider_candidate: TBD MOEX market quote, approved vendor, or tradable CNY/RUB proxy.
+    dataset_candidate: TBD market CNY/RUB spot/futures quote series.
+    license_access_status: needs_provider_decision
+    pit_requirement: Use tradable/market observations only; no CBR official rate as causal driver.
+    timestamp_publication_time_policy: Store market timestamp, session timestamp, source availability timestamp, and quote/settlement type.
+    storage_contract_placeholder: contracts/datasets/cnyrub_market_quote.v1.yaml placeholder; no ingestion authorized.
+    join_grain_to_d1_panel: trade_date aligned by market session and decision cutoff.
+    expected_feature_family: [market_fx_quote, cross_rate, returns, basis_or_spread]
+    blockers_or_open_questions: [market_quote_provider, spot_futures_proxy_decision, quote_type_cutoff]
+  - source_id: usd_index_proxy
+    priority: priority_A
+    source_name: DXY or approved USD index proxy
+    readiness_status: needs_provider_decision
+    provider_candidate_status: candidate_required_not_approved
+    provider_candidate: TBD DXY or approved USD index proxy provider.
+    dataset_candidate: TBD DXY index, USD futures basket proxy, or approved substitute.
+    license_access_status: needs_provider_decision
+    pit_requirement: Use only observations available before D1 decision cutoff; revised values require vintages.
+    timestamp_publication_time_policy: Store market timestamp, index calculation timestamp if applicable, and provider availability timestamp.
+    storage_contract_placeholder: contracts/datasets/usd_index_proxy.v1.yaml placeholder; no ingestion authorized.
+    join_grain_to_d1_panel: calendar_date/trade_date mapped to USDRUBF D1 trade_date.
+    expected_feature_family: [usd_index, returns, trend_regime, volatility]
+    blockers_or_open_questions: [provider_license, proxy_methodology, holiday_timezone_alignment]
+  - source_id: ru_tax_periods_calendar
+    priority: priority_A
+    source_name: RU tax periods calendar
+    readiness_status: needs_provider_decision
+    provider_candidate_status: candidate_required_not_approved
+    provider_candidate: TBD official tax calendar or approved static calendar source.
+    dataset_candidate: TBD tax-payment dates/windows with source and publication/version metadata.
+    license_access_status: needs_provider_decision
+    pit_requirement: Calendar must be known in advance or versioned by publication date.
+    timestamp_publication_time_policy: Store calendar publication/version timestamp and event effective date.
+    storage_contract_placeholder: contracts/datasets/ru_tax_periods_calendar.v1.yaml placeholder; no ingestion authorized.
+    join_grain_to_d1_panel: trade_date joined to tax-event windows.
+    expected_feature_family: [calendar_event, tax_period_window, days_to_from_event]
+    blockers_or_open_questions: [calendar_source, window_definitions, versioning_policy]
+  - source_id: cbr_key_rate_calendar
+    priority: priority_A
+    source_name: Bank of Russia key rate calendar
+    readiness_status: needs_provider_decision
+    provider_candidate_status: candidate_required_not_approved
+    provider_candidate: TBD Bank of Russia official policy calendar/decision source or approved mirror.
+    dataset_candidate: TBD key-rate meeting calendar and historical key-rate decisions with publication timestamps.
+    license_access_status: needs_provider_decision
+    pit_requirement: Meeting schedule must be versioned by publication date; decision values only after official publication timestamp.
+    timestamp_publication_time_policy: Store meeting date, decision publication timestamp, effective date, and availability timestamp.
+    storage_contract_placeholder: contracts/datasets/cbr_key_rate_calendar.v1.yaml placeholder; no ingestion authorized.
+    join_grain_to_d1_panel: trade_date joined to meeting/decision dates with publication flags.
+    expected_feature_family: [policy_calendar, key_rate_level, days_to_from_meeting, decision_surprise_placeholder]
+    special_rule: schedule_reference_only
+    blockers_or_open_questions: [source_mirror, decision_timestamp_policy, surprise_input]
+  - source_id: ru_us_holidays_calendar
+    priority: priority_A
+    source_name: RU/US holidays calendar
+    readiness_status: needs_provider_decision
+    provider_candidate_status: candidate_required_not_approved
+    provider_candidate: TBD approved exchange/settlement holiday calendars for Russia and US markets.
+    dataset_candidate: TBD RU exchange holidays, US market holidays, settlement holidays.
+    license_access_status: needs_provider_decision
+    pit_requirement: Calendar events must be known in advance or versioned by publication date.
+    timestamp_publication_time_policy: Store calendar publication/version timestamp, market identifier, and holiday/session date.
+    storage_contract_placeholder: contracts/datasets/ru_us_holidays_calendar.v1.yaml placeholder; no ingestion authorized.
+    join_grain_to_d1_panel: trade_date joined to holiday/session flags.
+    expected_feature_family: [calendar_event, liquidity_regime, session_availability]
+    blockers_or_open_questions: [calendar_source, session_settlement_hierarchy]
+  - source_id: futures_expiry_roll_effects
+    priority: priority_A
+    source_name: Futures expiry / roll effects
+    readiness_status: needs_provider_decision
+    provider_candidate_status: candidate_required_not_approved
+    provider_candidate: TBD exchange contract calendar and approved contract metadata source.
+    dataset_candidate: TBD futures expiry dates, contract codes, roll rules, last trade dates, settlement dates.
+    license_access_status: needs_provider_decision
+    pit_requirement: Contract metadata must be known as of trade_date; schedule changes must be versioned.
+    timestamp_publication_time_policy: Store contract-calendar publication/version timestamp and event effective dates.
+    storage_contract_placeholder: contracts/datasets/futures_expiry_roll_effects.v1.yaml placeholder; no ingestion authorized.
+    join_grain_to_d1_panel: instrument_id + trade_date.
+    expected_feature_family: [futures_calendar, days_to_expiry, roll_window, contract_liquidity_shift]
+    blockers_or_open_questions: [futures_calendar_source, roll_rule, contract_mapping]
+  - source_id: ofz_yield_rates_proxy
+    priority: priority_B
+    source_name: OFZ yield / rates proxy
+    readiness_status: needs_provider_decision
+    provider_candidate_status: candidate_required_not_approved
+    provider_candidate: TBD approved OFZ yield curve, index, or rates data provider.
+    dataset_candidate: TBD OFZ curve nodes, RGBI/OFZ index proxies, or approved rates proxy.
+    license_access_status: needs_provider_decision
+    pit_requirement: Use only values published before D1 decision cutoff; revised curves or indices require vintage/as-of tracking.
+    timestamp_publication_time_policy: Store observation date, calculation/publication timestamp, and provider availability timestamp.
+    storage_contract_placeholder: contracts/datasets/ofz_yield_rates_proxy.v1.yaml placeholder; no ingestion authorized.
+    join_grain_to_d1_panel: trade_date mapped by publication availability.
+    expected_feature_family: [rates_proxy, yield_level, curve_slope, yield_change]
+    blockers_or_open_questions: [provider_license, proxy_methodology, publication_cutoff]
+  - source_id: open_interest_liquidity_volume_extensions
+    priority: priority_B
+    source_name: Open interest / liquidity / volume extensions
+    readiness_status: needs_provider_decision
+    provider_candidate_status: candidate_required_not_approved
+    provider_candidate: TBD MOEX/FORTS or approved futures market data provider.
+    dataset_candidate: TBD daily open interest, volume, value, number of trades, bid/ask or liquidity proxy if approved.
+    license_access_status: needs_provider_decision
+    pit_requirement: Use only observations available before D1 decision cutoff; settlement/end-of-day statistics require publication timestamp.
+    timestamp_publication_time_policy: Store exchange observation date, session close, statistic publication timestamp, and provider availability timestamp.
+    storage_contract_placeholder: contracts/datasets/open_interest_liquidity_volume_extensions.v1.yaml placeholder; no ingestion authorized.
+    join_grain_to_d1_panel: instrument_id + trade_date after publication alignment.
+    expected_feature_family: [market_microstructure_daily, open_interest, volume_value, liquidity_regime]
+    blockers_or_open_questions: [provider_source, open_interest_timestamp, liquidity_proxy_schema]
+  - source_id: volatility_regime_features
+    priority: priority_B
+    source_name: Volatility regime features
+    readiness_status: needs_provider_decision
+    provider_candidate_status: candidate_required_not_approved
+    provider_candidate: TBD internal D1-derived volatility or approved external volatility proxy.
+    dataset_candidate: TBD realized volatility from internal D1 panel or approved external implied/realized volatility series.
+    license_access_status: needs_provider_decision
+    pit_requirement: Use lagged D1 observations or external publication/as-of timestamps only.
+    timestamp_publication_time_policy: Store derivation timestamp and source observation cutoff; no feature computation authorized in Phase 4.0.
+    storage_contract_placeholder: contracts/datasets/volatility_regime_features.v1.yaml placeholder if external source is selected.
+    join_grain_to_d1_panel: instrument_id + trade_date using lagged/PIT inputs only.
+    expected_feature_family: [volatility_regime, realized_volatility, range_expansion, vol_proxy]
+    blockers_or_open_questions: [internal_vs_external, lookback_cutoff_rules, feature_contract_deferred]
+  - source_id: sanctions_geopolitical_event_flags
+    priority: priority_B
+    source_name: Sanctions/geopolitical event flags
+    readiness_status: blocked
+    provider_candidate_status: not_approved_governed_event_source_required
+    provider_candidate: TBD governed event-source policy and approved dataset/provider.
+    dataset_candidate: TBD event taxonomy with publication timestamp, source attribution, severity policy, and revision/version handling.
+    license_access_status: blocked_until_source_license_and_attribution_policy_are_approved
+    pit_requirement: Blocked until event taxonomy, publication time, source reliability, and revision policy are defined; no hindsight labeling.
+    timestamp_publication_time_policy: Store first-publication timestamp, source timestamp, event effective timestamp/date, and correction/revision timestamp.
+    storage_contract_placeholder: contracts/datasets/sanctions_geopolitical_event_flags.v1.yaml after governed source/taxonomy decision only.
+    join_grain_to_d1_panel: trade_date event windows based on first-publication timestamp and event effective date.
+    expected_feature_family: [event_flag, risk_regime, days_to_from_event, severity_placeholder]
+    blockers_or_open_questions: [event_taxonomy, source_provider, first_publication_evidence, severity_governance]
+  - source_id: import_export_trade_balance_proxy
+    priority: priority_B
+    source_name: Import/export or trade balance proxy
+    readiness_status: needs_provider_decision
+    provider_candidate_status: candidate_required_not_approved
+    provider_candidate: TBD official statistics source, market proxy, or alternative data provider.
+    dataset_candidate: TBD trade balance, export/import proxy, current-account proxy, or high-frequency substitute.
+    license_access_status: needs_provider_decision
+    pit_requirement: Macro values must be stored by vintage/as-of publication date; revised history must not overwrite prior vintages.
+    timestamp_publication_time_policy: Store period_end_date, first_publication_timestamp, revision_timestamp if any, and provider availability timestamp.
+    storage_contract_placeholder: contracts/datasets/import_export_trade_balance_proxy.v1.yaml placeholder; no ingestion authorized.
+    join_grain_to_d1_panel: trade_date uses latest approved vintage available before decision cutoff.
+    expected_feature_family: [macro_flow_proxy, trade_balance, export_import_proxy, publication_lag]
+    blockers_or_open_questions: [provider_source, proxy_cadence_carry_forward, revision_vintage_contract]
