@@ -4,7 +4,7 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final, Iterable
+from typing import Any, Final
 
 import pandas as pd
 
@@ -54,6 +54,15 @@ DESCRIPTIVE_NUMERIC_COLUMNS: Final[tuple[str, ...]] = (
     "value",
     "num_trades",
 )
+EXPLICIT_FORBIDDEN_INPUT_PANEL_COLUMNS: Final[tuple[str, ...]] = (
+    "B",
+    "S",
+    "OUT",
+    "target",
+    "y",
+    "future_return",
+    "phase_label",
+)
 
 
 class Phase5RunnerError(ValueError):
@@ -95,6 +104,8 @@ def run_analysis_from_args(args: argparse.Namespace) -> Phase5RunResult:
     label_contract_path = Path(args.label_contract_path)
     output_dir = Path(args.output_dir)
 
+    _assert_output_dir_ready_for_new_run(output_dir)
+
     panel = pd.read_parquet(panel_path)
     panel_manifest = _read_json(panel_manifest_path)
     label_contract = _read_json(label_contract_path)
@@ -122,6 +133,7 @@ def run_analysis(
     output_dir: Path,
     run_id: str,
 ) -> Phase5RunResult:
+    _assert_output_dir_ready_for_new_run(output_dir)
     _validate_label_contract(label_contract)
     prepared_panel = _prepare_internal_d1_panel(panel)
     joined_panel = _join_manual_labels(prepared_panel)
@@ -185,6 +197,22 @@ def _assert_required_safety_gates(args: argparse.Namespace) -> None:
         )
 
 
+def _assert_output_dir_ready_for_new_run(output_dir: Path) -> None:
+    if not output_dir.exists():
+        return
+    if not output_dir.is_dir():
+        raise Phase5RunnerError(
+            "--output-dir must be a directory path when it already exists: "
+            + output_dir.as_posix()
+        )
+    existing_entries = sorted(path.name for path in output_dir.iterdir())
+    if existing_entries:
+        raise Phase5RunnerError(
+            "--output-dir already exists and is non-empty; refusing to reuse it: "
+            + output_dir.as_posix()
+        )
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
@@ -216,11 +244,11 @@ def _prepare_internal_d1_panel(panel: pd.DataFrame) -> pd.DataFrame:
             "internal D1 panel missing required columns: " + ", ".join(missing_columns)
         )
 
-    leaked_label_columns = sorted(set(panel.columns).intersection(manual_labels.NON_RUNTIME_FIELDS))
-    if leaked_label_columns:
+    forbidden_columns = _find_forbidden_input_panel_columns(panel)
+    if forbidden_columns:
         raise Phase5RunnerError(
-            "input panel must not already contain manual label or target columns: "
-            + ", ".join(leaked_label_columns)
+            "input panel must not contain target-like, label, or future columns: "
+            + ", ".join(forbidden_columns)
         )
 
     prepared = panel.copy()
@@ -239,6 +267,13 @@ def _prepare_internal_d1_panel(panel: pd.DataFrame) -> pd.DataFrame:
     if prepared["trade_date"].duplicated().any():
         raise Phase5RunnerError("internal D1 panel must contain one row per trade_date")
     return prepared
+
+
+def _find_forbidden_input_panel_columns(panel: pd.DataFrame) -> list[str]:
+    explicit_forbidden = set(EXPLICIT_FORBIDDEN_INPUT_PANEL_COLUMNS)
+    manual_non_runtime = set(manual_labels.NON_RUNTIME_FIELDS)
+    forbidden = explicit_forbidden | manual_non_runtime
+    return sorted(str(column) for column in panel.columns if str(column) in forbidden)
 
 
 def _join_manual_labels(panel: pd.DataFrame) -> pd.DataFrame:
