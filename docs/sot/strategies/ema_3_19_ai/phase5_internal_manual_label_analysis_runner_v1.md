@@ -71,6 +71,20 @@ The runner expects:
 
 The runner does not fetch market data and does not call external providers.
 
+The runner fails closed if the input panel already contains target-like, label, or future columns. The explicit runner-level denylist includes at least:
+
+```text
+B
+S
+OUT
+target
+y
+future_return
+phase_label
+```
+
+This explicit denylist is runner-owned and is not satisfied only by `manual_labels.NON_RUNTIME_FIELDS`.
+
 ## Outputs when executed later
 
 The runner writes only these required artifacts to `--output-dir`:
@@ -87,6 +101,8 @@ joined_panel_preview.csv
 The runner does not write `joined_panel.parquet` by default.
 
 A full joined parquet export is intentionally not part of this PR. If PM L2 later wants that artifact, it requires an explicit future approval and scope.
+
+The runner fails closed if `--output-dir` already exists and is non-empty. It does not reuse a non-empty directory and does not clean stale artifacts as a successful path.
 
 ## Analysis contents
 
@@ -112,7 +128,8 @@ Manual labels remain offline research labels. They must not become runtime featu
 The runner refuses or avoids these scopes:
 
 - missing safety flags;
-- input panels already containing manual label or target-like fields;
+- input panels already containing manual label, target-like, or future fields;
+- non-empty output directories;
 - non-B/S/OUT manual label contract values;
 - external data;
 - provider/network calls;
