@@ -29,7 +29,8 @@ sources:
     timestamp_publication_time_policy: Store provider timestamp, exchange/session timestamp if applicable, and availability timestamp before D1 use.
     storage_contract_placeholder: contracts/datasets/futoi_participant_positioning.v1.yaml after provider approval only.
     join_grain_to_d1_panel: instrument_id + trade_date after PIT availability alignment.
-    expected_feature_family: [participant_positioning, open_interest_structure, position_change]
+    expected_feature_family: [participant_position_direction, participant_position_pressure, participant_group_divergence, participant_position_change]
+    semantic_boundary: FUTOI means participant positioning only; open interest belongs only to source_id open_interest_liquidity_volume_extensions after later PM-approved source and contract.
     blockers_or_open_questions: [exact_provider, exact_schema, publication_timestamp_policy, storage_contract, license_access_terms]
   - source_id: oil_proxy_brent
     priority: priority_A
