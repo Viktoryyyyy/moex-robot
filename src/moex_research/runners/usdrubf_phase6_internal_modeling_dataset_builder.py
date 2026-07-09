@@ -297,6 +297,7 @@ def _prepare_internal_d1_panel(panel: pd.DataFrame) -> pd.DataFrame:
     if parsed_trade_dates.isna().any():
         raise Phase6DatasetBuilderError("trade_date column contains unparsable values")
     prepared["trade_date"] = parsed_trade_dates.dt.strftime("%Y-%m-%d")
+    _assert_single_instrument_panel(prepared)
 
     for column in ("open", "high", "low", "close", *OPTIONAL_NUMERIC_COLUMNS):
         if column in prepared.columns:
@@ -312,6 +313,23 @@ def _prepare_internal_d1_panel(panel: pd.DataFrame) -> pd.DataFrame:
             "internal D1 panel must contain one row per target trade_date/instrument_id"
         )
     return prepared
+
+
+def _assert_single_instrument_panel(prepared: pd.DataFrame) -> None:
+    if prepared["instrument_id"].isna().any():
+        raise Phase6DatasetBuilderError("instrument_id column contains missing values")
+
+    instrument_ids = sorted(
+        str(instrument_id) for instrument_id in prepared["instrument_id"].unique()
+    )
+    if len(instrument_ids) != 1:
+        observed = ", ".join(instrument_ids) if instrument_ids else "none"
+        raise Phase6DatasetBuilderError(
+            "Phase 6.0 internal modeling dataset builder supports a single "
+            "instrument_id only; refusing multi-instrument input panel to prevent "
+            "cross-instrument lag/rolling/EWM leakage. Observed instrument_id "
+            f"values: {observed}"
+        )
 
 
 def _find_forbidden_input_panel_columns(panel: pd.DataFrame) -> list[str]:
