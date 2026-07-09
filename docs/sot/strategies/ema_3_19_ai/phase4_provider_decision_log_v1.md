@@ -26,6 +26,7 @@ No provider is approved by this log unless repository/user evidence supports tha
 ## Explicit notes
 
 - FUTOI / participant positioning is blocked unless exact provider, schema, timestamp/publication policy, storage evidence, and license/access terms are specified.
+- FUTOI / participant positioning is participant-positioning only and must not include open-interest feature semantics; open interest belongs only under `open_interest_liquidity_volume_extensions` after later PM-approved source/contract approval.
 - CBR official exchange rate is not a causal market driver. It is not approved as a causal external factor.
 - Bank of Russia key rate calendar is schedule/reference context only.
 - This log does not authorize ingestion, provider API calls, materialization, feature computation, modeling, prediction, trading, or server apply.
