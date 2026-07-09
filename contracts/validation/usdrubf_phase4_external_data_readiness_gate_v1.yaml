@@ -36,6 +36,9 @@ required_checks:
   - check_id: futoi_blocked_without_exact_evidence
     requirement: FUTOI / participant positioning must remain blocked unless exact provider, schema, timestamp, storage, and license/access evidence is specified.
     failure_semantics: fail
+  - check_id: futoi_participant_positioning_not_open_interest
+    requirement: FUTOI / participant positioning must not include open-interest feature semantics; open interest requires the separate open_interest_liquidity_volume_extensions source and a later PM-approved source/contract.
+    failure_semantics: fail
   - check_id: cbr_official_exchange_rate_not_causal_driver
     requirement: CBR official exchange rate must not be represented as a causal market driver.
     failure_semantics: fail
@@ -50,7 +53,7 @@ required_checks:
     failure_semantics: fail
 pass_fail_semantics:
   pass: All required checks pass and any source used for ingestion has readiness_status=approved with provider/license/PIT/timestamp/storage/D1 join evidence.
-  fail: Any required check fails, FUTOI is not blocked without exact evidence, CBR official FX rate is causal, or any artifact authorizes execution/runtime scope.
+  fail: Any required check fails, FUTOI is not blocked without exact evidence, FUTOI includes open-interest semantics, CBR official FX rate is causal, or any artifact authorizes execution/runtime scope.
 phase_boundary:
   before_step_5: External source ingestion is not required and not authorized; step 5 may only proceed on internal D1 panel and manual labels unless PM L2 authorizes otherwise.
   before_step_6: External factor batches must not be materialized until this readiness gate passes for selected approved sources.
