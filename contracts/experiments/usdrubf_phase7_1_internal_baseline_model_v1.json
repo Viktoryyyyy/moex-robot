@@ -1,0 +1,401 @@
+{
+  "acceptance_invariants": [
+    "exactly four approved new files and no existing-file modifications",
+    "runner and contract identities agree",
+    "all seven required CLI arguments are validated",
+    "all input identities and SHA256 values are fail-closed and recorded",
+    "readiness contract matches the frozen canonical SHA256 and required markers",
+    "only eligible manual B/S/OUT rows enter splitting, fitting and metrics",
+    "target and metadata columns never enter the model matrix",
+    "chronological TimeSeriesSplit uses n_splits=5 test_size=64 gap=0",
+    "every training fold contains B S and OUT",
+    "preprocessing is fitted independently on each training fold",
+    "candidate and baselines use identical validation identities",
+    "metrics and probabilities use fixed B S OUT order",
+    "undefined class metrics remain explicit",
+    "output inventory equals exactly eight declared artifacts",
+    "no model serialization network subprocess provider broker or trading surface",
+    "repeated synthetic runs are deterministic",
+    "no real Phase 6 dataset is accessed during repository tests"
+  ],
+  "approved_file_scope": {
+    "create_only": [
+      "src/moex_research/runners/usdrubf_phase7_1_internal_baseline_model.py",
+      "contracts/experiments/usdrubf_phase7_1_internal_baseline_model_v1.json",
+      "tests/unit/test_usdrubf_phase7_1_internal_baseline_model.py",
+      "tests/contract/test_usdrubf_phase7_1_internal_baseline_model_contract.py"
+    ],
+    "exact_file_count": 4,
+    "existing_files_to_modify": [],
+    "scope_widening_allowed": false
+  },
+  "artifact_write_policy": {
+    "generated_repository_artifacts_allowed": false,
+    "implementation_code_may_support_writing": true,
+    "model_pickle_or_joblib_allowed": false,
+    "non_empty_output_dir_allowed": false,
+    "outputs_outside_explicit_output_dir_allowed": false,
+    "real_phase6_output_creation_allowed": false,
+    "real_runtime_deferred_to": "Phase 7.2",
+    "synthetic_output_location": "pytest_tmp_path_only",
+    "synthetic_test_outputs_allowed": true,
+    "undeclared_outputs_allowed": false
+  },
+  "authority_and_status": {
+    "merge_authority": "PM_L2_ONLY",
+    "model_promotion_allowed": false,
+    "persistent_model_artifact_allowed": false,
+    "real_dataset_fit_allowed": false,
+    "real_prediction_generation_allowed": false,
+    "repository_research_runner": true,
+    "runtime_ready": false,
+    "server_apply_allowed": false,
+    "strategy_promotion_allowed": false,
+    "synthetic_test_fit_allowed": true,
+    "trading_conclusion_allowed": false
+  },
+  "declared_output_artifacts": [
+    "evaluation_manifest.json",
+    "fold_boundaries.csv",
+    "fold_metrics.csv",
+    "aggregate_metrics.json",
+    "per_class_metrics.csv",
+    "confusion_matrix.csv",
+    "baseline_metrics.json",
+    "validation_predictions.parquet"
+  ],
+  "experiment_identity": {
+    "contract_id": "usdrubf_phase7_1_internal_baseline_model_v1",
+    "contract_version": "1.0",
+    "lane": "ema_3_19_ai",
+    "phase": "7.1",
+    "project": "MOEX Bot",
+    "status": "repository_research_runner_only",
+    "task_id": "ema_3_19_ai_market_phase_phase_7_1_internal_baseline_model"
+  },
+  "feature_policy": {
+    "categorical_features": [
+      "lag1_ema_3_19_state"
+    ],
+    "exact_model_matrix_required": true,
+    "excluded_target_and_metadata_columns": [
+      "target_phase_label",
+      "target_is_labeled",
+      "target_source",
+      "target_trade_date",
+      "target_instrument_id",
+      "prior_trade_date"
+    ],
+    "numeric_features": [
+      "session_index",
+      "days_since_prior_trade_date",
+      "lag1_close_return_1d",
+      "lag1_intraday_return",
+      "rolling_past_return_mean",
+      "rolling_past_return_std",
+      "lag1_hl_range_pct",
+      "rolling_past_hl_range_mean",
+      "rolling_past_hl_range_std",
+      "lag1_volume",
+      "lag1_value",
+      "lag1_num_trades",
+      "rolling_past_volume_mean",
+      "lag1_ema_3",
+      "lag1_ema_19",
+      "lag1_ema_3_19_spread"
+    ],
+    "target_values_as_features_allowed": false,
+    "unknown_or_extra_dataset_columns_silently_added": false,
+    "validation_outcome_feature_selection_allowed": false
+  },
+  "forbidden_capabilities": {
+    "broker_or_trading_actions": true,
+    "direct_main_write": true,
+    "external_data_ingestion": true,
+    "live_prediction": true,
+    "merge": true,
+    "network_calls": true,
+    "persistent_model_serialization": true,
+    "provider_calls": true,
+    "server_apply": true,
+    "server_commands": true,
+    "signal_generation": true,
+    "subprocess_calls": true
+  },
+  "immutable_input_identity": {
+    "class_order": [
+      "B",
+      "S",
+      "OUT"
+    ],
+    "dataset_id": "usdrubf_phase6_internal_modeling_dataset.v1",
+    "feature_schema_id": "usdrubf_phase6_internal_factor_batches_v1",
+    "readiness_contract_id": "usdrubf_phase7_modeling_readiness_target_policy_v1",
+    "target_source": "manual_phase_labels_v1"
+  },
+  "input_artifacts": {
+    "dataset_manifest": {
+      "flag": "--dataset-manifest-path",
+      "format": "json",
+      "must_exist_as_explicit_file": true,
+      "suffixes": [
+        ".json"
+      ]
+    },
+    "feature_schema": {
+      "flag": "--feature-schema-path",
+      "format": "json",
+      "must_exist_as_explicit_file": true,
+      "suffixes": [
+        ".json"
+      ]
+    },
+    "git_commit_sha": {
+      "flag": "--git-commit-sha",
+      "required_pattern": "^[0-9a-fA-F]{40}$"
+    },
+    "modeling_dataset": {
+      "flag": "--modeling-dataset-path",
+      "format": "parquet",
+      "must_exist_as_explicit_file": true,
+      "suffixes": [
+        ".parquet"
+      ]
+    },
+    "output_dir": {
+      "flag": "--output-dir",
+      "must_be_absent_or_empty": true
+    },
+    "path_rules": {
+      "fallback_server_paths_allowed": false,
+      "forbidden_mutable_alias_tokens": [
+        "latest",
+        "current",
+        "autodetect"
+      ],
+      "four_input_paths_must_be_distinct": true,
+      "glob_syntax_allowed": false,
+      "implicit_discovery_allowed": false,
+      "mutable_alias_tokens_allowed": false,
+      "non_empty": true
+    },
+    "readiness_contract": {
+      "flag": "--readiness-contract-path",
+      "format": "yaml",
+      "must_exist_as_explicit_file": true,
+      "suffixes": [
+        ".yaml",
+        ".yml"
+      ]
+    },
+    "sha256_capture_required_for_every_input": true
+  },
+  "leakage_fail_closed_policy": {
+    "contract_or_identity_mismatch": "fail_closed",
+    "duplicate_target_identity": "fail_closed",
+    "non_chronological_fold": "fail_closed",
+    "preprocessing_fit_outside_training_fold": "forbidden",
+    "target_or_metadata_in_model_matrix": "fail_closed",
+    "training_fold_missing_class": "fail_closed",
+    "validation_feedback": "forbidden"
+  },
+  "model": {
+    "calibration": false,
+    "constructor": {
+      "C": 1.0,
+      "class_weight": "balanced",
+      "max_iter": 1000,
+      "solver": "lbfgs"
+    },
+    "estimator": "sklearn.linear_model.LogisticRegression",
+    "expected_classes": [
+      "B",
+      "S",
+      "OUT"
+    ],
+    "hyperparameter_search": false,
+    "omitted_parameters": [
+      "multi_class",
+      "random_state",
+      "n_jobs",
+      "explicit_penalty"
+    ],
+    "persistent_model_serialization": false,
+    "threshold_search": false
+  },
+  "preprocessing": {
+    "categorical": [
+      {
+        "parameters": {
+          "strategy": "most_frequent"
+        },
+        "step": "SimpleImputer"
+      },
+      {
+        "parameters": {
+          "handle_unknown": "ignore"
+        },
+        "step": "OneHotEncoder"
+      }
+    ],
+    "fit_scope": "each_training_fold_only",
+    "numeric": [
+      {
+        "parameters": {
+          "strategy": "median"
+        },
+        "step": "SimpleImputer"
+      },
+      {
+        "parameters": {},
+        "step": "StandardScaler"
+      }
+    ],
+    "preprocessing_reuse_between_folds_allowed": false,
+    "validation_feature_selection_allowed": false
+  },
+  "producer": {
+    "execution_mode": "browser_chatgpt_github_direct",
+    "runner_module": "moex_research.runners.usdrubf_phase7_1_internal_baseline_model",
+    "runner_path": "src/moex_research/runners/usdrubf_phase7_1_internal_baseline_model.py"
+  },
+  "required_cli_args": [
+    "--modeling-dataset-path",
+    "--dataset-manifest-path",
+    "--feature-schema-path",
+    "--readiness-contract-path",
+    "--output-dir",
+    "--run-id",
+    "--git-commit-sha"
+  ],
+  "required_metrics": {
+    "common": [
+      "eligible_validation_rows",
+      "per_class_support",
+      "confusion_matrix",
+      "accuracy",
+      "balanced_accuracy",
+      "macro_f1",
+      "weighted_f1",
+      "per_class_precision",
+      "per_class_recall",
+      "per_class_f1"
+    ],
+    "fixed_class_order": [
+      "B",
+      "S",
+      "OUT"
+    ],
+    "probability": [
+      "multiclass_log_loss"
+    ]
+  },
+  "supervised_row_eligibility": {
+    "all_conditions_required": true,
+    "applied_before": [
+      "chronological_ordering",
+      "fold_construction",
+      "fitting",
+      "supervised_metrics"
+    ],
+    "duplicate_identity": {
+      "allowed": false,
+      "failure_policy": "fail_closed",
+      "fields": [
+        "target_trade_date",
+        "target_instrument_id"
+      ]
+    },
+    "excluded_rows": [
+      "UNLABELED",
+      "null_target",
+      "unknown_target_source",
+      "unknown_target_class",
+      "missing_or_unparseable_target_trade_date",
+      "missing_target_instrument_id"
+    ],
+    "required_identity_fields": [
+      "target_trade_date",
+      "target_instrument_id"
+    ],
+    "required_target_source": "manual_phase_labels_v1",
+    "target_class_must_be_one_of": [
+      "B",
+      "S",
+      "OUT"
+    ],
+    "target_is_labeled_must_equal": true,
+    "target_trade_date_must_be_parseable": true
+  },
+  "target_policy_binding": {
+    "canonical_readiness_contract_path": "contracts/validation/usdrubf_phase7_modeling_readiness_target_policy_v1.yaml",
+    "canonical_repository_commit": "6e8530e8d548d0016d17758785d797fe9995ace4",
+    "canonical_sha256": "d9a6c4bb712b872edb6c598e05fd080b88621842aa971272726539257d51178c",
+    "mismatch_policy": "fail_closed",
+    "required_markers": [
+      "usdrubf_phase7_modeling_readiness_target_policy_v1",
+      "manual_phase_labels_v1",
+      "supervised_classes",
+      "chronological_walk_forward",
+      "random_split_allowed: false",
+      "shuffle_allowed: false",
+      "majority_class_train_only",
+      "class_prior_train_only",
+      "multiclass_log_loss",
+      "failure_invalidates_fold: true"
+    ],
+    "yaml_parser_dependency_allowed": false
+  },
+  "train_only_baselines": {
+    "baseline_state_recomputed_independently_for_every_training_fold": true,
+    "candidate_and_baselines_use_identical_validation_identities": true,
+    "class_prior_train_only": {
+      "definition": "use training-fold B/S/OUT class proportions as fixed validation probabilities",
+      "validation_information_used": false
+    },
+    "majority_class_train_only": {
+      "definition": "predict the most frequent eligible class observed in the training fold",
+      "validation_information_used": false
+    },
+    "validation_labels_influence_baseline_construction": false
+  },
+  "undefined_metric_policy": {
+    "confusion_matrix_class_order": [
+      "B",
+      "S",
+      "OUT"
+    ],
+    "favorable_zero_substitution": false,
+    "probability_alignment": [
+      "B",
+      "S",
+      "OUT"
+    ],
+    "zero_support_class": {
+      "precision_recall_f1": "explicit_null_or_explicit_undefined_state",
+      "support": 0
+    }
+  },
+  "validation_protocol": {
+    "all_three_classes_required_in_each_training_fold": true,
+    "constructor": {
+      "gap": 0,
+      "n_splits": 5,
+      "test_size": 64
+    },
+    "duplicate_target_identity_allowed": false,
+    "expected_total_validation_rows": 320,
+    "expected_validation_rows_per_fold": 64,
+    "fold_failure_policy": "fail_closed",
+    "fold_invariant": "max_train_target_trade_date_strictly_less_than_min_validation_target_trade_date",
+    "missing_validation_class_allowed": true,
+    "order_by": [
+      "target_trade_date",
+      "target_instrument_id"
+    ],
+    "same_row_in_multiple_validation_folds": false,
+    "shuffle": false,
+    "splitter": "sklearn.model_selection.TimeSeriesSplit",
+    "training_must_strictly_precede_validation": true
+  }
+}
