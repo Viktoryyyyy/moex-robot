@@ -1,0 +1,286 @@
+{
+  "experiment_identity": {
+    "contract_id": "usdrubf_phase7_4_feature_policy_revision_experiment_v1",
+    "contract_version": "1.0",
+    "design_recommendation_id": "usdrubf_phase7_4_feature_policy_revision_design_v4_complete_corrected",
+    "execution_mode": "browser_chatgpt_github_direct",
+    "lane": "ema_3_19_ai",
+    "phase": "7.4",
+    "project": "MOEX Bot",
+    "status": "repository_implementation_only",
+    "task_id": "ema_3_19_ai_market_phase_phase_7_4_feature_policy_revision_implementation"
+  },
+  "approved_branch": "strategy/ema-3-19-ai/phase-7-4-feature-policy-revision-implementation",
+  "approved_file_scope": {
+    "create_only": [
+      "contracts/experiments/usdrubf_phase7_4_feature_policy_revision_experiment_v1.json",
+      "src/moex_research/runners/usdrubf_phase7_4_feature_policy_revision_builder.py",
+      "src/moex_research/runners/usdrubf_phase7_4_feature_policy_revision_experiment.py",
+      "tests/unit/test_usdrubf_phase7_4_feature_policy_revision_builder.py",
+      "tests/unit/test_usdrubf_phase7_4_feature_policy_revision_experiment.py",
+      "tests/contract/test_usdrubf_phase7_4_feature_policy_revision_experiment_contract.py"
+    ],
+    "existing_files_to_modify": [],
+    "exact_file_count": 6,
+    "scope_widening_allowed": false
+  },
+  "shared_file_lock": {
+    "required": true,
+    "file_or_glob": "contracts/experiments/usdrubf_phase7_4_feature_policy_revision_experiment_v1.json",
+    "owner_lane": "ema_3_19_ai",
+    "task_id": "ema_3_19_ai_market_phase_phase_7_4_feature_policy_revision_implementation",
+    "branch": "strategy/ema-3-19-ai/phase-7-4-feature-policy-revision-implementation",
+    "lock_status": "granted_by_PM_L2",
+    "lock_until": "PR merged | PR closed | PM L2 release"
+  },
+  "required_cli_args": [
+    "--source-panel-path",
+    "--source-panel-manifest-path",
+    "--modeling-dataset-path",
+    "--dataset-manifest-path",
+    "--feature-schema-path",
+    "--readiness-contract-path",
+    "--m0-validation-predictions-path",
+    "--experiment-contract-path",
+    "--output-dir",
+    "--run-id",
+    "--git-commit-sha"
+  ],
+  "declared_output_artifacts": [
+    "input_identity_verification.json",
+    "feature_matrix_inventory.json",
+    "feature_nullness_by_matrix_and_fold.csv",
+    "feature_shift_by_matrix_group_and_fold.csv",
+    "fold_metrics_by_matrix.csv",
+    "aggregate_metrics_by_matrix.json",
+    "per_class_metrics_by_matrix.csv",
+    "ablation_effects.csv",
+    "gate_results.json"
+  ],
+  "artifact_write_policy": {
+    "exact_count": 9,
+    "generated_during_repository_implementation": false,
+    "outputs_outside_explicit_output_dir_allowed": false,
+    "real_outputs_allowed": false,
+    "serialized_model_allowed": false,
+    "synthetic_tmp_path_outputs_allowed": true,
+    "undeclared_outputs_allowed": false
+  },
+  "producer": {
+    "builder_import_only": true,
+    "builder_standalone_cli_allowed": false,
+    "builder_module": "moex_research.runners.usdrubf_phase7_4_feature_policy_revision_builder",
+    "builder_path": "src/moex_research/runners/usdrubf_phase7_4_feature_policy_revision_builder.py",
+    "sole_cli_entrypoint": true,
+    "experiment_module": "moex_research.runners.usdrubf_phase7_4_feature_policy_revision_experiment",
+    "experiment_path": "src/moex_research/runners/usdrubf_phase7_4_feature_policy_revision_experiment.py"
+  },
+  "matrix_inventory": {
+    "M0_FROZEN_PHASE7_2_CONTROL": {
+      "role": "immutable_historical_control",
+      "acceptance_eligible": false,
+      "promotion_allowed": false
+    },
+    "M1_REVISED_FULL": {
+      "role": "sole_acceptance_candidate",
+      "numeric_count": 20,
+      "categorical_count": 1,
+      "total_pre_encoding": 21,
+      "categorical_features": ["lag1_ema_3_19_state"],
+      "acceptance_eligible": true,
+      "promotion_allowed": false
+    },
+    "M2_MINUS_NORMALIZED_EMA_TREND": {
+      "role": "diagnostic_ablation",
+      "categorical_features": [],
+      "removed_from_M1": [
+        "lag1_ema_3_19_spread_pct",
+        "lag1_close_ema_19_distance_pct",
+        "lag1_ema_3_slope_5_pct",
+        "lag1_ema_19_slope_5_pct",
+        "lag1_ema_3_19_spread_pct_change_5",
+        "lag1_ema_3_19_state_run_length_log",
+        "lag1_ema_3_19_state"
+      ],
+      "acceptance_eligible": false,
+      "promotion_allowed": false
+    },
+    "M3_MINUS_VOLATILITY_RANGE": {
+      "role": "diagnostic_ablation",
+      "categorical_features": ["lag1_ema_3_19_state"],
+      "removed_from_M1": [
+        "rolling_past_return_std_5",
+        "rolling_past_return_std_20",
+        "rolling_return_std_ratio_5_20",
+        "lag1_hl_range_pct",
+        "lag1_hl_range_to_prior20_mean",
+        "rolling_hl_range_mean_ratio_5_20"
+      ],
+      "acceptance_eligible": false,
+      "promotion_allowed": false
+    },
+    "M4_MINUS_VOLUME_ACTIVITY": {
+      "role": "diagnostic_ablation",
+      "categorical_features": ["lag1_ema_3_19_state"],
+      "removed_from_M1": [
+        "lag1_log_volume_rel_prior20",
+        "lag1_log_num_trades_rel_prior20",
+        "lag1_log_avg_trade_value_rel_prior20",
+        "rolling_log_volume_mean_diff_5_20"
+      ],
+      "acceptance_eligible": false,
+      "promotion_allowed": false
+    },
+    "M5_MINUS_LAGGED_INTERSESSION_GAP": {
+      "role": "diagnostic_ablation",
+      "categorical_features": ["lag1_ema_3_19_state"],
+      "removed_from_M1": ["lag1_intersession_gap_days"],
+      "acceptance_eligible": false,
+      "promotion_allowed": false
+    }
+  },
+  "matrix_policy": {
+    "M1_only_acceptance_candidate": true,
+    "ablation_promotion_allowed": false,
+    "combinatorial_search_allowed": false,
+    "maximum_matrix_count": 6
+  },
+  "exact_feature_definitions": {
+    "lag1_intersession_gap_days": {
+      "formula": "calendar_days(trade_date_(t-1) - trade_date_(t-2))"
+    },
+    "lag1_ema_3_slope_5_pct": {
+      "formula": "EMA3_(t-1) / EMA3_(t-6) - 1"
+    },
+    "lag1_hl_range_to_prior20_mean": {
+      "formula": "h_(t-1) / mean(h_s for s in [t-21,t-2]) - 1"
+    },
+    "lag1_log_avg_trade_value_rel_prior20": {
+      "formula": "log1p(A_(t-1)/N_(t-1)) - mean(log1p(A_s/N_s) for s in [t-21,t-2])"
+    }
+  },
+  "ema_semantics": {
+    "EMA3": "pandas ewm(span=3, adjust=False).mean()",
+    "EMA19": "pandas ewm(span=19, adjust=False).mean()"
+  },
+  "time_semantics": {
+    "latest_permitted_source_session": "t-1",
+    "prior20_reference_windows_end": "t-2",
+    "target_session_OHLCV_allowed": false,
+    "cross_instrument_state_allowed": false
+  },
+  "fixed_non_feature_components": {
+    "splitter": {
+      "type": "sklearn.model_selection.TimeSeriesSplit",
+      "n_splits": 5,
+      "test_size": 64,
+      "gap": 0
+    },
+    "candidate_model": {
+      "estimator": "sklearn.linear_model.LogisticRegression",
+      "constructor": {
+        "C": 1.0,
+        "class_weight": "balanced",
+        "max_iter": 1000,
+        "solver": "lbfgs"
+      }
+    },
+    "preprocessing_fit_scope": "each_training_fold_only",
+    "calibration_allowed": false,
+    "threshold_optimization_allowed": false,
+    "hyperparameter_search_allowed": false
+  },
+  "confidence_bucket_policy": {
+    "method": "method_B",
+    "inclusive_bucket": {
+      "lower_bound": 0.9,
+      "upper_bound": 1.0
+    },
+    "bucket_gap": "bucket_mean_confidence - bucket_accuracy",
+    "M1_gate": [
+      "bucket_count must be nonzero",
+      "bucket metrics must be finite",
+      "M1_gap <= 0.70 * M0_gap"
+    ]
+  },
+  "feature_shift_policy": {
+    "feature_level_SMD": {
+      "formula": "abs(validation_mean - training_mean) / training_standard_deviation",
+      "training_standard_deviation_ddof": 1
+    },
+    "revised_M1_groups": {
+      "lagged_intersession_gap": ["lag1_intersession_gap_days"],
+      "normalized_ema_trend": ["lag1_ema_3_19_spread_pct"],
+      "volatility_range": ["rolling_past_return_std_5"],
+      "volume_activity": ["lag1_log_volume_rel_prior20"]
+    },
+    "mapped_M0_groups": {
+      "lagged_intersession_gap": ["session_index"],
+      "normalized_ema_trend": ["lag1_ema_3"],
+      "volatility_range": ["rolling_past_return_std"],
+      "volume_activity": ["lag1_volume"]
+    },
+    "aggregation": {
+      "pooled_group_median": "median of five per-fold group medians"
+    }
+  },
+  "success_criteria": {
+    "S1": {"condition": ">= 0.2458904109589041"},
+    "S2": {"condition": "<= 1"},
+    "S3": {"condition": ">= 0.37439549155317"},
+    "S4": {"condition": ">= 0.378390605558729"},
+    "S5": {"condition": ">= 0.38"},
+    "S6": {"condition": "< 1.2796950500624311"},
+    "S7": {"condition": "<= 0.3436553216604367"},
+    "S8": {"condition": "<= 0.11025708314162237"},
+    "S9": {"condition": ">= 0.0892156862745098"},
+    "S10": {"condition": "<= 0.3774193548387097"},
+    "S11": {"condition": "<= 0.49756097560975615"},
+    "S12": {"condition": "<= 0.7099371"},
+    "S13": {"condition": "<= 0.70 * identically recomputed M0 gap"},
+    "S14": {"condition": "fixed fold breadth"},
+    "S15": {"condition": "fixed class-prior comparison"},
+    "S16": {"condition": "fixed feature-shift comparison"},
+    "S17": {"condition": "fixed identity and missingness"},
+    "S18": {"condition": "all S1 through S17 pass for M1"}
+  },
+  "failure_criteria": {
+    "F1": {"condition": "M1 aggregate_B_recall <= 0.1458904109589041"},
+    "F2": {"condition": "M1 zero_B_recall_fold_count >= 2"},
+    "F3": {"condition": "fixed confusion-direction failure"},
+    "F4": {"condition": "M1 multiclass_log_loss >= 1.2796950500624311"},
+    "F5": {"condition": "fixed fold fragility failure"},
+    "F6": {"condition": "eligible-row or warmup failure"},
+    "F7": {"condition": "source denominator or all-null failure"},
+    "F8": {"condition": "prohibited model-policy change required"},
+    "F9": {"condition": "M1 fails any S1 through S17"},
+    "F10": {"condition": "M0 bucket reference empty undefined nonfinite or nonpositive gap"},
+    "F11": {"condition": "M1 bucket empty undefined or over relative limit"}
+  },
+  "no_real_data_restrictions": {
+    "controlled_server_evaluation_during_implementation": false,
+    "real_Phase6_dataset_access_during_implementation": false,
+    "real_Phase7_2_output_directory_access_during_implementation": false,
+    "real_fit_during_implementation": false,
+    "real_internal_D1_source_panel_access_during_implementation": false,
+    "real_predictions_during_implementation": false,
+    "repository_or_server_evaluation_artifacts_during_implementation": false
+  },
+  "authority_and_status": {
+    "evaluation_task_authorized": false,
+    "direct_main_write_allowed": false,
+    "merge_allowed": false,
+    "merge_authority": "PM_L2_ONLY",
+    "server_apply_allowed": false,
+    "server_commands_allowed": false,
+    "runtime_allowed": "synthetic_pytest_only",
+    "real_model_fitting_allowed": false,
+    "real_prediction_generation_allowed": false,
+    "persistent_model_allowed": false,
+    "model_promotion_allowed": false,
+    "strategy_promotion_allowed": false,
+    "live_prediction_allowed": false,
+    "trading_allowed": false,
+    "external_ingestion_allowed": false
+  }
+}
