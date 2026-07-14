@@ -138,6 +138,43 @@ def result_order(frame: pd.DataFrame) -> list[tuple[str, str]]:
     return list(zip(frame["target_trade_date"].astype(str), frame["target_instrument_id"].astype(str)))
 
 
+def test_prior_trade_date_strict_chronology_and_missing_values_fail_closed() -> None:
+    source = _source(instruments=("SiA",))
+    phase6 = _phase6(source)
+    valid = build_feature_matrices(source, phase6)
+    assert valid.ordered_identities.equals(
+        phase6.sort_values(["target_trade_date", "target_instrument_id"], kind="mergesort")
+        .reset_index(drop=True)[["target_trade_date", "target_instrument_id"]]
+    )
+    for bad_value, message in (
+        (phase6.loc[0, "target_trade_date"], "strictly earlier"),
+        ((pd.Timestamp(phase6.loc[0, "target_trade_date"]) + pd.Timedelta(days=1)).strftime("%Y-%m-%d"), "strictly earlier"),
+        (None, "missing or invalid"),
+        ("not-a-date", "missing or invalid"),
+    ):
+        bad = phase6.copy()
+        bad.loc[0, "prior_trade_date"] = bad_value
+        with pytest.raises(Phase74FeaturePolicyBuilderError, match=message):
+            build_feature_matrices(source, bad)
+
+
+def test_target_session_ohlcv_mutation_does_not_change_target_features() -> None:
+    source = _source(instruments=("SiA",))
+    phase6 = _phase6(source)
+    target_date = pd.Timestamp(phase6.loc[25, "target_trade_date"])
+    phase6 = phase6[phase6["target_trade_date"].le(target_date.strftime("%Y-%m-%d"))].copy()
+    baseline = build_feature_matrices(source, phase6).matrices["M1_REVISED_FULL"]
+    changed = source.copy()
+    mask = changed["trade_date"].eq(target_date)
+    changed.loc[mask, ["open", "high", "low", "close", "volume", "value", "num_trades"]] *= 5
+    altered = build_feature_matrices(changed, phase6).matrices["M1_REVISED_FULL"]
+    target = target_date.strftime("%Y-%m-%d")
+    pd.testing.assert_frame_equal(
+        baseline[baseline["target_trade_date"].eq(target)].reset_index(drop=True),
+        altered[altered["target_trade_date"].eq(target)].reset_index(drop=True),
+    )
+
+
 def test_warmup_and_denominator_failures_are_separate_and_no_inf() -> None:
     source = _source(instruments=("SiA",))
     phase6 = _phase6(source)
