@@ -69,6 +69,20 @@ def _phase6(source: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
+def _contract_payload() -> dict[str, object]:
+    return {
+        "experiment_identity": {
+            "contract_id": experiment.EXPERIMENT_CONTRACT_ID,
+            "contract_version": experiment.EXPERIMENT_CONTRACT_VERSION,
+            "design_recommendation_id": experiment.DESIGN_RECOMMENDATION_ID,
+            "project": experiment.PROJECT,
+            "lane": experiment.LANE,
+            "task_id": experiment.TASK_ID,
+            "execution_mode": experiment.EXECUTION_MODE,
+        }
+    }
+
+
 def _write_inputs(tmp_path: Path) -> tuple[experiment.Phase74ExperimentRequest, pd.DataFrame]:
     source = _source()
     dataset = _phase6(source)
@@ -83,17 +97,20 @@ def _write_inputs(tmp_path: Path) -> tuple[experiment.Phase74ExperimentRequest, 
         "dataset_id": experiment.DATASET_ID,
         "feature_schema_id": experiment.FEATURE_SCHEMA_ID,
         "target_source": experiment.TARGET_SOURCE,
+        "target_columns": list(experiment.PHASE6_TARGET_COLUMNS),
+        "feature_columns": list(experiment.PHASE6_FEATURE_COLUMNS),
     }), encoding="utf-8")
     (tmp_path / "feature_schema.json").write_text(json.dumps({
         "schema_id": experiment.FEATURE_SCHEMA_ID,
         "dataset_id": experiment.DATASET_ID,
+        "target_columns": list(experiment.PHASE6_TARGET_COLUMNS),
+        "feature_columns": list(experiment.PHASE6_FEATURE_COLUMNS),
     }), encoding="utf-8")
     (tmp_path / "readiness.yaml").write_text(
         f"contract_id: {experiment.READINESS_CONTRACT_ID}\ntarget_source: {experiment.TARGET_SOURCE}\n",
         encoding="utf-8",
     )
-    contract_path = Path(__file__).parents[2] / "contracts/experiments/usdrubf_phase7_4_feature_policy_revision_experiment_v1.json"
-    (tmp_path / "contract.json").write_text(contract_path.read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / "contract.json").write_text(json.dumps(_contract_payload()), encoding="utf-8")
     eligible = experiment._prepare_experiment_eligible_rows(dataset)
     folds = experiment.build_chronological_folds(eligible)
     m0 = experiment._expected_validation_identities(eligible, folds)
@@ -242,12 +259,48 @@ def test_exact_nine_outputs_deterministic_no_serialization_or_external_actions(t
     assert sorted(path.name for path in request.output_dir.iterdir()) == sorted(experiment.DECLARED_OUTPUT_ARTIFACTS)
     assert not any(path.suffix in {".pkl", ".pickle", ".joblib"} for path in request.output_dir.iterdir())
     snapshot = {path.name: path.read_bytes() for path in request.output_dir.iterdir()}
+    identity = json.loads((request.output_dir / "input_identity_verification.json").read_text())
+    assert set(identity["inputs"]) == set(experiment._input_paths(request))
+    assert all(set(value) == {"path", "sha256", "declared_identity"} for value in identity["inputs"].values())
+    assert identity["inputs"]["modeling_dataset"]["declared_identity"]["eligible_identity_count"] == len(_phase6(_source()))
+    assert identity["inputs"]["m0_validation_predictions"]["declared_identity"]["role"] == "immutable_historical_control_predictions"
+    assert identity["inputs"]["m0_validation_predictions"]["declared_identity"]["row_count"] == 320
     second_request = experiment.Phase74ExperimentRequest(**{**request.__dict__, "output_dir": tmp_path / "output2"})
     experiment.run_experiment(second_request)
     assert snapshot == {path.name: path.read_bytes() for path in second_request.output_dir.iterdir()}
     source_text = Path(experiment.__file__).read_text(encoding="utf-8")
     for forbidden in ("import requests", "import urllib", "import subprocess", "import socket", "pickle.dump", "joblib.dump"):
         assert forbidden not in source_text
+
+
+def test_manifest_schema_and_contract_identity_mismatches_fail_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    request, _ = _write_inputs(tmp_path)
+    _patch_parquet(monkeypatch)
+    cases = [
+        (request.dataset_manifest_path, "target_columns", None, "dataset manifest target_columns"),
+        (request.dataset_manifest_path, "feature_columns", ["wrong"], "dataset manifest feature_columns"),
+        (request.feature_schema_path, "target_columns", ["wrong"], "feature schema target_columns"),
+        (request.feature_schema_path, "feature_columns", None, "feature schema feature_columns"),
+    ]
+    for path, key, value, message in cases:
+        original = path.read_text()
+        payload = json.loads(original)
+        if value is None:
+            payload.pop(key)
+        else:
+            payload[key] = value
+        path.write_text(json.dumps(payload))
+        with pytest.raises(experiment.Phase74FeaturePolicyExperimentError, match=message):
+            experiment.run_experiment(request)
+        path.write_text(original)
+    for key in ("project", "lane", "task_id", "execution_mode", "design_recommendation_id"):
+        original = request.experiment_contract_path.read_text()
+        payload = json.loads(original)
+        payload["experiment_identity"][key] = "wrong"
+        request.experiment_contract_path.write_text(json.dumps(payload))
+        with pytest.raises(experiment.Phase74FeaturePolicyExperimentError, match="experiment contract identity mismatch"):
+            experiment.run_experiment(request)
+        request.experiment_contract_path.write_text(original)
 
 
 def test_nonempty_output_dir_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
