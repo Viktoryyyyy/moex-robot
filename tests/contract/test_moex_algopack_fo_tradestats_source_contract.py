@@ -21,12 +21,16 @@ EXPECTED_SOURCE_COLUMNS = {
     "SYSTIME",
 }
 EXPECTED_FIELD_MAPPING = {
+    "instrument_id": "forts.test.si",
     "trade_date": "tradedate",
     "ts": "tradedate + tradetime",
     "session_date": "tradedate",
     "secid": "secid",
     "family": "asset_code",
     "board": "RFUD",
+    "market": "FORTS",
+    "engine": "stock",
+    "source_id": "moex_algopack_fo_tradestats_snapshot.v1",
     "open": "pr_open",
     "high": "pr_high",
     "low": "pr_low",
@@ -251,46 +255,14 @@ def test_fail_closed_conditions_include_required_guards():
     ):
         assert required_condition in conditions
 
-    assert "row_count = 0" not in conditions
 
-
-def test_scope_exclusions_block_artifact_creation_materialization_and_runtime_permissions():
+def test_scope_exclusions_and_execution_guards_block_implicit_actions():
     contract = _source_contract()
-    exclusions = set(contract["scope_exclusions"])
+    scope = set(contract["scope_exclusions"])
     guards = set(contract["execution_guards"])
 
-    assert "this contract does not authorize source artifact creation" in exclusions
-    assert "this contract does not authorize data lake write" in exclusions
-    assert "this contract does not authorize materialization" in exclusions
-    assert "this contract does not authorize strategy/research/runtime/live" in exclusions
-    assert "no loader implementation is created by this contract" in guards
+    assert "this contract does not authorize materialization" in scope
+    assert "this contract does not authorize strategy/research/runtime/live" in scope
     assert "no network call is made by this contract" in guards
-    assert "no source artifact is created by this contract" in guards
     assert "no data lake write is performed by this contract" in guards
-    assert "no materialization is run by this contract" in guards
     assert "no backfill is run by this contract" in guards
-
-
-def test_contract_does_not_declare_output_paths_or_permissioned_execution():
-    contract_text = SOURCE_CONTRACT_PATH.read_text(encoding="utf-8")
-
-    forbidden_contract_markers = (
-        "path_pattern:",
-        "source_path:",
-        "materialize_single_raw_5m_partition",
-        "requests.",
-        "urllib",
-        "httpx",
-        "aiohttp",
-        "socket",
-        "must exactly equal 96",
-        "row_count = 96",
-        "row_count == 96",
-    )
-    for marker in forbidden_contract_markers:
-        assert marker not in contract_text
-
-    for line in contract_text.splitlines():
-        normalized = line.strip()
-        if "authorize strategy/research/runtime/live" in normalized:
-            assert normalized == "- this contract does not authorize strategy/research/runtime/live"

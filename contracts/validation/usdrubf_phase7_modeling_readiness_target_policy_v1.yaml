@@ -1,0 +1,236 @@
+contract_identity:
+  contract_id: usdrubf_phase7_modeling_readiness_target_policy_v1
+  contract_version: '1.0'
+  schema_version: usdrubf_phase7_modeling_readiness_target_policy.v1
+  project: MOEX Bot
+  lane: ema_3_19_ai
+  phase: '7.0'
+  task_id: ema_3_19_ai_market_phase_phase_7_0_modeling_readiness_target_policy
+  status: repository_readiness_contract_only
+  purpose: Define the supervised-modeling readiness gate before any future USDRUBF / Si D1 model fit or evaluation.
+
+target_policy:
+  source_policy: manual_label_only
+  allowed_target_source: manual_phase_labels_v1
+  supervised_target_field: target_phase_label
+  target_is_labeled_field: target_is_labeled
+  supervised_classes:
+    - B
+    - S
+    - OUT
+  class_order:
+    - B
+    - S
+    - OUT
+  out_is_valid_supervised_class: true
+  unlabeled_is_supervised_class: false
+  inferred_or_derived_targets_allowed: false
+  ema_3_19_as_target_source_allowed: false
+  model_output_as_target_source_allowed: false
+
+supervised_row_eligibility:
+  all_conditions_required: true
+  required_target_source: manual_phase_labels_v1
+  target_is_labeled_must_equal: true
+  target_class_must_be_one_of:
+    - B
+    - S
+    - OUT
+  required_identity_fields:
+    - target_trade_date
+    - target_instrument_id
+  features_must_be_point_in_time_eligible: true
+  leakage_checks_must_pass: true
+  eligibility_applied_before_fitting: true
+  eligibility_applied_before_supervised_metrics: true
+  validation_outcomes_may_change_eligibility: false
+
+unlabeled_handling:
+  sentinel: UNLABELED
+  meaning: absence_of_eligible_manual_target
+  convert_to_out_allowed: false
+  eligible_for_supervised_fitting: false
+  included_in_supervised_metrics: false
+  included_in_class_support: false
+  included_in_confusion_matrix: false
+  included_in_probability_metrics: false
+  coverage_accounting_allowed_separately: true
+
+chronological_walk_forward_validation:
+  method: chronological_walk_forward
+  random_split_allowed: false
+  shuffle_allowed: false
+  validation_order_field: target_trade_date
+  training_must_precede_validation: true
+  fold_order_invariant: max_train_target_trade_date_strictly_less_than_min_validation_target_trade_date
+  same_row_in_train_and_validation_allowed: false
+  fold_boundaries_declared_before_validation_outcomes: true
+  expanding_training_window_allowed: true
+  training_only_fit_steps:
+    - feature_selection
+    - imputation
+    - scaling
+    - encoding
+    - class_weighting
+    - calibration
+    - threshold_selection
+  required_fold_evidence:
+    - fold_id
+    - train_start
+    - train_end
+    - validation_start
+    - validation_end
+    - eligible_train_rows
+    - eligible_validation_rows
+    - train_class_support
+    - validation_class_support
+
+baseline_metrics:
+  baselines:
+    majority_class_train_only:
+      definition: Predict the most frequent eligible class in the training fold.
+      validation_information_used: false
+    class_prior_train_only:
+      definition: Use training-fold class proportions as fixed validation probabilities.
+      validation_information_used: false
+  required_metrics:
+    - eligible_validation_rows
+    - per_class_support
+    - confusion_matrix
+    - accuracy
+    - balanced_accuracy
+    - macro_f1
+    - weighted_f1
+    - per_class_precision
+    - per_class_recall
+    - per_class_f1
+  probability_metric_when_available:
+    - multiclass_log_loss
+  fixed_class_order:
+    - B
+    - S
+    - OUT
+  same_eligible_rows_for_baseline_and_candidate: true
+  unlabeled_in_metric_denominators: false
+  undefined_metric_policy: report_explicitly_do_not_replace_with_favorable_value
+
+leakage_checks:
+  failure_invalidates_fold: true
+  required:
+    - check_id: manual_label_only_target_source
+      requirement: Supervised targets are sourced only from manual_phase_labels_v1.
+    - check_id: target_values_not_features
+      requirement: B, S and OUT target values and target columns are not training features.
+    - check_id: unlabeled_excluded
+      requirement: UNLABELED rows are excluded from fitting and supervised metrics.
+    - check_id: no_manual_label_metadata_features
+      requirement: Manual label, interval, annotation and phase-boundary metadata are absent from features.
+    - check_id: no_future_derived_features
+      requirement: No future-derived field may enter training features.
+    - check_id: no_same_session_target_leakage
+      requirement: Same-session target OHLCV is excluded where lagged inputs are required.
+    - check_id: point_in_time_availability
+      requirement: Every selected feature is available before the target decision anchor.
+    - check_id: train_only_preprocessing
+      requirement: Preprocessing and feature selection are fitted on training data only.
+    - check_id: chronological_ordering
+      requirement: Training dates strictly precede validation dates and folds are not shuffled.
+    - check_id: no_cross_fold_duplicate_target_rows
+      requirement: A target row does not appear in both training and validation.
+    - check_id: no_validation_feedback
+      requirement: Validation labels and outcomes do not influence fitting, thresholds, calibration or feature selection.
+  forbidden_feature_families:
+    - target_columns
+    - manual_label_metadata
+    - phase_interval_metadata
+    - phase_boundary_metadata
+    - annotation_metadata
+    - future_returns
+    - future_volatility
+    - future_drawdown
+    - future_phase
+    - transition_outcomes
+    - boundary_distance
+
+future_evaluation_artifacts:
+  creation_authorized_now: false
+  required:
+    evaluation_manifest.json:
+      required_content:
+        - contract_id_and_version
+        - source_commit
+        - dataset_identity
+        - target_source
+        - feature_schema_identity
+        - class_order
+        - fold_count
+        - artifact_inventory
+    fold_boundaries.csv:
+      required_content:
+        - fold_id
+        - train_start
+        - train_end
+        - validation_start
+        - validation_end
+        - eligible_row_counts
+        - per_class_support
+    fold_metrics.csv:
+      required_content:
+        - candidate_metrics_by_fold
+        - baseline_metrics_by_fold
+    aggregate_metrics.json:
+      required_content:
+        - aggregation_method
+        - aggregate_required_metrics
+    per_class_metrics.csv:
+      required_content:
+        - class
+        - precision
+        - recall
+        - f1
+        - support
+    confusion_matrix.csv:
+      required_content:
+        - fixed_class_order_B_S_OUT
+    baseline_metrics.json:
+      required_content:
+        - majority_class_train_only
+        - class_prior_train_only
+    validation_predictions.parquet:
+      required_content:
+        - fold_id
+        - target_identity
+        - y_true
+        - y_pred
+        - probability_columns_when_available
+      eligible_labeled_validation_rows_only: true
+  unlabeled_rows_in_supervised_artifacts: false
+  excluded_row_coverage_must_be_separate: true
+
+forbidden_capabilities:
+  runtime_execution: true
+  model_training: true
+  model_fitting: true
+  prediction_generation: true
+  probability_generation: true
+  threshold_optimization: true
+  trading_signal_generation: true
+  broker_or_order_actions: true
+  external_data_ingestion: true
+  provider_api_calls: true
+  dataset_materialization: true
+  generated_data_creation: true
+  server_commands: true
+  server_apply: true
+  direct_main_write: true
+  merge: true
+
+required_invariants:
+  - supervised targets are sourced only from manual labels
+  - supervised target classes are B, S and OUT
+  - UNLABELED rows are not eligible for supervised fitting
+  - UNLABELED rows are not included in supervised metrics
+  - validation ordering is chronological
+  - training data must precede validation data
+  - no future-derived field may enter training features
+  - no model training or prediction is enabled by this contract

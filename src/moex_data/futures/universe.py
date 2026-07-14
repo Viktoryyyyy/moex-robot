@@ -24,4 +24,6 @@ def validate_futures_universe_values(values: Mapping[str, object]) -> FuturesUni
     registry = validate_futures_instrument_registry_values(
         {"registry_id": universe_id.strip(), "instruments": values.get("instruments")}
     )
+    if not registry.instruments:
+        raise FuturesValidationError("universe instruments must be non-empty")
     return FuturesUniverse(universe_id=universe_id.strip(), instruments=registry)

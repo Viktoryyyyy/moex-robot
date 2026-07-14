@@ -1,0 +1,536 @@
+{
+  "contract_id": "usdrubf_external_feature_contract_v0",
+  "contract_version": 0,
+  "project": "MOEX Bot",
+  "lane": "ema_3_19_ai",
+  "instrument": "USDRUBF",
+  "timeframe": "D1",
+  "status": "design_contract_only",
+  "created_at": "2026-06-29",
+  "purpose": "Define a leakage-safe D1 external feature contract for USDRUBF B/S/OUT phase research.",
+  "runtime_readiness_claim": false,
+  "ingestion_implemented": false,
+  "feature_builders_implemented": false,
+  "data_artifacts_generated": false,
+  "source_registry_shape": "embedded_inside_single_contract_file",
+  "common_feature_schema": {
+    "row_grain": "one feature value per session_date, feature_name, and source observation availability rule",
+    "every_feature_row_must_include": [
+      "session_date",
+      "feature_name",
+      "feature_value",
+      "feature_value_type",
+      "source_id",
+      "source_uri_or_contract_ref",
+      "source_timezone",
+      "event_timestamp",
+      "availability_timestamp",
+      "ingestion_timestamp",
+      "transformation_version",
+      "quality_status",
+      "leakage_classification"
+    ],
+    "quality_status_allowed_values": [
+      "ok",
+      "missing",
+      "late_publication",
+      "source_unavailable",
+      "not_applicable",
+      "blocked_by_contract_gap"
+    ],
+    "leakage_classification_allowed_values": [
+      "allowed_for_runtime_after_availability_timestamp",
+      "forbidden_for_runtime",
+      "target_only",
+      "design_placeholder_only"
+    ]
+  },
+  "feature_groups": {
+    "internal_market": {
+      "group_id": "internal_market",
+      "mandatory": true,
+      "status": "already_available",
+      "source_ids": [
+        "internal.usdrubf_d1_ohlc_from_5m",
+        "internal.usdrubf_d1_ema_3_19_cross_context",
+        "internal.usdrubf_d1_classical_indicators"
+      ],
+      "intended_feature_families": [
+        "USDRUBF D1 OHLC from 5m",
+        "EMA 3/19 cross context",
+        "classical indicator context already approved elsewhere"
+      ],
+      "runtime_availability_note": "Internal D1 close-derived features are usable only from D+1 open."
+    },
+    "positioning": {
+      "group_id": "positioning",
+      "mandatory": true,
+      "status": "available_but_needs_contract",
+      "source_ids": [
+        "positioning.moex_algopack_futoi_raw"
+      ],
+      "FUTOI_in_v0": true,
+      "FUTOI_interpretation": "participant_positioning_only",
+      "FUTOI_is_open_interest": false,
+      "explicit_open_interest": "separate_future_task",
+      "runtime_availability_note": "FUTOI positioning features are usable only after exchange or source publication timestamp."
+    },
+    "oil": {
+      "group_id": "oil",
+      "mandatory": true,
+      "status": "requires_new_ingestion",
+      "source_ids": [
+        "oil.brent_or_br_or_urals_proxy"
+      ],
+      "source_provider": "not_approved_yet",
+      "proxy_hierarchy": [
+        "BR_or_Brent_futures_if_approved_source_exists",
+        "Brent_external_close",
+        "Urals_proxy_only_with_explicit_PM_L2_approval"
+      ],
+      "runtime_availability_note": "External daily close oil features align by latest source observation available before decision_timestamp."
+    },
+    "rates": {
+      "group_id": "rates",
+      "mandatory": true,
+      "status": "requires_new_ingestion_or_static_calendar_contract",
+      "source_ids": [
+        "rates.cbr_key_rate_calendar"
+      ],
+      "CBR_key_rate_source": "official_CBR_source_later",
+      "CBR_meeting_calendar": "static_or_official_calendar_contract_later",
+      "runtime_availability_note": "CBR features are usable only after official publication timestamp."
+    },
+    "dollar_index": {
+      "group_id": "dollar_index",
+      "mandatory": true,
+      "status": "requires_new_ingestion",
+      "source_ids": [
+        "dollar_index.dxy"
+      ],
+      "DXY_in_v0": true,
+      "DXY_source_provider": "not_approved_yet",
+      "runtime_availability_note": "DXY features align by latest source observation available before decision_timestamp."
+    },
+    "currency_context": {
+      "group_id": "currency_context",
+      "mandatory": true,
+      "status": "requires_new_ingestion_or_existing_source_discovery",
+      "source_ids": [
+        "currency.cnyrub_proxy",
+        "currency.usdrub_spot_proxy"
+      ],
+      "CNYRUB": "included_but_not_runtime_ready_required_now",
+      "USDRUB_spot_proxy": "best_effort_optional",
+      "no_invented_proxy_allowed": true
+    },
+    "calendar": {
+      "group_id": "calendar",
+      "mandatory": true,
+      "status": "partially_available_plus_schema_placeholders",
+      "source_ids": [
+        "calendar.moex_forts_session",
+        "calendar.futures_expiry_rollover_placeholder",
+        "calendar.ru_tax_period_static",
+        "calendar.ru_us_holidays_static"
+      ],
+      "rollover_expiry_status": "schema_placeholder_only",
+      "rollover_implementation": "forbidden_now",
+      "runtime_availability_note": "Static calendar features must be bound to session_date and must not encode future target labels."
+    },
+    "news_events": {
+      "group_id": "news_events",
+      "mandatory": true,
+      "status": "event_schema_only",
+      "source_ids": [
+        "news_events.event_schema_only"
+      ],
+      "raw_news_ingestion": "forbidden_now",
+      "LLM_news_classification": "forbidden_now",
+      "runtime_availability_note": "News event features are usable only after publication timestamp."
+    }
+  },
+  "source_registry": [
+    {
+      "source_id": "internal.usdrubf_d1_ohlc_from_5m",
+      "source_group": "internal_market",
+      "source_status": "already_available",
+      "source_uri_or_contract_ref": "contracts/features/usdrubf_d1_ohlc_from_5m.json",
+      "source_system": "repo_contract",
+      "instrument_or_series_id": "USDRUBF",
+      "native_grain": "D1",
+      "source_timezone": "Europe/Moscow",
+      "publication_time_rule": "D close after finalized D1 bar",
+      "availability_timestamp_rule": "usable only from D+1 open",
+      "latency_policy": "no same-bar usage",
+      "allowed_for_runtime": true,
+      "requires_ingestion": false,
+      "requires_static_calendar": false,
+      "requires_pm_l2_source_approval": false,
+      "leakage_risk": "medium",
+      "notes": "Internal D1 OHLC from approved 5m source contract."
+    },
+    {
+      "source_id": "internal.usdrubf_d1_ema_3_19_cross_context",
+      "source_group": "internal_market",
+      "source_status": "already_available",
+      "source_uri_or_contract_ref": "contracts/features/usdrubf_d1_ema_3_19_cross_context.json",
+      "source_system": "repo_contract",
+      "instrument_or_series_id": "USDRUBF",
+      "native_grain": "D1",
+      "source_timezone": "Europe/Moscow",
+      "publication_time_rule": "D close after finalized D1 bar",
+      "availability_timestamp_rule": "usable only from D+1 open",
+      "latency_policy": "no same-bar usage",
+      "allowed_for_runtime": true,
+      "requires_ingestion": false,
+      "requires_static_calendar": false,
+      "requires_pm_l2_source_approval": false,
+      "leakage_risk": "medium",
+      "notes": "EMA 3/19 context; not a label source."
+    },
+    {
+      "source_id": "internal.usdrubf_d1_classical_indicators",
+      "source_group": "internal_market",
+      "source_status": "already_available",
+      "source_uri_or_contract_ref": "contracts/features/usdrubf_d1_ema_3_19_classical_indicators.json",
+      "source_system": "repo_contract",
+      "instrument_or_series_id": "USDRUBF",
+      "native_grain": "D1",
+      "source_timezone": "Europe/Moscow",
+      "publication_time_rule": "D close after finalized D1 bar",
+      "availability_timestamp_rule": "usable only from D+1 open",
+      "latency_policy": "no same-bar usage",
+      "allowed_for_runtime": true,
+      "requires_ingestion": false,
+      "requires_static_calendar": false,
+      "requires_pm_l2_source_approval": false,
+      "leakage_risk": "medium",
+      "notes": "Classical indicators already defined separately; technical indicators are not expanded here."
+    },
+    {
+      "source_id": "positioning.moex_algopack_futoi_raw",
+      "source_group": "positioning",
+      "source_status": "available_but_needs_contract",
+      "source_uri_or_contract_ref": "source_contract_missing_for_phase_research_feature",
+      "source_system": "MOEX/AlgoPack",
+      "instrument_or_series_id": "USDRUBF/FUTOI",
+      "native_grain": "source_native",
+      "source_timezone": "Europe/Moscow",
+      "publication_time_rule": "exchange/source publication timestamp",
+      "availability_timestamp_rule": "usable only after exchange or source publication timestamp",
+      "latency_policy": "actual publication only",
+      "allowed_for_runtime": false,
+      "requires_ingestion": true,
+      "requires_static_calendar": false,
+      "requires_pm_l2_source_approval": true,
+      "leakage_risk": "high",
+      "notes": "FUTOI is participant positioning only and must not be treated as open interest."
+    },
+    {
+      "source_id": "oil.brent_or_br_or_urals_proxy",
+      "source_group": "oil",
+      "source_status": "requires_new_ingestion",
+      "source_uri_or_contract_ref": "source_provider_not_approved_yet",
+      "source_system": "external_source_slot",
+      "instrument_or_series_id": "BR_or_Brent_or_Urals_proxy",
+      "native_grain": "daily_or_source_native",
+      "source_timezone": "source_native_timezone",
+      "publication_time_rule": "source publication/close timestamp",
+      "availability_timestamp_rule": "latest source observation available before decision_timestamp",
+      "latency_policy": "no synthetic hindsight close",
+      "allowed_for_runtime": false,
+      "requires_ingestion": true,
+      "requires_static_calendar": false,
+      "requires_pm_l2_source_approval": true,
+      "leakage_risk": "high",
+      "notes": "Provider not approved; Urals requires explicit PM L2 approval."
+    },
+    {
+      "source_id": "rates.cbr_key_rate_calendar",
+      "source_group": "rates",
+      "source_status": "requires_new_ingestion_or_static_calendar_contract",
+      "source_uri_or_contract_ref": "official_CBR_source_later",
+      "source_system": "official_or_static_calendar_slot",
+      "instrument_or_series_id": "CBR key rate and meeting calendar",
+      "native_grain": "event/static_calendar",
+      "source_timezone": "Europe/Moscow",
+      "publication_time_rule": "official CBR publication timestamp",
+      "availability_timestamp_rule": "usable only after official publication timestamp",
+      "latency_policy": "actual official publication only",
+      "allowed_for_runtime": false,
+      "requires_ingestion": true,
+      "requires_static_calendar": true,
+      "requires_pm_l2_source_approval": true,
+      "leakage_risk": "high",
+      "notes": "Official CBR source or approved static calendar contract required later."
+    },
+    {
+      "source_id": "dollar_index.dxy",
+      "source_group": "dollar_index",
+      "source_status": "requires_new_ingestion",
+      "source_uri_or_contract_ref": "source_provider_not_approved_yet",
+      "source_system": "external_source_slot",
+      "instrument_or_series_id": "DXY",
+      "native_grain": "daily_or_source_native",
+      "source_timezone": "source_native_timezone",
+      "publication_time_rule": "source publication/close timestamp",
+      "availability_timestamp_rule": "latest source observation available before decision_timestamp",
+      "latency_policy": "no synthetic hindsight close",
+      "allowed_for_runtime": false,
+      "requires_ingestion": true,
+      "requires_static_calendar": false,
+      "requires_pm_l2_source_approval": true,
+      "leakage_risk": "high",
+      "notes": "DXY is mandatory in v0 but provider is not approved."
+    },
+    {
+      "source_id": "currency.cnyrub_proxy",
+      "source_group": "currency_context",
+      "source_status": "requires_new_ingestion_or_existing_source_discovery",
+      "source_uri_or_contract_ref": "source_contract_missing",
+      "source_system": "external_or_moex_source_slot",
+      "instrument_or_series_id": "CNYRUB",
+      "native_grain": "daily_or_source_native",
+      "source_timezone": "source_native_timezone",
+      "publication_time_rule": "source publication/close timestamp",
+      "availability_timestamp_rule": "latest source observation available before decision_timestamp",
+      "latency_policy": "no invented proxy",
+      "allowed_for_runtime": false,
+      "requires_ingestion": true,
+      "requires_static_calendar": false,
+      "requires_pm_l2_source_approval": true,
+      "leakage_risk": "high",
+      "notes": "Included but runtime readiness is not required now."
+    },
+    {
+      "source_id": "currency.usdrub_spot_proxy",
+      "source_group": "currency_context",
+      "source_status": "requires_new_ingestion_optional",
+      "source_uri_or_contract_ref": "source_contract_missing",
+      "source_system": "external_or_moex_source_slot",
+      "instrument_or_series_id": "USDRUB spot proxy",
+      "native_grain": "daily_or_source_native",
+      "source_timezone": "source_native_timezone",
+      "publication_time_rule": "source publication/close timestamp",
+      "availability_timestamp_rule": "latest source observation available before decision_timestamp",
+      "latency_policy": "best effort optional; no invented proxy",
+      "allowed_for_runtime": false,
+      "requires_ingestion": true,
+      "requires_static_calendar": false,
+      "requires_pm_l2_source_approval": true,
+      "leakage_risk": "high",
+      "notes": "Best-effort optional only."
+    },
+    {
+      "source_id": "calendar.moex_forts_session",
+      "source_group": "calendar",
+      "source_status": "already_available",
+      "source_uri_or_contract_ref": "contracts/datasets/futures_calendar_session.v1.yaml",
+      "source_system": "repo_contract",
+      "instrument_or_series_id": "MOEX FORTS",
+      "native_grain": "session_calendar",
+      "source_timezone": "Europe/Moscow",
+      "publication_time_rule": "static/session calendar known before session",
+      "availability_timestamp_rule": "available before affected session",
+      "latency_policy": "static calendar versioned",
+      "allowed_for_runtime": true,
+      "requires_ingestion": false,
+      "requires_static_calendar": true,
+      "requires_pm_l2_source_approval": false,
+      "leakage_risk": "medium",
+      "notes": "Existing dataset contract referenced; phase features may still need a separate contract."
+    },
+    {
+      "source_id": "calendar.futures_expiry_rollover_placeholder",
+      "source_group": "calendar",
+      "source_status": "schema_placeholder_only",
+      "source_uri_or_contract_ref": "source_contract_missing",
+      "source_system": "schema_placeholder",
+      "instrument_or_series_id": "USDRUBF futures expiry/rollover",
+      "native_grain": "event/static_calendar",
+      "source_timezone": "Europe/Moscow",
+      "publication_time_rule": "static calendar or exchange expiration schedule",
+      "availability_timestamp_rule": "available before affected session after policy approval",
+      "latency_policy": "blocked until roll policy and mapping approved",
+      "allowed_for_runtime": false,
+      "requires_ingestion": false,
+      "requires_static_calendar": true,
+      "requires_pm_l2_source_approval": true,
+      "leakage_risk": "high",
+      "notes": "Schema placeholder only; rollover implementation is forbidden now."
+    },
+    {
+      "source_id": "calendar.ru_tax_period_static",
+      "source_group": "calendar",
+      "source_status": "requires_new_ingestion_or_static_calendar_contract",
+      "source_uri_or_contract_ref": "static_calendar_contract_missing",
+      "source_system": "static_calendar_slot",
+      "instrument_or_series_id": "RU tax period",
+      "native_grain": "static_calendar",
+      "source_timezone": "Europe/Moscow",
+      "publication_time_rule": "static calendar version publication",
+      "availability_timestamp_rule": "available after static calendar contract approval",
+      "latency_policy": "no forward-fill defaults",
+      "allowed_for_runtime": false,
+      "requires_ingestion": true,
+      "requires_static_calendar": true,
+      "requires_pm_l2_source_approval": true,
+      "leakage_risk": "medium",
+      "notes": "Tax period calendar contract missing."
+    },
+    {
+      "source_id": "calendar.ru_us_holidays_static",
+      "source_group": "calendar",
+      "source_status": "requires_new_ingestion_or_static_calendar_contract",
+      "source_uri_or_contract_ref": "static_calendar_contract_missing",
+      "source_system": "static_calendar_slot",
+      "instrument_or_series_id": "RU/US holidays",
+      "native_grain": "static_calendar",
+      "source_timezone": "local_calendar_timezone",
+      "publication_time_rule": "static calendar version publication",
+      "availability_timestamp_rule": "available after static calendar contract approval",
+      "latency_policy": "no forward-fill defaults",
+      "allowed_for_runtime": false,
+      "requires_ingestion": true,
+      "requires_static_calendar": true,
+      "requires_pm_l2_source_approval": true,
+      "leakage_risk": "medium",
+      "notes": "RU/US holiday feature contract missing."
+    },
+    {
+      "source_id": "news_events.event_schema_only",
+      "source_group": "news_events",
+      "source_status": "event_schema_only",
+      "source_uri_or_contract_ref": "event_schema_only_no_raw_ingestion",
+      "source_system": "schema_placeholder",
+      "instrument_or_series_id": "macro/geopolitical/news events",
+      "native_grain": "event",
+      "source_timezone": "publication_timezone",
+      "publication_time_rule": "publication timestamp",
+      "availability_timestamp_rule": "usable only after publication timestamp",
+      "latency_policy": "raw ingestion and LLM classification forbidden now",
+      "allowed_for_runtime": false,
+      "requires_ingestion": false,
+      "requires_static_calendar": false,
+      "requires_pm_l2_source_approval": true,
+      "leakage_risk": "high",
+      "notes": "Event schema only; raw news ingestion and LLM classification are forbidden in this task."
+    }
+  ],
+  "alignment_rules": {
+    "primary_grain": "D1 session",
+    "join_key": [
+      "session_date"
+    ],
+    "decision_timestamp_definition": "The timestamp at which the EMA 3/19 AI filter would decide whether a signal may be entered or exited.",
+    "runtime_usability_rule": [
+      "availability_timestamp <= decision_timestamp"
+    ],
+    "internal_D1_close_features": [
+      "usable_only_from_D_plus_1_open"
+    ],
+    "external_daily_close_features": [
+      "align_by_latest_source_observation_available_before_decision_timestamp"
+    ],
+    "CBR_features": [
+      "usable_only_after_official_publication_timestamp"
+    ],
+    "news_event_features": [
+      "usable_only_after_publication_timestamp"
+    ],
+    "FUTOI_positioning_features": [
+      "usable_only_after_exchange_or_source_publication_timestamp"
+    ],
+    "missing_feature_policy": [
+      "keep_null_plus_quality_status",
+      "no_default_forward_fill"
+    ]
+  },
+  "leakage_policy": {
+    "mandatory_rules": [
+      "manual_phase_labels are not runtime features",
+      "phase_remaining_sessions is not a runtime feature",
+      "next_regime_if_current_ends is not a runtime feature",
+      "current_regime_ends_within_1d/3d/5d are targets, not runtime features",
+      "interval_start_date and interval_end_date from manual labels are not runtime features",
+      "DXY/oil/CBR/news/calendar/FUTOI features must use actual availability timestamp",
+      "hindsight timestamping is forbidden",
+      "any feature using observations after decision_timestamp is forbidden_for_runtime"
+    ],
+    "manual_phase_labels_runtime_feature": false,
+    "future_derived_targets_runtime_features": false,
+    "hindsight_timestamping": "forbidden",
+    "observations_after_decision_timestamp": "forbidden_for_runtime"
+  },
+  "dependency_classification": {
+    "already_available": [
+      "contracts/features/usdrubf_d1_ohlc_from_5m.json",
+      "contracts/features/usdrubf_d1_ema_3_19_cross_context.json",
+      "contracts/features/usdrubf_d1_ema_3_19_classical_indicators.json",
+      "contracts/datasets/futures_raw_5m.v1.yaml",
+      "contracts/datasets/futures_derived_d1.v1.yaml",
+      "contracts/datasets/futures_calendar_session.v1.yaml"
+    ],
+    "available_but_needs_contract": [
+      "FUTOI participant positioning",
+      "MOEX session calendar phase features"
+    ],
+    "schema_placeholder_only": [
+      "futures_expiry_flag",
+      "rollover_window_flag",
+      "continuous futures rollover/expiry mapping",
+      "news_events event schema"
+    ],
+    "not_found": [
+      "DXY source contract",
+      "oil source contract",
+      "CBR key rate/calendar source contract",
+      "CNYRUB feature/source contract",
+      "USDRUB spot proxy source contract",
+      "RU tax period calendar contract",
+      "RU/US holiday feature contract",
+      "news raw ingestion contract",
+      "explicit open interest contract"
+    ],
+    "requires_new_ingestion": [
+      "DXY",
+      "oil proxy",
+      "CBR key rate and meeting calendar unless static contract is approved",
+      "CNYRUB proxy",
+      "USDRUB spot proxy if used",
+      "tax period calendar",
+      "RU/US holidays",
+      "explicit open interest later"
+    ],
+    "blocked_by_data_coverage": [
+      "internal USDRUBF research feature coverage ends 2026-04-06 while labels extend through 2026-06-26"
+    ]
+  },
+  "blockers_preserved": [
+    "DXY source missing",
+    "USDRUBF research data coverage currently ends 2026-04-06 while labels extend through 2026-06-26",
+    "FUTOI raw exists but phase-research participant positioning feature contract is missing",
+    "explicit open interest missing and must not be inferred from FUTOI",
+    "oil source missing",
+    "CBR key rate/calendar source missing",
+    "CNYRUB and USDRUB spot proxy source contracts missing",
+    "tax/holiday static calendars missing",
+    "rollover/expiry implementation blocked by missing roll policy and expiration mapping",
+    "news allowed only as event schema in this task",
+    "USDRUBF D1 derivation/research enablement remains separate"
+  ],
+  "forbidden_outputs_and_actions": [
+    "Do not modify files outside approved_file_scope.",
+    "Do not implement src code.",
+    "Do not create data artifacts.",
+    "Do not generate CSV/parquet.",
+    "Do not run server commands.",
+    "Do not run runtime.",
+    "Do not run backtest.",
+    "Do not train model.",
+    "Do not make market recommendations.",
+    "Do not use deprecated server path /home/trader/moex_bot/moex_robot.",
+    "Do not use old Контекст.md."
+  ]
+}

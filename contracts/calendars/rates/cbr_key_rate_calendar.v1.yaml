@@ -1,0 +1,99 @@
+contract_id: rates.cbr_key_rate_calendar.v1
+status: design_only
+lane: ema_3_19_ai
+artifact_kind: calendar_placeholder_contract
+source_family: rates.cbr_key_rate_calendar
+calendar_scope: cbr_key_rate_calendar
+
+readiness_flags:
+  design_only: true
+  ingestion_ready: false
+  runtime_ready: false
+  loader_ready: false
+  materialization_ready: false
+  feature_computation_ready: false
+  modeling_ready: false
+  registry_mutation_ready: false
+  provider_approved_for_ingestion: false
+  provider_approved_for_runtime: false
+  provider_approved_for_modeling: false
+
+purpose: >
+  Design-only placeholder for preannounced Bank of Russia key-rate meeting
+  schedule context. Phase 2.5 allows only schedule-known-before-anchor fields.
+  Realized decision/outcome fields are blocked until a later publication_ts_utc
+  policy is approved.
+
+canonical_time_fields:
+  forecast_anchor_ts:
+    timezone: UTC
+    local_anchor: "06:00 Europe/Moscow"
+  availability_ts_utc:
+    required: true
+    timezone: UTC
+    source: official_schedule_publication_or_calendar_version_audit
+  schedule_publication_ts_utc:
+    required_for_schedule_version: true
+    timezone: UTC
+  timezone_conversion_to_utc_required: true
+
+namespaces:
+  schedule_known_before_anchor:
+    status: allowed_design_only
+    example_fields:
+      - meeting_date
+      - schedule_publication_ts_utc
+      - calendar_version_id
+      - days_to_next_scheduled_meeting
+      - days_since_previous_scheduled_meeting
+    eligibility_rule: availability_ts_utc <= forecast_anchor_ts
+  post_fact_outcome:
+    status: blocked
+    blocked_until: later_publication_ts_utc_policy_approved
+    blocked_fields:
+      - realized_key_rate_decision
+      - actual_key_rate_level_after_meeting
+      - statement_text_after_publication
+      - press_conference_outcome
+      - market_reaction_after_decision
+
+availability_rules:
+  schedule_known_before_anchor_only: true
+  eligibility_rule: availability_ts_utc <= forecast_anchor_ts
+  unknown_availability_ts_utc_rule: >
+    If schedule availability is unknown, exclude the row or shift by at least
+    one trading day.
+  revisions_and_restatements: >
+    Calendar schedule revisions require availability_ts_utc and cannot be
+    applied retroactively before the revision was available.
+
+cbr_usdrub_policy:
+  official_usd_rub_rate_role: reference_only
+  causal_market_driver_allowed: false
+  rule: >
+    The Bank of Russia official USD/RUB rate must not be described or used as a
+    causal market USD/RUB input. It is a lagged/reference indicator separate
+    from market USD/RUB dynamics.
+
+excluded_input_fields:
+  - B/S/OUT labels
+  - EMA cross labels
+  - future returns
+  - future volatility
+  - drawdown
+  - phase-completion targets
+  - LLM classifications
+  - post-fact annotations
+  - realized event outcomes
+
+explicit_non_authorizations:
+  - no registry mutation
+  - no configs mutation
+  - no src implementation
+  - no tests
+  - no ingestion
+  - no materialization
+  - no runtime
+  - no feature computation
+  - no modeling
+  - no server apply

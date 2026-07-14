@@ -1,0 +1,70 @@
+contract_version: '1.0'
+schema_version: usdrubf_phase4_external_data_readiness_gate.v1
+task_id: ema_3_19_ai_market_phase_phase_4_0_external_data_backlog_contracts
+lane: ema_3_19_ai
+purpose: Validate provider-readiness before any external factor ingestion or materialization for USDRUBF / Si D1 phase research.
+contract_only: true
+not_executable_ingestion_code: true
+validation_inputs:
+  - docs/sot/strategies/ema_3_19_ai/phase4_external_data_backlog_v1.md
+  - contracts/features/usdrubf_phase4_external_factor_backlog_v1.json
+  - docs/sot/strategies/ema_3_19_ai/phase4_provider_decision_log_v1.md
+  - contracts/datasets/usdrubf_phase4_external_sources_registry.v1.yaml
+allowed_readiness_statuses:
+  - approved
+  - blocked
+  - needs_provider_decision
+required_checks:
+  - check_id: every_source_has_pit_policy
+    requirement: Every source must define a PIT availability policy or explicit placeholder.
+    failure_semantics: fail
+  - check_id: every_source_has_timestamp_publication_policy
+    requirement: Every source must define timestamp/publication-time policy or explicit placeholder.
+    failure_semantics: fail
+  - check_id: every_source_has_provider_license_access_status
+    requirement: Every source must define provider candidate status and license/access status.
+    failure_semantics: fail
+  - check_id: every_source_has_d1_join_grain
+    requirement: Every source must define the intended D1 join grain.
+    failure_semantics: fail
+  - check_id: every_source_has_expected_feature_family
+    requirement: Every source must define expected feature family.
+    failure_semantics: fail
+  - check_id: blocked_sources_clearly_marked
+    requirement: Blocked sources must be marked blocked and must not be silently treated as approved.
+    failure_semantics: fail
+  - check_id: futoi_blocked_without_exact_evidence
+    requirement: FUTOI / participant positioning must remain blocked unless exact provider, schema, timestamp, storage, and license/access evidence is specified.
+    failure_semantics: fail
+  - check_id: futoi_participant_positioning_not_open_interest
+    requirement: FUTOI / participant positioning must not include open-interest feature semantics; open interest requires the separate open_interest_liquidity_volume_extensions source and a later PM-approved source/contract.
+    failure_semantics: fail
+  - check_id: cbr_official_exchange_rate_not_causal_driver
+    requirement: CBR official exchange rate must not be represented as a causal market driver.
+    failure_semantics: fail
+  - check_id: cbr_key_rate_schedule_reference_only
+    requirement: Bank of Russia key rate calendar must be represented only as schedule/reference context.
+    failure_semantics: fail
+  - check_id: no_execution_authorization
+    requirement: Artifacts must not authorize ingestion, materialization, feature computation, modeling, prediction, trading, provider API calls, or server apply.
+    failure_semantics: fail
+  - check_id: no_secrets_or_credentials
+    requirement: Artifacts must not contain secrets, credentials, API keys, or runtime endpoints.
+    failure_semantics: fail
+pass_fail_semantics:
+  pass: All required checks pass and any source used for ingestion has readiness_status=approved with provider/license/PIT/timestamp/storage/D1 join evidence.
+  fail: Any required check fails, FUTOI is not blocked without exact evidence, FUTOI includes open-interest semantics, CBR official FX rate is causal, or any artifact authorizes execution/runtime scope.
+phase_boundary:
+  before_step_5: External source ingestion is not required and not authorized; step 5 may only proceed on internal D1 panel and manual labels unless PM L2 authorizes otherwise.
+  before_step_6: External factor batches must not be materialized until this readiness gate passes for selected approved sources.
+forbidden_authorizations:
+  - external data ingestion
+  - provider API calls
+  - generated data creation
+  - D1 panel output modification
+  - data materialization
+  - feature computation
+  - model fitting
+  - prediction
+  - broker/trading code
+  - runtime/server apply

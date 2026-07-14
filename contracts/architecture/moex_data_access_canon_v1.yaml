@@ -1,0 +1,120 @@
+canon_id: moex_data_access_canon_v1
+status: architecture_contract
+scope: generic_moex_data_access
+activation_status: repo_only
+
+purpose:
+  - define one instrument-independent canon for MOEX quote loading
+  - define one instrument-independent canon for quote updating
+  - define one instrument-independent canon for quote retrieval
+  - define one instrument-independent canon for supplementary MOEX datasets
+
+identity_model:
+  canonical_identity_field: instrument_id
+  canonical_identity_scope: internal_storage_and_research_binding
+  source_identity_fields:
+    - secid
+    - board
+    - market
+    - engine
+  optional_source_grouping_fields:
+    - family
+  rules:
+    concrete_instrument_in_generic_contract_allowed: false
+    default_instrument_in_generic_contract_allowed: false
+    family_as_canonical_identity_allowed: false
+    latest_autodetect_allowed: false
+    implicit_contract_selection_allowed: false
+
+storage_model:
+  external_storage_root:
+    env_var: MOEX_DATA_ROOT
+    hardcoded_server_path_allowed: false
+  raw_quote_path_pattern: "${MOEX_DATA_ROOT}/market/raw/timeframe={TIMEFRAME}/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet"
+  derived_quote_path_pattern: "${MOEX_DATA_ROOT}/market/derived/timeframe={TIMEFRAME}/instrument_id={INSTRUMENT_ID}/part.parquet"
+  supplementary_path_pattern: "${MOEX_DATA_ROOT}/market/supplementary/dataset_id={DATASET_ID}/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet"
+  accepted_manifest_path_pattern: "${MOEX_DATA_ROOT}/state/datasets/dataset_id={DATASET_ID}/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+  partition_keys:
+    raw_quotes:
+      - timeframe
+      - instrument_id
+      - trade_date
+      - source_id
+    derived_quotes:
+      - timeframe
+      - instrument_id
+    supplementary:
+      - dataset_id
+      - instrument_id
+      - trade_date
+      - source_id
+
+registry_model:
+  registry_required: true
+  registry_entry_required_for_materialization: true
+  registry_entry_required_fields:
+    - instrument_id
+    - canonical_symbol
+    - source_system
+    - source_id
+    - secid
+    - board
+    - market
+    - engine
+    - enabled_for_loading
+    - enabled_for_update
+    - enabled_for_retrieval
+  generic_registry_default_entries_allowed: false
+
+loading_model:
+  source_selection: explicit_source_id
+  instrument_selection: explicit_instrument_id
+  date_selection: explicit_date_or_approved_range
+  fallback_source_allowed: false
+  empty_response_policy: fail_closed
+  schema_mismatch_policy: fail_closed
+  partial_response_policy: manifest_with_quality_status
+
+update_model:
+  update_mode:
+    - explicit_range
+    - observed_source_incremental
+  implicit_latest_scan_allowed: false
+  server_cron_requires_registry_entry: true
+  accepted_manifest_update_requires_quality_pass: true
+
+retrieval_model:
+  read_current_dataset_via_accepted_manifest: true
+  direct_dynamic_scan_allowed: false
+  runtime_reads_raw_partitions_directly_allowed: false
+  research_reads_must_pin_manifest_or_dataset_version: true
+
+supplementary_data_model:
+  same_identity_model_as_quotes: true
+  dataset_id_required: true
+  source_id_required: true
+  availability_timestamp_required: true
+  examples:
+    - futoi
+    - calendar
+    - open_interest
+  rules:
+    supplementary_data_cannot_redefine_canonical_identity: true
+    supplementary_data_cannot_use_family_as_storage_canon: true
+
+legacy_policy:
+  legacy_csv_status: compatibility_only
+  legacy_csv_extension_allowed: false
+  legacy_contract_as_architecture_proof_allowed: false
+
+server_boundary:
+  github_is_source_of_truth: true
+  server_is_applied_state_only: true
+  server_filesystem_is_architecture_proof: false
+  server_apply_requires_merged_github_contract: true
+
+implementation_boundary:
+  this_contract_changes_runtime: false
+  this_contract_runs_loading: false
+  this_contract_generates_data: false
+  this_contract_changes_server: false

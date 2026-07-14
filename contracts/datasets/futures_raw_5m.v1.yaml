@@ -8,22 +8,37 @@ consumers:
 format: parquet
 schema_version: futures_raw_5m.v1
 storage_root_ref: MOEX_DATA_ROOT
-path_pattern: "${MOEX_DATA_ROOT}/futures/raw_5m/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
+path_pattern: "${MOEX_DATA_ROOT}/market/raw/timeframe=5m/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet"
 partitioning:
+  - timeframe
+  - instrument_id
   - trade_date
-  - family
-  - secid
+  - source_id
 grain: 5m_bar
+identity_model:
+  canonical_identity_field: instrument_id
+  source_identity_fields:
+    - secid
+    - board
+    - market
+    - engine
+  optional_source_grouping_fields:
+    - family
+  family_as_canonical_identity_allowed: false
 primary_key:
+  - instrument_id
   - ts
-  - secid
+  - source_id
 required_columns:
+  - instrument_id
   - trade_date
   - ts
   - session_date
   - secid
-  - family
   - board
+  - market
+  - engine
+  - source_id
   - open
   - high
   - low
@@ -33,39 +48,30 @@ required_columns:
   - num_trades
   - source
   - ingest_ts
-controlled_native_5m_materialization:
+native_5m_materialization:
   producer: moex_data.futures.materialize_raw_5m
-  source_candidate: MOEX_ALGOPACK_FO_TRADESTATS
-  source_endpoint: /iss/datashop/algopack/fo/tradestats.json
-  endpoint_base_env_var: MOEX_API_URL
-  fallback_endpoints_allowed: false
-  market: FORTS
-  board: RFUD
-  family: Si
-  secid: SiM6
-  trade_date_binding: explicit_cli_argument
-  example_trade_date: "2026-06-02"
-  granularity: 5m
-  series_type: native
+  source_selection: explicit_source_id
+  instrument_selection: explicit_instrument_id
+  date_selection: explicit_date_or_approved_range
+  fallback_source_allowed: false
   query_params:
     date: "{YYYY-MM-DD}"
     from: "{YYYY-MM-DD}"
     till: "{YYYY-MM-DD}"
-    secid: SiM6
+    secid: "{SECID}"
     start: "0"
     iss.meta: "off"
     iss.only: tradestats
   required_contract_inputs:
     - MOEX_DATA_ROOT
-    - market
-    - board
-    - family
+    - instrument_id
+    - source_id
     - secid
+    - board
+    - market
+    - engine
     - trade_date
-    - series_type
-    - granularity
-    - source_candidate
-    - source_endpoint
+    - timeframe
     - raw_manifest_ref
     - raw_quality_report_ref
   failure_semantics:
@@ -73,13 +79,12 @@ controlled_native_5m_materialization:
     schema_mismatch: fail_closed
     missing_required_contract_input: fail_closed
     implicit_fallback: forbidden
-    iss_candles_masking: forbidden
 quality_checks:
   - non_null_ohlc
   - high_ge_low
   - open_high_low_close_inside_range
-  - duplicate_ts_secid_count
-  - monotonic_ts_by_secid
+  - duplicate_instrument_ts_source_count
+  - monotonic_ts_by_instrument_id_and_source_id
 path_rules:
   storage_root: env_contract
   hardcoded_server_path_allowed: false

@@ -1,47 +1,128 @@
 registry_id: forts_instrument_registry.v1
 schema_version: instrument_registry.v1
-status: target_declaration
+status: generic_registry_contract
 activation_status: repo_only
+architecture_contract_ref: contracts/architecture/moex_data_access_canon_v1.yaml
 scope_policy:
   explicit_instrument_id_required: true
+  explicit_source_id_required: true
   explicit_secid_required: true
   legacy_family_allowlist_allowed: false
   latest_autodetect_allowed: false
   implicit_contract_selection_allowed: false
   unresolved_instrument_blocks_materialization: true
 instruments:
-  - instrument_id: forts.usdrubf
+  - instrument_id: usdrubf_futures_family
     canonical_symbol: USDRUBF
-    display_name: USDRUBF
-    market: FORTS
-    board: RFUD
+    display_name: USDRUBF futures family design binding
+    source_system: moex_iss_forts
+    source_id: moex_forts_usdrubf_design_placeholder
     secid: USDRUBF
-    source_artifact_id: external.apim.fo.tradestats.v1
-    raw_5m_artifact_id: dataset.forts.raw_5m.tradestats.v1
-    enabled_for_raw_5m_materialization: true
+    board: RFUD
+    market: forts
+    engine: futures
+    source_artifact_id: internal.usdrubf_d1_ohlc_from_5m.v1
+    raw_5m_artifact_id: futures_raw_5m.v1
+    enabled_for_loading: false
+    enabled_for_update: false
+    enabled_for_retrieval: false
+    enabled_for_raw_5m_materialization: false
     enabled_for_d1_derivation: false
     enabled_for_research: false
     storage_partition_values:
-      instrument_id: forts.usdrubf
+      instrument_id: usdrubf_futures_family
       secid: USDRUBF
     evidence_status: pilot_required
+    phase2_6_binding:
+      status: design_config_binding_only
+      data_availability_status: not_proven
+      ingestion_status: not_ready
+      materialization_status: not_ready
+      modeling_status: blocked
+      runtime_status: not_ready
+      timezone_policy:
+        market_timezone: Europe/Moscow
+        forecast_anchor_local_time: "06:00 Europe/Moscow"
+        forecast_anchor_timezone: UTC
+      source_contract_refs:
+        - contracts/sources/internal/usdrubf_d1_ohlc_from_5m.v1.yaml
+        - contracts/sources/internal/usdrubf_d1_ema_3_19_cross_context.v1.yaml
+        - contracts/sources/internal/usdrubf_d1_classical_indicators.v1.yaml
+      roll_expiry_mapping_ref: contracts/sources/futures/roll_expiry_mapping.v1.yaml
+      explicit_non_authorizations:
+        - no current contract month selection automation
+        - no continuous contract runtime selection
+        - no loader readiness
+        - no materialization readiness
+        - no modeling readiness
+  - instrument_id: si_futures_family
+    canonical_symbol: Si
+    display_name: Si futures family design binding
+    source_system: moex_iss_forts
+    source_id: moex_forts_si_design_placeholder
+    secid: Si
+    board: RFUD
+    market: forts
+    engine: futures
+    source_artifact_id: internal.usdrubf_d1_ohlc_from_5m.v1
+    raw_5m_artifact_id: futures_raw_5m.v1
+    enabled_for_loading: false
+    enabled_for_update: false
+    enabled_for_retrieval: false
+    enabled_for_raw_5m_materialization: false
+    enabled_for_d1_derivation: false
+    enabled_for_research: false
+    storage_partition_values:
+      instrument_id: si_futures_family
+      secid: Si
+    evidence_status: pilot_required
+    phase2_6_binding:
+      status: design_config_binding_only
+      data_availability_status: not_proven
+      ingestion_status: not_ready
+      materialization_status: not_ready
+      modeling_status: blocked
+      runtime_status: not_ready
+      timezone_policy:
+        market_timezone: Europe/Moscow
+        forecast_anchor_local_time: "06:00 Europe/Moscow"
+        forecast_anchor_timezone: UTC
+      source_contract_refs:
+        - contracts/sources/internal/usdrubf_d1_ohlc_from_5m.v1.yaml
+        - contracts/sources/internal/usdrubf_d1_ema_3_19_cross_context.v1.yaml
+        - contracts/sources/internal/usdrubf_d1_classical_indicators.v1.yaml
+      roll_expiry_mapping_ref: contracts/sources/futures/roll_expiry_mapping.v1.yaml
+      explicit_non_authorizations:
+        - no current contract month selection automation
+        - no continuous contract runtime selection
+        - no loader readiness
+        - no materialization readiness
+        - no modeling readiness
 rules:
   storage_partition_key: instrument_id
-  secid_partition_key: secid
+  source_partition_key: source_id
+  secid_source_identity_key: secid
   family_partition_key_allowed: false
   default_family_allowlist_allowed: false
+  generic_registry_default_entries_allowed: false
   materialization_without_registry_entry_allowed: false
-  accepted_pointer_scope_strategy: per_instrument
-  accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/artifact_id=dataset.forts.raw_5m.tradestats.v1/instrument_id={INSTRUMENT_ID}/secid={SECID}/current_accepted_manifest.json"
+  accepted_pointer_scope_strategy: per_instrument_dataset
+  accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id={DATASET_ID}/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
   registry_entry_must_define:
     - instrument_id
     - canonical_symbol
     - display_name
-    - market
-    - board
+    - source_system
+    - source_id
     - secid
+    - board
+    - market
+    - engine
     - source_artifact_id
     - raw_5m_artifact_id
+    - enabled_for_loading
+    - enabled_for_update
+    - enabled_for_retrieval
     - enabled_for_raw_5m_materialization
     - enabled_for_d1_derivation
     - enabled_for_research

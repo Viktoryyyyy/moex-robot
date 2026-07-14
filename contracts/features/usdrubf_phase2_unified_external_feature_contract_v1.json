@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "contracts/features/usdrubf_phase2_unified_external_feature_contract_v1.json",
+  "contract_id": "usdrubf_phase2_unified_external_feature_contract_v1",
+  "status": "design_only",
+  "lane": "ema_3_19_ai",
+  "instrument_scope": [
+    "USDRUBF",
+    "Si"
+  ],
+  "runtime_authorized": false,
+  "server_apply_authorized": false,
+  "ingestion_authorized": false,
+  "backfill_authorized": false,
+  "feature_computation_authorized": false,
+  "modeling_authorized": false,
+  "purpose": "Broad design-only contract for external and internal context feature families considered for Phase 2 daily market phase research.",
+  "canonical_time_fields": {
+    "availability_ts_utc": {
+      "type": "string",
+      "format": "date-time",
+      "timezone": "UTC",
+      "required": true,
+      "description": "Canonical point-in-time timestamp at which the row value became available to the system."
+    },
+    "forecast_anchor_ts": {
+      "type": "string",
+      "format": "date-time",
+      "timezone_policy": "UTC representation of 06:00 Europe/Moscow anchor",
+      "required": true,
+      "description": "Forecast anchor timestamp. A row is eligible only when availability_ts_utc <= forecast_anchor_ts."
+    },
+    "availability_timestamp": {
+      "type": "string",
+      "strict_alias_of": "availability_ts_utc",
+      "allowed_only_for_ingress_compatibility": true,
+      "validation_rule": "Must be converted to UTC and compared as availability_ts_utc; rows that cannot be converted are rejected."
+    }
+  },
+  "required_record_fields": [
+    "source_id",
+    "provider_status",
+    "phase_2_usage_status",
+    "availability_ts_utc",
+    "forecast_anchor_ts"
+  ],
+  "source_id_policy": {
+    "description": "source_id identifies a broad source family or approved internal context family only. It does not imply provider approval.",
+    "provider_placeholder_exclusions": [
+      "No placeholder source_id may imply ingestion readiness.",
+      "No placeholder source_id may imply provider approval.",
+      "No placeholder source_id may imply modeling readiness.",
+      "No placeholder source_id may imply runtime readiness."
+    ]
+  },
+  "provider_status_values": {
+    "approved_internal_context": "Internal source family may be referenced as design context; no runtime materialization is authorized.",
+    "design_placeholder": "Candidate provider/source family is described only for future decision; provider approval is not implied.",
+    "forbidden_now": "Use is blocked until PM L2 changes the decision."
+  },
+  "phase_2_usage_status_values": {
+    "design_only": "Permitted only in design artifacts and future validation planning.",
+    "blocked": "Not permitted for ingestion, feature computation, or modeling.",
+    "future_gate_required": "Requires a later PM-approved implementation/provider gate."
+  },
+  "pit_rules": [
+    "availability_ts_utc is required for every eligible feature record.",
+    "availability_ts_utc must be parseable as UTC.",
+    "availability_ts_utc must be <= forecast_anchor_ts.",
+    "D1 trade_date T is usable only from T+1 06:00 Europe/Moscow or later.",
+    "If exact release timestamp is unknown, shift by at least one trading day or exclude.",
+    "Same-day unavailable data is forbidden.",
+    "Corrected, revised, filled, or vendor-restated values cannot be joined into earlier anchors without PIT revision history."
+  ],
+  "calendar_namespace_policy": {
+    "schedule_known_before_anchor": "Calendar schedule data known before forecast_anchor_ts may be considered in future approved tasks.",
+    "post_fact_outcome": "Realized decisions, outcomes, narratives, flow estimates, or post-event explanations are denied unless a later PIT source contract permits them.",
+    "phase_2_3_file_creation": "No contracts/calendars/** files are created or approved by this package."
+  },
+  "label_annotation_exclusion": {
+    "label_fields_forbidden_as_features": [
+      "phase_label",
+      "phase_remaining_sessions",
+      "current_regime_ends_within_*",
+      "next_regime_if_current_ends",
+      "interval_id",
+      "interval_start",
+      "interval_end",
+      "annotation_*",
+      "label_derived_*"
+    ],
+    "rule": "Labels and annotations are supervised target / research governance artifacts only and must not be used as feature evidence or source availability evidence."
+  },
+  "source_families": [
+    {
+      "source_id": "internal.usdrubf_d1_ohlc_from_5m",
+      "provider_status": "approved_internal_context",
+      "phase_2_usage_status": "design_only",
+      "availability_rule": "D1 trade_date T usable only from T+1 06:00 Europe/Moscow or later.",
+      "provider_specific_file_required_later": false
+    },
+    {
+      "source_id": "internal.usdrubf_d1_ema_3_19_cross_context",
+      "provider_status": "approved_internal_context",
+      "phase_2_usage_status": "design_only",
+      "availability_rule": "Inherits D1 OHLC availability; EMA is context only and not a B/S/OUT label source.",
+      "provider_specific_file_required_later": false
+    },
+    {
+      "source_id": "internal.usdrubf_d1_classical_indicators",
+      "provider_status": "approved_internal_context",
+      "phase_2_usage_status": "design_only",
+      "availability_rule": "Inherits D1 OHLC availability; D1 trade_date T usable only from T+1 06:00 Europe/Moscow or later.",
+      "provider_specific_file_required_later": false,
+      "semantics": "Lagged classical D1 indicator context only; not labels."
+    },
+    {
+      "source_id": "futures.roll_expiry_mapping",
+      "provider_status": "approved_internal_context",
+      "phase_2_usage_status": "design_only",
+      "availability_rule": "Mapping must be fixed before forecast_anchor_ts; availability_ts_utc <= forecast_anchor_ts; unknown timestamp must shift or exclude.",
+      "provider_specific_file_required_later": false,
+      "semantics": "Fixed-before-anchor roll/expiry context only; not future-optimized roll decision."
+    },
+    {
+      "source_id": "futoi.participant_positioning",
+      "provider_status": "design_placeholder",
+      "phase_2_usage_status": "future_gate_required",
+      "availability_rule": "Require explicit availability_ts_utc; if exact release timestamp is unresolved, shift by at least one trading day or exclude.",
+      "provider_specific_file_required_later": true
+    },
+    {
+      "source_id": "oil.external_price_proxy",
+      "provider_status": "design_placeholder",
+      "phase_2_usage_status": "future_gate_required",
+      "availability_rule": "Provider-specific timestamp required in a later approved source contract.",
+      "provider_specific_file_required_later": true
+    },
+    {
+      "source_id": "currency.external_usdrub_or_cnyrub_proxy",
+      "provider_status": "design_placeholder",
+      "phase_2_usage_status": "future_gate_required",
+      "availability_rule": "Provider-specific market quote timestamp required in a later approved source contract.",
+      "provider_specific_file_required_later": true
+    },
+    {
+      "source_id": "calendar.schedule_known_before_anchor",
+      "provider_status": "design_placeholder",
+      "phase_2_usage_status": "future_gate_required",
+      "availability_rule": "Only schedule-known-before-anchor fields may be considered; post-fact outcomes are denied.",
+      "provider_specific_file_required_later": true
+    },
+    {
+      "source_id": "news_events.raw_ingestion",
+      "provider_status": "forbidden_now",
+      "phase_2_usage_status": "blocked",
+      "availability_rule": "Not applicable. Raw news ingestion is forbidden now."
+    },
+    {
+      "source_id": "news_events.llm_classification",
+      "provider_status": "forbidden_now",
+      "phase_2_usage_status": "blocked",
+      "availability_rule": "Not applicable. LLM classification is forbidden now."
+    }
+  ],
+  "explicit_exclusions": [
+    "contracts/sources/**",
+    "contracts/calendars/**",
+    "configs/instruments/**",
+    "configs/datasets/**",
+    "src/**",
+    "tests/**",
+    "data/**",
+    "server apply",
+    "runtime ingestion",
+    "feature computation",
+    "model fitting"
+  ]
+}

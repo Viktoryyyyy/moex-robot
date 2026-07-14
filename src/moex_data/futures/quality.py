@@ -12,8 +12,12 @@ class FuturesQualityValidationError(ValueError):
 _QUALITY_ROW_REQUIRED_FIELDS: Final[tuple[str, ...]] = (
     "run_id",
     "dataset_id",
-    "family",
+    "instrument_id",
+    "source_id",
     "secid",
+    "board",
+    "market",
+    "engine",
     "trade_date",
     "rows",
     "duplicate_key_count",
@@ -41,6 +45,12 @@ def _require_int(value: object, field_name: str) -> int:
     return value
 
 
+def _optional_text(values: Mapping[str, object], field_name: str) -> str | None:
+    if field_name not in values:
+        return None
+    return _require_text(values[field_name], field_name)
+
+
 def validate_quality_row_values(values: Mapping[str, object]) -> FuturesQualityRow:
     values = _require_mapping(values, "quality_row")
     missing = tuple(field for field in _QUALITY_ROW_REQUIRED_FIELDS if field not in values)
@@ -57,8 +67,12 @@ def validate_quality_row_values(values: Mapping[str, object]) -> FuturesQualityR
     return FuturesQualityRow(
         run_id=_require_text(values["run_id"], "run_id"),
         dataset_id=dataset_id,
-        family=_require_text(values["family"], "family"),
+        instrument_id=_require_text(values["instrument_id"], "instrument_id"),
+        source_id=_require_text(values["source_id"], "source_id"),
         secid=_require_text(values["secid"], "secid"),
+        board=_require_text(values["board"], "board"),
+        market=_require_text(values["market"], "market"),
+        engine=_require_text(values["engine"], "engine"),
         trade_date=_require_text(values["trade_date"], "trade_date"),
         rows=_require_int(values["rows"], "rows"),
         duplicate_key_count=_require_int(values["duplicate_key_count"], "duplicate_key_count"),
@@ -68,6 +82,7 @@ def validate_quality_row_values(values: Mapping[str, object]) -> FuturesQualityR
         futoi_missing_count=_require_int(values["futoi_missing_count"], "futoi_missing_count"),
         calendar_status=_require_text(values["calendar_status"], "calendar_status"),
         quality_status=quality_status,
+        family=_optional_text(values, "family"),
     )
 
 

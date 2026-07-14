@@ -1,0 +1,106 @@
+{
+  "dataset_id": "usdrubf_phase6_internal_modeling_dataset.v1",
+  "feature_batches": {
+    "ema_3_19_baseline_context": {
+      "columns": [
+        "lag1_ema_3",
+        "lag1_ema_19",
+        "lag1_ema_3_19_spread",
+        "lag1_ema_3_19_state"
+      ],
+      "label_source": false,
+      "modeling_role": "lagged_diagnostic_baseline_context_only",
+      "past_only": true,
+      "trading_signal": false
+    },
+    "internal_price_return": {
+      "columns": [
+        "lag1_close_return_1d",
+        "lag1_intraday_return",
+        "rolling_past_return_mean",
+        "rolling_past_return_std"
+      ],
+      "past_only": true,
+      "same_day_target_ohlcv_allowed": false
+    },
+    "internal_volatility_range": {
+      "columns": [
+        "lag1_hl_range_pct",
+        "rolling_past_hl_range_mean",
+        "rolling_past_hl_range_std"
+      ],
+      "past_only": true,
+      "same_day_target_ohlcv_allowed": false
+    },
+    "internal_volume_liquidity": {
+      "columns": [
+        "lag1_volume",
+        "lag1_value",
+        "lag1_num_trades",
+        "rolling_past_volume_mean"
+      ],
+      "past_only": true,
+      "same_day_target_ohlcv_allowed": false
+    },
+    "session_index_context": {
+      "calendar_or_panel_index_only": true,
+      "columns": [
+        "target_trade_date",
+        "prior_trade_date",
+        "session_index",
+        "days_since_prior_trade_date"
+      ],
+      "derived_from_manual_phase_boundaries": false
+    }
+  },
+  "forbidden_feature_columns": [
+    "phase_label",
+    "B",
+    "S",
+    "OUT",
+    "target",
+    "y",
+    "future_return",
+    "source_interval_id",
+    "phase_remaining_sessions",
+    "next_regime_if_current_ends",
+    "transition_exit_day",
+    "boundary_distance",
+    "future_phase",
+    "future_volatility",
+    "label_annotation",
+    "annotator",
+    "label_availability_ts"
+  ],
+  "lane": "ema_3_19_ai",
+  "leakage_guards": {
+    "external_factors_included": false,
+    "labels_are_targets_only": true,
+    "manual_phase_metadata_features_allowed": false,
+    "model_fitting_performed": false,
+    "phase_boundary_metadata_features_allowed": false,
+    "prediction_performed": false,
+    "same_day_target_ohlcv_features_allowed": false,
+    "trading_signal_created": false
+  },
+  "phase": "6.0",
+  "project": "MOEX Bot",
+  "purpose": "Internal-only Phase 6 factor-batch feature contract for later supervised modeling dataset materialization.",
+  "runtime_authority": {
+    "external_data_ingestion_authorized_now": false,
+    "model_fitting_authorized_now": false,
+    "prediction_authorized_now": false,
+    "server_materialization_authorized_now": false,
+    "trading_authorized_now": false
+  },
+  "schema_id": "usdrubf_phase6_internal_factor_batches_v1",
+  "status": "repository_contract_only",
+  "target_columns": [
+    "target_phase_label",
+    "target_is_labeled",
+    "target_source",
+    "target_trade_date",
+    "target_instrument_id"
+  ],
+  "target_source_value": "manual_phase_labels_v1"
+}

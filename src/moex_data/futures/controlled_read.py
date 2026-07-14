@@ -35,6 +35,11 @@ class ControlledReadPlan:
     series_type: str | None = "raw"
     roll_policy: str | None = None
     run_id: str | None = None
+    instrument_id: str | None = None
+    source_id: str | None = None
+    board: str | None = None
+    market: str | None = None
+    engine: str | None = None
     max_days: int = _MAX_CONTROLLED_RANGE_DAYS
 
 
@@ -62,6 +67,12 @@ def _require_text(value: str | None, field_name: str) -> str:
         return reject_dynamic_markers(value or "", field_name)
     except FuturesContractIoError as exc:
         raise _as_read_error(exc) from exc
+
+
+def _optional_text(value: str | None, field_name: str) -> str | None:
+    if value is None:
+        return None
+    return _require_text(value, field_name)
 
 
 def _parse_trade_date(value: str, field_name: str) -> date:
@@ -121,13 +132,19 @@ def _contract_for_plan(package: FuturesContractPackage, plan: ControlledReadPlan
 
 def _placeholders_for_plan(plan: ControlledReadPlan, trade_date: str) -> dict[str, str | None]:
     family = _require_text(plan.family, "family")
+    secid = _optional_text(plan.secid, "secid")
     return {
         "YYYY-MM-DD": trade_date,
         "FAMILY": family,
-        "SECID": plan.secid,
-        "SERIES_TYPE": plan.series_type,
-        "ROLL_POLICY": plan.roll_policy,
-        "RUN_ID": plan.run_id,
+        "SECID": secid,
+        "SERIES_TYPE": _optional_text(plan.series_type, "series_type"),
+        "ROLL_POLICY": _optional_text(plan.roll_policy, "roll_policy"),
+        "RUN_ID": _optional_text(plan.run_id, "run_id"),
+        "INSTRUMENT_ID": _optional_text(plan.instrument_id, "instrument_id") or family,
+        "SOURCE_ID": _optional_text(plan.source_id, "source_id") or secid,
+        "BOARD": _optional_text(plan.board, "board"),
+        "MARKET": _optional_text(plan.market, "market"),
+        "ENGINE": _optional_text(plan.engine, "engine"),
     }
 
 

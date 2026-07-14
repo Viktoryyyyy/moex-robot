@@ -19,21 +19,22 @@ RAW_5M_DATASET_ID: Final[str] = "futures_raw_5m"
 RAW_5M_CONTRACT_ID: Final[str] = "futures_raw_5m.v1"
 D1_DATASET_ID: Final[str] = "futures_derived_d1"
 D1_CONTRACT_ID: Final[str] = "futures_derived_d1.v1"
-TARGET_FAMILY: Final[str] = "Si"
-TARGET_SECID: Final[str] = "SiM6"
-TARGET_SERIES_TYPE: Final[str] = "native"
+D1_TIMEFRAME: Final[str] = "1D"
 APPROVED_TRADE_DATES: Final[tuple[str, ...]] = ("2026-06-02", "2026-06-03", "2026-06-04", "2026-06-05")
 SUCCEEDED_STATUS: Final[str] = "succeeded"
 VALIDATION_FAILED_STATUS: Final[str] = "failed_validation"
 MANIFEST_QUALITY_LINKAGE_STATUS: Final[str] = "explicitly_reported_no_dedicated_d1_manifest_quality_contract_in_scope"
 
 RAW_5M_REQUIRED_COLUMNS: Final[tuple[str, ...]] = (
+    "instrument_id",
     "trade_date",
     "ts",
     "session_date",
     "secid",
-    "family",
     "board",
+    "market",
+    "engine",
+    "source_id",
     "open",
     "high",
     "low",
@@ -46,9 +47,9 @@ RAW_5M_REQUIRED_COLUMNS: Final[tuple[str, ...]] = (
 )
 D1_REQUIRED_COLUMNS: Final[tuple[str, ...]] = (
     "trade_date",
-    "symbol",
-    "family",
-    "series_type",
+    "instrument_id",
+    "canonical_symbol",
+    "timeframe",
     "open",
     "high",
     "low",
@@ -67,6 +68,19 @@ class FuturesD1ReadinessError(ValueError):
         super().__init__(message)
         self.status = status
         self.message = message
+
+
+@dataclass(frozen=True)
+class FuturesD1ReadinessIdentity:
+    instrument_id: str
+    source_id: str
+    secid: str
+    board: str | None
+    market: str | None
+    engine: str | None
+    canonical_symbol: str
+    family: str | None
+    series_type: str
 
 
 @dataclass(frozen=True)
@@ -98,6 +112,16 @@ def _require_text(value: str | None, field_name: str) -> str:
         raise FuturesD1ReadinessError(VALIDATION_FAILED_STATUS, str(exc)) from exc
 
 
+def _optional_text(value: str | None, field_name: str) -> str | None:
+    if value is None:
+        return None
+    return _require_text(value, field_name)
+
+
+def _coalesce_required(primary: str | None, fallback: str | None, field_name: str) -> str:
+    return _require_text(primary or fallback, field_name)
+
+
 def _require_trade_date(value: str) -> str:
     text = _require_text(value, "trade_date")
     if len(text) != 10 or text[4] != "-" or text[7] != "-":
@@ -119,17 +143,31 @@ def _require_trade_dates(values: Sequence[str]) -> tuple[str, ...]:
     return checked
 
 
-def _require_target_scope(family: str, secid: str, series_type: str) -> tuple[str, str, str]:
-    checked_family = _require_text(family, "family")
+def _require_identity(
+    *,
+    instrument_id: str | None,
+    source_id: str | None,
+    secid: str | None,
+    canonical_symbol: str | None,
+    family: str | None,
+    board: str | None,
+    market: str | None,
+    engine: str | None,
+    series_type: str | None,
+) -> FuturesD1ReadinessIdentity:
+    checked_family = _optional_text(family, "family")
     checked_secid = _require_text(secid, "secid")
-    checked_series_type = _require_text(series_type, "series_type")
-    if checked_family != TARGET_FAMILY:
-        _fail("family does not match the controlled D1 readiness slice")
-    if checked_secid != TARGET_SECID:
-        _fail("secid does not match the controlled D1 readiness slice")
-    if checked_series_type != TARGET_SERIES_TYPE:
-        _fail("series_type does not match the controlled D1 readiness slice")
-    return checked_family, checked_secid, checked_series_type
+    return FuturesD1ReadinessIdentity(
+        instrument_id=_coalesce_required(instrument_id, checked_family, "instrument_id"),
+        source_id=_coalesce_required(source_id, checked_secid, "source_id"),
+        secid=checked_secid,
+        board=_optional_text(board, "board"),
+        market=_optional_text(market, "market"),
+        engine=_optional_text(engine, "engine"),
+        canonical_symbol=_coalesce_required(canonical_symbol, checked_secid, "canonical_symbol"),
+        family=checked_family,
+        series_type=_require_text(series_type or "native", "series_type"),
+    )
 
 
 def _env_root(env: Mapping[str, str] | None) -> str:
@@ -152,13 +190,30 @@ def _contract_for(package_contracts: Mapping[str, FuturesDatasetContract], datas
 def d1_readiness_paths(
     repo_root: str | Path,
     trade_dates: Sequence[str],
-    family: str,
-    secid: str,
-    series_type: str,
+    family: str | None = None,
+    secid: str | None = None,
+    series_type: str | None = "native",
     env: Mapping[str, str] | None = None,
+    *,
+    instrument_id: str | None = None,
+    source_id: str | None = None,
+    canonical_symbol: str | None = None,
+    board: str | None = None,
+    market: str | None = None,
+    engine: str | None = None,
 ) -> FuturesD1ReadinessPaths:
     checked_dates = _require_trade_dates(trade_dates)
-    checked_family, checked_secid, checked_series_type = _require_target_scope(family, secid, series_type)
+    identity = _require_identity(
+        instrument_id=instrument_id,
+        source_id=source_id,
+        secid=secid,
+        canonical_symbol=canonical_symbol,
+        family=family,
+        board=board,
+        market=market,
+        engine=engine,
+        series_type=series_type,
+    )
     package = load_futures_data_lake_contract_package(repo_root)
     root = _env_root(env)
     raw_contract = _contract_for(package.contracts_by_dataset_id, RAW_5M_DATASET_ID, RAW_5M_CONTRACT_ID)
@@ -168,14 +223,14 @@ def d1_readiness_paths(
             expand_contract_path(
                 raw_contract.path_pattern,
                 root,
-                {"YYYY-MM-DD": trade_date, "FAMILY": checked_family, "SECID": checked_secid},
+                {"YYYY-MM-DD": trade_date, "INSTRUMENT_ID": identity.instrument_id, "SOURCE_ID": identity.source_id},
             )
             for trade_date in checked_dates
         )
         output_path = expand_contract_path(
             d1_contract.path_pattern,
             root,
-            {"SERIES_TYPE": checked_series_type, "FAMILY": checked_family},
+            {"INSTRUMENT_ID": identity.instrument_id},
         )
     except FuturesContractIoError as exc:
         raise FuturesD1ReadinessError(VALIDATION_FAILED_STATUS, str(exc)) from exc
@@ -195,7 +250,7 @@ def _timestamp_series(values: pd.Series) -> pd.Series:
     return timestamps
 
 
-def _validate_raw_partition(df: pd.DataFrame, trade_date: str, family: str, secid: str) -> tuple[pd.DataFrame, dict[str, object]]:
+def _validate_raw_partition(df: pd.DataFrame, trade_date: str, identity: FuturesD1ReadinessIdentity) -> tuple[pd.DataFrame, dict[str, object]]:
     missing = tuple(column for column in RAW_5M_REQUIRED_COLUMNS if column not in df.columns)
     if missing:
         _fail("raw 5m partition is missing required columns")
@@ -204,10 +259,18 @@ def _validate_raw_partition(df: pd.DataFrame, trade_date: str, family: str, seci
     work = df.loc[:, RAW_5M_REQUIRED_COLUMNS].copy()
     if set(work["trade_date"].astype(str)) != {trade_date}:
         _fail("raw 5m partition trade_date values do not match the requested approved date")
-    if set(work["family"].astype(str)) != {family}:
-        _fail("raw 5m partition family values do not match the requested family")
-    if set(work["secid"].astype(str)) != {secid}:
+    if set(work["instrument_id"].astype(str)) != {identity.instrument_id}:
+        _fail("raw 5m partition instrument_id values do not match the requested instrument_id")
+    if set(work["source_id"].astype(str)) != {identity.source_id}:
+        _fail("raw 5m partition source_id values do not match the requested source_id")
+    if set(work["secid"].astype(str)) != {identity.secid}:
         _fail("raw 5m partition secid values do not match the requested secid")
+    if identity.board is not None and set(work["board"].astype(str)) != {identity.board}:
+        _fail("raw 5m partition board values do not match the requested board")
+    if identity.market is not None and set(work["market"].astype(str)) != {identity.market}:
+        _fail("raw 5m partition market values do not match the requested market")
+    if identity.engine is not None and set(work["engine"].astype(str)) != {identity.engine}:
+        _fail("raw 5m partition engine values do not match the requested engine")
     for column in OHLC_COLUMNS + ("volume", "value", "num_trades"):
         work[column] = pd.to_numeric(work[column], errors="coerce")
     if bool(work.loc[:, OHLC_COLUMNS].isna().any(axis=1).any()):
@@ -218,9 +281,9 @@ def _validate_raw_partition(df: pd.DataFrame, trade_date: str, family: str, seci
         _fail("raw 5m partition contains open or close outside high-low range")
     timestamps = _timestamp_series(work["ts"])
     work["_ts"] = timestamps
-    work = work.sort_values(["_ts", "secid"], kind="mergesort").reset_index(drop=True)
-    if int(work.duplicated(subset=["_ts", "secid"]).sum()):
-        _fail("raw 5m partition contains duplicate ts/secid keys")
+    work = work.sort_values(["_ts", "instrument_id", "source_id"], kind="mergesort").reset_index(drop=True)
+    if int(work.duplicated(subset=["_ts", "instrument_id", "source_id"]).sum()):
+        _fail("raw 5m partition contains duplicate ts/instrument_id/source_id keys")
     if not bool(work["_ts"].is_monotonic_increasing):
         _fail("raw 5m partition contains non-monotonic ts values")
     return work, {
@@ -238,13 +301,15 @@ def _sum_or_na(values: pd.Series) -> object:
     return result
 
 
-def _aggregate_day(work: pd.DataFrame, metrics: Mapping[str, object], source_path: Path, family: str, secid: str, series_type: str) -> dict[str, object]:
+def _aggregate_day(work: pd.DataFrame, metrics: Mapping[str, object], source_path: Path, identity: FuturesD1ReadinessIdentity) -> dict[str, object]:
     return {
         "trade_date": str(work["trade_date"].iloc[0]),
-        "symbol": secid,
-        "secid": secid,
-        "family": family,
-        "series_type": series_type,
+        "instrument_id": identity.instrument_id,
+        "canonical_symbol": identity.canonical_symbol,
+        "timeframe": D1_TIMEFRAME,
+        "secid": identity.secid,
+        "source_id": identity.source_id,
+        "series_type": identity.series_type,
         "open": work["open"].iloc[0],
         "high": work["high"].max(),
         "low": work["low"].min(),
@@ -262,7 +327,7 @@ def _aggregate_day(work: pd.DataFrame, metrics: Mapping[str, object], source_pat
     }
 
 
-def _validate_d1_output(df: pd.DataFrame, trade_dates: tuple[str, ...], family: str, secid: str, series_type: str) -> None:
+def _validate_d1_output(df: pd.DataFrame, trade_dates: tuple[str, ...], identity: FuturesD1ReadinessIdentity) -> None:
     missing = tuple(column for column in D1_REQUIRED_COLUMNS if column not in df.columns)
     if missing:
         _fail("derived D1 output is missing required contract columns")
@@ -270,16 +335,14 @@ def _validate_d1_output(df: pd.DataFrame, trade_dates: tuple[str, ...], family: 
         _fail("derived D1 output must contain one row per approved trade_date")
     if tuple(df["trade_date"].astype(str).tolist()) != trade_dates:
         _fail("derived D1 output trade_date coverage does not match approved dates")
-    if set(df["family"].astype(str)) != {family}:
-        _fail("derived D1 output family coverage does not match approved family")
-    if set(df["symbol"].astype(str)) != {secid}:
-        _fail("derived D1 output symbol coverage does not match approved secid")
-    if "secid" in df.columns and set(df["secid"].astype(str)) != {secid}:
-        _fail("derived D1 output secid coverage does not match approved secid")
-    if set(df["series_type"].astype(str)) != {series_type}:
-        _fail("derived D1 output series_type coverage does not match approved series_type")
-    if int(df.duplicated(subset=["trade_date", "symbol", "series_type"]).sum()):
-        _fail("derived D1 output contains duplicate trade_date/symbol/series_type keys")
+    if set(df["instrument_id"].astype(str)) != {identity.instrument_id}:
+        _fail("derived D1 output instrument_id coverage does not match requested instrument_id")
+    if set(df["canonical_symbol"].astype(str)) != {identity.canonical_symbol}:
+        _fail("derived D1 output canonical_symbol coverage does not match requested canonical_symbol")
+    if set(df["timeframe"].astype(str)) != {D1_TIMEFRAME}:
+        _fail("derived D1 output timeframe coverage does not match D1")
+    if int(df.duplicated(subset=["trade_date", "instrument_id", "timeframe"]).sum()):
+        _fail("derived D1 output contains duplicate trade_date/instrument_id/timeframe keys")
     for column in OHLC_COLUMNS:
         numeric = pd.to_numeric(df[column], errors="coerce")
         if bool(numeric.isna().any()):
@@ -304,21 +367,51 @@ def _write_parquet_atomic(path: Path, df: pd.DataFrame) -> None:
 def derive_d1_readiness_from_raw_5m_partitions(
     repo_root: str | Path,
     trade_dates: Sequence[str],
-    family: str,
-    secid: str,
-    series_type: str,
+    family: str | None = None,
+    secid: str | None = None,
+    series_type: str | None = "native",
     env: Mapping[str, str] | None = None,
+    *,
+    instrument_id: str | None = None,
+    source_id: str | None = None,
+    canonical_symbol: str | None = None,
+    board: str | None = None,
+    market: str | None = None,
+    engine: str | None = None,
 ) -> FuturesD1ReadinessResult:
     checked_dates = _require_trade_dates(trade_dates)
-    checked_family, checked_secid, checked_series_type = _require_target_scope(family, secid, series_type)
-    paths = d1_readiness_paths(repo_root, checked_dates, checked_family, checked_secid, checked_series_type, env)
+    identity = _require_identity(
+        instrument_id=instrument_id,
+        source_id=source_id,
+        secid=secid,
+        canonical_symbol=canonical_symbol,
+        family=family,
+        board=board,
+        market=market,
+        engine=engine,
+        series_type=series_type,
+    )
+    paths = d1_readiness_paths(
+        repo_root,
+        checked_dates,
+        family=identity.family,
+        secid=identity.secid,
+        series_type=identity.series_type,
+        env=env,
+        instrument_id=identity.instrument_id,
+        source_id=identity.source_id,
+        canonical_symbol=identity.canonical_symbol,
+        board=identity.board,
+        market=identity.market,
+        engine=identity.engine,
+    )
     rows: list[dict[str, object]] = []
     for trade_date, input_path in zip(checked_dates, paths.input_partition_paths):
         raw_frame = _read_parquet(input_path)
-        checked_frame, metrics = _validate_raw_partition(raw_frame, trade_date, checked_family, checked_secid)
-        rows.append(_aggregate_day(checked_frame, metrics, input_path, checked_family, checked_secid, checked_series_type))
-    output = pd.DataFrame(rows).sort_values(["trade_date", "symbol", "series_type"], kind="mergesort").reset_index(drop=True)
-    _validate_d1_output(output, checked_dates, checked_family, checked_secid, checked_series_type)
+        checked_frame, metrics = _validate_raw_partition(raw_frame, trade_date, identity)
+        rows.append(_aggregate_day(checked_frame, metrics, input_path, identity))
+    output = pd.DataFrame(rows).sort_values(["trade_date", "instrument_id", "timeframe"], kind="mergesort").reset_index(drop=True)
+    _validate_d1_output(output, checked_dates, identity)
     _write_parquet_atomic(paths.output_partition_path, output)
     rows_per_trade_date = {trade_date: int(count) for trade_date, count in output.groupby("trade_date").size().items()}
     return FuturesD1ReadinessResult(
@@ -326,7 +419,7 @@ def derive_d1_readiness_from_raw_5m_partitions(
         rows=int(len(output.index)),
         output_partition_path=paths.output_partition_path,
         trade_dates=tuple(output["trade_date"].astype(str).tolist()),
-        symbols=tuple(sorted(set(output["symbol"].astype(str)))),
+        symbols=tuple(sorted(set(output["canonical_symbol"].astype(str)))),
         rows_per_trade_date=rows_per_trade_date,
         input_partition_paths=paths.input_partition_paths,
         manifest_quality_linkage_status=MANIFEST_QUALITY_LINKAGE_STATUS,
@@ -354,9 +447,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Derive one controlled futures_derived_d1 readiness artifact from accepted raw 5m partitions")
     parser.add_argument("--repo-root", default=Path.cwd().as_posix())
     parser.add_argument("--trade-date", action="append", required=True)
-    parser.add_argument("--family", required=True)
+    parser.add_argument("--instrument-id", required=True)
+    parser.add_argument("--source-id", required=True)
     parser.add_argument("--secid", required=True)
-    parser.add_argument("--series-type", required=True)
+    parser.add_argument("--canonical-symbol", required=True)
+    parser.add_argument("--board", default=None)
+    parser.add_argument("--market", default=None)
+    parser.add_argument("--engine", default=None)
+    parser.add_argument("--series-type", default="native")
+    parser.add_argument("--family", default=None)
     return parser.parse_args(argv)
 
 
@@ -369,6 +468,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             family=args.family,
             secid=args.secid,
             series_type=args.series_type,
+            instrument_id=args.instrument_id,
+            source_id=args.source_id,
+            canonical_symbol=args.canonical_symbol,
+            board=args.board,
+            market=args.market,
+            engine=args.engine,
         )
     except FuturesD1ReadinessError as exc:
         print(json.dumps(_error_payload(exc), ensure_ascii=False, sort_keys=True))

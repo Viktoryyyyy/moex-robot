@@ -100,10 +100,13 @@ def _manifest(refresh_status: str = "succeeded", **overrides: object) -> dict[st
     values: dict[str, object] = {
         "run_id": "refresh_run.contract_test.v1",
         "run_date": "2026-06-02",
+        "instrument_scope": ("forts.test.si",),
+        "source_scope": ("moex_algopack_fo_tradestats_snapshot.v1",),
         "dataset_contract_refs": EXPECTED_CONTRACT_IDS,
-        "partitions_written": ("${MOEX_DATA_ROOT}/futures/raw_5m/trade_date={YYYY-MM-DD}/part.parquet",),
+        "partitions_written": ("${MOEX_DATA_ROOT}/market/raw/timeframe=5m/instrument_id=forts.test.si/trade_date=2026-06-02/source=moex_algopack_fo_tradestats_snapshot.v1/part.parquet",),
         "partitions_skipped": (),
-        "quality_report_ref": "${MOEX_DATA_ROOT}/futures/quality/run_date={YYYY-MM-DD}/quality_report.json",
+        "quality_report_ref": "${MOEX_DATA_ROOT}/state/quality/run_date=2026-06-02/run_id=refresh_run.contract_test.v1/quality_report.json",
+        "accepted_manifest_ref": "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_raw_5m/instrument_id=forts.test.si/current_accepted_manifest.json",
         "refresh_status": refresh_status,
     }
     values.update(overrides)
@@ -114,8 +117,13 @@ def _quality_row(quality_status: str = "pass", **overrides: object) -> dict[str,
     values: dict[str, object] = {
         "run_id": "refresh_run.contract_test.v1",
         "dataset_id": "futures_raw_5m",
-        "family": "Si",
+        "instrument_id": "forts.test.si",
+        "source_id": "moex_algopack_fo_tradestats_snapshot.v1",
         "secid": "SiM6",
+        "board": "RFUD",
+        "market": "FORTS",
+        "engine": "futures",
+        "family": "Si",
         "trade_date": "2026-06-02",
         "rows": 100,
         "duplicate_key_count": 0,
@@ -172,7 +180,6 @@ def test_public_api_and_expected_ids_are_contract_stable():
 
 def test_dataset_contracts_must_be_external_pattern_and_env_rooted():
     contracts = validate_dataset_contract_set(_dataset_contracts())
-
     assert tuple(contract.contract_id for contract in contracts) == EXPECTED_CONTRACT_IDS
     for contract in contracts:
         assert contract.artifact_class == "external_pattern"
@@ -186,7 +193,6 @@ def test_dataset_contract_membership_order_and_required_fields_fail_closed():
         validate_dataset_contract_set(tuple(reversed(_dataset_contracts())))
     with pytest.raises(ValueError):
         validate_dataset_contract_set(_dataset_contracts()[:-1])
-
     missing = _dataset_contract()
     missing.pop("contract_id")
     with pytest.raises(ValueError):
@@ -198,12 +204,11 @@ def test_dataset_contract_rejects_wrong_class_absolute_paths_and_dynamic_markers
         _dataset_contract(artifact_class="repo_relative"),
         _dataset_contract(storage_root_ref="DATA_ROOT"),
         _dataset_contract(path_pattern="${DATA_ROOT}/futures/raw_5m/trade_date={YYYY-MM-DD}/part.parquet"),
-        _dataset_contract(path_pattern="/home/trader/moex_bot/data/futures/raw_5m/trade_date={YYYY-MM-DD}/part.parquet"),
+        _dataset_contract(path_pattern="/home/trader/moex_bot/moex-robot/data/futures/raw_5m/trade_date={YYYY-MM-DD}/part.parquet"),
         _dataset_contract(path_pattern="${MOEX_DATA_ROOT}/futures/raw_5m/latest/trade_date={YYYY-MM-DD}/part.parquet"),
         _dataset_contract(path_pattern="${MOEX_DATA_ROOT}/futures/raw_5m/current/trade_date={YYYY-MM-DD}/part.parquet"),
         _dataset_contract(path_pattern="${MOEX_DATA_ROOT}/futures/raw_5m/autodetect/trade_date={YYYY-MM-DD}/part.parquet"),
     )
-
     for values in invalid_cases:
         with pytest.raises(ValueError):
             validate_dataset_contract_values(values)
@@ -211,7 +216,6 @@ def test_dataset_contract_rejects_wrong_class_absolute_paths_and_dynamic_markers
 
 def test_config_is_repo_relative_uses_env_contract_and_pr106_paths():
     config = validate_futures_data_lake_config_values(_config())
-
     assert config.config_id == "futures_data_lake.v1"
     assert config.artifact_class == "repo_relative"
     assert config.repo_path == "configs/datasets/futures_data_lake.v1.yaml"
@@ -230,11 +234,9 @@ def test_config_refs_external_root_blocked_contracts_and_required_fields_fail_cl
         _config(external_storage_root={"artifact_class": "env_contract", "env_var": "DATA_ROOT", "hardcoded_server_path_allowed": False}),
         _config(path_rules={"external_root_source": "env_contract", "hardcoded_server_path_allowed": True, "implicit_file_selection_allowed": False}),
     )
-
     for values in invalid_cases:
         with pytest.raises(ValueError):
             validate_futures_data_lake_config_values(values)
-
     missing = _config()
     missing.pop("path_rules")
     with pytest.raises(ValueError):
@@ -243,23 +245,26 @@ def test_config_refs_external_root_blocked_contracts_and_required_fields_fail_cl
 
 def test_refresh_manifest_status_and_dataset_refs_are_closed_sets():
     for status in ("succeeded", "failed", "partial"):
-        assert validate_refresh_manifest_values(_manifest(status)).refresh_status == status
-
+        manifest = validate_refresh_manifest_values(_manifest(status))
+        assert manifest.refresh_status == status
+        assert manifest.instrument_scope == ("forts.test.si",)
+        assert manifest.source_scope == ("moex_algopack_fo_tradestats_snapshot.v1",)
     with pytest.raises(ValueError):
         validate_refresh_manifest_values(_manifest("running"))
     with pytest.raises(ValueError):
         validate_refresh_manifest_values(_manifest(dataset_contract_refs=tuple(reversed(EXPECTED_CONTRACT_IDS))))
-
     missing = _manifest()
-    missing.pop("refresh_status")
+    missing.pop("source_scope")
     with pytest.raises(ValueError):
         validate_refresh_manifest_values(missing)
 
 
 def test_quality_status_and_counters_are_closed_sets():
     for status in ("pass", "warn", "fail"):
-        assert validate_quality_row_values(_quality_row(status)).quality_status == status
-
+        row = validate_quality_row_values(_quality_row(status))
+        assert row.quality_status == status
+        assert row.instrument_id == "forts.test.si"
+        assert row.source_id == "moex_algopack_fo_tradestats_snapshot.v1"
     with pytest.raises(ValueError):
         validate_quality_row_values(_quality_row("running"))
     with pytest.raises(ValueError):
@@ -268,16 +273,14 @@ def test_quality_status_and_counters_are_closed_sets():
         validate_quality_row_values(_quality_row(rows=1.5))
     with pytest.raises(ValueError):
         validate_quality_row_values(_quality_row(rows=True))
-
     missing = _quality_row()
-    missing.pop("quality_status")
+    missing.pop("instrument_id")
     with pytest.raises(ValueError):
         validate_quality_row_values(missing)
 
 
 def test_quality_report_rows_must_be_non_empty_and_single_run():
     report = validate_quality_report_rows((_quality_row(), _quality_row(dataset_id="futures_futoi_raw")))
-
     assert report.run_id == "refresh_run.contract_test.v1"
     with pytest.raises(ValueError):
         validate_quality_report_rows(())
@@ -291,6 +294,5 @@ def test_futures_helper_dependency_import_guard():
         source_path = REPO_ROOT / relative_path
         assert source_path.exists(), relative_path
         imported_names.extend(_imported_names_from_source(source_path.read_text(encoding="utf-8")))
-
     for term in _guard_terms():
         assert not any(imported_name.startswith(term) for imported_name in imported_names)

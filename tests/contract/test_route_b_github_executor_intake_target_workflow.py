@@ -79,11 +79,25 @@ def test_validates_request_identity_scopes_and_authorities() -> None:
         "base_ref_required",
         "base_ref_must_equal_origin_main",
         "origin/main",
+        "execution_request_id_required",
+        "workflow_run_id_required",
+        "role_task_id_required",
+        "base_sha_required",
+        "base_sha_must_be_40_hex",
+        "request_fingerprint_sha256_required",
+        "request_fingerprint_sha256_must_be_sha256_hex",
+        "role_output_id_must_be_non_empty_string_when_present",
+        "pm_l3_decision_id_must_be_non_empty_string_when_present",
         "approved_file_scope_must_be_array",
         "approved_file_scope_invalid_repo_relative_path:",
         "forbidden_file_scope_must_be_array",
         "forbidden_file_scope_must_not_be_empty",
         "approved_file_scope_intersects_forbidden_file_scope:",
+        "file_changes_must_be_array",
+        "file_changes_must_not_be_empty",
+        "file_change_operation_must_be_create_or_update",
+        "file_change_path_not_in_approved_file_scope:",
+        "file_changes_must_match_approved_file_scope_exactly",
         "candidate.merge_authority !== 'PM_L2_ONLY'",
         "merge_authority_must_equal_PM_L2_ONLY",
         "candidate.server_apply_authority !== 'PM_L2_ONLY_OR_EXPLICIT_PM_L2_TASK'",
@@ -104,6 +118,33 @@ def test_rejects_every_unsafe_true_flag() -> None:
     assert "candidate[flag] !== false" in script
     assert "flag + '_must_be_false'" in script
     assert "file_delete_allowed_must_be_false" in script
+
+
+def test_preserves_execution_evidence_registry_identity_fields_without_task_id_fallback() -> None:
+    script = validator_js()
+    for token in (
+        "execution_request_id: candidate.execution_request_id.trim()",
+        "workflow_run_id: candidate.workflow_run_id.trim()",
+        "role_task_id: candidate.role_task_id.trim()",
+        "role_output_id: nonEmptyString(candidate.role_output_id) ? candidate.role_output_id.trim() : null",
+        "pm_l3_decision_id: nonEmptyString(candidate.pm_l3_decision_id) ? candidate.pm_l3_decision_id.trim() : null",
+        "base_sha: candidate.base_sha.trim()",
+        "file_changes: exactFileChanges",
+        "request_fingerprint_sha256: candidate.request_fingerprint_sha256.trim().toLowerCase()",
+        "evidence_registry_identity",
+        "execution_request_id: normalizedRequest.execution_request_id",
+        "workflow_run_id: normalizedRequest.workflow_run_id",
+        "role_task_id: normalizedRequest.role_task_id",
+        "role_output_id: normalizedRequest.role_output_id",
+        "pm_l3_decision_id: normalizedRequest.pm_l3_decision_id",
+        "base_sha: normalizedRequest.base_sha",
+        "file_changes: normalizedRequest.file_changes",
+        "request_fingerprint_sha256: normalizedRequest.request_fingerprint_sha256",
+    ):
+        assert token in script
+    assert "execution_request_id || candidate.task_id" not in script
+    assert "execution_request_id || request.task_id" not in script
+    assert "execution_request_id || task_id" not in script
 
 
 def test_is_validation_and_normalization_only() -> None:
@@ -133,6 +174,7 @@ def test_is_validation_and_normalization_only() -> None:
         "production_secret_access_allowed: false",
         "production_secret_accessed: false",
         "pm_l2_approval_claimed: false",
+        "Persist normalized request into GitHub executor evidence registry",
     ):
         assert token in script
 
