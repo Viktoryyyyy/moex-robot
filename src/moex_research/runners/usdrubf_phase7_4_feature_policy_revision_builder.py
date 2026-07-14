@@ -156,21 +156,31 @@ def _prepare_phase6(dataset: pd.DataFrame) -> pd.DataFrame:
     )
     _required_columns(dataset, required, "Phase 6 modeling dataset")
     rows = dataset.loc[:, required].copy()
-    rows["target_trade_date"] = pd.to_datetime(rows["target_trade_date"], errors="coerce")
-    rows["prior_trade_date"] = pd.to_datetime(rows["prior_trade_date"], errors="coerce")
-    rows["target_instrument_id"] = rows["target_instrument_id"].astype("string").str.strip()
+    target_dates = pd.to_datetime(rows["target_trade_date"], errors="coerce").dt.normalize()
+    instruments = rows["target_instrument_id"].astype("string").str.strip()
     eligible = (
         rows["target_source"].eq("manual_phase_labels_v1")
         & rows["target_is_labeled"].eq(True)
         & rows["target_phase_label"].isin(("B", "S", "OUT"))
-        & rows["target_trade_date"].notna()
-        & rows["prior_trade_date"].notna()
-        & rows["target_instrument_id"].notna()
-        & rows["target_instrument_id"].ne("")
+        & target_dates.notna()
+        & instruments.notna()
+        & instruments.ne("")
     )
     rows = rows.loc[eligible].copy()
     if rows.empty:
         raise Phase74FeaturePolicyBuilderError("no eligible Phase 6 rows")
+    rows["target_trade_date"] = target_dates.loc[eligible]
+    rows["target_instrument_id"] = instruments.loc[eligible].astype(str)
+    prior_dates = pd.to_datetime(rows["prior_trade_date"], errors="coerce").dt.normalize()
+    if prior_dates.isna().any():
+        raise Phase74FeaturePolicyBuilderError(
+            "eligible Phase 6 prior_trade_date is missing or invalid"
+        )
+    if prior_dates.ge(rows["target_trade_date"]).any():
+        raise Phase74FeaturePolicyBuilderError(
+            "eligible Phase 6 prior_trade_date must be strictly earlier than target_trade_date"
+        )
+    rows["prior_trade_date"] = prior_dates
     rows = rows.sort_values(["target_trade_date", "target_instrument_id"], kind="mergesort").reset_index(drop=True)
     if rows.duplicated(list(IDENTITY_COLUMNS), keep=False).any():
         raise Phase74FeaturePolicyBuilderError("duplicate eligible target identity")
@@ -228,14 +238,14 @@ def _features_for_group(group: pd.DataFrame) -> dict[pd.Timestamp, tuple[dict[st
             else _value(spread_pct[index] - spread_pct[index - 5])
         )
         computed["lag1_ema_3_19_state_run_length_log"] = _value(np.log1p(runs[index]))
-        if index < 5:
-            computed["rolling_past_return_std_5"] = _value(np.nan, warmup=True)
-        else:
-            computed["rolling_past_return_std_5"] = _value(np.std(returns[index - 4:index + 1], ddof=1))
-        if index < 20:
-            std20 = _value(np.nan, warmup=True)
-        else:
-            std20 = _value(np.std(returns[index - 19:index + 1], ddof=1))
+        computed["rolling_past_return_std_5"] = (
+            _value(np.nan, warmup=True) if index < 5
+            else _value(np.std(returns[index - 4:index + 1], ddof=1))
+        )
+        std20 = (
+            _value(np.nan, warmup=True) if index < 20
+            else _value(np.std(returns[index - 19:index + 1], ddof=1))
+        )
         computed["rolling_past_return_std_20"] = std20
         computed["rolling_return_std_ratio_5_20"] = (
             _value(np.nan, warmup=True)
@@ -286,7 +296,7 @@ def build_feature_matrices(
     source_panel: pd.DataFrame,
     phase6_modeling_dataset: pd.DataFrame,
 ) -> FeatureBuildResult:
-    """Build exactly M1-M5 in memory from past-only same-instrument data."""
+    """Build exactly M1-M5 in memory from explicit past-only source identities."""
     source = _prepare_source(source_panel)
     phase6 = _prepare_phase6(phase6_modeling_dataset)
     by_instrument = {
@@ -301,7 +311,9 @@ def build_feature_matrices(
             raise Phase74FeaturePolicyBuilderError("target/source identity is absent")
         source_date = pd.Timestamp(row["prior_trade_date"])
         if source_date not in by_instrument[instrument]:
-            raise Phase74FeaturePolicyBuilderError("target prior_trade_date is absent from source panel")
+            raise Phase74FeaturePolicyBuilderError(
+                "exact target prior_trade_date/instrument_id source identity is absent"
+            )
         computed, source_state = by_instrument[instrument][source_date]
         if str(row["lag1_ema_3_19_state"]) != source_state:
             raise Phase74FeaturePolicyBuilderError("retained EMA state disagrees with source panel")
