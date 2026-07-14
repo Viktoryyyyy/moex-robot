@@ -13,7 +13,7 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import confusion_matrix, log_loss
+from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
@@ -24,6 +24,7 @@ from .usdrubf_phase7_4_feature_policy_revision_builder import (
     MATRIX_NUMERIC_FEATURES,
     M1_CATEGORICAL_FEATURES,
     M1_NUMERIC_FEATURES,
+    NEW_NUMERIC_FEATURES,
     PHASE6_IDENTITY_AND_TARGET_COLUMNS,
     PHASE6_LEGACY_CATEGORICAL_COLUMNS,
     PHASE6_LEGACY_NUMERIC_COLUMNS,
@@ -331,7 +332,10 @@ def calculate_metrics(
         "balanced_accuracy": float(np.mean(list(recall.values()))),
         "macro_f1": float(np.mean(list(f1.values()))),
         "weighted_f1": float(sum(f1[label] * support[i] for i, label in enumerate(CLASS_ORDER)) / len(y_true)),
-        "multiclass_log_loss": float(log_loss(y_true, probabilities, labels=list(CLASS_ORDER))),
+        "multiclass_log_loss": float(-np.mean(np.log(np.clip(
+            probabilities[np.arange(len(y_true)), np.asarray([CLASS_ORDER.index(str(label)) for label in y_true])],
+            np.finfo(float).eps, 1.0,
+        )))),
         "B_recall": recall["B"],
         "S_to_OUT_rate": float(matrix[1, 2] / support[1]) if support[1] else np.nan,
         "OUT_to_S_rate": float(matrix[2, 1] / support[2]) if support[2] else np.nan,
@@ -564,14 +568,19 @@ def evaluate_gates(
         "F10": m0_gap is None or not np.isfinite(m0_gap) or m0_gap <= 0,
         "F11": not s13,
     }
-    confusion_failure = False
-    for key in ("S_to_OUT_rate", "OUT_to_S_rate"):
-        if m0[key] <= 0 or not np.isfinite(m0[key]):
-            confusion_failure = True
-            break
-        relative = (m0[key] - m1[key]) / m0[key]
-        if relative < 0.05 and m1[key] - m0[key] >= 0.03:
-            confusion_failure = True
+    if any(m0[key] <= 0 or not np.isfinite(m0[key]) for key in ("S_to_OUT_rate", "OUT_to_S_rate")):
+        confusion_failure = True
+    else:
+        relative_improvements = [
+            (m0[key] - m1[key]) / m0[key]
+            for key in ("S_to_OUT_rate", "OUT_to_S_rate")
+        ]
+        neither_improves = all(value < 0.05 for value in relative_improvements)
+        either_worsens = any(
+            m1[key] - m0[key] >= 0.03
+            for key in ("S_to_OUT_rate", "OUT_to_S_rate")
+        )
+        confusion_failure = neither_improves or either_worsens
     conditions["F3"] = confusion_failure
     for index in range(1, 12):
         name = f"F{index}"
@@ -656,7 +665,16 @@ def run_experiment(request: Phase74ExperimentRequest) -> Phase74ExperimentResult
     readiness_text = request.readiness_contract_path.read_text(encoding="utf-8")
     if tuple(source_manifest.get("required_columns", ())) != SOURCE_REQUIRED_COLUMNS:
         raise Phase74FeaturePolicyExperimentError("source panel manifest column declaration mismatch")
-    if dataset_manifest.get("dataset_id") != DATASET_ID or feature_schema.get("schema_id") != FEATURE_SCHEMA_ID:
+    declared_instruments = source_manifest.get("instruments")
+    if not isinstance(declared_instruments, list) or not declared_instruments:
+        raise Phase74FeaturePolicyExperimentError("source panel manifest instrument declaration mismatch")
+    if (
+        dataset_manifest.get("dataset_id") != DATASET_ID
+        or dataset_manifest.get("feature_schema_id") != FEATURE_SCHEMA_ID
+        or dataset_manifest.get("target_source") != TARGET_SOURCE
+        or feature_schema.get("schema_id") != FEATURE_SCHEMA_ID
+        or feature_schema.get("dataset_id") != DATASET_ID
+    ):
         raise Phase74FeaturePolicyExperimentError("dataset or feature schema identity mismatch")
     identity = experiment_contract.get("experiment_identity", {})
     if identity.get("contract_id") != EXPERIMENT_CONTRACT_ID or identity.get("contract_version") != EXPERIMENT_CONTRACT_VERSION:
@@ -665,6 +683,9 @@ def run_experiment(request: Phase74ExperimentRequest) -> Phase74ExperimentResult
         raise Phase74FeaturePolicyExperimentError("readiness contract identity mismatch")
 
     source = pd.read_parquet(request.source_panel_path)
+    observed_instruments = sorted(source["instrument_id"].astype(str).str.strip().unique().tolist()) if "instrument_id" in source else []
+    if observed_instruments != sorted(str(item).strip() for item in declared_instruments):
+        raise Phase74FeaturePolicyExperimentError("source panel instrument declaration mismatch")
     dataset = pd.read_parquet(request.modeling_dataset_path)
     eligible = _prepare_experiment_eligible_rows(dataset)
     folds = build_chronological_folds(eligible)
@@ -685,9 +706,25 @@ def run_experiment(request: Phase74ExperimentRequest) -> Phase74ExperimentResult
         aggregate[matrix_id] = metrics
         predictions[matrix_id] = prediction_frame
         null_rows.extend(matrix_null_rows)
+    diagnostic = built.diagnostics
+    for row in null_rows:
+        if row["feature"] not in NEW_NUMERIC_FEATURES:
+            continue
+        train_index, valid_index = folds[int(row["fold_id"]) - 1]
+        selected_index = train_index if row["split"] == "train" else valid_index
+        selected = diagnostic.loc[
+            diagnostic["feature"].eq(row["feature"])
+            & diagnostic["row_index"].isin(selected_index)
+        ]
+        warmup_count = int(selected["warmup_null"].sum())
+        denominator_count = int(selected["denominator_failure"].sum())
+        nonwarmup_count = int((~selected["warmup_null"]).sum())
+        row["warmup_null_count"] = warmup_count
+        row["warmup_null_rate"] = warmup_count / len(selected) if len(selected) else 0.0
+        row["denominator_failure_count"] = denominator_count
+        row["denominator_failure_rate"] = denominator_count / nonwarmup_count if nonwarmup_count else 0.0
     shift_rows = _shift_rows(eligible, built.matrices["M1_REVISED_FULL"], folds)
 
-    diagnostic = built.diagnostics
     warmup_rates = diagnostic.groupby("feature")["warmup_null"].mean()
     nonwarmup = diagnostic.loc[~diagnostic["warmup_null"]]
     denominator_rates = nonwarmup.groupby("feature")["denominator_failure"].mean()
@@ -714,14 +751,25 @@ def run_experiment(request: Phase74ExperimentRequest) -> Phase74ExperimentResult
         "M0_identity_comparison_result": True, "fold_identity_comparison_result": True,
         "side_effect_declaration": {"writes_outside_output_dir": False, "network_calls": False, "subprocess_calls": False, "model_serialization": False},
     })
-    _write_json(paths["feature_matrix_inventory.json"], {
-        matrix_id: {
+    inventory: dict[str, Any] = {}
+    for matrix_id in MATRIX_ROLES:
+        numeric_features = tuple(MATRIX_NUMERIC_FEATURES.get(matrix_id, PHASE6_LEGACY_NUMERIC_COLUMNS))
+        categorical_features = tuple(MATRIX_CATEGORICAL_FEATURES.get(matrix_id, PHASE6_LEGACY_CATEGORICAL_COLUMNS))
+        inventory[matrix_id] = {
             "role": MATRIX_ROLES[matrix_id],
-            "numeric_features": list(MATRIX_NUMERIC_FEATURES.get(matrix_id, PHASE6_LEGACY_NUMERIC_COLUMNS)),
-            "categorical_features": list(MATRIX_CATEGORICAL_FEATURES.get(matrix_id, PHASE6_LEGACY_CATEGORICAL_COLUMNS)),
+            "numeric_features": list(numeric_features),
+            "categorical_features": list(categorical_features),
+            "numeric_count": len(numeric_features),
+            "categorical_count": len(categorical_features),
+            "total_pre_encoding": len(numeric_features) + len(categorical_features),
             "acceptance_eligible": matrix_id == "M1_REVISED_FULL",
-        } for matrix_id in MATRIX_ROLES
-    })
+            "removed_from_M1": [] if matrix_id in {"M0_FROZEN_PHASE7_2_CONTROL", "M1_REVISED_FULL"} else [
+                feature for feature in (*M1_NUMERIC_FEATURES, *M1_CATEGORICAL_FEATURES)
+                if feature not in (*numeric_features, *categorical_features)
+            ],
+            "promotion_allowed": False,
+        }
+    _write_json(paths["feature_matrix_inventory.json"], inventory)
     pd.DataFrame(null_rows).to_csv(paths["feature_nullness_by_matrix_and_fold.csv"], index=False)
     pd.DataFrame(shift_rows).to_csv(paths["feature_shift_by_matrix_group_and_fold.csv"], index=False)
     fold_metrics = pd.concat(all_fold_frames, ignore_index=True)
