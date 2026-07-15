@@ -143,6 +143,32 @@ def test_key_rate_grouped_subheaders_are_skipped_before_observations() -> None:
     ]
 
 
+def test_key_rate_expanded_data_rows_may_be_wider_than_grouped_header() -> None:
+    payload = _table(
+        KEY_RATE_WIDE_HEADERS,
+        [
+            (
+                "01.06.2026",
+                "13.0",
+                "8.25",
+                "14.0",
+                "extra liquidity column",
+                "extra auction column",
+            ),
+        ],
+    )
+    result = parse_key_rate_html(payload, retrieved_at_utc=RETRIEVED)
+    assert [(item["effective_date"], item["key_rate_pct"]) for item in result] == [
+        ("2026-06-01", 13.0),
+    ]
+
+
+def test_key_rate_data_row_missing_required_rate_column_fails_closed() -> None:
+    payload = _table(KEY_RATE_WIDE_HEADERS, [("01.06.2026",)])
+    with pytest.raises(ExternalDataError, match="required key-rate columns"):
+        parse_key_rate_html(payload, retrieved_at_utc=RETRIEVED)
+
+
 def test_daily_key_rate_date_rate_response_is_rejected() -> None:
     payload = _table(DAILY_KEY_RATE_HEADERS, [("15.07.2026", "14.25")])
     with pytest.raises(ExternalDataError, match="daily Date / Rate"):

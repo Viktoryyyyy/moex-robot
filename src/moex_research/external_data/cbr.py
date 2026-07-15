@@ -152,8 +152,8 @@ def _key_rate_change_rows(payload: bytes) -> tuple[tuple[str, ...], ...]:
                 continue
             raise ExternalDataError("malformed effective_date in CBR data row")
         data_started = True
-        if len(row) != len(header):
-            raise ExternalDataError("CBR data row width differs from expected schema")
+        if len(row) < len(KEY_RATE_HEADERS):
+            raise ExternalDataError("CBR data row lacks required key-rate columns")
         result.append(row[: len(KEY_RATE_HEADERS)])
     if not result:
         raise ExternalDataError("requested non-empty CBR interval returned no rows")
