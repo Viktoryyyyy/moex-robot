@@ -89,9 +89,9 @@ def _write_inputs(tmp_path: Path) -> tuple[experiment.Phase74ExperimentRequest, 
     source.to_pickle(tmp_path / "source.parquet")
     dataset.to_pickle(tmp_path / "dataset.parquet")
     (tmp_path / "source_manifest.json").write_text(json.dumps({
-        "source_panel_id": "synthetic_source_panel_v1",
-        "required_columns": list(SOURCE_REQUIRED_COLUMNS),
-        "instruments": ["SiSynthetic"],
+        "panel_id": experiment.SOURCE_PANEL_ID,
+        "panel_schema_version": experiment.SOURCE_PANEL_ID,
+        "instrument_id": "SiSynthetic",
     }), encoding="utf-8")
     (tmp_path / "dataset_manifest.json").write_text(json.dumps({
         "dataset_id": experiment.DATASET_ID,
