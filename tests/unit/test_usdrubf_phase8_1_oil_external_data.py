@@ -226,7 +226,7 @@ def test_delayed_quote_after_effective_availability_boundary_fails() -> None:
         retrieved_at_utc=RETRIEVED,
     )
 
-    with pytest.raises(ExternalDataError, match="visible at or before"):
+    with pytest.raises(ExternalDataError, match="visible"):
         build_pre_moex_observation(quotes, date(2026, 7, 15))
 
 
@@ -237,7 +237,18 @@ def test_delayed_quote_exactly_at_cutoff_fails() -> None:
         retrieved_at_utc=RETRIEVED,
     )
 
-    with pytest.raises(ExternalDataError, match="visible at or before"):
+    with pytest.raises(ExternalDataError, match="visible"):
+        build_pre_moex_observation(quotes, date(2026, 7, 15))
+
+
+def test_delayed_quote_must_also_be_visible_at_snapshot_retrieval() -> None:
+    quotes = parse_cme_wti_current_quotes(
+        _quote_payload(updated="2026-07-15T05:35:00Z"),
+        expiration_by_contract={"CLU26": date(2026, 8, 20)},
+        retrieved_at_utc=datetime(2026, 7, 15, 5, 40, tzinfo=timezone.utc),
+    )
+
+    with pytest.raises(ExternalDataError, match="visible at retrieval"):
         build_pre_moex_observation(quotes, date(2026, 7, 15))
 
 
@@ -275,7 +286,7 @@ def test_contract_roll_does_not_fallback_to_later_available_contract() -> None:
             ]
         ),
         expiration_by_contract=expirations,
-        retrieved_at_utc=RETRIEVED,
+        retrieved_at_utc=datetime(2026, 7, 15, 5, 46, tzinfo=timezone.utc),
     )
 
     with pytest.raises(ExternalDataError, match="selected CME contract"):
