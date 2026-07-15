@@ -1,0 +1,342 @@
+{
+  "contract_identity": {
+    "contract_id": "usdrubf_phase8_1_external_data_acquisition_v1",
+    "contract_version": "1.0",
+    "project": "MOEX Bot",
+    "task_id": "ema_3_19_ai_market_phase_phase_8_1_external_data_acquisition_foundation_v2",
+    "lane": "ema_3_19_ai",
+    "phase": "8.1",
+    "execution_mode": "browser_chatgpt_github_direct",
+    "status": "repository_foundation_only"
+  },
+  "approved_branch": "research/ema-3-19-ai/phase-8-1-external-data-foundation",
+  "approved_file_scope": {
+    "create_only": [
+      "contracts/experiments/usdrubf_phase8_1_external_data_acquisition_v1.json",
+      "src/moex_research/external_data/__init__.py",
+      "src/moex_research/external_data/models.py",
+      "src/moex_research/external_data/registry.py",
+      "src/moex_research/external_data/cbr.py",
+      "src/moex_research/external_data/oil_markets.py",
+      "tests/unit/test_usdrubf_phase8_1_cbr_external_data.py",
+      "tests/unit/test_usdrubf_phase8_1_oil_external_data.py",
+      "tests/contract/test_usdrubf_phase8_1_external_data_acquisition_contract.py"
+    ],
+    "existing_files_to_modify": [],
+    "maximum_changed_file_count": 10,
+    "actual_changed_file_count": 9,
+    "scope_widening_allowed": false
+  },
+  "source_slots": [
+    "moex_brent_futures_daily",
+    "pre_moex_global_oil_market",
+    "cbr_ruonia_daily",
+    "cbr_key_rate_daily",
+    "cbr_banking_liquidity_daily"
+  ],
+  "sources": {
+    "moex_brent_futures_daily": {
+      "source_id": "moex_brent_futures_daily",
+      "official_service": "MOEX ISS",
+      "official_routes": {
+        "contract_metadata": "https://iss.moex.com/iss/engines/futures/markets/forts/securities.json",
+        "explicit_contract_daily_candles": "https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities/{contract_code}/candles.json"
+      },
+      "required_fields": [
+        "source_id",
+        "contract_code",
+        "trade_date",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "value",
+        "candle_begin",
+        "candle_end",
+        "expiration_date",
+        "retrieved_at_utc",
+        "raw_payload_sha256",
+        "source_revision_status",
+        "historical_model_use_status"
+      ],
+      "contract_selection": {
+        "identity": "explicit contract code",
+        "primary_rule": "nearest non-expired contract with at least seven calendar days to expiration",
+        "same_day_or_future_volume_allowed": false,
+        "continuous_alias_allowed": false,
+        "continuous_series_construction_allowed": false
+      },
+      "source_revision_status": "official_iss_current_view",
+      "historical_model_use_status": "blocked_pending_source_validation",
+      "readiness_condition": "candidate_for_phase8_2 only after expired-contract history is proven"
+    },
+    "pre_moex_global_oil_market": {
+      "slot_id": "pre_moex_global_oil_market",
+      "candidates": [
+        "ine_shanghai_crude_pre_moex",
+        "cme_wti_pre_moex"
+      ],
+      "comparison": {
+        "ine_shanghai_crude_pre_moex": {
+          "exchange": "Shanghai International Energy Exchange",
+          "instrument": "SC crude oil futures",
+          "morning_before_moex": "yes; the official site publishes 30-minute-delayed SC quotes during the Asian session",
+          "official_exchange_calendar": "available on INE official site",
+          "timestamp_semantics": "no exact per-observation exchange timestamp was verified on the delayed public page",
+          "delayed_current_quote_availability": "public official web page; at least 30 minutes delayed",
+          "historical_intraday_availability": "no reproducible official public intraday route verified",
+          "expired_contract_availability": "daily statistical reports exist; timestamped expired-contract intraday history not verified",
+          "api_or_downloadable_route": "official delayed web page and daily reports only",
+          "authentication_requirements": "public page uses a web application firewall; institutional data access not established",
+          "licensing_and_redistribution": "automation and historical research rights not confirmed",
+          "reproducibility": "insufficient for a fixed historical pre-MOEX cutoff",
+          "rate_limits": "not documented",
+          "schema_stability": "public web schema not documented",
+          "expected_operating_cost": "unknown",
+          "historical_model_use_status": "blocked_pending_historical_intraday_source"
+        },
+        "cme_wti_pre_moex": {
+          "exchange": "CME/NYMEX",
+          "instrument": "WTI Light Sweet Crude Oil futures",
+          "morning_before_moex": "yes; Globex is open at 08:45 Europe/Moscow on normal weekdays",
+          "official_exchange_calendar": "CME trading and holiday calendars plus product calendar",
+          "timestamp_semantics": "event timestamps are exchange-defined and normalized from UTC to Europe/Moscow",
+          "delayed_current_quote_availability": "official CME web quotes delayed by at least 10 minutes",
+          "historical_intraday_availability": "CME DataMine Market by Order/PCAP after account, purchase and license",
+          "expired_contract_availability": "official product calendar and DataMine contract-specific history",
+          "api_or_downloadable_route": "official delayed page, product calendar endpoint and DataMine API/SFTP/S3/file delivery",
+          "authentication_requirements": "public delayed display; DataMine account and API identity for historical data",
+          "licensing_and_redistribution": "Information License Agreement applies; redistribution is not authorized by this contract",
+          "reproducibility": "technically reproducible after licensed contract-level historical access",
+          "rate_limits": "subject to the contracted CME delivery route",
+          "schema_stability": "public display is not a guaranteed API; DataMine schema must be pinned after purchase",
+          "expected_operating_cost": "commercial historical data and licensing cost",
+          "historical_model_use_status": "blocked_pending_license"
+        }
+      },
+      "selection": {
+        "selected_source": "cme_wti_pre_moex",
+        "rejected_source": "ine_shanghai_crude_pre_moex",
+        "selection_reason": "CME provides stronger official timestamp, product-calendar, expired-contract and licensed historical-delivery evidence",
+        "rejection_reason": "INE lacks a verified reproducible timestamped historical intraday route and exact public snapshot timestamp semantics",
+        "selected_license_status": "DataMine_account_purchase_and_information_license_required",
+        "selected_historical_readiness_status": "blocked_pending_license",
+        "rejected_historical_readiness_status": "blocked_pending_historical_intraday_source"
+      },
+      "official_routes": {
+        "selected_current_delayed": "https://www.cmegroup.com/CmeWS/mvc/quotes/v2/425",
+        "selected_current_delayed_display": "https://www.cmegroup.com/markets/energy/crude-oil/light-sweet-crude.quotes.html",
+        "selected_contract_calendar": "https://www.cmegroup.com/CmeWS/mvc/ProductCalendar/Future/425",
+        "selected_historical": "https://www.cmegroup.com/datamine.html",
+        "rejected_current_delayed": "https://www.ine.cn/eng/market/futures/energy/sc/"
+      },
+      "required_fields": [
+        "source_id",
+        "exchange",
+        "instrument_family",
+        "contract_code",
+        "exchange_trading_date",
+        "observation_timestamp_utc",
+        "observation_timestamp_moscow",
+        "cutoff_timestamp_moscow",
+        "previous_official_settlement",
+        "first_price_in_observation_window",
+        "high_to_cutoff",
+        "low_to_cutoff",
+        "last_price_at_cutoff",
+        "volume_to_cutoff",
+        "open_interest_at_cutoff",
+        "return_from_previous_settlement",
+        "return_from_window_open",
+        "range_to_cutoff",
+        "minutes_since_last_trade",
+        "expiration_date",
+        "source_route",
+        "retrieved_at_utc",
+        "raw_payload_sha256",
+        "source_revision_status",
+        "historical_model_use_status"
+      ],
+      "cutoff_policy": {
+        "timezone": "Europe/Moscow",
+        "modeled_day_cutoff_local_time": "08:45:00",
+        "cutoff_expression": "D 08:45:00 Europe/Moscow",
+        "target_moex_session_start": "D 08:50:00 Europe/Moscow",
+        "ordering": "CME useful delayed quote <= cutoff < MOEX morning session start",
+        "cme_normal_hours": "Sunday-Friday 17:00-16:00 America/Chicago with a 60-minute break from 16:00",
+        "cme_delay_minutes_minimum": 10,
+        "latest_expected_visible_event_time": "D 08:35:00 Europe/Moscow or earlier",
+        "later_same_day_observations_allowed": false,
+        "full_day_ohlc_or_settlement_allowed": false,
+        "post_cutoff_volume_for_roll_allowed": false,
+        "holiday_future_fill_allowed": false,
+        "stale_quote_age_retained": true
+      },
+      "contract_selection": {
+        "identity": "explicit CL contract code",
+        "primary_rule": "nearest contract with at least seven calendar days to last trade date",
+        "same_day_post_cutoff_volume_allowed": false,
+        "continuous_ticker_allowed": false
+      }
+    },
+    "cbr_ruonia_daily": {
+      "source_id": "cbr_ruonia_daily",
+      "official_route": "https://www.cbr.ru/eng/hd_base/ruonia/dynamics/",
+      "required_fields": [
+        "observation_date",
+        "publication_date",
+        "ruonia_rate_pct",
+        "transaction_volume_rub_bn",
+        "transaction_count",
+        "participant_count",
+        "minimum_rate_pct",
+        "percentile_25_rate_pct",
+        "percentile_75_rate_pct",
+        "maximum_rate_pct",
+        "calculation_status",
+        "source_id",
+        "source_route",
+        "retrieved_at_utc",
+        "raw_payload_sha256",
+        "source_revision_status",
+        "historical_model_use_status"
+      ],
+      "availability_policy": "usable only from the official row-level publication_date; publication_date before observation_date fails closed",
+      "source_revision_status": "official_published_history",
+      "historical_model_use_status": "candidate_for_phase8_2"
+    },
+    "cbr_key_rate_daily": {
+      "source_id": "cbr_key_rate_daily",
+      "official_route": "https://www.cbr.ru/eng/hd_base/KeyRate/",
+      "required_fields": [
+        "effective_date",
+        "key_rate_pct",
+        "source_id",
+        "source_route",
+        "retrieved_at_utc",
+        "raw_payload_sha256",
+        "source_revision_status",
+        "historical_model_use_status"
+      ],
+      "availability_policy": "the rate is usable no earlier than its official effective_date",
+      "source_revision_status": "official_effective_date_history",
+      "historical_model_use_status": "candidate_for_phase8_2"
+    },
+    "cbr_banking_liquidity_daily": {
+      "source_id": "cbr_banking_liquidity_daily",
+      "official_route": "https://www.cbr.ru/eng/hd_base/bliquidity/",
+      "required_fields": [
+        "observation_date",
+        "liquidity_deficit_surplus_rub_bn",
+        "liquidity_deficit_surplus_ex_correspondent_accounts_rub_bn",
+        "bank_correspondent_accounts_rub_bn",
+        "required_reserves_averaging_rub_bn",
+        "source_id",
+        "source_route",
+        "retrieved_at_utc",
+        "raw_payload_sha256",
+        "source_revision_status",
+        "historical_model_use_status"
+      ],
+      "availability_policy": "not acceptance-ready until a separate historical publication-vintage policy is approved",
+      "source_revision_status": "latest_revised",
+      "historical_model_use_status": "blocked_pending_vintage_policy"
+    }
+  },
+  "official_evidence": [
+    {
+      "claim": "MOEX derivatives morning session starts at 08:50 Europe/Moscow from 23 March 2026",
+      "url": "https://www.moex.com/n98363"
+    },
+    {
+      "claim": "CME WTI Globex normal hours are Sunday-Friday 17:00-16:00 CT with a daily 60-minute break",
+      "url": "https://www.cmegroup.com/markets/energy/crude-oil/light-sweet-crude.contractSpecs.html"
+    },
+    {
+      "claim": "CME official web quotes are delayed by at least 10 minutes",
+      "url": "https://www.cmegroup.com/market-data/browse-data/delayed-quotes.html"
+    },
+    {
+      "claim": "CME DataMine offers historical futures data through API, SFTP, S3 and file delivery after licensing",
+      "url": "https://www.cmegroup.com/datamine.html"
+    },
+    {
+      "claim": "INE official market charts are delayed by at least 30 minutes",
+      "url": "https://www.ine.cn/eng/market/"
+    },
+    {
+      "claim": "RUONIA history includes separate rate and publication dates and is public with source attribution",
+      "url": "https://www.cbr.ru/eng/hd_base/ruonia/dynamics/"
+    }
+  ],
+  "source_status_policy": {
+    "allowed": [
+      "candidate_for_phase8_2",
+      "diagnostic_only",
+      "blocked_pending_historical_intraday_source",
+      "blocked_pending_license",
+      "blocked_pending_source_validation",
+      "blocked_pending_vintage_policy"
+    ],
+    "blocked_source_can_enter_phase8_2_matrix": false,
+    "fabricated_historical_observations_allowed": false
+  },
+  "fail_closed_policy": [
+    "required response block absent",
+    "response columns differ from expected schema",
+    "date or timestamp malformed",
+    "timezone missing or ambiguous",
+    "numeric value malformed or non-finite",
+    "duplicate business identity",
+    "requested non-empty interval has no rows",
+    "RUONIA publication date precedes observation date",
+    "expiration identity missing",
+    "observation after cutoff",
+    "full-day values used as pre-MOEX observations",
+    "holiday silently reuses later data",
+    "mutable historical identity",
+    "blocked source passed as acceptance-ready"
+  ],
+  "deferred_sources": [
+    "EIA Brent API",
+    "Ministry of Finance budget-rule operations",
+    "OFAC sanctions events",
+    "EU sanctions events",
+    "Bank of Russia monthly financial-market risk review",
+    "tax-payment calendar",
+    "exporter foreign-currency sales",
+    "news sentiment",
+    "LLM sentiment",
+    "social-media data"
+  ],
+  "fixed_research_components": {
+    "model_family_change_allowed": false,
+    "label_change_allowed": false,
+    "threshold_change_allowed": false,
+    "calibration_change_allowed": false,
+    "fold_change_allowed": false,
+    "model_fit_allowed": false,
+    "model_evaluation_allowed": false,
+    "promotion_allowed": false
+  },
+  "artifact_policy": {
+    "runtime_dataset_artifact_allowed": false,
+    "real_historical_dataset_allowed": false,
+    "large_real_api_fixture_allowed": false,
+    "minimized_synthetic_fixtures_only": true,
+    "secret_or_credential_allowed": false
+  },
+  "authority_boundary": {
+    "direct_main_write_allowed": false,
+    "conditional_subchat_merge_pre_authorized": true,
+    "server_apply_allowed": false,
+    "external_historical_dataset_write_allowed": false,
+    "model_fit_allowed": false,
+    "model_evaluation_allowed": false,
+    "model_promotion_allowed": false,
+    "live_prediction_allowed": false,
+    "broker_action_allowed": false,
+    "trading_allowed": false
+  }
+}
