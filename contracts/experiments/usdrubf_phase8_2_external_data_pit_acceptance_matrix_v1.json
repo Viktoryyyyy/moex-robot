@@ -1,0 +1,272 @@
+{
+  "contract_identity": {
+    "contract_id": "usdrubf_phase8_2_external_data_pit_acceptance_matrix_v1",
+    "contract_version": "1.0",
+    "project": "MOEX Bot",
+    "task_id": "ema_3_19_ai_market_phase_phase_8_2_external_data_pit_acceptance_matrix_v1",
+    "lane": "ema_3_19_ai",
+    "phase": "8.2",
+    "execution_mode": "browser_chatgpt_github_direct",
+    "status": "controlled_runtime_contract"
+  },
+  "approved_branch": "research/ema-3-19-ai/phase-8-2-external-data-pit-acceptance-matrix",
+  "approved_file_scope": {
+    "create_only": [
+      "contracts/experiments/usdrubf_phase8_2_external_data_pit_acceptance_matrix_v1.json",
+      "src/moex_research/external_data/pit_alignment.py",
+      "src/moex_research/runners/usdrubf_phase8_2_external_data_pit_acceptance_matrix.py",
+      "tests/unit/test_usdrubf_phase8_2_external_data_pit_alignment.py",
+      "tests/unit/test_usdrubf_phase8_2_external_data_pit_acceptance_matrix.py",
+      "tests/contract/test_usdrubf_phase8_2_external_data_pit_acceptance_matrix_contract.py"
+    ],
+    "existing_files_to_modify": [],
+    "exact_file_count": 6,
+    "maximum_changed_file_count": 6,
+    "scope_widening_allowed": false
+  },
+  "phase8_1_source_contract": {
+    "contract_id": "usdrubf_phase8_1_external_data_acquisition_v1",
+    "contract_version": "1.0",
+    "repository_path": "contracts/experiments/usdrubf_phase8_1_external_data_acquisition_v1.json",
+    "sha256_policy": "compute_and_record_from_the_explicit_runtime_input; no_implementation_time_hash_is_declared"
+  },
+  "immutable_input_sha256": {
+    "modeling_dataset": "fdd626f9e0522c6bbb653f9e17fbbbeef7ded77f57ff187b35246a2458d55d00",
+    "dataset_manifest": "fcbbb5e5ed0549c5c6f397e34f203f01836271f6bf471f90cab5a2fd64ace082",
+    "feature_schema": "8f08802c7fb0a4cc43ab4ba072ee22ff9edd92fe8d674ea0515545d20d143238",
+    "m0_validation_predictions": "9769d00a49adeb54c016d965387774e46a3e09e09f895aa61d48a90bbf3568cf"
+  },
+  "identity_contract": {
+    "eligible_identity_count": 472,
+    "validation_identity_count": 320,
+    "instrument": "forts.usdrubf",
+    "identity_fields": [
+      "target_trade_date",
+      "target_instrument_id"
+    ],
+    "ordering": "target_trade_date ascending, target_instrument_id ascending, stable mergesort",
+    "one_matrix_row_per_eligible_identity": true
+  },
+  "accepted_sources": [
+    "cbr_ruonia_daily",
+    "cbr_key_rate_daily"
+  ],
+  "blocked_sources": {
+    "moex_brent_futures_daily": "blocked_pending_source_validation",
+    "cme_wti_pre_moex": "blocked_pending_license",
+    "cbr_banking_liquidity_daily": "blocked_pending_vintage_policy",
+    "ine_shanghai_crude_pre_moex": "blocked_pending_historical_intraday_source"
+  },
+  "availability_policy": {
+    "timezone": "Europe/Moscow",
+    "decision_cutoff_local_time": "08:45:00",
+    "cutoff_expression": "D 08:45:00 Europe/Moscow",
+    "ruonia_eligibility": "publication_date < target_trade_date",
+    "ruonia_same_day_publication_allowed": false,
+    "ruonia_selection": "maximum eligible publication_date; publication-date ties and duplicate observation identities fail closed",
+    "ruonia_observation_chronology": "observation_date <= publication_date",
+    "ruonia_interpolation_allowed": false,
+    "ruonia_prior_available_carry_forward_allowed": true,
+    "key_rate_eligibility": "effective_date <= target_trade_date",
+    "key_rate_selection": "maximum eligible effective_date; duplicate effective dates fail closed",
+    "key_rate_retrospective_application_allowed": false,
+    "key_rate_interpolation_allowed": false
+  },
+  "historical_request_range": {
+    "derived_from": "minimum and maximum exact eligible target_trade_date",
+    "history_buffer_calendar_days": 31,
+    "hidden_dynamic_widening_allowed": false,
+    "missing_first_row_policy": "fail_closed"
+  },
+  "normalized_source_provenance_fields": [
+    "source_id",
+    "source_route",
+    "retrieved_at_utc",
+    "raw_payload_sha256",
+    "source_revision_status",
+    "historical_model_use_status"
+  ],
+  "matrix_columns": [
+    "target_trade_date",
+    "target_instrument_id",
+    "ruonia_observation_date",
+    "ruonia_publication_date",
+    "ruonia_rate_pct",
+    "ruonia_transaction_volume_rub_bn",
+    "ruonia_transaction_count",
+    "ruonia_participant_count",
+    "ruonia_minimum_rate_pct",
+    "ruonia_percentile_25_rate_pct",
+    "ruonia_percentile_75_rate_pct",
+    "ruonia_maximum_rate_pct",
+    "ruonia_calculation_status",
+    "ruonia_observation_age_calendar_days",
+    "ruonia_publication_age_calendar_days",
+    "key_rate_effective_date",
+    "key_rate_pct",
+    "key_rate_age_calendar_days",
+    "ruonia_minus_key_rate_pp"
+  ],
+  "diagnostic_only_fields": [
+    "ruonia_minus_key_rate_pp"
+  ],
+  "forbidden_matrix_content": [
+    "target labels and target-is-labeled flags",
+    "candidate predictions and probability columns",
+    "CME WTI fields",
+    "MOEX Brent fields",
+    "banking-liquidity fields",
+    "INE fields",
+    "technical indicator fields",
+    "model outputs",
+    "mutable source aliases"
+  ],
+  "runtime_artifacts": [
+    "input_identity_verification.json",
+    "source_fetch_manifest.json",
+    "ruonia_normalized.parquet",
+    "key_rate_normalized.parquet",
+    "external_pit_acceptance_matrix.parquet",
+    "coverage_by_source.csv",
+    "staleness_by_source.csv",
+    "source_blocker_register.json",
+    "gate_results.json"
+  ],
+  "artifact_policy": {
+    "exact_count": 9,
+    "undeclared_artifact_allowed": false,
+    "pre_existing_output_directory_allowed": false,
+    "repository_commit_of_runtime_artifact_allowed": false,
+    "write_outside_explicit_output_directory_allowed": false,
+    "repository_implementation_runtime": "synthetic temporary test paths only"
+  },
+  "source_fetch_manifest_required_fields": [
+    "source_id",
+    "exact_requested_route",
+    "requested_start_date",
+    "requested_end_date",
+    "retrieved_at_utc",
+    "raw_payload_sha256",
+    "normalized_row_count",
+    "first_business_date",
+    "last_business_date",
+    "source_revision_status",
+    "historical_model_use_status"
+  ],
+  "staleness_policy": {
+    "statistics": [
+      "minimum_age_calendar_days",
+      "median_age_calendar_days",
+      "p90_age_calendar_days",
+      "p95_age_calendar_days",
+      "maximum_age_calendar_days"
+    ],
+    "ruonia_age_buckets": [
+      "1 calendar day",
+      "2-3 calendar days",
+      "4-7 calendar days",
+      "more than 7 calendar days"
+    ],
+    "key_rate_age_buckets": [
+      "0-30 calendar days",
+      "31-90 calendar days",
+      "91-180 calendar days",
+      "more than 180 calendar days"
+    ],
+    "acceptance_threshold_applied": false
+  },
+  "gates": {
+    "G1_input_identity": [
+      "four immutable SHA256 values match",
+      "eligible identity count equals 472",
+      "validation identity count equals 320",
+      "all instruments equal forts.usdrubf"
+    ],
+    "G2_exact_identity_preservation": [
+      "matrix row count equals 472",
+      "no duplicate target identity",
+      "no eligible identity loss",
+      "the same 320 M0 validation identities are present",
+      "row ordering is deterministic"
+    ],
+    "G3_ruonia_point_in_time_correctness": [
+      "publication_date < target_trade_date",
+      "observation_date <= publication_date",
+      "latest eligible publication is selected",
+      "duplicate observation identity and publication-date tie fail closed",
+      "required normalized values are valid"
+    ],
+    "G4_key_rate_point_in_time_correctness": [
+      "effective_date <= target_trade_date",
+      "latest eligible effective date is selected",
+      "duplicate effective date fails closed",
+      "key_rate_pct is finite"
+    ],
+    "G5_coverage": [
+      "RUONIA coverage equals 100 percent for 472 identities",
+      "key-rate coverage equals 100 percent for 472 identities",
+      "no required matrix value is missing",
+      "no future observation is silently forward-filled"
+    ],
+    "G6_blocked_source_exclusion": [
+      "blocked fields are absent from the matrix",
+      "all four blocked sources are registered",
+      "a blocked source cannot be marked accepted"
+    ],
+    "G7_provenance": [
+      "both raw payload hashes are present",
+      "both exact requested routes are present",
+      "retrieval timestamp is finite UTC",
+      "source statuses match the Phase 8.1 registry",
+      "normalized outputs preserve provenance"
+    ],
+    "G8_leakage_and_scope": [
+      "target labels, predictions, probabilities and technical fields are absent",
+      "no model is fitted or evaluated",
+      "no threshold, label, calibration or fold setting changes"
+    ],
+    "G9_final_acceptance": "pass only when G1 through G8 all pass"
+  },
+  "runner_interface": {
+    "required_cli_arguments": [
+      "--modeling-dataset-path",
+      "--dataset-manifest-path",
+      "--feature-schema-path",
+      "--m0-validation-predictions-path",
+      "--phase8-1-source-contract-path",
+      "--experiment-contract-path",
+      "--output-dir",
+      "--run-id",
+      "--git-commit-sha"
+    ],
+    "optional_cli_arguments": [
+      "--retrieved-at-utc"
+    ],
+    "server_path_default_allowed": false,
+    "http_transport_injection_required_for_tests": true
+  },
+  "fixed_research_components": {
+    "model_family_change_allowed": false,
+    "label_change_allowed": false,
+    "threshold_change_allowed": false,
+    "calibration_change_allowed": false,
+    "fold_change_allowed": false,
+    "model_fit_allowed": false,
+    "model_evaluation_allowed": false,
+    "promotion_allowed": false
+  },
+  "authority_boundary": {
+    "direct_main_write_allowed": false,
+    "conditional_subchat_merge_authorized": true,
+    "server_apply_allowed": false,
+    "real_external_data_acquisition_during_repository_implementation_allowed": false,
+    "runtime_output_write_allowed": "temporary_test_paths_only",
+    "model_fit_allowed": false,
+    "model_evaluation_allowed": false,
+    "model_promotion_allowed": false,
+    "strategy_promotion_allowed": false,
+    "live_prediction_allowed": false,
+    "broker_action_allowed": false,
+    "trading_allowed": false
+  }
+}
