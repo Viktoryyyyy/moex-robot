@@ -9,7 +9,11 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from moex_research.external_data.cbr import KEY_RATE_HEADERS, RUONIA_HEADERS
+from moex_research.external_data.cbr import (
+    DAILY_KEY_RATE_HEADERS,
+    KEY_RATE_HEADERS,
+    RUONIA_HEADERS,
+)
 from moex_research.runners import (
     usdrubf_phase8_2_external_data_pit_acceptance_matrix as runner,
 )
@@ -392,7 +396,7 @@ def test_daily_repeated_key_rate_rows_cannot_pass_source_validation(
         runner.run_acceptance_matrix(
             request,
             ruonia_transport=lambda _: ruonia_payload,
-            key_rate_transport=lambda _: _table(KEY_RATE_HEADERS, daily_rows),
+            key_rate_transport=lambda _: _table(DAILY_KEY_RATE_HEADERS, daily_rows),
         )
     assert not request.output_dir.exists()
 
