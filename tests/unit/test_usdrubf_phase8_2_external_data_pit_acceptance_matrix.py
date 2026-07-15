@@ -168,8 +168,10 @@ def _payloads() -> tuple[bytes, bytes]:
                 publication.strftime("%d.%m.%Y"),
             )
         )
-    key_rate_date = dates[0].date() - timedelta(days=10)
-    key_rate_rows = [(key_rate_date.strftime("%d.%m.%Y"), "13.0")]
+    key_rate_rows = [
+        (runner.KEY_RATE_HISTORY_START.strftime("%d.%m.%Y"), "5.5"),
+        (dates[0].strftime("%d.%m.%Y"), "13.0"),
+    ]
     return _table(RUONIA_HEADERS, ruonia_rows), _table(KEY_RATE_HEADERS, key_rate_rows)
 
 
@@ -227,7 +229,9 @@ def test_runner_writes_exact_artifacts_and_preserves_identities_and_provenance(
         runner.DECLARED_OUTPUT_ARTIFACTS
     )
     assert len(ruonia_urls) == len(key_rate_urls) == 1
-    assert "UniDbQuery.From=" in ruonia_urls[0]
+    assert "UniDbQuery.From=01.12.2023" in ruonia_urls[0]
+    assert "UniDbQuery.From=03.02.2014" in key_rate_urls[0]
+    assert "UniDbQuery.To=" in ruonia_urls[0]
     assert "UniDbQuery.To=" in key_rate_urls[0]
 
     matrix = pd.read_parquet(
@@ -244,6 +248,12 @@ def test_runner_writes_exact_artifacts_and_preserves_identities_and_provenance(
         pd.to_datetime(matrix["key_rate_effective_date"])
         <= pd.to_datetime(matrix["target_trade_date"])
     ).all()
+    assert matrix.loc[0, "key_rate_effective_date"] == matrix.loc[
+        0, "target_trade_date"
+    ]
+    assert matrix.loc[0, "key_rate_age_calendar_days"] == 0
+    assert matrix.loc[1, "key_rate_age_calendar_days"] > 0
+    assert matrix["key_rate_age_calendar_days"].max() > 0
 
     manifest = json.loads(
         (request.output_dir / "source_fetch_manifest.json").read_text()
@@ -253,6 +263,14 @@ def test_runner_writes_exact_artifacts_and_preserves_identities_and_provenance(
     )
     assert all(len(item["raw_payload_sha256"]) == 64 for item in manifest["sources"])
     assert all(item["exact_requested_route"].startswith("https://") for item in manifest["sources"])
+    starts = {
+        item["source_id"]: item["requested_start_date"]
+        for item in manifest["sources"]
+    }
+    assert starts == {
+        "cbr_ruonia_daily": "2023-12-01",
+        "cbr_key_rate_daily": "2014-02-03",
+    }
     identity = json.loads(
         (request.output_dir / "input_identity_verification.json").read_text()
     )
@@ -355,6 +373,90 @@ def test_blocked_source_contract_change_and_source_schema_change_fail_closed(
             key_rate_transport=lambda _: key_payload,
         )
     assert not request.output_dir.exists()
+
+
+def test_daily_repeated_key_rate_rows_cannot_pass_source_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _request(tmp_path, monkeypatch)
+    ruonia_payload, _ = _payloads()
+    daily_rows = [
+        (target.strftime("%d.%m.%Y"), "13.0")
+        for target in pd.bdate_range("2024-01-01", periods=20)
+    ]
+    with pytest.raises(
+        runner.Phase82AcceptanceMatrixError,
+        match="external source acquisition failed",
+    ):
+        runner.run_acceptance_matrix(
+            request,
+            ruonia_transport=lambda _: ruonia_payload,
+            key_rate_transport=lambda _: _table(KEY_RATE_HEADERS, daily_rows),
+        )
+    assert not request.output_dir.exists()
+
+
+def test_all_zero_key_rate_age_fails_semantic_integrity_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    targets = pd.bdate_range("2024-01-01", periods=472)
+    normalized = pd.DataFrame(
+        {
+            "effective_date": targets.strftime("%Y-%m-%d"),
+            "key_rate_pct": [float(index) for index in range(len(targets))],
+        }
+    )
+    matrix = pd.DataFrame(
+        {
+            "key_rate_effective_date": targets.strftime("%Y-%m-%d"),
+            "key_rate_age_calendar_days": 0,
+        }
+    )
+    manifest = {
+        "sources": [
+            {
+                "source_id": "cbr_key_rate_daily",
+                "requested_start_date": "2014-02-03",
+                "requested_end_date": targets[-1].strftime("%Y-%m-%d"),
+            }
+        ]
+    }
+    monkeypatch.setattr(runner, "KEY_RATE_MAX_NORMALIZED_ROW_FRACTION", 1.0)
+    assert not runner._key_rate_semantic_integrity(
+        matrix,
+        normalized,
+        source_fetch_manifest=manifest,
+    )
+
+
+def test_selected_key_rate_effective_dates_must_exist_in_change_history() -> None:
+    normalized = pd.DataFrame(
+        {
+            "effective_date": ["2014-02-03", "2024-01-01"],
+            "key_rate_pct": [5.5, 13.0],
+        }
+    )
+    matrix = pd.DataFrame(
+        {
+            "key_rate_effective_date": ["2024-01-02"],
+            "key_rate_age_calendar_days": [10],
+        }
+    )
+    manifest = {
+        "sources": [
+            {
+                "source_id": "cbr_key_rate_daily",
+                "requested_start_date": "2014-02-03",
+                "requested_end_date": "2025-01-01",
+            }
+        ]
+    }
+    assert not runner._key_rate_semantic_integrity(
+        matrix,
+        normalized,
+        source_fetch_manifest=manifest,
+    )
 
 
 def test_source_error_does_not_echo_secret_and_no_unapproved_side_effect_code_exists(

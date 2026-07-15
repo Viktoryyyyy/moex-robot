@@ -83,10 +83,28 @@ def test_exact_artifacts_gates_history_buffer_and_manifest_fields() -> None:
     assert contract["artifact_policy"]["exact_count"] == 9
     assert contract["artifact_policy"]["undeclared_artifact_allowed"] is False
     assert contract["historical_request_range"] == {
-        "derived_from": "minimum and maximum exact eligible target_trade_date",
-        "history_buffer_calendar_days": 31,
+        "ruonia": {
+            "start_date": "minimum eligible target_trade_date minus 31 calendar days",
+            "end_date": "maximum eligible target_trade_date",
+            "history_buffer_calendar_days": 31,
+        },
+        "key_rate_change_history": {
+            "start_date": "2014-02-03",
+            "end_date": "maximum eligible target_trade_date",
+            "source_semantics": "official_key_rate_change_date_history",
+        },
         "hidden_dynamic_widening_allowed": False,
         "missing_first_row_policy": "fail_closed",
+    }
+    assert contract["key_rate_change_point_policy"] == {
+        "required_response_columns": ["Date effective", "Key rate"],
+        "strictly_increasing_effective_dates": True,
+        "duplicate_effective_date_allowed": False,
+        "consecutive_identical_rate_allowed": False,
+        "daily_date_rate_schema_allowed": False,
+        "maximum_normalized_row_fraction_of_request_calendar_days": 0.05,
+        "all_zero_key_rate_age_allowed": False,
+        "selected_effective_date_must_exist_in_normalized_source": True,
     }
     assert list(contract["gates"]) == [
         "G1_input_identity",
@@ -109,6 +127,19 @@ def test_exact_artifacts_gates_history_buffer_and_manifest_fields() -> None:
         "last_business_date",
     ):
         assert required in contract["source_fetch_manifest_required_fields"]
+
+
+def test_key_rate_gate_requires_change_points_nonzero_age_and_source_membership() -> None:
+    rules = _contract()["gates"]["G4_key_rate_point_in_time_correctness"]
+    assert "latest eligible actual rate-change effective date is selected" in rules
+    assert "consecutive normalized key-rate rows have different finite rates" in rules
+    assert (
+        "normalized key-rate rows are materially sparser than daily calendar rows"
+        in rules
+    )
+    assert "maximum key_rate_age_calendar_days is greater than zero" in rules
+    assert "not all eligible identities have zero key-rate age" in rules
+    assert "every selected effective date exists in normalized change history" in rules
 
 
 def test_identity_matrix_and_staleness_contracts_are_exact() -> None:

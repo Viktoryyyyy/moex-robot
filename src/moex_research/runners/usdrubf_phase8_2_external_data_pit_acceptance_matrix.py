@@ -62,6 +62,8 @@ CLASS_ORDER: Final[tuple[str, ...]] = ("B", "S", "OUT")
 DATASET_ID: Final[str] = "usdrubf_phase6_internal_modeling_dataset.v1"
 FEATURE_SCHEMA_ID: Final[str] = "usdrubf_phase6_internal_factor_batches_v1"
 HISTORY_BUFFER_CALENDAR_DAYS: Final[int] = 31
+KEY_RATE_HISTORY_START: Final[date] = date(2014, 2, 3)
+KEY_RATE_MAX_NORMALIZED_ROW_FRACTION: Final[float] = 0.05
 
 ACCEPTED_SOURCES: Final[tuple[str, str]] = (
     "cbr_ruonia_daily",
@@ -79,7 +81,7 @@ SOURCE_DATE_FIELDS: Final[dict[str, str]] = {
 }
 SOURCE_REVISION_STATUSES: Final[dict[str, str]] = {
     "cbr_ruonia_daily": "official_published_history",
-    "cbr_key_rate_daily": "official_effective_date_history",
+    "cbr_key_rate_daily": "official_change_date_history",
 }
 SOURCE_REQUIRED_COLUMNS: Final[dict[str, tuple[str, ...]]] = {
     "cbr_ruonia_daily": (
@@ -295,12 +297,15 @@ def run_acceptance_matrix(
 
     first_target = date.fromisoformat(eligible_identities["target_trade_date"].iloc[0])
     last_target = date.fromisoformat(eligible_identities["target_trade_date"].iloc[-1])
-    requested_start = first_target - timedelta(days=HISTORY_BUFFER_CALENDAR_DAYS)
+    ruonia_requested_start = first_target - timedelta(
+        days=HISTORY_BUFFER_CALENDAR_DAYS
+    )
+    key_rate_requested_start = KEY_RATE_HISTORY_START
     requested_end = last_target
 
     ruonia_records = _load_source_safely(
         lambda: load_ruonia_daily(
-            requested_start,
+            ruonia_requested_start,
             requested_end,
             retrieved_at_utc=retrieved_at,
             transport=ruonia_transport,
@@ -308,7 +313,7 @@ def run_acceptance_matrix(
     )
     key_rate_records = _load_source_safely(
         lambda: load_key_rate_daily(
-            requested_start,
+            key_rate_requested_start,
             requested_end,
             retrieved_at_utc=retrieved_at,
             transport=key_rate_transport,
@@ -340,7 +345,10 @@ def run_acceptance_matrix(
             "cbr_ruonia_daily": ruonia_normalized,
             "cbr_key_rate_daily": key_rate_normalized,
         },
-        requested_start=requested_start,
+        requested_intervals={
+            "cbr_ruonia_daily": (ruonia_requested_start, requested_end),
+            "cbr_key_rate_daily": (key_rate_requested_start, requested_end),
+        },
         requested_end=requested_end,
         retrieved_at=retrieved_at,
     )
@@ -555,8 +563,35 @@ def _validate_experiment_contract(contract: Mapping[str, Any]) -> None:
     if cutoff.get("key_rate_eligibility") != "effective_date <= target_trade_date":
         raise Phase82AcceptanceMatrixError("Phase 8.2 key-rate policy mismatch")
     history = contract.get("historical_request_range", {})
-    if history.get("history_buffer_calendar_days") != HISTORY_BUFFER_CALENDAR_DAYS:
-        raise Phase82AcceptanceMatrixError("Phase 8.2 history buffer mismatch")
+    if history != {
+        "ruonia": {
+            "start_date": "minimum eligible target_trade_date minus 31 calendar days",
+            "end_date": "maximum eligible target_trade_date",
+            "history_buffer_calendar_days": HISTORY_BUFFER_CALENDAR_DAYS,
+        },
+        "key_rate_change_history": {
+            "start_date": KEY_RATE_HISTORY_START.isoformat(),
+            "end_date": "maximum eligible target_trade_date",
+            "source_semantics": "official_key_rate_change_date_history",
+        },
+        "hidden_dynamic_widening_allowed": False,
+        "missing_first_row_policy": "fail_closed",
+    }:
+        raise Phase82AcceptanceMatrixError("Phase 8.2 source request range mismatch")
+    change_policy = contract.get("key_rate_change_point_policy", {})
+    if change_policy != {
+        "required_response_columns": ["Date effective", "Key rate"],
+        "strictly_increasing_effective_dates": True,
+        "duplicate_effective_date_allowed": False,
+        "consecutive_identical_rate_allowed": False,
+        "daily_date_rate_schema_allowed": False,
+        "maximum_normalized_row_fraction_of_request_calendar_days": (
+            KEY_RATE_MAX_NORMALIZED_ROW_FRACTION
+        ),
+        "all_zero_key_rate_age_allowed": False,
+        "selected_effective_date_must_exist_in_normalized_source": True,
+    }:
+        raise Phase82AcceptanceMatrixError("Phase 8.2 key-rate change-point policy mismatch")
     if tuple(contract.get("runtime_artifacts", ())) != DECLARED_OUTPUT_ARTIFACTS:
         raise Phase82AcceptanceMatrixError("Phase 8.2 artifact inventory mismatch")
     immutable = contract.get("immutable_input_sha256")
@@ -617,6 +652,11 @@ def _validate_phase81_registry() -> None:
         definition = require_phase8_2_ready(source_id)
         if definition.source_revision_status != SOURCE_REVISION_STATUSES[source_id]:
             raise Phase82AcceptanceMatrixError("source revision status mismatch")
+    if (
+        SOURCE_REGISTRY["cbr_key_rate_daily"].source_semantics
+        != "official_key_rate_change_date_history"
+    ):
+        raise Phase82AcceptanceMatrixError("key-rate source semantics mismatch")
     for source_id, status in BLOCKED_SOURCE_STATUSES.items():
         definition = SOURCE_REGISTRY[source_id]
         if definition.historical_model_use_status != status:
@@ -777,8 +817,29 @@ def _normalized_source_frame(
         else ["effective_date"]
     )
     frame = frame.sort_values(sort_fields, kind="mergesort").reset_index(drop=True)
+    if source_id == "cbr_key_rate_daily":
+        _validate_key_rate_change_history(frame)
     _assert_secret_free(frame)
     return frame
+
+
+def _validate_key_rate_change_history(frame: pd.DataFrame) -> None:
+    effective_dates = pd.to_datetime(frame["effective_date"], errors="raise")
+    if effective_dates.duplicated().any():
+        raise Phase82AcceptanceMatrixError("duplicate key-rate effective date")
+    if len(effective_dates) > 1 and not effective_dates.diff().iloc[1:].gt(
+        pd.Timedelta(0)
+    ).all():
+        raise Phase82AcceptanceMatrixError(
+            "key-rate effective dates are not strictly increasing"
+        )
+    rates = pd.to_numeric(frame["key_rate_pct"], errors="raise").astype(float)
+    if not np.isfinite(rates.to_numpy()).all():
+        raise Phase82AcceptanceMatrixError("key-rate change history contains invalid rates")
+    if len(rates) > 1 and rates.eq(rates.shift()).iloc[1:].any():
+        raise Phase82AcceptanceMatrixError(
+            "consecutive key-rate change points have identical rates"
+        )
 
 
 def _validate_public_source_route(route: str, *, expected_base: str) -> None:
@@ -827,13 +888,16 @@ def _validate_matrix(matrix: pd.DataFrame, *, eligible_identities: pd.DataFrame)
 def _build_source_fetch_manifest(
     *,
     normalized_sources: Mapping[str, pd.DataFrame],
-    requested_start: date,
+    requested_intervals: Mapping[str, tuple[date, date]],
     requested_end: date,
     retrieved_at: datetime,
 ) -> dict[str, Any]:
     sources: list[dict[str, Any]] = []
     for source_id in ACCEPTED_SOURCES:
         frame = normalized_sources[source_id]
+        requested_start, source_requested_end = requested_intervals[source_id]
+        if source_requested_end != requested_end:
+            raise Phase82AcceptanceMatrixError("source request end-date mismatch")
         date_field = SOURCE_DATE_FIELDS[source_id]
         dates = pd.to_datetime(frame[date_field], errors="raise")
         if (
@@ -861,7 +925,8 @@ def _build_source_fetch_manifest(
             }
         )
     result = {
-        "history_buffer_calendar_days": HISTORY_BUFFER_CALENDAR_DAYS,
+        "ruonia_history_buffer_calendar_days": HISTORY_BUFFER_CALENDAR_DAYS,
+        "key_rate_fixed_start_date": KEY_RATE_HISTORY_START.isoformat(),
         "sources": sources,
     }
     _assert_secret_free(result)
@@ -1061,6 +1126,11 @@ def _build_gate_results(
         (effective_dates <= target_dates).all()
         and np.isfinite(matrix["key_rate_pct"].to_numpy(float)).all()
         and _latest_key_rate_selection_matches(matrix, key_rate_normalized)
+        and _key_rate_semantic_integrity(
+            matrix,
+            key_rate_normalized,
+            source_fetch_manifest=source_fetch_manifest,
+        )
     )
     g5 = bool(
         coverage["eligible_coverage_pct"].eq(100.0).all()
@@ -1169,6 +1239,68 @@ def _latest_key_rate_selection_matches(
         if selected != row.key_rate_effective_date:
             return False
     return True
+
+
+def _key_rate_semantic_integrity(
+    matrix: pd.DataFrame,
+    normalized: pd.DataFrame,
+    *,
+    source_fetch_manifest: Mapping[str, Any],
+) -> bool:
+    try:
+        effective_dates = pd.to_datetime(normalized["effective_date"], errors="raise")
+        rates = pd.to_numeric(normalized["key_rate_pct"], errors="raise").astype(float)
+        ages = pd.to_numeric(
+            matrix["key_rate_age_calendar_days"], errors="raise"
+        ).astype("int64")
+    except (KeyError, TypeError, ValueError):
+        return False
+    if normalized.empty or ages.empty:
+        return False
+    strict_dates = bool(
+        not effective_dates.duplicated().any()
+        and (
+            len(effective_dates) == 1
+            or effective_dates.diff().iloc[1:].gt(pd.Timedelta(0)).all()
+        )
+    )
+    changing_rates = bool(
+        np.isfinite(rates.to_numpy()).all()
+        and (len(rates) == 1 or not rates.eq(rates.shift()).iloc[1:].any())
+    )
+    selected_dates = set(matrix["key_rate_effective_date"].astype(str))
+    normalized_dates = set(effective_dates.dt.strftime("%Y-%m-%d"))
+    selected_dates_exist = selected_dates.issubset(normalized_dates)
+    key_manifest = next(
+        (
+            item
+            for item in source_fetch_manifest.get("sources", [])
+            if isinstance(item, Mapping)
+            and item.get("source_id") == "cbr_key_rate_daily"
+        ),
+        None,
+    )
+    if not isinstance(key_manifest, Mapping):
+        return False
+    try:
+        requested_start = date.fromisoformat(str(key_manifest["requested_start_date"]))
+        requested_end = date.fromisoformat(str(key_manifest["requested_end_date"]))
+    except (KeyError, TypeError, ValueError):
+        return False
+    request_calendar_days = (requested_end - requested_start).days + 1
+    sparse_change_points = bool(
+        request_calendar_days > 0
+        and len(normalized)
+        <= request_calendar_days * KEY_RATE_MAX_NORMALIZED_ROW_FRACTION
+    )
+    return bool(
+        strict_dates
+        and changing_rates
+        and sparse_change_points
+        and ages.max() > 0
+        and not ages.eq(0).all()
+        and selected_dates_exist
+    )
 
 
 def _finalize_gate_results(gates: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:

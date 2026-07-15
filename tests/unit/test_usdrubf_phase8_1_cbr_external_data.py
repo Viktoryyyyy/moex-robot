@@ -5,10 +5,13 @@ from datetime import date, datetime, timezone
 import pytest
 
 from src.moex_research.external_data.cbr import (
+    DAILY_KEY_RATE_HEADERS,
     KEY_RATE_HEADERS,
+    KEY_RATE_ROUTE,
     LIQUIDITY_NUMBER_HEADERS,
     LIQUIDITY_REQUIRED_MARKERS,
     RUONIA_HEADERS,
+    load_key_rate_daily,
     load_ruonia_daily,
     parse_banking_liquidity_html,
     parse_key_rate_html,
@@ -103,11 +106,28 @@ def test_duplicate_ruonia_identity_fails_closed() -> None:
         parse_ruonia_html(payload, retrieved_at_utc=RETRIEVED)
 
 
-def test_key_rate_history_parses_and_duplicate_effective_date_fails() -> None:
-    payload = _table(KEY_RATE_HEADERS, [("15.07.2026", "14.25")])
+def test_official_key_rate_change_history_parses_and_sorts_effective_dates() -> None:
+    payload = _table(
+        KEY_RATE_HEADERS,
+        [("15.07.2026", "14.25"), ("01.06.2026", "13.0")],
+    )
     result = parse_key_rate_html(payload, retrieved_at_utc=RETRIEVED)
-    assert result[0]["effective_date"] == "2026-07-15"
-    assert result[0]["key_rate_pct"] == 14.25
+    assert [item["effective_date"] for item in result] == [
+        "2026-06-01",
+        "2026-07-15",
+    ]
+    assert [item["key_rate_pct"] for item in result] == [13.0, 14.25]
+    assert result[0]["source_revision_status"] == "official_change_date_history"
+    assert result[0]["historical_model_use_status"] == "candidate_for_phase8_2"
+
+
+def test_daily_key_rate_date_rate_response_is_rejected() -> None:
+    payload = _table(DAILY_KEY_RATE_HEADERS, [("15.07.2026", "14.25")])
+    with pytest.raises(ExternalDataError, match="daily Date / Rate"):
+        parse_key_rate_html(payload, retrieved_at_utc=RETRIEVED)
+
+
+def test_key_rate_duplicate_effective_date_fails() -> None:
 
     duplicate = _table(
         KEY_RATE_HEADERS,
@@ -115,6 +135,28 @@ def test_key_rate_history_parses_and_duplicate_effective_date_fails() -> None:
     )
     with pytest.raises(ExternalDataError, match="duplicate key-rate"):
         parse_key_rate_html(duplicate, retrieved_at_utc=RETRIEVED)
+
+
+def test_key_rate_malformed_effective_date_and_rate_fail() -> None:
+    with pytest.raises(ExternalDataError, match="effective_date"):
+        parse_key_rate_html(
+            _table(KEY_RATE_HEADERS, [("not-a-date", "14.25")]),
+            retrieved_at_utc=RETRIEVED,
+        )
+    with pytest.raises(ExternalDataError, match="key_rate_pct"):
+        parse_key_rate_html(
+            _table(KEY_RATE_HEADERS, [("15.07.2026", "not-a-rate")]),
+            retrieved_at_utc=RETRIEVED,
+        )
+
+
+def test_consecutive_identical_key_rate_change_points_fail() -> None:
+    payload = _table(
+        KEY_RATE_HEADERS,
+        [("01.06.2026", "14.25"), ("15.07.2026", "14.25")],
+    )
+    with pytest.raises(ExternalDataError, match="identical rates"):
+        parse_key_rate_html(payload, retrieved_at_utc=RETRIEVED)
 
 
 def test_banking_liquidity_parses_required_fields_and_stays_vintage_blocked() -> None:
@@ -150,9 +192,29 @@ def test_banking_liquidity_parses_required_fields_and_stays_vintage_blocked() ->
 def test_empty_requested_interval_and_schema_change_fail_closed() -> None:
     with pytest.raises(ExternalDataError, match="no rows"):
         parse_key_rate_html(_table(KEY_RATE_HEADERS, []), retrieved_at_utc=RETRIEVED)
-    changed = tuple("changed" if item == "Rate" else item for item in KEY_RATE_HEADERS)
+    changed = tuple("changed" if item == "Key rate" else item for item in KEY_RATE_HEADERS)
     with pytest.raises(ExternalDataError, match="columns"):
         parse_key_rate_html(_table(changed, [("15.07.2026", "14.25")]), retrieved_at_utc=RETRIEVED)
+
+
+def test_key_rate_loader_retains_exact_change_history_route_and_provenance() -> None:
+    seen: list[str] = []
+
+    def transport(url: str) -> bytes:
+        seen.append(url)
+        return _table(KEY_RATE_HEADERS, [("03.02.2014", "5.5")])
+
+    result = load_key_rate_daily(
+        date(2014, 2, 3),
+        date(2026, 7, 15),
+        retrieved_at_utc=RETRIEVED,
+        transport=transport,
+    )
+    assert seen[0].startswith(KEY_RATE_ROUTE)
+    assert "UniDbQuery.From=03.02.2014" in seen[0]
+    assert result[0]["source_route"] == seen[0]
+    assert result[0]["source_revision_status"] == "official_change_date_history"
+    assert len(result[0]["raw_payload_sha256"]) == 64
 
 
 def test_loader_is_mockable_and_builds_explicit_interval_url() -> None:

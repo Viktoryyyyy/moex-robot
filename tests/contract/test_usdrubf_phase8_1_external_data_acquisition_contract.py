@@ -125,6 +125,15 @@ def test_availability_and_blocked_status_policies_are_explicit() -> None:
     assert sources["cbr_key_rate_daily"]["historical_model_use_status"] == (
         "candidate_for_phase8_2"
     )
+    assert sources["cbr_key_rate_daily"]["source_semantics"] == (
+        "official_key_rate_change_date_history"
+    )
+    assert sources["cbr_key_rate_daily"]["official_route"] == (
+        "https://www.cbr.ru/eng/hd_base/ProcStav/IR_CHG_MPO/"
+    )
+    assert sources["cbr_key_rate_daily"]["source_revision_status"] == (
+        "official_change_date_history"
+    )
     assert sources["cbr_banking_liquidity_daily"]["source_revision_status"] == (
         "latest_revised"
     )
@@ -133,6 +142,15 @@ def test_availability_and_blocked_status_policies_are_explicit() -> None:
     )
     assert contract["source_status_policy"]["blocked_source_can_enter_phase8_2_matrix"] is False
     assert contract["source_status_policy"]["fabricated_historical_observations_allowed"] is False
+
+
+def test_key_rate_contract_rejects_daily_rows_and_identical_change_points() -> None:
+    fail_closed = set(_contract()["fail_closed_policy"])
+    assert (
+        "daily Date / Rate table supplied for key-rate effective-date semantics"
+        in fail_closed
+    )
+    assert "consecutive key-rate change points have identical values" in fail_closed
 
 
 def test_deferred_sources_fixed_model_boundaries_and_no_runtime_dataset() -> None:

@@ -16,7 +16,7 @@ from .models import (
 
 
 RUONIA_ROUTE = "https://www.cbr.ru/eng/hd_base/ruonia/dynamics/"
-KEY_RATE_ROUTE = "https://www.cbr.ru/eng/hd_base/KeyRate/"
+KEY_RATE_ROUTE = "https://www.cbr.ru/eng/hd_base/ProcStav/IR_CHG_MPO/"
 LIQUIDITY_ROUTE = "https://www.cbr.ru/eng/hd_base/bliquidity/"
 
 RUONIA_HEADERS = (
@@ -32,7 +32,8 @@ RUONIA_HEADERS = (
     "Status of calculation",
     "Date of publication",
 )
-KEY_RATE_HEADERS = ("Date", "Rate")
+KEY_RATE_HEADERS = ("Date effective", "Key rate")
+DAILY_KEY_RATE_HEADERS = ("Date", "Rate")
 LIQUIDITY_NUMBER_HEADERS = (
     "1",
     "2 = 4 - 9 + 13 - 14 + 15",
@@ -61,11 +62,18 @@ class _TableParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.rows: list[tuple[str, ...]] = []
+        self.tables: list[tuple[tuple[str, ...], ...]] = []
         self._row: list[str] | None = None
         self._cell: list[str] | None = None
+        self._table_depth = 0
+        self._table_rows: list[tuple[str, ...]] | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "tr":
+        if tag == "table":
+            if self._table_depth == 0:
+                self._table_rows = []
+            self._table_depth += 1
+        elif tag == "tr":
             self._row = []
         elif tag in {"th", "td"} and self._row is not None:
             self._cell = []
@@ -79,8 +87,16 @@ class _TableParser(HTMLParser):
             self._row.append(" ".join("".join(self._cell).split()))
             self._cell = None
         elif tag == "tr" and self._row:
-            self.rows.append(tuple(self._row))
+            row = tuple(self._row)
+            self.rows.append(row)
+            if self._table_rows is not None:
+                self._table_rows.append(row)
             self._row = None
+        elif tag == "table" and self._table_depth:
+            self._table_depth -= 1
+            if self._table_depth == 0 and self._table_rows is not None:
+                self.tables.append(tuple(self._table_rows))
+                self._table_rows = None
 
 
 def _html_rows(payload: bytes) -> tuple[tuple[str, ...], ...]:
@@ -93,6 +109,35 @@ def _html_rows(payload: bytes) -> tuple[tuple[str, ...], ...]:
     if not parser.rows:
         raise ExternalDataError("CBR response contains no table rows")
     return tuple(parser.rows)
+
+
+def _key_rate_change_rows(payload: bytes) -> tuple[tuple[str, ...], ...]:
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ExternalDataError("CBR response is not UTF-8 HTML") from exc
+    parser = _TableParser()
+    parser.feed(text)
+    if not parser.tables:
+        raise ExternalDataError("CBR response contains no table rows")
+    change_tables = [table for table in parser.tables if KEY_RATE_HEADERS in table]
+    if not change_tables:
+        if any(DAILY_KEY_RATE_HEADERS in table for table in parser.tables):
+            raise ExternalDataError(
+                "daily Date / Rate table cannot provide key-rate effective dates"
+            )
+        raise ExternalDataError("CBR response columns differ from expected schema")
+    if len(change_tables) != 1:
+        raise ExternalDataError("CBR key-rate change-history table is ambiguous")
+    table = change_tables[0]
+    header_index = table.index(KEY_RATE_HEADERS)
+    data = table[header_index + 1 :]
+    if not data:
+        raise ExternalDataError("requested non-empty CBR interval returned no rows")
+    for row in data:
+        if len(row) != len(KEY_RATE_HEADERS):
+            raise ExternalDataError("CBR data row width differs from expected schema")
+    return data
 
 
 def _url(route: str, start: date, end: date) -> str:
@@ -181,29 +226,43 @@ def parse_key_rate_html(
     retrieved_at_utc: datetime,
     source_route: str = KEY_RATE_ROUTE,
 ) -> list[dict[str, object]]:
-    rows = _data_rows(_html_rows(payload), headers=KEY_RATE_HEADERS, date_field="effective_date")
+    rows = _key_rate_change_rows(payload)
     base = provenance(
         source_id="cbr_key_rate_daily",
         source_route=source_route,
         payload=payload,
         retrieved_at_utc=retrieved_at_utc,
-        source_revision_status="official_effective_date_history",
+        source_revision_status="official_change_date_history",
         historical_model_use_status="candidate_for_phase8_2",
     )
-    records: list[dict[str, object]] = []
-    identities: set[str] = set()
+    points: list[tuple[date, float]] = []
     for row in rows:
-        effective_date = parse_date(row[0], field="effective_date").isoformat()
-        if effective_date in identities:
+        points.append(
+            (
+                parse_date(row[0], field="effective_date"),
+                parse_number(row[1], field="key_rate_pct"),
+            )
+        )
+    points.sort(key=lambda item: item[0])
+    records: list[dict[str, object]] = []
+    previous_date: date | None = None
+    previous_rate: float | None = None
+    for effective, rate in points:
+        if effective == previous_date:
             raise ExternalDataError("duplicate key-rate effective_date")
-        identities.add(effective_date)
+        if previous_rate is not None and rate == previous_rate:
+            raise ExternalDataError(
+                "consecutive key-rate change points have identical rates"
+            )
         records.append(
             {
-                "effective_date": effective_date,
-                "key_rate_pct": parse_number(row[1], field="key_rate_pct"),
+                "effective_date": effective.isoformat(),
+                "key_rate_pct": rate,
                 **base,
             }
         )
+        previous_date = effective
+        previous_rate = rate
     return records
 
 

@@ -68,15 +68,36 @@
     "ruonia_interpolation_allowed": false,
     "ruonia_prior_available_carry_forward_allowed": true,
     "key_rate_eligibility": "effective_date <= target_trade_date",
-    "key_rate_selection": "maximum eligible effective_date; duplicate effective dates fail closed",
+    "key_rate_selection": "maximum eligible actual rate-change effective_date; duplicate effective dates fail closed",
     "key_rate_retrospective_application_allowed": false,
     "key_rate_interpolation_allowed": false
   },
   "historical_request_range": {
-    "derived_from": "minimum and maximum exact eligible target_trade_date",
-    "history_buffer_calendar_days": 31,
+    "ruonia": {
+      "start_date": "minimum eligible target_trade_date minus 31 calendar days",
+      "end_date": "maximum eligible target_trade_date",
+      "history_buffer_calendar_days": 31
+    },
+    "key_rate_change_history": {
+      "start_date": "2014-02-03",
+      "end_date": "maximum eligible target_trade_date",
+      "source_semantics": "official_key_rate_change_date_history"
+    },
     "hidden_dynamic_widening_allowed": false,
     "missing_first_row_policy": "fail_closed"
+  },
+  "key_rate_change_point_policy": {
+    "required_response_columns": [
+      "Date effective",
+      "Key rate"
+    ],
+    "strictly_increasing_effective_dates": true,
+    "duplicate_effective_date_allowed": false,
+    "consecutive_identical_rate_allowed": false,
+    "daily_date_rate_schema_allowed": false,
+    "maximum_normalized_row_fraction_of_request_calendar_days": 0.05,
+    "all_zero_key_rate_age_allowed": false,
+    "selected_effective_date_must_exist_in_normalized_source": true
   },
   "normalized_source_provenance_fields": [
     "source_id",
@@ -198,9 +219,13 @@
     ],
     "G4_key_rate_point_in_time_correctness": [
       "effective_date <= target_trade_date",
-      "latest eligible effective date is selected",
+      "latest eligible actual rate-change effective date is selected",
       "duplicate effective date fails closed",
-      "key_rate_pct is finite"
+      "consecutive normalized key-rate rows have different finite rates",
+      "normalized key-rate rows are materially sparser than daily calendar rows",
+      "maximum key_rate_age_calendar_days is greater than zero",
+      "not all eligible identities have zero key-rate age",
+      "every selected effective date exists in normalized change history"
     ],
     "G5_coverage": [
       "RUONIA coverage equals 100 percent for 472 identities",
