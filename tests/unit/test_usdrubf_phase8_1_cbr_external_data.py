@@ -129,6 +129,20 @@ def test_official_key_rate_change_history_parses_and_sorts_effective_dates() -> 
     assert result[0]["historical_model_use_status"] == "candidate_for_phase8_2"
 
 
+def test_key_rate_grouped_subheaders_are_skipped_before_observations() -> None:
+    payload = _table(
+        KEY_RATE_WIDE_HEADERS,
+        [
+            ("Liquidity provision", "Standing facilities", "Auctions", "Other"),
+            ("01.06.2026", "13.0", "8.25", "14.0"),
+        ],
+    )
+    result = parse_key_rate_html(payload, retrieved_at_utc=RETRIEVED)
+    assert [(item["effective_date"], item["key_rate_pct"]) for item in result] == [
+        ("2026-06-01", 13.0),
+    ]
+
+
 def test_daily_key_rate_date_rate_response_is_rejected() -> None:
     payload = _table(DAILY_KEY_RATE_HEADERS, [("15.07.2026", "14.25")])
     with pytest.raises(ExternalDataError, match="daily Date / Rate"):
@@ -146,7 +160,7 @@ def test_key_rate_duplicate_effective_date_fails() -> None:
 
 
 def test_key_rate_malformed_effective_date_and_rate_fail() -> None:
-    with pytest.raises(ExternalDataError, match="effective_date"):
+    with pytest.raises(ExternalDataError, match="effective_date|no rows"):
         parse_key_rate_html(
             _table(KEY_RATE_HEADERS, [("not-a-date", "14.25")]),
             retrieved_at_utc=RETRIEVED,
@@ -158,13 +172,20 @@ def test_key_rate_malformed_effective_date_and_rate_fail() -> None:
         )
 
 
-def test_consecutive_identical_key_rate_change_points_fail() -> None:
+def test_non_key_rate_changes_with_identical_key_rate_are_filtered() -> None:
     payload = _table(
         KEY_RATE_HEADERS,
-        [("01.06.2026", "14.25"), ("15.07.2026", "14.25")],
+        [
+            ("01.06.2026", "14.25"),
+            ("15.07.2026", "14.25"),
+            ("01.08.2026", "13.0"),
+        ],
     )
-    with pytest.raises(ExternalDataError, match="identical rates"):
-        parse_key_rate_html(payload, retrieved_at_utc=RETRIEVED)
+    result = parse_key_rate_html(payload, retrieved_at_utc=RETRIEVED)
+    assert [(item["effective_date"], item["key_rate_pct"]) for item in result] == [
+        ("2026-06-01", 14.25),
+        ("2026-08-01", 13.0),
+    ]
 
 
 def test_banking_liquidity_parses_required_fields_and_stays_vintage_blocked() -> None:

@@ -143,10 +143,20 @@ def _key_rate_change_rows(payload: bytes) -> tuple[tuple[str, ...], ...]:
     if not data:
         raise ExternalDataError("requested non-empty CBR interval returned no rows")
     result: list[tuple[str, ...]] = []
+    data_started = False
     for row in data:
+        try:
+            parse_date(row[0], field="effective_date")
+        except (ExternalDataError, IndexError):
+            if not data_started:
+                continue
+            raise ExternalDataError("malformed effective_date in CBR data row")
+        data_started = True
         if len(row) != len(header):
             raise ExternalDataError("CBR data row width differs from expected schema")
         result.append(row[: len(KEY_RATE_HEADERS)])
+    if not result:
+        raise ExternalDataError("requested non-empty CBR interval returned no rows")
     return tuple(result)
 
 
@@ -261,9 +271,8 @@ def parse_key_rate_html(
         if effective == previous_date:
             raise ExternalDataError("duplicate key-rate effective_date")
         if previous_rate is not None and rate == previous_rate:
-            raise ExternalDataError(
-                "consecutive key-rate change points have identical rates"
-            )
+            previous_date = effective
+            continue
         records.append(
             {
                 "effective_date": effective.isoformat(),
