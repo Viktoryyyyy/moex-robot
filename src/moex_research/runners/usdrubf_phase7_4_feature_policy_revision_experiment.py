@@ -27,6 +27,7 @@ DATASET_ID: Final[str] = 'usdrubf_phase6_internal_modeling_dataset.v1'
 FEATURE_SCHEMA_ID: Final[str] = 'usdrubf_phase6_internal_factor_batches_v1'
 READINESS_CONTRACT_ID: Final[str] = 'usdrubf_phase7_modeling_readiness_target_policy_v1'
 TARGET_SOURCE: Final[str] = 'manual_phase_labels_v1'
+SOURCE_PANEL_ID: Final[str] = 'usdrubf_phase2_d1_panel.v1'
 CLASS_ORDER: Final[tuple[str, ...]] = ('B', 'S', 'OUT')
 PHASE6_TARGET_COLUMNS: Final[tuple[str, ...]] = ('target_phase_label', 'target_is_labeled', 'target_source', 'target_trade_date', 'target_instrument_id')
 PHASE6_FEATURE_COLUMNS: Final[tuple[str, ...]] = ('prior_trade_date', *PHASE6_LEGACY_NUMERIC_COLUMNS, *PHASE6_LEGACY_CATEGORICAL_COLUMNS)
@@ -418,14 +419,27 @@ def _readiness_declared_identity(text: str) -> dict[str, str]:
 def _validate_declared_inputs(source_manifest: dict[str, Any], dataset_manifest: dict[str, Any], feature_schema: dict[str, Any], readiness_text: str, experiment_contract: dict[str, Any]) -> dict[str, dict[str, Any]]:
     source_panel_id = source_manifest.get('source_panel_id')
     instruments = source_manifest.get('instruments')
-    if not isinstance(source_panel_id, str) or not source_panel_id.strip():
-        raise Phase74FeaturePolicyExperimentError('source panel manifest identity mismatch')
-    if not isinstance(instruments, list) or not instruments:
-        raise Phase74FeaturePolicyExperimentError('source panel manifest instrument declaration mismatch')
-    normalized_instruments = [str(item).strip() for item in instruments]
-    if any((not item for item in normalized_instruments)) or len(set(normalized_instruments)) != len(normalized_instruments):
-        raise Phase74FeaturePolicyExperimentError('source panel manifest instrument declaration mismatch')
-    source_columns = _require_exact_list(source_manifest, 'required_columns', SOURCE_REQUIRED_COLUMNS, 'source panel manifest')
+    required_columns = source_manifest.get('required_columns')
+    if source_panel_id is None and instruments is None and required_columns is None:
+        panel_id = source_manifest.get('panel_id')
+        panel_schema_version = source_manifest.get('panel_schema_version')
+        instrument_id = source_manifest.get('instrument_id')
+        if panel_id != SOURCE_PANEL_ID or panel_schema_version != SOURCE_PANEL_ID:
+            raise Phase74FeaturePolicyExperimentError('source panel manifest identity mismatch')
+        if not isinstance(instrument_id, str) or not instrument_id.strip():
+            raise Phase74FeaturePolicyExperimentError('source panel manifest instrument declaration mismatch')
+        source_panel_id = panel_id
+        normalized_instruments = [instrument_id.strip()]
+        source_columns = list(SOURCE_REQUIRED_COLUMNS)
+    else:
+        if not isinstance(source_panel_id, str) or not source_panel_id.strip():
+            raise Phase74FeaturePolicyExperimentError('source panel manifest identity mismatch')
+        if not isinstance(instruments, list) or not instruments:
+            raise Phase74FeaturePolicyExperimentError('source panel manifest instrument declaration mismatch')
+        normalized_instruments = [str(item).strip() for item in instruments]
+        if any((not item for item in normalized_instruments)) or len(set(normalized_instruments)) != len(normalized_instruments):
+            raise Phase74FeaturePolicyExperimentError('source panel manifest instrument declaration mismatch')
+        source_columns = _require_exact_list(source_manifest, 'required_columns', SOURCE_REQUIRED_COLUMNS, 'source panel manifest')
     if dataset_manifest.get('dataset_id') != DATASET_ID or dataset_manifest.get('feature_schema_id') != FEATURE_SCHEMA_ID or dataset_manifest.get('target_source') != TARGET_SOURCE:
         raise Phase74FeaturePolicyExperimentError('dataset manifest identity mismatch')
     dataset_targets = _require_exact_list(dataset_manifest, 'target_columns', PHASE6_TARGET_COLUMNS, 'dataset manifest')
