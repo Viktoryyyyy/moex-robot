@@ -120,24 +120,34 @@ def _key_rate_change_rows(payload: bytes) -> tuple[tuple[str, ...], ...]:
     parser.feed(text)
     if not parser.tables:
         raise ExternalDataError("CBR response contains no table rows")
-    change_tables = [table for table in parser.tables if KEY_RATE_HEADERS in table]
-    if not change_tables:
-        if any(DAILY_KEY_RATE_HEADERS in table for table in parser.tables):
+    change_matches = [
+        (table, index, row)
+        for table in parser.tables
+        for index, row in enumerate(table)
+        if row[: len(KEY_RATE_HEADERS)] == KEY_RATE_HEADERS
+    ]
+    if not change_matches:
+        if any(
+            row[: len(DAILY_KEY_RATE_HEADERS)] == DAILY_KEY_RATE_HEADERS
+            for table in parser.tables
+            for row in table
+        ):
             raise ExternalDataError(
                 "daily Date / Rate table cannot provide key-rate effective dates"
             )
         raise ExternalDataError("CBR response columns differ from expected schema")
-    if len(change_tables) != 1:
+    if len(change_matches) != 1:
         raise ExternalDataError("CBR key-rate change-history table is ambiguous")
-    table = change_tables[0]
-    header_index = table.index(KEY_RATE_HEADERS)
+    table, header_index, header = change_matches[0]
     data = table[header_index + 1 :]
     if not data:
         raise ExternalDataError("requested non-empty CBR interval returned no rows")
+    result: list[tuple[str, ...]] = []
     for row in data:
-        if len(row) != len(KEY_RATE_HEADERS):
+        if len(row) != len(header):
             raise ExternalDataError("CBR data row width differs from expected schema")
-    return data
+        result.append(row[: len(KEY_RATE_HEADERS)])
+    return tuple(result)
 
 
 def _url(route: str, start: date, end: date) -> str:

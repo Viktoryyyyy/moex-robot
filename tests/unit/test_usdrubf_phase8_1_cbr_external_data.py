@@ -21,6 +21,11 @@ from src.moex_research.external_data.models import ExternalDataError
 
 
 RETRIEVED = datetime(2026, 7, 15, 6, 0, tzinfo=timezone.utc)
+KEY_RATE_WIDE_HEADERS = (
+    *KEY_RATE_HEADERS,
+    "Refinancing rate",
+    "Overnight loans",
+)
 
 
 def _table(headers: tuple[str, ...], rows: list[tuple[object, ...]], prefix: str = "") -> bytes:
@@ -108,8 +113,11 @@ def test_duplicate_ruonia_identity_fails_closed() -> None:
 
 def test_official_key_rate_change_history_parses_and_sorts_effective_dates() -> None:
     payload = _table(
-        KEY_RATE_HEADERS,
-        [("15.07.2026", "14.25"), ("01.06.2026", "13.0")],
+        KEY_RATE_WIDE_HEADERS,
+        [
+            ("15.07.2026", "14.25", "8.25", "15.25"),
+            ("01.06.2026", "13.0", "8.25", "14.0"),
+        ],
     )
     result = parse_key_rate_html(payload, retrieved_at_utc=RETRIEVED)
     assert [item["effective_date"] for item in result] == [
