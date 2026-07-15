@@ -202,6 +202,7 @@ def test_cme_calendar_and_current_quote_parse_with_exact_timezone_conversion() -
     assert quotes[0]["display_quote_code"] == "CLU6"
     assert quotes[0]["observation_timestamp_moscow"] == "2026-07-15T08:34:00+03:00"
     assert quotes[0]["quote_delay_minutes"] == 10
+    assert quotes[0]["has_price_observation"] is True
     assert quotes[0]["minutes_since_last_trade"] == 11
     assert quotes[0]["historical_model_use_status"] == "blocked_pending_license"
 
@@ -277,6 +278,35 @@ def test_contract_roll_does_not_fallback_to_later_available_contract() -> None:
         retrieved_at_utc=RETRIEVED,
     )
 
+    with pytest.raises(ExternalDataError, match="selected CME contract"):
+        build_pre_moex_observation(quotes, date(2026, 7, 15))
+
+
+def test_contract_roll_preserves_nearest_blank_quote_row_and_fails_closed() -> None:
+    expirations = {
+        "CLQ26": date(2026, 7, 22),
+        "CLU26": date(2026, 8, 20),
+    }
+    quotes = parse_cme_wti_current_quotes(
+        _quotes_payload(
+            [
+                _quote_record(
+                    quoteCode="CLQ6",
+                    lastTradeDate="2026-07-22T05:00:00Z",
+                    last="-",
+                    open="-",
+                    high="-",
+                    low="-",
+                ),
+                _quote_record(),
+            ]
+        ),
+        expiration_by_contract=expirations,
+        retrieved_at_utc=RETRIEVED,
+    )
+
+    assert quotes[0]["contract_code"] == "CLQ26"
+    assert quotes[0]["has_price_observation"] is False
     with pytest.raises(ExternalDataError, match="selected CME contract"):
         build_pre_moex_observation(quotes, date(2026, 7, 15))
 
