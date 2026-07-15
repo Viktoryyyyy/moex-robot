@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 
 import pytest
 
@@ -72,7 +72,7 @@ def _calendar_payload() -> bytes:
     ).encode()
 
 
-def _quote_payload(**overrides: object) -> bytes:
+def _quote_record(**overrides: object) -> dict[str, object]:
     quote: dict[str, object] = {
         "quoteCode": "CLU6",
         "productCode": "CL",
@@ -86,14 +86,24 @@ def _quote_payload(**overrides: object) -> bytes:
         "updated": "2026-07-15T05:34:00Z",
     }
     quote.update(overrides)
+    return quote
+
+
+def _quotes_payload(
+    quotes: list[dict[str, object]], *, quote_delay: object = "10 minutes"
+) -> bytes:
     return json.dumps(
         {
             "quoteDelayed": True,
-            "quoteDelay": "10 minutes",
+            "quoteDelay": quote_delay,
             "tradeDate": "15 Jul 2026",
-            "quotes": [quote],
+            "quotes": quotes,
         }
     ).encode()
+
+
+def _quote_payload(**overrides: object) -> bytes:
+    return _quotes_payload([_quote_record(**overrides)])
 
 
 def test_moex_contract_metadata_and_daily_candles_retain_expiration_and_provenance() -> None:
@@ -191,8 +201,134 @@ def test_cme_calendar_and_current_quote_parse_with_exact_timezone_conversion() -
     assert quotes[0]["contract_code"] == "CLU26"
     assert quotes[0]["display_quote_code"] == "CLU6"
     assert quotes[0]["observation_timestamp_moscow"] == "2026-07-15T08:34:00+03:00"
+    assert quotes[0]["quote_delay_minutes"] == 10
     assert quotes[0]["minutes_since_last_trade"] == 11
     assert quotes[0]["historical_model_use_status"] == "blocked_pending_license"
+
+
+def test_delayed_quote_exactly_at_effective_availability_boundary_passes() -> None:
+    quotes = parse_cme_wti_current_quotes(
+        _quote_payload(updated="2026-07-15T05:35:00Z"),
+        expiration_by_contract={"CLU26": date(2026, 8, 20)},
+        retrieved_at_utc=RETRIEVED,
+    )
+
+    result = build_pre_moex_observation(quotes, date(2026, 7, 15))
+
+    assert result["observation_timestamp_moscow"] == "2026-07-15T08:35:00+03:00"
+
+
+def test_delayed_quote_after_effective_availability_boundary_fails() -> None:
+    quotes = parse_cme_wti_current_quotes(
+        _quote_payload(updated="2026-07-15T05:35:01Z"),
+        expiration_by_contract={"CLU26": date(2026, 8, 20)},
+        retrieved_at_utc=RETRIEVED,
+    )
+
+    with pytest.raises(ExternalDataError, match="visible at or before"):
+        build_pre_moex_observation(quotes, date(2026, 7, 15))
+
+
+def test_delayed_quote_exactly_at_cutoff_fails() -> None:
+    quotes = parse_cme_wti_current_quotes(
+        _quote_payload(updated="2026-07-15T05:45:00Z"),
+        expiration_by_contract={"CLU26": date(2026, 8, 20)},
+        retrieved_at_utc=RETRIEVED,
+    )
+
+    with pytest.raises(ExternalDataError, match="visible at or before"):
+        build_pre_moex_observation(quotes, date(2026, 7, 15))
+
+
+def test_delayed_quote_semantics_fail_closed_when_changed_or_absent() -> None:
+    expirations = {"CLU26": date(2026, 8, 20)}
+    with pytest.raises(ExternalDataError, match="delay declaration mismatch"):
+        parse_cme_wti_current_quotes(
+            _quotes_payload([_quote_record()], quote_delay="15 minutes"),
+            expiration_by_contract=expirations,
+            retrieved_at_utc=RETRIEVED,
+        )
+
+    quotes = parse_cme_wti_current_quotes(
+        _quote_payload(), expiration_by_contract=expirations, retrieved_at_utc=RETRIEVED
+    )
+    del quotes[0]["quote_delay_minutes"]
+    with pytest.raises(ExternalDataError, match="delay semantics"):
+        build_pre_moex_observation(quotes, date(2026, 7, 15))
+
+
+def test_contract_roll_does_not_fallback_to_later_available_contract() -> None:
+    expirations = {
+        "CLQ26": date(2026, 7, 22),
+        "CLU26": date(2026, 8, 20),
+    }
+    quotes = parse_cme_wti_current_quotes(
+        _quotes_payload(
+            [
+                _quote_record(
+                    quoteCode="CLQ6",
+                    lastTradeDate="2026-07-22T05:00:00Z",
+                    updated="2026-07-15T05:36:00Z",
+                ),
+                _quote_record(updated="2026-07-15T05:35:00Z"),
+            ]
+        ),
+        expiration_by_contract=expirations,
+        retrieved_at_utc=RETRIEVED,
+    )
+
+    with pytest.raises(ExternalDataError, match="selected CME contract"):
+        build_pre_moex_observation(quotes, date(2026, 7, 15))
+
+
+def test_nearest_contract_with_visible_quote_is_selected() -> None:
+    expirations = {
+        "CLQ26": date(2026, 7, 22),
+        "CLU26": date(2026, 8, 20),
+    }
+    quotes = parse_cme_wti_current_quotes(
+        _quotes_payload(
+            [
+                _quote_record(
+                    quoteCode="CLQ6",
+                    lastTradeDate="2026-07-22T05:00:00Z",
+                    updated="2026-07-15T05:35:00Z",
+                ),
+                _quote_record(updated="2026-07-15T05:34:00Z"),
+            ]
+        ),
+        expiration_by_contract=expirations,
+        retrieved_at_utc=RETRIEVED,
+    )
+
+    result = build_pre_moex_observation(quotes, date(2026, 7, 15))
+
+    assert result["contract_code"] == "CLQ26"
+
+
+def test_pre_moex_contract_selection_remains_independent_of_volume() -> None:
+    expirations = {
+        "CLQ26": date(2026, 7, 22),
+        "CLU26": date(2026, 8, 20),
+    }
+    quotes = parse_cme_wti_current_quotes(
+        _quotes_payload(
+            [
+                _quote_record(
+                    quoteCode="CLQ6",
+                    lastTradeDate="2026-07-22T05:00:00Z",
+                    volume="1",
+                ),
+                _quote_record(volume="999999"),
+            ]
+        ),
+        expiration_by_contract=expirations,
+        retrieved_at_utc=RETRIEVED,
+    )
+
+    result = build_pre_moex_observation(quotes, date(2026, 7, 15))
+
+    assert result["contract_code"] == "CLQ26"
 
 
 def test_cutoff_excludes_later_observation_and_rejects_full_day_close() -> None:
@@ -284,6 +420,44 @@ def test_holiday_does_not_reuse_future_data_and_cme_is_open_at_normal_cutoff() -
     with pytest.raises(ExternalDataError, match="at or before"):
         build_pre_moex_observation(quote, date(2026, 7, 15))
     assert_cme_market_open_at_cutoff(date(2026, 7, 15))
+
+
+def test_winter_monday_cutoff_maps_to_open_sunday_evening_chicago_session() -> None:
+    assert_cme_market_open_at_cutoff(date(2026, 1, 12))
+
+
+def test_sunday_chicago_before_17_is_rejected() -> None:
+    with pytest.raises(ExternalDataError, match="Sunday"):
+        assert_cme_market_open_at_cutoff(
+            date(2026, 1, 12), cutoff_local_time=time(1, 59)
+        )
+
+
+def test_saturday_chicago_is_rejected() -> None:
+    with pytest.raises(ExternalDataError, match="Saturday"):
+        assert_cme_market_open_at_cutoff(
+            date(2026, 1, 10), cutoff_local_time=time(21, 0)
+        )
+
+
+def test_friday_chicago_at_or_after_16_is_rejected() -> None:
+    with pytest.raises(ExternalDataError, match="Friday"):
+        assert_cme_market_open_at_cutoff(
+            date(2026, 1, 10), cutoff_local_time=time(1, 0)
+        )
+
+
+def test_monday_through_thursday_maintenance_break_is_rejected() -> None:
+    with pytest.raises(ExternalDataError, match="maintenance"):
+        assert_cme_market_open_at_cutoff(
+            date(2026, 1, 13), cutoff_local_time=time(1, 30)
+        )
+
+
+def test_normal_weekday_chicago_session_passes() -> None:
+    assert_cme_market_open_at_cutoff(
+        date(2026, 1, 14), cutoff_local_time=time(21, 0)
+    )
 
 
 def test_historical_parser_is_isolated_and_license_blocked_source_cannot_be_ready() -> None:
