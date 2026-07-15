@@ -107,7 +107,14 @@ def _write_inputs(tmp_path: Path) -> tuple[experiment.Phase74ExperimentRequest, 
         "feature_columns": list(experiment.PHASE6_FEATURE_COLUMNS),
     }), encoding="utf-8")
     (tmp_path / "readiness.yaml").write_text(
-        f"contract_id: {experiment.READINESS_CONTRACT_ID}\ntarget_source: {experiment.TARGET_SOURCE}\n",
+        (
+            "contract_identity:\n"
+            f"  contract_id: {experiment.READINESS_CONTRACT_ID}\n"
+            "target_policy:\n"
+            f"  allowed_target_source: {experiment.TARGET_SOURCE}\n"
+            "supervised_row_eligibility:\n"
+            f"  required_target_source: {experiment.TARGET_SOURCE}\n"
+        ),
         encoding="utf-8",
     )
     (tmp_path / "contract.json").write_text(json.dumps(_contract_payload()), encoding="utf-8")
