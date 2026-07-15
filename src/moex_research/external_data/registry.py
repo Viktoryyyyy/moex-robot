@@ -16,6 +16,7 @@ class SourceDefinition:
     historical_model_use_status: str
     license_status: str
     availability_policy: str
+    source_semantics: str | None = None
 
 
 SOURCE_SLOTS: Final[tuple[str, ...]] = (
@@ -79,11 +80,15 @@ SOURCE_REGISTRY: Final[dict[str, SourceDefinition]] = {
         source_id="cbr_key_rate_daily",
         slot_id="cbr_key_rate_daily",
         selected_for_production_loader=True,
-        official_routes=("https://www.cbr.ru/eng/hd_base/KeyRate/",),
-        source_revision_status="official_effective_date_history",
+        official_routes=("https://www.cbr.ru/eng/hd_base/ProcStav/IR_CHG_MPO/",),
+        source_revision_status="official_change_date_history",
         historical_model_use_status="candidate_for_phase8_2",
         license_status="public_official_route_attribution_required",
-        availability_policy="a rate is usable no earlier than its effective_date",
+        availability_policy=(
+            "official_key_rate_change_date_history; each row is an actual change "
+            "point usable no earlier than its effective_date"
+        ),
+        source_semantics="official_key_rate_change_date_history",
     ),
     "cbr_banking_liquidity_daily": SourceDefinition(
         source_id="cbr_banking_liquidity_daily",

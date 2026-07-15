@@ -208,7 +208,8 @@
     },
     "cbr_key_rate_daily": {
       "source_id": "cbr_key_rate_daily",
-      "official_route": "https://www.cbr.ru/eng/hd_base/KeyRate/",
+      "source_semantics": "official_key_rate_change_date_history",
+      "official_route": "https://www.cbr.ru/eng/hd_base/ProcStav/IR_CHG_MPO/",
       "required_fields": [
         "effective_date",
         "key_rate_pct",
@@ -219,8 +220,8 @@
         "source_revision_status",
         "historical_model_use_status"
       ],
-      "availability_policy": "the rate is usable no earlier than its official effective_date",
-      "source_revision_status": "official_effective_date_history",
+      "availability_policy": "each normalized row is an actual monetary-policy rate-change point; the rate is usable no earlier than its official effective_date",
+      "source_revision_status": "official_change_date_history",
       "historical_model_use_status": "candidate_for_phase8_2"
     },
     "cbr_banking_liquidity_daily": {
@@ -268,6 +269,10 @@
     {
       "claim": "RUONIA history includes separate rate and publication dates and is public with source attribution",
       "url": "https://www.cbr.ru/eng/hd_base/ruonia/dynamics/"
+    },
+    {
+      "claim": "Bank of Russia key-rate change history publishes actual Date effective and Key rate points",
+      "url": "https://www.cbr.ru/eng/hd_base/ProcStav/IR_CHG_MPO/"
     }
   ],
   "source_status_policy": {
@@ -290,6 +295,8 @@
     "numeric value malformed or non-finite",
     "duplicate business identity",
     "requested non-empty interval has no rows",
+    "daily Date / Rate table supplied for key-rate effective-date semantics",
+    "consecutive key-rate change points have identical values",
     "RUONIA publication date precedes observation date",
     "expiration identity missing",
     "observation after cutoff",
