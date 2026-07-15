@@ -36,6 +36,9 @@ CME_PRODUCT_CALENDAR_ROUTE: Final[str] = (
     "https://www.cmegroup.com/CmeWS/mvc/ProductCalendar/Future/425"
 )
 CME_DATAMINE_ROUTE: Final[str] = "https://www.cmegroup.com/datamine.html"
+CME_QUOTE_DELAY_DECLARATION: Final[str] = "10 minutes"
+CME_QUOTE_DELAY: Final[timedelta] = timedelta(minutes=10)
+CME_QUOTE_DELAY_MINUTES: Final[int] = 10
 
 MOEX_CONTRACT_COLUMNS = (
     "SECID",
@@ -312,7 +315,10 @@ def parse_cme_wti_current_quotes(
     quotes = root.get("quotes")
     if not isinstance(quotes, list) or not quotes:
         raise ExternalDataError("CME current quote response is empty")
-    if root.get("quoteDelayed") is not True or root.get("quoteDelay") != "10 minutes":
+    if (
+        root.get("quoteDelayed") is not True
+        or root.get("quoteDelay") != CME_QUOTE_DELAY_DECLARATION
+    ):
         raise ExternalDataError("CME quote delay declaration mismatch")
     exchange_trading_date = parse_date(
         root.get("tradeDate"), field="exchange_trading_date"
@@ -376,6 +382,7 @@ def parse_cme_wti_current_quotes(
                 "exchange_trading_date": exchange_trading_date.isoformat(),
                 "observation_timestamp_utc": observed_utc.isoformat().replace("+00:00", "Z"),
                 "observation_timestamp_moscow": observed_utc.astimezone(MOSCOW).isoformat(),
+                "quote_delay_minutes": CME_QUOTE_DELAY_MINUTES,
                 "previous_official_settlement": prior,
                 "first_price_in_observation_window": open_,
                 "high_to_cutoff": high,
@@ -404,24 +411,36 @@ def build_pre_moex_observation(
     session_start = datetime.combine(modeled_day, time(8, 50), tzinfo=MOSCOW)
     if cutoff >= session_start:
         raise ExternalDataError("pre-MOEX cutoff must precede the 08:50 session start")
-    eligible_quotes: list[dict[str, object]] = []
     contracts: dict[str, dict[str, object]] = {}
     for quote in quotes:
+        code = _explicit_contract_code(quote.get("contract_code"))
+        expiration = parse_date(quote.get("expiration_date"), field="expiration_date")
+        contract = {
+            "contract_code": code,
+            "expiration_date": expiration.isoformat(),
+        }
+        existing = contracts.get(code)
+        if existing is not None and existing != contract:
+            raise ExternalDataError("CME contract expiration metadata is ambiguous")
+        contracts[code] = contract
+    selected = select_contract_for_day(list(contracts.values()), modeled_day)
+
+    candidates: list[dict[str, object]] = []
+    for quote in quotes:
+        if _explicit_contract_code(quote.get("contract_code")) != selected:
+            continue
+        delay_minutes = quote.get("quote_delay_minutes")
+        if type(delay_minutes) is not int or delay_minutes != CME_QUOTE_DELAY_MINUTES:
+            raise ExternalDataError("CME quote delay semantics are absent or ambiguous")
         timestamp = parse_datetime(
             quote.get("observation_timestamp_utc"), field="observation_timestamp_utc"
         )
-        if timestamp.astimezone(MOSCOW) <= cutoff:
-            eligible_quotes.append(quote)
-            contracts[str(quote.get("contract_code"))] = {
-                "contract_code": quote.get("contract_code"),
-                "expiration_date": quote.get("expiration_date"),
-            }
-    if not eligible_quotes:
-        raise ExternalDataError("no CME observation exists at or before the cutoff")
-    selected = select_contract_for_day(list(contracts.values()), modeled_day)
-    candidates = [q for q in eligible_quotes if q.get("contract_code") == selected]
+        if timestamp + CME_QUOTE_DELAY <= cutoff:
+            candidates.append(quote)
     if not candidates:
-        raise ExternalDataError("selected CME contract has no pre-cutoff quote")
+        raise ExternalDataError(
+            "selected CME contract has no observation visible at or before the cutoff"
+        )
     result = max(
         candidates,
         key=lambda item: parse_datetime(
@@ -432,14 +451,24 @@ def build_pre_moex_observation(
     return result
 
 
-def assert_cme_market_open_at_cutoff(modeled_day: date) -> None:
-    cutoff_chicago = datetime.combine(modeled_day, time(8, 45), tzinfo=MOSCOW).astimezone(
-        CHICAGO
-    )
-    if cutoff_chicago.weekday() >= 5:
-        raise ExternalDataError("CME weekday session is not open at weekend cutoff")
+def assert_cme_market_open_at_cutoff(
+    modeled_day: date, *, cutoff_local_time: time = time(8, 45)
+) -> None:
+    cutoff_chicago = datetime.combine(
+        modeled_day, cutoff_local_time, tzinfo=MOSCOW
+    ).astimezone(CHICAGO)
+    weekday = cutoff_chicago.weekday()
     local_clock = cutoff_chicago.timetz().replace(tzinfo=None)
-    if time(16, 0) <= local_clock < time(17, 0):
+
+    if weekday == 5:
+        raise ExternalDataError("CME session is closed on Saturday")
+    if weekday == 6:
+        if local_clock < time(17, 0):
+            raise ExternalDataError("CME Sunday session is closed before 17:00 Chicago")
+        return
+    if weekday == 4 and local_clock >= time(16, 0):
+        raise ExternalDataError("CME Friday session is closed from 16:00 Chicago")
+    if weekday <= 3 and time(16, 0) <= local_clock < time(17, 0):
         raise ExternalDataError("CME daily maintenance break overlaps cutoff")
 
 
