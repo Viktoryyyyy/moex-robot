@@ -403,18 +403,42 @@ def _require_exact_list(payload: dict[str, Any], key: str, expected: tuple[str, 
 
 def _readiness_declared_identity(text: str) -> dict[str, str]:
     values: dict[str, str] = {}
+    accepted_keys = {
+        'contract_id',
+        'target_source',
+        'allowed_target_source',
+        'required_target_source',
+    }
     for line in text.splitlines():
         if ':' not in line:
             continue
         key, value = line.split(':', 1)
         key = key.strip()
-        if key in {'contract_id', 'target_source'}:
+        if key in accepted_keys:
             values[key] = value.strip().strip('"\'')
     if values.get('contract_id') != READINESS_CONTRACT_ID:
         raise Phase74FeaturePolicyExperimentError('readiness contract identity mismatch')
-    if values.get('target_source') != TARGET_SOURCE:
+    legacy_target_source = values.get('target_source')
+    allowed_target_source = values.get('allowed_target_source')
+    required_target_source = values.get('required_target_source')
+    if legacy_target_source is not None:
+        declared_sources = [legacy_target_source]
+        if allowed_target_source is not None:
+            declared_sources.append(allowed_target_source)
+        if required_target_source is not None:
+            declared_sources.append(required_target_source)
+    else:
+        if allowed_target_source is None or required_target_source is None:
+            raise Phase74FeaturePolicyExperimentError('readiness contract target_source mismatch')
+        declared_sources = [allowed_target_source, required_target_source]
+    if any(value != TARGET_SOURCE for value in declared_sources):
         raise Phase74FeaturePolicyExperimentError('readiness contract target_source mismatch')
-    return values
+    return {
+        'contract_id': READINESS_CONTRACT_ID,
+        'target_source': TARGET_SOURCE,
+        'allowed_target_source': allowed_target_source or TARGET_SOURCE,
+        'required_target_source': required_target_source or TARGET_SOURCE,
+    }
 
 def _validate_declared_inputs(source_manifest: dict[str, Any], dataset_manifest: dict[str, Any], feature_schema: dict[str, Any], readiness_text: str, experiment_contract: dict[str, Any]) -> dict[str, dict[str, Any]]:
     source_panel_id = source_manifest.get('source_panel_id')
