@@ -345,9 +345,12 @@ def parse_cme_wti_current_quotes(
         if quote["productCode"] != "CL" or not display_code.startswith("CL"):
             raise ExternalDataError("CME quote is not a WTI CL contract")
         price_values = tuple(quote[field] for field in ("last", "open", "high", "low"))
-        if all(value in (None, "-", "") for value in price_values):
-            continue
-        if any(value in (None, "-", "") for value in price_values):
+        has_price_observation = not all(
+            value in (None, "-", "") for value in price_values
+        )
+        if has_price_observation and any(
+            value in (None, "-", "") for value in price_values
+        ):
             raise ExternalDataError("CME current quote price fields are incomplete")
         quote_last_trade = parse_datetime(
             quote["lastTradeDate"], field="last_trade_timestamp_utc"
@@ -368,21 +371,44 @@ def parse_cme_wti_current_quotes(
         if identity in identities:
             raise ExternalDataError("duplicate CME timestamp-contract identity")
         identities.add(identity)
+        record = {
+            "exchange": "CME/NYMEX",
+            "instrument_family": "WTI Light Sweet Crude Oil futures",
+            "contract_code": code,
+            "display_quote_code": display_code,
+            "exchange_trading_date": exchange_trading_date.isoformat(),
+            "observation_timestamp_utc": observed_utc.isoformat().replace("+00:00", "Z"),
+            "observation_timestamp_moscow": observed_utc.astimezone(MOSCOW).isoformat(),
+            "quote_delay_minutes": CME_QUOTE_DELAY_MINUTES,
+            "has_price_observation": has_price_observation,
+            "expiration_date": expiration_by_contract[code].isoformat(),
+            **base,
+        }
+        if not has_price_observation:
+            record.update(
+                {
+                    "previous_official_settlement": None,
+                    "first_price_in_observation_window": None,
+                    "high_to_cutoff": None,
+                    "low_to_cutoff": None,
+                    "last_price_at_cutoff": None,
+                    "volume_to_cutoff": None,
+                    "open_interest_at_cutoff": None,
+                    "return_from_previous_settlement": None,
+                    "return_from_window_open": None,
+                    "range_to_cutoff": None,
+                    "minutes_since_last_trade": None,
+                }
+            )
+            records.append(record)
+            continue
         last = parse_number(quote["last"], field="last")
         prior = parse_number(quote["priorSettle"], field="priorSettle")
         open_ = parse_number(quote["open"], field="open")
         high = parse_number(quote["high"], field="high")
         low = parse_number(quote["low"], field="low")
-        records.append(
+        record.update(
             {
-                "exchange": "CME/NYMEX",
-                "instrument_family": "WTI Light Sweet Crude Oil futures",
-                "contract_code": code,
-                "display_quote_code": display_code,
-                "exchange_trading_date": exchange_trading_date.isoformat(),
-                "observation_timestamp_utc": observed_utc.isoformat().replace("+00:00", "Z"),
-                "observation_timestamp_moscow": observed_utc.astimezone(MOSCOW).isoformat(),
-                "quote_delay_minutes": CME_QUOTE_DELAY_MINUTES,
                 "previous_official_settlement": prior,
                 "first_price_in_observation_window": open_,
                 "high_to_cutoff": high,
@@ -394,10 +420,9 @@ def parse_cme_wti_current_quotes(
                 "return_from_window_open": last / open_ - 1.0,
                 "range_to_cutoff": high / low - 1.0,
                 "minutes_since_last_trade": (retrieved - observed_utc).total_seconds() / 60.0,
-                "expiration_date": expiration_by_contract[code].isoformat(),
-                **base,
             }
         )
+        records.append(record)
     return records
 
 
@@ -432,6 +457,11 @@ def build_pre_moex_observation(
         delay_minutes = quote.get("quote_delay_minutes")
         if type(delay_minutes) is not int or delay_minutes != CME_QUOTE_DELAY_MINUTES:
             raise ExternalDataError("CME quote delay semantics are absent or ambiguous")
+        has_price_observation = quote.get("has_price_observation")
+        if type(has_price_observation) is not bool:
+            raise ExternalDataError("CME price observation semantics are absent or ambiguous")
+        if not has_price_observation:
+            continue
         timestamp = parse_datetime(
             quote.get("observation_timestamp_utc"), field="observation_timestamp_utc"
         )
