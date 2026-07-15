@@ -465,7 +465,11 @@ def build_pre_moex_observation(
         timestamp = parse_datetime(
             quote.get("observation_timestamp_utc"), field="observation_timestamp_utc"
         )
-        if timestamp + CME_QUOTE_DELAY <= cutoff:
+        retrieved = parse_datetime(quote.get("retrieved_at_utc"), field="retrieved_at_utc")
+        available_at = timestamp + CME_QUOTE_DELAY
+        if available_at > retrieved:
+            raise ExternalDataError("CME quote was not visible at retrieval time")
+        if available_at <= cutoff:
             candidates.append(quote)
     if not candidates:
         raise ExternalDataError(
