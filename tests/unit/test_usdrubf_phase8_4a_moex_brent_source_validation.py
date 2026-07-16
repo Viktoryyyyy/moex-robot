@@ -5,6 +5,7 @@ import inspect
 import json
 from dataclasses import fields, replace
 from datetime import date, datetime, timedelta, timezone
+from functools import partial
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -12,6 +13,7 @@ import pandas as pd
 import pytest
 
 from moex_research.external_data import moex_brent_history as brent
+from moex_research.external_data.models import ExternalDataError
 from moex_research.runners import (
     usdrubf_phase8_4a_moex_brent_source_validation as runner,
 )
@@ -204,6 +206,35 @@ def test_all_six_immutable_evidence_hashes_are_verified(
     request.phase83_gate_results_path.write_text("{}\n", encoding="utf-8")
     with pytest.raises(runner.Phase84ABrentSourceValidationError, match="hash mismatch"):
         runner.verify_immutable_inputs(request)
+
+
+@pytest.mark.parametrize("mutation", ["missing", "altered"])
+def test_retry_policy_mismatch_fails_before_network_or_output_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    request, hashes = _write_inputs(tmp_path)
+    monkeypatch.setattr(runner, "EXPECTED_INPUT_SHA256", hashes)
+    contract = json.loads(request.experiment_contract_path.read_text(encoding="utf-8"))
+    if mutation == "missing":
+        contract.pop("transient_http_retry_policy")
+    else:
+        contract["transient_http_retry_policy"]["retry_delays_seconds"] = [0.0]
+    tampered_contract = tmp_path / f"{mutation}_retry_policy.json"
+    tampered_contract.write_text(json.dumps(contract) + "\n", encoding="utf-8")
+    request = replace(request, experiment_contract_path=tampered_contract)
+    transport = SyntheticMOEX()
+
+    with pytest.raises(
+        runner.Phase84ABrentSourceValidationError,
+        match="transient HTTP retry policy mismatch",
+    ):
+        runner.run_source_validation(
+            request, transport=transport, clock=lambda: RETRIEVED
+        )
+    assert transport.urls == []
+    assert not request.output_dir.exists()
 
 
 def test_controlled_synthetic_run_preserves_identity_PIT_roll_and_artifacts(
@@ -442,6 +473,129 @@ def test_injected_clock_is_called_once_after_every_history_metadata_and_candle_f
     assert universe["metadata_retrieved_at_utc"].notna().all()
     assert candles["retrieved_at_utc"].nunique() == len(candles)
     assert matrix["brent_retrieved_at_utc"].nunique() == len(matrix)
+
+
+def test_production_runner_defaults_to_phase84a_retrying_brent_transport() -> None:
+    assert inspect.signature(runner.build_brent_pit_matrix).parameters[
+        "transport"
+    ].default is brent.fetch_brent_bytes_with_retry
+    assert inspect.signature(runner.run_source_validation).parameters[
+        "transport"
+    ].default is brent.fetch_brent_bytes_with_retry
+
+
+def test_retry_success_permits_matrix_construction_without_real_sleep() -> None:
+    synthetic = SyntheticMOEX()
+    calls: list[str] = []
+    sleeps: list[float] = []
+
+    def one_attempt(url: str) -> bytes:
+        calls.append(url)
+        if len(calls) == 1:
+            raise ExternalDataError(brent.TRANSIENT_HTTP_ERROR_MESSAGE)
+        return synthetic(url)
+
+    retrying = partial(
+        brent.fetch_brent_bytes_with_retry,
+        transport=one_attempt,
+        sleeper=sleeps.append,
+    )
+    eligible = _dataset().iloc[:1][[*runner.IDENTITY_COLUMNS, "prior_trade_date"]]
+    universe, candles, matrix, _ = runner.build_brent_pit_matrix(
+        eligible, transport=retrying, clock=lambda: RETRIEVED
+    )
+    assert len(universe) == 2
+    assert len(candles) == len(matrix) == 1
+    assert sleeps == [0.5]
+
+
+def test_exhausted_metadata_retry_reports_route_attempts_and_blocker() -> None:
+    synthetic = SyntheticMOEX()
+    calls: list[str] = []
+    sleeps: list[float] = []
+
+    def one_attempt(url: str) -> bytes:
+        calls.append(url)
+        if urlsplit(url).path.startswith("/iss/securities/"):
+            raise ExternalDataError(brent.TRANSIENT_HTTP_ERROR_MESSAGE)
+        return synthetic(url)
+
+    retrying = partial(
+        brent.fetch_brent_bytes_with_retry,
+        transport=one_attempt,
+        sleeper=sleeps.append,
+    )
+    eligible = _dataset().iloc[:1][[*runner.IDENTITY_COLUMNS, "prior_trade_date"]]
+    route = brent.build_security_description_url("BRU4")
+    with pytest.raises(
+        runner.Phase84ABrentSourceValidationError, match="attempts=5"
+    ) as raised:
+        runner.build_brent_pit_matrix(
+            eligible, transport=retrying, clock=lambda: RETRIEVED
+        )
+    assert route in str(raised.value)
+    assert raised.value.blocker == "expired_contract_universe_not_reproducible"
+    assert [url for url in calls if url == route] == [route] * 5
+    assert sleeps == [0.5, 1.0, 2.0, 4.0]
+
+
+def test_exhausted_candle_retry_reports_exact_route_contract_date_without_fallback() -> None:
+    synthetic = SyntheticMOEX()
+    calls: list[str] = []
+    sleeps: list[float] = []
+
+    def one_attempt(url: str) -> bytes:
+        calls.append(url)
+        if urlsplit(url).path.endswith("/candles.json"):
+            raise ExternalDataError(brent.TRANSIENT_HTTP_ERROR_MESSAGE)
+        return synthetic(url)
+
+    retrying = partial(
+        brent.fetch_brent_bytes_with_retry,
+        transport=one_attempt,
+        sleeper=sleeps.append,
+    )
+    eligible = _dataset().iloc[:1][[*runner.IDENTITY_COLUMNS, "prior_trade_date"]]
+    prior_date = date.fromisoformat(eligible.iloc[0]["prior_trade_date"])
+    route = brent.build_candle_url("BRU4", prior_date)
+    with pytest.raises(
+        runner.Phase84ABrentSourceValidationError, match="attempts=5"
+    ) as raised:
+        runner.build_brent_pit_matrix(
+            eligible, transport=retrying, clock=lambda: RETRIEVED
+        )
+    assert route in str(raised.value)
+    assert "BRU4" in str(raised.value)
+    assert prior_date.isoformat() in str(raised.value)
+    assert raised.value.blocker == "expired_contract_candles_not_available"
+    candle_calls = [url for url in calls if urlsplit(url).path.endswith("/candles.json")]
+    assert candle_calls == [route] * 5
+    assert not any("BRN6" in url for url in candle_calls)
+    assert sleeps == [0.5, 1.0, 2.0, 4.0]
+
+
+def test_exhausted_retry_does_not_create_output_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request, hashes = _write_inputs(tmp_path)
+    monkeypatch.setattr(runner, "EXPECTED_INPUT_SHA256", hashes)
+    synthetic = SyntheticMOEX()
+
+    def one_attempt(url: str) -> bytes:
+        if urlsplit(url).path.startswith("/iss/securities/"):
+            raise ExternalDataError(brent.TRANSIENT_HTTP_ERROR_MESSAGE)
+        return synthetic(url)
+
+    retrying = partial(
+        brent.fetch_brent_bytes_with_retry,
+        transport=one_attempt,
+        sleeper=lambda _: None,
+    )
+    with pytest.raises(runner.Phase84ABrentSourceValidationError, match="attempts=5"):
+        runner.run_source_validation(
+            request, transport=retrying, clock=lambda: RETRIEVED
+        )
+    assert not request.output_dir.exists()
 
 
 @pytest.mark.parametrize(

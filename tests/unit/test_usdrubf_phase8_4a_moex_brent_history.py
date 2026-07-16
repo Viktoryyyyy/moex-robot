@@ -3,11 +3,13 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import date, datetime, timedelta, timezone
+from functools import partial
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
 from moex_research.external_data import moex_brent_history as brent
+from moex_research.external_data.models import ExternalDataError
 
 
 RETRIEVED = datetime(2026, 7, 16, 12, 0, tzinfo=timezone.utc)
@@ -368,3 +370,195 @@ def test_non_UTC_injected_clock_fails_closed() -> None:
             clock=lambda: datetime(2026, 7, 16, 15, 0, tzinfo=non_utc),
         )
     assert raised.value.blocker == "provenance_not_sufficient"
+
+
+def test_retry_first_attempt_success_calls_once_without_sleep() -> None:
+    calls: list[str] = []
+    sleeps: list[float] = []
+    route = brent.build_history_universe_url(AS_OF)
+
+    def transport(url: str) -> bytes:
+        calls.append(url)
+        return _history_payload()
+
+    assert brent.fetch_brent_bytes_with_retry(
+        route, transport=transport, sleeper=sleeps.append
+    ) == _history_payload()
+    assert calls == [route]
+    assert sleeps == []
+
+
+def test_retry_one_transient_failure_then_success() -> None:
+    calls: list[str] = []
+    sleeps: list[float] = []
+    route = brent.build_security_description_url("BRQ4")
+
+    def transport(url: str) -> bytes:
+        calls.append(url)
+        if len(calls) == 1:
+            raise ExternalDataError(brent.TRANSIENT_HTTP_ERROR_MESSAGE)
+        return _metadata_payload()
+
+    assert brent.fetch_brent_bytes_with_retry(
+        route, transport=transport, sleeper=sleeps.append
+    ) == _metadata_payload()
+    assert calls == [route, route]
+    assert sleeps == [0.5]
+
+
+def test_retry_four_transient_failures_then_success_uses_exact_schedule_and_route() -> None:
+    calls: list[str] = []
+    sleeps: list[float] = []
+    route = brent.build_candle_url("BRQ4", AS_OF)
+
+    def transport(url: str) -> bytes:
+        calls.append(url)
+        if len(calls) < 5:
+            raise ExternalDataError(brent.TRANSIENT_HTTP_ERROR_MESSAGE)
+        return _candle_payload()
+
+    assert brent.fetch_brent_bytes_with_retry(
+        route, transport=transport, sleeper=sleeps.append
+    ) == _candle_payload()
+    assert calls == [route] * 5
+    assert sleeps == [0.5, 1.0, 2.0, 4.0]
+
+
+def test_retry_five_transient_failures_preserves_cause_route_and_attempt_count() -> None:
+    calls: list[str] = []
+    sleeps: list[float] = []
+    errors: list[ExternalDataError] = []
+    route = brent.build_security_description_url("BRQ4")
+
+    def transport(url: str) -> bytes:
+        calls.append(url)
+        error = ExternalDataError(brent.TRANSIENT_HTTP_ERROR_MESSAGE)
+        errors.append(error)
+        raise error
+
+    with pytest.raises(
+        ExternalDataError, match=r"official route=.*BRQ4.*attempts=5"
+    ) as raised:
+        brent.fetch_brent_bytes_with_retry(
+            route, transport=transport, sleeper=sleeps.append
+        )
+    assert calls == [route] * 5
+    assert sleeps == [0.5, 1.0, 2.0, 4.0]
+    assert raised.value.__cause__ is errors[-1]
+
+
+def test_empty_response_error_is_not_retried() -> None:
+    calls: list[str] = []
+    sleeps: list[float] = []
+
+    def transport(url: str) -> bytes:
+        calls.append(url)
+        raise ExternalDataError("external-data response is empty")
+
+    with pytest.raises(ExternalDataError, match="response is empty"):
+        brent.fetch_brent_bytes_with_retry(
+            brent.build_history_universe_url(AS_OF),
+            transport=transport,
+            sleeper=sleeps.append,
+        )
+    assert len(calls) == 1
+    assert sleeps == []
+
+
+def test_schema_failure_after_successful_transport_is_not_retried() -> None:
+    calls: list[str] = []
+    sleeps: list[float] = []
+    payload = _history_payload(columns=["SECID"])
+
+    def transport(url: str) -> bytes:
+        calls.append(url)
+        return payload
+
+    retrying = partial(
+        brent.fetch_brent_bytes_with_retry,
+        transport=transport,
+        sleeper=sleeps.append,
+    )
+    with pytest.raises(brent.BrentHistoryError, match="missing required columns"):
+        brent.enumerate_brent_contract_identities(AS_OF, transport=retrying)
+    assert len(calls) == 1
+    assert sleeps == []
+
+
+def test_semantic_brent_history_error_is_not_retried() -> None:
+    calls: list[str] = []
+    sleeps: list[float] = []
+    semantic_error = brent.BrentHistoryError("semantic failure")
+
+    def transport(url: str) -> bytes:
+        calls.append(url)
+        raise semantic_error
+
+    with pytest.raises(brent.BrentHistoryError) as raised:
+        brent.fetch_brent_bytes_with_retry(
+            brent.build_history_universe_url(AS_OF),
+            transport=transport,
+            sleeper=sleeps.append,
+        )
+    assert raised.value is semantic_error
+    assert len(calls) == 1
+    assert sleeps == []
+
+
+def test_retry_success_retains_payload_sha_and_captures_clock_only_after_success() -> None:
+    events: list[str] = []
+    sleeps: list[float] = []
+    calls = 0
+    payload = _history_payload()
+
+    def transport(_: str) -> bytes:
+        nonlocal calls
+        calls += 1
+        events.append(f"transport_{calls}")
+        if calls == 1:
+            raise ExternalDataError(brent.TRANSIENT_HTTP_ERROR_MESSAGE)
+        return payload
+
+    def clock() -> datetime:
+        events.append("clock")
+        return RETRIEVED
+
+    retrying = partial(
+        brent.fetch_brent_bytes_with_retry,
+        transport=transport,
+        sleeper=sleeps.append,
+    )
+    identities = brent.enumerate_brent_contract_identities(
+        AS_OF, transport=retrying, clock=clock
+    )
+    assert events == ["transport_1", "transport_2", "clock"]
+    assert sleeps == [0.5]
+    assert identities[0].enumeration_retrieved_at_utc == RETRIEVED
+    assert identities[0].enumeration_raw_payload_sha256 == hashlib.sha256(
+        payload
+    ).hexdigest()
+
+
+def test_exhausted_retry_creates_no_provenance_timestamp() -> None:
+    clock_calls = 0
+    sleeps: list[float] = []
+
+    def transport(_: str) -> bytes:
+        raise ExternalDataError(brent.TRANSIENT_HTTP_ERROR_MESSAGE)
+
+    def clock() -> datetime:
+        nonlocal clock_calls
+        clock_calls += 1
+        return RETRIEVED
+
+    retrying = partial(
+        brent.fetch_brent_bytes_with_retry,
+        transport=transport,
+        sleeper=sleeps.append,
+    )
+    with pytest.raises(brent.BrentHistoryError, match="attempts=5"):
+        brent.enumerate_brent_contract_identities(
+            AS_OF, transport=retrying, clock=clock
+        )
+    assert clock_calls == 0
+    assert sleeps == [0.5, 1.0, 2.0, 4.0]

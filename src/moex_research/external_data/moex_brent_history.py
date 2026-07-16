@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -13,6 +14,7 @@ from .models import ExternalDataError, fetch_bytes, parse_json_object, raw_paylo
 
 
 HttpTransport = Callable[[str], bytes]
+Sleeper = Callable[[float], None]
 UtcClock = Callable[[], datetime]
 
 SOURCE_ID: Final[str] = "moex_brent_futures_daily"
@@ -33,6 +35,14 @@ CANDLE_ROUTE_TEMPLATE: Final[str] = (
 )
 SOURCE_REVISION_STATUS: Final[str] = "official_iss_current_revision"
 HISTORICAL_MODEL_USE_STATUS: Final[str] = "source_validation_only"
+TRANSIENT_HTTP_ERROR_MESSAGE: Final[str] = "external-data request failed"
+BRENT_HTTP_MAX_ATTEMPTS: Final[int] = 5
+BRENT_HTTP_RETRY_DELAYS_SECONDS: Final[tuple[float, ...]] = (
+    0.5,
+    1.0,
+    2.0,
+    4.0,
+)
 _SHA256_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
 _EXPLICIT_CODE_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Z0-9_]{2,32}$")
 _MUTABLE_TOKENS: Final[tuple[str, ...]] = (
@@ -56,6 +66,29 @@ class BrentHistoryError(ValueError):
     ) -> None:
         super().__init__(message)
         self.blocker = blocker
+
+
+def fetch_brent_bytes_with_retry(
+    url: str,
+    *,
+    transport: HttpTransport = fetch_bytes,
+    sleeper: Sleeper = time.sleep,
+) -> bytes:
+    """Fetch one Phase 8.4A MOEX Brent route with bounded transient retries."""
+
+    for attempt in range(1, BRENT_HTTP_MAX_ATTEMPTS + 1):
+        try:
+            return transport(url)
+        except ExternalDataError as exc:
+            if exc.args != (TRANSIENT_HTTP_ERROR_MESSAGE,):
+                raise
+            if attempt == BRENT_HTTP_MAX_ATTEMPTS:
+                raise ExternalDataError(
+                    f"{TRANSIENT_HTTP_ERROR_MESSAGE}; official route={url}; "
+                    f"attempts={BRENT_HTTP_MAX_ATTEMPTS}"
+                ) from exc
+            sleeper(BRENT_HTTP_RETRY_DELAYS_SECONDS[attempt - 1])
+    raise AssertionError("unreachable Brent HTTP retry state")
 
 
 def utc_now() -> datetime:
@@ -350,7 +383,7 @@ def parse_history_universe_response(
 def enumerate_brent_contract_identities(
     as_of_date: date,
     *,
-    transport: HttpTransport = fetch_bytes,
+    transport: HttpTransport = fetch_brent_bytes_with_retry,
     clock: UtcClock = utc_now,
 ) -> list[EnumeratedContractIdentity]:
     identities: list[EnumeratedContractIdentity] = []
@@ -368,7 +401,8 @@ def enumerate_brent_contract_identities(
             payload = transport(route)
         except Exception as exc:
             raise BrentHistoryError(
-                "official historical contract enumeration request failed",
+                "official historical contract enumeration request failed: "
+                f"{exc}",
                 blocker="expired_contract_universe_not_reproducible",
             ) from exc
         retrieved_at_utc = _utc(clock())
@@ -538,7 +572,7 @@ def parse_contract_metadata_response(
 def load_contract_metadata(
     identity: EnumeratedContractIdentity,
     *,
-    transport: HttpTransport = fetch_bytes,
+    transport: HttpTransport = fetch_brent_bytes_with_retry,
     clock: UtcClock = utc_now,
 ) -> BrentContract:
     route = build_security_description_url(identity.contract_code)
@@ -547,7 +581,8 @@ def load_contract_metadata(
         payload = transport(route)
     except Exception as exc:
         raise BrentHistoryError(
-            "official exact-contract metadata request failed",
+            "official exact-contract metadata request failed: "
+            f"{exc}",
             blocker="expired_contract_universe_not_reproducible",
         ) from exc
     retrieved_at_utc = _utc(clock())
@@ -721,7 +756,7 @@ def load_daily_candle(
     contract: BrentContract,
     trade_date: date,
     *,
-    transport: HttpTransport = fetch_bytes,
+    transport: HttpTransport = fetch_brent_bytes_with_retry,
     clock: UtcClock = utc_now,
 ) -> BrentDailyCandle:
     route = build_candle_url(contract.contract_code, trade_date)
@@ -735,7 +770,8 @@ def load_daily_candle(
         payload = transport(route)
     except Exception as exc:
         raise BrentHistoryError(
-            "official explicit-contract candle request failed",
+            "official explicit-contract candle request failed: "
+            f"{exc}",
             blocker="expired_contract_candles_not_available",
         ) from exc
     retrieved_at_utc = _utc(clock())

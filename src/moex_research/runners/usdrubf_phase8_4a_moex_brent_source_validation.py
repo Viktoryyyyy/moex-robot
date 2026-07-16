@@ -12,20 +12,24 @@ from typing import Any, Final
 
 import pandas as pd
 
-from moex_research.external_data.models import HttpTransport, fetch_bytes
+from moex_research.external_data.models import HttpTransport
 from moex_research.external_data.moex_brent_history import (
     ASSET_CODE,
     BOARD_ID,
+    BRENT_HTTP_MAX_ATTEMPTS,
+    BRENT_HTTP_RETRY_DELAYS_SECONDS,
     CANDLE_ROUTE_TEMPLATE,
     HISTORY_ROUTE,
     HISTORICAL_MODEL_USE_STATUS,
     MOEX_ISS_HOST,
     SECURITY_DESCRIPTION_ROUTE_TEMPLATE,
     SOURCE_ID,
+    TRANSIENT_HTTP_ERROR_MESSAGE,
     BrentContract,
     BrentHistoryError,
     UtcClock,
     enumerate_brent_contract_identities,
+    fetch_brent_bytes_with_retry,
     load_contract_metadata,
     load_daily_candle,
     select_nearest_contract,
@@ -105,6 +109,27 @@ DECLARED_OUTPUT_ARTIFACTS: Final[tuple[str, ...]] = (
     "source_blocker_register.json",
     "gate_results.json",
 )
+EXPECTED_TRANSIENT_HTTP_RETRY_POLICY: Final[dict[str, object]] = {
+    "bounded_transient_retry_enabled": True,
+    "enabled_for_source_id": SOURCE_ID,
+    "phase_scope": "8.4A_only",
+    "maximum_total_attempts": BRENT_HTTP_MAX_ATTEMPTS,
+    "retry_delays_seconds": list(BRENT_HTTP_RETRY_DELAYS_SECONDS),
+    "random_jitter_allowed": False,
+    "same_exact_official_route_only": True,
+    "route_substitution_allowed": False,
+    "fallback_source_allowed": False,
+    "fallback_contract_allowed": False,
+    "fallback_date_allowed": False,
+    "retryable_exception": f"ExternalDataError({TRANSIENT_HTTP_ERROR_MESSAGE})",
+    "semantic_failures_retried": False,
+    "failed_attempts_enter_provenance": False,
+    "successful_payload_timestamp_policy": (
+        "one exact post-fetch UTC timestamp after successful transport return"
+    ),
+    "source_acceptance_still_requires": [f"G{index}" for index in range(1, 10)],
+    "retry_constitutes_source_fallback": False,
+}
 REQUIRED_CLI_ARGS: Final[tuple[str, ...]] = (
     "--modeling-dataset-path",
     "--dataset-manifest-path",
@@ -397,6 +422,13 @@ def _validate_experiment_contract(contract: Mapping[str, Any]) -> None:
         raise Phase84ABrentSourceValidationError("Phase 8.4A branch mismatch")
     if tuple(contract.get("runtime_artifacts", ())) != DECLARED_OUTPUT_ARTIFACTS:
         raise Phase84ABrentSourceValidationError("Phase 8.4A artifact contract mismatch")
+    if (
+        contract.get("transient_http_retry_policy")
+        != EXPECTED_TRANSIENT_HTTP_RETRY_POLICY
+    ):
+        raise Phase84ABrentSourceValidationError(
+            "Phase 8.4A transient HTTP retry policy mismatch"
+        )
 
 
 def _eligible_identities(dataset: pd.DataFrame) -> pd.DataFrame:
@@ -509,7 +541,7 @@ def _contract_for_identity(
 def build_brent_pit_matrix(
     eligible: pd.DataFrame,
     *,
-    transport: HttpTransport = fetch_bytes,
+    transport: HttpTransport = fetch_brent_bytes_with_retry,
     clock: UtcClock = utc_now,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     metadata_cache: dict[str, BrentContract] = {}
@@ -542,7 +574,7 @@ def build_brent_pit_matrix(
             except BrentHistoryError as exc:
                 raise Phase84ABrentSourceValidationError(
                     str(exc), blocker=exc.blocker
-                ) from None
+                ) from exc
             universe_by_date[prior_date] = contracts
             for contract in contracts:
                 universe_observations.setdefault(contract.contract_code, []).append(contract)
@@ -563,7 +595,9 @@ def build_brent_pit_matrix(
                 prior_trade_date=prior_date,
             )
         except BrentHistoryError as exc:
-            raise Phase84ABrentSourceValidationError(str(exc), blocker=exc.blocker) from None
+            raise Phase84ABrentSourceValidationError(
+                str(exc), blocker=exc.blocker
+            ) from exc
         changed = previous_code is not None and previous_code != selected.contract_code
         days_to_expiration = (selected.expiration_date - target_date).days
         matrix_rows.append(
@@ -1007,7 +1041,7 @@ def _write_exact_artifacts(output_dir: Path, payloads: Mapping[str, object]) -> 
 def run_source_validation(
     request: Phase84ARequest,
     *,
-    transport: HttpTransport = fetch_bytes,
+    transport: HttpTransport = fetch_brent_bytes_with_retry,
     clock: UtcClock = utc_now,
 ) -> Phase84AResult:
     _validate_request(request)

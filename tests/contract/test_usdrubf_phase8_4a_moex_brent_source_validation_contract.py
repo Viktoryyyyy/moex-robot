@@ -212,3 +212,38 @@ def test_per_payload_post_fetch_timestamp_policy_is_fail_closed() -> None:
     assert "metadata_retrieved_at_utc" in required
     assert "retrieved_at_utc" in _contract()["normalized_candle_required_fields"]
     assert "post-fetch UTC clock timestamp" in _contract()["gates"]["G7_provenance"]
+
+
+def test_bounded_transient_http_retry_policy_is_exact_and_not_a_fallback() -> None:
+    policy = _contract()["transient_http_retry_policy"]
+    assert policy == {
+        "bounded_transient_retry_enabled": True,
+        "enabled_for_source_id": "moex_brent_futures_daily",
+        "phase_scope": "8.4A_only",
+        "maximum_total_attempts": 5,
+        "retry_delays_seconds": [0.5, 1.0, 2.0, 4.0],
+        "random_jitter_allowed": False,
+        "same_exact_official_route_only": True,
+        "route_substitution_allowed": False,
+        "fallback_source_allowed": False,
+        "fallback_contract_allowed": False,
+        "fallback_date_allowed": False,
+        "retryable_exception": "ExternalDataError(external-data request failed)",
+        "semantic_failures_retried": False,
+        "failed_attempts_enter_provenance": False,
+        "successful_payload_timestamp_policy": (
+            "one exact post-fetch UTC timestamp after successful transport return"
+        ),
+        "source_acceptance_still_requires": [
+            "G1",
+            "G2",
+            "G3",
+            "G4",
+            "G5",
+            "G6",
+            "G7",
+            "G8",
+            "G9",
+        ],
+        "retry_constitutes_source_fallback": False,
+    }
