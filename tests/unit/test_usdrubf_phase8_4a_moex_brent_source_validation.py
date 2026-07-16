@@ -500,3 +500,46 @@ def test_G7_fails_for_malformed_exact_payload_provenance_timestamp(
     assert gates["G9_final_source_readiness"]["blocker_classification"] == (
         "provenance_not_sufficient"
     )
+
+
+def test_G7_fails_when_one_metadata_payload_key_maps_to_two_valid_timestamps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request, _ = _run(tmp_path, monkeypatch)
+    universe = pd.read_parquet(
+        request.output_dir / "brent_contract_universe.parquet"
+    )
+    first_code = universe.loc[0, "contract_code"]
+    repeated = universe.index[universe["contract_code"].eq(first_code)]
+    assert len(repeated) > 1
+    universe.loc[repeated[0], "metadata_retrieved_at_utc"] = (
+        pd.Timestamp(RETRIEVED) + pd.Timedelta(seconds=1)
+    )
+    candles = pd.read_parquet(
+        request.output_dir / "brent_daily_candles_normalized.parquet"
+    )
+    matrix = pd.read_parquet(
+        request.output_dir / "brent_pit_acceptance_matrix.parquet"
+    )
+    eligible = _dataset().loc[:, [*runner.IDENTITY_COLUMNS, "prior_trade_date"]]
+    validation = eligible.iloc[-320:][list(runner.IDENTITY_COLUMNS)].reset_index(
+        drop=True
+    )
+    gates = runner.evaluate_gates(
+        immutable_inputs_verified=True,
+        phase83_verified=True,
+        eligible=eligible,
+        validation=validation,
+        universe=universe,
+        candles=candles,
+        matrix=matrix,
+        coverage=pd.read_csv(request.output_dir / "coverage_by_source.csv"),
+        rolls=pd.read_csv(request.output_dir / "contract_roll_diagnostics.csv"),
+        route_validation=json.loads(
+            (request.output_dir / "official_route_validation.json").read_text()
+        ),
+    )
+    assert gates["G7_provenance"]["passed"] is False
+    assert gates["G9_final_source_readiness"]["blocker_classification"] == (
+        "provenance_not_sufficient"
+    )

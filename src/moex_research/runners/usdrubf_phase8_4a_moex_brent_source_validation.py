@@ -851,8 +851,12 @@ def evaluate_gates(
             str(row.contract_code),
             str(row.metadata_route),
             str(row.metadata_raw_payload_sha256),
+            _timestamp_key(row.metadata_retrieved_at_utc),
         )
         for row in universe.itertuples(index=False)
+    }
+    metadata_payload_keys = {
+        record[:3] for record in metadata_provenance_records
     }
     matrix_metadata_records = {
         (
@@ -878,7 +882,9 @@ def evaluate_gates(
         and metadata_provenance_valid
         and candle_provenance_valid
         and None not in {record[-1] for record in matrix_candle_records}
-        and matrix_metadata_records.issubset(metadata_provenance_records)
+        and None not in {record[-1] for record in metadata_provenance_records}
+        and len(metadata_provenance_records) == len(metadata_payload_keys)
+        and matrix_metadata_records.issubset(metadata_payload_keys)
         and matrix_candle_records.issubset(candle_provenance_records)
         and matrix["brent_contract_metadata_route"]
         .ne(matrix["brent_candle_route"])
