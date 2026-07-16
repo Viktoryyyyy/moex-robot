@@ -1,0 +1,371 @@
+{
+  "experiment_identity": {
+    "contract_id": "usdrubf_phase8_5_brent_incremental_value_v1",
+    "contract_version": "1.0",
+    "project": "MOEX Bot",
+    "phase": "8.5",
+    "lane": "ema_3_19_ai",
+    "task_id": "ema_3_19_ai_market_phase_phase_8_5_brent_incremental_value_experiment_v1",
+    "execution_mode": "browser_chatgpt_github_direct",
+    "status": "repository_implementation_only"
+  },
+  "approved_branch": "research/ema-3-19-ai/phase-8-5-brent-incremental-value",
+  "approved_file_scope": {
+    "create_only": [
+      "contracts/experiments/usdrubf_phase8_5_brent_incremental_value_v1.json",
+      "src/moex_research/features/brent_incremental_features.py",
+      "src/moex_research/runners/usdrubf_phase8_5_brent_incremental_value.py",
+      "tests/unit/test_usdrubf_phase8_5_brent_incremental_features.py",
+      "tests/unit/test_usdrubf_phase8_5_brent_incremental_value.py",
+      "tests/contract/test_usdrubf_phase8_5_brent_incremental_value_contract.py"
+    ],
+    "exact_file_count": 6,
+    "maximum_changed_file_count": 6,
+    "existing_files_to_modify": [],
+    "scope_widening_allowed": false
+  },
+  "accepted_phase8_4a_input": {
+    "run_id": "phase8_4a_moex_brent_source_validation_20260716_v2",
+    "source_git_commit_sha": "0e25691f8c665052c2d44b7bf66d8ef053543149",
+    "source_id": "moex_brent_futures_daily",
+    "status": "candidate_for_phase8_5",
+    "eligible_identities": 472,
+    "validation_identities": 320,
+    "explicit_candles": 472,
+    "unique_explicit_contracts": 29,
+    "expired_explicit_contracts": 22,
+    "all_G1_through_G9_passed": true,
+    "blocker_classification": null,
+    "existing_registry_modified": false,
+    "promotion_authorized": false,
+    "runtime_must_not_be_repeated": true
+  },
+  "upstream_sha256": {
+    "modeling_dataset": "fdd626f9e0522c6bbb653f9e17fbbbeef7ded77f57ff187b35246a2458d55d00",
+    "dataset_manifest": "fcbbb5e5ed0549c5c6f397e34f203f01836271f6bf471f90cab5a2fd64ace082",
+    "feature_schema": "8f08802c7fb0a4cc43ab4ba072ee22ff9edd92fe8d674ea0515545d20d143238",
+    "m0_validation_predictions": "9769d00a49adeb54c016d965387774e46a3e09e09f895aa61d48a90bbf3568cf",
+    "brent_contract_universe": "0b5b27d686cb99866a22ddbf52ff9713e25f8ac88531ac64b96b49361775bb83",
+    "brent_daily_candles_normalized": "851f965944bcd60ff9d97e75d305fd43a6bb8eb00851e1da346adb07e139dff3",
+    "brent_pit_acceptance_matrix": "78b60c9542fc08667267849b9ce03fdf161d2dc971fe99e1ab9d6a8d56266c43",
+    "contract_roll_diagnostics": "cdeae7dc34f8845321bf3b4ca9279f5d50bf41464812fd8698e36dae47fc71dd",
+    "coverage_by_source": "261c8bbd9235f8f5a5249d43e6195bf7ee44a29012fc57dbcb1d836be4cd3ded",
+    "phase84a_gate_results": "aceaefb4d2e2a236539dd527c98464ddd1ea6bf5f1cdb8121662e1ce087f9c4c",
+    "phase84a_input_identity": "3fa20b2daf45f196937064b5f1cc6a58b8009e544d6141e32a77d841d68b65ae",
+    "official_route_validation": "e5f66ab37a270ed443ad513b7a84da249e9e9c7f032c6a194c7c056e70540fbe",
+    "source_blocker_register": "60b6742ddaf7b3dde12c5128af2a2b765d3e29b57ec904ffaa97f301830fe946"
+  },
+  "source_acceptance_requirements": {
+    "all_thirteen_hashes_verified_before_feature_construction": true,
+    "phase8_4a_source_git_sha_must_match": true,
+    "phase8_4a_G1_through_G9_must_pass": true,
+    "blocker_classification_must_be_null": true,
+    "source_status_must_equal": "candidate_for_phase8_5",
+    "registry_modification_must_be_false": true,
+    "promotion_authorization_must_be_false": true,
+    "eligible_coverage": "472/472",
+    "validation_coverage": "320/320",
+    "PIT_identity_order": "exact frozen Phase 6 order",
+    "explicit_prior_session_candles": "one per eligible identity",
+    "network_access_allowed": false,
+    "source_artifact_regeneration_allowed": false,
+    "source_artifact_modification_allowed": false
+  },
+  "identity_contract": {
+    "eligible_identities": 472,
+    "validation_identities": 320,
+    "instrument": "forts.usdrubf",
+    "target_source": "manual_phase_labels_v1",
+    "class_order": [
+      "B",
+      "S",
+      "OUT"
+    ],
+    "identity_columns": [
+      "target_trade_date",
+      "target_instrument_id"
+    ],
+    "join": "exact one-to-one identity join preserving frozen Phase 6 order",
+    "brent_trade_date_rule": "brent_trade_date == prior_trade_date",
+    "forward_fill_allowed": false,
+    "backward_fill_allowed": false,
+    "interpolation_allowed": false,
+    "other_contract_imputation_allowed": false
+  },
+  "frozen_protocol": {
+    "reused_from_phase": "8.3_unchanged",
+    "splitter": {
+      "type": "sklearn.model_selection.TimeSeriesSplit",
+      "n_splits": 5,
+      "test_size": 64,
+      "gap": 0
+    },
+    "estimator": {
+      "type": "sklearn.linear_model.LogisticRegression",
+      "C": 1.0,
+      "class_weight": "balanced",
+      "solver": "lbfgs",
+      "max_iter": 1000
+    },
+    "numeric_preprocessing": [
+      "SimpleImputer(strategy=median)",
+      "StandardScaler"
+    ],
+    "categorical_preprocessing": [
+      "SimpleImputer(strategy=most_frequent)",
+      "OneHotEncoder(handle_unknown=ignore)"
+    ],
+    "preprocessing_fit_scope": "each_training_fold_only",
+    "training_rows_precede_validation_rows": true,
+    "each_training_fold_contains_all_classes": true,
+    "model_family_change_allowed": false,
+    "hyperparameter_search_allowed": false,
+    "threshold_optimization_allowed": false,
+    "calibration_allowed": false,
+    "label_change_allowed": false,
+    "fold_change_allowed": false,
+    "feature_selection_search_allowed": false,
+    "target_resampling_allowed": false,
+    "post_result_feature_modification_allowed": false
+  },
+  "m0_internal_features": {
+    "numeric": [
+      "session_index",
+      "days_since_prior_trade_date",
+      "lag1_close_return_1d",
+      "lag1_intraday_return",
+      "rolling_past_return_mean",
+      "rolling_past_return_std",
+      "lag1_hl_range_pct",
+      "rolling_past_hl_range_mean",
+      "rolling_past_hl_range_std",
+      "lag1_volume",
+      "lag1_value",
+      "lag1_num_trades",
+      "rolling_past_volume_mean",
+      "lag1_ema_3",
+      "lag1_ema_19",
+      "lag1_ema_3_19_spread"
+    ],
+    "categorical": [
+      "lag1_ema_3_19_state"
+    ]
+  },
+  "brent_feature_definitions": {
+    "ext_brent_log_close": {
+      "block": "PRICE_ACTION_BLOCK",
+      "formula": "natural_log(prior_session_explicit_contract_close)"
+    },
+    "ext_brent_intraday_return": {
+      "block": "PRICE_ACTION_BLOCK",
+      "formula": "(close / open) - 1"
+    },
+    "ext_brent_range_pct": {
+      "block": "PRICE_ACTION_BLOCK",
+      "formula": "(high - low) / open"
+    },
+    "ext_brent_close_location": {
+      "block": "PRICE_ACTION_BLOCK",
+      "formula": "(close - low) / (high - low); 0.5 when high == low"
+    },
+    "ext_log1p_brent_volume": {
+      "block": "ACTIVITY_BLOCK",
+      "formula": "log1p(volume)"
+    },
+    "ext_log1p_brent_value": {
+      "block": "ACTIVITY_BLOCK",
+      "formula": "log1p(value)"
+    }
+  },
+  "feature_restrictions": {
+    "exact_feature_count": 6,
+    "authorized_features": [
+      "ext_brent_log_close",
+      "ext_brent_intraday_return",
+      "ext_brent_range_pct",
+      "ext_brent_close_location",
+      "ext_log1p_brent_volume",
+      "ext_log1p_brent_value"
+    ],
+    "prior_session_explicit_contract_only": true,
+    "target_or_probability_feature_allowed": false,
+    "contract_or_previous_contract_code_feature_allowed": false,
+    "date_encoding_feature_allowed": false,
+    "retrieval_or_provenance_feature_allowed": false,
+    "roll_or_expiration_feature_allowed": false,
+    "target_day_candle_allowed": false,
+    "continuous_ticker_allowed": false,
+    "cross_contract_return_allowed": false,
+    "back_adjusted_price_allowed": false,
+    "ruonia_or_key_rate_feature_allowed": false,
+    "phase8_3_external_feature_allowed": false
+  },
+  "matrix_inventory": {
+    "E0_FROZEN_PHASE7_2_CONTROL": {
+      "role": "immutable_historical_control",
+      "refit": false,
+      "recalibration": false,
+      "threshold_change": false,
+      "acceptance_eligible": false
+    },
+    "E1_M0_PLUS_BRENT_FULL": {
+      "role": "sole_acceptance_candidate",
+      "internal_features": "all frozen M0 internal features",
+      "brent_features": "all six declared Brent features",
+      "acceptance_eligible": true
+    },
+    "E2_M0_PLUS_BRENT_PRICE_ACTION": {
+      "role": "diagnostic_ablation",
+      "internal_features": "all frozen M0 internal features",
+      "brent_features": [
+        "ext_brent_log_close",
+        "ext_brent_intraday_return",
+        "ext_brent_range_pct",
+        "ext_brent_close_location"
+      ],
+      "acceptance_eligible": false
+    },
+    "E3_M0_PLUS_BRENT_ACTIVITY": {
+      "role": "diagnostic_ablation",
+      "internal_features": "all frozen M0 internal features",
+      "brent_features": [
+        "ext_log1p_brent_volume",
+        "ext_log1p_brent_value"
+      ],
+      "acceptance_eligible": false
+    },
+    "E4_BRENT_ONLY": {
+      "role": "diagnostic_only",
+      "internal_features": [],
+      "brent_features": "all six declared Brent features",
+      "acceptance_eligible": false
+    }
+  },
+  "absolute_limits": {
+    "B_recall": {
+      "comparator": ">=",
+      "threshold": 0.2458904109589041
+    },
+    "zero_B_recall_fold_count": {
+      "comparator": "<=",
+      "threshold": 1.0
+    },
+    "macro_f1": {
+      "comparator": ">=",
+      "threshold": 0.37439549155317
+    },
+    "balanced_accuracy": {
+      "comparator": ">=",
+      "threshold": 0.378390605558729
+    },
+    "accuracy": {
+      "comparator": ">=",
+      "threshold": 0.38
+    },
+    "multiclass_log_loss": {
+      "comparator": "<",
+      "threshold": 1.2796950500624311
+    },
+    "fold_macro_f1_range": {
+      "comparator": "<=",
+      "threshold": 0.3436553216604367
+    },
+    "fold_macro_f1_population_standard_deviation": {
+      "comparator": "<=",
+      "threshold": 0.11025708314162237
+    },
+    "minimum_fold_macro_f1": {
+      "comparator": ">=",
+      "threshold": 0.0892156862745098
+    },
+    "S_to_OUT_rate": {
+      "comparator": "<=",
+      "threshold": 0.3774193548387097
+    },
+    "OUT_to_S_rate": {
+      "comparator": "<=",
+      "threshold": 0.49756097560975615
+    },
+    "mean_confidence_on_incorrect_predictions": {
+      "comparator": "<=",
+      "threshold": 0.7099371
+    }
+  },
+  "incremental_gates": {
+    "reused_from_phase8_3_without_relaxation": true,
+    "G1": "all four internal and all nine Phase 8.4A hashes match; exact accepted source identity, status and null blocker",
+    "G2": "472 eligible and 320 ordered validation identities; five chronological folds of 64; no loss, duplication or drift",
+    "G3": "exact six finite prior-session Brent features; exact formulas; no forbidden field or cross-contract return",
+    "G4": "exact frozen Phase 8.3 splitter, estimator and fold-local preprocessing; E0 loaded and not refitted; E1 sole acceptance candidate",
+    "G5": "E1 satisfies every unchanged Phase 8.3 absolute limit",
+    "G6": "E1 multiclass_log_loss <= E0 multiclass_log_loss - 0.01 and E1 macro_f1 >= E0 macro_f1 - 0.01",
+    "G7": "one S/OUT confusion direction improves at least 5 percent relative and neither worsens by 0.03 absolute or more",
+    "G8": "defined positive E0 inclusive 0.90-1.00 bucket gap and nonempty E1 gap <= 0.70 times E0 gap",
+    "G9": "at least three folds improve macro-F1 by 0.01; at most one degrades by more than 0.03; unchanged stability limits pass",
+    "G10": "finite SMD for every one of the six Brent features and every fold; sufficient values; no constant training-fold feature",
+    "G11": "no leakage, network, source mutation, threshold or fold change, model file, production prediction, out-of-directory write, serialization or promotion",
+    "G12": "E1 passes G1 through G11"
+  },
+  "final_status": {
+    "passed": "brent_incremental_value_supported",
+    "failed": "brent_incremental_value_not_supported",
+    "exact_failed_dimensions_required": true,
+    "diagnostic_matrices_can_authorize_acceptance": false,
+    "promotion_authorized": false
+  },
+  "declared_output_artifacts": [
+    "input_identity_verification.json",
+    "feature_matrix_inventory.json",
+    "brent_feature_definitions.json",
+    "feature_nullness_by_matrix_and_fold.csv",
+    "brent_feature_shift_by_fold.csv",
+    "fold_metrics_by_matrix.csv",
+    "aggregate_metrics_by_matrix.json",
+    "per_class_metrics_by_matrix.csv",
+    "validation_predictions_by_matrix.parquet",
+    "ablation_effects.csv",
+    "brent_feature_coefficients_by_fold.csv",
+    "gate_results.json"
+  ],
+  "artifact_policy": {
+    "exact_count": 12,
+    "undeclared_artifact_allowed": false,
+    "output_outside_explicit_output_dir_allowed": false,
+    "preexisting_output_directory_allowed": false,
+    "runtime_artifact_commit_allowed": false,
+    "model_file_allowed": false
+  },
+  "required_cli_args": [
+    "--modeling-dataset-path",
+    "--dataset-manifest-path",
+    "--feature-schema-path",
+    "--m0-validation-predictions-path",
+    "--phase8-4a-brent-contract-universe-path",
+    "--phase8-4a-brent-daily-candles-normalized-path",
+    "--phase8-4a-brent-pit-acceptance-matrix-path",
+    "--phase8-4a-contract-roll-diagnostics-path",
+    "--phase8-4a-coverage-by-source-path",
+    "--phase8-4a-gate-results-path",
+    "--phase8-4a-input-identity-verification-path",
+    "--phase8-4a-official-route-validation-path",
+    "--phase8-4a-source-blocker-register-path",
+    "--experiment-contract-path",
+    "--output-dir",
+    "--run-id",
+    "--git-commit-sha"
+  ],
+  "authority_boundary": {
+    "direct_main_write_allowed": false,
+    "conditional_merge_authorized": true,
+    "server_apply_allowed": false,
+    "real_runtime_allowed": false,
+    "real_model_fit_allowed": false,
+    "real_model_evaluation_allowed": false,
+    "model_serialization_allowed": false,
+    "model_promotion_allowed": false,
+    "strategy_promotion_allowed": false,
+    "live_prediction_allowed": false,
+    "broker_action_allowed": false,
+    "trading_allowed": false
+  }
+}
