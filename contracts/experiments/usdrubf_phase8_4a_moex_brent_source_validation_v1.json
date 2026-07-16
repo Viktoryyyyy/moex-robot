@@ -103,6 +103,40 @@
     "later_candle_allowed": false,
     "missing_prior_session_candle_policy": "fail_closed"
   },
+  "transient_http_retry_policy": {
+    "bounded_transient_retry_enabled": true,
+    "enabled_for_source_id": "moex_brent_futures_daily",
+    "phase_scope": "8.4A_only",
+    "maximum_total_attempts": 5,
+    "retry_delays_seconds": [
+      0.5,
+      1.0,
+      2.0,
+      4.0
+    ],
+    "random_jitter_allowed": false,
+    "same_exact_official_route_only": true,
+    "route_substitution_allowed": false,
+    "fallback_source_allowed": false,
+    "fallback_contract_allowed": false,
+    "fallback_date_allowed": false,
+    "retryable_exception": "ExternalDataError(external-data request failed)",
+    "semantic_failures_retried": false,
+    "failed_attempts_enter_provenance": false,
+    "successful_payload_timestamp_policy": "one exact post-fetch UTC timestamp after successful transport return",
+    "source_acceptance_still_requires": [
+      "G1",
+      "G2",
+      "G3",
+      "G4",
+      "G5",
+      "G6",
+      "G7",
+      "G8",
+      "G9"
+    ],
+    "retry_constitutes_source_fallback": false
+  },
   "retrieval_timestamp_policy": {
     "production_cli_override_allowed": false,
     "production_clock": "datetime.now(timezone.utc).replace(microsecond=0)",

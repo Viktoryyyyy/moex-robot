@@ -12,7 +12,7 @@ from typing import Any, Final
 
 import pandas as pd
 
-from moex_research.external_data.models import HttpTransport, fetch_bytes
+from moex_research.external_data.models import HttpTransport
 from moex_research.external_data.moex_brent_history import (
     ASSET_CODE,
     BOARD_ID,
@@ -26,6 +26,7 @@ from moex_research.external_data.moex_brent_history import (
     BrentHistoryError,
     UtcClock,
     enumerate_brent_contract_identities,
+    fetch_brent_bytes_with_retry,
     load_contract_metadata,
     load_daily_candle,
     select_nearest_contract,
@@ -509,7 +510,7 @@ def _contract_for_identity(
 def build_brent_pit_matrix(
     eligible: pd.DataFrame,
     *,
-    transport: HttpTransport = fetch_bytes,
+    transport: HttpTransport = fetch_brent_bytes_with_retry,
     clock: UtcClock = utc_now,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     metadata_cache: dict[str, BrentContract] = {}
@@ -542,7 +543,7 @@ def build_brent_pit_matrix(
             except BrentHistoryError as exc:
                 raise Phase84ABrentSourceValidationError(
                     str(exc), blocker=exc.blocker
-                ) from None
+                ) from exc
             universe_by_date[prior_date] = contracts
             for contract in contracts:
                 universe_observations.setdefault(contract.contract_code, []).append(contract)
@@ -563,7 +564,9 @@ def build_brent_pit_matrix(
                 prior_trade_date=prior_date,
             )
         except BrentHistoryError as exc:
-            raise Phase84ABrentSourceValidationError(str(exc), blocker=exc.blocker) from None
+            raise Phase84ABrentSourceValidationError(
+                str(exc), blocker=exc.blocker
+            ) from exc
         changed = previous_code is not None and previous_code != selected.contract_code
         days_to_expiration = (selected.expiration_date - target_date).days
         matrix_rows.append(
@@ -1007,7 +1010,7 @@ def _write_exact_artifacts(output_dir: Path, payloads: Mapping[str, object]) -> 
 def run_source_validation(
     request: Phase84ARequest,
     *,
-    transport: HttpTransport = fetch_bytes,
+    transport: HttpTransport = fetch_brent_bytes_with_retry,
     clock: UtcClock = utc_now,
 ) -> Phase84AResult:
     _validate_request(request)
