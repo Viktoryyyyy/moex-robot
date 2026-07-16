@@ -1,0 +1,230 @@
+{
+  "contract_identity": {
+    "contract_id": "usdrubf_phase8_4a_moex_brent_source_validation_v1",
+    "contract_version": "1.0",
+    "project": "MOEX Bot",
+    "task_id": "ema_3_19_ai_market_phase_phase_8_4a_moex_brent_source_validation_v1",
+    "lane": "ema_3_19_ai",
+    "phase": "8.4A",
+    "execution_mode": "browser_chatgpt_github_direct",
+    "status": "source_validation_only"
+  },
+  "approved_branch": "research/ema-3-19-ai/phase-8-4a-moex-brent-source-validation",
+  "approved_file_scope": {
+    "create_only": [
+      "contracts/experiments/usdrubf_phase8_4a_moex_brent_source_validation_v1.json",
+      "src/moex_research/external_data/moex_brent_history.py",
+      "src/moex_research/runners/usdrubf_phase8_4a_moex_brent_source_validation.py",
+      "tests/unit/test_usdrubf_phase8_4a_moex_brent_history.py",
+      "tests/unit/test_usdrubf_phase8_4a_moex_brent_source_validation.py",
+      "tests/contract/test_usdrubf_phase8_4a_moex_brent_source_validation_contract.py"
+    ],
+    "existing_files_to_modify": [],
+    "exact_file_count": 6,
+    "maximum_changed_file_count": 6,
+    "scope_widening_allowed": false
+  },
+  "source_identity": {
+    "source_id": "moex_brent_futures_daily",
+    "official_service": "MOEX ISS",
+    "asset_code": "BR",
+    "board_id": "RFUD",
+    "initial_status": "blocked_pending_source_validation",
+    "pass_status": "candidate_for_phase8_5",
+    "fail_status": "blocked_pending_source_validation"
+  },
+  "official_source_policy": {
+    "allowed_hosts": [
+      "iss.moex.com"
+    ],
+    "allowed_routes": {
+      "historical_contract_enumeration": "https://iss.moex.com/iss/history/engines/futures/markets/forts/boards/RFUD/securities.json?date={prior_trade_date}&assetcode=BR",
+      "exact_security_description": "https://iss.moex.com/iss/securities/{officially_enumerated_contract_code}.json",
+      "explicit_contract_daily_candles": "https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities/{officially_enumerated_contract_code}/candles.json"
+    },
+    "third_party_market_data_allowed": false,
+    "manual_contract_calendar_allowed": false,
+    "inferred_or_guessed_contract_code_allowed": false,
+    "generated_month_code_allowed": false,
+    "continuous_alias_allowed": false,
+    "synthetic_continuous_ticker_allowed": false,
+    "current_active_contract_list_as_historical_proof_allowed": false,
+    "later_contract_fill_allowed": false
+  },
+  "frozen_inputs": {
+    "sha256": {
+      "modeling_dataset": "fdd626f9e0522c6bbb653f9e17fbbbeef7ded77f57ff187b35246a2458d55d00",
+      "dataset_manifest": "fcbbb5e5ed0549c5c6f397e34f203f01836271f6bf471f90cab5a2fd64ace082",
+      "feature_schema": "8f08802c7fb0a4cc43ab4ba072ee22ff9edd92fe8d674ea0515545d20d143238",
+      "m0_validation_predictions": "9769d00a49adeb54c016d965387774e46a3e09e09f895aa61d48a90bbf3568cf",
+      "phase8_3_aggregate_metrics": "d6ad4f6587dadb32431bd7b8f3bd59c5393e04d742efb4af459b316b417f8756",
+      "phase8_3_gate_results": "d3f7e24022e550e725eae7ec5bc214d6b95e0e9c66393574c575e5d6f593f33c"
+    },
+    "eligible_identity_count": 472,
+    "validation_identity_count": 320,
+    "target_instrument": "forts.usdrubf",
+    "target_source": "manual_phase_labels_v1",
+    "target_interval": [
+      "2024-08-05",
+      "2026-06-11"
+    ],
+    "identity_columns": [
+      "target_trade_date",
+      "target_instrument_id"
+    ],
+    "required_phase8_3_status": "external_factor_incremental_value_not_supported",
+    "required_phase8_3_recommendation": "prioritize_blocked_oil_and_liquidity_sources",
+    "required_phase8_3_failed_gates": [
+      "G5",
+      "G6",
+      "G7",
+      "G8",
+      "G9"
+    ]
+  },
+  "contract_selection_rule": {
+    "rule": "nearest explicit BR RFUD contract whose official expiration or last-trade date is at least seven calendar days after target date D",
+    "minimum_days_to_expiration": 7,
+    "universe_as_of": "frozen prior_trade_date",
+    "same_day_or_future_volume_allowed": false,
+    "same_day_or_future_open_interest_allowed": false,
+    "volume_based_roll_allowed": false,
+    "open_interest_based_roll_allowed": false,
+    "silent_fallback_to_next_contract_allowed": false,
+    "selected_contract_must_have_prior_trade_date_candle": true,
+    "cross_contract_return_allowed": false
+  },
+  "point_in_time_policy": {
+    "timezone": "Europe/Moscow",
+    "decision_cutoff_local_time": "08:45:00",
+    "candle_trade_date": "exact frozen prior_trade_date",
+    "candle_end_rule": "candle_end < D 08:45:00 Europe/Moscow",
+    "target_day_candle_allowed": false,
+    "later_candle_allowed": false,
+    "missing_prior_session_candle_policy": "fail_closed"
+  },
+  "normalized_contract_required_fields": [
+    "source_id",
+    "contract_code",
+    "short_name",
+    "asset_code",
+    "board_id",
+    "first_verified_trade_date",
+    "expiration_date",
+    "last_delivery_date",
+    "metadata_route",
+    "metadata_retrieved_at_utc",
+    "metadata_raw_payload_sha256",
+    "source_revision_status",
+    "historical_model_use_status"
+  ],
+  "normalized_candle_required_fields": [
+    "source_id",
+    "contract_code",
+    "trade_date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "value",
+    "candle_begin",
+    "candle_end",
+    "expiration_date",
+    "source_route",
+    "retrieved_at_utc",
+    "raw_payload_sha256",
+    "source_revision_status",
+    "historical_model_use_status"
+  ],
+  "acceptance_matrix_fields": [
+    "target_trade_date",
+    "target_instrument_id",
+    "prior_trade_date",
+    "brent_contract_code",
+    "brent_expiration_date",
+    "brent_days_to_expiration",
+    "brent_contract_changed",
+    "brent_previous_contract_code",
+    "brent_trade_date",
+    "brent_open",
+    "brent_high",
+    "brent_low",
+    "brent_close",
+    "brent_volume",
+    "brent_value",
+    "brent_candle_begin",
+    "brent_candle_end",
+    "brent_contract_metadata_route",
+    "brent_candle_route",
+    "brent_contract_metadata_sha256",
+    "brent_candle_payload_sha256",
+    "brent_retrieved_at_utc"
+  ],
+  "runtime_artifacts": [
+    "input_identity_verification.json",
+    "official_route_validation.json",
+    "brent_contract_universe.parquet",
+    "brent_daily_candles_normalized.parquet",
+    "brent_pit_acceptance_matrix.parquet",
+    "coverage_by_source.csv",
+    "contract_roll_diagnostics.csv",
+    "source_blocker_register.json",
+    "gate_results.json"
+  ],
+  "artifact_policy": {
+    "exact_count": 9,
+    "undeclared_artifact_allowed": false,
+    "output_outside_explicit_output_directory_allowed": false,
+    "preexisting_output_directory_allowed": false,
+    "runtime_artifact_commit_allowed": false,
+    "model_file_allowed": false
+  },
+  "gates": {
+    "G1_immutable_inputs": "six frozen hashes, Phase 8.3 status and recommendation, 472 eligible and 320 validation identities",
+    "G2_official_expired_contract_universe": "official MOEX ISS only, officially enumerated SECID, full interval metadata, explicit expiration, no duplicate or ambiguous identity",
+    "G3_explicit_contract_selection": "exact seven-calendar-day rule, no volume or open-interest roll, no continuous alias, no fallback",
+    "G4_point_in_time_candle_correctness": "exact prior_trade_date explicit candle, candle end before D 08:45 Europe/Moscow, valid OHLC, finite non-negative volume and value",
+    "G5_exact_coverage": "472/472 eligible, 320/320 validation, no missing or duplicate identity, frozen Phase 6 order",
+    "G6_roll_integrity": "every contract change flagged with old and new codes, deterministic rule, no cross-contract return",
+    "G7_provenance": "official routes, valid separate metadata and candle payload SHA256, UTC retrieval timestamp, no secret",
+    "G8_leakage_and_scope": "no target, prediction or probability in matrix; no non-MOEX source; no model fit, evaluation, file or out-of-directory write",
+    "G9_final_source_readiness": "G1 through G8 all pass"
+  },
+  "blocker_classifications": [
+    "expired_contract_universe_not_reproducible",
+    "expired_contract_candles_not_available",
+    "point_in_time_cutoff_not_provable",
+    "incomplete_identity_coverage",
+    "official_schema_not_stable",
+    "provenance_not_sufficient",
+    "other_fail_closed_with_exact_reason"
+  ],
+  "required_cli_args": [
+    "--modeling-dataset-path",
+    "--dataset-manifest-path",
+    "--feature-schema-path",
+    "--m0-validation-predictions-path",
+    "--phase8-3-aggregate-metrics-path",
+    "--phase8-3-gate-results-path",
+    "--phase8-1-source-contract-path",
+    "--experiment-contract-path",
+    "--output-dir",
+    "--run-id",
+    "--git-commit-sha"
+  ],
+  "authority_boundary": {
+    "direct_main_write_allowed": false,
+    "conditional_merge_authorized": true,
+    "server_apply_allowed": false,
+    "real_runtime_allowed": false,
+    "model_fit_allowed": false,
+    "model_evaluation_allowed": false,
+    "model_serialization_allowed": false,
+    "model_promotion_allowed": false,
+    "strategy_promotion_allowed": false,
+    "live_prediction_allowed": false,
+    "broker_action_allowed": false,
+    "trading_allowed": false
+  }
+}
