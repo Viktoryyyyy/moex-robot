@@ -1,0 +1,369 @@
+{
+  "experiment_identity": {
+    "contract_id": "usdrubf_phase8_3_external_factor_incremental_value_experiment_v1",
+    "contract_version": "1.0",
+    "project": "MOEX Bot",
+    "phase": "8.3",
+    "lane": "ema_3_19_ai",
+    "task_id": "ema_3_19_ai_market_phase_phase_8_3_external_factor_incremental_value_experiment_v1",
+    "execution_mode": "browser_chatgpt_github_direct",
+    "status": "repository_implementation_only"
+  },
+  "approved_branch": "research/ema-3-19-ai/phase-8-3-external-factor-incremental-value",
+  "approved_file_scope": {
+    "create_only": [
+      "contracts/experiments/usdrubf_phase8_3_external_factor_incremental_value_experiment_v1.json",
+      "src/moex_research/runners/usdrubf_phase8_3_external_factor_builder.py",
+      "src/moex_research/runners/usdrubf_phase8_3_external_factor_incremental_value_experiment.py",
+      "tests/unit/test_usdrubf_phase8_3_external_factor_builder.py",
+      "tests/unit/test_usdrubf_phase8_3_external_factor_incremental_value_experiment.py",
+      "tests/contract/test_usdrubf_phase8_3_external_factor_incremental_value_experiment_contract.py"
+    ],
+    "exact_file_count": 6,
+    "existing_files_to_modify": [],
+    "scope_widening_allowed": false
+  },
+  "accepted_phase8_2_input": {
+    "run_id": "phase8_2_external_data_pit_acceptance_matrix_20260716_v2",
+    "source_git_commit_sha": "b512e0e9400ef150ecc1c0eee3954c56ab8c1dbc",
+    "accepted_sources": [
+      "cbr_ruonia_daily",
+      "cbr_key_rate_daily"
+    ],
+    "blocked_sources": [
+      "moex_brent_futures_daily",
+      "cme_wti_pre_moex",
+      "cbr_banking_liquidity_daily",
+      "ine_shanghai_crude_pre_moex"
+    ],
+    "rejected_run_ids": [
+      "phase8_2_external_data_pit_acceptance_matrix_20260715_v1"
+    ]
+  },
+  "upstream_sha256": {
+    "modeling_dataset": "fdd626f9e0522c6bbb653f9e17fbbbeef7ded77f57ff187b35246a2458d55d00",
+    "dataset_manifest": "fcbbb5e5ed0549c5c6f397e34f203f01836271f6bf471f90cab5a2fd64ace082",
+    "feature_schema": "8f08802c7fb0a4cc43ab4ba072ee22ff9edd92fe8d674ea0515545d20d143238",
+    "m0_validation_predictions": "9769d00a49adeb54c016d965387774e46a3e09e09f895aa61d48a90bbf3568cf",
+    "phase82_input_identity": "3285631da929d5b8a8b3399b4ac02304a2b4819f611514ba9a9b294bd238f243",
+    "phase82_source_fetch_manifest": "88df6150db6c70d9d7e3177169c00b49ae1e9880bf175921f58b4041e424cd96",
+    "phase82_ruonia_normalized": "b2417ce39e64345aba0357d3e4b7aac536f8a6a6edbd33aef5aac83fbbc8ba17",
+    "phase82_key_rate_normalized": "d4bd6064f943a008c149a566ee2408b3a21ffa700c2b09f234ef64d480a7b787",
+    "phase82_external_matrix": "04bd613e850d1763026cbd6e19d7c38e0ff9c8ec33817ad400b4489cf36393ec",
+    "phase82_coverage": "810c6c2136a24e1b766aadd5e36a3524801543cdbe527d17bf37e59e7090ba43",
+    "phase82_staleness": "160a20e56e6548b5c67321707e5869bad82fa1118fbd38e53eb5905a1df217af",
+    "phase82_blocker_register": "b0408a760ba688784ace0e76ee94f399f19b22ee078de9a9e461b10953316bf9",
+    "phase82_gate_results": "dddf87a153722276effe27c88987c76ab5872ac64ef7b0151637e880daab241e"
+  },
+  "identity_contract": {
+    "eligible_identities": 472,
+    "validation_identities": 320,
+    "instrument": "forts.usdrubf",
+    "target_source": "manual_phase_labels_v1",
+    "class_order": [
+      "B",
+      "S",
+      "OUT"
+    ],
+    "identity_columns": [
+      "target_trade_date",
+      "target_instrument_id"
+    ],
+    "join": "exact one-to-one identity join preserving Phase 6 order"
+  },
+  "frozen_protocol": {
+    "splitter": {
+      "type": "sklearn.model_selection.TimeSeriesSplit",
+      "n_splits": 5,
+      "test_size": 64,
+      "gap": 0
+    },
+    "estimator": {
+      "type": "sklearn.linear_model.LogisticRegression",
+      "C": 1.0,
+      "class_weight": "balanced",
+      "solver": "lbfgs",
+      "max_iter": 1000
+    },
+    "numeric_preprocessing": [
+      "SimpleImputer(strategy=median)",
+      "StandardScaler"
+    ],
+    "categorical_preprocessing": [
+      "SimpleImputer(strategy=most_frequent)",
+      "OneHotEncoder(handle_unknown=ignore)"
+    ],
+    "preprocessing_fit_scope": "each_training_fold_only",
+    "training_rows_precede_validation_rows": true,
+    "each_training_fold_contains_all_classes": true,
+    "model_family_change_allowed": false,
+    "hyperparameter_search_allowed": false,
+    "threshold_optimization_allowed": false,
+    "calibration_allowed": false,
+    "label_change_allowed": false,
+    "fold_change_allowed": false,
+    "feature_selection_search_allowed": false,
+    "target_resampling_allowed": false,
+    "post_result_feature_modification_allowed": false
+  },
+  "m0_internal_features": {
+    "numeric": [
+      "session_index",
+      "days_since_prior_trade_date",
+      "lag1_close_return_1d",
+      "lag1_intraday_return",
+      "rolling_past_return_mean",
+      "rolling_past_return_std",
+      "lag1_hl_range_pct",
+      "rolling_past_hl_range_mean",
+      "rolling_past_hl_range_std",
+      "lag1_volume",
+      "lag1_value",
+      "lag1_num_trades",
+      "rolling_past_volume_mean",
+      "lag1_ema_3",
+      "lag1_ema_19",
+      "lag1_ema_3_19_spread"
+    ],
+    "categorical": [
+      "lag1_ema_3_19_state"
+    ]
+  },
+  "external_feature_definitions": {
+    "ext_key_rate_pct": {
+      "block": "POLICY_AND_MONEY_MARKET_BLOCK",
+      "source": "key_rate_pct",
+      "formula": "key_rate_pct"
+    },
+    "ext_ruonia_minus_key_rate_pp": {
+      "block": "POLICY_AND_MONEY_MARKET_BLOCK",
+      "source": "ruonia_minus_key_rate_pp",
+      "formula": "ruonia_minus_key_rate_pp"
+    },
+    "ext_ruonia_rate_range_pp": {
+      "block": "POLICY_AND_MONEY_MARKET_BLOCK",
+      "formula": "ruonia_maximum_rate_pct - ruonia_minimum_rate_pct"
+    },
+    "ext_ruonia_rate_iqr_pp": {
+      "block": "POLICY_AND_MONEY_MARKET_BLOCK",
+      "formula": "ruonia_percentile_75_rate_pct - ruonia_percentile_25_rate_pct"
+    },
+    "ext_log1p_key_rate_age_days": {
+      "block": "POLICY_AND_MONEY_MARKET_BLOCK",
+      "formula": "log1p(key_rate_age_calendar_days)"
+    },
+    "ext_log1p_ruonia_transaction_volume_rub_bn": {
+      "block": "RUONIA_ACTIVITY_BLOCK",
+      "formula": "log1p(ruonia_transaction_volume_rub_bn)"
+    },
+    "ext_log1p_ruonia_transaction_count": {
+      "block": "RUONIA_ACTIVITY_BLOCK",
+      "formula": "log1p(ruonia_transaction_count)"
+    },
+    "ext_log1p_ruonia_participant_count": {
+      "block": "RUONIA_ACTIVITY_BLOCK",
+      "formula": "log1p(ruonia_participant_count)"
+    }
+  },
+  "matrix_inventory": {
+    "E0_FROZEN_PHASE7_2_CONTROL": {
+      "role": "immutable_historical_control",
+      "refit": false,
+      "acceptance_eligible": false
+    },
+    "E1_M0_PLUS_EXTERNAL_FULL": {
+      "role": "sole_acceptance_candidate",
+      "internal_features": "all frozen M0 internal features",
+      "external_features": "all eight declared external features",
+      "acceptance_eligible": true
+    },
+    "E2_M0_PLUS_POLICY_AND_MONEY_MARKET": {
+      "role": "diagnostic_ablation",
+      "internal_features": "all frozen M0 internal features",
+      "external_features": [
+        "ext_key_rate_pct",
+        "ext_ruonia_minus_key_rate_pp",
+        "ext_ruonia_rate_range_pp",
+        "ext_ruonia_rate_iqr_pp",
+        "ext_log1p_key_rate_age_days"
+      ],
+      "acceptance_eligible": false
+    },
+    "E3_M0_PLUS_RUONIA_ACTIVITY": {
+      "role": "diagnostic_ablation",
+      "internal_features": "all frozen M0 internal features",
+      "external_features": [
+        "ext_log1p_ruonia_transaction_volume_rub_bn",
+        "ext_log1p_ruonia_transaction_count",
+        "ext_log1p_ruonia_participant_count"
+      ],
+      "acceptance_eligible": false
+    },
+    "E4_EXTERNAL_ONLY": {
+      "role": "diagnostic_only",
+      "internal_features": [],
+      "external_features": "all eight declared external features",
+      "acceptance_eligible": false
+    }
+  },
+  "feature_integrity": {
+    "all_external_features_finite": true,
+    "activity_and_age_nonnegative_before_log1p": true,
+    "rate_range_and_iqr_nonnegative": true,
+    "target_prediction_or_probability_as_feature_allowed": false,
+    "ruonia_observation_and_publication_ages_as_features_allowed": false,
+    "blocked_source_feature_allowed": false,
+    "eligible_row_loss_allowed": false,
+    "duplicate_identity_allowed": false
+  },
+  "required_metrics": [
+    "validation_rows",
+    "accuracy",
+    "balanced_accuracy",
+    "macro_f1",
+    "weighted_f1",
+    "multiclass_log_loss",
+    "B_recall",
+    "S_to_OUT_rate",
+    "OUT_to_S_rate",
+    "mean_confidence_on_incorrect_predictions",
+    "zero_B_recall",
+    "per_class_precision",
+    "per_class_recall",
+    "per_class_f1",
+    "per_class_support",
+    "confusion_matrix",
+    "fold_macro_f1_range",
+    "fold_macro_f1_population_standard_deviation",
+    "minimum_fold_macro_f1",
+    "zero_B_recall_fold_count",
+    "inclusive_0_90_to_1_00_confidence_bucket"
+  ],
+  "absolute_limits": {
+    "B_recall": {
+      "comparator": ">=",
+      "threshold": 0.2458904109589041
+    },
+    "zero_B_recall_fold_count": {
+      "comparator": "<=",
+      "threshold": 1.0
+    },
+    "macro_f1": {
+      "comparator": ">=",
+      "threshold": 0.37439549155317
+    },
+    "balanced_accuracy": {
+      "comparator": ">=",
+      "threshold": 0.378390605558729
+    },
+    "accuracy": {
+      "comparator": ">=",
+      "threshold": 0.38
+    },
+    "multiclass_log_loss": {
+      "comparator": "<",
+      "threshold": 1.2796950500624311
+    },
+    "fold_macro_f1_range": {
+      "comparator": "<=",
+      "threshold": 0.3436553216604367
+    },
+    "fold_macro_f1_population_standard_deviation": {
+      "comparator": "<=",
+      "threshold": 0.11025708314162237
+    },
+    "minimum_fold_macro_f1": {
+      "comparator": ">=",
+      "threshold": 0.0892156862745098
+    },
+    "S_to_OUT_rate": {
+      "comparator": "<=",
+      "threshold": 0.3774193548387097
+    },
+    "OUT_to_S_rate": {
+      "comparator": "<=",
+      "threshold": 0.49756097560975615
+    },
+    "mean_confidence_on_incorrect_predictions": {
+      "comparator": "<=",
+      "threshold": 0.7099371
+    }
+  },
+  "incremental_gates": {
+    "G1": "all thirteen upstream hashes match, Phase 8.2 G1-G9 pass, exact accepted and blocked source sets, exact source commit",
+    "G2": "472 eligible and 320 ordered validation identities, five chronological folds of 64, no loss or duplication",
+    "G3": "exact eight finite external features, exact formulas, no undeclared or blocked-source feature, no leakage",
+    "G4": "exact frozen splitter, estimator and preprocessing, train-fold-only fitting, E0 loaded not refitted",
+    "G5": "E1 satisfies every absolute limit",
+    "G6": "E1 multiclass_log_loss <= E0 multiclass_log_loss - 0.01 and E1 macro_f1 >= E0 macro_f1 - 0.01",
+    "G7": "one S/OUT confusion direction improves at least 5 percent relative and neither worsens by 0.03 absolute or more",
+    "G8": "defined positive E0 inclusive 0.90-1.00 bucket gap and nonempty E1 gap <= 0.70 times E0 gap",
+    "G9": "at least three folds improve macro-F1 by 0.01, at most one degrades by more than 0.03, stability limits pass",
+    "G10": "finite SMD for every external feature and fold, sufficient values, no constant training-fold feature",
+    "G11": "no leakage, serialization, external acquisition, undeclared output, calibration, threshold change or promotion",
+    "G12": "G1 through G11 all pass"
+  },
+  "declared_output_artifacts": [
+    "input_identity_verification.json",
+    "feature_matrix_inventory.json",
+    "external_feature_definitions.json",
+    "feature_nullness_by_matrix_and_fold.csv",
+    "external_feature_shift_by_fold.csv",
+    "fold_metrics_by_matrix.csv",
+    "aggregate_metrics_by_matrix.json",
+    "per_class_metrics_by_matrix.csv",
+    "validation_predictions_by_matrix.parquet",
+    "ablation_effects.csv",
+    "external_feature_coefficients_by_fold.csv",
+    "gate_results.json"
+  ],
+  "artifact_policy": {
+    "exact_count": 12,
+    "undeclared_artifact_allowed": false,
+    "output_outside_explicit_output_dir_allowed": false,
+    "preexisting_output_directory_allowed": false,
+    "model_file_allowed": false,
+    "runtime_artifact_commit_allowed": false
+  },
+  "required_cli_args": [
+    "--modeling-dataset-path",
+    "--dataset-manifest-path",
+    "--feature-schema-path",
+    "--m0-validation-predictions-path",
+    "--phase8-2-input-identity-path",
+    "--phase8-2-source-fetch-manifest-path",
+    "--phase8-2-ruonia-normalized-path",
+    "--phase8-2-key-rate-normalized-path",
+    "--phase8-2-external-matrix-path",
+    "--phase8-2-coverage-path",
+    "--phase8-2-staleness-path",
+    "--phase8-2-blocker-register-path",
+    "--phase8-2-gate-results-path",
+    "--experiment-contract-path",
+    "--output-dir",
+    "--run-id",
+    "--git-commit-sha"
+  ],
+  "authority_and_status": {
+    "direct_main_write_allowed": false,
+    "conditional_merge_authorized": true,
+    "server_apply_allowed": false,
+    "real_artifact_access_allowed": false,
+    "real_runtime_allowed": false,
+    "model_fit_allowed": "synthetic_pytest_only",
+    "model_evaluation_allowed": "synthetic_pytest_only",
+    "model_serialization_allowed": false,
+    "model_promotion_allowed": false,
+    "strategy_promotion_allowed": false,
+    "live_prediction_allowed": false,
+    "broker_action_allowed": false,
+    "trading_allowed": false
+  },
+  "interpretation": {
+    "pass_status": "external_factor_incremental_value_supported",
+    "fail_status": "external_factor_incremental_value_not_supported",
+    "production_use_authorized": false,
+    "next_research_phase_only": true,
+    "post_hoc_rerun_or_feature_modification_allowed": false
+  }
+}
