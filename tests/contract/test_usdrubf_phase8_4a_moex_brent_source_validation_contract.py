@@ -165,3 +165,50 @@ def test_no_server_path_dependency_change_or_runtime_artifact_in_scope() -> None
     assert "pyproject.toml" not in APPROVED_FILES
     assert not any(Path(path).suffix in {".csv", ".parquet", ".pkl", ".joblib"} for path in APPROVED_FILES)
 
+
+def test_exact_production_CLI_excludes_retrieval_timestamp_override() -> None:
+    assert _contract()["required_cli_args"] == [
+        "--modeling-dataset-path",
+        "--dataset-manifest-path",
+        "--feature-schema-path",
+        "--m0-validation-predictions-path",
+        "--phase8-3-aggregate-metrics-path",
+        "--phase8-3-gate-results-path",
+        "--phase8-1-source-contract-path",
+        "--experiment-contract-path",
+        "--output-dir",
+        "--run-id",
+        "--git-commit-sha",
+    ]
+    assert "--retrieved-at-utc" not in _contract()["required_cli_args"]
+
+
+def test_per_payload_post_fetch_timestamp_policy_is_fail_closed() -> None:
+    policy = _contract()["retrieval_timestamp_policy"]
+    assert policy == {
+        "production_cli_override_allowed": False,
+        "production_clock": "datetime.now(timezone.utc).replace(microsecond=0)",
+        "capture_order": [
+            "build_and_validate_official_route",
+            "call_injected_transport",
+            "call_injected_UTC_clock_immediately_after_transport_returns",
+            "validate_timezone_aware_UTC",
+            "assign_timestamp_to_exact_returned_payload",
+        ],
+        "timestamp_scope": "one timestamp per exact response payload",
+        "history_page_timestamp_reuse_allowed": False,
+        "metadata_timestamp_reuse_as_candle_timestamp_allowed": False,
+        "run_level_timestamp_reuse_allowed": False,
+        "payload_content_timestamp_derivation_allowed": False,
+        "post_artifact_timestamp_modification_allowed": False,
+        "naive_datetime_allowed": False,
+        "non_UTC_datetime_allowed": False,
+        "synthetic_injected_clock_allowed": True,
+        "synthetic_injected_clock_scope": "tests_only",
+        "equal_numeric_timestamps_across_requests_allowed": True,
+    }
+    required = _contract()["normalized_contract_required_fields"]
+    assert "enumeration_retrieved_at_utc" in required
+    assert "metadata_retrieved_at_utc" in required
+    assert "retrieved_at_utc" in _contract()["normalized_candle_required_fields"]
+    assert "post-fetch UTC clock timestamp" in _contract()["gates"]["G7_provenance"]

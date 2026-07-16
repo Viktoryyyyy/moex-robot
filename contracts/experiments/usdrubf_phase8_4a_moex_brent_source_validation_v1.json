@@ -103,6 +103,28 @@
     "later_candle_allowed": false,
     "missing_prior_session_candle_policy": "fail_closed"
   },
+  "retrieval_timestamp_policy": {
+    "production_cli_override_allowed": false,
+    "production_clock": "datetime.now(timezone.utc).replace(microsecond=0)",
+    "capture_order": [
+      "build_and_validate_official_route",
+      "call_injected_transport",
+      "call_injected_UTC_clock_immediately_after_transport_returns",
+      "validate_timezone_aware_UTC",
+      "assign_timestamp_to_exact_returned_payload"
+    ],
+    "timestamp_scope": "one timestamp per exact response payload",
+    "history_page_timestamp_reuse_allowed": false,
+    "metadata_timestamp_reuse_as_candle_timestamp_allowed": false,
+    "run_level_timestamp_reuse_allowed": false,
+    "payload_content_timestamp_derivation_allowed": false,
+    "post_artifact_timestamp_modification_allowed": false,
+    "naive_datetime_allowed": false,
+    "non_UTC_datetime_allowed": false,
+    "synthetic_injected_clock_allowed": true,
+    "synthetic_injected_clock_scope": "tests_only",
+    "equal_numeric_timestamps_across_requests_allowed": true
+  },
   "normalized_contract_required_fields": [
     "source_id",
     "contract_code",
@@ -116,7 +138,11 @@
     "metadata_retrieved_at_utc",
     "metadata_raw_payload_sha256",
     "source_revision_status",
-    "historical_model_use_status"
+    "historical_model_use_status",
+    "enumerated_as_of_date",
+    "enumeration_route",
+    "enumeration_retrieved_at_utc",
+    "enumeration_raw_payload_sha256"
   ],
   "normalized_candle_required_fields": [
     "source_id",
@@ -187,7 +213,7 @@
     "G4_point_in_time_candle_correctness": "exact prior_trade_date explicit candle, candle end before D 08:45 Europe/Moscow, valid OHLC, finite non-negative volume and value",
     "G5_exact_coverage": "472/472 eligible, 320/320 validation, no missing or duplicate identity, frozen Phase 6 order",
     "G6_roll_integrity": "every contract change flagged with old and new codes, deterministic rule, no cross-contract return",
-    "G7_provenance": "official routes, valid separate metadata and candle payload SHA256, UTC retrieval timestamp, no secret",
+    "G7_provenance": "each enumeration page, metadata response and candle response has an exact-payload SHA256 paired with its own timezone-aware post-fetch UTC clock timestamp; no production CLI timestamp input; metadata and candle provenance remain distinguishable; no secret",
     "G8_leakage_and_scope": "no target, prediction or probability in matrix; no non-MOEX source; no model fit, evaluation, file or out-of-directory write",
     "G9_final_source_readiness": "G1 through G8 all pass"
   },
