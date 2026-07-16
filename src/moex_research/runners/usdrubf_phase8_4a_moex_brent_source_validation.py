@@ -16,12 +16,15 @@ from moex_research.external_data.models import HttpTransport
 from moex_research.external_data.moex_brent_history import (
     ASSET_CODE,
     BOARD_ID,
+    BRENT_HTTP_MAX_ATTEMPTS,
+    BRENT_HTTP_RETRY_DELAYS_SECONDS,
     CANDLE_ROUTE_TEMPLATE,
     HISTORY_ROUTE,
     HISTORICAL_MODEL_USE_STATUS,
     MOEX_ISS_HOST,
     SECURITY_DESCRIPTION_ROUTE_TEMPLATE,
     SOURCE_ID,
+    TRANSIENT_HTTP_ERROR_MESSAGE,
     BrentContract,
     BrentHistoryError,
     UtcClock,
@@ -106,6 +109,27 @@ DECLARED_OUTPUT_ARTIFACTS: Final[tuple[str, ...]] = (
     "source_blocker_register.json",
     "gate_results.json",
 )
+EXPECTED_TRANSIENT_HTTP_RETRY_POLICY: Final[dict[str, object]] = {
+    "bounded_transient_retry_enabled": True,
+    "enabled_for_source_id": SOURCE_ID,
+    "phase_scope": "8.4A_only",
+    "maximum_total_attempts": BRENT_HTTP_MAX_ATTEMPTS,
+    "retry_delays_seconds": list(BRENT_HTTP_RETRY_DELAYS_SECONDS),
+    "random_jitter_allowed": False,
+    "same_exact_official_route_only": True,
+    "route_substitution_allowed": False,
+    "fallback_source_allowed": False,
+    "fallback_contract_allowed": False,
+    "fallback_date_allowed": False,
+    "retryable_exception": f"ExternalDataError({TRANSIENT_HTTP_ERROR_MESSAGE})",
+    "semantic_failures_retried": False,
+    "failed_attempts_enter_provenance": False,
+    "successful_payload_timestamp_policy": (
+        "one exact post-fetch UTC timestamp after successful transport return"
+    ),
+    "source_acceptance_still_requires": [f"G{index}" for index in range(1, 10)],
+    "retry_constitutes_source_fallback": False,
+}
 REQUIRED_CLI_ARGS: Final[tuple[str, ...]] = (
     "--modeling-dataset-path",
     "--dataset-manifest-path",
@@ -398,6 +422,13 @@ def _validate_experiment_contract(contract: Mapping[str, Any]) -> None:
         raise Phase84ABrentSourceValidationError("Phase 8.4A branch mismatch")
     if tuple(contract.get("runtime_artifacts", ())) != DECLARED_OUTPUT_ARTIFACTS:
         raise Phase84ABrentSourceValidationError("Phase 8.4A artifact contract mismatch")
+    if (
+        contract.get("transient_http_retry_policy")
+        != EXPECTED_TRANSIENT_HTTP_RETRY_POLICY
+    ):
+        raise Phase84ABrentSourceValidationError(
+            "Phase 8.4A transient HTTP retry policy mismatch"
+        )
 
 
 def _eligible_identities(dataset: pd.DataFrame) -> pd.DataFrame:

@@ -208,6 +208,35 @@ def test_all_six_immutable_evidence_hashes_are_verified(
         runner.verify_immutable_inputs(request)
 
 
+@pytest.mark.parametrize("mutation", ["missing", "altered"])
+def test_retry_policy_mismatch_fails_before_network_or_output_creation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    request, hashes = _write_inputs(tmp_path)
+    monkeypatch.setattr(runner, "EXPECTED_INPUT_SHA256", hashes)
+    contract = json.loads(request.experiment_contract_path.read_text(encoding="utf-8"))
+    if mutation == "missing":
+        contract.pop("transient_http_retry_policy")
+    else:
+        contract["transient_http_retry_policy"]["retry_delays_seconds"] = [0.0]
+    tampered_contract = tmp_path / f"{mutation}_retry_policy.json"
+    tampered_contract.write_text(json.dumps(contract) + "\n", encoding="utf-8")
+    request = replace(request, experiment_contract_path=tampered_contract)
+    transport = SyntheticMOEX()
+
+    with pytest.raises(
+        runner.Phase84ABrentSourceValidationError,
+        match="transient HTTP retry policy mismatch",
+    ):
+        runner.run_source_validation(
+            request, transport=transport, clock=lambda: RETRIEVED
+        )
+    assert transport.urls == []
+    assert not request.output_dir.exists()
+
+
 def test_controlled_synthetic_run_preserves_identity_PIT_roll_and_artifacts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
