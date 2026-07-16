@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -122,6 +124,7 @@ def test_official_expired_contract_universe_response_parses() -> None:
     assert [(row.contract_code, row.asset_code, row.board_id) for row in rows] == [
         ("BRQ4", "BR", "RFUD")
     ]
+    assert rows[0].enumeration_retrieved_at_utc == RETRIEVED
 
 
 def test_active_only_current_route_cannot_masquerade_as_history() -> None:
@@ -241,3 +244,127 @@ def test_source_provenance_is_retained_and_distinguishable() -> None:
     assert len(candle.raw_payload_sha256) == 64
     assert contract.metadata_raw_payload_sha256 != candle.raw_payload_sha256
 
+
+def test_history_page_timestamp_is_captured_after_transport_returns() -> None:
+    events: list[str] = []
+
+    def transport(_: str) -> bytes:
+        events.append("transport_return")
+        return _history_payload()
+
+    def clock() -> datetime:
+        events.append("clock")
+        return RETRIEVED
+
+    identities = brent.enumerate_brent_contract_identities(
+        AS_OF, transport=transport, clock=clock
+    )
+    assert events == ["transport_return", "clock"]
+    assert identities[0].enumeration_retrieved_at_utc == RETRIEVED
+
+
+def test_separate_history_pages_capture_separate_timestamp_and_digest() -> None:
+    timestamps = iter(
+        [
+            RETRIEVED,
+            RETRIEVED + timedelta(seconds=1),
+        ]
+    )
+    payloads: dict[int, bytes] = {}
+
+    def transport(url: str) -> bytes:
+        start = int(parse_qs(urlsplit(url).query)["start"][0])
+        code = "BRQ4" if start == 0 else "BRU4"
+        payload = _json_bytes(
+            {
+                "history": {
+                    "columns": [
+                        "BOARDID",
+                        "SECID",
+                        "TRADEDATE",
+                        "SHORTNAME",
+                        "ASSETCODE",
+                    ],
+                    "data": [
+                        ["RFUD", code, AS_OF.isoformat(), f"{code}-name", "BR"]
+                    ],
+                },
+                "history.cursor": {
+                    "columns": ["INDEX", "TOTAL", "PAGESIZE"],
+                    "data": [[start, 2, 1]],
+                },
+            }
+        )
+        payloads[start] = payload
+        return payload
+
+    identities = brent.enumerate_brent_contract_identities(
+        AS_OF, transport=transport, clock=lambda: next(timestamps)
+    )
+    assert [item.enumeration_retrieved_at_utc for item in identities] == [
+        RETRIEVED,
+        RETRIEVED + timedelta(seconds=1),
+    ]
+    assert [item.enumeration_raw_payload_sha256 for item in identities] == [
+        hashlib.sha256(payloads[0]).hexdigest(),
+        hashlib.sha256(payloads[1]).hexdigest(),
+    ]
+    assert [parse_qs(urlsplit(item.enumeration_route).query)["start"] for item in identities] == [
+        ["0"],
+        ["1"],
+    ]
+
+
+def test_metadata_and_candle_each_capture_post_transport_clock() -> None:
+    events: list[str] = []
+    timestamps = iter([RETRIEVED, RETRIEVED + timedelta(seconds=1)])
+
+    def clock() -> datetime:
+        events.append("clock")
+        return next(timestamps)
+
+    def metadata_transport(_: str) -> bytes:
+        events.append("metadata_transport_return")
+        return _metadata_payload()
+
+    contract = brent.load_contract_metadata(
+        _identity(), transport=metadata_transport, clock=clock
+    )
+
+    def candle_transport(_: str) -> bytes:
+        events.append("candle_transport_return")
+        return _candle_payload()
+
+    candle = brent.load_daily_candle(
+        contract, AS_OF, transport=candle_transport, clock=clock
+    )
+    assert events == [
+        "metadata_transport_return",
+        "clock",
+        "candle_transport_return",
+        "clock",
+    ]
+    assert contract.metadata_retrieved_at_utc == RETRIEVED
+    assert contract.enumeration_retrieved_at_utc == RETRIEVED
+    assert candle.retrieved_at_utc == RETRIEVED + timedelta(seconds=1)
+
+
+def test_naive_injected_clock_fails_closed() -> None:
+    with pytest.raises(brent.BrentHistoryError, match="timezone-aware") as raised:
+        brent.enumerate_brent_contract_identities(
+            AS_OF,
+            transport=lambda _: _history_payload(),
+            clock=lambda: datetime(2026, 7, 16, 12, 0),
+        )
+    assert raised.value.blocker == "provenance_not_sufficient"
+
+
+def test_non_UTC_injected_clock_fails_closed() -> None:
+    non_utc = timezone(timedelta(hours=3))
+    with pytest.raises(brent.BrentHistoryError, match="expressed in UTC") as raised:
+        brent.load_contract_metadata(
+            _identity(),
+            transport=lambda _: _metadata_payload(),
+            clock=lambda: datetime(2026, 7, 16, 15, 0, tzinfo=non_utc),
+        )
+    assert raised.value.blocker == "provenance_not_sufficient"

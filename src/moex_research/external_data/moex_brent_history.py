@@ -13,6 +13,7 @@ from .models import ExternalDataError, fetch_bytes, parse_json_object, raw_paylo
 
 
 HttpTransport = Callable[[str], bytes]
+UtcClock = Callable[[], datetime]
 
 SOURCE_ID: Final[str] = "moex_brent_futures_daily"
 ASSET_CODE: Final[str] = "BR"
@@ -57,6 +58,12 @@ class BrentHistoryError(ValueError):
         self.blocker = blocker
 
 
+def utc_now() -> datetime:
+    """Return the production retrieval clock at artifact precision."""
+
+    return datetime.now(timezone.utc).replace(microsecond=0)
+
+
 @dataclass(frozen=True)
 class EnumeratedContractIdentity:
     contract_code: str
@@ -86,6 +93,7 @@ class BrentContract:
     historical_model_use_status: str
     enumerated_as_of_date: date
     enumeration_route: str
+    enumeration_retrieved_at_utc: datetime
     enumeration_raw_payload_sha256: str
 
     def as_record(self) -> dict[str, object]:
@@ -117,7 +125,7 @@ class BrentDailyCandle:
 
 
 def _utc(value: datetime) -> datetime:
-    if value.tzinfo is None or value.utcoffset() is None:
+    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
         raise BrentHistoryError(
             "retrieval timestamp must be timezone-aware",
             blocker="provenance_not_sufficient",
@@ -342,14 +350,20 @@ def parse_history_universe_response(
 def enumerate_brent_contract_identities(
     as_of_date: date,
     *,
-    retrieved_at_utc: datetime,
     transport: HttpTransport = fetch_bytes,
+    clock: UtcClock = utc_now,
 ) -> list[EnumeratedContractIdentity]:
     identities: list[EnumeratedContractIdentity] = []
     start = 0
     total: int | None = None
     while total is None or start < total:
         route = build_history_universe_url(as_of_date, start=start)
+        _official_route(
+            route,
+            allowed_path_prefix=(
+                "/iss/history/engines/futures/markets/forts/boards/RFUD/securities"
+            ),
+        )
         try:
             payload = transport(route)
         except Exception as exc:
@@ -357,6 +371,7 @@ def enumerate_brent_contract_identities(
                 "official historical contract enumeration request failed",
                 blocker="expired_contract_universe_not_reproducible",
             ) from exc
+        retrieved_at_utc = _utc(clock())
         page, (index, observed_total, page_size) = parse_history_universe_response(
             payload,
             as_of_date=as_of_date,
@@ -515,6 +530,7 @@ def parse_contract_metadata_response(
         historical_model_use_status=HISTORICAL_MODEL_USE_STATUS,
         enumerated_as_of_date=identity.enumerated_as_of_date,
         enumeration_route=identity.enumeration_route,
+        enumeration_retrieved_at_utc=identity.enumeration_retrieved_at_utc,
         enumeration_raw_payload_sha256=identity.enumeration_raw_payload_sha256,
     )
 
@@ -522,10 +538,11 @@ def parse_contract_metadata_response(
 def load_contract_metadata(
     identity: EnumeratedContractIdentity,
     *,
-    retrieved_at_utc: datetime,
     transport: HttpTransport = fetch_bytes,
+    clock: UtcClock = utc_now,
 ) -> BrentContract:
     route = build_security_description_url(identity.contract_code)
+    _official_route(route, allowed_path_prefix="/iss/securities/")
     try:
         payload = transport(route)
     except Exception as exc:
@@ -533,6 +550,7 @@ def load_contract_metadata(
             "official exact-contract metadata request failed",
             blocker="expired_contract_universe_not_reproducible",
         ) from exc
+    retrieved_at_utc = _utc(clock())
     return parse_contract_metadata_response(
         payload,
         identity=identity,
@@ -703,10 +721,16 @@ def load_daily_candle(
     contract: BrentContract,
     trade_date: date,
     *,
-    retrieved_at_utc: datetime,
     transport: HttpTransport = fetch_bytes,
+    clock: UtcClock = utc_now,
 ) -> BrentDailyCandle:
     route = build_candle_url(contract.contract_code, trade_date)
+    _official_route(
+        route,
+        allowed_path_prefix=(
+            "/iss/engines/futures/markets/forts/boards/RFUD/securities/"
+        ),
+    )
     try:
         payload = transport(route)
     except Exception as exc:
@@ -714,6 +738,7 @@ def load_daily_candle(
             "official explicit-contract candle request failed",
             blocker="expired_contract_candles_not_available",
         ) from exc
+    retrieved_at_utc = _utc(clock())
     return parse_daily_candle_response(
         payload,
         contract=contract,

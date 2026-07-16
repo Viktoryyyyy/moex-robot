@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
-from dataclasses import replace
+from dataclasses import fields, replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -101,7 +101,6 @@ def _write_inputs(tmp_path: Path) -> tuple[runner.Phase84ARequest, dict[str, str
         output_dir=tmp_path / "output",
         run_id="synthetic_phase8_4a",
         git_commit_sha=FULL_SHA,
-        retrieved_at_utc=RETRIEVED,
     )
     return request, hashes
 
@@ -189,7 +188,9 @@ def _run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[runner.Phase8
     request, hashes = _write_inputs(tmp_path)
     monkeypatch.setattr(runner, "EXPECTED_INPUT_SHA256", hashes)
     transport = SyntheticMOEX()
-    result = runner.run_source_validation(request, transport=transport)
+    result = runner.run_source_validation(
+        request, transport=transport, clock=lambda: RETRIEVED
+    )
     assert result.final_status == "moex_brent_source_candidate_for_phase8_5"
     return request, transport
 
@@ -260,6 +261,7 @@ def test_target_day_and_post_cutoff_candles_are_rejected() -> None:
         historical_model_use_status=brent.HISTORICAL_MODEL_USE_STATUS,
         enumerated_as_of_date=date(2024, 8, 2),
         enumeration_route=brent.build_history_universe_url(date(2024, 8, 2)),
+        enumeration_retrieved_at_utc=RETRIEVED,
         enumeration_raw_payload_sha256="b" * 64,
     )
     candle = brent.BrentDailyCandle(
@@ -310,7 +312,9 @@ def test_missing_selected_contract_candle_fails_without_fallback(
     with pytest.raises(
         runner.Phase84ABrentSourceValidationError, match="candle history is empty"
     ) as raised:
-        runner.run_source_validation(request, transport=transport)
+        runner.run_source_validation(
+            request, transport=transport, clock=lambda: RETRIEVED
+        )
     assert raised.value.blocker == "expired_contract_candles_not_available"
     candle_urls = [url for url in transport.urls if urlsplit(url).path.endswith("candles.json")]
     assert len(candle_urls) == 1
@@ -325,7 +329,9 @@ def test_preexisting_output_directory_fails(
     monkeypatch.setattr(runner, "EXPECTED_INPUT_SHA256", hashes)
     request.output_dir.mkdir()
     with pytest.raises(runner.Phase84ABrentSourceValidationError, match="pre-exist"):
-        runner.run_source_validation(request, transport=SyntheticMOEX())
+        runner.run_source_validation(
+            request, transport=SyntheticMOEX(), clock=lambda: RETRIEVED
+        )
 
 
 def test_no_write_outside_output_directory(tmp_path: Path) -> None:
@@ -393,6 +399,104 @@ def test_exact_runner_CLI() -> None:
         if action.required and action.option_strings
     }
     assert required == set(runner.REQUIRED_CLI_ARGS)
-    assert "--retrieved-at-utc" in {
+    assert "--retrieved-at-utc" not in {
         option for action in parser._actions for option in action.option_strings
     }
+    arguments = [
+        value
+        for flag in runner.REQUIRED_CLI_ARGS
+        for value in (flag, "synthetic-value")
+    ]
+    with pytest.raises(SystemExit):
+        parser.parse_args([*arguments, "--retrieved-at-utc", RETRIEVED.isoformat()])
+
+
+def test_request_and_runner_have_no_caller_supplied_or_shared_retrieval_timestamp() -> None:
+    assert "retrieved_at_utc" not in {field.name for field in fields(runner.Phase84ARequest)}
+    source = inspect.getsource(runner.run_source_validation)
+    assert "datetime.now" not in source
+    assert "retrieved_at" not in source
+
+
+def test_injected_clock_is_called_once_after_every_history_metadata_and_candle_fetch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request, hashes = _write_inputs(tmp_path)
+    monkeypatch.setattr(runner, "EXPECTED_INPUT_SHA256", hashes)
+    transport = SyntheticMOEX()
+    clock_routes: list[str] = []
+
+    def clock() -> datetime:
+        clock_routes.append(transport.urls[-1])
+        return RETRIEVED + timedelta(seconds=len(clock_routes))
+
+    runner.run_source_validation(request, transport=transport, clock=clock)
+    assert clock_routes == transport.urls
+    assert any("/iss/history/" in route for route in clock_routes)
+    assert any("/iss/securities/" in route for route in clock_routes)
+    assert any("/candles.json" in route for route in clock_routes)
+    universe = pd.read_parquet(request.output_dir / "brent_contract_universe.parquet")
+    candles = pd.read_parquet(request.output_dir / "brent_daily_candles_normalized.parquet")
+    matrix = pd.read_parquet(request.output_dir / "brent_pit_acceptance_matrix.parquet")
+    assert universe["enumeration_retrieved_at_utc"].notna().all()
+    assert universe["metadata_retrieved_at_utc"].notna().all()
+    assert candles["retrieved_at_utc"].nunique() == len(candles)
+    assert matrix["brent_retrieved_at_utc"].nunique() == len(matrix)
+
+
+@pytest.mark.parametrize(
+    ("frame_name", "timestamp_column"),
+    [
+        ("universe", "enumeration_retrieved_at_utc"),
+        ("universe", "metadata_retrieved_at_utc"),
+        ("candles", "retrieved_at_utc"),
+        ("matrix", "brent_retrieved_at_utc"),
+    ],
+)
+def test_G7_fails_for_malformed_exact_payload_provenance_timestamp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    frame_name: str,
+    timestamp_column: str,
+) -> None:
+    request, _ = _run(tmp_path, monkeypatch)
+    frames = {
+        "universe": pd.read_parquet(
+            request.output_dir / "brent_contract_universe.parquet"
+        ),
+        "candles": pd.read_parquet(
+            request.output_dir / "brent_daily_candles_normalized.parquet"
+        ),
+        "matrix": pd.read_parquet(
+            request.output_dir / "brent_pit_acceptance_matrix.parquet"
+        ),
+    }
+    frames[frame_name][timestamp_column] = frames[frame_name][
+        timestamp_column
+    ].astype(object)
+    frames[frame_name].loc[0, timestamp_column] = "not-a-UTC-timestamp"
+    eligible = _dataset().loc[:, [*runner.IDENTITY_COLUMNS, "prior_trade_date"]]
+    validation = eligible.iloc[-320:][list(runner.IDENTITY_COLUMNS)].reset_index(
+        drop=True
+    )
+    coverage = pd.read_csv(request.output_dir / "coverage_by_source.csv")
+    rolls = pd.read_csv(request.output_dir / "contract_roll_diagnostics.csv")
+    route_validation = json.loads(
+        (request.output_dir / "official_route_validation.json").read_text()
+    )
+    gates = runner.evaluate_gates(
+        immutable_inputs_verified=True,
+        phase83_verified=True,
+        eligible=eligible,
+        validation=validation,
+        universe=frames["universe"],
+        candles=frames["candles"],
+        matrix=frames["matrix"],
+        coverage=coverage,
+        rolls=rolls,
+        route_validation=route_validation,
+    )
+    assert gates["G7_provenance"]["passed"] is False
+    assert gates["G9_final_source_readiness"]["blocker_classification"] == (
+        "provenance_not_sufficient"
+    )

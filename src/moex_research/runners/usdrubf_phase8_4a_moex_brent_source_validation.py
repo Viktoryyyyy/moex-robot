@@ -24,10 +24,12 @@ from moex_research.external_data.moex_brent_history import (
     SOURCE_ID,
     BrentContract,
     BrentHistoryError,
+    UtcClock,
     enumerate_brent_contract_identities,
     load_contract_metadata,
     load_daily_candle,
     select_nearest_contract,
+    utc_now,
     validate_prior_session_cutoff,
 )
 
@@ -176,7 +178,6 @@ class Phase84ARequest:
     output_dir: Path
     run_id: str
     git_commit_sha: str
-    retrieved_at_utc: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -202,7 +203,6 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     for flag in REQUIRED_CLI_ARGS:
         parser.add_argument(flag, required=True)
-    parser.add_argument("--retrieved-at-utc")
     return parser
 
 
@@ -223,23 +223,6 @@ def _explicit_output_path(raw: object) -> Path:
     if not text or any(char in text for char in _GLOB_CHARS) or _ALIAS_PATTERN.search(text):
         raise Phase84ABrentSourceValidationError("--output-dir must be explicit and immutable")
     return Path(text)
-
-
-def _retrieved_at(raw: object) -> datetime | None:
-    if raw is None or str(raw).strip() == "":
-        return None
-    text = str(raw).strip().replace("Z", "+00:00")
-    try:
-        value = datetime.fromisoformat(text)
-    except ValueError as exc:
-        raise Phase84ABrentSourceValidationError(
-            "--retrieved-at-utc must be ISO-8601 UTC"
-        ) from exc
-    if value.tzinfo is None or value.utcoffset() != timedelta(0):
-        raise Phase84ABrentSourceValidationError(
-            "--retrieved-at-utc must be expressed in UTC"
-        )
-    return value.astimezone(timezone.utc)
 
 
 def request_from_args(args: argparse.Namespace) -> Phase84ARequest:
@@ -279,7 +262,6 @@ def request_from_args(args: argparse.Namespace) -> Phase84ARequest:
         output_dir=_explicit_output_path(args.output_dir),
         run_id=str(args.run_id).strip(),
         git_commit_sha=str(args.git_commit_sha).strip().lower(),
-        retrieved_at_utc=_retrieved_at(args.retrieved_at_utc),
     )
     _validate_request(request)
     return request
@@ -336,8 +318,6 @@ def _validate_request(request: Phase84ARequest) -> None:
         raise Phase84ABrentSourceValidationError(
             "--git-commit-sha must be exactly 40 hexadecimal characters"
         )
-    if request.retrieved_at_utc is not None:
-        _retrieved_at(request.retrieved_at_utc.isoformat())
     if request.output_dir.exists():
         raise Phase84ABrentSourceValidationError("--output-dir must not pre-exist")
 
@@ -492,15 +472,15 @@ def _contract_for_identity(
     identity: Any,
     *,
     metadata_cache: dict[str, BrentContract],
-    retrieved_at: datetime,
     transport: HttpTransport,
+    clock: UtcClock,
 ) -> BrentContract:
     cached = metadata_cache.get(identity.contract_code)
     if cached is None:
         cached = load_contract_metadata(
             identity,
-            retrieved_at_utc=retrieved_at,
             transport=transport,
+            clock=clock,
         )
         metadata_cache[identity.contract_code] = cached
     elif cached.short_name != identity.short_name:
@@ -521,6 +501,7 @@ def _contract_for_identity(
         cached,
         enumerated_as_of_date=identity.enumerated_as_of_date,
         enumeration_route=identity.enumeration_route,
+        enumeration_retrieved_at_utc=identity.enumeration_retrieved_at_utc,
         enumeration_raw_payload_sha256=identity.enumeration_raw_payload_sha256,
     )
 
@@ -528,8 +509,8 @@ def _contract_for_identity(
 def build_brent_pit_matrix(
     eligible: pd.DataFrame,
     *,
-    retrieved_at: datetime,
     transport: HttpTransport = fetch_bytes,
+    clock: UtcClock = utc_now,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     metadata_cache: dict[str, BrentContract] = {}
     universe_observations: dict[str, list[BrentContract]] = {}
@@ -546,15 +527,15 @@ def build_brent_pit_matrix(
             try:
                 identities = enumerate_brent_contract_identities(
                     prior_date,
-                    retrieved_at_utc=retrieved_at,
                     transport=transport,
+                    clock=clock,
                 )
                 contracts = [
                     _contract_for_identity(
                         identity,
                         metadata_cache=metadata_cache,
-                        retrieved_at=retrieved_at,
                         transport=transport,
+                        clock=clock,
                     )
                     for identity in identities
                 ]
@@ -573,8 +554,8 @@ def build_brent_pit_matrix(
             candle = load_daily_candle(
                 selected,
                 prior_date,
-                retrieved_at_utc=retrieved_at,
                 transport=transport,
+                clock=clock,
             )
             validate_prior_session_cutoff(
                 candle,
@@ -608,7 +589,9 @@ def build_brent_pit_matrix(
                 "brent_candle_route": candle.source_route,
                 "brent_contract_metadata_sha256": selected.metadata_raw_payload_sha256,
                 "brent_candle_payload_sha256": candle.raw_payload_sha256,
-                "brent_retrieved_at_utc": retrieved_at.isoformat().replace("+00:00", "Z"),
+                "brent_retrieved_at_utc": candle.retrieved_at_utc.isoformat().replace(
+                    "+00:00", "Z"
+                ),
             }
         )
         candle_records.append(candle.as_record())
@@ -628,17 +611,19 @@ def build_brent_pit_matrix(
             )
         previous_code = selected.contract_code
     universe_rows: list[dict[str, object]] = []
-    for code, observations in sorted(universe_observations.items()):
-        base = metadata_cache[code]
+    for _, observations in sorted(universe_observations.items()):
         dates = sorted(item.enumerated_as_of_date for item in observations)
-        universe_rows.append(
-            {
-                **base.as_record(),
-                "first_enumerated_as_of_date": dates[0],
-                "last_enumerated_as_of_date": dates[-1],
-                "enumeration_date_count": len(set(dates)),
-            }
-        )
+        for observation in sorted(
+            observations, key=lambda item: item.enumerated_as_of_date
+        ):
+            universe_rows.append(
+                {
+                    **observation.as_record(),
+                    "first_enumerated_as_of_date": dates[0],
+                    "last_enumerated_as_of_date": dates[-1],
+                    "enumeration_date_count": len(set(dates)),
+                }
+            )
     return (
         pd.DataFrame(universe_rows),
         pd.DataFrame(candle_records),
@@ -710,14 +695,41 @@ def _official_route_validation(
         "current_active_contract_route_used_as_historical_proof": False,
         "prior_trade_date_enumeration_count": int(eligible["prior_trade_date"].nunique()),
         "unique_explicit_contract_count": int(universe["contract_code"].nunique()),
-        "expired_explicit_contract_count": int(expired.sum()),
+        "expired_explicit_contract_count": int(
+            universe.loc[expired, "contract_code"].nunique()
+        ),
         "explicit_contract_candle_count": int(len(candles)),
         "all_contracts_BR_RFUD": bool(
             universe["asset_code"].eq(ASSET_CODE).all()
             and universe["board_id"].eq(BOARD_ID).all()
         ),
         "all_routes_official_https": True,
+        "retrieval_timestamp_origin": "per_payload_post_transport_utc_clock",
+        "caller_provided_production_retrieval_timestamp_allowed": False,
+        "synthetic_clock_injection_scope": "tests_only",
+        "metadata_and_candle_payload_provenance_distinguishable": True,
     }
+
+
+def _utc_timestamp(value: object) -> datetime | None:
+    if isinstance(value, pd.Timestamp):
+        parsed = value.to_pydatetime()
+    elif isinstance(value, datetime):
+        parsed = value
+    else:
+        text = str(value).strip().replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def _timestamp_key(value: object) -> str | None:
+    parsed = _utc_timestamp(value)
+    return None if parsed is None else parsed.isoformat()
 
 
 def evaluate_gates(
@@ -739,7 +751,9 @@ def evaluate_gates(
         and route_validation.get("history_enumeration_uses_official_SECID")
         and not route_validation.get("contract_code_generation_or_guessing_used")
         and route_validation.get("expired_explicit_contract_count", 0) > 0
-        and not universe.duplicated("contract_code", keep=False).any()
+        and not universe.duplicated(
+            ["contract_code", "enumerated_as_of_date"], keep=False
+        ).any()
         and universe["expiration_date"].notna().all()
     )
     g3 = bool(
@@ -792,11 +806,95 @@ def evaluate_gates(
         ],
         ignore_index=True,
     )
+    enumeration_provenance_valid = bool(
+        universe["enumeration_retrieved_at_utc"]
+        .map(lambda value: _utc_timestamp(value) is not None)
+        .all()
+        and universe["enumeration_route"].astype(str).str.contains("/iss/history/").all()
+        and universe["enumeration_raw_payload_sha256"]
+        .astype(str)
+        .map(lambda value: bool(_SHA256_PATTERN.fullmatch(value)))
+        .all()
+    )
+    metadata_provenance_valid = bool(
+        universe["metadata_retrieved_at_utc"]
+        .map(lambda value: _utc_timestamp(value) is not None)
+        .all()
+        and universe["metadata_route"].astype(str).str.contains("/iss/securities/").all()
+        and universe["metadata_raw_payload_sha256"]
+        .astype(str)
+        .map(lambda value: bool(_SHA256_PATTERN.fullmatch(value)))
+        .all()
+    )
+    candle_provenance_valid = bool(
+        candles["retrieved_at_utc"]
+        .map(lambda value: _utc_timestamp(value) is not None)
+        .all()
+        and candles["source_route"].astype(str).str.contains("/candles.json").all()
+        and candles["raw_payload_sha256"]
+        .astype(str)
+        .map(lambda value: bool(_SHA256_PATTERN.fullmatch(value)))
+        .all()
+    )
+    candle_provenance_records = {
+        (
+            str(row.contract_code),
+            str(row.trade_date),
+            str(row.source_route),
+            str(row.raw_payload_sha256),
+            _timestamp_key(row.retrieved_at_utc),
+        )
+        for row in candles.itertuples(index=False)
+    }
+    metadata_provenance_records = {
+        (
+            str(row.contract_code),
+            str(row.metadata_route),
+            str(row.metadata_raw_payload_sha256),
+        )
+        for row in universe.itertuples(index=False)
+    }
+    matrix_metadata_records = {
+        (
+            str(row.brent_contract_code),
+            str(row.brent_contract_metadata_route),
+            str(row.brent_contract_metadata_sha256),
+        )
+        for row in matrix.itertuples(index=False)
+    }
+    matrix_candle_records = {
+        (
+            str(row.brent_contract_code),
+            str(row.brent_trade_date),
+            str(row.brent_candle_route),
+            str(row.brent_candle_payload_sha256),
+            _timestamp_key(row.brent_retrieved_at_utc),
+        )
+        for row in matrix.itertuples(index=False)
+    }
     g7 = bool(
         hashes.map(lambda value: bool(_SHA256_PATTERN.fullmatch(value))).all()
-        and matrix["brent_retrieved_at_utc"].str.endswith("Z").all()
+        and enumeration_provenance_valid
+        and metadata_provenance_valid
+        and candle_provenance_valid
+        and None not in {record[-1] for record in matrix_candle_records}
+        and matrix_metadata_records.issubset(metadata_provenance_records)
+        and matrix_candle_records.issubset(candle_provenance_records)
+        and matrix["brent_contract_metadata_route"]
+        .ne(matrix["brent_candle_route"])
+        .all()
         and matrix["brent_contract_metadata_route"].str.contains("/iss/securities/").all()
         and matrix["brent_candle_route"].str.contains("/candles.json").all()
+        and route_validation.get("retrieval_timestamp_origin")
+        == "per_payload_post_transport_utc_clock"
+        and route_validation.get(
+            "caller_provided_production_retrieval_timestamp_allowed"
+        )
+        is False
+        and route_validation.get("synthetic_clock_injection_scope") == "tests_only"
+        and route_validation.get(
+            "metadata_and_candle_payload_provenance_distinguishable"
+        )
     )
     g8 = not bool(set(matrix.columns) & _FORBIDDEN_MATRIX_FIELDS)
     passed = (g1, g2, g3, g4, g5, g6, g7, g8)
@@ -891,11 +989,9 @@ def run_source_validation(
     request: Phase84ARequest,
     *,
     transport: HttpTransport = fetch_bytes,
+    clock: UtcClock = utc_now,
 ) -> Phase84AResult:
     _validate_request(request)
-    retrieved_at = request.retrieved_at_utc or datetime.now(timezone.utc).replace(
-        microsecond=0
-    )
     observed_hashes = verify_immutable_inputs(request)
     aggregate = _json(request.phase83_aggregate_metrics_path)
     phase83_gates = _json(request.phase83_gate_results_path)
@@ -911,8 +1007,8 @@ def run_source_validation(
     validation = _validation_identities(predictions, eligible)
     universe, candles, matrix, rolls = build_brent_pit_matrix(
         eligible,
-        retrieved_at=retrieved_at,
         transport=transport,
+        clock=clock,
     )
     coverage = _coverage(matrix, validation)
     route_validation = _official_route_validation(universe, candles, eligible)
