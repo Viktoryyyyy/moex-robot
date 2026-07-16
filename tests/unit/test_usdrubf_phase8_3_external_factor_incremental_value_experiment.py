@@ -220,6 +220,27 @@ def test_all_thirteen_immutable_data_hashes_are_verified(
     assert observed == experiment.EXPECTED_INPUT_SHA256
 
 
+def test_experiment_contract_digest_is_pinned_and_enforced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository_contract = (
+        Path(experiment.__file__).resolve().parents[3]
+        / "contracts"
+        / "experiments"
+        / "usdrubf_phase8_3_external_factor_incremental_value_experiment_v1.json"
+    )
+    assert experiment._sha256(repository_contract) == (
+        experiment.EXPECTED_EXPERIMENT_CONTRACT_SHA256
+    )
+    request = _request(tmp_path)
+    monkeypatch.setattr(experiment, "_sha256", lambda _: "0" * 64)
+    with pytest.raises(
+        experiment.Phase83ExternalFactorExperimentError,
+        match="contract SHA256 mismatch",
+    ):
+        experiment.verify_experiment_contract_hash(request)
+
+
 def test_all_nine_phase82_artifacts_are_required(tmp_path: Path) -> None:
     paths = experiment._input_paths(_request(tmp_path))
     assert len([name for name in paths if name.startswith("phase82_")]) == 9

@@ -61,6 +61,9 @@ ACCEPTED_PHASE82_RUN_ID: Final[str] = (
     "phase8_2_external_data_pit_acceptance_matrix_20260716_v2"
 )
 EXPECTED_SOURCE_COMMIT: Final[str] = "b512e0e9400ef150ecc1c0eee3954c56ab8c1dbc"
+EXPECTED_EXPERIMENT_CONTRACT_SHA256: Final[str] = (
+    "3093a2525b73e283115c89598482cf8c0fe2eb7b949d018d5d09f81ab2b90ec8"
+)
 EXPECTED_VALIDATION_IDENTITIES: Final[int] = 320
 PROBABILITY_COLUMNS: Final[tuple[str, ...]] = (
     "probability_B",
@@ -395,6 +398,15 @@ def verify_immutable_hashes(request: Phase83ExperimentRequest) -> dict[str, str]
     if mismatches:
         raise Phase83ExternalFactorExperimentError(
             "immutable input hash mismatch: " + ", ".join(mismatches)
+        )
+    return observed
+
+
+def verify_experiment_contract_hash(request: Phase83ExperimentRequest) -> str:
+    observed = _sha256(request.experiment_contract_path)
+    if observed != EXPECTED_EXPERIMENT_CONTRACT_SHA256:
+        raise Phase83ExternalFactorExperimentError(
+            "experiment contract SHA256 mismatch"
         )
     return observed
 
@@ -1453,6 +1465,7 @@ def run_experiment(request: Phase83ExperimentRequest) -> Phase83ExperimentResult
     if request.output_dir.exists():
         raise Phase83ExternalFactorExperimentError("output directory must not pre-exist")
     observed_hashes = verify_immutable_hashes(request)
+    observed_contract_hash = verify_experiment_contract_hash(request)
     contract = _json(request.experiment_contract_path)
     validate_experiment_contract(contract)
     phase82_input_identity = _json(request.phase82_input_identity_path)
@@ -1545,6 +1558,12 @@ def run_experiment(request: Phase83ExperimentRequest) -> Phase83ExperimentResult
         "validation_identity_count": len(m0),
         "fold_count": len(folds),
         "validation_rows_per_fold": [len(valid) for _, valid in folds],
+        "experiment_contract": {
+            "expected_sha256": EXPECTED_EXPERIMENT_CONTRACT_SHA256,
+            "observed_sha256": observed_contract_hash,
+            "matches": observed_contract_hash
+            == EXPECTED_EXPERIMENT_CONTRACT_SHA256,
+        },
         "immutable_inputs": {
             name: {
                 "expected_sha256": expected,
