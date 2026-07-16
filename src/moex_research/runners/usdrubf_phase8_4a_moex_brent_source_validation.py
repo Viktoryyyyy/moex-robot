@@ -816,6 +816,17 @@ def evaluate_gates(
         .map(lambda value: bool(_SHA256_PATTERN.fullmatch(value)))
         .all()
     )
+    enumeration_provenance_records = {
+        (
+            str(row.enumeration_route),
+            str(row.enumeration_raw_payload_sha256),
+            _timestamp_key(row.enumeration_retrieved_at_utc),
+        )
+        for row in universe.itertuples(index=False)
+    }
+    enumeration_payload_keys = {
+        record[:2] for record in enumeration_provenance_records
+    }
     metadata_provenance_valid = bool(
         universe["metadata_retrieved_at_utc"]
         .map(lambda value: _utc_timestamp(value) is not None)
@@ -881,6 +892,8 @@ def evaluate_gates(
         and enumeration_provenance_valid
         and metadata_provenance_valid
         and candle_provenance_valid
+        and None not in {record[-1] for record in enumeration_provenance_records}
+        and len(enumeration_provenance_records) == len(enumeration_payload_keys)
         and None not in {record[-1] for record in matrix_candle_records}
         and None not in {record[-1] for record in metadata_provenance_records}
         and len(metadata_provenance_records) == len(metadata_payload_keys)
