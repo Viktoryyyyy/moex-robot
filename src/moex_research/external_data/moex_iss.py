@@ -23,6 +23,21 @@ MOEX_ISS_HOST: Final[str] = "iss.moex.com"
 TRANSIENT_HTTP_ERROR_MESSAGE: Final[str] = "external-data request failed"
 _SHA256_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
 
+__all__ = (
+    "IssBlock",
+    "MOEX_ISS_HOST",
+    "MoexIssClient",
+    "MoexIssClientError",
+    "RetryPolicy",
+    "Sleeper",
+    "TRANSIENT_HTTP_ERROR_MESSAGE",
+    "UtcClock",
+    "parse_iss_block",
+    "require_utc",
+    "utc_now",
+    "validate_official_route",
+)
+
 
 class MoexIssClientError(ValueError):
     """A structured route, schema, payload, or timestamp validation failure."""
