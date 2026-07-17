@@ -99,9 +99,13 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _write_inputs(tmp_path: Path) -> tuple[runner.Phase85Request, dict[str, Path]]:
+def _write_inputs(
+    tmp_path: Path, *, constant_brent_value: float | None = None
+) -> tuple[runner.Phase85Request, dict[str, Path]]:
     dataset = _modeling_dataset()
     matrix = _brent_matrix()
+    if constant_brent_value is not None:
+        matrix["brent_value"] = constant_brent_value
     paths = {
         "modeling_dataset": tmp_path / "modeling_dataset.parquet",
         "dataset_manifest": tmp_path / "manifest.json",
@@ -407,7 +411,7 @@ def test_no_model_serialization_or_promotion_path_exists() -> None:
     assert "pickle" not in source
     assert "subprocess" not in source
     assert ".dump(" not in source
-    assert "promotion_performed\": true" not in source
+    assert 'promotion_performed\": true' not in source
 
 
 def _synthetic_gate_inputs() -> tuple[dict[str, dict[str, object]], pd.DataFrame]:
@@ -457,6 +461,27 @@ def _synthetic_gate_inputs() -> tuple[dict[str, dict[str, object]], pd.DataFrame
     return aggregates, pd.DataFrame(rows)
 
 
+def _defined_distribution_rows() -> list[dict[str, object]]:
+    return [
+        {
+            "matrix_id": "E1_M0_PLUS_BRENT_FULL",
+            "fold_id": fold_id,
+            "brent_feature": feature,
+            "train_finite_count": 100,
+            "validation_finite_count": 64,
+            "train_mean": 0.0,
+            "validation_mean": 0.1,
+            "train_standard_deviation": 1.0,
+            "smd": 0.1,
+            "validation_matches_training_constant": None,
+            "status": "defined",
+            "distribution_integrity_passed": True,
+        }
+        for fold_id in range(1, 6)
+        for feature in runner.BRENT_FEATURES
+    ]
+
+
 @pytest.mark.parametrize(
     "failed_flag",
     [
@@ -465,7 +490,6 @@ def _synthetic_gate_inputs() -> tuple[dict[str, dict[str, object]], pd.DataFrame
         "identity_verified",
         "feature_integrity_verified",
         "protocol_verified",
-        "distribution_verified",
         "scope_verified",
     ],
 )
@@ -477,15 +501,153 @@ def test_G12_fails_when_any_required_integrity_gate_fails(failed_flag: str) -> N
         "identity_verified": True,
         "feature_integrity_verified": True,
         "protocol_verified": True,
-        "distribution_verified": True,
         "scope_verified": True,
     }
     flags[failed_flag] = False
-    gates = runner.evaluate_gates(aggregates, folds, **flags)
+    gates = runner.evaluate_gates(
+        aggregates, folds, distribution_rows=_defined_distribution_rows(), **flags
+    )
     assert gates["G12_final_acceptance"]["passed"] is False
     assert gates["G12_final_acceptance"]["status"] == (
         "brent_incremental_value_not_supported"
     )
+
+
+def test_brent_feature_smd_returns_defined_for_non_constant_feature() -> None:
+    row = runner.brent_feature_smd(
+        pd.Series([1.0, 2.0, 3.0]), pd.Series([2.0, 3.0])
+    )
+    assert row["status"] == "defined"
+    assert np.isfinite(row["smd"])
+    assert row["distribution_integrity_passed"] is True
+    assert row["validation_matches_training_constant"] is None
+
+
+def test_brent_feature_smd_returns_structured_equal_constant_failure() -> None:
+    row = runner.brent_feature_smd(
+        pd.Series([0.0, 0.0, 0.0]), pd.Series([0.0, 0.0])
+    )
+    assert row == {
+        "train_finite_count": 3,
+        "validation_finite_count": 2,
+        "train_mean": 0.0,
+        "validation_mean": 0.0,
+        "train_standard_deviation": 0.0,
+        "smd": None,
+        "validation_matches_training_constant": True,
+        "status": "undefined_constant_equal",
+        "distribution_integrity_passed": False,
+    }
+
+
+def test_brent_feature_smd_returns_structured_shifted_constant_failure() -> None:
+    row = runner.brent_feature_smd(
+        pd.Series([0.0, 0.0, 0.0]), pd.Series([1.0, 1.0])
+    )
+    assert row["status"] == "undefined_constant_shifted"
+    assert row["smd"] is None
+    assert row["train_standard_deviation"] == 0.0
+    assert row["validation_matches_training_constant"] is False
+    assert row["distribution_integrity_passed"] is False
+
+
+@pytest.mark.parametrize(
+    ("train", "validation", "match"),
+    [
+        (pd.Series([1.0]), pd.Series([1.0]), "insufficient"),
+        (pd.Series([1.0, np.nan]), pd.Series([1.0]), "non-finite"),
+        (pd.Series([1.0, 2.0]), pd.Series([np.inf]), "non-finite"),
+    ],
+)
+def test_brent_feature_smd_remains_fail_closed_for_invalid_values(
+    train: pd.Series, validation: pd.Series, match: str
+) -> None:
+    with pytest.raises(runner.Phase85BrentIncrementalValueError, match=match):
+        runner.brent_feature_smd(train, validation)
+
+
+def test_G10_and_G12_identify_exact_constant_feature_and_folds() -> None:
+    aggregates, folds = _synthetic_gate_inputs()
+    distribution = _defined_distribution_rows()
+    for row in distribution:
+        if row["brent_feature"] == "ext_log1p_brent_value":
+            row.update(
+                {
+                    "train_mean": 0.0,
+                    "validation_mean": 0.0,
+                    "train_standard_deviation": 0.0,
+                    "smd": None,
+                    "validation_matches_training_constant": True,
+                    "status": "undefined_constant_equal",
+                    "distribution_integrity_passed": False,
+                }
+            )
+    gates = runner.evaluate_gates(
+        aggregates,
+        folds,
+        immutable_hashes_verified=True,
+        phase84a_source_verified=True,
+        identity_verified=True,
+        feature_integrity_verified=True,
+        protocol_verified=True,
+        distribution_rows=distribution,
+        scope_verified=True,
+    )
+    g10 = gates["G10_distribution_integrity"]
+    assert g10["passed"] is False
+    assert g10["total_rows"] == 30
+    assert g10["defined_rows"] == 25
+    assert g10["undefined_rows"] == 5
+    assert {row["brent_feature"] for row in g10["undefined_feature_folds"]} == {
+        "ext_log1p_brent_value"
+    }
+    assert [row["fold_id"] for row in g10["undefined_feature_folds"]] == [1, 2, 3, 4, 5]
+    g12 = gates["G12_final_acceptance"]
+    assert g12["passed"] is False
+    assert g12["status"] == "brent_incremental_value_not_supported"
+    assert "G10" in g12["failed_gates"]
+    distribution_dimensions = [
+        dimension
+        for dimension in g12["failure_dimensions"]
+        if dimension.startswith("distribution_integrity:")
+    ]
+    assert distribution_dimensions == [
+        f"distribution_integrity:ext_log1p_brent_value:fold_{fold}:undefined_constant_equal"
+        for fold in range(1, 6)
+    ]
+    assert g12["production_or_strategy_promotion_authorized"] is False
+
+
+def test_constant_equal_runtime_completes_with_structured_G10_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request, paths = _write_inputs(tmp_path, constant_brent_value=0.0)
+    _patch_hashes(monkeypatch, paths)
+    result = runner.run_experiment(request)
+    assert result.final_status == "brent_incremental_value_not_supported"
+    shift = pd.read_csv(request.output_dir / "brent_feature_shift_by_fold.csv")
+    assert len(shift) == 30
+    undefined = shift.loc[shift["status"].ne("defined")]
+    assert len(undefined) == 5
+    assert undefined["brent_feature"].eq("ext_log1p_brent_value").all()
+    assert undefined["fold_id"].tolist() == [1, 2, 3, 4, 5]
+    assert undefined["status"].eq("undefined_constant_equal").all()
+    assert undefined["train_standard_deviation"].eq(0.0).all()
+    assert undefined["smd"].isna().all()
+    assert undefined["validation_matches_training_constant"].astype(bool).all()
+    assert (~undefined["distribution_integrity_passed"].astype(bool)).all()
+    gates = json.loads((request.output_dir / "gate_results.json").read_text())
+    assert gates["G10_distribution_integrity"]["passed"] is False
+    assert gates["G10_distribution_integrity"]["defined_rows"] == 25
+    assert gates["G10_distribution_integrity"]["undefined_rows"] == 5
+    assert gates["G12_final_acceptance"]["passed"] is False
+    assert gates["G12_final_acceptance"]["status"] == (
+        "brent_incremental_value_not_supported"
+    )
+    assert "G10" in gates["G12_final_acceptance"]["failed_gates"]
+    assert gates["G12_final_acceptance"][
+        "production_or_strategy_promotion_authorized"
+    ] is False
 
 
 def test_exact_runner_cli_and_distinct_explicit_paths(

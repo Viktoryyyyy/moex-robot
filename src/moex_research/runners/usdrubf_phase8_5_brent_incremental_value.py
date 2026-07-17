@@ -39,7 +39,6 @@ from moex_research.runners import (
     usdrubf_phase8_3_external_factor_incremental_value_experiment as phase83_protocol,
 )
 
-
 PROJECT: Final[str] = "MOEX Bot"
 PHASE: Final[str] = "8.5"
 LANE: Final[str] = "ema_3_19_ai"
@@ -63,9 +62,7 @@ ACCEPTED_PHASE84A_RUN_ID: Final[str] = (
     "phase8_4a_moex_brent_source_validation_20260716_v2"
 )
 EXPECTED_SOURCE_COMMIT: Final[str] = "0e25691f8c665052c2d44b7bf66d8ef053543149"
-EXPECTED_EXPERIMENT_CONTRACT_SHA256: Final[str] = (
-    "c96aaf4a0ea8a415fc03c13aec43c83cb74815dd0d89c88f0a4f7eb8ed20f232"
-)
+EXPECTED_EXPERIMENT_CONTRACT_SHA256: Final[str] = "63fb0be54230af72083bb683eeef28f1cc17fb63ae43c761a66593b90dd7632b"
 EXPECTED_VALIDATION_IDENTITIES: Final[int] = 320
 PROBABILITY_COLUMNS: Final[tuple[str, ...]] = (
     "probability_B",
@@ -161,6 +158,21 @@ BRENT_FEATURE_DEFINITIONS: Final[dict[str, dict[str, str]]] = {
         "formula": "log1p(value)",
     },
 }
+DISTRIBUTION_INTEGRITY_POLICY: Final[dict[str, Any]] = {
+    "expected_feature_fold_rows": 30,
+    "expected_features": 6,
+    "expected_folds": 5,
+    "defined_status": "defined",
+    "constant_equal_status": "undefined_constant_equal",
+    "constant_shifted_status": "undefined_constant_shifted",
+    "constant_smd": None,
+    "constant_training_standard_deviation": 0.0,
+    "G10_pass_rule": (
+        "all 30 feature/fold rows have status defined, finite SMD, positive training "
+        "standard deviation, and distribution_integrity_passed true"
+    ),
+    "insufficient_or_non_finite_values": "fail_closed_exception",
+}
 _ALIAS_PATTERN = re.compile(r"(^|[/\\._-])(latest|current|autodetect)($|[/\\._-])", re.I)
 _SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
 _GLOB_CHARS = frozenset("*?[]")
@@ -203,10 +215,7 @@ class Phase85Result:
 
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog=(
-            "python -m moex_research.runners."
-            "usdrubf_phase8_5_brent_incremental_value"
-        )
+        prog="python -m moex_research.runners.usdrubf_phase8_5_brent_incremental_value"
     )
     for flag in REQUIRED_CLI_ARGS:
         parser.add_argument(flag, required=True)
@@ -353,9 +362,7 @@ def _sha256(path: Path) -> str:
 
 def verify_immutable_hashes(request: Phase85Request) -> dict[str, str]:
     paths = _input_paths(request)
-    observed = {
-        name: _sha256(paths[name]) for name in EXPECTED_INPUT_SHA256
-    }
+    observed = {name: _sha256(paths[name]) for name in EXPECTED_INPUT_SHA256}
     mismatches = [
         name
         for name, expected in EXPECTED_INPUT_SHA256.items()
@@ -371,9 +378,7 @@ def verify_immutable_hashes(request: Phase85Request) -> dict[str, str]:
 def verify_experiment_contract_hash(request: Phase85Request) -> str:
     observed = _sha256(request.experiment_contract_path)
     if observed != EXPECTED_EXPERIMENT_CONTRACT_SHA256:
-        raise Phase85BrentIncrementalValueError(
-            "experiment contract SHA256 mismatch"
-        )
+        raise Phase85BrentIncrementalValueError("experiment contract SHA256 mismatch")
     return observed
 
 
@@ -381,9 +386,7 @@ def _json(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise Phase85BrentIncrementalValueError(
-            f"invalid JSON: {path.name}"
-        ) from exc
+        raise Phase85BrentIncrementalValueError(f"invalid JSON: {path.name}") from exc
     if not isinstance(value, dict):
         raise Phase85BrentIncrementalValueError(
             f"JSON must be an object: {path.name}"
@@ -412,22 +415,20 @@ def validate_phase84a_acceptance_identity(
             "Phase 8.4A eligible or validation coverage mismatch"
         )
     required_gates = tuple(f"G{i}" for i in range(1, 10))
-    normalized_gate_names = {
+    normalized = {
         str(name).split("_", 1)[0]: payload
         for name, payload in gate_results.items()
         if isinstance(payload, Mapping)
     }
     if any(
-        name not in normalized_gate_names
+        name not in normalized
         or not bool(
-            normalized_gate_names[name].get(
-                "passed", normalized_gate_names[name].get("pass", False)
-            )
+            normalized[name].get("passed", normalized[name].get("pass", False))
         )
         for name in required_gates
     ):
         raise Phase85BrentIncrementalValueError("Phase 8.4A G1 through G9 must pass")
-    final_gate = normalized_gate_names["G9"]
+    final_gate = normalized["G9"]
     if (
         final_gate.get("status") != "moex_brent_source_candidate_for_phase8_5"
         or final_gate.get("blocker_classification") is not None
@@ -478,11 +479,7 @@ def validate_phase84a_artifacts(
     eligible: pd.DataFrame,
 ) -> None:
     required_universe = ("contract_code", "asset_code", "board_id", "expiration_date")
-    required_candles = (
-        "contract_code",
-        "trade_date",
-        "raw_payload_sha256",
-    )
+    required_candles = ("contract_code", "trade_date", "raw_payload_sha256")
     required_matrix = (
         *IDENTITY_COLUMNS,
         "prior_trade_date",
@@ -521,11 +518,13 @@ def validate_phase84a_artifacts(
         raise Phase85BrentIncrementalValueError(
             "Phase 8.4A expired explicit contract count mismatch"
         )
-    if len(matrix) != EXPECTED_ELIGIBLE_IDENTITIES or len(candles) != EXPECTED_ELIGIBLE_IDENTITIES:
+    if (
+        len(matrix) != EXPECTED_ELIGIBLE_IDENTITIES
+        or len(candles) != EXPECTED_ELIGIBLE_IDENTITIES
+    ):
         raise Phase85BrentIncrementalValueError(
             "Phase 8.4A must contain one explicit candle per eligible identity"
         )
-
     matrix_identity = matrix.loc[:, IDENTITY_COLUMNS].copy()
     matrix_identity["target_trade_date"] = pd.to_datetime(
         matrix_identity["target_trade_date"], errors="raise"
@@ -542,22 +541,24 @@ def validate_phase84a_artifacts(
         raise Phase85BrentIncrementalValueError(
             "Phase 8.4A PIT identity order differs from frozen Phase 6"
         )
-    matrix_prior = pd.to_datetime(matrix["prior_trade_date"], errors="raise").dt.strftime(
-        "%Y-%m-%d"
-    )
-    eligible_prior = eligible["prior_trade_date"].reset_index(drop=True)
-    if not matrix_prior.reset_index(drop=True).equals(eligible_prior):
+    matrix_prior = pd.to_datetime(
+        matrix["prior_trade_date"], errors="raise"
+    ).dt.strftime("%Y-%m-%d")
+    if not matrix_prior.reset_index(drop=True).equals(
+        eligible["prior_trade_date"].reset_index(drop=True)
+    ):
         raise Phase85BrentIncrementalValueError(
             "Phase 8.4A prior_trade_date differs from frozen Phase 6"
         )
-
     candle_keys = candles.loc[:, required_candles].copy()
     candle_keys["trade_date"] = pd.to_datetime(
         candle_keys["trade_date"], errors="raise"
     ).dt.strftime("%Y-%m-%d")
     candle_keys["contract_code"] = candle_keys["contract_code"].astype(str)
     if candle_keys.duplicated(["contract_code", "trade_date"], keep=False).any():
-        raise Phase85BrentIncrementalValueError("Phase 8.4A candle identity is duplicated")
+        raise Phase85BrentIncrementalValueError(
+            "Phase 8.4A candle identity is duplicated"
+        )
     matrix_keys = matrix.loc[
         :, ("brent_contract_code", "brent_trade_date", "brent_candle_payload_sha256")
     ].copy()
@@ -582,8 +583,7 @@ def validate_phase84a_artifacts(
         raise Phase85BrentIncrementalValueError(
             "Phase 8.4A matrix candle provenance or explicit contract mismatch"
         )
-
-    coverage_required = (
+    required_coverage = (
         "source_id",
         "eligible_identity_count",
         "eligible_covered_count",
@@ -592,7 +592,7 @@ def validate_phase84a_artifacts(
         "validation_covered_count",
         "validation_missing_count",
     )
-    if len(coverage) != 1 or any(column not in coverage for column in coverage_required):
+    if len(coverage) != 1 or any(column not in coverage for column in required_coverage):
         raise Phase85BrentIncrementalValueError("Phase 8.4A coverage evidence malformed")
     row = coverage.iloc[0]
     if (
@@ -607,7 +607,6 @@ def validate_phase84a_artifacts(
         raise Phase85BrentIncrementalValueError(
             "Phase 8.4A exact eligible or validation coverage mismatch"
         )
-
     expected_changed = matrix["brent_contract_code"].ne(
         matrix["brent_contract_code"].shift()
     )
@@ -709,6 +708,10 @@ def validate_experiment_contract(contract: Mapping[str, Any]) -> None:
     if contract.get("brent_feature_definitions") != BRENT_FEATURE_DEFINITIONS:
         raise Phase85BrentIncrementalValueError(
             "contract Brent feature definitions mismatch"
+        )
+    if contract.get("distribution_integrity_policy") != DISTRIBUTION_INTEGRITY_POLICY:
+        raise Phase85BrentIncrementalValueError(
+            "contract distribution integrity policy mismatch"
         )
     inventory = contract.get("matrix_inventory", {})
     if (
@@ -819,9 +822,7 @@ def _expected_validation_identities(
 ) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
     for fold_id, (_, valid) in enumerate(folds, 1):
-        frame = eligible.iloc[valid][
-            [*IDENTITY_COLUMNS, "target_phase_label"]
-        ].copy()
+        frame = eligible.iloc[valid][[*IDENTITY_COLUMNS, "target_phase_label"]].copy()
         frame.insert(0, "fold_id", fold_id)
         frames.append(frame.rename(columns={"target_phase_label": "y_true"}))
     return pd.concat(frames, ignore_index=True)
@@ -960,12 +961,8 @@ def calculate_metrics(
             )
         ),
         "B_recall": recall["B"],
-        "S_to_OUT_rate": (
-            float(matrix[1, 2] / support[1]) if support[1] else float("nan")
-        ),
-        "OUT_to_S_rate": (
-            float(matrix[2, 1] / support[2]) if support[2] else float("nan")
-        ),
+        "S_to_OUT_rate": float(matrix[1, 2] / support[1]) if support[1] else float("nan"),
+        "OUT_to_S_rate": float(matrix[2, 1] / support[2]) if support[2] else float("nan"),
         "mean_confidence_on_incorrect_predictions": (
             float(np.mean(confidence[incorrect])) if incorrect.any() else float("nan")
         ),
@@ -1007,36 +1004,62 @@ def confidence_bucket(predictions: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def brent_feature_smd(train: pd.Series, validation: pd.Series) -> dict[str, float]:
+def brent_feature_smd(train: pd.Series, validation: pd.Series) -> dict[str, Any]:
     train_values = pd.to_numeric(train, errors="coerce").to_numpy(float)
     validation_values = pd.to_numeric(validation, errors="coerce").to_numpy(float)
-    train_values = train_values[np.isfinite(train_values)]
-    validation_values = validation_values[np.isfinite(validation_values)]
     if len(train_values) < 2 or len(validation_values) < 1:
         raise Phase85BrentIncrementalValueError(
             "Brent feature SMD has insufficient finite values"
         )
-    standard_deviation = float(np.std(train_values, ddof=1))
-    if not np.isfinite(standard_deviation) or standard_deviation <= 0:
+    if not np.isfinite(train_values).all() or not np.isfinite(validation_values).all():
         raise Phase85BrentIncrementalValueError(
-            "Brent feature is constant in a training fold"
+            "Brent feature SMD contains non-finite values"
         )
+    standard_deviation = float(np.std(train_values, ddof=1))
     train_mean = float(np.mean(train_values))
     validation_mean = float(np.mean(validation_values))
-    return {
+    if not all(np.isfinite(value) for value in (standard_deviation, train_mean, validation_mean)):
+        raise Phase85BrentIncrementalValueError(
+            "Brent feature SMD contains non-finite statistics"
+        )
+    base = {
         "train_finite_count": int(len(train_values)),
         "validation_finite_count": int(len(validation_values)),
         "train_mean": train_mean,
         "validation_mean": validation_mean,
         "train_standard_deviation": standard_deviation,
-        "smd": abs(validation_mean - train_mean) / standard_deviation,
+    }
+    if standard_deviation == 0.0:
+        matches = bool((validation_values == train_values[0]).all())
+        return {
+            **base,
+            "smd": None,
+            "validation_matches_training_constant": matches,
+            "status": (
+                "undefined_constant_equal"
+                if matches
+                else "undefined_constant_shifted"
+            ),
+            "distribution_integrity_passed": False,
+        }
+    if standard_deviation < 0.0:
+        raise Phase85BrentIncrementalValueError(
+            "Brent feature SMD standard deviation is invalid"
+        )
+    smd = abs(validation_mean - train_mean) / standard_deviation
+    if not np.isfinite(smd):
+        raise Phase85BrentIncrementalValueError("Brent feature SMD is non-finite")
+    return {
+        **base,
+        "smd": float(smd),
+        "validation_matches_training_constant": None,
+        "status": "defined",
+        "distribution_integrity_passed": True,
     }
 
 
 def _per_class_rows(
-    matrix_id: str,
-    fold_id: int | str,
-    metrics: Mapping[str, Any],
+    matrix_id: str, fold_id: int | str, metrics: Mapping[str, Any]
 ) -> list[dict[str, Any]]:
     return [
         {
@@ -1130,14 +1153,15 @@ def _evaluate_candidate_matrix(
             pipeline.predict_proba(valid.loc[:, feature_columns]), classifier.classes_
         )
         metrics = calculate_metrics(y_valid, predicted, probabilities)
-        row = {
-            "matrix_id": matrix_id,
-            "matrix_role": MATRIX_ROLES[matrix_id],
-            "fold_id": fold_id,
-            **metrics,
-            "acceptance_eligible": matrix_id == "E1_M0_PLUS_BRENT_FULL",
-        }
-        fold_rows.append(row)
+        fold_rows.append(
+            {
+                "matrix_id": matrix_id,
+                "matrix_role": MATRIX_ROLES[matrix_id],
+                "fold_id": fold_id,
+                **metrics,
+                "acceptance_eligible": matrix_id == "E1_M0_PLUS_BRENT_FULL",
+            }
+        )
         per_class_rows.extend(_per_class_rows(matrix_id, fold_id, metrics))
         identity = eligible.iloc[valid_index][list(IDENTITY_COLUMNS)].reset_index(drop=True)
         identity.insert(0, "fold_id", fold_id)
@@ -1148,9 +1172,7 @@ def _evaluate_candidate_matrix(
             identity[column] = probabilities[:, column_index]
         prediction_frames.append(identity)
         if matrix_id == "E1_M0_PLUS_BRENT_FULL":
-            transformed_names = pipeline.named_steps[
-                "preprocessor"
-            ].get_feature_names_out()
+            transformed_names = pipeline.named_steps["preprocessor"].get_feature_names_out()
             positions = {
                 name.split("__", 1)[-1]: index
                 for index, name in enumerate(transformed_names)
@@ -1231,11 +1253,98 @@ def _brent_shift_rows(
                     "matrix_id": "E1_M0_PLUS_BRENT_FULL",
                     "fold_id": fold_id,
                     "brent_feature": feature,
-                    **brent_feature_smd(e1.iloc[train][feature], e1.iloc[valid][feature]),
-                    "status": "defined",
+                    **brent_feature_smd(
+                        e1.iloc[train][feature], e1.iloc[valid][feature]
+                    ),
                 }
             )
     return rows
+
+
+def _distribution_integrity_gate(
+    rows: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    materialized = [dict(row) for row in rows]
+    expected_pairs = {(fold, feature) for fold in range(1, 6) for feature in BRENT_FEATURES}
+    observed_pairs = {
+        (int(row.get("fold_id", -1)), str(row.get("brent_feature", "")))
+        for row in materialized
+    }
+    if (
+        len(materialized) != 30
+        or len(observed_pairs) != 30
+        or observed_pairs != expected_pairs
+        or any(row.get("matrix_id") != "E1_M0_PLUS_BRENT_FULL" for row in materialized)
+    ):
+        raise Phase85BrentIncrementalValueError(
+            "Brent distribution evidence must contain exact 30 feature/fold rows"
+        )
+    undefined: list[dict[str, Any]] = []
+    defined_count = 0
+    for row in materialized:
+        status = row.get("status")
+        std = row.get("train_standard_deviation")
+        smd = row.get("smd")
+        passed = row.get("distribution_integrity_passed")
+        matches = row.get("validation_matches_training_constant")
+        if status == "defined":
+            try:
+                valid_defined = (
+                    np.isfinite(float(std))
+                    and float(std) > 0.0
+                    and np.isfinite(float(smd))
+                    and passed is True
+                    and matches is None
+                )
+            except (TypeError, ValueError):
+                valid_defined = False
+            if not valid_defined:
+                raise Phase85BrentIncrementalValueError(
+                    "defined Brent distribution row is malformed"
+                )
+            defined_count += 1
+            continue
+        if status not in {"undefined_constant_equal", "undefined_constant_shifted"}:
+            raise Phase85BrentIncrementalValueError(
+                "unsupported Brent distribution status"
+            )
+        if (
+            float(std) != 0.0
+            or smd is not None
+            or passed is not False
+            or matches is not (status == "undefined_constant_equal")
+        ):
+            raise Phase85BrentIncrementalValueError(
+                "constant Brent distribution row is malformed"
+            )
+        undefined.append(
+            {
+                "brent_feature": row["brent_feature"],
+                "fold_id": int(row["fold_id"]),
+                "status": status,
+                "validation_matches_training_constant": bool(matches),
+            }
+        )
+    undefined.sort(key=lambda item: (str(item["brent_feature"]), int(item["fold_id"])))
+    status_counts = {
+        "defined": defined_count,
+        "undefined_constant_equal": sum(
+            item["status"] == "undefined_constant_equal" for item in undefined
+        ),
+        "undefined_constant_shifted": sum(
+            item["status"] == "undefined_constant_shifted" for item in undefined
+        ),
+    }
+    return {
+        "passed": not undefined,
+        "distribution_integrity_passed": not undefined,
+        "all_brent_feature_SMD_defined": not undefined,
+        "total_rows": len(materialized),
+        "defined_rows": defined_count,
+        "undefined_rows": len(undefined),
+        "status_counts": status_counts,
+        "undefined_feature_folds": undefined,
+    }
 
 
 def _coefficient_sign_consistency(rows: list[dict[str, Any]]) -> None:
@@ -1244,9 +1353,11 @@ def _coefficient_sign_consistency(rows: list[dict[str, Any]]) -> None:
         ["brent_feature", "class_label"], sort=False
     ):
         coefficients = group["standardized_coefficient"].to_numpy(float)
-        nonnegative = bool((coefficients >= 0).all())
-        nonpositive = bool((coefficients <= 0).all())
-        status = "consistent" if nonnegative or nonpositive else "mixed"
+        status = (
+            "consistent"
+            if bool((coefficients >= 0).all()) or bool((coefficients <= 0).all())
+            else "mixed"
+        )
         for row in rows:
             if row["brent_feature"] == feature and row["class_label"] == label:
                 row["coefficient_sign_consistency"] = status
@@ -1365,7 +1476,7 @@ def evaluate_gates(
     identity_verified: bool,
     feature_integrity_verified: bool,
     protocol_verified: bool,
-    distribution_verified: bool,
+    distribution_rows: Iterable[Mapping[str, Any]],
     scope_verified: bool = True,
 ) -> dict[str, Any]:
     e0_id = "E0_FROZEN_PHASE7_2_CONTROL"
@@ -1432,16 +1543,15 @@ def evaluate_gates(
         if confusion_defined
         else {}
     )
-    g7 = bool(
-        confusion_defined
-        and any(value >= 0.05 for value in relative.values())
-        and all(
-            e1[metric] - e0[metric] < 0.03
-            for metric in ("S_to_OUT_rate", "OUT_to_S_rate")
-        )
-    )
     gates["G7_S_versus_OUT_objective"] = {
-        "passed": g7,
+        "passed": bool(
+            confusion_defined
+            and any(value >= 0.05 for value in relative.values())
+            and all(
+                e1[metric] - e0[metric] < 0.03
+                for metric in ("S_to_OUT_rate", "OUT_to_S_rate")
+            )
+        ),
         "relative_improvements": relative,
         "denominators_defined": confusion_defined,
     }
@@ -1493,10 +1603,9 @@ def evaluate_gates(
         "macro_f1_deltas": deltas.tolist(),
         "absolute_stability_passed": stability,
     }
-    gates["G10_distribution_integrity"] = {
-        "passed": bool(distribution_verified),
-        "all_brent_feature_SMD_defined": bool(distribution_verified),
-    }
+    gates["G10_distribution_integrity"] = _distribution_integrity_gate(
+        distribution_rows
+    )
     gates["G11_leakage_and_scope"] = {
         "passed": bool(scope_verified),
         "target_or_probability_feature_used": False,
@@ -1539,7 +1648,11 @@ def evaluate_gates(
     if "G9" in failed:
         dimensions.append("fold_breadth")
     if "G10" in failed:
-        dimensions.append("source_shift")
+        dimensions.extend(
+            "distribution_integrity:"
+            f"{item['brent_feature']}:fold_{item['fold_id']}:{item['status']}"
+            for item in gates["G10_distribution_integrity"]["undefined_feature_folds"]
+        )
     if "G11" in failed:
         dimensions.append("leakage_or_scope")
     status = (
@@ -1598,13 +1711,13 @@ def _json_ready(value: Any) -> Any:
         return {str(key): _json_ready(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_json_ready(item) for item in value]
-    if isinstance(value, (np.integer,)):
+    if isinstance(value, np.integer):
         return int(value)
-    if isinstance(value, (np.floating,)):
+    if isinstance(value, np.floating):
         return float(value) if np.isfinite(value) else None
     if isinstance(value, float) and not np.isfinite(value):
         return None
-    if isinstance(value, (np.bool_,)):
+    if isinstance(value, np.bool_):
         return bool(value)
     return value
 
@@ -1620,7 +1733,9 @@ def _write_exact_artifacts(output_dir: Path, payloads: Mapping[str, object]) -> 
     for name in DECLARED_OUTPUT_ARTIFACTS:
         path = output_dir / name
         if path.parent != output_dir:
-            raise Phase85BrentIncrementalValueError("write outside output directory refused")
+            raise Phase85BrentIncrementalValueError(
+                "write outside output directory refused"
+            )
         payload = payloads[name]
         if name.endswith(".json"):
             path.write_text(
@@ -1632,7 +1747,9 @@ def _write_exact_artifacts(output_dir: Path, payloads: Mapping[str, object]) -> 
             )
         elif name.endswith(".csv"):
             if not isinstance(payload, pd.DataFrame):
-                raise Phase85BrentIncrementalValueError("CSV payload must be a DataFrame")
+                raise Phase85BrentIncrementalValueError(
+                    "CSV payload must be a DataFrame"
+                )
             payload.to_csv(path, index=False)
         elif name.endswith(".parquet"):
             if not isinstance(payload, pd.DataFrame):
@@ -1666,7 +1783,6 @@ def run_experiment(request: Phase85Request) -> Phase85Result:
         source_blockers,
         phase84a_gates,
     )
-    # Read all thirteen immutable inputs before feature construction or any fit.
     modeling_dataset = pd.read_parquet(request.modeling_dataset_path)
     m0_raw = pd.read_parquet(request.m0_validation_predictions_path)
     universe = pd.read_parquet(request.brent_contract_universe_path)
@@ -1738,7 +1854,7 @@ def run_experiment(request: Phase85Request) -> Phase85Result:
         identity_verified=True,
         feature_integrity_verified=True,
         protocol_verified=True,
-        distribution_verified=True,
+        distribution_rows=shift_rows,
         scope_verified=True,
     )
     gate_results["G12_final_acceptance"]["recommendation"] = _recommendation(
@@ -1788,9 +1904,7 @@ def run_experiment(request: Phase85Request) -> Phase85Result:
         "aggregate_metrics_by_matrix.json": aggregate_payload,
         "per_class_metrics_by_matrix.csv": pd.DataFrame(all_per_class_rows),
         "validation_predictions_by_matrix.parquet": prediction_frame,
-        "ablation_effects.csv": pd.DataFrame(
-            _ablation_rows(aggregates, fold_frame)
-        ),
+        "ablation_effects.csv": pd.DataFrame(_ablation_rows(aggregates, fold_frame)),
         "brent_feature_coefficients_by_fold.csv": pd.DataFrame(coefficient_rows),
         "gate_results.json": gate_results,
     }
