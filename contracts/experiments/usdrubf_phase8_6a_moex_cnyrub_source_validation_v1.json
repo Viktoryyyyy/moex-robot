@@ -158,7 +158,8 @@
     "cnyrub_candle_end",
     "cnyrub_source_route",
     "cnyrub_payload_sha256",
-    "cnyrub_retrieved_at_utc"
+    "cnyrub_retrieved_at_utc",
+    "cnyrub_source_revision_status"
   ],
   "forbidden_acceptance_matrix_fields": [
     "target_phase_label",
