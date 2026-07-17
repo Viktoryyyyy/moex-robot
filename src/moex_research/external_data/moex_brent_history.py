@@ -3,24 +3,31 @@ from __future__ import annotations
 import math
 import re
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, timedelta, timezone
-from typing import Any, Final
+from datetime import date, datetime, timedelta
+from typing import Final
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
-from .models import ExternalDataError, fetch_bytes, parse_json_object, raw_payload_sha256
-
-
-HttpTransport = Callable[[str], bytes]
-Sleeper = Callable[[float], None]
-UtcClock = Callable[[], datetime]
+from .models import ExternalDataError, HttpTransport, fetch_bytes, parse_json_object
+from .moex_iss import (
+    MOEX_ISS_HOST,
+    TRANSIENT_HTTP_ERROR_MESSAGE,
+    MoexIssClient,
+    MoexIssClientError,
+    RetryPolicy,
+    Sleeper,
+    UtcClock,
+    parse_iss_block,
+    require_utc,
+    utc_now as iss_utc_now,
+    validate_official_route,
+)
 
 SOURCE_ID: Final[str] = "moex_brent_futures_daily"
 ASSET_CODE: Final[str] = "BR"
 BOARD_ID: Final[str] = "RFUD"
-MOEX_ISS_HOST: Final[str] = "iss.moex.com"
 MOSCOW: Final[ZoneInfo] = ZoneInfo("Europe/Moscow")
 HISTORY_ROUTE: Final[str] = (
     "https://iss.moex.com/iss/history/engines/futures/markets/forts/"
@@ -35,7 +42,6 @@ CANDLE_ROUTE_TEMPLATE: Final[str] = (
 )
 SOURCE_REVISION_STATUS: Final[str] = "official_iss_current_revision"
 HISTORICAL_MODEL_USE_STATUS: Final[str] = "source_validation_only"
-TRANSIENT_HTTP_ERROR_MESSAGE: Final[str] = "external-data request failed"
 BRENT_HTTP_MAX_ATTEMPTS: Final[int] = 5
 BRENT_HTTP_RETRY_DELAYS_SECONDS: Final[tuple[float, ...]] = (
     0.5,
@@ -43,7 +49,6 @@ BRENT_HTTP_RETRY_DELAYS_SECONDS: Final[tuple[float, ...]] = (
     2.0,
     4.0,
 )
-_SHA256_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
 _EXPLICIT_CODE_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[A-Z0-9_]{2,32}$")
 _MUTABLE_TOKENS: Final[tuple[str, ...]] = (
     "CONT",
@@ -76,25 +81,22 @@ def fetch_brent_bytes_with_retry(
 ) -> bytes:
     """Fetch one Phase 8.4A MOEX Brent route with bounded transient retries."""
 
-    for attempt in range(1, BRENT_HTTP_MAX_ATTEMPTS + 1):
-        try:
-            return transport(url)
-        except ExternalDataError as exc:
-            if exc.args != (TRANSIENT_HTTP_ERROR_MESSAGE,):
-                raise
-            if attempt == BRENT_HTTP_MAX_ATTEMPTS:
-                raise ExternalDataError(
-                    f"{TRANSIENT_HTTP_ERROR_MESSAGE}; official route={url}; "
-                    f"attempts={BRENT_HTTP_MAX_ATTEMPTS}"
-                ) from exc
-            sleeper(BRENT_HTTP_RETRY_DELAYS_SECONDS[attempt - 1])
-    raise AssertionError("unreachable Brent HTTP retry state")
+    client = MoexIssClient(
+        retry_policy=RetryPolicy(
+            maximum_total_attempts=BRENT_HTTP_MAX_ATTEMPTS,
+            retry_delays_seconds=BRENT_HTTP_RETRY_DELAYS_SECONDS,
+            transient_error_message=TRANSIENT_HTTP_ERROR_MESSAGE,
+        ),
+        transport=transport,
+        sleeper=sleeper,
+    )
+    return client.fetch(url)
 
 
 def utc_now() -> datetime:
     """Return the production retrieval clock at artifact precision."""
 
-    return datetime.now(timezone.utc).replace(microsecond=0)
+    return iss_utc_now()
 
 
 @dataclass(frozen=True)
@@ -158,33 +160,28 @@ class BrentDailyCandle:
 
 
 def _utc(value: datetime) -> datetime:
-    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
-        raise BrentHistoryError(
-            "retrieval timestamp must be timezone-aware",
-            blocker="provenance_not_sufficient",
-        )
-    if value.utcoffset() != timedelta(0):
-        raise BrentHistoryError(
-            "retrieval timestamp must be expressed in UTC",
-            blocker="provenance_not_sufficient",
-        )
-    return value.astimezone(timezone.utc)
+    try:
+        return require_utc(value)
+    except MoexIssClientError as exc:
+        if exc.reason == "timestamp_not_timezone_aware":
+            message = "retrieval timestamp must be timezone-aware"
+        else:
+            message = "retrieval timestamp must be expressed in UTC"
+        raise BrentHistoryError(message, blocker="provenance_not_sufficient") from exc
 
 
 def _official_route(url: str, *, allowed_path_prefix: str) -> None:
-    parsed = urlsplit(url)
-    if (
-        parsed.scheme != "https"
-        or parsed.hostname != MOEX_ISS_HOST
-        or parsed.port not in (None, 443)
-        or parsed.username
-        or parsed.password
-        or not parsed.path.startswith(allowed_path_prefix)
-    ):
+    try:
+        validate_official_route(
+            url,
+            allowed_path_prefix=allowed_path_prefix,
+            expected_host=MOEX_ISS_HOST,
+        )
+    except MoexIssClientError as exc:
         raise BrentHistoryError(
             "route is not an allowlisted official MOEX ISS route",
             blocker="provenance_not_sufficient",
-        )
+        ) from exc
 
 
 def _explicit_contract_code(value: object) -> str:
@@ -209,50 +206,28 @@ def _iss_rows(
     required_columns: Sequence[str],
 ) -> tuple[list[dict[str, object]], str]:
     try:
-        decoded = parse_json_object(payload)
-    except ExternalDataError as exc:
-        raise BrentHistoryError(
-            "official ISS response is not valid JSON",
-            blocker="official_schema_not_stable",
-        ) from exc
-    block = decoded.get(block_name)
-    if not isinstance(block, Mapping):
-        raise BrentHistoryError(
-            f"official ISS response lacks {block_name} block",
-            blocker="official_schema_not_stable",
+        block = parse_iss_block(
+            payload,
+            block_name=block_name,
+            required_columns=required_columns,
         )
-    columns = block.get("columns")
-    data = block.get("data")
-    if not isinstance(columns, list) or not all(isinstance(item, str) for item in columns):
-        raise BrentHistoryError(
-            f"official ISS {block_name} columns are malformed",
-            blocker="official_schema_not_stable",
+    except MoexIssClientError as exc:
+        messages = {
+            "invalid_json": "official ISS response is not valid JSON",
+            "missing_block": f"official ISS response lacks {block_name} block",
+            "malformed_columns": f"official ISS {block_name} columns are malformed",
+            "missing_required_columns": f"official ISS {block_name} schema is missing required columns",
+            "malformed_data": f"official ISS {block_name} data is malformed",
+            "row_width_mismatch": f"official ISS {block_name} row width mismatch",
+            "invalid_payload_digest": "official payload digest is invalid",
+        }
+        blocker = (
+            "provenance_not_sufficient"
+            if exc.reason == "invalid_payload_digest"
+            else "official_schema_not_stable"
         )
-    if not set(required_columns).issubset(columns):
-        raise BrentHistoryError(
-            f"official ISS {block_name} schema is missing required columns",
-            blocker="official_schema_not_stable",
-        )
-    if not isinstance(data, list):
-        raise BrentHistoryError(
-            f"official ISS {block_name} data is malformed",
-            blocker="official_schema_not_stable",
-        )
-    rows: list[dict[str, object]] = []
-    for raw in data:
-        if not isinstance(raw, list) or len(raw) != len(columns):
-            raise BrentHistoryError(
-                f"official ISS {block_name} row width mismatch",
-                blocker="official_schema_not_stable",
-            )
-        rows.append(dict(zip(columns, raw, strict=True)))
-    digest = raw_payload_sha256(payload)
-    if not _SHA256_PATTERN.fullmatch(digest):  # pragma: no cover - hashlib invariant
-        raise BrentHistoryError(
-            "official payload digest is invalid",
-            blocker="provenance_not_sufficient",
-        )
-    return rows, digest
+        raise BrentHistoryError(messages[exc.reason], blocker=blocker) from exc
+    return block.rows, block.raw_payload_sha256
 
 
 def build_history_universe_url(as_of_date: date, *, start: int = 0) -> str:
@@ -339,8 +314,6 @@ def parse_history_universe_response(
                 blocker="expired_contract_universe_not_reproducible",
             )
         if asset == "":
-            # ISS also returns calendar-spread rows despite assetcode=BR. They are not
-            # explicit BR futures and are excluded before contract identity parsing.
             continue
         if asset != ASSET_CODE:
             raise BrentHistoryError(

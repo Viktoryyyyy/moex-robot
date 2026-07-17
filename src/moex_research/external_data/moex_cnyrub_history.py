@@ -1,32 +1,34 @@
 from __future__ import annotations
 
 import math
-import re
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime
 from typing import Any, Final
-from urllib.parse import parse_qsl, urlencode, urlsplit
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
-from .models import (
-    ExternalDataError,
-    HttpTransport,
-    fetch_bytes,
-    parse_json_object,
-    raw_payload_sha256,
+from .models import ExternalDataError, HttpTransport, fetch_bytes
+from .moex_iss import (
+    MOEX_ISS_HOST,
+    TRANSIENT_HTTP_ERROR_MESSAGE,
+    MoexIssClient,
+    MoexIssClientError,
+    RetryPolicy,
+    Sleeper,
+    UtcClock,
+    parse_iss_block,
+    require_utc,
+    utc_now as iss_utc_now,
+    validate_official_route,
 )
-
-Sleeper = Callable[[float], None]
-UtcClock = Callable[[], datetime]
 
 SOURCE_ID: Final[str] = "moex_cnyrub_tom_daily"
 SECURITY_ID: Final[str] = "CNYRUB_TOM"
 BOARD_ID: Final[str] = "CETS"
 ENGINE: Final[str] = "currency"
 MARKET: Final[str] = "selt"
-MOEX_ISS_HOST: Final[str] = "iss.moex.com"
 MOSCOW: Final[ZoneInfo] = ZoneInfo("Europe/Moscow")
 SECURITY_METADATA_ROUTE: Final[str] = (
     "https://iss.moex.com/iss/securities/CNYRUB_TOM.json"
@@ -37,11 +39,9 @@ CANDLE_ROUTE: Final[str] = (
 )
 SOURCE_REVISION_STATUS: Final[str] = "official_iss_current_revision"
 HISTORICAL_MODEL_USE_STATUS: Final[str] = "source_validation_only"
-TRANSIENT_HTTP_ERROR_MESSAGE: Final[str] = "external-data request failed"
 CNYRUB_HTTP_MAX_ATTEMPTS: Final[int] = 5
 CNYRUB_HTTP_RETRY_DELAYS_SECONDS: Final[tuple[float, ...]] = (0.5, 1.0, 2.0, 4.0)
 CNYRUB_MAX_PAGES: Final[int] = 10_000
-_SHA256: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{64}$")
 _CANDLE_COLUMNS: Final[tuple[str, ...]] = (
     "open",
     "close",
@@ -115,25 +115,22 @@ class CnyrubDailyCandle:
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc).replace(microsecond=0)
+    return iss_utc_now()
 
 
 def _utc(value: datetime) -> datetime:
-    if (
-        not isinstance(value, datetime)
-        or value.tzinfo is None
-        or value.utcoffset() is None
-    ):
-        raise CnyrubHistoryError(
-            "retrieval timestamp must be timezone-aware",
-            blocker="provenance_not_sufficient",
+    try:
+        return require_utc(value)
+    except MoexIssClientError as exc:
+        message = (
+            "retrieval timestamp must be timezone-aware"
+            if exc.reason == "timestamp_not_timezone_aware"
+            else "retrieval timestamp must be expressed in UTC"
         )
-    if value.utcoffset() != timedelta(0):
         raise CnyrubHistoryError(
-            "retrieval timestamp must be expressed in UTC",
+            message,
             blocker="provenance_not_sufficient",
-        )
-    return value.astimezone(timezone.utc)
+        ) from exc
 
 
 def fetch_cnyrub_bytes_with_retry(
@@ -144,36 +141,29 @@ def fetch_cnyrub_bytes_with_retry(
 ) -> bytes:
     """Retry only the same exact route after the canonical transient error."""
 
-    for attempt in range(CNYRUB_HTTP_MAX_ATTEMPTS):
-        try:
-            return transport(url)
-        except ExternalDataError as exc:
-            if exc.args != (TRANSIENT_HTTP_ERROR_MESSAGE,):
-                raise
-            if attempt + 1 == CNYRUB_HTTP_MAX_ATTEMPTS:
-                raise ExternalDataError(
-                    f"{TRANSIENT_HTTP_ERROR_MESSAGE}; official route={url}; "
-                    f"attempts={CNYRUB_HTTP_MAX_ATTEMPTS}"
-                ) from exc
-            sleeper(CNYRUB_HTTP_RETRY_DELAYS_SECONDS[attempt])
-    raise AssertionError("unreachable retry state")
+    return MoexIssClient(
+        retry_policy=RetryPolicy(
+            maximum_total_attempts=CNYRUB_HTTP_MAX_ATTEMPTS,
+            retry_delays_seconds=CNYRUB_HTTP_RETRY_DELAYS_SECONDS,
+            transient_error_message=TRANSIENT_HTTP_ERROR_MESSAGE,
+        ),
+        transport=transport,
+        sleeper=sleeper,
+    ).fetch(url)
 
 
 def _official(url: str, path: str) -> dict[str, str]:
-    parsed = urlsplit(url)
-    if (
-        parsed.scheme != "https"
-        or parsed.hostname != MOEX_ISS_HOST
-        or parsed.port not in (None, 443)
-        or parsed.username
-        or parsed.password
-        or parsed.path != path
-    ):
+    try:
+        return validate_official_route(
+            url,
+            expected_path=path,
+            expected_host=MOEX_ISS_HOST,
+        )
+    except MoexIssClientError as exc:
         raise CnyrubHistoryError(
             "route is not the exact allowlisted official MOEX ISS route",
             blocker="provenance_not_sufficient",
-        )
-    return dict(parse_qsl(parsed.query, keep_blank_values=True))
+        ) from exc
 
 
 def _block(
@@ -182,55 +172,32 @@ def _block(
     required: Sequence[str],
 ) -> tuple[list[dict[str, object]], tuple[str, ...], str, Mapping[str, Any]]:
     try:
-        root = parse_json_object(payload)
-    except ExternalDataError as exc:
+        block = parse_iss_block(
+            payload,
+            block_name=name,
+            required_columns=required,
+        )
+    except MoexIssClientError as exc:
+        messages = {
+            "invalid_json": "official ISS response is not valid UTF-8 JSON",
+            "missing_block": f"official ISS response lacks {name} block",
+            "malformed_columns": f"official ISS {name} columns are malformed",
+            "missing_required_columns": (
+                f"official ISS {name} schema is missing required columns"
+            ),
+            "malformed_data": f"official ISS {name} data is malformed",
+            "row_width_mismatch": f"official ISS {name} row width mismatch",
+            "invalid_payload_digest": "official payload digest is invalid",
+        }
         raise CnyrubHistoryError(
-            "official ISS response is not valid UTF-8 JSON",
-            blocker="official_schema_not_stable",
+            messages[exc.reason],
+            blocker=(
+                "provenance_not_sufficient"
+                if exc.reason == "invalid_payload_digest"
+                else "official_schema_not_stable"
+            ),
         ) from exc
-
-    value = root.get(name)
-    if not isinstance(value, Mapping):
-        raise CnyrubHistoryError(
-            f"official ISS response lacks {name} block",
-            blocker="official_schema_not_stable",
-        )
-    columns = value.get("columns")
-    data = value.get("data")
-    if not isinstance(columns, list) or not all(
-        isinstance(item, str) for item in columns
-    ):
-        raise CnyrubHistoryError(
-            f"official ISS {name} columns are malformed",
-            blocker="official_schema_not_stable",
-        )
-    if not set(required).issubset(columns):
-        raise CnyrubHistoryError(
-            f"official ISS {name} schema is missing required columns",
-            blocker="official_schema_not_stable",
-        )
-    if not isinstance(data, list):
-        raise CnyrubHistoryError(
-            f"official ISS {name} data is malformed",
-            blocker="official_schema_not_stable",
-        )
-
-    rows: list[dict[str, object]] = []
-    for raw in data:
-        if not isinstance(raw, list) or len(raw) != len(columns):
-            raise CnyrubHistoryError(
-                f"official ISS {name} row width mismatch",
-                blocker="official_schema_not_stable",
-            )
-        rows.append(dict(zip(columns, raw, strict=True)))
-
-    digest = raw_payload_sha256(payload)
-    if not _SHA256.fullmatch(digest):  # pragma: no cover - hashlib invariant
-        raise CnyrubHistoryError(
-            "official payload digest is invalid",
-            blocker="provenance_not_sufficient",
-        )
-    return rows, tuple(columns), digest, root
+    return block.rows, block.columns, block.raw_payload_sha256, block.root
 
 
 def build_security_metadata_url() -> str:
