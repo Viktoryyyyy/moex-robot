@@ -78,6 +78,26 @@ def test_exact_six_Brent_features_and_formulas() -> None:
     assert contract["brent_feature_definitions"] == runner.BRENT_FEATURE_DEFINITIONS
 
 
+def test_exact_distribution_integrity_policy_and_G10_rule() -> None:
+    contract = _contract()
+    assert contract["distribution_integrity_policy"] == (
+        runner.DISTRIBUTION_INTEGRITY_POLICY
+    )
+    policy = contract["distribution_integrity_policy"]
+    assert policy["expected_feature_fold_rows"] == 30
+    assert policy["expected_features"] == 6
+    assert policy["expected_folds"] == 5
+    assert policy["defined_status"] == "defined"
+    assert policy["constant_equal_status"] == "undefined_constant_equal"
+    assert policy["constant_shifted_status"] == "undefined_constant_shifted"
+    assert policy["constant_smd"] is None
+    assert policy["constant_training_standard_deviation"] == 0.0
+    g10 = contract["incremental_gates"]["G10"]
+    assert "exact 30 Brent feature/fold rows" in g10
+    assert "undefined_constant_equal" in g10
+    assert "undefined_constant_shifted" in g10
+
+
 def test_exact_five_matrix_inventory_and_E1_is_sole_candidate() -> None:
     inventory = _contract()["matrix_inventory"]
     assert tuple(inventory) == (

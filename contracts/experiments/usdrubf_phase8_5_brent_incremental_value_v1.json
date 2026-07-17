@@ -177,6 +177,18 @@
       "formula": "log1p(value)"
     }
   },
+  "distribution_integrity_policy": {
+    "expected_feature_fold_rows": 30,
+    "expected_features": 6,
+    "expected_folds": 5,
+    "defined_status": "defined",
+    "constant_equal_status": "undefined_constant_equal",
+    "constant_shifted_status": "undefined_constant_shifted",
+    "constant_smd": null,
+    "constant_training_standard_deviation": 0.0,
+    "G10_pass_rule": "all 30 feature/fold rows have status defined, finite SMD, positive training standard deviation, and distribution_integrity_passed true",
+    "insufficient_or_non_finite_values": "fail_closed_exception"
+  },
   "feature_restrictions": {
     "exact_feature_count": 6,
     "authorized_features": [
@@ -302,7 +314,7 @@
     "G7": "one S/OUT confusion direction improves at least 5 percent relative and neither worsens by 0.03 absolute or more",
     "G8": "defined positive E0 inclusive 0.90-1.00 bucket gap and nonempty E1 gap <= 0.70 times E0 gap",
     "G9": "at least three folds improve macro-F1 by 0.01; at most one degrades by more than 0.03; unchanged stability limits pass",
-    "G10": "finite SMD for every one of the six Brent features and every fold; sufficient values; no constant training-fold feature",
+    "G10": "derive from the exact 30 Brent feature/fold rows; pass only when every row is defined with finite SMD and distribution_integrity_passed true; constant training rows are structured undefined_constant_equal or undefined_constant_shifted failures with null SMD",
     "G11": "no leakage, network, source mutation, threshold or fold change, model file, production prediction, out-of-directory write, serialization or promotion",
     "G12": "E1 passes G1 through G11"
   },
