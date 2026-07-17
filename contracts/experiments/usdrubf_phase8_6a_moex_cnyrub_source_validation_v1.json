@@ -1,0 +1,253 @@
+{
+  "contract_identity": {
+    "contract_id": "usdrubf_phase8_6a_moex_cnyrub_source_validation_v1",
+    "contract_version": "1.0",
+    "project": "MOEX Bot",
+    "task_id": "ema_3_19_ai_phase_8_6a_moex_cnyrub_source_validation_v1",
+    "lane": "ema_3_19_ai",
+    "phase": "8.6A",
+    "execution_mode": "browser_chatgpt_github_direct",
+    "status": "source_validation_only"
+  },
+  "approved_branch": "research/ema-3-19-ai/phase-8-6a-moex-cnyrub-source-validation",
+  "approved_file_scope": {
+    "create_only": [
+      "contracts/experiments/usdrubf_phase8_6a_moex_cnyrub_source_validation_v1.json",
+      "src/moex_research/external_data/moex_cnyrub_history.py",
+      "src/moex_research/runners/usdrubf_phase8_6a_moex_cnyrub_source_validation.py",
+      "tests/unit/test_usdrubf_phase8_6a_moex_cnyrub_history.py",
+      "tests/unit/test_usdrubf_phase8_6a_moex_cnyrub_source_validation.py",
+      "tests/contract/test_usdrubf_phase8_6a_moex_cnyrub_source_validation_contract.py"
+    ],
+    "existing_files_to_modify": [],
+    "exact_file_count": 6,
+    "maximum_changed_file_count": 6,
+    "scope_widening_allowed": false
+  },
+  "source_identity": {
+    "source_id": "moex_cnyrub_tom_daily",
+    "official_service": "MOEX ISS",
+    "security_id": "CNYRUB_TOM",
+    "board_id": "CETS",
+    "engine": "currency",
+    "market": "selt",
+    "security_type": "spot",
+    "primary_active_board_required": true,
+    "initial_status": "blocked_pending_source_validation",
+    "pass_status": "moex_cnyrub_source_candidate_for_phase8_6b",
+    "fail_status": "moex_cnyrub_source_not_ready"
+  },
+  "official_source_policy": {
+    "allowed_hosts": [
+      "iss.moex.com"
+    ],
+    "security_metadata_route": "https://iss.moex.com/iss/securities/CNYRUB_TOM.json?iss.meta=off&iss.only=description%2Cboards",
+    "daily_candle_route": "https://iss.moex.com/iss/engines/currency/markets/selt/boards/CETS/securities/CNYRUB_TOM/candles.json",
+    "daily_interval": 24,
+    "official_metadata_identity_required": true,
+    "full_pagination_required": true,
+    "stable_schema_within_run_required": true,
+    "third_party_market_data_allowed": false,
+    "bank_of_russia_rate_allowed": false,
+    "cnyrubf_allowed": false,
+    "synthetic_cross_allowed": false,
+    "commercial_aggregator_allowed": false,
+    "scraped_web_page_allowed": false,
+    "continuous_alias_allowed": false,
+    "substitute_security_or_board_allowed": false
+  },
+  "frozen_inputs": {
+    "sha256": {
+      "modeling_dataset": "fdd626f9e0522c6bbb653f9e17fbbbeef7ded77f57ff187b35246a2458d55d00",
+      "dataset_manifest": "fcbbb5e5ed0549c5c6f397e34f203f01836271f6bf471f90cab5a2fd64ace082",
+      "feature_schema": "8f08802c7fb0a4cc43ab4ba072ee22ff9edd92fe8d674ea0515545d20d143238",
+      "m0_validation_predictions": "9769d00a49adeb54c016d965387774e46a3e09e09f895aa61d48a90bbf3568cf",
+      "phase83_aggregate_metrics": "d6ad4f6587dadb32431bd7b8f3bd59c5393e04d742efb4af459b316b417f8756",
+      "phase83_gate_results": "d3f7e24022e550e725eae7ec5bc214d6b95e0e9c66393574c575e5d6f593f33c"
+    },
+    "eligible_identity_count": 472,
+    "validation_identity_count": 320,
+    "fold_count": 5,
+    "validation_rows_per_fold": 64,
+    "target_instrument": "forts.usdrubf",
+    "target_source": "manual_phase_labels_v1",
+    "target_interval": [
+      "2024-08-05",
+      "2026-06-11"
+    ],
+    "identity_columns": [
+      "target_trade_date",
+      "target_instrument_id"
+    ],
+    "required_phase8_3_status": "external_factor_incremental_value_not_supported",
+    "required_phase8_3_recommendation": "prioritize_blocked_oil_and_liquidity_sources"
+  },
+  "point_in_time_policy": {
+    "timezone": "Europe/Moscow",
+    "forecast_anchor_local_time": "06:00:00",
+    "join_date": "exact frozen prior_trade_date from eligible target identity",
+    "cnyrub_trade_date_rule": "cnyrub_trade_date == prior_trade_date",
+    "target_day_candle_allowed": false,
+    "same_day_close_volume_or_value_allowed": false,
+    "later_observation_allowed": false,
+    "forward_fill_allowed": false,
+    "backward_fill_allowed": false,
+    "arbitrary_last_available_date_allowed": false,
+    "future_session_missing_fill_allowed": false,
+    "missing_exact_prior_session_policy": "missing_coverage",
+    "zero_fill_allowed": false,
+    "candle_begin_and_end_required": true,
+    "historical_revision_status": "official_iss_current_revision"
+  },
+  "transient_http_retry_policy": {
+    "bounded_transient_retry_enabled": true,
+    "enabled_for_source_id": "moex_cnyrub_tom_daily",
+    "phase_scope": "8.6A_only",
+    "maximum_total_attempts": 5,
+    "retry_delays_seconds": [
+      0.5,
+      1.0,
+      2.0,
+      4.0
+    ],
+    "random_jitter_allowed": false,
+    "same_exact_official_route_only": true,
+    "route_substitution_allowed": false,
+    "fallback_source_allowed": false,
+    "fallback_security_allowed": false,
+    "fallback_board_allowed": false,
+    "fallback_date_allowed": false,
+    "retryable_exception": "ExternalDataError(external-data request failed)",
+    "semantic_failures_retried": false
+  },
+  "normalized_source_required_fields": [
+    "source_id",
+    "security_id",
+    "board_id",
+    "engine",
+    "market",
+    "trade_date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "value",
+    "candle_begin",
+    "candle_end",
+    "source_route",
+    "retrieved_at_utc",
+    "raw_payload_sha256",
+    "source_revision_status",
+    "historical_model_use_status"
+  ],
+  "acceptance_matrix_fields": [
+    "target_trade_date",
+    "target_instrument_id",
+    "prior_trade_date",
+    "cnyrub_security_id",
+    "cnyrub_board_id",
+    "cnyrub_trade_date",
+    "cnyrub_open",
+    "cnyrub_high",
+    "cnyrub_low",
+    "cnyrub_close",
+    "cnyrub_volume",
+    "cnyrub_value",
+    "cnyrub_candle_begin",
+    "cnyrub_candle_end",
+    "cnyrub_source_route",
+    "cnyrub_payload_sha256",
+    "cnyrub_retrieved_at_utc"
+  ],
+  "forbidden_acceptance_matrix_fields": [
+    "target_phase_label",
+    "target_is_labeled",
+    "target_source",
+    "fold_id",
+    "y_true",
+    "candidate_y_pred",
+    "prediction",
+    "probability_B",
+    "probability_S",
+    "probability_OUT"
+  ],
+  "runtime_artifacts": [
+    "input_identity_verification.json",
+    "official_route_validation.json",
+    "cnyrub_security_identity.json",
+    "cnyrub_daily_candles_normalized.parquet",
+    "cnyrub_pit_acceptance_matrix.parquet",
+    "coverage_by_source.csv",
+    "session_alignment_diagnostics.csv",
+    "source_blocker_register.json",
+    "gate_results.json"
+  ],
+  "artifact_policy": {
+    "exact_count": 9,
+    "undeclared_artifact_allowed": false,
+    "output_directory_must_be_explicit": true,
+    "preexisting_output_directory_allowed": false,
+    "output_outside_explicit_output_directory_allowed": false,
+    "runtime_artifact_commit_allowed": false,
+    "model_file_allowed": false
+  },
+  "gates": {
+    "G1_immutable_inputs": "all six frozen SHA256 values, target identity contract, 472 eligible identities, 320 validation identities, five folds and 64 validation rows per fold",
+    "G2_official_security_identity": "exact SECID CNYRUB_TOM, board CETS, engine currency and market selt confirmed by official MOEX ISS metadata with primary and active board semantics",
+    "G3_official_candle_route_and_schema": "official HTTPS MOEX ISS daily route, required candle columns, complete pagination, stable schema and deterministic normalization",
+    "G4_point_in_time_session_correctness": "exact frozen prior_trade_date candle completed before D 06:00 Europe/Moscow; no same-day, future, fill or substitution",
+    "G5_exact_coverage": "472/472 eligible and 320/320 validation identities, one row per eligible identity, no missing or duplicate identities",
+    "G6_numerical_and_chronology_integrity": "finite and internally consistent OHLC, finite non-negative volume/value, unique ordered dates and valid begin/end",
+    "G7_provenance": "exact route, payload SHA256, retrieval timestamp, source revision status, security and board identity",
+    "G8_leakage_and_scope": "no model, fit, evaluation, target/probability source field, fallback, out-of-directory write, promotion or broker/trading action",
+    "G9_final_source_readiness": "G1 through G8 all pass"
+  },
+  "final_status_policy": {
+    "pass_status": "moex_cnyrub_source_candidate_for_phase8_6b",
+    "pass_blocker_classification": null,
+    "fail_status": "moex_cnyrub_source_not_ready",
+    "fail_historical_model_use_status": "blocked",
+    "failed_gates_must_be_exact": true
+  },
+  "blocker_classifications": [
+    "security_identity_not_reproducible",
+    "official_daily_candles_not_available",
+    "point_in_time_cutoff_not_provable",
+    "incomplete_identity_coverage",
+    "official_schema_not_stable",
+    "numerical_or_chronology_integrity_failure",
+    "provenance_not_sufficient",
+    "other_fail_closed_with_exact_reason"
+  ],
+  "runtime_id_policy": {
+    "planned_runtime_id": "phase8_6a_moex_cnyrub_source_validation_20260717_v1",
+    "format_regex": "^phase8_6a_moex_cnyrub_source_validation_[0-9]{8}_v[1-9][0-9]*$"
+  },
+  "required_cli_args": [
+    "--modeling-dataset-path",
+    "--dataset-manifest-path",
+    "--feature-schema-path",
+    "--m0-validation-predictions-path",
+    "--phase8-3-aggregate-metrics-path",
+    "--phase8-3-gate-results-path",
+    "--experiment-contract-path",
+    "--output-dir",
+    "--run-id",
+    "--git-commit-sha"
+  ],
+  "authority_boundary": {
+    "direct_main_write_allowed": false,
+    "merge_allowed": false,
+    "server_apply_allowed": false,
+    "controlled_runtime_allowed": false,
+    "model_fit_allowed": false,
+    "model_evaluation_allowed": false,
+    "model_serialization_allowed": false,
+    "model_promotion_allowed": false,
+    "strategy_promotion_allowed": false,
+    "production_prediction_allowed": false,
+    "broker_action_allowed": false,
+    "trading_allowed": false
+  }
+}
