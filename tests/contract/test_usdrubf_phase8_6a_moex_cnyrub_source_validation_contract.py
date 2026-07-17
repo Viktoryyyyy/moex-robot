@@ -4,7 +4,6 @@ import json
 import re
 from pathlib import Path
 
-
 ROOT = Path(__file__).parents[2]
 CONTRACT_PATH = (
     ROOT
@@ -57,7 +56,6 @@ def test_exact_six_file_create_only_scope() -> None:
 
 
 def test_source_identity_and_no_fallback_policy() -> None:
-    assert CONTRACT["source_identity"] | {} == CONTRACT["source_identity"]
     assert CONTRACT["source_identity"]["security_id"] == "CNYRUB_TOM"
     assert CONTRACT["source_identity"]["board_id"] == "CETS"
     assert CONTRACT["source_identity"]["engine"] == "currency"
@@ -127,6 +125,7 @@ def test_exact_source_and_acceptance_schemas() -> None:
         "cnyrub_source_route",
         "cnyrub_payload_sha256",
         "cnyrub_retrieved_at_utc",
+        "cnyrub_source_revision_status",
     ]
     assert set(CONTRACT["acceptance_matrix_fields"]).isdisjoint(
         CONTRACT["forbidden_acceptance_matrix_fields"]
