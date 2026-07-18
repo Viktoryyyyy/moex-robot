@@ -42,11 +42,16 @@
   "authorization_policy": {
     "scheme": "Bearer",
     "required_environment_variable": "MOEX_ALGOPACK_TOKEN",
+    "exact_route_validation_before_request": true,
+    "redirects_allowed": false,
+    "cross_host_redirect_allowed": false,
+    "authorization_on_redirect_allowed": false,
     "token_in_cli_allowed": false,
     "token_in_url_allowed": false,
     "token_in_logs_allowed": false,
     "token_in_artifacts_allowed": false,
-    "token_in_repository_allowed": false
+    "token_in_repository_allowed": false,
+    "token_in_exception_text_allowed": false
   },
   "required_environment_variables": [
     "MOEX_ALGOPACK_TOKEN"
@@ -58,6 +63,8 @@
     ],
     "algopack_data_host": "apim.moex.com",
     "iss_metadata_host": "iss.moex.com",
+    "exact_scheme_host_port_path_query_required": true,
+    "redirects_allowed": false,
     "full_pagination_required": true,
     "cursor_validation_required": true,
     "stable_schema_within_run_required": true,
@@ -68,6 +75,18 @@
     "commercial_aggregator_allowed": false,
     "scraped_web_page_allowed": false,
     "substitute_security_or_board_allowed": false
+  },
+  "http_outcome_policy": {
+    "missing_or_empty_token": "token_env_not_configured",
+    "HTTP_401": "algopack_authentication_failed",
+    "HTTP_403": "algopack_subscription_not_entitled",
+    "HTTP_404_route": "official_route_not_reproducible",
+    "HTTP_404_ticker": "cnyrub_tom_not_available",
+    "HTTP_429": "algopack_rate_limit_blocked",
+    "HTTP_5XX": "algopack_tradestats_not_available",
+    "transport_timeout": "algopack_tradestats_not_available",
+    "malformed_json_or_schema": "algopack_schema_not_stable",
+    "response_body_in_blocker_reason_allowed": false
   },
   "aggregation_policy": {
     "source_granularity": "5_minute_tradestats",
@@ -85,14 +104,43 @@
     "daily_trades_buy": "sum trades_b",
     "daily_trades_sell": "sum trades_s",
     "daily_volume_imbalance": "(volume_buy-volume_sell)/volume; zero when volume is zero",
+    "daily_source_available_at": "maximum valid SYSTIME across included rows",
     "volume_identity_required": "volume == volume_buy + volume_sell",
     "value_identity_required": "value approximately equals value_buy + value_sell within AlgoPack rounding tolerance",
     "trade_identity_required": "trades == trades_buy + trades_sell"
   },
+  "raw_tradestats_required_fields": [
+    "tradedate",
+    "tradetime",
+    "secid",
+    "pr_open",
+    "pr_high",
+    "pr_low",
+    "pr_close",
+    "vol",
+    "val",
+    "trades",
+    "trades_b",
+    "trades_s",
+    "val_b",
+    "val_s",
+    "vol_b",
+    "vol_s",
+    "SYSTIME"
+  ],
   "point_in_time_policy": {
     "timezone": "Europe/Moscow",
     "forecast_anchor_local_time": "06:00:00",
     "join_date": "exact frozen prior_trade_date",
+    "provider_availability_field": "SYSTIME",
+    "daily_source_available_at": "max SYSTIME of included exact-prior-date rows",
+    "source_available_at_before_anchor_required": true,
+    "all_source_rows_completed_required": true,
+    "five_minute_grid_required": true,
+    "grid_seconds_required": 0,
+    "grid_minute_modulus": 5,
+    "unique_provider_timestamps_required": true,
+    "chronological_provider_timestamps_required": true,
     "target_day_data_allowed": false,
     "later_observation_allowed": false,
     "forward_fill_allowed": false,
@@ -100,6 +148,17 @@
     "arbitrary_last_available_date_allowed": false,
     "missing_exact_prior_session_policy": "missing_coverage",
     "zero_fill_allowed": false
+  },
+  "pagination_policy": {
+    "cursor_index_must_equal_requested_start": true,
+    "cursor_total_must_be_constant": true,
+    "returned_rows_must_not_exceed_remaining_total": true,
+    "final_accumulated_count_must_equal_total": true,
+    "start_greater_than_total_allowed": false,
+    "overlapping_pages_allowed": false,
+    "skipped_pages_allowed": false,
+    "duplicate_provider_row_identity_allowed": false,
+    "premature_empty_page_allowed": false
   },
   "transient_http_retry_policy": {
     "bounded_transient_retry_enabled": true,
@@ -112,14 +171,27 @@
       2.0,
       4.0
     ],
+    "maximum_retry_after_seconds": 60.0,
     "random_jitter_allowed": false,
     "same_exact_official_route_only": true,
+    "redirects_allowed": false,
+    "cross_host_redirect_allowed": false,
     "route_substitution_allowed": false,
     "fallback_source_allowed": false,
     "fallback_security_allowed": false,
     "fallback_board_allowed": false,
     "fallback_date_allowed": false,
-    "retryable_exception": "ExternalDataError(external-data request failed)",
+    "retryable_outcomes": [
+      "HTTP_429",
+      "HTTP_5XX",
+      "transport_timeout"
+    ],
+    "non_retryable_outcomes": [
+      "HTTP_401",
+      "HTTP_403",
+      "HTTP_404",
+      "schema_failure"
+    ],
     "semantic_failures_retried": false
   },
   "normalized_source_required_fields": [
@@ -145,6 +217,7 @@
     "trades_sell",
     "candle_begin",
     "candle_end",
+    "source_available_at",
     "source_route",
     "retrieved_at_utc",
     "raw_payload_sha256",
@@ -174,6 +247,7 @@
     "cnyrub_trades_sell",
     "cnyrub_candle_begin",
     "cnyrub_candle_end",
+    "cnyrub_source_available_at",
     "cnyrub_source_route",
     "cnyrub_payload_sha256",
     "cnyrub_retrieved_at_utc",
@@ -212,8 +286,12 @@
   },
   "blocker_classifications": [
     "security_identity_not_reproducible",
-    "algopack_subscription_not_available",
-    "algopack_authorization_failed",
+    "token_env_not_configured",
+    "algopack_authentication_failed",
+    "algopack_subscription_not_entitled",
+    "official_route_not_reproducible",
+    "cnyrub_tom_not_available",
+    "algopack_rate_limit_blocked",
     "algopack_tradestats_not_available",
     "algopack_schema_not_stable",
     "official_schema_not_stable",
