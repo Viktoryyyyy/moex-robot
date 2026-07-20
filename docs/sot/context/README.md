@@ -44,3 +44,12 @@ This package does not define n8n workflow JSON, Postgres DDL, trading strategy l
 ## Note
 
 - The status of the package should be clearly defined as 'active'.
+
+## GitHub Workflow
+
+This section describes the workflow involving PM Lead and github_worker:
+
+1. **PM Lead** initiates the workflow by defining the task and its scope.
+2. **github_worker** executes the task as per the defined scope.
+3. Any discrepancies or issues are reported back to the PM Lead for review.
+4. Upon approval, the workflow continues as per the defined processes.
