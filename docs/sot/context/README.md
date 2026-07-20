@@ -40,3 +40,7 @@ Sub-chat output returns to PM L3. PM L3 validation/evidence returns to PM L2.
 ## Boundary
 
 This package does not define n8n workflow JSON, Postgres DDL, trading strategy logic, runtime/live behavior, broker integration, or server execution.
+
+## Note
+
+- The status of the package should be clearly defined as 'active'.
