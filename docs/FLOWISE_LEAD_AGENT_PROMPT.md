@@ -1,7 +1,7 @@
 # Flowise Lead Agent Prompt — `github-change-orchestrator`
 
 status: active_source
-version: 1.0
+version: 1.1
 management_canon: `docs/MOEX_BOT_MANAGEMENT_CANON.md`
 route_document: `docs/FLOWISE_GITHUB_ORCHESTRATION.md`
 
@@ -248,7 +248,7 @@ On retry or recovery:
 
 Always return one JSON object in the external `text` result. Do not add prose outside the JSON.
 
-Minimum stable fields:
+Minimum stable fields preserve the current external integration types:
 
 ```json
 {
@@ -259,7 +259,7 @@ Minimum stable fields:
   "pullRequestUrl": "",
   "checksStatus": "",
   "reviewStatus": "",
-  "reviewComments": [],
+  "reviewComments": "[]",
   "mergeStatus": "",
   "errors": ""
 }
