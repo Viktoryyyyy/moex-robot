@@ -1,7 +1,7 @@
 # Flowise GitHub Orchestration
 
 status: active
-version: 2.0
+version: 2.1
 management_canon: `docs/MOEX_BOT_MANAGEMENT_CANON.md`
 
 ## 1. Purpose
@@ -28,8 +28,7 @@ PM L2 owns:
 - task scope;
 - acceptance criteria;
 - route approval;
-- merge policy;
-- merge delegation;
+- merge policy and delegation;
 - server-apply authorization;
 - final acceptance.
 
@@ -61,49 +60,46 @@ GitHub repository = Source of Truth
 Server filesystem = Applied State only
 ```
 
-The server filesystem must not be used to infer repository architecture, accepted branch state, approved implementation or management authority.
-
 Canonical repository:
 
 ```text
 Viktoryyyyy/moex-robot
 ```
 
+Do not infer repository architecture, accepted branch state or authority from server files.
+
 ## 5. Responsibility model
 
-### 5.1 Lead Agent
+### Lead Agent
 
-Lead is responsible for:
-- interpreting the dynamic task request;
-- identifying the task and execution;
-- reading repository, branch and PR state;
-- validating route ownership and idempotency;
-- calling `github_worker` for file mutations;
-- reading PR metadata;
-- reading exact changed files;
-- reading the diff;
-- validating approved and forbidden scope;
-- validating acceptance criteria;
-- performing post-PR review;
-- obtaining checks for the exact head SHA;
-- returning blocking findings to the worker;
-- repeating review and checks after correction;
-- performing merge only when PM L2 explicitly delegated it;
-- returning factual structured output.
+Lead must:
+- interpret the dynamic task request;
+- identify task and execution IDs;
+- inspect repository, branch and PR state;
+- validate route ownership and idempotency;
+- call `github_worker` for file mutations;
+- inspect PR metadata, exact changed files and diff;
+- validate scope and acceptance criteria;
+- perform post-PR review;
+- obtain checks for the exact head SHA;
+- return blocking findings to Worker;
+- repeat review and checks after correction;
+- merge only when PM L2 delegated merge for the exact task, repository, branch, PR, head SHA and executor;
+- return factual structured output.
 
 Lead may use GitHub MCP directly for read-only inspection, checks, review support and authorized merge.
 
-Lead must not perform file mutations directly when the task changes repository files.
+Lead must not perform file mutations directly.
 
-### 5.2 `github_worker`
+### `github_worker`
 
-Worker is responsible for:
-- reading the repository;
-- creating or reusing the authorized working branch;
-- modifying only approved files;
-- creating or updating the authorized PR;
-- applying approved corrections to the same branch and PR;
-- returning actual branch, commit, PR and changed files.
+Worker must:
+- read the repository;
+- create or reuse the authorized branch;
+- modify only approved files;
+- create or update the authorized PR;
+- apply approved corrections to the same branch and PR;
+- return actual branch, commit, PR and changed files.
 
 Worker must never:
 - merge;
@@ -136,7 +132,7 @@ If safe ownership cannot be established, return `BLOCKED`.
 
 ## 7. Dynamic request contract
 
-The request contains task-specific data only.
+The request contains task-specific information only.
 
 Recommended format:
 
@@ -169,26 +165,31 @@ Constraints:
 Merge mode: <manual|automatic>
 ```
 
-Optional task-specific fields:
+For automatic merge, the request must also include:
+
+```text
+Merge delegation:
+  Task ID: <task_id>
+  Repository: Viktoryyyyy/moex-robot
+  Working branch: <exact branch>
+  Pull request: <exact PR number>
+  Expected head SHA: <full exact SHA>
+  Merge executor: flowise_lead
+```
+
+`Merge mode: automatic` alone is not sufficient authority to merge.
+
+Optional fields:
 - root task ID;
 - attempt number;
 - base SHA;
-- expected head SHA;
 - review comments;
 - evidence requirements;
 - route transfer reason;
 - fallback allowed;
 - server apply allowed.
 
-Do not repeat in every request:
-- generic Lead or Worker role descriptions;
-- the full GitHub workflow;
-- static project paths;
-- standard authority rules;
-- standard result schema;
-- full historical context.
-
-These belong in persistent Agent settings and the management canon.
+Do not repeat generic Lead/Worker descriptions, full GitHub workflow, static paths or standard schemas in every request.
 
 ## 8. Soft intake
 
@@ -207,12 +208,12 @@ Examples:
 - approved mutation scope is unknown;
 - two executions may control the same branch;
 - requested correction has no identifiable PR;
-- merge is requested but authority is ambiguous;
+- merge is requested without complete exact-head delegation;
 - current GitHub state conflicts with the request.
 
 ## 9. Task identity and idempotency
 
-Every execution should use:
+Use:
 
 ```text
 taskId
@@ -223,10 +224,10 @@ attemptNo
 Rules:
 - `taskId` remains stable across retry and route transfer;
 - `executionId` is unique per execution attempt;
-- repeated requests with the same `executionId` must be treated as potential duplicates;
-- Lead must inspect GitHub before repeating mutations;
+- repeated requests with the same `executionId` are potential duplicates;
+- inspect GitHub before repeating mutations;
 - correction reuses the same branch and PR;
-- a new branch or PR requires explicit authorization when an existing one already belongs to the task.
+- a replacement branch or PR requires explicit PM L2 authorization.
 
 ## 10. Proxy behaviour
 
@@ -243,9 +244,7 @@ The proxy:
 }
 ```
 
-Internal runtime fields are not returned externally.
-
-The external caller must treat `text` as the authoritative Flowise result and verify repository-changing claims against GitHub.
+Treat `text` as the authoritative external Flowise result and verify repository-changing claims against GitHub.
 
 ## 11. Read-only execution
 
@@ -265,7 +264,7 @@ The result must state that no mutation was performed.
 ## 12. Mutation execution
 
 For any file mutation:
-1. Lead validates task identity, route ownership and scope;
+1. Lead validates task identity, ownership and scope;
 2. Lead inspects existing branch and PR state;
 3. Lead calls `github_worker`;
 4. Worker creates or reuses the authorized branch;
@@ -277,11 +276,11 @@ For any file mutation:
 10. Worker corrects the same branch and PR;
 11. Lead repeats review and exact-head checks.
 
-For file mutation, observing only Lead and GitHub MCP without a Worker execution is an architecture violation.
+For mutation tasks, observing only Lead and GitHub MCP without a Worker execution is an architecture violation.
 
 ## 13. Mandatory post-PR review
 
-After every PR creation or update, Lead must:
+After each PR creation or update, Lead must:
 1. obtain PR metadata;
 2. obtain exact changed files;
 3. obtain the diff;
@@ -290,7 +289,7 @@ After every PR creation or update, Lead must:
 6. verify approved and forbidden scope;
 7. verify acceptance criteria;
 8. perform code review;
-9. obtain checks associated with the exact head SHA;
+9. obtain checks for the exact head SHA;
 10. identify blocking findings;
 11. return Worker for correction when required;
 12. repeat review and checks after a new head SHA.
@@ -303,7 +302,7 @@ reviewStatus: NOT_PERFORMED
 mergeStatus: not_merged
 ```
 
-The following combination is forbidden:
+This combination is forbidden:
 
 ```text
 pullRequestUrl != ""
@@ -315,17 +314,18 @@ status = READY_FOR_MANUAL_MERGE
 
 Checks must be tied to the exact latest PR head SHA.
 
-Lead must return, when available:
+Return when available:
 - full head SHA;
 - checks status;
-- source used to obtain checks;
+- checks source;
 - workflow run ID;
 - relevant check names.
 
 If the head SHA changes:
-- previous review approval becomes stale;
+- previous review approval is stale;
 - previous checks must not be reused;
-- review and checks must be repeated.
+- review and checks must be repeated;
+- prior merge delegation is invalid unless the task contract explicitly permits revalidation and delegated merge on the updated exact head.
 
 Checks must never be inferred or invented.
 
@@ -344,31 +344,31 @@ Recommended structure:
 ]
 ```
 
-If no findings exist:
+If there are no findings:
 
 ```json
 []
 ```
 
-Only blocking findings require Worker correction unless the task contract explicitly includes non-blocking improvements.
+Only blocking findings require Worker correction unless the task explicitly includes non-blocking improvements.
 
 ## 16. Correction cycle
 
 Correction rules:
 - same `taskId`;
-- new `executionId` when a new external execution is started;
+- new `executionId` for a new external execution;
 - same working branch;
 - same PR;
-- approved scope remains unchanged;
-- only approved findings are corrected;
-- new actual changed files are revalidated;
-- review and checks are repeated on the new exact head SHA.
+- unchanged approved scope;
+- only approved findings corrected;
+- actual changed files revalidated;
+- review and checks repeated on the new exact head SHA.
 
 Replacement branch or PR creation is forbidden unless PM L2 explicitly authorizes it.
 
 ## 17. Merge policy
 
-### 17.1 Manual
+### Manual
 
 Default:
 
@@ -386,22 +386,29 @@ reviewStatus: APPROVED
 mergeStatus: not_merged
 ```
 
-### 17.2 Automatic
+### Automatic
 
-Automatic merge is task-specific delegation by PM L2.
+Automatic merge is exact task-specific delegation by PM L2.
 
-Lead may merge only when:
-1. `Merge mode: automatic` is explicit in the current task;
-2. PR exists;
-3. full exact head SHA is known;
-4. actual changed files are within approved scope;
-5. acceptance criteria pass;
-6. post-PR review is complete;
-7. `reviewStatus=APPROVED`;
-8. exact-head checks pass;
-9. blocking comments are absent;
-10. conflicts are absent;
-11. user or PM L2 did not prohibit merge.
+Lead may merge only when all conditions pass:
+1. `Merge mode: automatic` is explicit;
+2. a complete `Merge delegation` block is present;
+3. delegation Task ID equals the active task ID;
+4. delegation Repository equals the active repository;
+5. delegation Working branch equals the PR head branch;
+6. delegation Pull request equals the exact active PR number;
+7. delegation Expected head SHA equals the full current PR head SHA;
+8. delegation Merge executor equals `flowise_lead`;
+9. actual changed files are within approved scope;
+10. acceptance criteria pass;
+11. post-PR review is complete;
+12. `reviewStatus=APPROVED`;
+13. checks for the exact delegated head SHA pass;
+14. blocking comments are absent;
+15. conflicts are absent;
+16. the task does not prohibit merge.
+
+If the Worker updates the PR after delegation, the head SHA changes and the previous delegation becomes invalid. Lead must not merge until PM L2 provides a new exact-head delegation or the original task contract explicitly authorizes revalidation and delegated merge on the updated exact head.
 
 After successful merge:
 
@@ -447,11 +454,11 @@ Recommended result:
 
 Extended fields are recommended, not a reason to invent unavailable data.
 
-The operational success gate is:
+Operational success requires:
 - the task reached the agent;
 - requested GitHub action completed or was safely blocked;
 - branch and PR state are factual;
-- checks and review status are factual;
+- checks and review state are factual;
 - no unauthorized mutation occurred.
 
 ## 19. Status values
@@ -471,7 +478,7 @@ COMPLETED
 SUPERSEDED
 ```
 
-Recommended `checksStatus` values:
+Checks:
 
 ```text
 passed
@@ -481,7 +488,7 @@ not_configured
 unknown
 ```
 
-Recommended `reviewStatus` values:
+Review:
 
 ```text
 APPROVED
@@ -489,7 +496,7 @@ CHANGES_REQUESTED
 NOT_PERFORMED
 ```
 
-Recommended `mergeStatus` values:
+Merge:
 
 ```text
 merged
@@ -498,17 +505,15 @@ not_merged
 
 ## 20. Timeout reconciliation
 
-GPT Action may time out before Flowise finishes.
-
-A timeout does not prove that the execution stopped.
+A GPT Action or proxy timeout does not prove that Flowise stopped.
 
 After timeout:
 1. do not immediately repeat a mutation;
 2. inspect GitHub for branch, commit and PR changes;
 3. inspect Flowise execution trace when available;
 4. determine whether the original execution is active, completed or failed;
-5. reconcile the latest head SHA and PR state;
-6. repeat only after idempotency and route ownership are confirmed.
+5. reconcile latest head SHA and PR state;
+6. retry only after idempotency and route ownership are confirmed.
 
 If state cannot be determined safely:
 
@@ -552,8 +557,6 @@ Before transfer:
 
 ## 22. Loop limits
 
-Lead must not create infinite loops.
-
 Recommended defaults:
 - Worker correction cycles: 2;
 - checks polling attempts: 2–3;
@@ -563,8 +566,6 @@ Recommended defaults:
 When limits are exhausted, return `BLOCKED` with factual reason.
 
 ## 23. Error classification
-
-Use:
 
 ```text
 handoff_error
@@ -595,7 +596,7 @@ Errors must identify:
 
 ## 24. Troubleshooting
 
-### 24.1 Empty request smoke test
+### Empty request smoke test
 
 ```bash
 curl -i -X POST https://flowise-api.foods-tech.store/github-task -H 'Content-Type: application/json' -d '{}'
@@ -609,7 +610,7 @@ Expected response:
 }
 ```
 
-### 24.2 Historical transport errors
+### Historical transport errors
 
 Previously observed:
 - `fetch failed`;
@@ -618,7 +619,7 @@ Previously observed:
 
 Agent as Tool resolved the prior SSE issue. Reappearance must be diagnosed from current traces rather than assumed to have the same cause.
 
-### 24.3 Execution trace inspection
+### Execution trace inspection
 
 Inspect:
 - Lead Agent node;
@@ -630,11 +631,11 @@ Inspect:
 - repeated checks loops;
 - actual GitHub branch and PR state.
 
-### 24.4 Ports and deployment
+### Ports and deployment
 
 Exact internal proxy and Flowise ports are not established by this management document.
 
-Do not guess them. Verify deployment configuration on the relevant server before making infrastructure claims.
+Do not guess them. Verify deployment configuration before making infrastructure claims.
 
 ## 25. Server apply boundary
 
@@ -647,7 +648,7 @@ serverApplyAllowed: false
 serverApplyStatus: not_performed
 ```
 
-Server apply requires a separate PM L2 authorization and must use the canonical MOEX Bot server context.
+Server apply requires separate PM L2 authorization and the canonical MOEX Bot server context.
 
 ## 26. Closed Route B
 
@@ -657,7 +658,7 @@ status: deprecated
 new_tasks_allowed: false
 ```
 
-Old Route B documents and evidence may remain for history, but they are not active Flowise orchestration authority.
+Old Route B evidence may remain for history, but it is not active Flowise authority.
 
 Do not:
 - send new tasks through Route B;
@@ -665,13 +666,13 @@ Do not:
 - create new Route B PRs;
 - use Route B registry state as the active route owner.
 
-## 27. Required pilots before production sign-off
+## 27. Required pilots
 
 1. Read-only PR inspection with full head SHA and exact checks evidence.
 2. Docs-only mutation with exact file scope.
 3. Blocking review → Worker correction → repeated review on the same PR.
 4. Timeout reconciliation without duplicate mutation.
-5. Explicit delegated automatic merge on a safe task.
-6. Route transfer test preserving task ID, branch and PR.
+5. Explicit exact-head delegated automatic merge on a safe task.
+6. Route transfer preserving task ID, branch and PR.
 
 Production sign-off requires factual results recorded in the repository or approved management evidence.
