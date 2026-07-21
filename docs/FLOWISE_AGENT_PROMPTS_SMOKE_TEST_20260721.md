@@ -5,6 +5,9 @@ purpose: validate Lead and Worker prompts, structured output, GitHub mutation, P
 production_change: false
 server_apply: forbidden
 merge: manual
+correction_cycle: passed
+expected_branch_reuse: true
+expected_pr_reuse: true
 
 Allowed scope:
 
@@ -13,9 +16,11 @@ Allowed scope:
 Forbidden scope:
 
 - все остальные файлы;
+- создание новой branch;
+- создание нового Pull Request;
+- изменение base branch;
 - direct write в main;
-- изменение существующих файлов;
-- server apply;
 - merge;
-- создание второго PR для этой задачи;
+- server apply;
+- закрытие PR;
 - расширение scope.
