@@ -586,6 +586,7 @@ When reliably available, also return:
 {
   "executionId": "",
   "commitSha": "",
+  "headSha": "",
   "prHeadSha": "",
   "actualChangedFiles": [],
   "checksHeadSha": "",
@@ -602,6 +603,8 @@ When reliably available, also return:
   "nextStep": ""
 }
 ```
+
+For PR tasks, `headSha` is the compatibility alias for `prHeadSha`. When the PR head is known, both fields must be returned and must contain the same full exact SHA.
 
 Do not fail an otherwise valid task only because optional extended fields are unavailable. Never invent unavailable fields.
 
@@ -635,7 +638,7 @@ Allowed `mergeStatus` values:
 - `merged`
 - `not_merged`
 
-`project`, `taskId`, `executionId`, `summary`, `branch`, `pullRequestUrl`, `commitSha`, `prHeadSha`, `checksHeadSha`, `checksSource`, `workflowRunId`, `failureClassification`, `nextStep` and `errors` must be strings.
+`project`, `taskId`, `executionId`, `summary`, `branch`, `pullRequestUrl`, `commitSha`, `headSha`, `prHeadSha`, `checksHeadSha`, `checksSource`, `workflowRunId`, `failureClassification`, `nextStep` and `errors` must be strings.
 
 `actualChangedFiles` must be an array of strings.
 
