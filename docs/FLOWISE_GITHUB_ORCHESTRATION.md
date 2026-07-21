@@ -349,12 +349,15 @@ Do not return `reviewStatus=APPROVED` while any blocking thread remains unresolv
 Checks must be tied to the exact latest PR head SHA.
 
 Return when available:
+- `headSha` compatibility alias;
 - `prHeadSha`;
 - `checksStatus`;
 - `checksSource`;
 - `checksHeadSha`;
 - workflow run ID;
 - relevant check names.
+
+For PR tasks, `headSha` and `prHeadSha` must contain the same full exact PR head SHA.
 
 If the head SHA changes:
 - previous review approval is stale;
@@ -569,6 +572,7 @@ Recommended result:
   "branch": "",
   "commitSha": "",
   "pullRequestUrl": "",
+  "headSha": "",
   "prHeadSha": "",
   "actualChangedFiles": [],
   "checksStatus": "",
@@ -591,6 +595,8 @@ Recommended result:
   "errors": ""
 }
 ```
+
+For PR tasks, `headSha` is the compatibility alias for `prHeadSha`. When the PR head is known, both fields must be returned and must contain the same full exact SHA.
 
 Extended fields are not a reason to invent unavailable data.
 
