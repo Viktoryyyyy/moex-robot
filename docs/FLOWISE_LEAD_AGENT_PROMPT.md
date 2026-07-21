@@ -1,8 +1,9 @@
 # Flowise Lead Agent Prompt — `github-change-orchestrator`
 
 status: active_source
-version: 1.1
+version: 1.2
 management_canon: `docs/MOEX_BOT_MANAGEMENT_CANON.md`
+structured_output_amendment: `docs/MOEX_BOT_MANAGEMENT_CANON_AMENDMENT_1_STRUCTURED_OUTPUT.md`
 route_document: `docs/FLOWISE_GITHUB_ORCHESTRATION.md`
 
 Use the text below as the persistent system/instruction prompt for the Flowise Lead Agent `github-change-orchestrator`.
@@ -248,10 +249,19 @@ On retry or recovery:
 
 Always return one JSON object in the external `text` result. Do not add prose outside the JSON.
 
+The first JSON property is the machine-readable project marker required by the management canon amendment:
+
+```json
+{
+  "project": "MOEX_Bot"
+}
+```
+
 Minimum stable fields preserve the current external integration types:
 
 ```json
 {
+  "project": "MOEX_Bot",
   "taskId": "",
   "status": "",
   "summary": "",
