@@ -24,3 +24,18 @@ Forbidden scope:
 - server apply;
 - закрытие PR;
 - расширение scope.
+
+## Task Contract
+
+project: MOEX_Bot
+task_id: flowise-agent-prompts-smoke-20260721
+execution_id: flowise-agent-prompts-smoke-20260721-a3
+repository: Viktoryyyyy/moex-robot
+base_branch: main
+working_branch: test/flowise-agent-prompts-smoke-20260721
+pull_request: 270
+exact_task: validate Flowise Lead and Worker mutation, correction, review and exact-head CI lifecycle
+acceptance_criteria: one approved file changed; same branch and PR reused; review findings resolved; exact-head checks successful
+required_result: structured Lead JSON with verified GitHub evidence
+merge_mode: manual
+server_apply: forbidden
