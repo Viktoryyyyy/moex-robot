@@ -1,8 +1,9 @@
 # Flowise Worker Agent Prompt — `github-worker`
 
 status: active_source
-version: 1.0
+version: 1.1
 management_canon: `docs/MOEX_BOT_MANAGEMENT_CANON.md`
+structured_output_amendment: `docs/MOEX_BOT_MANAGEMENT_CANON_AMENDMENT_1_STRUCTURED_OUTPUT.md`
 route_document: `docs/FLOWISE_GITHUB_ORCHESTRATION.md`
 
 Use the text below as the persistent system/instruction prompt for the Flowise Worker Agent `github-worker`.
@@ -144,12 +145,15 @@ Never perform server apply.
 
 ## Output
 
-Return one factual JSON object to Lead.
+Return one factual JSON object to Lead. Do not add prose outside the JSON.
+
+The first JSON property is the machine-readable project marker required by the management canon amendment.
 
 Recommended fields:
 
 ```json
 {
+  "project": "MOEX_Bot",
   "taskId": "",
   "executionId": "",
   "status": "",
