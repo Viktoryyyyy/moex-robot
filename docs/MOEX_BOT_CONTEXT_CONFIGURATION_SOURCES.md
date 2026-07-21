@@ -1,8 +1,9 @@
 # MOEX Bot Context Configuration Sources
 
 status: active_source
-version: 1.0
+version: 1.1
 management_canon: `docs/MOEX_BOT_MANAGEMENT_CANON.md`
+structured_output_amendment: `docs/MOEX_BOT_MANAGEMENT_CANON_AMENDMENT_1_STRUCTURED_OUTPUT.md`
 repository: `Viktoryyyyy/moex-robot`
 
 ## Purpose
@@ -19,6 +20,7 @@ The repository stores the approved source text. The ChatGPT Project settings and
 | Browser role chats | `docs/BROWSER_ROLE_CONTEXTS.md` |
 | Flowise Lead Agent `github-change-orchestrator` | `docs/FLOWISE_LEAD_AGENT_PROMPT.md` |
 | Flowise Worker Agent `github-worker` | `docs/FLOWISE_GITHUB_WORKER_PROMPT.md` |
+| Machine-readable project marker clarification | `docs/MOEX_BOT_MANAGEMENT_CANON_AMENDMENT_1_STRUCTURED_OUTPUT.md` |
 
 ## Authority
 
@@ -27,12 +29,13 @@ The precedence order is:
 ```text
 Owner decision
 → docs/MOEX_BOT_MANAGEMENT_CANON.md
+→ approved canon amendments
 → target-specific source file in this index
 → applied UI or Agent setting
 → dynamic task request
 ```
 
-A dynamic task request may add task-specific scope, constraints and authority. It must not silently replace static role rules or widen authority.
+A dynamic task request supplies task-specific scope, constraints and authority within the higher-level rules. It must not silently replace static role rules or widen authority.
 
 ## Application control
 
