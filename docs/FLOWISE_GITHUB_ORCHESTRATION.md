@@ -1,8 +1,9 @@
 # Flowise GitHub Orchestration
 
 status: active
-version: 2.1
+version: 2.2
 management_canon: `docs/MOEX_BOT_MANAGEMENT_CANON.md`
+structured_output_amendment: `docs/MOEX_BOT_MANAGEMENT_CANON_AMENDMENT_1_STRUCTURED_OUTPUT.md`
 
 ## 1. Purpose
 
@@ -58,12 +59,7 @@ Secrets, API keys, tokens and passwords must not be stored in documentation, pro
 ```text
 GitHub repository = Source of Truth
 Server filesystem = Applied State only
-```
-
-Canonical repository:
-
-```text
-Viktoryyyyy/moex-robot
+canonical repository = Viktoryyyyy/moex-robot
 ```
 
 Do not infer repository architecture, accepted branch state or authority from server files.
@@ -81,15 +77,16 @@ Lead must:
 - inspect PR metadata, exact changed files and diff;
 - validate scope and acceptance criteria;
 - perform post-PR review;
+- inspect current review threads;
 - obtain checks for the exact head SHA;
 - return blocking findings to Worker;
-- repeat review and checks after correction;
-- merge only when PM L2 delegated merge for the exact task, repository, branch, PR, head SHA and executor;
+- repeat review, thread inspection and checks after correction;
+- merge only when PM L2 delegated merge for the exact task, repository, branch, PR, head SHA, merge policy and executor;
 - return factual structured output.
 
-Lead may use GitHub MCP directly for read-only inspection, checks, review support and authorized merge.
+Lead may use GitHub MCP directly for read-only inspection, checks, review support, review-thread replies and resolution after verified correction, and authorized merge.
 
-Lead must not perform file mutations directly.
+Lead must not perform repository file mutations directly.
 
 ### `github_worker`
 
@@ -107,6 +104,7 @@ Worker must never:
 - widen scope;
 - create a replacement branch or PR without explicit authorization;
 - perform server apply;
+- approve its own work;
 - invent GitHub state.
 
 ## 6. Route invariants
@@ -174,6 +172,7 @@ Merge delegation:
   Working branch: <exact branch>
   Pull request: <exact PR number>
   Expected head SHA: <full exact SHA>
+  Merge policy: automatic
   Merge executor: flowise_lead
 ```
 
@@ -190,6 +189,8 @@ Optional fields:
 - server apply allowed.
 
 Do not repeat generic Lead/Worker descriptions, full GitHub workflow, static paths or standard schemas in every request.
+
+The receiving Agent must not rely on memory from earlier executions. It reconstructs current state from the task identity and GitHub.
 
 ## 8. Soft intake
 
@@ -255,6 +256,7 @@ Read-only tasks must not:
 - create commits;
 - create or update PRs;
 - add comments or reviews;
+- resolve review threads;
 - rerun checks;
 - merge;
 - perform server apply.
@@ -271,10 +273,13 @@ For any file mutation:
 5. Worker modifies only approved files;
 6. Worker creates or updates the authorized PR;
 7. Worker returns actual GitHub evidence;
-8. Lead performs mandatory post-PR review;
-9. Lead returns blocking findings to Worker when required;
-10. Worker corrects the same branch and PR;
-11. Lead repeats review and exact-head checks.
+8. Lead independently verifies branch, commit, PR and changed files;
+9. Lead performs mandatory post-PR review;
+10. Lead inspects current review threads;
+11. Lead returns blocking findings to Worker when required;
+12. Worker corrects the same branch and PR;
+13. Lead repeats review, thread inspection and exact-head checks;
+14. Lead performs final GitHub reconciliation before output.
 
 For mutation tasks, observing only Lead and GitHub MCP without a Worker execution is an architecture violation.
 
@@ -288,11 +293,12 @@ After each PR creation or update, Lead must:
 5. verify the full head SHA;
 6. verify approved and forbidden scope;
 7. verify acceptance criteria;
-8. perform code review;
-9. obtain checks for the exact head SHA;
-10. identify blocking findings;
-11. return Worker for correction when required;
-12. repeat review and checks after a new head SHA.
+8. perform code or documentation review;
+9. obtain all current review threads;
+10. obtain checks for the exact head SHA;
+11. identify blocking findings;
+12. return Worker for correction when required;
+13. repeat review, thread inspection and checks after a new head SHA.
 
 If PR exists but review was not performed:
 
@@ -310,49 +316,121 @@ reviewStatus = NOT_PERFORMED
 status = READY_FOR_MANUAL_MERGE
 ```
 
-## 14. Exact-head checks
+## 14. Review thread authority
+
+GitHub review-thread state is authoritative.
+
+Lead must obtain, when available:
+- thread ID;
+- `is_resolved`;
+- `is_outdated`;
+- file path and line;
+- current comments.
+
+A thread is outdated only when GitHub explicitly returns `is_outdated=true`.
+
+A blocking thread remains blocking while GitHub returns `is_resolved=false`.
+
+A changed PR head SHA, edited file or apparently corrected finding does not itself make a thread stale or outdated.
+
+After Worker correction, Lead must:
+1. verify the correction in the current diff;
+2. verify scope compliance;
+3. reply to the existing thread with factual evidence;
+4. resolve that same thread;
+5. fetch review threads again;
+6. confirm `is_resolved=true`;
+7. check for other unresolved blocking threads.
+
+Do not return `reviewStatus=APPROVED` while any blocking thread remains unresolved.
+
+## 15. Exact-head checks
 
 Checks must be tied to the exact latest PR head SHA.
 
 Return when available:
-- full head SHA;
-- checks status;
-- checks source;
+- `prHeadSha`;
+- `checksStatus`;
+- `checksSource`;
+- `checksHeadSha`;
 - workflow run ID;
 - relevant check names.
 
 If the head SHA changes:
 - previous review approval is stale;
 - previous checks must not be reused;
-- review and checks must be repeated;
+- previous merge readiness is stale;
+- review, review-thread inspection and checks must be repeated;
 - prior merge delegation is invalid unless the task contract explicitly permits revalidation and delegated merge on the updated exact head.
 
 Checks must never be inferred or invented.
 
-## 15. Review comments
+Normalize checks:
 
-Recommended structure:
-
-```json
-[
-  {
-    "file": "src/app.py",
-    "line": 42,
-    "priority": "blocking",
-    "comment": "Описание проблемы"
-  }
-]
+```text
+passed
+failed
+pending
+not_configured
+unknown
 ```
 
-If there are no findings:
+Mapping:
+- queued, requested, waiting, in_progress → `pending`;
+- failure, timed_out, cancelled, action_required → `failed`;
+- completed with success → `passed`;
+- no configured checks → `not_configured`;
+- unavailable or inconclusive evidence → `unknown`.
+
+`checksHeadSha` must equal `prHeadSha` for merge readiness.
+
+Recommended `checksSource` values:
+
+```text
+github_actions
+check_runs
+commit_status
+not_configured
+unknown
+```
+
+## 16. Checks polling
+
+Recommended maximum checks polling attempts: 3.
+
+If checks remain pending after the configured attempts:
+
+```text
+status: WAITING_FOR_CHECKS
+checksStatus: pending
+failureClassification: ci_pending
+mergeStatus: not_merged
+nextStep: wait_for_exact_head_ci
+```
+
+Do not return `CHANGES_REQUIRED` merely because CI is pending.
+
+Do not rerun checks unless the task explicitly authorizes it and a rerun is required.
+
+## 17. Review comments
+
+`reviewComments` is externally represented as a string containing a serialized JSON array.
+
+No findings:
 
 ```json
-[]
+"reviewComments": "[]"
+```
+
+Finding example:
+
+```json
+"reviewComments": "[{\"threadId\":\"PRRT_example\",\"is_resolved\":false,\"is_outdated\":false,\"priority\":\"blocking\",\"comment\":\"Description\"}]"
 ```
 
 Only blocking findings require Worker correction unless the task explicitly includes non-blocking improvements.
 
-## 16. Correction cycle
+## 18. Correction cycle
 
 Correction rules:
 - same `taskId`;
@@ -362,11 +440,28 @@ Correction rules:
 - unchanged approved scope;
 - only approved findings corrected;
 - actual changed files revalidated;
-- review and checks repeated on the new exact head SHA.
+- review, review-thread inspection and checks repeated on the new exact head SHA.
 
 Replacement branch or PR creation is forbidden unless PM L2 explicitly authorizes it.
 
-## 17. Merge policy
+If correction requires scope widening:
+
+```text
+status: BLOCKED
+failureClassification: scope_violation
+nextStep: PM L2 must approve explicit scope widening
+```
+
+Recommended maximum Worker correction cycles: 2.
+
+When correction limits are exhausted:
+
+```text
+status: BLOCKED
+failureClassification: execution_loop_exhausted
+```
+
+## 19. Merge policy
 
 ### Manual
 
@@ -383,7 +478,9 @@ If all gates pass:
 ```text
 status: READY_FOR_MANUAL_MERGE
 reviewStatus: APPROVED
+checksStatus: passed
 mergeStatus: not_merged
+mergePerformed: false
 ```
 
 ### Automatic
@@ -398,40 +495,73 @@ Lead may merge only when all conditions pass:
 5. delegation Working branch equals the PR head branch;
 6. delegation Pull request equals the exact active PR number;
 7. delegation Expected head SHA equals the full current PR head SHA;
-8. delegation Merge executor equals `flowise_lead`;
-9. actual changed files are within approved scope;
-10. acceptance criteria pass;
-11. post-PR review is complete;
-12. `reviewStatus=APPROVED`;
-13. checks for the exact delegated head SHA pass;
-14. blocking comments are absent;
-15. conflicts are absent;
-16. the task does not prohibit merge.
+8. delegation Merge policy equals `automatic`;
+9. delegation Merge executor equals `flowise_lead`;
+10. actual changed files are within approved scope;
+11. acceptance criteria pass;
+12. post-PR review is complete;
+13. `reviewStatus=APPROVED`;
+14. all blocking review threads are resolved;
+15. checks for the exact delegated head SHA passed;
+16. `checksHeadSha=prHeadSha`;
+17. conflicts are absent;
+18. the task does not prohibit merge.
 
-If the Worker updates the PR after delegation, the head SHA changes and the previous delegation becomes invalid. Lead must not merge until PM L2 provides a new exact-head delegation or the original task contract explicitly authorizes revalidation and delegated merge on the updated exact head.
+If Worker updates the PR after delegation, the head SHA changes and the previous delegation becomes invalid. Lead must not merge until PM L2 provides a new exact-head delegation or the original task contract explicitly authorizes revalidation and delegated merge on the updated exact head.
 
 After successful merge:
 
 ```text
 status: MERGED
 mergeStatus: merged
+mergePerformed: true
 ```
 
-If any gate fails:
+If any merge gate fails:
 
 ```text
 status: BLOCKED
 mergeStatus: not_merged
+mergePerformed: false
 ```
 
 Worker never merges.
 
-## 18. Response contract
+## 20. Final reconciliation gate
+
+Immediately before final output, Lead must re-fetch and reconcile:
+1. current PR metadata and state;
+2. base and head branches;
+3. full current PR head SHA;
+4. exact changed filenames;
+5. current diff;
+6. scope and acceptance criteria;
+7. all current review threads and their resolution/outdated state;
+8. workflow runs and jobs for the exact current head SHA;
+9. `checksHeadSha=prHeadSha`;
+10. mergeability and merge state.
+
+Discard stale evidence from older head SHAs.
+
+Build final output only from the reconciled state.
+
+## 21. Response contract
+
+The external `text` result must contain exactly one JSON object. No prose or markdown may precede or follow it.
+
+The first property must be:
+
+```json
+{
+  "project": "MOEX_Bot"
+}
+```
 
 Recommended result:
 
 ```json
 {
+  "project": "MOEX_Bot",
   "taskId": "",
   "executionId": "",
   "status": "",
@@ -439,31 +569,50 @@ Recommended result:
   "branch": "",
   "commitSha": "",
   "pullRequestUrl": "",
-  "headSha": "",
+  "prHeadSha": "",
   "actualChangedFiles": [],
   "checksStatus": "",
   "checksSource": "",
+  "checksHeadSha": "",
   "workflowRunId": "",
   "reviewStatus": "",
-  "reviewComments": [],
+  "reviewComments": "[]",
   "mergeStatus": "",
-  "errors": [],
-  "nextStep": ""
+  "filesChanged": false,
+  "branchCreated": false,
+  "commitCreated": false,
+  "prCreated": false,
+  "reviewCreated": false,
+  "checksRerun": false,
+  "mergePerformed": false,
+  "serverApplyStatus": "not_performed",
+  "failureClassification": "",
+  "nextStep": "",
+  "errors": ""
 }
 ```
 
-Extended fields are recommended, not a reason to invent unavailable data.
+Extended fields are not a reason to invent unavailable data.
+
+Types:
+- `actualChangedFiles` is an array of strings;
+- mutation flags are JSON booleans;
+- `reviewComments` is a string containing a serialized JSON array;
+- `errors` is always a string;
+- all SHA, ID, status, source, classification and next-step fields are strings.
+
+Use `"errors": ""` when no error exists. Do not return `errors` as a boolean, array, null or object.
 
 Operational success requires:
-- the task reached the agent;
-- requested GitHub action completed or was safely blocked;
+- the task reached the Agent;
+- the requested GitHub action completed or was safely blocked;
 - branch and PR state are factual;
 - checks and review state are factual;
 - no unauthorized mutation occurred.
 
-## 19. Status values
+## 22. Status values
 
-Recommended `status` values:
+Allowed `status` values:
 
 ```text
 RUNNING
@@ -478,7 +627,7 @@ COMPLETED
 SUPERSEDED
 ```
 
-Checks:
+Allowed checks:
 
 ```text
 passed
@@ -488,7 +637,7 @@ not_configured
 unknown
 ```
 
-Review:
+Allowed review:
 
 ```text
 APPROVED
@@ -496,14 +645,21 @@ CHANGES_REQUESTED
 NOT_PERFORMED
 ```
 
-Merge:
+Allowed merge:
 
 ```text
 merged
 not_merged
 ```
 
-## 20. Timeout reconciliation
+Rules:
+- `CHANGES_REQUIRED` means an additional repository or PR mutation is required;
+- pending CI uses `WAITING_FOR_CHECKS`, not `CHANGES_REQUIRED`;
+- `READY_FOR_MANUAL_MERGE` requires current-head review approval, no unresolved blocking threads, passed exact-head checks and `mergeStatus=not_merged`;
+- `MERGED` requires factual GitHub merge evidence and `mergeStatus=merged`;
+- `COMPLETED` is normally used for read-only, inspection or no-PR tasks.
+
+## 23. Timeout reconciliation
 
 A GPT Action or proxy timeout does not prove that Flowise stopped.
 
@@ -512,18 +668,18 @@ After timeout:
 2. inspect GitHub for branch, commit and PR changes;
 3. inspect Flowise execution trace when available;
 4. determine whether the original execution is active, completed or failed;
-5. reconcile latest head SHA and PR state;
+5. reconcile latest head SHA, review threads, checks and PR state;
 6. retry only after idempotency and route ownership are confirmed.
 
 If state cannot be determined safely:
 
 ```text
 status: BLOCKED
-errorClass: flowise_timeout
+failureClassification: flowise_timeout
 nextStep: reconcile_execution_state
 ```
 
-## 21. Route transfer
+## 24. Route transfer
 
 Flowise ↔ Browser transfer preserves:
 
@@ -555,17 +711,17 @@ Before transfer:
 - reuse the same branch and PR;
 - do not create replacements without explicit PM L2 authorization.
 
-## 22. Loop limits
+## 25. Loop limits
 
 Recommended defaults:
 - Worker correction cycles: 2;
-- checks polling attempts: 2–3;
+- checks polling attempts: 3;
 - route transfer attempts: 1;
 - total execution time below the external timeout with safety margin where possible.
 
-When limits are exhausted, return `BLOCKED` with factual reason.
+When limits are exhausted, return `BLOCKED` with factual evidence and `failureClassification=execution_loop_exhausted` when applicable.
 
-## 23. Error classification
+## 26. Error classification
 
 ```text
 handoff_error
@@ -594,7 +750,7 @@ Errors must identify:
 - whether retry is safe;
 - required next owner.
 
-## 24. Troubleshooting
+## 27. Troubleshooting
 
 ### Empty request smoke test
 
@@ -637,7 +793,7 @@ Exact internal proxy and Flowise ports are not established by this management do
 
 Do not guess them. Verify deployment configuration before making infrastructure claims.
 
-## 25. Server apply boundary
+## 28. Server apply boundary
 
 Flowise GitHub orchestration does not authorize server apply.
 
@@ -650,7 +806,7 @@ serverApplyStatus: not_performed
 
 Server apply requires separate PM L2 authorization and the canonical MOEX Bot server context.
 
-## 26. Closed Route B
+## 29. Closed Route B
 
 ```text
 route_b_n8n_universal_role_runner
@@ -666,7 +822,7 @@ Do not:
 - create new Route B PRs;
 - use Route B registry state as the active route owner.
 
-## 27. Required pilots
+## 30. Required pilots
 
 1. Read-only PR inspection with full head SHA and exact checks evidence.
 2. Docs-only mutation with exact file scope.
