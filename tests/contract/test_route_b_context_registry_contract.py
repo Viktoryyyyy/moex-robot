@@ -6,192 +6,72 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = REPO_ROOT / "docs/sot/context/registry.route_b.v1.yaml"
-FORBIDDEN_MARKERS = ("latest", "current", "autodetect")
-REQUIRED_STATIC_REFS = {
-    "MOEX_Bot_Target_Architecture_2026_All_In_One",
-    "MOEX_Bot_Role_Context_Operating_Model_v1",
-    "github_commit_flow_subchats_v3",
-}
-REQUIRED_ROLE_REFS = {
-    "PM_L2_PHASE_OWNER",
-    "PM_L3_DELIVERY_VALIDATION_OWNER",
-    "SUBCHAT_BASE",
-    "SUBCHAT_IMPLEMENTATION",
-    "SUBCHAT_VALIDATION",
-    "SUBCHAT_REPO_AUDIT",
-}
-REQUIRED_SCHEMAS = {
-    "pm_l2_to_pm_l3_request_envelope.v1",
-    "pm_l3_to_subchat_task_package.v1",
-    "subchat_to_pm_l3_return_package.v1",
-    "pm_l3_to_pm_l2_validation_return_package.v1",
-    "route_b_pm_l2_console_actions.v0.1",
-    "route_b_pm_l2_console_actions_adapter.v0.1",
-    "route_b_pm_l2_console_actions_openapi.v0.1",
-    "route_b_pm_l2_console_owner_wiring.v0.1",
-    "route_b_universal_role_runner.v0.1",
-    "route_b_role_task_queue.v0.1",
-    "route_b_pm_l3_decision_loop.v0.1",
-    "route_b_multi_role_phase_state_machine.v0.1",
-    "route_b_ollama_role_prompt_contract.v0.1",
-    "route_b_universal_role_runner_db_contract.v0.1",
-    "route_b_universal_role_runner_db_migration_proposal.v0.1",
-    "route_b_universal_role_runner_db_migration_execution.v0.1",
-    "route_b_universal_role_runner_db_migration_rollback.v0.1",
-    "route_b_worker_poller_db_adapter_contract.v0.1",
-    "route_b_worker_poller_workflow_mutation_package.v0.1",
-    "route_b_github_executor_execution_evidence_registry.v0.1",
-}
-REQUIRED_ROLE_FIELDS = (
-    "mandate:",
-    "authority:",
-    "forbidden_actions:",
-    "expected_output:",
-    "relationship_to_chain:",
-)
+MANAGEMENT_REGISTRY_PATH = REPO_ROOT / "docs/MOEX_BOT_CONTEXT_CONFIGURATION_SOURCES.md"
+MANAGEMENT_CANON_PATH = REPO_ROOT / "docs/MOEX_BOT_MANAGEMENT_CANON.md"
 
 
 def _load_registry() -> dict[str, object]:
     return json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
 
 
-def _walk_strings(value: object) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, dict):
-        output: list[str] = []
-        for key, item in value.items():
-            output.extend(_walk_strings(key))
-            output.extend(_walk_strings(item))
-        return output
-    if isinstance(value, list):
-        output = []
-        for item in value:
-            output.extend(_walk_strings(item))
-        return output
-    return []
-
-
-def _registry_paths(registry: dict[str, object]) -> list[str]:
-    paths: list[str] = []
-    for section_name in ("static_context_refs", "schema_refs"):
-        section = registry[section_name]
-        assert isinstance(section, dict)
-        for entry in section.values():
-            assert isinstance(entry, dict)
-            paths.append(str(entry["path"]))
-    role_section = registry["role_context_refs"]
-    assert isinstance(role_section, dict)
-    for versions in role_section.values():
-        assert isinstance(versions, dict)
-        for entry in versions.values():
-            assert isinstance(entry, dict)
-            paths.append(str(entry["path"]))
-    return paths
-
-
-def test_route_b_registry_has_required_refs() -> None:
+def test_route_b_registry_is_fail_closed_historical_tombstone() -> None:
     registry = _load_registry()
-    assert set(registry["static_context_refs"]) == REQUIRED_STATIC_REFS
-    assert set(registry["role_context_refs"]) == REQUIRED_ROLE_REFS
-    assert set(registry["schema_refs"]) == REQUIRED_SCHEMAS
+
+    assert registry["registry_id"] == "route_b_context_registry.v1"
+    assert registry["project"] == "MOEX_Bot"
+    assert registry["status"] == "deprecated_historical"
+    assert registry["new_tasks_allowed"] is False
+    assert registry["new_runtime_execution_allowed"] is False
+    assert registry["active_context_resolution_allowed"] is False
+    assert registry["historical_source"] is True
 
 
-def test_route_b_registry_paths_are_repo_relative_and_existing() -> None:
+def test_route_b_registry_points_to_current_management_sources() -> None:
     registry = _load_registry()
-    for path_value in _registry_paths(registry):
-        path = Path(path_value)
-        assert not path.is_absolute()
-        assert ".." not in path.parts
-        assert not str(path_value).startswith(("/", "~"))
-        assert chr(92) not in path_value
-        assert (REPO_ROOT / path).is_file(), path_value
+    superseded_by = registry["superseded_by"]
+
+    assert isinstance(superseded_by, dict)
+    assert superseded_by["management_registry"] == "docs/MOEX_BOT_CONTEXT_CONFIGURATION_SOURCES.md"
+    assert superseded_by["management_canon"] == "docs/MOEX_BOT_MANAGEMENT_CANON.md"
+    assert superseded_by["active_routes"] == [
+        "browser_controlled_github_route",
+        "flowise_automated_github_route",
+    ]
+
+    assert MANAGEMENT_REGISTRY_PATH.is_file()
+    assert MANAGEMENT_CANON_PATH.is_file()
 
 
-def test_route_b_registry_rejects_forbidden_markers() -> None:
+def test_route_b_registry_forbids_active_resolution() -> None:
     registry = _load_registry()
-    for value in _walk_strings(registry):
-        lowered = value.lower()
-        for marker in FORBIDDEN_MARKERS:
-            assert marker not in lowered, value
+    policy = registry["resolution_policy"]
+
+    assert isinstance(policy, dict)
+    assert policy["active_resolution"] == "forbidden"
+    assert policy["unknown_ref_policy"] == "reject"
+    assert policy["historical_inspection"] == "read_only_when_explicitly_requested"
 
 
-def test_role_specs_include_required_contract_fields() -> None:
+def test_route_b_registry_does_not_publish_legacy_active_refs() -> None:
     registry = _load_registry()
-    role_section = registry["role_context_refs"]
-    assert isinstance(role_section, dict)
-    for versions in role_section.values():
-        assert isinstance(versions, dict)
-        role = versions["v1"]
-        assert isinstance(role, dict)
-        text = (REPO_ROOT / str(role["path"])).read_text(encoding="utf-8")
-        for field in REQUIRED_ROLE_FIELDS:
-            assert field in text
 
-
-def test_route_b_schema_direction_is_explicit() -> None:
-    registry = _load_registry()
-    schemas = registry["schema_refs"]
-    assert isinstance(schemas, dict)
-    schema_text = {
-        key: (REPO_ROOT / str(value["path"])).read_text(encoding="utf-8")
-        for key, value in schemas.items()
-        if isinstance(value, dict)
+    forbidden_active_sections = {
+        "workflow_state_store",
+        "static_context_refs",
+        "role_context_refs",
+        "schema_refs",
+        "route_b_chain",
+        "resolver_rules",
     }
-    assert "producer: PM_L2_PHASE_OWNER" in schema_text["pm_l2_to_pm_l3_request_envelope.v1"]
-    assert "consumer: PM_L3_DELIVERY_VALIDATION_OWNER" in schema_text["pm_l2_to_pm_l3_request_envelope.v1"]
-    assert "target_subchat_role" in schema_text["pm_l3_to_subchat_task_package.v1"]
-    assert "expected_return_to: PM_L3_DELIVERY_VALIDATION_OWNER" in schema_text["pm_l3_to_subchat_task_package.v1"]
-    assert "return_to: PM_L3_DELIVERY_VALIDATION_OWNER" in schema_text["subchat_to_pm_l3_return_package.v1"]
-    assert "return_to: PM_L2_PHASE_OWNER" in schema_text["pm_l3_to_pm_l2_validation_return_package.v1"]
+
+    assert forbidden_active_sections.isdisjoint(registry)
 
 
-def test_route_b_registry_binds_db_migration_execution_refs() -> None:
+def test_route_b_registry_records_applied_state_boundary() -> None:
     registry = _load_registry()
-    schemas = registry["schema_refs"]
-    assert isinstance(schemas, dict)
-    assert schemas["route_b_universal_role_runner_db_migration_execution.v0.1"][
-        "path"
-    ] == "docs/sot/context/schemas/route_b_universal_role_runner_db_migration_execution.v0.1.sql"
-    assert schemas["route_b_universal_role_runner_db_migration_rollback.v0.1"][
-        "path"
-    ] == "docs/sot/context/schemas/route_b_universal_role_runner_db_migration_rollback.v0.1.sql"
+    note = registry["application_note"]
 
-
-def test_route_b_registry_keeps_proposal_and_db_contract_refs_intact() -> None:
-    registry = _load_registry()
-    schemas = registry["schema_refs"]
-    assert isinstance(schemas, dict)
-    assert schemas["route_b_universal_role_runner_db_contract.v0.1"][
-        "path"
-    ] == "docs/sot/context/schemas/route_b_universal_role_runner_db_contract.v0.1.yaml"
-    assert schemas["route_b_universal_role_runner_db_migration_proposal.v0.1"][
-        "path"
-    ] == "docs/sot/context/schemas/route_b_universal_role_runner_db_migration_proposal.v0.1.sql"
-
-
-def test_route_b_registry_binds_worker_poller_db_adapter_contract_ref() -> None:
-    registry = _load_registry()
-    schemas = registry["schema_refs"]
-    assert isinstance(schemas, dict)
-    assert schemas["route_b_worker_poller_db_adapter_contract.v0.1"][
-        "path"
-    ] == "docs/sot/context/schemas/route_b_worker_poller_db_adapter_contract.v0.1.yaml"
-
-
-def test_route_b_registry_binds_worker_poller_workflow_mutation_package_ref() -> None:
-    registry = _load_registry()
-    schemas = registry["schema_refs"]
-    assert isinstance(schemas, dict)
-    assert schemas["route_b_worker_poller_workflow_mutation_package.v0.1"][
-        "path"
-    ] == "docs/sot/context/schemas/route_b_worker_poller_workflow_mutation_package.v0.1.yaml"
-
-
-def test_route_b_registry_binds_github_executor_execution_evidence_registry_ref() -> None:
-    registry = _load_registry()
-    schemas = registry["schema_refs"]
-    assert isinstance(schemas, dict)
-    assert schemas["route_b_github_executor_execution_evidence_registry.v0.1"][
-        "path"
-    ] == "docs/sot/context/schemas/route_b_github_executor_execution_evidence_registry.v0.1.yaml"
+    assert isinstance(note, str)
+    assert "must not be used" in note
+    assert "Deployed n8n Applied State" in note
+    assert "deactivated and verified separately" in note
