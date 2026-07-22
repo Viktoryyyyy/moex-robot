@@ -27,6 +27,18 @@ The project-local `.env` under the repository root is the only canonical dotenv 
 - `MOEX_API_KEY` is not an alias or fallback for `MOEX_ALGOPACK_TOKEN`.
 - Real credential values must remain outside GitHub and must not appear in logs, artifacts, commands, or reports.
 
+## Canonical AlgoPack runtime entrypoint
+
+Controlled Phase 8.6A AlgoPack runs must use this launcher:
+
+```bash
+cd /home/trader/moex_bot/moex-robot && source /home/trader/moex_bot/venv/bin/activate && PYTHONPATH=.:src python -m moex_research.runners.usdrubf_phase8_6a_algopack_cnyrub_runtime <approved-arguments>
+```
+
+The launcher resolves the repository-local `.env` from its own module path, loads it with `override=False`, and then delegates to `usdrubf_phase8_6a_algopack_cnyrub_source_validation`.
+
+Direct `python -m moex_research.runners.usdrubf_phase8_6a_algopack_cnyrub_source_validation` invocation is not the canonical controlled-server entrypoint because that validator expects the required environment to be loaded already.
+
 ## Deprecated / forbidden path claims
 
 The following paths are not valid runtime contract paths for this project and must not be used in generated commands:
