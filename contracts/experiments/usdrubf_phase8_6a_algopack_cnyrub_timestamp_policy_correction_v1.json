@@ -1,0 +1,64 @@
+{
+  "contract_identity": {
+    "contract_id": "usdrubf_phase8_6a_algopack_cnyrub_timestamp_policy_correction_v1",
+    "contract_version": "1.0",
+    "project": "MOEX Bot",
+    "task_id": "ema_3_19_ai_phase_8_6a_algopack_cnyrub_timestamp_policy_correction",
+    "lane": "ema_3_19_ai",
+    "phase": "8.6A",
+    "status": "runtime_correction_only"
+  },
+  "supersedes_policy_fragment": {
+    "contract_id": "usdrubf_phase8_6a_algopack_cnyrub_source_validation_v2",
+    "scope": "interpretation of tradedate, tradetime, and SYSTIME for five-minute provider buckets"
+  },
+  "source_identity": {
+    "source_id": "moex_algopack_cnyrub_tom_tradestats_5m",
+    "security_id": "CNYRUB_TOM",
+    "board_id": "CETS",
+    "route": "https://apim.moex.com/iss/datashop/algopack/fx/tradestats/CNYRUB_TOM.json",
+    "bucket_interval_minutes": 5
+  },
+  "live_evidence": {
+    "diagnostic_date": "2026-07-22",
+    "sample_trade_date": "2026-06-10",
+    "http_status": 200,
+    "page_rows": 109,
+    "cursor_total": 109,
+    "systime_minus_tradetime_min_seconds": 10,
+    "systime_minus_tradetime_max_seconds": 30,
+    "systime_before_tradetime_count": 0,
+    "systime_before_tradetime_plus_five_minutes_count": 109,
+    "token_value_exposed": false
+  },
+  "timestamp_policy": {
+    "policy_id": "algopack_tradetime_is_five_minute_interval_end_v1",
+    "provider_tradetime_role": "five_minute_interval_end",
+    "bucket_end": "tradedate plus tradetime in Europe/Moscow",
+    "bucket_begin": "bucket_end minus five minutes",
+    "source_available_at": "SYSTIME in Europe/Moscow",
+    "row_completion_required": "SYSTIME must be greater than or equal to bucket_end",
+    "legacy_assumption_rejected": "SYSTIME must be greater than or equal to tradetime plus five minutes",
+    "daily_candle_begin": "first chronological bucket_begin",
+    "daily_candle_end": "last chronological bucket_end",
+    "daily_source_available_at": "maximum SYSTIME across included rows",
+    "forecast_anchor_rule_unchanged": true
+  },
+  "runtime_policy": {
+    "canonical_launcher": "python -m moex_research.runners.usdrubf_phase8_6a_algopack_cnyrub_runtime",
+    "timestamp_policy_module": "moex_research.external_data.moex_cnyrub_algopack_timestamp_policy",
+    "install_before_validation_required": true,
+    "fallback_source_allowed": false,
+    "source_substitution_allowed": false
+  },
+  "authority_boundary": {
+    "direct_main_write_allowed": false,
+    "merge_allowed": false,
+    "server_apply_allowed": false,
+    "runtime_rerun_allowed": false,
+    "model_fit_allowed": false,
+    "model_promotion_allowed": false,
+    "broker_action_allowed": false,
+    "trading_allowed": false
+  }
+}
