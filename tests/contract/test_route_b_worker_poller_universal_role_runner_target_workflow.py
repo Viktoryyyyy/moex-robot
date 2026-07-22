@@ -45,15 +45,23 @@ def blob_sha(path: Path) -> str:
 
 def test_artifact_scope_activation_and_protected_exports() -> None:
     target = workflow()
+    baseline = workflow(BASELINE)
     assert target["name"] == "MOEX_ROUTE_B_WORKER_POLLER_UNIVERSAL_ROLE_RUNNER_V0_1_TARGET"
     assert target["active"] is False
     assert APPROVED == {
         "docs/sot/MOEX_ROUTE_B_WORKER_POLLER_UNIVERSAL_ROLE_RUNNER_V0_1_TARGET.json",
         "tests/contract/test_route_b_worker_poller_universal_role_runner_target_workflow.py",
     }
-    assert workflow(BASELINE)["name"] == "MOEX_ROUTE_B_WORKER_POLLER_V1_10_3"
+    assert baseline["name"] == "MOEX_ROUTE_B_WORKER_POLLER_V1_10_3"
+    assert baseline["project"] == "MOEX_Bot"
+    assert baseline["status"] == "deprecated_historical"
+    assert baseline["active"] is False
+    assert baseline["new_tasks_allowed"] is False
+    assert baseline["new_runtime_execution_allowed"] is False
+    assert baseline["nodes"] == []
+    assert baseline["connections"] == {}
+    assert baseline["historical_source"] is True
     assert workflow(INTAKE)["name"] == "MOEX_ROUTE_B_INTAKE_ACK_ROLE_TASK_ADAPTER_V0_1_TARGET"
-    assert blob_sha(BASELINE) == "513b70e52294d66e9478a55765fa2f72eec4baec"
     assert blob_sha(INTAKE) == "b2a19654add077f0ad72dd13b4e270bbcd21f44d"
 
 
