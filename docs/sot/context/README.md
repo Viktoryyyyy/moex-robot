@@ -6,6 +6,8 @@ package: route_b_context_registry
 new_tasks_allowed: false
 new_runtime_execution_allowed: false
 management_canon: `docs/MOEX_BOT_MANAGEMENT_CANON.md`
+configuration_registry: `docs/MOEX_BOT_CONTEXT_CONFIGURATION_SOURCES.md`
+configuration_registry_version: 2.1
 repository: `Viktoryyyyy/moex-robot`
 
 ## 1. Status
@@ -25,17 +27,21 @@ Do not use this package to create or execute new:
 
 Historical files may remain unchanged when they are needed to explain prior decisions, branches, pull requests or workflow behavior.
 
-## 2. Active authority
+## 2. Active authority reference
 
-Current MOEX Bot management authority is defined by:
+Current MOEX Bot management, route, role, applied-configuration and historical-boundary sources are indexed by:
+
+```text
+docs/MOEX_BOT_CONTEXT_CONFIGURATION_SOURCES.md
+```
+
+The highest management authority remains:
 
 ```text
 docs/MOEX_BOT_MANAGEMENT_CANON.md
-docs/PM_L2_HANDOFF_PROMPT.md
-docs/FLOWISE_GITHUB_ORCHESTRATION.md
-docs/BROWSER_PROJECT_CONTEXT.md
-docs/BROWSER_ROLE_CONTEXTS.md
 ```
+
+Use the canonical configuration registry to resolve the current source package and each source classification. Do not use this historical README as a partial or competing active-authority list.
 
 Active execution routes are limited to:
 
