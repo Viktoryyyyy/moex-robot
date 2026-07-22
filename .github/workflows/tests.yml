@@ -50,6 +50,16 @@ jobs:
           path: pytest-output.txt
           if-no-files-found: error
 
+      - name: Upload diagnostic test sources
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostic-test-sources
+          path: |
+            tests/contract/test_route_b_github_executor_execution_path_target_workflow.py
+            tests/contract/test_route_b_github_executor_intake_target_workflow.py
+          if-no-files-found: error
+
       - name: Enforce pytest result
         run: |
           exit "$PYTEST_EXIT_CODE"
