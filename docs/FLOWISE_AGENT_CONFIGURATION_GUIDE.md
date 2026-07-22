@@ -1,7 +1,7 @@
 # Flowise Agent Configuration Guide
 
 status: approved_pending_merge
-version: 1.0
+version: 1.1
 management_canon: `docs/MOEX_BOT_MANAGEMENT_CANON.md`
 management_canon_version: 2.0
 route_document: `docs/FLOWISE_GITHUB_ORCHESTRATION.md`
@@ -329,6 +329,7 @@ Lead should delegate only the task-specific implementation package:
 
 ```text
 PROJECT=MOEX_Bot
+Action: change
 Task ID: <stable_task_id>
 Task: <implementation or correction result>
 Done when:
@@ -458,19 +459,32 @@ Rules:
 
 ### 9.2 Worker result
 
-Recommended contract:
+Recommended mutation-result contract:
 
 ```json
 {
   "project": "MOEX_Bot",
-  "taskId": "",
+  "taskId": "task-123",
   "status": "COMPLETED",
   "result": {
-    "implemented": "",
-    "doneWhen": {}
+    "implemented": "Updated the approved document contract",
+    "doneWhen": {
+      "delegated action is explicit": "passed",
+      "result contains no empty optional sections": "passed"
+    }
   },
-  "changes": {},
-  "validation": {},
+  "changes": {
+    "branch": "task/example",
+    "commitSha": "<full_sha>",
+    "pullRequestUrl": "<verified_url>",
+    "actualChangedFiles": [
+      "docs/example.md"
+    ]
+  },
+  "validation": {
+    "performed": "Compared the current file and approved scope",
+    "result": "passed"
+  },
   "nextAction": "Lead performs independent verification"
 }
 ```
