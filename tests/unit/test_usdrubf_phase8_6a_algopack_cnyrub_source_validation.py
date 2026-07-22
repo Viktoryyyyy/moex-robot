@@ -110,7 +110,7 @@ def test_run_source_validation_writes_exact_nine_artifacts_on_systime_failure(mo
     eligible = _eligible()
     validation = _validation(eligible)
     captured: dict[str, object] = {}
-    monkeypatch.setattr(runner.base, '_validate_request', lambda _request: None)
+    monkeypatch.setattr(runner, '_validate_request', lambda _request: None)
     monkeypatch.setattr(runner.base, 'verify_immutable_inputs', lambda _request: dict(runner.EXPECTED_INPUT_SHA256))
     monkeypatch.setattr(runner.base, '_json', lambda _path: {})
     monkeypatch.setattr(runner.base, '_validate_phase83_evidence', lambda _a, _b: None)

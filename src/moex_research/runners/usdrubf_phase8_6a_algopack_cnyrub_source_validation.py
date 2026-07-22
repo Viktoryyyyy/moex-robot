@@ -1,7 +1,8 @@
 from __future__ import annotations
-import argparse, math
+import argparse, math, re
 from dataclasses import asdict
 from datetime import date
+from pathlib import Path
 import pandas as pd
 from moex_research.external_data.moex_cnyrub_algopack_history import *
 from moex_research.external_data.moex_cnyrub_history import CnyrubHistoryError
@@ -17,6 +18,9 @@ EXPECTED_VALIDATION_IDENTITIES=base.EXPECTED_VALIDATION_IDENTITIES; EXPECTED_FOL
 EXPECTED_VALIDATION_ROWS_PER_FOLD=base.EXPECTED_VALIDATION_ROWS_PER_FOLD; IDENTITY_COLUMNS=base.IDENTITY_COLUMNS
 DECLARED_OUTPUT_ARTIFACTS=base.DECLARED_OUTPUT_ARTIFACTS; REQUIRED_CLI_ARGS=base.REQUIRED_CLI_ARGS
 Phase86ARequest=base.Phase86ARequest; Phase86AResult=base.Phase86AResult; _FORBIDDEN_MATRIX_FIELDS=base._FORBIDDEN_MATRIX_FIELDS; _SHA256=base._SHA256
+_RUN_ID=re.compile(r"^phase8_6a_algopack_cnyrub_source_validation_[0-9]{8}_v[1-9][0-9]*$")
+_SHA40=re.compile(r"^[0-9a-f]{40}$")
+_ALIAS=re.compile(r"(^|[/\\._-])(latest|current|autodetect)($|[/\\._-])",re.IGNORECASE)
 DIAGNOSTIC_COLUMNS=("target_trade_date","prior_trade_date","candidate_trade_date","accepted","reason","blocker_classification","same_day_or_future_used","forward_fill_used","backward_fill_used","arbitrary_date_selection_used","source_substitution_used")
 ACCEPTANCE_MATRIX_COLUMNS=("target_trade_date","target_instrument_id","prior_trade_date","cnyrub_security_id","cnyrub_board_id","cnyrub_trade_date","cnyrub_open","cnyrub_high","cnyrub_low","cnyrub_close","cnyrub_volume","cnyrub_volume_buy","cnyrub_volume_sell","cnyrub_volume_imbalance","cnyrub_value","cnyrub_value_buy","cnyrub_value_sell","cnyrub_trades","cnyrub_trades_buy","cnyrub_trades_sell","cnyrub_candle_begin","cnyrub_candle_end","cnyrub_source_available_at","cnyrub_source_route","cnyrub_payload_sha256","cnyrub_retrieved_at_utc","cnyrub_source_revision_status")
 NORMALIZED_SOURCE_COLUMNS=("source_id","security_id","board_id","engine","market","trade_date","open","high","low","close","volume","volume_buy","volume_sell","volume_imbalance","value","value_buy","value_sell","trades","trades_buy","trades_sell","candle_begin","candle_end","source_available_at","source_route","retrieved_at_utc","raw_payload_sha256","source_revision_status","historical_model_use_status")
@@ -30,7 +34,28 @@ def build_argument_parser():
  p=argparse.ArgumentParser(prog="python -m moex_research.runners.usdrubf_phase8_6a_algopack_cnyrub_source_validation")
  for f in REQUIRED_CLI_ARGS:p.add_argument(f,required=True)
  return p
-def request_from_args(a):return base.request_from_args(a)
+
+def _file(value,flag,suffix):
+ text=str(value).strip()
+ if not text or any(c in text for c in "*?[]") or _ALIAS.search(text):raise Phase86AAlgoPackSourceValidationError(f"{flag} must identify one immutable file")
+ path=Path(text)
+ if path.suffix.lower()!=suffix or not path.is_file():raise Phase86AAlgoPackSourceValidationError(f"{flag} file or suffix mismatch")
+ return path
+
+def _input_paths(request):
+ return {"modeling_dataset":request.modeling_dataset_path,"dataset_manifest":request.dataset_manifest_path,"feature_schema":request.feature_schema_path,"m0_validation_predictions":request.m0_validation_predictions_path,"phase83_aggregate_metrics":request.phase83_aggregate_metrics_path,"phase83_gate_results":request.phase83_gate_results_path,"experiment_contract":request.experiment_contract_path}
+
+def _validate_request(request):
+ if len({path.resolve() for path in _input_paths(request).values()})!=7:raise Phase86AAlgoPackSourceValidationError("all input files must be distinct")
+ if not _RUN_ID.fullmatch(request.run_id) or not _SHA40.fullmatch(request.git_commit_sha):raise Phase86AAlgoPackSourceValidationError("immutable AlgoPack run id or commit SHA mismatch")
+ text=str(request.output_dir)
+ if not text or any(c in text for c in "*?[]") or _ALIAS.search(text) or request.output_dir.exists():raise Phase86AAlgoPackSourceValidationError("--output-dir must be explicit and must not pre-exist")
+
+def request_from_args(a):
+ request=Phase86ARequest(modeling_dataset_path=_file(a.modeling_dataset_path,REQUIRED_CLI_ARGS[0],".parquet"),dataset_manifest_path=_file(a.dataset_manifest_path,REQUIRED_CLI_ARGS[1],".json"),feature_schema_path=_file(a.feature_schema_path,REQUIRED_CLI_ARGS[2],".json"),m0_validation_predictions_path=_file(a.m0_validation_predictions_path,REQUIRED_CLI_ARGS[3],".parquet"),phase83_aggregate_metrics_path=_file(getattr(a,"phase8_3_aggregate_metrics_path"),REQUIRED_CLI_ARGS[4],".json"),phase83_gate_results_path=_file(getattr(a,"phase8_3_gate_results_path"),REQUIRED_CLI_ARGS[5],".json"),experiment_contract_path=_file(a.experiment_contract_path,REQUIRED_CLI_ARGS[6],".json"),output_dir=Path(str(a.output_dir).strip()),run_id=str(a.run_id).strip(),git_commit_sha=str(a.git_commit_sha).strip().lower())
+ _validate_request(request)
+ return request
+
 def build_metadata_route():return build_security_metadata_url()
 
 def _validate_experiment_contract(c):
@@ -93,7 +118,7 @@ def _structured_reason(blocker,diagnostics,error):
  return str(x.iloc[0]) if not x.empty else (str(error) if error is not None else blocker)
 
 def run_source_validation(request,*,algopack_transport=fetch_algopack_bytes,token_loader=load_algopack_token,clock=utc_now,identity_loader=load_security_identity,history_loader=load_daily_history):
- base._validate_request(request); hashes=base.verify_immutable_inputs(request); aggregate=base._json(request.phase83_aggregate_metrics_path); phase83=base._json(request.phase83_gate_results_path); base._validate_phase83_evidence(aggregate,phase83); _validate_experiment_contract(base._json(request.experiment_contract_path)); base._json(request.dataset_manifest_path); base._json(request.feature_schema_path)
+ _validate_request(request); hashes=base.verify_immutable_inputs(request); aggregate=base._json(request.phase83_aggregate_metrics_path); phase83=base._json(request.phase83_gate_results_path); base._validate_phase83_evidence(aggregate,phase83); _validate_experiment_contract(base._json(request.experiment_contract_path)); base._json(request.dataset_manifest_path); base._json(request.feature_schema_path)
  eligible=base._eligible_identities(pd.read_parquet(request.modeling_dataset_path)); validation=base._validation_identities(pd.read_parquet(request.m0_validation_predictions_path),eligible); identity=None; error=None; candle_list=[]
  try:
   identity=identity_loader(clock=clock); first=min(map(date.fromisoformat,eligible.prior_trade_date)); last=max(map(date.fromisoformat,eligible.prior_trade_date)); candle_list=history_loader(identity,from_date=first,till_date=last,transport=algopack_transport,token_loader=token_loader,clock=clock)
