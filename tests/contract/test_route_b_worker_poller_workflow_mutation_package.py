@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import subprocess
 from pathlib import Path
 
 
@@ -24,45 +22,7 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _changed_files() -> set[str]:
-    base_ref = os.environ.get("GITHUB_BASE_REF", "").strip()
-    commands: list[list[str]] = []
-    if base_ref:
-        subprocess.run(
-            ["git", "fetch", "origin", base_ref, "--depth=1"],
-            cwd=REPO_ROOT,
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        commands.append(["git", "diff", "--name-only", "origin/" + base_ref + "...HEAD"])
-    commands.append(["git", "diff", "--name-only", "HEAD^", "HEAD"])
-
-    for command in commands:
-        result = subprocess.run(
-            command,
-            cwd=REPO_ROOT,
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        if result.returncode == 0:
-            return {line.strip() for line in result.stdout.splitlines() if line.strip()}
-    return set()
-
-
-def _is_route_b_n8n_workflow_json(path: str) -> bool:
-    lower = path.lower()
-    name = Path(path).name
-    if not lower.endswith(".json"):
-        return False
-    return name.startswith("MOEX_ROUTE_B_") or (
-        "route_b" in lower and "workflow" in lower
-    ) or ("n8n" in lower and "route_b" in lower)
-
-
-def test_mutation_package_file_exists_and_is_repo_only() -> None:
+def test_mutation_package_file_exists_as_historical_repo_only_evidence() -> None:
     assert PACKAGE_PATH.is_file()
     package = _read(PACKAGE_PATH)
     assert "schema_id: route_b_worker_poller_workflow_mutation_package.v0.1" in package
@@ -77,19 +37,40 @@ def test_mutation_package_file_exists_and_is_repo_only() -> None:
     assert "workflow_export_mutation_mode: formal_mutation_package" in package
 
 
-def test_mutation_package_targets_existing_worker_poller_export_without_json_change() -> None:
-    package = _read(PACKAGE_PATH)
+def test_worker_poller_export_is_fail_closed_historical_tombstone() -> None:
     workflow = json.loads(_read(WORKFLOW_EXPORT_PATH))
+
     assert workflow["name"] == "MOEX_ROUTE_B_WORKER_POLLER_V1_10_3"
+    assert workflow["project"] == "MOEX_Bot"
+    assert workflow["status"] == "deprecated_historical"
+    assert workflow["active"] is False
+    assert workflow["new_tasks_allowed"] is False
+    assert workflow["new_runtime_execution_allowed"] is False
+    assert workflow["nodes"] == []
+    assert workflow["connections"] == {}
+    assert workflow["historical_source"] is True
+    assert workflow["superseded_by"] == [
+        "browser_controlled_github_route",
+        "flowise_automated_github_route",
+    ]
+    assert "deployed Applied State must be verified separately" in workflow["application_note"]
+
+
+def test_historical_package_keeps_original_target_references_for_audit() -> None:
+    package = _read(PACKAGE_PATH)
+
     assert DB_ADAPTER_PATH.is_file()
-    assert "target_workflow_export_artifact: docs/sot/MOEX_ROUTE_B_WORKER_POLLER_V1_10_3.json" in package
-    assert "worker_poller_workflow_export: docs/sot/MOEX_ROUTE_B_WORKER_POLLER_V1_10_3.json" in package
-    changed_files = _changed_files()
-    forbidden = sorted(path for path in changed_files if _is_route_b_n8n_workflow_json(path))
-    assert forbidden == []
+    assert (
+        "target_workflow_export_artifact: docs/sot/MOEX_ROUTE_B_WORKER_POLLER_V1_10_3.json"
+        in package
+    )
+    assert (
+        "worker_poller_workflow_export: docs/sot/MOEX_ROUTE_B_WORKER_POLLER_V1_10_3.json"
+        in package
+    )
 
 
-def test_claim_role_task_uses_role_task_queue_and_lock_safe_semantics() -> None:
+def test_claim_role_task_contract_preserves_historical_safety_boundaries() -> None:
     package = _read(PACKAGE_PATH)
     assert "read_table: public.route_b_role_task_queue" in package
     assert "role_task_queue: public.route_b_role_task_queue" in package
@@ -110,7 +91,7 @@ def test_claim_role_task_uses_role_task_queue_and_lock_safe_semantics() -> None:
     assert "ORDER BY phase_run_id ASC, sequence_no ASC, created_at ASC, role_task_id ASC" in package
 
 
-def test_universal_role_input_resolves_static_role_and_schema_refs() -> None:
+def test_universal_role_input_contract_preserves_historical_reference_rules() -> None:
     package = _read(PACKAGE_PATH)
     required_tokens = (
         "step_id: build_universal_role_input",
@@ -131,7 +112,7 @@ def test_universal_role_input_resolves_static_role_and_schema_refs() -> None:
         assert token in package, token
 
 
-def test_prompt_contract_is_single_ai_node_role_id_driven_strict_json() -> None:
+def test_prompt_contract_preserves_historical_strict_output_boundaries() -> None:
     package = _read(PACKAGE_PATH)
     required_tokens = (
         "target_node_kind: ai_call",
@@ -152,7 +133,7 @@ def test_prompt_contract_is_single_ai_node_role_id_driven_strict_json() -> None:
         assert token in package, token
 
 
-def test_persist_role_output_keeps_untrusted_validation_fields() -> None:
+def test_persist_role_output_contract_preserves_untrusted_validation_fields() -> None:
     package = _read(PACKAGE_PATH)
     required_tokens = (
         "write_table: public.route_b_role_outputs",
@@ -174,7 +155,7 @@ def test_persist_role_output_keeps_untrusted_validation_fields() -> None:
         assert token in package, token
 
 
-def test_pm_l3_decision_and_github_handoff_preserve_authority_boundaries() -> None:
+def test_pm_l3_decision_contract_preserves_historical_authority_boundaries() -> None:
     package = _read(PACKAGE_PATH)
     required_tokens = (
         "role_id_equals: PM_L3_DELIVERY_VALIDATION_OWNER",
@@ -196,7 +177,7 @@ def test_pm_l3_decision_and_github_handoff_preserve_authority_boundaries() -> No
         assert token in package, token
 
 
-def test_authority_boundaries_disallow_merge_direct_main_force_push_and_server_apply() -> None:
+def test_historical_package_disallows_merge_direct_main_and_server_apply() -> None:
     package = _read(PACKAGE_PATH)
     required_tokens = (
         "merge_authority: PM_L2_ONLY",
@@ -219,13 +200,12 @@ def test_authority_boundaries_disallow_merge_direct_main_force_push_and_server_a
     assert "direct_main_write_allowed: true" not in package
 
 
-def test_registry_binds_worker_poller_workflow_mutation_package() -> None:
+def test_historical_mutation_package_is_not_published_by_active_registry() -> None:
     registry = json.loads(_read(REGISTRY_PATH))
-    schemas = registry["schema_refs"]
-    assert isinstance(schemas, dict)
-    ref = schemas["route_b_worker_poller_workflow_mutation_package.v0.1"]
-    assert ref["path"] == (
-        "docs/sot/context/schemas/route_b_worker_poller_workflow_mutation_package.v0.1.yaml"
-    )
-    assert ref["producer"] == "SUBCHAT_IMPLEMENTATION"
-    assert ref["consumer"] == "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER"
+
+    assert registry["status"] == "deprecated_historical"
+    assert registry["new_tasks_allowed"] is False
+    assert registry["new_runtime_execution_allowed"] is False
+    assert registry["active_context_resolution_allowed"] is False
+    assert "schema_refs" not in registry
+    assert PACKAGE_PATH.is_file()
