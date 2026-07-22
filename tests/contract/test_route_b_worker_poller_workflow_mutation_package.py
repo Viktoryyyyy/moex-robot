@@ -200,12 +200,21 @@ def test_historical_package_disallows_merge_direct_main_and_server_apply() -> No
     assert "direct_main_write_allowed: true" not in package
 
 
-def test_historical_mutation_package_is_not_published_by_active_registry() -> None:
+def test_historical_mutation_package_is_indexed_only_as_historical() -> None:
     registry = json.loads(_read(REGISTRY_PATH))
 
     assert registry["status"] == "deprecated_historical"
     assert registry["new_tasks_allowed"] is False
     assert registry["new_runtime_execution_allowed"] is False
     assert registry["active_context_resolution_allowed"] is False
-    assert "schema_refs" not in registry
+
+    schemas = registry["schema_refs"]
+    assert isinstance(schemas, dict)
+    ref = schemas["route_b_worker_poller_workflow_mutation_package.v0.1"]
+    assert ref["path"] == (
+        "docs/sot/context/schemas/route_b_worker_poller_workflow_mutation_package.v0.1.yaml"
+    )
+    assert ref["producer"] == "SUBCHAT_IMPLEMENTATION"
+    assert ref["consumer"] == "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER"
+    assert ref["status"] == "historical_only"
     assert PACKAGE_PATH.is_file()
