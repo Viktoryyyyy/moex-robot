@@ -1,8 +1,10 @@
 # MOEX Bot Browser Project Context
 
-status: active_source
-version: 1.0
+status: approved_pending_merge
+version: 2.0
 management_canon: `docs/MOEX_BOT_MANAGEMENT_CANON.md`
+management_canon_version: 2.0
+repository: `Viktoryyyyy/moex-robot`
 
 Используй этот текст как постоянный Project Context проекта MOEX Bot.
 
@@ -10,9 +12,17 @@ management_canon: `docs/MOEX_BOT_MANAGEMENT_CANON.md`
 
 PROJECT=MOEX_Bot
 
-Работай только в контексте проекта MOEX Bot. Не используй контекст, память, решения, пути или артефакты других проектов.
+## 1. Project isolation
 
-## Source of Truth
+Работай только в контексте проекта MOEX Bot.
+
+Не используй контекст, память, решения, пути, файлы или артефакты других проектов.
+
+Не используй устаревший файл `Контекст.md (1)`.
+
+Не придумывай repository state, server paths, branches, commits, PR, SHA, changed files, reviews, checks, merge state или server state.
+
+## 2. Source of Truth
 
 ```text
 GitHub repository = Source of Truth
@@ -20,9 +30,18 @@ Server filesystem = Applied State only
 repository_full_name = Viktoryyyyy/moex-robot
 ```
 
-Server filesystem не является архитектурным доказательством и не определяет repository state, branch ownership, accepted implementation или management authority.
+Server filesystem не является архитектурным доказательством и не определяет:
 
-## Canonical server context
+- repository structure;
+- branch ownership;
+- accepted implementation;
+- merge authority;
+- актуальное состояние `main`;
+- наличие или содержимое PR.
+
+Repository facts проверяй непосредственно в GitHub.
+
+## 3. Canonical server context
 
 ```text
 HOME=/home/trader
@@ -39,9 +58,13 @@ command_prefix=cd ~/moex_bot && source venv/bin/activate && cd moex-robot
 cd ~/moex_bot/moex_robot && source venv/bin/activate
 ```
 
-Не угадывай server paths. Для Flowise server tasks используй отдельную подтверждённую Flowise server instruction.
+Не угадывай server paths.
 
-## Active execution routes
+Для server task используй только подтверждённый canonical context и отдельную task-specific authority.
+
+## 4. Active execution routes
+
+Активны только:
 
 ```text
 browser_controlled_github_route
@@ -58,7 +81,19 @@ new_tasks_allowed: false
 
 Не создавай новые Route B / n8n задачи, ветки, PR или runtime действия.
 
-## Context model
+Используй Browser route, когда:
+
+- scope или архитектура уточняются;
+- задача сложная или высокорисковая;
+- repository state противоречив;
+- требуется несколько ролей;
+- каждый mutation stage требует явного контроля.
+
+Используй Flowise route, когда задача формализована, scope точный, completion criteria проверяемы и подходит стандартный GitHub lifecycle.
+
+Один task не должен иметь двух одновременных mutation owners.
+
+## 5. Context model
 
 ```text
 Static Project Context
@@ -66,38 +101,176 @@ Static Project Context
 + Dynamic Task Contract
 ```
 
-Task handoff содержит только динамические данные конкретной задачи. Не требуй повторения статического project context, role mandate, стандартного GitHub lifecycle или общего result schema.
+Project Context содержит общие правила проекта.
 
-## Task identity
+Role Context содержит постоянный mandate конкретной роли.
+
+Dynamic Task Contract содержит только сведения, необходимые для текущей задачи.
+
+Не требуй повторения в каждом handoff:
+
+- canonical repository;
+- project paths;
+- полного GitHub lifecycle;
+- статических role descriptions;
+- стандартных authority rules;
+- полного output schema;
+- repository facts, которые можно восстановить из GitHub.
+
+## 6. Operating principle: result first
+
+Главный deliverable — запрошенный содержательный результат.
+
+Технические сведения о branch, commit, PR, CI и review являются supporting evidence и не заменяют результат.
+
+Примеры:
+
+- `analyze` → фактические выводы, конфликты, affected files и минимальный следующий scope;
+- `change` → что реализовано и как проверено;
+- `validate` → `PASS`, `CHANGES_REQUIRED` или `BLOCKED` с точными findings;
+- `merge` → подтверждённый merge result;
+- `server_apply` → подтверждённый applied commit и runtime result.
+
+`COMPLETED` запрещён, если запрошенный содержательный результат отсутствует.
+
+## 7. Task classes
+
+Каждая задача имеет один основной Action:
 
 ```text
-project: MOEX_Bot
-root_task_id: stable parent ID
-task_id: stable task ID
-execution_id: unique execution attempt
-attempt_no: incremented retry number
+analyze
+change
+validate
+merge
+server_apply
 ```
 
-`task_id` сохраняется при retry и Browser ↔ Flowise transfer. `execution_id` меняется.
+Не используй расплывчатый `Action: execute` для новых задач.
 
-## Soft intake
+Не объединяй независимые основные действия в одном execution.
+
+### analyze
+
+Read-only анализ без repository mutation.
+
+### change
+
+Изменение repository в approved scope через task branch и PR.
+
+### validate
+
+Независимая проверка существующего результата, branch или PR.
+
+Вердикт:
+
+```text
+PASS
+CHANGES_REQUIRED
+BLOCKED
+```
+
+### merge
+
+Merge только по отдельной exact-head authority после прохождения всех gates.
+
+### server_apply
+
+Отдельно разрешённое применение exact merged GitHub commit на сервере.
+
+## 8. Minimal dynamic task contract
+
+Обязательный общий минимум:
+
+```text
+PROJECT=MOEX_Bot
+Action: <analyze|change|validate|merge|server_apply>
+Task ID: <stable_task_id>
+
+Task:
+<какой содержательный результат требуется>
+
+Done when:
+- <проверяемый критерий 1>
+- <проверяемый критерий 2>
+```
+
+Условные поля добавляются только по необходимости:
+
+```text
+Target
+Scope
+Constraints
+Authority
+Merge mode
+```
+
+`Scope` обязателен для mutation, если boundary нельзя однозначно определить из `Task` и `Done when`.
+
+`Authority` обязателен для `merge` и `server_apply`.
+
+Default:
+
+```text
+repository = Viktoryyyyy/moex-robot
+base = repository default branch
+merge mode = manual
+server apply = forbidden
+```
+
+## 9. Task identity
+
+```text
+task_id = stable across retries, correction and route transfer
+execution_id = generated per execution attempt when needed
+attempt_no = generated or incremented when needed
+```
+
+Не требуй `execution_id` и `attempt_no` как обязательный user input для обычной задачи.
+
+Correction сохраняет:
+
+```text
+task ID
+working branch
+PR
+approved scope
+```
+
+Replacement branch или PR требует отдельного PM L2 authority.
+
+## 10. GitHub recovery and soft intake
+
+Самостоятельно восстанавливай из GitHub, когда применимо:
+
+- repository и default branch;
+- current base SHA;
+- существующую task branch;
+- существующий PR;
+- full current head SHA;
+- actual changed files;
+- diff и patches;
+- reviews и review threads;
+- exact-head checks;
+- mergeability и merge state.
 
 Не блокируй задачу из-за отсутствия необязательных или восстанавливаемых данных.
 
-Самостоятельно проверяй в GitHub:
-- repository state;
-- branch;
-- PR;
-- full head SHA;
-- actual changed files;
-- diff;
-- reviews;
-- checks;
-- merge state.
+Используй `BLOCKED` только когда безопасное продолжение потребует угадать критический факт, который нельзя установить из task context, GitHub или другого разрешённого источника.
 
-Используй `BLOCKED` только если критическое значение необходимо для безопасного выполнения и не определяется ни из task context, ни из GitHub, ни из другого разрешённого источника.
+Критические blockers:
 
-## Ownership invariants
+- repository или target task невозможно определить;
+- mutation scope неоднозначен;
+- branch или PR ownership конфликтует;
+- другой executor может контролировать тот же mutation scope;
+- correction требует scope widening;
+- merge или server-apply authority неполна;
+- GitHub state противоречит task request;
+- timeout state невозможно безопасно reconciliate.
+
+Blocker должен содержать точный конфликт, уже установленные факты, требуемое решение и next owner.
+
+## 11. Ownership invariants
 
 ```text
 one task = one active route
@@ -107,40 +280,135 @@ one merge at a time
 one server apply at a time
 ```
 
-Read-only inspection допускается без mutation ownership. До mutation проверь route lock, branch owner, existing PR, exact head SHA и пересечение scope.
+Read-only inspection допускается без mutation ownership.
 
-## GitHub lifecycle
+До mutation проверь:
 
-Для mutation:
+- task identity;
+- route owner;
+- branch owner;
+- existing branch и PR;
+- current full head SHA;
+- approved scope;
+- overlapping file scope;
+- отсутствие конфликтующего active или timed-out mutation owner.
+
+## 12. Browser workflow by Action
+
+### analyze
 
 ```text
-verify GitHub state
+intake
+→ relevant GitHub inspection
+→ substantive analysis
+→ findings and affected files
+→ minimum recommended next scope
+→ result with no mutation
+```
+
+### change
+
+```text
+intake
+→ GitHub and ownership reconciliation
 → use or create task branch
 → mutate only approved scope
+→ commit
 → create or update the same task PR
-→ inspect exact changed files and diff
-→ validate acceptance criteria
-→ review
-→ validate CI on exact latest head SHA
-→ correct in the same branch and PR if required
-→ merge only with explicit authority
+→ inspect actual changed files and diff
+→ validate Done when
+→ current-head review
+→ exact-head CI
+→ correction in the same branch and PR when required
+→ final reconciliation
+→ result
 ```
+
+### validate
+
+```text
+intake
+→ target metadata
+→ exact latest head SHA
+→ actual changed files and diff
+→ scope and Done when
+→ review findings and unresolved threads
+→ exact-head CI
+→ mergeability
+→ PASS | CHANGES_REQUIRED | BLOCKED
+```
+
+### merge
+
+```text
+exact authority
+→ current head reconciliation
+→ scope and completion criteria
+→ review and unresolved threads
+→ exact-head CI
+→ mergeability
+→ merge
+→ merge verification
+```
+
+### server_apply
+
+```text
+separate authority
+→ exact merged GitHub SHA
+→ server reconciliation
+→ apply
+→ runtime validation
+→ applied-state evidence
+```
+
+## 13. Branch, PR and correction rules
 
 Direct write в `main` запрещён.
 
-## Review and CI
+Repository changes выполняются в task-specific branch и PR, если отдельный утверждённый workflow явно не устанавливает иное.
 
-Green CI не означает merge readiness.
+До повторной mutation:
+
+- проверь существующие branch, commits и PR;
+- установи, не выполнено ли изменение ранее;
+- не создавай duplicate branch, commit или PR.
+
+Correction выполняется в той же branch и PR.
+
+Если correction требует файл вне approved scope, остановись и запроси явное scope widening.
+
+## 14. Review and exact-head CI
+
+Green CI не означает approval или merge readiness.
+
+Для mutation PR проверь:
+
+- PR state;
+- base и head branches;
+- full latest head SHA;
+- exact changed files;
+- current diff;
+- approved scope;
+- `Done when` criteria;
+- defects и security findings;
+- unresolved blocking review threads;
+- checks, относящиеся к exact latest head SHA;
+- mergeability и conflicts.
+
+GitHub review-thread state является authoritative.
+
+Не объявляй thread outdated или resolved без фактического GitHub evidence.
 
 Если head SHA изменился:
+
 - прошлый review устарел;
 - прошлые checks не используются;
-- merge delegation по старому SHA недействительно;
-- review и CI проверяются повторно.
+- прошлый merge-readiness verdict устарел;
+- exact-head merge delegation по старому SHA недействителен, если authority прямо не разрешает revalidation на новом head;
+- review, threads и checks проверяются повторно.
 
-Не выдумывай branch, SHA, PR URL, changed files, checks, review, merge или server state.
-
-## Merge
+## 15. Merge
 
 Default:
 
@@ -149,22 +417,33 @@ merge_policy: manual
 merge_delegated: false
 ```
 
-Merge выполняется только при явном owner/PM authority и после проверки exact PR head, scope, acceptance criteria, review, exact-head CI и конфликтов.
+Manual mode никогда не выполняет merge автоматически.
 
-Automatic merge delegation должно быть привязано к:
+Automatic merge требует exact delegation, связанного с:
 
 ```text
-task_id
+task ID
 repository
-branch
-pr_number
-exact head_sha
-merge_executor
+working branch
+PR number
+full expected head SHA
+merge executor
+merge policy
 ```
 
-## Server apply
+Merge разрешён только когда:
 
-Server apply является отдельным действием после merge.
+- current GitHub state соответствует delegation;
+- actual changed files находятся в approved scope;
+- `Done when` criteria выполнены;
+- current-head review approved;
+- blocking threads resolved;
+- exact-head checks passed;
+- conflicts отсутствуют.
+
+## 16. Server apply
+
+Server apply отделён от merge.
 
 Default:
 
@@ -173,33 +452,100 @@ server_apply_allowed: false
 server_apply_status: not_performed
 ```
 
-Не выполняй server apply без отдельного явного разрешения и exact GitHub commit SHA.
+Не выполняй server apply без отдельного явного разрешения и exact merged GitHub commit SHA.
 
-## Route transfer and timeout
+Server apply должен:
 
-Browser ↔ Flowise transfer сохраняет task ID, approved scope, branch и PR. Меняются execution ID, attempt и route owner.
+- использовать canonical server context;
+- применять exact verified GitHub commit;
+- фиксировать applied commit;
+- останавливаться при repository/server divergence;
+- возвращать runtime validation evidence.
 
-После Flowise timeout не повторяй mutation автоматически. Сначала выполни GitHub reconciliation и установи фактические branch, commits, PR и head SHA.
+## 17. Timeout and route transfer
 
-## Output rule
+Timeout не доказывает, что execution остановился.
 
-Каждый управленческий ответ начинается с:
+После timeout:
+
+1. не повторяй mutation автоматически;
+2. проверь branch, commits и PR;
+3. проверь доступный Flowise trace;
+4. reconciliate latest head, diff, review и checks;
+5. установи, произошла ли mutation;
+6. retry допускается только после восстановления ownership и idempotency.
+
+Browser ↔ Flowise transfer сохраняет task ID, approved scope, branch, PR, completion criteria и authority.
+
+Меняются execution attempt и route owner.
+
+## 18. Output contract
+
+Каждый human-readable management response начинается с:
 
 ```text
 PROJECT=MOEX_Bot
 ```
 
-Пиши профессионально, кратко и только подтверждённые данные. Не придумывай пути, состояние файлов или результаты выполнения.
+Common machine-readable result:
 
-Для команд на сервере давай одну порцию кода за раз, пригодную для вставки с телефона; не используй heredoc без прямой необходимости.
+```json
+{
+  "project": "MOEX_Bot",
+  "taskId": "",
+  "status": "",
+  "result": {},
+  "evidence": {},
+  "nextAction": ""
+}
+```
 
-## Canonical management documents
+Правила:
+
+- `result` содержит запрошенный содержательный deliverable;
+- `evidence` содержит только task-relevant evidence;
+- не выводи пустые optional fields, пустые массивы и повторяющиеся false flags;
+- `blocker` добавляется только при blocker;
+- `changes` добавляется только при mutation;
+- `validation` добавляется только при validation;
+- `merge` добавляется только для merge;
+- `serverApply` добавляется только для server apply;
+- technical metadata не заменяет результат.
+
+Пиши профессионально, кратко и только подтверждённые данные.
+
+Для команд на сервере давай одну порцию кода за раз, пригодную для вставки с телефона. Не используй heredoc без прямой необходимости.
+
+## 19. Canonical management documents
 
 ```text
 docs/MOEX_BOT_MANAGEMENT_CANON.md
 docs/PM_L2_HANDOFF_PROMPT.md
 docs/FLOWISE_GITHUB_ORCHESTRATION.md
+docs/FLOWISE_LEAD_AGENT_PROMPT.md
+docs/FLOWISE_GITHUB_WORKER_PROMPT.md
 docs/MOEX_BOT_CONTEXT_CONFIGURATION_SOURCES.md
 ```
 
 При конфликте применяется `docs/MOEX_BOT_MANAGEMENT_CANON.md`, если owner не утвердил более новую версию.
+
+## 20. Applied State
+
+GitHub source documents являются Source of Truth для Browser Project Context и Role Context.
+
+Browser settings являются Applied State.
+
+Изменение source file не доказывает, что Browser setting обновлён.
+
+При применении Browser context зафиксируй:
+
+```text
+target
+source file
+source commit SHA
+applied at
+applied by
+verification status
+```
+
+До merge активным Source of Truth остаётся версия документов в `main`.
