@@ -10,12 +10,22 @@ Evidence source: user-provided server file listing screenshot dated 2026-06-09 s
 - Repository root: `/home/trader/moex_bot/moex-robot`
 - Virtual environment root: `/home/trader/moex_bot/venv`
 - Data root: `/home/trader/moex_bot/data`
+- Project environment file: `/home/trader/moex_bot/moex-robot/.env`
 
 ## Command construction rule
 
 Use the current observed paths above when constructing server commands for this project.
 
 Do not substitute underscore variants or another Linux user unless a newer server-state proof explicitly supersedes this contract.
+
+The project-local `.env` under the repository root is the only canonical dotenv file for MOEX Bot repository commands. `/home/trader/moex_bot/.env` is not a canonical project runtime source and must not be used as a fallback without a newer merged runtime contract.
+
+## Runtime environment identity
+
+- `MOEX_DATA_ROOT=/home/trader/moex_bot/data`
+- `MOEX_ALGOPACK_TOKEN` is the sole credential variable for subscribed MOEX AlgoPack routes.
+- `MOEX_API_KEY` is not an alias or fallback for `MOEX_ALGOPACK_TOKEN`.
+- Real credential values must remain outside GitHub and must not appear in logs, artifacts, commands, or reports.
 
 ## Deprecated / forbidden path claims
 
