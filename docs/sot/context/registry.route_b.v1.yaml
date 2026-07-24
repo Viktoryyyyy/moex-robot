@@ -1,62 +1,82 @@
 {
   "registry_id": "route_b_context_registry.v1",
-  "project": "MOEX Bot",
-  "status": "active",
+  "project": "MOEX_Bot",
+  "status": "deprecated_historical",
+  "new_tasks_allowed": false,
+  "new_runtime_execution_allowed": false,
+  "active_context_resolution_allowed": false,
   "root_path": "docs/sot/context",
   "source_of_truth": "github_repo",
-  "workflow_state_store": "postgres",
+  "historical_source": true,
+  "superseded_by": {
+    "management_registry": "docs/MOEX_BOT_CONTEXT_CONFIGURATION_SOURCES.md",
+    "management_canon": "docs/MOEX_BOT_MANAGEMENT_CANON.md",
+    "active_routes": [
+      "browser_controlled_github_route",
+      "flowise_automated_github_route"
+    ]
+  },
   "static_context_refs": {
     "MOEX_Bot_Target_Architecture_2026_All_In_One": {
       "path": "docs/sot/context/static/MOEX_Bot_Target_Architecture_2026_All_In_One.md",
       "kind": "static_context",
-      "version": "2026_all_in_one"
+      "version": "2026_all_in_one",
+      "status": "historical_only"
     },
     "MOEX_Bot_Role_Context_Operating_Model_v1": {
       "path": "docs/sot/context/static/MOEX_Bot_Role_Context_Operating_Model_v1.md",
       "kind": "static_context",
-      "version": "v1"
+      "version": "v1",
+      "status": "historical_only"
     },
     "github_commit_flow_subchats_v3": {
       "path": "docs/sot/context/static/github_commit_flow_subchats_v3.md",
       "kind": "static_context",
-      "version": "v3"
+      "version": "v3",
+      "status": "historical_only"
     }
   },
   "role_context_refs": {
     "PM_L2_PHASE_OWNER": {
       "v1": {
         "path": "docs/sot/context/roles/PM_L2_PHASE_OWNER.v1.yaml",
-        "kind": "role_context"
+        "kind": "role_context",
+        "status": "historical_only"
       }
     },
     "PM_L3_DELIVERY_VALIDATION_OWNER": {
       "v1": {
         "path": "docs/sot/context/roles/PM_L3_DELIVERY_VALIDATION_OWNER.v1.yaml",
-        "kind": "role_context"
+        "kind": "role_context",
+        "status": "historical_only"
       }
     },
     "SUBCHAT_BASE": {
       "v1": {
         "path": "docs/sot/context/roles/SUBCHAT_BASE.v1.yaml",
-        "kind": "role_context"
+        "kind": "role_context",
+        "status": "historical_only"
       }
     },
     "SUBCHAT_IMPLEMENTATION": {
       "v1": {
         "path": "docs/sot/context/roles/SUBCHAT_IMPLEMENTATION.v1.yaml",
-        "kind": "role_context"
+        "kind": "role_context",
+        "status": "historical_only"
       }
     },
     "SUBCHAT_VALIDATION": {
       "v1": {
         "path": "docs/sot/context/roles/SUBCHAT_VALIDATION.v1.yaml",
-        "kind": "role_context"
+        "kind": "role_context",
+        "status": "historical_only"
       }
     },
     "SUBCHAT_REPO_AUDIT": {
       "v1": {
         "path": "docs/sot/context/roles/SUBCHAT_REPO_AUDIT.v1.yaml",
-        "kind": "role_context"
+        "kind": "role_context",
+        "status": "historical_only"
       }
     }
   },
@@ -64,102 +84,122 @@
     "pm_l2_to_pm_l3_request_envelope.v1": {
       "path": "docs/sot/context/schemas/pm_l2_to_pm_l3_request_envelope.v1.md",
       "producer": "PM_L2_PHASE_OWNER",
-      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER"
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER",
+      "status": "historical_only"
     },
     "pm_l3_to_subchat_task_package.v1": {
       "path": "docs/sot/context/schemas/pm_l3_to_subchat_task_package.v1.md",
       "producer": "PM_L3_DELIVERY_VALIDATION_OWNER",
-      "consumer": "SUBCHAT_BASE_or_variant"
+      "consumer": "SUBCHAT_BASE_or_variant",
+      "status": "historical_only"
     },
     "subchat_to_pm_l3_return_package.v1": {
       "path": "docs/sot/context/schemas/subchat_to_pm_l3_return_package.v1.md",
       "producer": "SUBCHAT_BASE_or_variant",
-      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER"
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER",
+      "status": "historical_only"
     },
     "pm_l3_to_pm_l2_validation_return_package.v1": {
       "path": "docs/sot/context/schemas/pm_l3_to_pm_l2_validation_return_package.v1.md",
       "producer": "PM_L3_DELIVERY_VALIDATION_OWNER",
-      "consumer": "PM_L2_PHASE_OWNER"
+      "consumer": "PM_L2_PHASE_OWNER",
+      "status": "historical_only"
     },
     "route_b_pm_l2_console_actions.v0.1": {
       "path": "docs/sot/context/schemas/route_b_pm_l2_console_actions.v0.1.yaml",
       "producer": "PM_L2_PHASE_OWNER",
-      "consumer": "PM_L2_CONSOLE"
+      "consumer": "PM_L2_CONSOLE",
+      "status": "historical_only"
     },
     "route_b_pm_l2_console_actions_adapter.v0.1": {
       "path": "docs/sot/context/schemas/route_b_pm_l2_console_actions_adapter.v0.1.yaml",
       "producer": "PM_L2_PHASE_OWNER",
-      "consumer": "PM_L2_CONSOLE"
+      "consumer": "PM_L2_CONSOLE",
+      "status": "historical_only"
     },
     "route_b_pm_l2_console_actions_openapi.v0.1": {
       "path": "docs/sot/context/schemas/route_b_pm_l2_console_actions_openapi.v0.1.yaml",
       "producer": "PM_L2_PHASE_OWNER",
-      "consumer": "PM_L2_CONSOLE"
+      "consumer": "PM_L2_CONSOLE",
+      "status": "historical_only"
     },
     "route_b_pm_l2_console_owner_wiring.v0.1": {
       "path": "docs/sot/context/schemas/route_b_pm_l2_console_owner_wiring.v0.1.yaml",
       "producer": "PM_L2_PHASE_OWNER",
-      "consumer": "PM_L2_CONSOLE"
+      "consumer": "PM_L2_CONSOLE",
+      "status": "historical_only"
     },
     "route_b_universal_role_runner.v0.1": {
       "path": "docs/sot/context/schemas/route_b_universal_role_runner.v0.1.yaml",
       "producer": "PM_L2_PHASE_OWNER",
-      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER"
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER",
+      "status": "historical_only"
     },
     "route_b_role_task_queue.v0.1": {
       "path": "docs/sot/context/schemas/route_b_role_task_queue.v0.1.yaml",
       "producer": "PM_L2_PHASE_OWNER",
-      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER"
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER",
+      "status": "historical_only"
     },
     "route_b_pm_l3_decision_loop.v0.1": {
       "path": "docs/sot/context/schemas/route_b_pm_l3_decision_loop.v0.1.yaml",
       "producer": "PM_L2_PHASE_OWNER",
-      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER"
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER",
+      "status": "historical_only"
     },
     "route_b_multi_role_phase_state_machine.v0.1": {
       "path": "docs/sot/context/schemas/route_b_multi_role_phase_state_machine.v0.1.yaml",
       "producer": "PM_L2_PHASE_OWNER",
-      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER"
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER",
+      "status": "historical_only"
     },
     "route_b_ollama_role_prompt_contract.v0.1": {
       "path": "docs/sot/context/schemas/route_b_ollama_role_prompt_contract.v0.1.yaml",
       "producer": "PM_L2_PHASE_OWNER",
-      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER"
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER",
+      "status": "historical_only"
     },
     "route_b_universal_role_runner_db_contract.v0.1": {
       "path": "docs/sot/context/schemas/route_b_universal_role_runner_db_contract.v0.1.yaml",
       "producer": "PM_L2_PHASE_OWNER",
-      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER"
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER",
+      "status": "historical_only"
     },
     "route_b_universal_role_runner_db_migration_proposal.v0.1": {
       "path": "docs/sot/context/schemas/route_b_universal_role_runner_db_migration_proposal.v0.1.sql",
       "producer": "PM_L2_PHASE_OWNER",
-      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER"
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER",
+      "status": "historical_only"
     },
     "route_b_universal_role_runner_db_migration_execution.v0.1": {
       "path": "docs/sot/context/schemas/route_b_universal_role_runner_db_migration_execution.v0.1.sql",
       "producer": "SUBCHAT_IMPLEMENTATION",
-      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER"
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER",
+      "status": "historical_only"
     },
     "route_b_universal_role_runner_db_migration_rollback.v0.1": {
       "path": "docs/sot/context/schemas/route_b_universal_role_runner_db_migration_rollback.v0.1.sql",
       "producer": "SUBCHAT_IMPLEMENTATION",
-      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_DB_OPERATOR_AFTER_PM_L2_APPROVAL"
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_DB_OPERATOR_AFTER_PM_L2_APPROVAL",
+      "status": "historical_only"
     },
     "route_b_worker_poller_db_adapter_contract.v0.1": {
       "path": "docs/sot/context/schemas/route_b_worker_poller_db_adapter_contract.v0.1.yaml",
       "producer": "SUBCHAT_IMPLEMENTATION",
-      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER"
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER",
+      "status": "historical_only"
     },
     "route_b_worker_poller_workflow_mutation_package.v0.1": {
       "path": "docs/sot/context/schemas/route_b_worker_poller_workflow_mutation_package.v0.1.yaml",
       "producer": "SUBCHAT_IMPLEMENTATION",
-      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER"
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_UNIVERSAL_ROLE_RUNNER",
+      "status": "historical_only"
     },
     "route_b_github_executor_execution_evidence_registry.v0.1": {
       "path": "docs/sot/context/schemas/route_b_github_executor_execution_evidence_registry.v0.1.yaml",
       "producer": "SUBCHAT_IMPLEMENTATION",
-      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_GITHUB_EXECUTOR_CREDENTIALED_RUNTIME"
+      "consumer": "PM_L3_DELIVERY_VALIDATION_OWNER_or_ROUTE_B_GITHUB_EXECUTOR_CREDENTIALED_RUNTIME",
+      "status": "historical_only"
     }
   },
   "route_b_chain": [
@@ -174,6 +214,14 @@
     "unknown_ref_policy": "reject",
     "full_context_paste_policy": "reject",
     "subchat_return_target": "PM_L3_DELIVERY_VALIDATION_OWNER",
-    "pm_l3_return_target": "PM_L2_PHASE_OWNER"
-  }
+    "pm_l3_return_target": "PM_L2_PHASE_OWNER",
+    "active_resolution": "forbidden",
+    "historical_inspection": "read_only_when_explicitly_requested"
+  },
+  "resolution_policy": {
+    "active_resolution": "forbidden",
+    "unknown_ref_policy": "reject",
+    "historical_inspection": "read_only_when_explicitly_requested"
+  },
+  "application_note": "This GitHub registry preserves historical ref mappings for audit only. It must not be used by Browser, Flowise, PM, subchat or n8n runtime context resolution. Deployed n8n Applied State must be deactivated and verified separately."
 }

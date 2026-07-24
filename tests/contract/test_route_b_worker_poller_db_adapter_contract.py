@@ -271,7 +271,13 @@ def test_adapter_contract_contains_no_server_filesystem_or_dynamic_path_markers(
         assert not re.search(pattern, spec, flags=re.IGNORECASE | re.MULTILINE), pattern
 
 
-def test_this_pr_does_not_change_production_n8n_workflow_json_files() -> None:
-    changed_files = _changed_files()
-    forbidden = sorted(path for path in changed_files if _is_route_b_n8n_workflow_json(path))
-    assert forbidden == []
+def test_route_b_poller_source_is_fail_closed_historical() -> None:
+    allowed_path = "docs/sot/MOEX_ROUTE_B_WORKER_POLLER_V1_10_3.json"
+    workflow = __import__("json").loads(_read(REPO_ROOT / allowed_path))
+
+    assert workflow["status"] == "deprecated_historical"
+    assert workflow["active"] is False
+    assert workflow["new_tasks_allowed"] is False
+    assert workflow["new_runtime_execution_allowed"] is False
+    assert workflow["nodes"] == []
+    assert workflow["connections"] == {}

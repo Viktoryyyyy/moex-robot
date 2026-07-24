@@ -1,55 +1,119 @@
-# Route B Context Registry
+# Route B Context Registry — Historical Package
 
-Status: active SoT package
-Project: MOEX Bot
-Scope: Route B project-management context resolution
+status: deprecated_historical
+project: MOEX_Bot
+package: route_b_context_registry
+new_tasks_allowed: false
+new_runtime_execution_allowed: false
+management_canon: `docs/MOEX_BOT_MANAGEMENT_CANON.md`
+configuration_registry: `docs/MOEX_BOT_CONTEXT_CONFIGURATION_SOURCES.md`
+configuration_registry_version: 2.1
+repository: `Viktoryyyyy/moex-robot`
 
-This package defines the GitHub-resolvable context references used by Route B orchestration.
+## 1. Status
 
-## Purpose
+This directory preserves the former Route B / n8n Universal Role Runner context package as historical evidence.
 
-Route B requests must pass compact dynamic handoffs plus context references. n8n workers and PM/sub-chat handoffs must resolve those references through this repo package instead of pasting full static or role context into each request.
+It is not an active management, orchestration, task-authoring or runtime source.
 
-## Registry
+Do not use this package to create or execute new:
 
-Machine-readable registry:
+- Route B tasks;
+- n8n Universal Role Runner workflows;
+- PM or sub-chat handoffs;
+- branches or pull requests;
+- context-resolution requests;
+- server or runtime actions.
 
-- `docs/sot/context/registry.route_b.v1.yaml`
+Historical files may remain unchanged when they are needed to explain prior decisions, branches, pull requests or workflow behavior.
 
-The registry maps:
+## 2. Active authority reference
 
-- `static_context_refs` to files under `docs/sot/context/static/`
-- `role_context_refs` to files under `docs/sot/context/roles/`
-- request/return schema docs to files under `docs/sot/context/schemas/`
+Current MOEX Bot management, route, role, applied-configuration and historical-boundary sources are indexed by:
 
-## Resolution rule
+```text
+docs/MOEX_BOT_CONTEXT_CONFIGURATION_SOURCES.md
+```
 
-A Route B resolver must:
+The highest management authority remains:
 
-1. Read `docs/sot/context/registry.route_b.v1.yaml` from the repo ref selected by the workflow run.
-2. Resolve only repo-relative paths listed in the registry.
-3. Reject absolute paths, server paths, implicit file discovery, and unresolved context refs.
-4. Keep GitHub/repo as Source of Truth and Postgres as workflow state/evidence store.
+```text
+docs/MOEX_BOT_MANAGEMENT_CANON.md
+```
 
-## Route B chain
+Use the canonical configuration registry to resolve the current source package and each source classification. Do not use this historical README as a partial or competing active-authority list.
 
-`PM L2 -> PM L3 -> Sub-chat -> PM L3 -> PM L2`
+Active execution routes are limited to:
 
-Sub-chat output returns to PM L3. PM L3 validation/evidence returns to PM L2.
+```text
+browser_controlled_github_route
+flowise_automated_github_route
+```
 
-## Boundary
+Route B is not an active fallback route.
 
-This package does not define n8n workflow JSON, Postgres DDL, trading strategy logic, runtime/live behavior, broker integration, or server execution.
+## 3. Historical contents
 
-## Note
+The preserved package may include:
 
-- The status of the package should be clearly defined as 'active'.
+- `docs/sot/context/registry.route_b.v1.yaml`;
+- static context references under `docs/sot/context/static/`;
+- role context references under `docs/sot/context/roles/`;
+- request and return schemas under `docs/sot/context/schemas/`;
+- historical descriptions of the former PM L2 → PM L3 → Sub-chat chain.
 
-## GitHub Workflow
+These files describe prior design intent only. Their existence in GitHub does not grant current execution authority.
 
-This section describes the workflow involving PM Lead and github_worker:
+## 4. Resolution prohibition
 
-1. **PM Lead** initiates the workflow by defining the task and its scope.
-2. **github_worker** executes the task as per the defined scope.
-3. Any discrepancies or issues are reported back to the PM Lead for review.
-4. Upon approval, the workflow continues as per the defined processes.
+Active Browser, Flowise, PM or sub-chat workflows must not resolve dynamic task context through this Route B registry.
+
+Do not:
+
+- treat `registry.route_b.v1.yaml` as an active registry;
+- load Route B static or role contexts into current agents;
+- restore Route B request or return schemas;
+- copy Route B mandatory fields into new task contracts;
+- infer that Postgres or n8n state is current management Source of Truth;
+- create replacement Route B branches or pull requests.
+
+Current tasks use the minimal dynamic task contract and recover repository facts directly from GitHub when safe.
+
+## 5. Source of Truth boundary
+
+```text
+GitHub repository = Source of Truth
+Server filesystem = Applied State only
+```
+
+This historical package does not prove:
+
+- current repository architecture;
+- active branch or PR ownership;
+- accepted implementation;
+- current Agent configuration;
+- server Applied State;
+- authority to execute any workflow.
+
+Do not use server paths or server files to reactivate this package.
+
+## 6. Use in audits
+
+A role may inspect this package read-only when the task explicitly requires historical analysis, migration review or reconciliation of an old Route B artifact.
+
+Such analysis must:
+
+- identify the package as `deprecated_historical`;
+- distinguish historical statements from current authority;
+- avoid mutation unless a separate approved change task exists;
+- recommend current Browser or Flowise handling rather than Route B reactivation.
+
+## 7. Supersession rule
+
+Any open branch, pull request, issue, document or prompt that describes this package as active must be reviewed for closure, supersession or historical relabelling.
+
+Do not merge a change that restores `active`, `active SoT package`, `new_tasks_allowed: true` or equivalent Route B authority unless the project owner explicitly changes the management canon.
+
+## 8. Security
+
+Historical files must not contain or expose credentials, API keys, tokens, passwords or private runtime secrets.
