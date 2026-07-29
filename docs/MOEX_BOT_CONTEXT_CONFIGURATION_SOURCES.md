@@ -1,6 +1,6 @@
 # MOEX Bot Context Configuration Sources
 
-status: approved_pending_merge
+status: current_merged_source
 version: 2.1
 management_canon: `docs/MOEX_BOT_MANAGEMENT_CANON.md`
 management_canon_version: 2.0
