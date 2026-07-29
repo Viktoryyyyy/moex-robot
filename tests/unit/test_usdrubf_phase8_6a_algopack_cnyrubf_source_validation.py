@@ -254,10 +254,10 @@ def test_experiment_contract_is_part_of_immutable_digest_inventory() -> None:
     )
 
 
-def test_modified_experiment_contract_fails_immutable_verification(
+def _immutable_request(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    contract_payload: bytes,
+) -> tuple[runner.Phase86ARequest, dict[str, Path], dict[str, tuple[str, str]]]:
     names_and_suffixes = {
         "modeling_dataset": ".parquet",
         "dataset_manifest": ".json",
@@ -270,9 +270,9 @@ def test_modified_experiment_contract_fails_immutable_verification(
     paths: dict[str, Path] = {}
     for name, suffix in names_and_suffixes.items():
         path = tmp_path / f"{name}{suffix}"
-        path.write_bytes(f"frozen-{name}".encode("utf-8"))
+        payload = contract_payload if name == "experiment_contract" else f"frozen-{name}".encode("utf-8")
+        path.write_bytes(payload)
         paths[name] = path
-
     expected = {
         name: ("sha256", runner._hash(path))
         for name, path in paths.items()
@@ -282,8 +282,6 @@ def test_modified_experiment_contract_fails_immutable_verification(
         "git_blob_sha1",
         runner._git_blob_sha1(paths["experiment_contract"]),
     )
-    monkeypatch.setattr(runner, "EXPECTED_IMMUTABLE_INPUT_DIGESTS", expected)
-
     request = runner.Phase86ARequest(
         modeling_dataset_path=paths["modeling_dataset"],
         dataset_manifest_path=paths["dataset_manifest"],
@@ -296,10 +294,54 @@ def test_modified_experiment_contract_fails_immutable_verification(
         run_id="phase8_6a_algopack_cnyrubf_source_validation_20260729_v1",
         git_commit_sha="a" * 40,
     )
+    return request, paths, expected
+
+
+def test_modified_experiment_contract_fails_immutable_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, paths, expected = _immutable_request(
+        tmp_path,
+        b"frozen-experiment-contract",
+    )
+    monkeypatch.setattr(runner, "EXPECTED_IMMUTABLE_INPUT_DIGESTS", expected)
+
     observed = runner.verify_immutable_inputs(request)
     assert observed["experiment_contract"] == expected["experiment_contract"][1]
 
     paths["experiment_contract"].write_bytes(b"modified-contract")
+    with pytest.raises(
+        runner.Phase86ACnyrubfSourceValidationError,
+        match="experiment_contract",
+    ):
+        runner.verify_immutable_inputs(request)
+
+
+def test_verified_contract_snapshot_is_consumed_after_path_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    merged_contract = Path(
+        "contracts/experiments/"
+        "usdrubf_phase8_6a_algopack_cnyrubf_fo_source_correction_v1.json"
+    ).read_bytes()
+    request, paths, expected = _immutable_request(tmp_path, merged_contract)
+    monkeypatch.setattr(runner, "EXPECTED_IMMUTABLE_INPUT_DIGESTS", expected)
+
+    contract, captured_digest = runner._verified_experiment_contract(
+        request.experiment_contract_path
+    )
+    paths["experiment_contract"].write_bytes(merged_contract + b"\n")
+    assert runner._git_blob_sha1(paths["experiment_contract"]) != captured_digest
+
+    observed = runner.verify_immutable_inputs(
+        request,
+        experiment_contract_digest=captured_digest,
+    )
+    assert observed["experiment_contract"] == captured_digest
+    runner._validate_experiment_contract(contract)
+
     with pytest.raises(
         runner.Phase86ACnyrubfSourceValidationError,
         match="experiment_contract",
