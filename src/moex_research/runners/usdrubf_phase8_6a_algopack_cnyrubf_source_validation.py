@@ -442,10 +442,13 @@ def _hash(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _git_blob_sha1(path: Path) -> str:
-    payload = path.read_bytes()
+def _git_blob_sha1_bytes(payload: bytes) -> str:
     header = f"blob {len(payload)}\0".encode("ascii")
     return hashlib.sha1(header + payload, usedforsecurity=False).hexdigest()
+
+
+def _git_blob_sha1(path: Path) -> str:
+    return _git_blob_sha1_bytes(path.read_bytes())
 
 
 def _immutable_input_digest(path: Path, algorithm: str) -> str:
@@ -458,21 +461,47 @@ def _immutable_input_digest(path: Path, algorithm: str) -> str:
     )
 
 
-def _json(path: Path) -> dict[str, Any]:
+def _json_bytes(payload: bytes, name: str) -> dict[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise Phase86ACnyrubfSourceValidationError(
-            f"invalid JSON: {path.name}"
+            f"invalid JSON: {name}"
         ) from exc
     if not isinstance(value, dict):
         raise Phase86ACnyrubfSourceValidationError(
-            f"JSON must be object: {path.name}"
+            f"JSON must be object: {name}"
         )
     return value
 
 
-def verify_immutable_inputs(request: Phase86ARequest) -> dict[str, str]:
+def _json(path: Path) -> dict[str, Any]:
+    return _json_bytes(path.read_bytes(), path.name)
+
+
+def _verified_experiment_contract(
+    path: Path,
+) -> tuple[dict[str, Any], str]:
+    try:
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise Phase86ACnyrubfSourceValidationError(
+            f"cannot read immutable experiment contract: {path.name}"
+        ) from exc
+    observed = _git_blob_sha1_bytes(payload)
+    expected = EXPECTED_IMMUTABLE_INPUT_DIGESTS["experiment_contract"][1]
+    if observed != expected:
+        raise Phase86ACnyrubfSourceValidationError(
+            "immutable input hash mismatch: experiment_contract"
+        )
+    return _json_bytes(payload, path.name), observed
+
+
+def verify_immutable_inputs(
+    request: Phase86ARequest,
+    *,
+    experiment_contract_digest: str | None = None,
+) -> dict[str, str]:
     paths = _input_paths(request)
     expected_names = set(EXPECTED_IMMUTABLE_INPUT_DIGESTS)
     if set(paths) != expected_names:
@@ -482,10 +511,12 @@ def verify_immutable_inputs(request: Phase86ARequest) -> dict[str, str]:
             "immutable input digest inventory mismatch: "
             f"missing={missing}, unexpected={unexpected}"
         )
-    found = {
-        name: _immutable_input_digest(paths[name], algorithm)
-        for name, (algorithm, _expected) in EXPECTED_IMMUTABLE_INPUT_DIGESTS.items()
-    }
+    found: dict[str, str] = {}
+    for name, (algorithm, _expected) in EXPECTED_IMMUTABLE_INPUT_DIGESTS.items():
+        if name == "experiment_contract" and experiment_contract_digest is not None:
+            found[name] = experiment_contract_digest
+        else:
+            found[name] = _immutable_input_digest(paths[name], algorithm)
     bad = [
         name
         for name, (_algorithm, expected) in EXPECTED_IMMUTABLE_INPUT_DIGESTS.items()
@@ -1349,11 +1380,17 @@ def run_source_validation(
     history_loader: Any = load_daily_history,
 ) -> Phase86AResult:
     _validate_request(request)
-    hashes = verify_immutable_inputs(request)
+    contract, contract_digest = _verified_experiment_contract(
+        request.experiment_contract_path
+    )
+    hashes = verify_immutable_inputs(
+        request,
+        experiment_contract_digest=contract_digest,
+    )
     aggregate = _json(request.phase83_aggregate_metrics_path)
     phase83 = _json(request.phase83_gate_results_path)
     _validate_phase83_evidence(aggregate, phase83)
-    _validate_experiment_contract(_json(request.experiment_contract_path))
+    _validate_experiment_contract(contract)
     _json(request.dataset_manifest_path)
     _json(request.feature_schema_path)
 
