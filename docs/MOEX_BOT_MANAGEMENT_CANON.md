@@ -1,6 +1,6 @@
 # MOEX Bot Management Canon
 
-status: approved_pending_merge
+status: current_merged_source
 version: 2.0
 approved_at: 2026-07-22
 repository: Viktoryyyyy/moex-robot
