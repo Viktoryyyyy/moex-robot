@@ -238,6 +238,75 @@ def test_noncanonical_run_ids_are_rejected(
         runner._validate_request(request)
 
 
+def test_experiment_contract_is_part_of_immutable_digest_inventory() -> None:
+    assert set(runner.EXPECTED_IMMUTABLE_INPUT_DIGESTS) == {
+        "modeling_dataset",
+        "dataset_manifest",
+        "feature_schema",
+        "m0_validation_predictions",
+        "phase83_aggregate_metrics",
+        "phase83_gate_results",
+        "experiment_contract",
+    }
+    assert runner.EXPECTED_IMMUTABLE_INPUT_DIGESTS["experiment_contract"] == (
+        "git_blob_sha1",
+        runner.EXPECTED_EXPERIMENT_CONTRACT_GIT_BLOB_SHA1,
+    )
+
+
+def test_modified_experiment_contract_fails_immutable_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    names_and_suffixes = {
+        "modeling_dataset": ".parquet",
+        "dataset_manifest": ".json",
+        "feature_schema": ".json",
+        "m0_validation_predictions": ".parquet",
+        "phase83_aggregate_metrics": ".json",
+        "phase83_gate_results": ".json",
+        "experiment_contract": ".json",
+    }
+    paths: dict[str, Path] = {}
+    for name, suffix in names_and_suffixes.items():
+        path = tmp_path / f"{name}{suffix}"
+        path.write_bytes(f"frozen-{name}".encode("utf-8"))
+        paths[name] = path
+
+    expected = {
+        name: ("sha256", runner._hash(path))
+        for name, path in paths.items()
+        if name != "experiment_contract"
+    }
+    expected["experiment_contract"] = (
+        "git_blob_sha1",
+        runner._git_blob_sha1(paths["experiment_contract"]),
+    )
+    monkeypatch.setattr(runner, "EXPECTED_IMMUTABLE_INPUT_DIGESTS", expected)
+
+    request = runner.Phase86ARequest(
+        modeling_dataset_path=paths["modeling_dataset"],
+        dataset_manifest_path=paths["dataset_manifest"],
+        feature_schema_path=paths["feature_schema"],
+        m0_validation_predictions_path=paths["m0_validation_predictions"],
+        phase83_aggregate_metrics_path=paths["phase83_aggregate_metrics"],
+        phase83_gate_results_path=paths["phase83_gate_results"],
+        experiment_contract_path=paths["experiment_contract"],
+        output_dir=tmp_path / "out",
+        run_id="phase8_6a_algopack_cnyrubf_source_validation_20260729_v1",
+        git_commit_sha="a" * 40,
+    )
+    observed = runner.verify_immutable_inputs(request)
+    assert observed["experiment_contract"] == expected["experiment_contract"][1]
+
+    paths["experiment_contract"].write_bytes(b"modified-contract")
+    with pytest.raises(
+        runner.Phase86ACnyrubfSourceValidationError,
+        match="experiment_contract",
+    ):
+        runner.verify_immutable_inputs(request)
+
+
 def test_runtime_artifact_inventory_is_exact(tmp_path: Path) -> None:
     output = tmp_path / "artifacts"
     empty = pd.DataFrame()
