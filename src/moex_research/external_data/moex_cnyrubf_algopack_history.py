@@ -1219,7 +1219,6 @@ def load_daily_history(
     page_digests: list[str] = []
     expected_columns: tuple[str, ...] | None = None
     expected_total: int | None = None
-    retrieved = _utc(clock())
 
     for _page in range(ALGOPACK_MAX_PAGES):
         start = len(all_rows)
@@ -1230,13 +1229,14 @@ def load_daily_history(
             transport=transport,
             sleeper=sleeper,
         )
+        page_retrieved_at = _utc(clock())
         page_rows, columns, cursor, digest = parse_tradestats_page_response(
             payload,
             from_date=from_date,
             till_date=till_date,
             start=start,
             route=route,
-            retrieved_at_utc=retrieved,
+            retrieved_at_utc=page_retrieved_at,
         )
         if expected_columns is None:
             expected_columns = columns
@@ -1324,6 +1324,7 @@ def load_daily_history(
             "AlgoPack buckets are duplicated or not chronological across pages",
             blocker="algopack_schema_not_stable",
         )
+    retrieved = _utc(clock())
     return aggregate_daily_tradestats(
         all_rows,
         source_route=build_tradestats_url(from_date, till_date, start=0),
