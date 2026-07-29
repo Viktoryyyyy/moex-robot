@@ -370,6 +370,73 @@ def test_daily_aggregation_includes_directional_and_open_interest_fields() -> No
     assert candle.source_available_at.isoformat() == "2026-06-10T09:10:04+03:00"
 
 
+def test_retrieval_timestamp_is_recorded_after_final_page() -> None:
+    pages = {
+        0: _page([_row()], start=0, total=2, page_size=1),
+        1: _page(
+            [
+                _row(
+                    tradetime="09:10:00",
+                    systime="2026-06-10 09:10:04",
+                    open_=12.1,
+                    high=12.4,
+                    low=12.0,
+                    close=12.3,
+                    vol=20.0,
+                    vol_b=8.0,
+                    vol_s=12.0,
+                    val=246.0,
+                    val_b=98.4,
+                    val_s=147.6,
+                    trades=8,
+                    trades_b=3,
+                    trades_s=5,
+                    im=1100.0,
+                    oi_open=105.0,
+                    oi_high=120.0,
+                    oi_low=100.0,
+                    oi_close=115.0,
+                )
+            ],
+            start=1,
+            total=2,
+            page_size=1,
+        ),
+    }
+    requested_starts: list[int] = []
+
+    def transport(url: str, _token: str) -> bytes:
+        start = int(parse_qs(urlsplit(url).query)["start"][0])
+        requested_starts.append(start)
+        return pages[start]
+
+    clock_values = iter(
+        [
+            datetime(2026, 7, 29, 10, 0, tzinfo=timezone.utc),
+            datetime(2026, 7, 29, 10, 1, tzinfo=timezone.utc),
+            datetime(2026, 7, 29, 10, 2, tzinfo=timezone.utc),
+        ]
+    )
+    candles = source.load_daily_history(
+        _identity(),
+        from_date=START,
+        till_date=END,
+        bearer_token=TOKEN,
+        transport=transport,
+        sleeper=lambda _delay: None,
+        clock=lambda: next(clock_values),
+    )
+    assert requested_starts == [0, 1]
+    assert candles[0].retrieved_at_utc == datetime(
+        2026,
+        7,
+        29,
+        10,
+        2,
+        tzinfo=timezone.utc,
+    )
+
+
 def test_prior_session_requires_exact_date_and_pre_anchor_availability() -> None:
     candle = source.CnyrubfAlgoPackDailyCandle(
         source_id=source.SOURCE_ID,
