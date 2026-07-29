@@ -63,14 +63,44 @@ CONTRACT_BRANCH: Final[str] = (
     "research/ema-3-19-ai/phase-8-6a-cnyrubf-fo-source-correction-v1"
 )
 
-EXPECTED_INPUT_SHA256: Final[dict[str, str]] = {
-    "modeling_dataset": "fdd626f9e0522c6bbb653f9e17fbbbeef7ded77f57ff187b35246a2458d55d00",
-    "dataset_manifest": "fcbbb5e5ed0549c5c6f397e34f203f01836271f6bf471f90cab5a2fd64ace082",
-    "feature_schema": "8f08802c7fb0a4cc43ab4ba072ee22ff9edd92fe8d674ea0515545d20d143238",
-    "m0_validation_predictions": "9769d00a49adeb54c016d965387774e46a3e09e09f895aa61d48a90bbf3568cf",
-    "phase83_aggregate_metrics": "d6ad4f6587dadb32431bd7b8f3bd59c5393e04d742efb4af459b316b417f8756",
-    "phase83_gate_results": "d3f7e24022e550e725eae7ec5bc214d6b95e0e9c66393574c575e5d6f593f33c",
+EXPECTED_IMMUTABLE_INPUT_DIGESTS: Final[dict[str, tuple[str, str]]] = {
+    "modeling_dataset": (
+        "sha256",
+        "fdd626f9e0522c6bbb653f9e17fbbbeef7ded77f57ff187b35246a2458d55d00",
+    ),
+    "dataset_manifest": (
+        "sha256",
+        "fcbbb5e5ed0549c5c6f397e34f203f01836271f6bf471f90cab5a2fd64ace082",
+    ),
+    "feature_schema": (
+        "sha256",
+        "8f08802c7fb0a4cc43ab4ba072ee22ff9edd92fe8d674ea0515545d20d143238",
+    ),
+    "m0_validation_predictions": (
+        "sha256",
+        "9769d00a49adeb54c016d965387774e46a3e09e09f895aa61d48a90bbf3568cf",
+    ),
+    "phase83_aggregate_metrics": (
+        "sha256",
+        "d6ad4f6587dadb32431bd7b8f3bd59c5393e04d742efb4af459b316b417f8756",
+    ),
+    "phase83_gate_results": (
+        "sha256",
+        "d3f7e24022e550e725eae7ec5bc214d6b95e0e9c66393574c575e5d6f593f33c",
+    ),
+    "experiment_contract": (
+        "git_blob_sha1",
+        "8d7c0a8fcb50aa48d2c9f9c579e2c2ea62e01e35",
+    ),
 }
+EXPECTED_INPUT_SHA256: Final[dict[str, str]] = {
+    name: digest
+    for name, (algorithm, digest) in EXPECTED_IMMUTABLE_INPUT_DIGESTS.items()
+    if algorithm == "sha256"
+}
+EXPECTED_EXPERIMENT_CONTRACT_GIT_BLOB_SHA1: Final[str] = (
+    EXPECTED_IMMUTABLE_INPUT_DIGESTS["experiment_contract"][1]
+)
 EXPECTED_ELIGIBLE_IDENTITIES: Final[int] = 472
 EXPECTED_VALIDATION_IDENTITIES: Final[int] = 320
 EXPECTED_FOLDS: Final[int] = 5
@@ -412,6 +442,22 @@ def _hash(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _git_blob_sha1(path: Path) -> str:
+    payload = path.read_bytes()
+    header = f"blob {len(payload)}\0".encode("ascii")
+    return hashlib.sha1(header + payload, usedforsecurity=False).hexdigest()
+
+
+def _immutable_input_digest(path: Path, algorithm: str) -> str:
+    if algorithm == "sha256":
+        return _hash(path)
+    if algorithm == "git_blob_sha1":
+        return _git_blob_sha1(path)
+    raise Phase86ACnyrubfSourceValidationError(
+        f"unsupported immutable input digest algorithm: {algorithm}"
+    )
+
+
 def _json(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -428,10 +474,21 @@ def _json(path: Path) -> dict[str, Any]:
 
 def verify_immutable_inputs(request: Phase86ARequest) -> dict[str, str]:
     paths = _input_paths(request)
-    found = {name: _hash(paths[name]) for name in EXPECTED_INPUT_SHA256}
+    expected_names = set(EXPECTED_IMMUTABLE_INPUT_DIGESTS)
+    if set(paths) != expected_names:
+        missing = sorted(expected_names.difference(paths))
+        unexpected = sorted(set(paths).difference(expected_names))
+        raise Phase86ACnyrubfSourceValidationError(
+            "immutable input digest inventory mismatch: "
+            f"missing={missing}, unexpected={unexpected}"
+        )
+    found = {
+        name: _immutable_input_digest(paths[name], algorithm)
+        for name, (algorithm, _expected) in EXPECTED_IMMUTABLE_INPUT_DIGESTS.items()
+    }
     bad = [
         name
-        for name, expected in EXPECTED_INPUT_SHA256.items()
+        for name, (_algorithm, expected) in EXPECTED_IMMUTABLE_INPUT_DIGESTS.items()
         if found[name] != expected
     ]
     if bad:
@@ -1380,11 +1437,23 @@ def run_source_validation(
         ],
         "immutable_inputs": {
             name: {
-                "expected_sha256": expected,
-                "observed_sha256": hashes[name],
+                "algorithm": algorithm,
+                "expected_digest": expected,
+                "observed_digest": hashes[name],
                 "matches": hashes[name] == expected,
+                **(
+                    {
+                        "expected_sha256": expected,
+                        "observed_sha256": hashes[name],
+                    }
+                    if algorithm == "sha256"
+                    else {
+                        "expected_git_blob_sha1": expected,
+                        "observed_git_blob_sha1": hashes[name],
+                    }
+                ),
             }
-            for name, expected in EXPECTED_INPUT_SHA256.items()
+            for name, (algorithm, expected) in EXPECTED_IMMUTABLE_INPUT_DIGESTS.items()
         },
     }
     blocker_register = {
