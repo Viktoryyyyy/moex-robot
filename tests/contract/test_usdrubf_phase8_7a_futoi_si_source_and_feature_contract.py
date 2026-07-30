@@ -8,6 +8,9 @@ CONTRACT_PATH = Path(
     "contracts/experiments/"
     "usdrubf_phase8_7a_futoi_si_source_and_feature_contract_v1.json"
 )
+REGISTRY_PATH = Path(
+    "contracts/datasets/usdrubf_phase4_external_sources_registry.v1.yaml"
+)
 
 FORBIDDEN_ACCEPTANCE_MATRIX_FIELDS = [
     "target_phase_label",
@@ -34,7 +37,7 @@ def test_contract_identity_and_canonical_futoi_si_source() -> None:
     source = contract["source_identity"]
 
     assert identity["project"] == "MOEX_Bot"
-    assert identity["contract_version"] == "1.3"
+    assert identity["contract_version"] == "1.4"
     assert identity["phase"] == "8.7A"
     assert identity["task_id"] == (
         "ema_3_19_ai_phase_8_7a_futoi_si_source_contract_v1"
@@ -52,9 +55,16 @@ def test_contract_identity_and_canonical_futoi_si_source() -> None:
     assert source["approved_normalized_source_scope"] == "family_aggregate_futoi"
     assert source["family_aggregate_is_approved_source_not_fallback"] is True
     assert source["exact_contract_futoi_scope_allowed"] is False
+    assert source["technical_pass_status"] == (
+        "moex_futoi_si_technical_source_validated"
+    )
+    assert source["phase8_7b_pass_status"] == (
+        "moex_futoi_si_source_candidate_for_phase8_7b"
+    )
+    assert source["phase8_7b_entry_requires_license_access_gate"] is True
 
 
-def test_contract_points_to_implemented_futoi_dataset() -> None:
+def test_source_ticker_is_distinct_from_canonical_storage_identity() -> None:
     contract = load_contract()
     components = contract["existing_canonical_components"]
     implementation = contract["implementation_scope_next_pr"]
@@ -73,18 +83,12 @@ def test_contract_points_to_implemented_futoi_dataset() -> None:
         "contracts/datasets/futures_futoi_5m_raw_contract.md"
     )
     assert components["implemented_schema_version"] == "futures_futoi_5m_raw.v1"
-    assert components["normalizer_and_transport_reuse_required"] is True
-    assert components["duplicate_source_client_allowed"] is False
-    assert components["required_source_selection"] == "explicit_source_ticker_si"
-    assert components["source_ticker_required"] == "Si"
+    assert components["reuse_scope"] == "normalizer_and_transport_primitives_only"
     assert components["canonical_storage_secid"] == "USDRUBF"
     assert components["canonical_storage_family_code"] == "USDRUBF"
+    assert components["source_ticker_required"] == "Si"
     assert components["source_ticker_must_not_be_used_as_storage_family"] is True
     assert components["secid_and_family_filter_intersection_for_si_allowed"] is False
-    assert implementation[
-        "must_reuse_existing_normalizer_and_transport_primitives"
-    ] is True
-    assert implementation["explicit_si_source_selection_required"] is True
     assert implementation["all_universe_orchestrator_reuse_required"] is False
     assert implementation["canonical_storage_secid"] == "USDRUBF"
     assert implementation["canonical_storage_family_code"] == "USDRUBF"
@@ -92,7 +96,45 @@ def test_contract_points_to_implemented_futoi_dataset() -> None:
     assert implementation["duplicate_http_transport_allowed"] is False
 
 
-def test_limited_probe_does_not_prove_historical_readiness() -> None:
+def test_license_and_access_gate_matches_standing_registry_blocker() -> None:
+    contract = load_contract()
+    authorization = contract["authorization_policy"]
+    license_policy = contract["license_and_access_policy"]
+    registry_text = REGISTRY_PATH.read_text(encoding="utf-8")
+
+    assert "source_id: futoi_participant_positioning" in registry_text
+    assert (
+        "license_access_status: "
+        "blocked_until_provider_license_and_access_terms_are_documented"
+        in registry_text
+    )
+    assert authorization["token_proves_technical_entitlement_only"] is True
+    assert authorization["license_access_approval_implied_by_token"] is False
+    assert license_policy["registry_contract"] == str(REGISTRY_PATH)
+    assert license_policy["registry_source_id"] == "futoi_participant_positioning"
+    assert license_policy["registry_license_access_status"] == (
+        "blocked_until_provider_license_and_access_terms_are_documented"
+    )
+    assert license_policy["successful_authenticated_request_is_sufficient"] is False
+    assert license_policy["research_use_terms_documented_required"] is True
+    assert license_policy["local_raw_storage_terms_documented_required"] is True
+    assert license_policy["derived_feature_use_terms_documented_required"] is True
+    assert license_policy["redistribution_terms_documented_required"] is True
+    assert license_policy["raw_payload_redistribution_assumed_allowed"] is False
+    assert license_policy["current_status"] == (
+        "blocked_pending_documented_license_and_access_terms"
+    )
+    assert license_policy["phase8_7b_entry_allowed_before_pass"] is False
+    assert license_policy["failure_blocker"] == (
+        "provider_license_and_access_terms_not_documented"
+    )
+    assert license_policy["required_evidence_artifact"] == (
+        "futoi_si_license_access_validation.json"
+    )
+    assert license_policy["legal_or_license_permission_must_not_be_inferred"] is True
+
+
+def test_limited_probe_does_not_prove_historical_or_license_readiness() -> None:
     evidence = load_contract()["limited_probe_evidence"]
 
     assert evidence["route"] == (
@@ -109,6 +151,7 @@ def test_limited_probe_does_not_prove_historical_readiness() -> None:
     assert evidence["participant_groups"] == ["FIZ", "YUR"]
     assert evidence["historical_coverage_proven"] is False
     assert evidence["pit_correctness_proven"] is False
+    assert evidence["license_access_terms_proven"] is False
     assert evidence["model_use_authorized"] is False
 
 
@@ -219,20 +262,13 @@ def test_owner_requested_factor_semantics_are_frozen() -> None:
     )
 
 
-def test_acceptance_matrix_and_authority_boundaries() -> None:
+def test_gates_runtime_artifacts_and_authority_boundaries() -> None:
     contract = load_contract()
-    leakage = contract["acceptance_matrix_leakage_policy"]
     implementation = contract["implementation_scope_next_pr"]
 
-    assert leakage["artifact"] == "futoi_si_pit_acceptance_matrix.parquet"
-    assert leakage["forbidden_acceptance_matrix_fields"] == (
-        FORBIDDEN_ACCEPTANCE_MATRIX_FIELDS
-    )
-    assert leakage["forbidden_fields_must_be_absent"] is True
-    assert leakage["target_labels_allowed"] is False
-    assert leakage["predictions_allowed"] is False
-    assert leakage["class_probabilities_allowed"] is False
-    assert leakage["fold_assignments_allowed"] is False
+    assert "futoi_si_license_access_validation.json" in contract[
+        "required_runtime_artifacts"
+    ]
     assert list(contract["gates"]) == [
         "G1",
         "G2",
@@ -244,6 +280,10 @@ def test_acceptance_matrix_and_authority_boundaries() -> None:
         "G8",
         "G9",
     ]
+    assert "license and access" in contract["gates"]["G3"]
+    assert "license and access approval" in contract["gates"]["G9"]
+    assert implementation["license_access_validation_required"] is True
+    assert implementation["phase8_7b_entry_requires_license_access_pass"] is True
     assert implementation["feature_computation_requires_phase8_7a_pass"] is True
     assert implementation[
         "incremental_value_evaluation_requires_separate_phase8_7b"
@@ -253,4 +293,19 @@ def test_acceptance_matrix_and_authority_boundaries() -> None:
     assert "no server apply" in contract["non_authorizations"]
     assert "no controlled runtime" in contract["non_authorizations"]
     assert "no feature computation" in contract["non_authorizations"]
+    assert "no raw payload redistribution" in contract["non_authorizations"]
     assert "no trading action" in contract["non_authorizations"]
+
+
+def test_acceptance_matrix_forbids_target_leakage() -> None:
+    leakage = load_contract()["acceptance_matrix_leakage_policy"]
+
+    assert leakage["artifact"] == "futoi_si_pit_acceptance_matrix.parquet"
+    assert leakage["forbidden_acceptance_matrix_fields"] == (
+        FORBIDDEN_ACCEPTANCE_MATRIX_FIELDS
+    )
+    assert leakage["forbidden_fields_must_be_absent"] is True
+    assert leakage["target_labels_allowed"] is False
+    assert leakage["predictions_allowed"] is False
+    assert leakage["class_probabilities_allowed"] is False
+    assert leakage["fold_assignments_allowed"] is False
