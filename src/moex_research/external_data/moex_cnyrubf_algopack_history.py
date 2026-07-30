@@ -804,6 +804,11 @@ def _number(value: object, field: str, *, nonnegative: bool = False) -> float:
 def _optional_initial_margin(value: object) -> float | None:
     if value is None or value == "":
         return None
+    if isinstance(value, bool):
+        raise CnyrubfAlgoPackError(
+            "AlgoPack im is malformed",
+            blocker="numerical_or_chronology_integrity_failure",
+        )
     return _number(value, "im", nonnegative=True)
 
 

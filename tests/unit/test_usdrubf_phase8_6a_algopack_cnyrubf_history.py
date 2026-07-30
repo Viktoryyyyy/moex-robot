@@ -552,7 +552,10 @@ def test_nullable_initial_margin_is_preserved_without_fill(im: object) -> None:
     assert candles[0].initial_margin_close is None
 
 
-@pytest.mark.parametrize("im", [-1.0, float("inf"), "not-a-number", " "])
+@pytest.mark.parametrize(
+    "im",
+    [False, True, -1.0, float("inf"), "not-a-number", " "],
+)
 def test_invalid_nonempty_initial_margin_remains_fail_closed(im: object) -> None:
     with pytest.raises(source.CnyrubfAlgoPackError) as raised:
         source.parse_tradestats_page_response(
