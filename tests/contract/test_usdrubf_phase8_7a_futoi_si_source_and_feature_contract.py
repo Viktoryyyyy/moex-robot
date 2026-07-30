@@ -27,7 +27,7 @@ def load_contract() -> dict[str, object]:
     return json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
 
 
-def test_contract_identity_and_exact_futoi_source() -> None:
+def test_contract_identity_and_canonical_futoi_si_source() -> None:
     contract = load_contract()
     identity = contract["contract_identity"]
     owner = contract["owner_decision"]
@@ -40,40 +40,45 @@ def test_contract_identity_and_exact_futoi_source() -> None:
     )
     assert identity["execution_mode"] == "browser_controlled_github_route"
     assert owner["target_security_id"] == "USDRUBF"
-    assert owner["target_family_code"] == "Si"
+    assert owner["approved_source_ticker"] == "Si"
     assert owner["participant_groups"] == ["FIZ", "YUR"]
     assert owner["open_interest_interpretation_allowed"] is False
+    assert owner["usdrubf_exact_contract_endpoint_allowed"] is False
     assert source["exact_path"] == (
-        "/iss/analyticalproducts/futoi/securities/usdrubf.json"
+        "/iss/analyticalproducts/futoi/securities/si.json"
     )
-    assert source["source_scope_must_equal"] == "exact_contract_futoi"
-    assert source["family_aggregate_source_scope_forbidden"] == (
+    assert source["source_ticker"] == "Si"
+    assert source["target_security_id"] == "USDRUBF"
+    assert source["approved_normalized_source_scope"] == (
         "family_aggregate_futoi"
     )
+    assert source["family_aggregate_is_approved_source_not_fallback"] is True
+    assert source["exact_contract_futoi_scope_allowed"] is False
 
 
-def test_existing_canonical_producer_must_be_reused() -> None:
+def test_existing_canonical_components_must_be_reused() -> None:
     contract = load_contract()
-    producer = contract["existing_canonical_producer"]
+    components = contract["existing_canonical_components"]
     implementation = contract["implementation_scope_next_pr"]
 
-    assert producer["module"] == (
+    assert components["producer_module"] == (
         "moex_data.futures.all_universe_futoi_raw_backfill_slice"
     )
-    assert producer["normalizer_module"] == (
+    assert components["normalizer_module"] == (
         "moex_data.futures.futoi_raw_loader"
     )
-    assert producer["dataset_contract"] == (
+    assert components["dataset_contract"] == (
         "contracts/datasets/futures_futoi_raw.v1.yaml"
     )
-    assert producer["reuse_required"] is True
-    assert producer["duplicate_source_client_allowed"] is False
-    assert producer["producer_modification_allowed_in_this_task"] is False
-    assert producer["exact_contract_only_required"] is True
-    assert producer["secid_scope_filter"] == "USDRUBF"
+    assert components["normalizer_and_transport_reuse_required"] is True
+    assert components["duplicate_source_client_allowed"] is False
+    assert components["component_modification_allowed_in_this_contract_task"] is False
+    assert components["required_source_selection"] == "explicit_source_ticker_si"
+    assert components["source_ticker_required"] == "Si"
     assert implementation[
-        "must_reuse_existing_canonical_producer_and_normalizer"
+        "must_reuse_existing_normalizer_and_transport_primitives"
     ] is True
+    assert implementation["explicit_si_source_selection_required"] is True
     assert implementation["duplicate_http_transport_allowed"] is False
 
 
@@ -81,12 +86,20 @@ def test_limited_probe_does_not_prove_historical_readiness() -> None:
     contract = load_contract()
     evidence = contract["limited_probe_evidence"]
 
+    assert evidence["route"] == (
+        "https://apim.moex.com/iss/analyticalproducts/futoi/"
+        "securities/si.json"
+    )
+    assert evidence["query_policy"] == (
+        "from=trade_date&till=trade_date&latest=1"
+    )
     assert evidence["date_from"] == "2026-07-03"
     assert evidence["date_till"] == "2026-07-29"
     assert evidence["source_requests"] == 27
     assert evidence["raw_rows"] == 54
     assert evidence["daily_rows"] == 27
     assert evidence["trade_dates"] == 27
+    assert evidence["participant_groups"] == ["FIZ", "YUR"]
     assert evidence["selection_rule"] == "daily_latest_FIZ_and_YUR_wide"
     assert evidence["sha256"] == (
         "cd0792552d516310d63435bf7989014e4b01dce6e79201c0d9bc2886e6e7dff9"
@@ -96,18 +109,53 @@ def test_limited_probe_does_not_prove_historical_readiness() -> None:
     assert evidence["model_use_authorized"] is False
 
 
+def test_source_route_query_and_secret_policy_are_exact() -> None:
+    contract = load_contract()
+    source = contract["source_identity"]
+    authorization = contract["authorization_policy"]
+
+    assert source["allowed_hosts"] == ["apim.moex.com"]
+    assert source["required_query_fields"] == ["from", "till", "latest"]
+    assert source["latest_must_equal"] == 1
+    assert source["request_grain"] == "one trade date per request"
+    assert authorization["required_environment_variable"] == (
+        "MOEX_ALGOPACK_TOKEN"
+    )
+    assert authorization["token_in_cli_allowed"] is False
+    assert authorization["token_in_url_allowed"] is False
+    assert authorization["token_in_logs_allowed"] is False
+    assert authorization["token_in_artifacts_allowed"] is False
+    assert authorization["token_in_repository_allowed"] is False
+
+
 def test_raw_schema_and_daily_pairing_are_fail_closed() -> None:
     contract = load_contract()
     schema = contract["raw_schema_policy"]
     pairing = contract["daily_pairing_policy"]
 
+    assert schema["required_fields"] == [
+        "sess_id",
+        "ticker",
+        "clgroup",
+        "pos",
+        "pos_long",
+        "pos_short",
+        "pos_long_num",
+        "pos_short_num",
+        "seqnum",
+        "moment",
+        "systime",
+    ]
     assert schema["required_participant_groups"] == ["FIZ", "YUR"]
+    assert schema["ticker_must_equal"] == "Si"
     assert schema["pos_long_must_be_nonnegative"] is True
     assert schema["pos_short_must_be_nonpositive"] is True
     assert schema["net_identity"] == "pos == pos_long + pos_short"
     assert schema["cross_group_zero_sum_identity"] == "FIZ.pos + YUR.pos == 0"
     assert pairing["latest_common_pair_only"] is True
     assert pairing["fiz_yur_moment_mismatch_allowed"] is False
+    assert pairing["fiz_yur_session_mismatch_allowed"] is False
+    assert pairing["fiz_yur_seqnum_mismatch_allowed"] is False
     assert pairing["independent_latest_row_per_group_allowed"] is False
     assert pairing["forward_fill_allowed"] is False
     assert pairing["backward_fill_allowed"] is False
@@ -123,9 +171,12 @@ def test_pit_and_revision_semantics_must_be_proven() -> None:
     assert pit["timezone"] == "Europe/Moscow"
     assert pit["forecast_anchor_local_time"] == "06:00:00"
     assert pit["target_join_date"] == "exact frozen prior_trade_date"
-    assert pit["availability_field_candidate"] == "SYSTIME"
-    assert pit["availability_field_semantics_must_be_proven"] is True
+    assert pit["availability_field"] == "systime"
+    assert pit["documented_availability_meaning"] == (
+        "time of publishing information"
+    )
     assert pit["historical_original_publication_time_required"] is True
+    assert pit["historical_systime_semantics_must_be_verified"] is True
     assert pit["current_revision_timestamp_is_not_sufficient"] is True
     assert pit["revision_or_restatement_behavior_must_be_proven"] is True
     assert pit["fail_closed_if_publication_time_not_provable"] is True
