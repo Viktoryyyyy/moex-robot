@@ -83,7 +83,7 @@ def _row(
     trades: int = 5,
     trades_b: int = 3,
     trades_s: int = 2,
-    im: float = 1000.0,
+    im: object = 1000.0,
     oi_open: float = 100.0,
     oi_high: float = 110.0,
     oi_low: float = 90.0,
@@ -527,3 +527,43 @@ def test_redirect_rejection_and_token_sanitization() -> None:
     assert raised.value.blocker == "algopack_authentication_failed"
     assert TOKEN not in str(raised.value)
     assert TOKEN not in repr(raised.value)
+
+
+
+@pytest.mark.parametrize("im", [None, ""])
+def test_nullable_initial_margin_is_preserved_without_fill(im: object) -> None:
+    payload = _page([_row(im=im)], start=0, total=1)
+    rows, _, _, digest = source.parse_tradestats_page_response(
+        payload,
+        from_date=START,
+        till_date=END,
+        start=0,
+        route=source.build_tradestats_url(START, END),
+        retrieved_at_utc=NOW,
+    )
+    assert rows[0].initial_margin is None
+
+    candles = source.aggregate_daily_tradestats(
+        rows,
+        source_route=source.build_tradestats_url(START, END),
+        retrieved_at_utc=NOW,
+        raw_payload_sha256=digest,
+    )
+    assert candles[0].initial_margin_close is None
+
+
+@pytest.mark.parametrize(
+    "im",
+    [False, True, -1.0, float("inf"), "not-a-number", " "],
+)
+def test_invalid_nonempty_initial_margin_remains_fail_closed(im: object) -> None:
+    with pytest.raises(source.CnyrubfAlgoPackError) as raised:
+        source.parse_tradestats_page_response(
+            _page([_row(im=im)], start=0, total=1),
+            from_date=START,
+            till_date=END,
+            start=0,
+            route=source.build_tradestats_url(START, END),
+            retrieved_at_utc=NOW,
+        )
+    assert raised.value.blocker == "numerical_or_chronology_integrity_failure"

@@ -367,3 +367,68 @@ def test_runtime_artifact_inventory_is_exact(tmp_path: Path) -> None:
     assert sorted(path.name for path in output.iterdir()) == sorted(
         runner.DECLARED_OUTPUT_ARTIFACTS
     )
+
+
+
+def test_g5_coverage_ignores_only_nullable_initial_margin() -> None:
+    eligible = _eligible()
+    validation = eligible.loc[:, runner.IDENTITY_COLUMNS].copy()
+    matrix, _ = runner.build_cnyrubf_pit_acceptance_matrix(
+        eligible,
+        [_candle()],
+    )
+    matrix.loc[0, "cnyrubf_initial_margin_close"] = None
+    coverage = runner._coverage(matrix, validation).iloc[0]
+    assert int(coverage.eligible_covered_count) == 1
+    assert int(coverage.validation_covered_count) == 1
+
+    matrix.loc[0, "cnyrubf_close"] = None
+    coverage = runner._coverage(matrix, validation).iloc[0]
+    assert int(coverage.eligible_covered_count) == 0
+    assert int(coverage.validation_covered_count) == 0
+
+
+def test_g6_ignores_only_nullable_initial_margin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runner, "EXPECTED_ELIGIBLE_IDENTITIES", 1)
+    monkeypatch.setattr(runner, "EXPECTED_VALIDATION_IDENTITIES", 1)
+    eligible = _eligible()
+    validation = eligible.loc[:, runner.IDENTITY_COLUMNS].copy()
+    matrix, diagnostics = runner.build_cnyrubf_pit_acceptance_matrix(
+        eligible,
+        [_candle()],
+    )
+    matrix.loc[0, "cnyrubf_initial_margin_close"] = None
+    candles = runner.normalized_candles([_candle()])
+    candles.loc[0, "initial_margin_close"] = None
+    coverage = runner._coverage(matrix, validation)
+
+    gates = runner.evaluate_gates(
+        immutable_inputs_verified=True,
+        phase83_verified=True,
+        eligible=eligible,
+        validation=validation,
+        identity=_identity(),
+        candles=candles,
+        matrix=matrix,
+        coverage=coverage,
+        diagnostics=diagnostics,
+        route_validation=_route_validation(),
+    )
+    assert gates["G6_numerical_and_open_interest_integrity"]["passed"] is True
+
+    candles.loc[0, "close"] = float("inf")
+    gates = runner.evaluate_gates(
+        immutable_inputs_verified=True,
+        phase83_verified=True,
+        eligible=eligible,
+        validation=validation,
+        identity=_identity(),
+        candles=candles,
+        matrix=matrix,
+        coverage=coverage,
+        diagnostics=diagnostics,
+        route_validation=_route_validation(),
+    )
+    assert gates["G6_numerical_and_open_interest_integrity"]["passed"] is False
