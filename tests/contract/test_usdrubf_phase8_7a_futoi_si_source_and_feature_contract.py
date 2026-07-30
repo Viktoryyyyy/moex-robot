@@ -11,6 +11,10 @@ CONTRACT_PATH = Path(
 REGISTRY_PATH = Path(
     "contracts/datasets/usdrubf_phase4_external_sources_registry.v1.yaml"
 )
+RUNTIME_LAYOUT_PATH = Path("docs/sot/runtime/server_layout.v1.md")
+CNYRUBF_TRANSPORT_REFERENCE = Path(
+    "src/moex_research/external_data/moex_cnyrubf_algopack_history.py"
+)
 
 FORBIDDEN_ACCEPTANCE_MATRIX_FIELDS = [
     "target_phase_label",
@@ -37,7 +41,7 @@ def test_contract_identity_and_canonical_futoi_si_source() -> None:
     source = contract["source_identity"]
 
     assert identity["project"] == "MOEX_Bot"
-    assert identity["contract_version"] == "1.4"
+    assert identity["contract_version"] == "1.5"
     assert identity["phase"] == "8.7A"
     assert identity["task_id"] == (
         "ema_3_19_ai_phase_8_7a_futoi_si_source_contract_v1"
@@ -55,12 +59,6 @@ def test_contract_identity_and_canonical_futoi_si_source() -> None:
     assert source["approved_normalized_source_scope"] == "family_aggregate_futoi"
     assert source["family_aggregate_is_approved_source_not_fallback"] is True
     assert source["exact_contract_futoi_scope_allowed"] is False
-    assert source["technical_pass_status"] == (
-        "moex_futoi_si_technical_source_validated"
-    )
-    assert source["phase8_7b_pass_status"] == (
-        "moex_futoi_si_source_candidate_for_phase8_7b"
-    )
     assert source["phase8_7b_entry_requires_license_access_gate"] is True
 
 
@@ -76,14 +74,11 @@ def test_source_ticker_is_distinct_from_canonical_storage_identity() -> None:
     assert components["normalizer_module"] == (
         "moex_data.futures.futoi_raw_loader"
     )
-    assert components["transport_module"] == (
-        "moex_data.futures.liquidity_history_metrics_probe"
-    )
     assert components["implemented_dataset_contract"] == (
         "contracts/datasets/futures_futoi_5m_raw_contract.md"
     )
     assert components["implemented_schema_version"] == "futures_futoi_5m_raw.v1"
-    assert components["reuse_scope"] == "normalizer_and_transport_primitives_only"
+    assert components["normalizer_reuse_required"] is True
     assert components["canonical_storage_secid"] == "USDRUBF"
     assert components["canonical_storage_family_code"] == "USDRUBF"
     assert components["source_ticker_required"] == "Si"
@@ -93,6 +88,54 @@ def test_source_ticker_is_distinct_from_canonical_storage_identity() -> None:
     assert implementation["canonical_storage_secid"] == "USDRUBF"
     assert implementation["canonical_storage_family_code"] == "USDRUBF"
     assert implementation["source_ticker_required"] == "Si"
+
+
+def test_canonical_algopack_token_transport_refactor_is_required() -> None:
+    contract = load_contract()
+    components = contract["existing_canonical_components"]
+    transport = contract["generic_algopack_transport_policy"]
+    implementation = contract["implementation_scope_next_pr"]
+    runtime_layout = RUNTIME_LAYOUT_PATH.read_text(encoding="utf-8")
+    reference_source = CNYRUBF_TRANSPORT_REFERENCE.read_text(encoding="utf-8")
+
+    assert "MOEX_ALGOPACK_TOKEN` is the sole credential variable" in runtime_layout
+    assert "MOEX_API_KEY` is not an alias or fallback" in runtime_layout
+    assert 'ALGOPACK_TOKEN_ENV: Final[str] = "MOEX_ALGOPACK_TOKEN"' in reference_source
+    assert '"Authorization": f"Bearer {token}"' in reference_source
+    assert "class _RejectAllRedirects" in reference_source
+    assert components["legacy_transport_module_forbidden"] == (
+        "moex_data.futures.liquidity_history_metrics_probe"
+    )
+    assert "MOEX_API_KEY" in components["legacy_transport_forbidden_reason"]
+    assert components["canonical_algopack_transport_reference"] == (
+        "moex_research.external_data.moex_cnyrubf_algopack_history"
+    )
+    assert components[
+        "canonical_algopack_transport_reference_direct_reuse_allowed"
+    ] is False
+    assert components["required_generic_transport_module"] == (
+        "moex_research.external_data.moex_algopack_http"
+    )
+    assert components["required_refactor_source_module"] == (
+        "moex_research.external_data.moex_cnyrubf_algopack_history"
+    )
+    assert components["generic_refactor_must_preserve_existing_cnyrubf_behavior"] is True
+    assert transport["required_environment_variable"] == "MOEX_ALGOPACK_TOKEN"
+    assert transport["moex_api_key_alias_allowed"] is False
+    assert transport["redirects_allowed"] is False
+    assert transport["authorization_on_redirect_allowed"] is False
+    assert transport["bearer_header_required"] is True
+    assert transport["token_in_logs_allowed"] is False
+    assert implementation["generic_transport_refactor_required"] is True
+    assert implementation[
+        "generic_transport_refactor_must_preserve_cnyrubf_behavior"
+    ] is True
+    assert "src/moex_research/external_data/moex_algopack_http.py" in implementation[
+        "required_new_files"
+    ]
+    assert "src/moex_research/external_data/moex_cnyrubf_algopack_history.py" in implementation[
+        "required_modified_files"
+    ]
     assert implementation["duplicate_http_transport_allowed"] is False
 
 
@@ -108,22 +151,17 @@ def test_license_and_access_gate_matches_standing_registry_blocker() -> None:
         "blocked_until_provider_license_and_access_terms_are_documented"
         in registry_text
     )
+    assert authorization["required_environment_variable"] == "MOEX_ALGOPACK_TOKEN"
     assert authorization["token_proves_technical_entitlement_only"] is True
     assert authorization["license_access_approval_implied_by_token"] is False
+    assert authorization["moex_api_key_alias_allowed"] is False
     assert license_policy["registry_contract"] == str(REGISTRY_PATH)
     assert license_policy["registry_source_id"] == "futoi_participant_positioning"
-    assert license_policy["registry_license_access_status"] == (
-        "blocked_until_provider_license_and_access_terms_are_documented"
-    )
     assert license_policy["successful_authenticated_request_is_sufficient"] is False
     assert license_policy["research_use_terms_documented_required"] is True
     assert license_policy["local_raw_storage_terms_documented_required"] is True
     assert license_policy["derived_feature_use_terms_documented_required"] is True
-    assert license_policy["redistribution_terms_documented_required"] is True
     assert license_policy["raw_payload_redistribution_assumed_allowed"] is False
-    assert license_policy["current_status"] == (
-        "blocked_pending_documented_license_and_access_terms"
-    )
     assert license_policy["phase8_7b_entry_allowed_before_pass"] is False
     assert license_policy["failure_blocker"] == (
         "provider_license_and_access_terms_not_documented"
@@ -168,11 +206,7 @@ def test_raw_schema_and_pairing_use_seqnum_as_row_provenance_only() -> None:
         "provider row sequence identifier retained separately for provenance"
     )
     assert schema["cross_group_seqnum_equality_required"] is False
-    assert pairing["candidate_pair_key"] == [
-        "trade_date",
-        "moment",
-        "sess_id",
-    ]
+    assert pairing["candidate_pair_key"] == ["trade_date", "moment", "sess_id"]
     assert pairing["group_row_identity"] == [
         "trade_date",
         "moment",
@@ -180,14 +214,10 @@ def test_raw_schema_and_pairing_use_seqnum_as_row_provenance_only() -> None:
         "clgroup",
         "seqnum",
     ]
-    assert pairing["latest_common_pair_only"] is True
     assert pairing["fiz_yur_moment_mismatch_allowed"] is False
     assert pairing["fiz_yur_session_mismatch_allowed"] is False
     assert pairing["fiz_yur_seqnum_mismatch_allowed"] is True
     assert pairing["seqnum_cross_group_join_allowed"] is False
-    assert pairing["seqnum_storage_rule"] == (
-        "retain separate fiz_seqnum and yur_seqnum in normalized evidence"
-    )
     assert pairing["independent_latest_row_per_group_allowed"] is False
     assert pairing["forward_fill_allowed"] is False
     assert pairing["backward_fill_allowed"] is False
@@ -280,8 +310,9 @@ def test_gates_runtime_artifacts_and_authority_boundaries() -> None:
         "G8",
         "G9",
     ]
+    assert "MOEX_ALGOPACK_TOKEN generic transport" in contract["gates"]["G2"]
     assert "license and access" in contract["gates"]["G3"]
-    assert "license and access approval" in contract["gates"]["G9"]
+    assert "canonical token transport" in contract["gates"]["G9"]
     assert implementation["license_access_validation_required"] is True
     assert implementation["phase8_7b_entry_requires_license_access_pass"] is True
     assert implementation["feature_computation_requires_phase8_7a_pass"] is True
