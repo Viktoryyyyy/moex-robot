@@ -193,11 +193,7 @@ def _utc(value: datetime) -> datetime:
 
 def build_futoi_url(trade_date: date) -> str:
     return FUTOI_ROUTE + "?" + urlencode(
-        {
-            "from": trade_date.isoformat(),
-            "till": trade_date.isoformat(),
-            "latest": 1,
-        }
+        {"from": trade_date.isoformat(), "till": trade_date.isoformat(), "latest": 1}
     )
 
 
@@ -277,9 +273,7 @@ def _map_transport_error(
     else:
         blocker = "algopack_futoi_not_available"
     return FutoiSiSourceValidationError(
-        str(error),
-        blocker=blocker,
-        retryable=error.retryable,
+        str(error), blocker=blocker, retryable=error.retryable
     )
 
 
@@ -318,8 +312,7 @@ def _json_object(payload: bytes) -> dict[str, Any]:
 
 
 def _data_rows(payload: bytes) -> tuple[list[dict[str, object]], tuple[str, ...]]:
-    root = _json_object(payload)
-    block = root.get("data")
+    block = _json_object(payload).get("data")
     if not isinstance(block, Mapping):
         raise FutoiSiSourceValidationError(
             "FUTOI response lacks data block",
@@ -358,12 +351,29 @@ def _data_rows(payload: bytes) -> tuple[list[dict[str, object]], tuple[str, ...]
     return rows, tuple(columns)
 
 
+def _validate_raw_si_ticker_identity(
+    raw_rows: Sequence[Mapping[str, object]],
+) -> None:
+    if not raw_rows:
+        raise FutoiSiSourceValidationError(
+            "FUTOI provider payload is empty",
+            blocker="incomplete_identity_coverage",
+        )
+    tickers = [str(row.get("ticker") or "").strip() for row in raw_rows]
+    if any(ticker != SOURCE_TICKER for ticker in tickers):
+        raise FutoiSiSourceValidationError(
+            "FUTOI provider rows do not all carry exact ticker Si",
+            blocker="provenance_not_sufficient",
+        )
+
+
 def _canonical_normalized_rows(
     raw_rows: Sequence[Mapping[str, object]],
     *,
     route: str,
     retrieved_at_utc: datetime,
 ) -> list[dict[str, object]]:
+    _validate_raw_si_ticker_identity(raw_rows)
     normalized, metadata = normalize_futoi(
         pd.DataFrame(raw_rows),
         secid=TARGET_SECURITY_ID,
@@ -451,14 +461,9 @@ def _integer(value: object, field: str, *, nonnegative: bool = True) -> int:
 
 
 def _required_identifier(value: object, field: str) -> str:
-    if value is None or pd.isna(value):
+    if value is None or pd.isna(value) or isinstance(value, bool):
         raise FutoiSiSourceValidationError(
-            f"FUTOI {field} identity is missing",
-            blocker="official_schema_not_stable",
-        )
-    if isinstance(value, bool):
-        raise FutoiSiSourceValidationError(
-            f"FUTOI {field} identity is malformed",
+            f"FUTOI {field} identity is missing or malformed",
             blocker="official_schema_not_stable",
         )
     if isinstance(value, (int, float)):
@@ -500,10 +505,7 @@ def _provider_timestamp(value: object, field: str) -> datetime:
                 else "numerical_or_chronology_integrity_failure"
             ),
         )
-    if parsed.tzinfo is None:
-        parsed = parsed.tz_localize(MOSCOW)
-    else:
-        parsed = parsed.tz_convert(MOSCOW)
+    parsed = parsed.tz_localize(MOSCOW) if parsed.tzinfo is None else parsed.tz_convert(MOSCOW)
     return parsed.to_pydatetime()
 
 
@@ -578,21 +580,13 @@ def parse_futoi_daily_response(
         )
     raw_rows, columns = _data_rows(payload)
     normalized_rows = _canonical_normalized_rows(
-        raw_rows,
-        route=route,
-        retrieved_at_utc=retrieved_at_utc,
+        raw_rows, route=route, retrieved_at_utc=retrieved_at_utc
     )
     participants = [_participant(row, trade_date) for row in normalized_rows]
     identities: set[tuple[date, datetime, str, str, int]] = set()
     by_pair: dict[tuple[date, datetime, str], dict[str, FutoiParticipantRow]] = {}
     for row in participants:
-        identity = (
-            row.trade_date,
-            row.moment,
-            row.sess_id,
-            row.clgroup,
-            row.seqnum,
-        )
+        identity = (row.trade_date, row.moment, row.sess_id, row.clgroup, row.seqnum)
         if identity in identities:
             raise FutoiSiSourceValidationError(
                 "FUTOI provider row identity is duplicated",
@@ -625,46 +619,47 @@ def parse_futoi_daily_response(
             blocker="official_schema_not_stable",
         )
     key, groups = latest[0]
-    fiz = groups["FIZ"]
-    yur = groups["YUR"]
+    fiz, yur = groups["FIZ"], groups["YUR"]
     if not math.isclose(fiz.pos + yur.pos, 0.0, rel_tol=0.0, abs_tol=1e-9):
         raise FutoiSiSourceValidationError(
             "FUTOI FIZ/YUR zero-sum identity failed",
             blocker="numerical_or_chronology_integrity_failure",
         )
-    pair = FutoiDailyPair(
-        source_id=SOURCE_ID,
-        source_ticker=SOURCE_TICKER,
-        target_security_id=TARGET_SECURITY_ID,
-        target_instrument_id=TARGET_INSTRUMENT_ID,
-        storage_family_code=STORAGE_FAMILY_CODE,
-        board_id=BOARD_ID,
-        engine=ENGINE,
-        market=MARKET,
-        trade_date=trade_date,
-        moment=key[1],
-        sess_id=key[2],
-        source_available_at=max(fiz.source_available_at, yur.source_available_at),
-        fiz_pos=fiz.pos,
-        fiz_pos_long=fiz.pos_long,
-        fiz_pos_short=fiz.pos_short,
-        fiz_pos_long_num=fiz.pos_long_num,
-        fiz_pos_short_num=fiz.pos_short_num,
-        fiz_seqnum=fiz.seqnum,
-        fiz_systime=fiz.source_available_at,
-        yur_pos=yur.pos,
-        yur_pos_long=yur.pos_long,
-        yur_pos_short=yur.pos_short,
-        yur_pos_long_num=yur.pos_long_num,
-        yur_pos_short_num=yur.pos_short_num,
-        yur_seqnum=yur.seqnum,
-        yur_systime=yur.source_available_at,
-        source_route=route,
-        retrieved_at_utc=_utc(retrieved_at_utc),
-        raw_payload_sha256=hashlib.sha256(payload).hexdigest(),
-        source_revision_status=SOURCE_REVISION_STATUS,
+    return (
+        FutoiDailyPair(
+            source_id=SOURCE_ID,
+            source_ticker=SOURCE_TICKER,
+            target_security_id=TARGET_SECURITY_ID,
+            target_instrument_id=TARGET_INSTRUMENT_ID,
+            storage_family_code=STORAGE_FAMILY_CODE,
+            board_id=BOARD_ID,
+            engine=ENGINE,
+            market=MARKET,
+            trade_date=trade_date,
+            moment=key[1],
+            sess_id=key[2],
+            source_available_at=max(fiz.source_available_at, yur.source_available_at),
+            fiz_pos=fiz.pos,
+            fiz_pos_long=fiz.pos_long,
+            fiz_pos_short=fiz.pos_short,
+            fiz_pos_long_num=fiz.pos_long_num,
+            fiz_pos_short_num=fiz.pos_short_num,
+            fiz_seqnum=fiz.seqnum,
+            fiz_systime=fiz.source_available_at,
+            yur_pos=yur.pos,
+            yur_pos_long=yur.pos_long,
+            yur_pos_short=yur.pos_short,
+            yur_pos_long_num=yur.pos_long_num,
+            yur_pos_short_num=yur.pos_short_num,
+            yur_seqnum=yur.seqnum,
+            yur_systime=yur.source_available_at,
+            source_route=route,
+            retrieved_at_utc=_utc(retrieved_at_utc),
+            raw_payload_sha256=hashlib.sha256(payload).hexdigest(),
+            source_revision_status=SOURCE_REVISION_STATUS,
+        ),
+        columns,
     )
-    return pair, columns
 
 
 def load_futoi_daily_pair(
@@ -682,9 +677,8 @@ def load_futoi_daily_pair(
             blocker="token_env_not_configured",
         )
     route = build_futoi_url(trade_date)
-    payload = transport(route, token)
     return parse_futoi_daily_response(
-        payload,
+        transport(route, token),
         trade_date=trade_date,
         route=route,
         retrieved_at_utc=clock(),
@@ -817,14 +811,11 @@ def build_futoi_pit_acceptance_matrix(
         else:
             try:
                 validate_prior_session_pair(
-                    pair,
-                    target_trade_date=target,
-                    prior_trade_date=prior,
+                    pair, target_trade_date=target, prior_trade_date=prior
                 )
             except FutoiSiSourceValidationError as exc:
                 source_row = _empty_acceptance_source()
-                reason = str(exc)
-                blocker = exc.blocker
+                reason, blocker = str(exc), exc.blocker
             else:
                 source_row = _accepted_pair_record(pair)
                 accepted = True
@@ -872,9 +863,7 @@ def coverage_by_source(
     validation_index = pd.MultiIndex.from_frame(
         validation_identities.loc[:, identity_columns].astype(str)
     )
-    matrix_index = pd.MultiIndex.from_frame(
-        matrix.loc[:, identity_columns].astype(str)
-    )
+    matrix_index = pd.MultiIndex.from_frame(matrix.loc[:, identity_columns].astype(str))
     validation_mask = matrix_index.isin(validation_index)
     complete = matrix.futoi_trade_date.notna()
     validation_count = int(validation_mask.sum())
@@ -886,9 +875,7 @@ def coverage_by_source(
                 "eligible_identity_count": len(matrix),
                 "eligible_covered_count": int(complete.sum()),
                 "eligible_missing_count": int((~complete).sum()),
-                "eligible_coverage_pct": (
-                    float(complete.mean() * 100.0) if len(matrix) else 0.0
-                ),
+                "eligible_coverage_pct": float(complete.mean() * 100.0) if len(matrix) else 0.0,
                 "validation_identity_count": validation_count,
                 "validation_covered_count": validation_covered,
                 "validation_missing_count": validation_count - validation_covered,
@@ -953,11 +940,7 @@ def validate_license_access_evidence(
         "evidence_source": evidence_source,
         "verified_at": verified_at or None,
         "status": "passed" if passed else "blocked",
-        "blocker": (
-            None
-            if passed
-            else "provider_license_and_access_terms_not_documented"
-        ),
+        "blocker": None if passed else "provider_license_and_access_terms_not_documented",
     }
     return passed, normalized
 
@@ -991,10 +974,8 @@ def evaluate_gates(
     ).any()
     g6 = (
         len(matrix) == EXPECTED_ELIGIBLE_IDENTITIES
-        and int(coverage_row.eligible_covered_count)
-        == EXPECTED_ELIGIBLE_IDENTITIES
-        and int(coverage_row.validation_covered_count)
-        == EXPECTED_VALIDATION_IDENTITIES
+        and int(coverage_row.eligible_covered_count) == EXPECTED_ELIGIBLE_IDENTITIES
+        and int(coverage_row.validation_covered_count) == EXPECTED_VALIDATION_IDENTITIES
     )
     g7 = numerical_integrity_passed
     g8 = provenance_passed and not diagnostics[
@@ -1009,7 +990,7 @@ def evaluate_gates(
         ]
     ].any().any()
     values = [g1, g2, g3, g4, g5, g6, g7, g8]
-    g9 = all(values)
+    statuses = values + [all(values)]
     names = (
         "G1_immutable_inputs",
         "G2_exact_route_and_transport",
@@ -1021,7 +1002,6 @@ def evaluate_gates(
         "G8_provenance_and_no_leakage",
         "G9_final_acceptance",
     )
-    statuses = values + [g9]
     return {
         name: {"passed": bool(status), "status": "passed" if status else "failed"}
         for name, status in zip(names, statuses, strict=True)
@@ -1062,8 +1042,7 @@ def write_validation_artifacts(
             encoding="utf-8",
         )
     pd.DataFrame(
-        [pair.as_record() for pair in pairs],
-        columns=DAILY_POSITIONING_COLUMNS,
+        [pair.as_record() for pair in pairs], columns=DAILY_POSITIONING_COLUMNS
     ).to_parquet(output_dir / "futoi_si_daily_positioning.parquet", index=False)
     matrix.to_parquet(output_dir / "futoi_si_pit_acceptance_matrix.parquet", index=False)
     coverage.to_csv(output_dir / "coverage_by_source.csv", index=False)
