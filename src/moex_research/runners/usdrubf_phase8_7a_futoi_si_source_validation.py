@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from moex_data.futures.futoi_raw_loader import SCHEMA_FUTOI_RAW, normalize_futoi
 from moex_research.external_data import moex_algopack_http as algopack_http
 
 PROJECT: Final[str] = "MOEX_Bot"
@@ -36,6 +37,8 @@ FORECAST_ANCHOR: Final[time] = time(6, 0)
 SOURCE_REVISION_STATUS: Final[str] = "algopack_futoi_current_revision"
 EXPECTED_ELIGIBLE_IDENTITIES: Final[int] = 472
 EXPECTED_VALIDATION_IDENTITIES: Final[int] = 320
+EXPECTED_LICENSE_PROVIDER: Final[str] = "MOEX AlgoPack FUTOI"
+EXPECTED_LICENSE_PRODUCT: Final[str] = "AlgoPack FUTOI"
 PARTICIPANT_GROUPS: Final[tuple[str, str]] = ("FIZ", "YUR")
 RAW_REQUIRED_FIELDS: Final[tuple[str, ...]] = (
     "sess_id",
@@ -266,7 +269,7 @@ def _map_transport_error(
         markers = _marker_text(error)
         blocker = (
             "futoi_si_not_available"
-            if any(word in markers for word in ("ticker", "security", "source", "si"))
+            if any(word in markers for word in ("ticker", "security", "source"))
             else "official_route_not_reproducible"
         )
     elif outcome == "algopack_http_redirect_refused":
@@ -331,14 +334,13 @@ def _data_rows(payload: bytes) -> tuple[list[dict[str, object]], tuple[str, ...]
         )
     if not set(RAW_REQUIRED_FIELDS).issubset(columns):
         missing = sorted(set(RAW_REQUIRED_FIELDS).difference(columns))
-        blocker = (
-            "point_in_time_cutoff_not_provable"
-            if "systime" in missing
-            else "official_schema_not_stable"
-        )
         raise FutoiSiSourceValidationError(
             "FUTOI schema is missing required fields: " + ",".join(missing),
-            blocker=blocker,
+            blocker=(
+                "point_in_time_cutoff_not_provable"
+                if "systime" in missing
+                else "official_schema_not_stable"
+            ),
         )
     if not isinstance(data, list):
         raise FutoiSiSourceValidationError(
@@ -354,6 +356,67 @@ def _data_rows(payload: bytes) -> tuple[list[dict[str, object]], tuple[str, ...]
             )
         rows.append(dict(zip(columns, raw, strict=True)))
     return rows, tuple(columns)
+
+
+def _canonical_normalized_rows(
+    raw_rows: Sequence[Mapping[str, object]],
+    *,
+    route: str,
+    retrieved_at_utc: datetime,
+) -> list[dict[str, object]]:
+    normalized, metadata = normalize_futoi(
+        pd.DataFrame(raw_rows),
+        secid=TARGET_SECURITY_ID,
+        family_code=STORAGE_FAMILY_CODE,
+        board=BOARD_ID,
+        source_url=route,
+        source_ticker=SOURCE_TICKER,
+        ingest_ts=_utc(retrieved_at_utc).isoformat().replace("+00:00", "Z"),
+        short_history_flag=False,
+        calendar_status="phase8_7a_source_validation",
+    )
+    error = str(metadata.get("error") or "").strip()
+    if error or normalized.empty or len(normalized) != len(raw_rows):
+        raise FutoiSiSourceValidationError(
+            "canonical FUTOI normalizer rejected or filtered provider rows"
+            + (f": {error}" if error else ""),
+            blocker="official_schema_not_stable",
+        )
+    required = {
+        "trade_date",
+        "moment",
+        "systime",
+        "secid",
+        "family_code",
+        "source_ticker",
+        "source_scope",
+        "clgroup",
+        "pos",
+        "pos_long",
+        "pos_short",
+        "pos_long_num",
+        "pos_short_num",
+        "sess_id",
+        "seqnum",
+        "schema_version",
+    }
+    if not required.issubset(normalized.columns):
+        raise FutoiSiSourceValidationError(
+            "canonical FUTOI normalized schema is incomplete",
+            blocker="official_schema_not_stable",
+        )
+    if (
+        not normalized["secid"].astype(str).eq(TARGET_SECURITY_ID).all()
+        or not normalized["family_code"].astype(str).eq(STORAGE_FAMILY_CODE).all()
+        or not normalized["source_ticker"].astype(str).str.upper().eq("SI").all()
+        or not normalized["source_scope"].astype(str).eq("family_aggregate_futoi").all()
+        or not normalized["schema_version"].astype(str).eq(SCHEMA_FUTOI_RAW).all()
+    ):
+        raise FutoiSiSourceValidationError(
+            "canonical FUTOI storage or schema identity mismatch",
+            blocker="provenance_not_sufficient",
+        )
+    return normalized.to_dict(orient="records")
 
 
 def _number(value: object, field: str) -> float:
@@ -387,16 +450,39 @@ def _integer(value: object, field: str, *, nonnegative: bool = True) -> int:
     return int(number)
 
 
+def _required_identifier(value: object, field: str) -> str:
+    if value is None or pd.isna(value):
+        raise FutoiSiSourceValidationError(
+            f"FUTOI {field} identity is missing",
+            blocker="official_schema_not_stable",
+        )
+    if isinstance(value, bool):
+        raise FutoiSiSourceValidationError(
+            f"FUTOI {field} identity is malformed",
+            blocker="official_schema_not_stable",
+        )
+    if isinstance(value, (int, float)):
+        number = float(value)
+        if not math.isfinite(number) or not number.is_integer():
+            raise FutoiSiSourceValidationError(
+                f"FUTOI {field} identity is malformed",
+                blocker="official_schema_not_stable",
+            )
+        text = str(int(number))
+    else:
+        text = str(value).strip()
+    if not text:
+        raise FutoiSiSourceValidationError(
+            f"FUTOI {field} identity is missing",
+            blocker="official_schema_not_stable",
+        )
+    return text
+
+
 def _provider_timestamp(value: object, field: str) -> datetime:
-    text = str(value or "").strip()
-    parsed: datetime | None = None
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
-        try:
-            parsed = datetime.strptime(text, fmt)
-            break
-        except ValueError:
-            pass
-    if parsed is None:
+    try:
+        parsed = pd.Timestamp(value)
+    except (TypeError, ValueError) as exc:
         raise FutoiSiSourceValidationError(
             f"FUTOI {field} timestamp is malformed",
             blocker=(
@@ -404,17 +490,33 @@ def _provider_timestamp(value: object, field: str) -> datetime:
                 if field == "systime"
                 else "numerical_or_chronology_integrity_failure"
             ),
-        )
-    return parsed.replace(tzinfo=MOSCOW)
-
-
-def _participant(row: Mapping[str, object], requested_date: date) -> FutoiParticipantRow:
-    ticker = str(row.get("ticker") or "").strip()
-    group = str(row.get("clgroup") or "").strip().upper()
-    if ticker != SOURCE_TICKER:
+        ) from exc
+    if pd.isna(parsed):
         raise FutoiSiSourceValidationError(
-            "FUTOI response contains a substituted ticker",
-            blocker="provenance_not_sufficient",
+            f"FUTOI {field} timestamp is missing",
+            blocker=(
+                "point_in_time_cutoff_not_provable"
+                if field == "systime"
+                else "numerical_or_chronology_integrity_failure"
+            ),
+        )
+    if parsed.tzinfo is None:
+        parsed = parsed.tz_localize(MOSCOW)
+    else:
+        parsed = parsed.tz_convert(MOSCOW)
+    return parsed.to_pydatetime()
+
+
+def _participant(
+    row: Mapping[str, object],
+    requested_date: date,
+) -> FutoiParticipantRow:
+    trade_date = date.fromisoformat(str(row.get("trade_date")))
+    group = str(row.get("clgroup") or "").strip().upper()
+    if trade_date != requested_date:
+        raise FutoiSiSourceValidationError(
+            "canonical FUTOI trade date differs from the requested date",
+            blocker="numerical_or_chronology_integrity_failure",
         )
     if group not in PARTICIPANT_GROUPS:
         raise FutoiSiSourceValidationError(
@@ -450,8 +552,8 @@ def _participant(row: Mapping[str, object], requested_date: date) -> FutoiPartic
         trade_date=requested_date,
         moment=moment,
         source_available_at=systime,
-        sess_id=str(row.get("sess_id") or "").strip(),
-        ticker=ticker,
+        sess_id=_required_identifier(row.get("sess_id"), "sess_id"),
+        ticker=SOURCE_TICKER,
         clgroup=group,
         pos=pos,
         pos_long=pos_long,
@@ -469,14 +571,18 @@ def parse_futoi_daily_response(
     route: str,
     retrieved_at_utc: datetime,
 ) -> tuple[FutoiDailyPair, tuple[str, ...]]:
-    found_date = _exact_futoi_route_date(route)
-    if found_date != trade_date:
+    if _exact_futoi_route_date(route) != trade_date:
         raise FutoiSiSourceValidationError(
             "FUTOI route date differs from the requested date",
             blocker="provenance_not_sufficient",
         )
     raw_rows, columns = _data_rows(payload)
-    participants = [_participant(row, trade_date) for row in raw_rows]
+    normalized_rows = _canonical_normalized_rows(
+        raw_rows,
+        route=route,
+        retrieved_at_utc=retrieved_at_utc,
+    )
+    participants = [_participant(row, trade_date) for row in normalized_rows]
     identities: set[tuple[date, datetime, str, str, int]] = set()
     by_pair: dict[tuple[date, datetime, str], dict[str, FutoiParticipantRow]] = {}
     for row in participants:
@@ -526,7 +632,6 @@ def parse_futoi_daily_response(
             "FUTOI FIZ/YUR zero-sum identity failed",
             blocker="numerical_or_chronology_integrity_failure",
         )
-    retrieved = _utc(retrieved_at_utc)
     pair = FutoiDailyPair(
         source_id=SOURCE_ID,
         source_ticker=SOURCE_TICKER,
@@ -555,7 +660,7 @@ def parse_futoi_daily_response(
         yur_seqnum=yur.seqnum,
         yur_systime=yur.source_available_at,
         source_route=route,
-        retrieved_at_utc=retrieved,
+        retrieved_at_utc=_utc(retrieved_at_utc),
         raw_payload_sha256=hashlib.sha256(payload).hexdigest(),
         source_revision_status=SOURCE_REVISION_STATUS,
     )
@@ -598,10 +703,10 @@ def validate_prior_session_pair(
         or pair.moment.date() != prior_trade_date
         or pair.source_available_at < pair.moment
         or pair.moment >= anchor
-        or pair.source_available_at >= anchor
+        or pair.source_available_at > anchor
     ):
         raise FutoiSiSourceValidationError(
-            "selected FUTOI Si pair cannot prove exact prior-session availability before the forecast anchor",
+            "selected FUTOI Si pair cannot prove exact prior-session availability before or at the forecast anchor",
             blocker="point_in_time_cutoff_not_provable",
         )
 
@@ -706,7 +811,7 @@ def build_futoi_pit_acceptance_matrix(
         blocker: str | None = None
         candidate = None if pair is None else pair.trade_date.isoformat()
         if pair is None:
-            source = _empty_acceptance_source()
+            source_row = _empty_acceptance_source()
             reason = "missing_exact_prior_trade_date_futoi_pair"
             blocker = "incomplete_identity_coverage"
         else:
@@ -717,11 +822,11 @@ def build_futoi_pit_acceptance_matrix(
                     prior_trade_date=prior,
                 )
             except FutoiSiSourceValidationError as exc:
-                source = _empty_acceptance_source()
+                source_row = _empty_acceptance_source()
                 reason = str(exc)
                 blocker = exc.blocker
             else:
-                source = _accepted_pair_record(pair)
+                source_row = _accepted_pair_record(pair)
                 accepted = True
                 reason = "accepted_exact_prior_trade_date_futoi_pair"
         rows.append(
@@ -729,7 +834,7 @@ def build_futoi_pit_acceptance_matrix(
                 "target_trade_date": str(identity.target_trade_date),
                 "target_instrument_id": str(identity.target_instrument_id),
                 "prior_trade_date": str(identity.prior_trade_date),
-                **source,
+                **source_row,
             }
         )
         diagnostics.append(
@@ -750,24 +855,26 @@ def build_futoi_pit_acceptance_matrix(
             }
         )
     matrix = pd.DataFrame(rows, columns=ACCEPTANCE_MATRIX_COLUMNS)
-    diagnostics_frame = pd.DataFrame(diagnostics, columns=DIAGNOSTIC_COLUMNS)
+    diagnostic_frame = pd.DataFrame(diagnostics, columns=DIAGNOSTIC_COLUMNS)
     if set(matrix.columns) & FORBIDDEN_ACCEPTANCE_MATRIX_FIELDS:
         raise FutoiSiSourceValidationError(
             "acceptance matrix contains target-derived fields",
             blocker="target_derived_field_leakage",
         )
-    return matrix, diagnostics_frame
+    return matrix, diagnostic_frame
 
 
 def coverage_by_source(
     matrix: pd.DataFrame,
     validation_identities: pd.DataFrame,
 ) -> pd.DataFrame:
-    identities = ["target_trade_date", "target_instrument_id"]
+    identity_columns = ["target_trade_date", "target_instrument_id"]
     validation_index = pd.MultiIndex.from_frame(
-        validation_identities.loc[:, identities].astype(str)
+        validation_identities.loc[:, identity_columns].astype(str)
     )
-    matrix_index = pd.MultiIndex.from_frame(matrix.loc[:, identities].astype(str))
+    matrix_index = pd.MultiIndex.from_frame(
+        matrix.loc[:, identity_columns].astype(str)
+    )
     validation_mask = matrix_index.isin(validation_index)
     complete = matrix.futoi_trade_date.notna()
     validation_count = int(validation_mask.sum())
@@ -795,36 +902,55 @@ def coverage_by_source(
     )
 
 
+def _aware_iso_timestamp(value: object) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None and parsed.utcoffset() is not None
+
+
 def validate_license_access_evidence(
     evidence: Mapping[str, object],
 ) -> tuple[bool, dict[str, object]]:
-    required_text = ("provider", "product", "redistribution_policy", "evidence_source")
-    text_ok = all(str(evidence.get(name) or "").strip() for name in required_text)
-    permission_fields = (
-        "account_entitlement",
-        "permitted_research_use",
-        "permitted_local_raw_storage",
-        "permitted_derived_feature_use",
+    provider_identity = bool(
+        evidence.get("provider") == EXPECTED_LICENSE_PROVIDER
+        and evidence.get("product") == EXPECTED_LICENSE_PRODUCT
     )
-    permission_ok = all(evidence.get(name) is True for name in permission_fields)
+    permissions = all(
+        evidence.get(name) is True
+        for name in (
+            "account_entitlement",
+            "permitted_research_use",
+            "permitted_local_raw_storage",
+            "permitted_derived_feature_use",
+        )
+    )
+    redistribution = str(evidence.get("redistribution_policy") or "").strip()
+    evidence_source = str(evidence.get("evidence_source") or "").strip()
     verified_at = str(evidence.get("verified_at") or "").strip()
-    timestamp_ok = False
-    if verified_at:
-        try:
-            parsed = datetime.fromisoformat(verified_at.replace("Z", "+00:00"))
-            timestamp_ok = parsed.tzinfo is not None and parsed.utcoffset() is not None
-        except ValueError:
-            timestamp_ok = False
-    passed = bool(text_ok and permission_ok and timestamp_ok)
+    passed = bool(
+        provider_identity
+        and permissions
+        and redistribution
+        and evidence_source
+        and _aware_iso_timestamp(verified_at)
+    )
     normalized = {
         "provider": str(evidence.get("provider") or ""),
         "product": str(evidence.get("product") or ""),
+        "expected_provider": EXPECTED_LICENSE_PROVIDER,
+        "expected_product": EXPECTED_LICENSE_PRODUCT,
+        "provider_identity_verified": provider_identity,
         "account_entitlement": evidence.get("account_entitlement") is True,
         "permitted_research_use": evidence.get("permitted_research_use") is True,
         "permitted_local_raw_storage": evidence.get("permitted_local_raw_storage") is True,
         "permitted_derived_feature_use": evidence.get("permitted_derived_feature_use") is True,
-        "redistribution_policy": str(evidence.get("redistribution_policy") or ""),
-        "evidence_source": str(evidence.get("evidence_source") or ""),
+        "redistribution_policy": redistribution,
+        "evidence_source": evidence_source,
         "verified_at": verified_at or None,
         "status": "passed" if passed else "blocked",
         "blocker": (
@@ -935,10 +1061,10 @@ def write_validation_artifacts(
             json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-    pd.DataFrame([pair.as_record() for pair in pairs], columns=DAILY_POSITIONING_COLUMNS).to_parquet(
-        output_dir / "futoi_si_daily_positioning.parquet",
-        index=False,
-    )
+    pd.DataFrame(
+        [pair.as_record() for pair in pairs],
+        columns=DAILY_POSITIONING_COLUMNS,
+    ).to_parquet(output_dir / "futoi_si_daily_positioning.parquet", index=False)
     matrix.to_parquet(output_dir / "futoi_si_pit_acceptance_matrix.parquet", index=False)
     coverage.to_csv(output_dir / "coverage_by_source.csv", index=False)
     diagnostics.to_csv(output_dir / "session_alignment_diagnostics.csv", index=False)
@@ -958,10 +1084,13 @@ __all__ = [
     "DAILY_POSITIONING_COLUMNS",
     "DIAGNOSTIC_COLUMNS",
     "EXPECTED_ELIGIBLE_IDENTITIES",
+    "EXPECTED_LICENSE_PRODUCT",
+    "EXPECTED_LICENSE_PROVIDER",
     "EXPECTED_VALIDATION_IDENTITIES",
     "FUTOI_PATH",
     "FUTOI_ROUTE",
     "FORECAST_ANCHOR",
+    "FORBIDDEN_ACCEPTANCE_MATRIX_FIELDS",
     "FutoiDailyPair",
     "FutoiParticipantRow",
     "FutoiSiSourceValidationError",
