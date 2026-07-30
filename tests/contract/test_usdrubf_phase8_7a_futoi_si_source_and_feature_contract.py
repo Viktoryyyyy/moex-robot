@@ -34,7 +34,7 @@ def test_contract_identity_and_canonical_futoi_si_source() -> None:
     source = contract["source_identity"]
 
     assert identity["project"] == "MOEX_Bot"
-    assert identity["contract_version"] == "1.2"
+    assert identity["contract_version"] == "1.3"
     assert identity["phase"] == "8.7A"
     assert identity["task_id"] == (
         "ema_3_19_ai_phase_8_7a_futoi_si_source_contract_v1"
@@ -59,11 +59,15 @@ def test_contract_points_to_implemented_futoi_dataset() -> None:
     components = contract["existing_canonical_components"]
     implementation = contract["implementation_scope_next_pr"]
 
-    assert components["orchestration_module"] == (
+    assert components["availability_orchestration_reference"] == (
         "moex_data.futures.all_universe_futoi_raw_backfill_slice"
     )
-    assert components["implemented_dataset_producer"] == (
+    assert components["orchestration_reuse_required"] is False
+    assert components["normalizer_module"] == (
         "moex_data.futures.futoi_raw_loader"
+    )
+    assert components["transport_module"] == (
+        "moex_data.futures.liquidity_history_metrics_probe"
     )
     assert components["implemented_dataset_contract"] == (
         "contracts/datasets/futures_futoi_5m_raw_contract.md"
@@ -73,10 +77,18 @@ def test_contract_points_to_implemented_futoi_dataset() -> None:
     assert components["duplicate_source_client_allowed"] is False
     assert components["required_source_selection"] == "explicit_source_ticker_si"
     assert components["source_ticker_required"] == "Si"
+    assert components["canonical_storage_secid"] == "USDRUBF"
+    assert components["canonical_storage_family_code"] == "USDRUBF"
+    assert components["source_ticker_must_not_be_used_as_storage_family"] is True
+    assert components["secid_and_family_filter_intersection_for_si_allowed"] is False
     assert implementation[
         "must_reuse_existing_normalizer_and_transport_primitives"
     ] is True
     assert implementation["explicit_si_source_selection_required"] is True
+    assert implementation["all_universe_orchestrator_reuse_required"] is False
+    assert implementation["canonical_storage_secid"] == "USDRUBF"
+    assert implementation["canonical_storage_family_code"] == "USDRUBF"
+    assert implementation["source_ticker_required"] == "Si"
     assert implementation["duplicate_http_transport_allowed"] is False
 
 
