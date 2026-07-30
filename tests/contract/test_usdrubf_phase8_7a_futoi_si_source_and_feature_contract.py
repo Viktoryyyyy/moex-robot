@@ -34,6 +34,7 @@ def test_contract_identity_and_canonical_futoi_si_source() -> None:
     source = contract["source_identity"]
 
     assert identity["project"] == "MOEX_Bot"
+    assert identity["contract_version"] == "1.1"
     assert identity["phase"] == "8.7A"
     assert identity["task_id"] == (
         "ema_3_19_ai_phase_8_7a_futoi_si_source_contract_v1"
@@ -56,20 +57,28 @@ def test_contract_identity_and_canonical_futoi_si_source() -> None:
     assert source["exact_contract_futoi_scope_allowed"] is False
 
 
-def test_existing_canonical_components_must_be_reused() -> None:
+def test_contract_points_to_implemented_futoi_dataset() -> None:
     contract = load_contract()
     components = contract["existing_canonical_components"]
     implementation = contract["implementation_scope_next_pr"]
 
-    assert components["producer_module"] == (
+    assert components["orchestration_module"] == (
         "moex_data.futures.all_universe_futoi_raw_backfill_slice"
     )
-    assert components["normalizer_module"] == (
+    assert components["implemented_dataset_producer"] == (
         "moex_data.futures.futoi_raw_loader"
     )
-    assert components["dataset_contract"] == (
-        "contracts/datasets/futures_futoi_raw.v1.yaml"
+    assert components["implemented_dataset_contract"] == (
+        "contracts/datasets/futures_futoi_5m_raw_contract.md"
     )
+    assert components["implemented_schema_version"] == (
+        "futures_futoi_5m_raw.v1"
+    )
+    assert components["implemented_path_pattern"] == (
+        "${MOEX_DATA_ROOT}/futures/futoi_raw/trade_date={trade_date}/"
+        "family={family_code}/secid={secid}/part.parquet"
+    )
+    assert components["conversion_to_market_supplementary_dataset_required"] is False
     assert components["normalizer_and_transport_reuse_required"] is True
     assert components["duplicate_source_client_allowed"] is False
     assert components["component_modification_allowed_in_this_contract_task"] is False
@@ -185,39 +194,91 @@ def test_pit_and_revision_semantics_must_be_proven() -> None:
     assert counts["validation_identity_count"] == 320
 
 
-def test_feature_contract_includes_owner_requested_changes() -> None:
+def test_base_and_one_day_feature_formulas_are_frozen() -> None:
     contract = load_contract()
     features = contract["feature_semantics_for_phase8_7b"]
+    formulas = features["base_level_formulas"]
 
     assert features["computation_authorized_in_phase8_7a"] is False
     assert features["model_evaluation_authorized_in_phase8_7a"] is False
     assert features["short_storage_semantics"] == (
-        "pos_short is signed and non-positive; short_abs = abs(pos_short)"
+        "pos_short is signed and non-positive; short_abs = -pos_short"
+    )
+    assert formulas["fiz_short_abs"] == "-FIZ.pos_short"
+    assert formulas["fiz_gross_position"] == "FIZ.pos_long - FIZ.pos_short"
+    assert formulas["yur_short_abs"] == "-YUR.pos_short"
+    assert formulas["yur_gross_position"] == "YUR.pos_long - YUR.pos_short"
+    assert features["one_day_change_rule"] == (
+        "delta_x_1d = x_D - x_previous_accepted_source_trade_date"
     )
     assert "delta_fiz_pos_1d" in features["one_day_changes"]
     assert "delta_yur_pos_1d" in features["one_day_changes"]
-    assert "delta_fiz_pos_long_1d" in features["one_day_changes"]
-    assert "delta_fiz_short_abs_1d" in features["one_day_changes"]
-    assert features["previous_only_rolling_windows"] == [5, 20, 60]
-    assert features["rolling_rule"] == (
-        "mean and standard deviation use only D-1 and earlier observations; "
-        "D is excluded"
+    pct = features["percentage_change_policy"]
+    assert pct["formula"] == "pct_delta_x_1d = (x_D - x_prev) / abs(x_prev)"
+    assert pct["zero_denominator_result"] == "null"
+    assert pct["infinite_value_allowed"] is False
+
+
+def test_previous_only_rolling_semantics_are_frozen() -> None:
+    contract = load_contract()
+    rolling = contract["feature_semantics_for_phase8_7b"]["rolling_policy"]
+
+    assert rolling["windows"] == [5, 20, 60]
+    assert rolling["members"] == (
+        "the immediately preceding accepted source trade dates D-1 and earlier"
     )
-    assert features["within_group_net_change_decomposition"]["formula"] == (
+    assert rolling["current_D_included"] is False
+    assert rolling["minimum_observations"] == "exactly the full window size"
+    assert rolling["partial_window_allowed"] is False
+    assert rolling["missing_member_or_value_result"] == "null"
+    assert rolling["calendar_fill_allowed"] is False
+    assert rolling["standard_deviation"] == (
+        "population standard deviation with ddof=0"
+    )
+    assert rolling["zero_standard_deviation_zscore_result"] == "null"
+    assert rolling["zero_mean_relative_deviation_result"] == "null"
+    assert rolling["absolute_deviation_formula"] == (
+        "x_minus_mean_prev_w = x_D - mean_prev_w"
+    )
+    assert rolling["relative_deviation_formula"] == (
+        "x_relative_to_mean_prev_w = (x_D - mean_prev_w) / abs(mean_prev_w)"
+    )
+    assert rolling["zscore_formula"] == (
+        "x_zscore_prev_w = (x_D - mean_prev_w) / population_std_prev_w"
+    )
+
+
+def test_change_structure_and_divergence_formulas_are_frozen() -> None:
+    contract = load_contract()
+    features = contract["feature_semantics_for_phase8_7b"]
+    decomposition = features["within_group_net_change_decomposition"]
+    structure = features["participant_change_structure"]
+    divergence = features["divergence_formulas"]
+
+    assert decomposition["formula"] == (
         "delta_pos = delta_pos_long - delta_short_abs"
     )
-
-
-def test_change_structure_is_observed_not_causal() -> None:
-    contract = load_contract()
-    owner = contract["owner_decision"]
-    structure = contract["feature_semantics_for_phase8_7b"][
-        "participant_change_structure"
+    assert decomposition["opening_long_component"] == "max(delta_pos_long,0)"
+    assert decomposition["closing_short_component"] == (
+        "max(-delta_short_abs,0)"
+    )
+    assert decomposition["closing_long_component"] == "max(-delta_pos_long,0)"
+    assert decomposition["opening_short_component"] == (
+        "max(delta_short_abs,0)"
+    )
+    assert decomposition["classification_values"] == [
+        "OPENING_LONG",
+        "CLOSING_SHORT",
+        "CLOSING_LONG",
+        "OPENING_SHORT",
+        "MIXED",
+        "NO_MATERIAL_CHANGE",
     ]
-
-    assert owner["causal_attribution_allowed"] is False
-    assert structure["group_activity_measure"] == (
-        "abs(delta_pos_long) + abs(delta_short_abs)"
+    assert structure["fiz_group_activity"] == (
+        "abs(delta_fiz_pos_long_1d) + abs(delta_fiz_short_abs_1d)"
+    )
+    assert structure["yur_group_activity"] == (
+        "abs(delta_yur_pos_long_1d) + abs(delta_yur_short_abs_1d)"
     )
     assert structure["dominant_group_values"] == [
         "FIZ",
@@ -228,6 +289,19 @@ def test_change_structure_is_observed_not_causal() -> None:
     assert "does not identify trade initiator or causality" in structure[
         "interpretation"
     ]
+    assert divergence["fiz_yur_net_divergence"] == "fiz_pos - yur_pos"
+    assert divergence["delta_fiz_yur_net_divergence_1d"] == (
+        "delta_fiz_pos_1d - delta_yur_pos_1d"
+    )
+    assert divergence["fiz_yur_gross_activity_divergence"] == (
+        "fiz_gross_position - yur_gross_position"
+    )
+    assert divergence["fiz_yur_long_change_divergence"] == (
+        "delta_fiz_pos_long_1d - delta_yur_pos_long_1d"
+    )
+    assert divergence["fiz_yur_short_change_divergence"] == (
+        "delta_fiz_short_abs_1d - delta_yur_short_abs_1d"
+    )
 
 
 def test_acceptance_matrix_has_no_target_leakage() -> None:
