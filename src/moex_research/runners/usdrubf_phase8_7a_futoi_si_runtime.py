@@ -99,50 +99,26 @@ def _input_file(value: object, suffix: str, flag: str) -> Path:
 
 def request_from_args(args: argparse.Namespace) -> RuntimeRequest:
     request = RuntimeRequest(
-        modeling_dataset_path=_input_file(
-            args.modeling_dataset_path,
-            ".parquet",
-            REQUIRED_ARGS[0],
-        ),
-        dataset_manifest_path=_input_file(
-            args.dataset_manifest_path,
-            ".json",
-            REQUIRED_ARGS[1],
-        ),
-        feature_schema_path=_input_file(
-            args.feature_schema_path,
-            ".json",
-            REQUIRED_ARGS[2],
-        ),
+        modeling_dataset_path=_input_file(args.modeling_dataset_path, ".parquet", REQUIRED_ARGS[0]),
+        dataset_manifest_path=_input_file(args.dataset_manifest_path, ".json", REQUIRED_ARGS[1]),
+        feature_schema_path=_input_file(args.feature_schema_path, ".json", REQUIRED_ARGS[2]),
         m0_validation_predictions_path=_input_file(
-            args.m0_validation_predictions_path,
-            ".parquet",
-            REQUIRED_ARGS[3],
+            args.m0_validation_predictions_path, ".parquet", REQUIRED_ARGS[3]
         ),
         phase83_aggregate_metrics_path=_input_file(
-            getattr(args, "phase8_3_aggregate_metrics_path"),
-            ".json",
-            REQUIRED_ARGS[4],
+            getattr(args, "phase8_3_aggregate_metrics_path"), ".json", REQUIRED_ARGS[4]
         ),
         phase83_gate_results_path=_input_file(
-            getattr(args, "phase8_3_gate_results_path"),
-            ".json",
-            REQUIRED_ARGS[5],
+            getattr(args, "phase8_3_gate_results_path"), ".json", REQUIRED_ARGS[5]
         ),
         experiment_contract_path=_input_file(
-            args.experiment_contract_path,
-            ".json",
-            REQUIRED_ARGS[6],
+            args.experiment_contract_path, ".json", REQUIRED_ARGS[6]
         ),
         license_access_evidence_path=_input_file(
-            args.license_access_evidence_path,
-            ".json",
-            REQUIRED_ARGS[7],
+            args.license_access_evidence_path, ".json", REQUIRED_ARGS[7]
         ),
         pit_semantics_evidence_path=_input_file(
-            args.pit_semantics_evidence_path,
-            ".json",
-            REQUIRED_ARGS[8],
+            args.pit_semantics_evidence_path, ".json", REQUIRED_ARGS[8]
         ),
         output_dir=Path(str(args.output_dir).strip()),
         run_id=str(args.run_id).strip(),
@@ -163,11 +139,7 @@ def request_from_args(args: argparse.Namespace) -> RuntimeRequest:
             "output directory must not pre-exist",
             blocker="provenance_not_sufficient",
         )
-    paths = [
-        value
-        for name, value in request.__dict__.items()
-        if name.endswith("_path")
-    ]
+    paths = [value for name, value in request.__dict__.items() if name.endswith("_path")]
     if len({path.resolve() for path in paths}) != len(paths):
         raise validation.FutoiSiSourceValidationError(
             "runtime input files must be distinct",
@@ -217,15 +189,6 @@ def _frozen_input_inventory(request: RuntimeRequest) -> dict[str, Path]:
     }
 
 
-def _input_inventory(request: RuntimeRequest) -> dict[str, Path]:
-    return {
-        **_frozen_input_inventory(request),
-        "experiment_contract": request.experiment_contract_path,
-        "license_access_evidence": request.license_access_evidence_path,
-        "pit_semantics_evidence": request.pit_semantics_evidence_path,
-    }
-
-
 def _verify_contract(path: Path) -> dict[str, Any]:
     contract = _json(path)
     identity = contract.get("contract_identity")
@@ -247,8 +210,7 @@ def _verify_contract(path: Path) -> dict[str, Any]:
             "FUTOI experiment contract mismatch",
             blocker="provenance_not_sufficient",
         )
-    observed = _git_blob_sha1(path)
-    if observed != CONTRACT_GIT_BLOB_SHA1:
+    if _git_blob_sha1(path) != CONTRACT_GIT_BLOB_SHA1:
         raise validation.FutoiSiSourceValidationError(
             "FUTOI experiment contract digest mismatch",
             blocker="provenance_not_sufficient",
@@ -286,9 +248,7 @@ def _verify_frozen_inputs(request: RuntimeRequest) -> dict[str, str]:
             "immutable input hash mismatch: " + ", ".join(sorted(bad)),
             blocker="provenance_not_sufficient",
         )
-    manifest = _json(request.dataset_manifest_path)
-    feature_schema = _json(request.feature_schema_path)
-    if not manifest or not feature_schema:
+    if not _json(request.dataset_manifest_path) or not _json(request.feature_schema_path):
         raise validation.FutoiSiSourceValidationError(
             "frozen manifest or feature schema is empty",
             blocker="provenance_not_sufficient",
@@ -300,15 +260,9 @@ def _verify_frozen_inputs(request: RuntimeRequest) -> dict[str, str]:
     _verify_contract(request.experiment_contract_path)
     return {
         **observed,
-        "experiment_contract": _git_blob_sha1(
-            request.experiment_contract_path
-        ),
-        "license_access_evidence": _sha256(
-            request.license_access_evidence_path
-        ),
-        "pit_semantics_evidence": _sha256(
-            request.pit_semantics_evidence_path
-        ),
+        "experiment_contract": _git_blob_sha1(request.experiment_contract_path),
+        "license_access_evidence": _sha256(request.license_access_evidence_path),
+        "pit_semantics_evidence": _sha256(request.pit_semantics_evidence_path),
     }
 
 
@@ -316,11 +270,7 @@ def _identity_frames(
     modeling: pd.DataFrame,
     validation_predictions: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    identity_columns = [
-        "target_trade_date",
-        "target_instrument_id",
-        "prior_trade_date",
-    ]
+    identity_columns = ["target_trade_date", "target_instrument_id", "prior_trade_date"]
     if not set(identity_columns).issubset(modeling.columns):
         raise validation.FutoiSiSourceValidationError(
             "modeling dataset lacks frozen identity fields",
@@ -329,12 +279,8 @@ def _identity_frames(
     eligible = (
         modeling.loc[:, identity_columns]
         .assign(
-            target_trade_date=lambda x: pd.to_datetime(
-                x.target_trade_date
-            ).dt.strftime("%Y-%m-%d"),
-            prior_trade_date=lambda x: pd.to_datetime(
-                x.prior_trade_date
-            ).dt.strftime("%Y-%m-%d"),
+            target_trade_date=lambda x: pd.to_datetime(x.target_trade_date).dt.strftime("%Y-%m-%d"),
+            prior_trade_date=lambda x: pd.to_datetime(x.prior_trade_date).dt.strftime("%Y-%m-%d"),
             target_instrument_id=lambda x: x.target_instrument_id.astype(str),
         )
         .drop_duplicates()
@@ -350,9 +296,7 @@ def _identity_frames(
     validation_ids = (
         validation_predictions.loc[:, validation_columns]
         .assign(
-            target_trade_date=lambda x: pd.to_datetime(
-                x.target_trade_date
-            ).dt.strftime("%Y-%m-%d"),
+            target_trade_date=lambda x: pd.to_datetime(x.target_trade_date).dt.strftime("%Y-%m-%d"),
             target_instrument_id=lambda x: x.target_instrument_id.astype(str),
         )
         .drop_duplicates()
@@ -361,17 +305,13 @@ def _identity_frames(
     )
     if len(eligible) != validation.EXPECTED_ELIGIBLE_IDENTITIES:
         raise validation.FutoiSiSourceValidationError(
-            "eligible identity count mismatch",
-            blocker="provenance_not_sufficient",
+            "eligible identity count mismatch", blocker="provenance_not_sufficient"
         )
     if len(validation_ids) != validation.EXPECTED_VALIDATION_IDENTITIES:
         raise validation.FutoiSiSourceValidationError(
-            "validation identity count mismatch",
-            blocker="provenance_not_sufficient",
+            "validation identity count mismatch", blocker="provenance_not_sufficient"
         )
-    if not eligible.target_instrument_id.eq(
-        validation.TARGET_INSTRUMENT_ID
-    ).all():
+    if not eligible.target_instrument_id.eq(validation.TARGET_INSTRUMENT_ID).all():
         raise validation.FutoiSiSourceValidationError(
             "eligible identities contain another instrument",
             blocker="provenance_not_sufficient",
@@ -382,25 +322,7 @@ def _identity_frames(
 def _license_access_validation(
     evidence: dict[str, Any],
 ) -> tuple[bool, dict[str, object]]:
-    passed, normalized = validation.validate_license_access_evidence(evidence)
-    provider_identity_verified = bool(
-        evidence.get("provider") == EXPECTED_LICENSE_PROVIDER
-        and evidence.get("product") == EXPECTED_LICENSE_PRODUCT
-    )
-    passed = bool(passed and provider_identity_verified)
-    normalized = {
-        **normalized,
-        "expected_provider": EXPECTED_LICENSE_PROVIDER,
-        "expected_product": EXPECTED_LICENSE_PRODUCT,
-        "provider_identity_verified": provider_identity_verified,
-        "status": "passed" if passed else "blocked",
-        "blocker": (
-            None
-            if passed
-            else "provider_license_and_access_terms_not_documented"
-        ),
-    }
-    return passed, normalized
+    return validation.validate_license_access_evidence(evidence)
 
 
 def _pit_semantics_passed(evidence: dict[str, Any]) -> bool:
@@ -410,7 +332,7 @@ def _pit_semantics_passed(evidence: dict[str, Any]) -> bool:
         and evidence.get("historical_original_publication_time_verified") is True
         and evidence.get("revision_behavior_documented") is True
         and str(evidence.get("evidence_source") or "").strip()
-        and str(evidence.get("verified_at") or "").strip()
+        and validation._aware_iso_timestamp(evidence.get("verified_at"))
     )
 
 
@@ -420,23 +342,14 @@ def _source_error_record(
     blocker: str,
     reason: str,
 ) -> dict[str, object]:
-    return {
-        "trade_date": trade_date_value,
-        "blocker": blocker,
-        "reason": reason,
-    }
+    return {"trade_date": trade_date_value, "blocker": blocker, "reason": reason}
 
 
 def execute(request: RuntimeRequest) -> dict[str, object]:
     input_hashes = _verify_frozen_inputs(request)
     modeling = pd.read_parquet(request.modeling_dataset_path)
-    validation_predictions = pd.read_parquet(
-        request.m0_validation_predictions_path
-    )
-    eligible, validation_ids = _identity_frames(
-        modeling,
-        validation_predictions,
-    )
+    validation_predictions = pd.read_parquet(request.m0_validation_predictions_path)
+    eligible, validation_ids = _identity_frames(modeling, validation_predictions)
     license_passed, license_validation = _license_access_validation(
         _json(request.license_access_evidence_path)
     )
@@ -475,8 +388,7 @@ def execute(request: RuntimeRequest) -> dict[str, object]:
             source_date = date.fromisoformat(str(value))
             try:
                 pair, columns = validation.load_futoi_daily_pair(
-                    source_date,
-                    bearer_token=token,
+                    source_date, bearer_token=token
                 )
             except validation.FutoiSiSourceValidationError as exc:
                 source_errors.append(
@@ -500,10 +412,7 @@ def execute(request: RuntimeRequest) -> dict[str, object]:
                 break
             pairs.append(pair)
 
-    matrix, diagnostics = validation.build_futoi_pit_acceptance_matrix(
-        eligible,
-        pairs,
-    )
+    matrix, diagnostics = validation.build_futoi_pit_acceptance_matrix(eligible, pairs)
     coverage = validation.coverage_by_source(matrix, validation_ids)
     route_validation = {
         "official_service": EXPECTED_LICENSE_PROVIDER,
@@ -526,10 +435,12 @@ def execute(request: RuntimeRequest) -> dict[str, object]:
         "participant_groups": list(validation.PARTICIPANT_GROUPS),
         "pair_key": ["trade_date", "moment", "sess_id"],
         "cross_group_seqnum_equality_required": False,
+        "canonical_normalizer": "moex_data.futures.futoi_raw_loader.normalize_futoi",
+        "canonical_schema_version": "futures_futoi_5m_raw.v1",
         "daily_pair_count": len(pairs),
-        "schema_stable": bool(schema_columns) and not any(
-            item["blocker"] == "official_schema_not_stable"
-            for item in source_errors
+        "schema_stable": bool(schema_columns)
+        and not any(
+            item["blocker"] == "official_schema_not_stable" for item in source_errors
         ),
         "pit_evidence": pit_evidence,
     }
@@ -538,10 +449,7 @@ def execute(request: RuntimeRequest) -> dict[str, object]:
         for item in source_errors
     )
     provenance_passed = not any(
-        item["blocker"] in {
-            "provenance_not_sufficient",
-            "official_route_not_reproducible",
-        }
+        item["blocker"] in {"provenance_not_sufficient", "official_route_not_reproducible"}
         for item in source_errors
     )
     gates = validation.evaluate_gates(
@@ -558,11 +466,7 @@ def execute(request: RuntimeRequest) -> dict[str, object]:
         numerical_integrity_passed=numerical_integrity,
         provenance_passed=provenance_passed,
     )
-    failed_gates = [
-        name
-        for name, result in gates.items()
-        if not bool(result["passed"])
-    ]
+    failed_gates = [name for name, result in gates.items() if not bool(result["passed"])]
     final_status = (
         "moex_futoi_si_source_candidate_for_phase8_7b"
         if not failed_gates
