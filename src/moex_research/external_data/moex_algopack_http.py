@@ -15,6 +15,16 @@ ALGOPACK_TOKEN_ENV: Final[str] = "MOEX_ALGOPACK_TOKEN"
 HTTP_MAX_ATTEMPTS: Final[int] = 5
 HTTP_RETRY_DELAYS_SECONDS: Final[tuple[float, ...]] = (0.5, 1.0, 2.0, 4.0)
 MAX_RETRY_AFTER_SECONDS: Final[float] = 60.0
+_SAFE_HEADER_CATEGORIES: Final[tuple[str, ...]] = (
+    "ticker",
+    "security",
+    "instrument",
+    "source",
+    "route",
+    "not-found",
+    "not_found",
+    "missing",
+)
 
 RouteValidator = Callable[[str], object]
 HttpOpener = Callable[..., HTTPResponse]
@@ -115,12 +125,23 @@ def _sanitized_header_markers(
 ) -> tuple[str, ...]:
     if headers is None:
         return ()
-    values: list[str] = []
+    markers: list[str] = []
     for name in ("X-MOEX-Error-Code", "X-Error-Code", "X-Route-Status"):
-        raw = str(headers.get(name, "") or "").strip()
-        if raw:
-            values.append(f"{name.lower()}={raw[:128]}")
-    return tuple(values)
+        raw = str(headers.get(name, "") or "").lower()
+        categories = sorted(
+            {
+                category.replace("_", "-")
+                for category in _SAFE_HEADER_CATEGORIES
+                if category in raw
+            }
+        )
+        if categories:
+            markers.extend(
+                f"{name.lower()}:{category}" for category in categories
+            )
+        elif raw.strip():
+            markers.append(f"{name.lower()}:present")
+    return tuple(markers)
 
 
 def fetch_algopack_bytes(
