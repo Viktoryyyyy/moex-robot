@@ -414,6 +414,7 @@ def execute(request: RuntimeRequest) -> dict[str, object]:
 
     matrix, diagnostics = validation.build_futoi_pit_acceptance_matrix(eligible, pairs)
     coverage = validation.coverage_by_source(matrix, validation_ids)
+    transport_exercised = bool(pairs)
     route_validation = {
         "official_service": EXPECTED_LICENSE_PROVIDER,
         "host": validation.ALGOPACK_HOST,
@@ -427,7 +428,10 @@ def execute(request: RuntimeRequest) -> dict[str, object]:
         "fallback_used": False,
         "one_trade_date_per_request": True,
         "latest": 1,
-        "route_validated": True,
+        "request_attempted": token is not None,
+        "successful_request_count": len(pairs),
+        "transport_exercised": transport_exercised,
+        "route_validated": transport_exercised,
     }
     schema_profile = {
         "required_fields": list(validation.RAW_REQUIRED_FIELDS),
@@ -456,7 +460,7 @@ def execute(request: RuntimeRequest) -> dict[str, object]:
         immutable_inputs_verified=True,
         eligible_identity_count=len(eligible),
         validation_identity_count=len(validation_ids),
-        route_validated=True,
+        route_validated=transport_exercised,
         license_access_passed=license_passed,
         schema_stable=bool(schema_profile["schema_stable"]),
         pit_semantics_verified=pit_semantics_verified,
