@@ -1,7 +1,7 @@
 {
   "contract_identity": {
     "contract_id": "usdrubf_phase8_7a_futoi_si_source_and_feature_contract_v1",
-    "contract_version": "1.5",
+    "contract_version": "1.6",
     "project": "MOEX_Bot",
     "task_id": "ema_3_19_ai_phase_8_7a_futoi_si_source_contract_v1",
     "lane": "ema_3_19_ai",
@@ -36,7 +36,7 @@
     "canonical_algopack_transport_reference": "moex_research.external_data.moex_cnyrubf_algopack_history",
     "canonical_algopack_transport_reference_capabilities": ["MOEX_ALGOPACK_TOKEN loading", "Bearer authorization", "all-redirect rejection", "secret isolation", "authenticated HTTP outcome classification"],
     "canonical_algopack_transport_reference_direct_reuse_allowed": false,
-    "direct_reuse_blocker": "current route validator and error context are CNYRUBF TradeStats specific",
+    "direct_reuse_blocker": "current route validator and source blocker mapping are CNYRUBF TradeStats specific",
     "required_generic_transport_module": "moex_research.external_data.moex_algopack_http",
     "required_refactor_source_module": "moex_research.external_data.moex_cnyrubf_algopack_history",
     "generic_refactor_must_preserve_existing_cnyrubf_behavior": true,
@@ -64,14 +64,33 @@
     "token_in_artifacts_allowed": false,
     "token_in_repository_allowed": false,
     "token_in_exception_text_allowed": false,
-    "required_http_classification": {
+    "generic_error_model": {
+      "error_type": "AlgoPackHttpError",
+      "required_fields": ["status_code", "retryable", "retry_after_seconds", "sanitized_header_markers", "transport_outcome"],
+      "response_body_retained": false,
+      "source_specific_blocker_assigned_by_generic_layer": false,
+      "source_adapter_mapping_required": true
+    },
+    "generic_transport_outcomes": {
       "missing_or_empty_token": "token_env_not_configured",
       "HTTP_401": "algopack_authentication_failed",
       "HTTP_403": "algopack_subscription_not_entitled",
-      "HTTP_404": "official_route_or_source_not_reproducible",
+      "HTTP_404": "algopack_http_not_found",
       "HTTP_429": "algopack_rate_limit_blocked",
-      "HTTP_5XX": "algopack_service_not_available",
-      "transport_timeout": "algopack_service_not_available"
+      "HTTP_5XX": "algopack_http_service_unavailable",
+      "transport_timeout": "algopack_http_service_unavailable"
+    },
+    "cnyrubf_adapter_frozen_mapping": {
+      "HTTP_404_route": "official_route_not_reproducible",
+      "HTTP_404_ticker": "cnyrubf_not_available",
+      "HTTP_5XX": "algopack_tradestats_not_available",
+      "transport_timeout": "algopack_tradestats_not_available"
+    },
+    "futoi_si_adapter_mapping": {
+      "HTTP_404_route": "official_route_not_reproducible",
+      "HTTP_404_source": "futoi_si_not_available",
+      "HTTP_5XX": "algopack_futoi_not_available",
+      "transport_timeout": "algopack_futoi_not_available"
     }
   },
   "source_identity": {
@@ -193,12 +212,7 @@
     "immutable_daily_snapshot_alternative_allowed": true,
     "fail_closed_if_publication_time_not_provable": true
   },
-  "frozen_identity_counts": {
-    "eligible_identity_count": 472,
-    "validation_identity_count": 320,
-    "first_target_trade_date": "2024-08-05",
-    "last_target_trade_date": "2026-06-11"
-  },
+  "frozen_identity_counts": {"eligible_identity_count": 472, "validation_identity_count": 320, "first_target_trade_date": "2024-08-05", "last_target_trade_date": "2026-06-11"},
   "feature_semantics_for_phase8_7b": {
     "computation_authorized_in_phase8_7a": false,
     "model_evaluation_authorized_in_phase8_7a": false,
@@ -206,95 +220,38 @@
     "target_trade_date_symbol": "T",
     "alignment_rule": "D must equal the frozen prior_trade_date of T and pass the PIT cutoff",
     "short_storage_semantics": "pos_short is signed and non-positive; short_abs = -pos_short",
-    "base_level_formulas": {
-      "fiz_pos": "FIZ.pos",
-      "fiz_pos_long": "FIZ.pos_long",
-      "fiz_short_abs": "-FIZ.pos_short",
-      "fiz_pos_long_num": "FIZ.pos_long_num",
-      "fiz_pos_short_num": "FIZ.pos_short_num",
-      "fiz_gross_position": "FIZ.pos_long - FIZ.pos_short",
-      "yur_pos": "YUR.pos",
-      "yur_pos_long": "YUR.pos_long",
-      "yur_short_abs": "-YUR.pos_short",
-      "yur_pos_long_num": "YUR.pos_long_num",
-      "yur_pos_short_num": "YUR.pos_short_num",
-      "yur_gross_position": "YUR.pos_long - YUR.pos_short"
-    },
+    "base_level_formulas": {"fiz_pos": "FIZ.pos", "fiz_pos_long": "FIZ.pos_long", "fiz_short_abs": "-FIZ.pos_short", "fiz_pos_long_num": "FIZ.pos_long_num", "fiz_pos_short_num": "FIZ.pos_short_num", "fiz_gross_position": "FIZ.pos_long - FIZ.pos_short", "yur_pos": "YUR.pos", "yur_pos_long": "YUR.pos_long", "yur_short_abs": "-YUR.pos_short", "yur_pos_long_num": "YUR.pos_long_num", "yur_pos_short_num": "YUR.pos_short_num", "yur_gross_position": "YUR.pos_long - YUR.pos_short"},
     "one_day_change_rule": "delta_x_1d = x_D - x_previous_accepted_source_trade_date",
     "one_day_changes": ["delta_fiz_pos_1d", "delta_fiz_pos_long_1d", "delta_fiz_short_abs_1d", "delta_fiz_pos_long_num_1d", "delta_fiz_pos_short_num_1d", "delta_fiz_gross_position_1d", "delta_yur_pos_1d", "delta_yur_pos_long_1d", "delta_yur_short_abs_1d", "delta_yur_pos_long_num_1d", "delta_yur_pos_short_num_1d", "delta_yur_gross_position_1d"],
     "percentage_change_policy": {"formula": "pct_delta_x_1d = (x_D - x_prev) / abs(x_prev)", "enabled_for_core_levels": true, "zero_denominator_result": "null", "infinite_value_allowed": false},
-    "rolling_policy": {
-      "windows": [5, 20, 60],
-      "members": "the immediately preceding accepted source trade dates D-1 and earlier",
-      "current_D_included": false,
-      "minimum_observations": "exactly the full window size",
-      "partial_window_allowed": false,
-      "missing_member_or_value_result": "null",
-      "calendar_fill_allowed": false,
-      "standard_deviation": "population standard deviation with ddof=0",
-      "zero_standard_deviation_zscore_result": "null",
-      "zero_mean_relative_deviation_result": "null",
-      "mean_formula": "mean_prev_w = mean(x over the previous w accepted source trade dates)",
-      "absolute_deviation_formula": "x_minus_mean_prev_w = x_D - mean_prev_w",
-      "relative_deviation_formula": "x_relative_to_mean_prev_w = (x_D - mean_prev_w) / abs(mean_prev_w)",
-      "zscore_formula": "x_zscore_prev_w = (x_D - mean_prev_w) / population_std_prev_w"
-    },
+    "rolling_policy": {"windows": [5, 20, 60], "members": "the immediately preceding accepted source trade dates D-1 and earlier", "current_D_included": false, "minimum_observations": "exactly the full window size", "partial_window_allowed": false, "missing_member_or_value_result": "null", "calendar_fill_allowed": false, "standard_deviation": "population standard deviation with ddof=0", "zero_standard_deviation_zscore_result": "null", "zero_mean_relative_deviation_result": "null", "mean_formula": "mean_prev_w = mean(x over the previous w accepted source trade dates)", "absolute_deviation_formula": "x_minus_mean_prev_w = x_D - mean_prev_w", "relative_deviation_formula": "x_relative_to_mean_prev_w = (x_D - mean_prev_w) / abs(mean_prev_w)", "zscore_formula": "x_zscore_prev_w = (x_D - mean_prev_w) / population_std_prev_w"},
     "rolling_core_levels": ["fiz_pos", "fiz_pos_long", "fiz_short_abs", "fiz_gross_position", "yur_pos", "yur_pos_long", "yur_short_abs", "yur_gross_position"],
-    "within_group_net_change_decomposition": {
-      "formula": "delta_pos = delta_pos_long - delta_short_abs",
-      "opening_long_component": "max(delta_pos_long,0)",
-      "closing_short_component": "max(-delta_short_abs,0)",
-      "closing_long_component": "max(-delta_pos_long,0)",
-      "opening_short_component": "max(delta_short_abs,0)",
-      "classification_values": ["OPENING_LONG", "CLOSING_SHORT", "CLOSING_LONG", "OPENING_SHORT", "MIXED", "NO_MATERIAL_CHANGE"],
-      "classification_rule": "single active component maps to its class; opposing or multiple active components map to MIXED; all zero maps to NO_MATERIAL_CHANGE"
-    },
-    "participant_change_structure": {
-      "fiz_group_activity": "abs(delta_fiz_pos_long_1d) + abs(delta_fiz_short_abs_1d)",
-      "yur_group_activity": "abs(delta_yur_pos_long_1d) + abs(delta_yur_short_abs_1d)",
-      "total_group_activity": "fiz_group_activity + yur_group_activity",
-      "fiz_activity_contribution_share": "fiz_group_activity / total_group_activity",
-      "yur_activity_contribution_share": "yur_group_activity / total_group_activity",
-      "zero_total_activity_result": "both shares null and dominant_group=NO_MATERIAL_CHANGE",
-      "dominant_group_rule": "FIZ if fiz_group_activity > yur_group_activity; YUR if lower; TIE if equal and positive",
-      "dominant_group_values": ["FIZ", "YUR", "TIE", "NO_MATERIAL_CHANGE"],
-      "interpretation": "observed position-change structure only; it does not identify trade initiator or causality"
-    },
+    "within_group_net_change_decomposition": {"formula": "delta_pos = delta_pos_long - delta_short_abs", "opening_long_component": "max(delta_pos_long,0)", "closing_short_component": "max(-delta_short_abs,0)", "closing_long_component": "max(-delta_pos_long,0)", "opening_short_component": "max(delta_short_abs,0)", "classification_values": ["OPENING_LONG", "CLOSING_SHORT", "CLOSING_LONG", "OPENING_SHORT", "MIXED", "NO_MATERIAL_CHANGE"], "classification_rule": "single active component maps to its class; opposing or multiple active components map to MIXED; all zero maps to NO_MATERIAL_CHANGE"},
+    "participant_change_structure": {"fiz_group_activity": "abs(delta_fiz_pos_long_1d) + abs(delta_fiz_short_abs_1d)", "yur_group_activity": "abs(delta_yur_pos_long_1d) + abs(delta_yur_short_abs_1d)", "total_group_activity": "fiz_group_activity + yur_group_activity", "fiz_activity_contribution_share": "fiz_group_activity / total_group_activity", "yur_activity_contribution_share": "yur_group_activity / total_group_activity", "zero_total_activity_result": "both shares null and dominant_group=NO_MATERIAL_CHANGE", "dominant_group_rule": "FIZ if fiz_group_activity > yur_group_activity; YUR if lower; TIE if equal and positive", "dominant_group_values": ["FIZ", "YUR", "TIE", "NO_MATERIAL_CHANGE"], "interpretation": "observed position-change structure only; it does not identify trade initiator or causality"},
     "divergence_formulas": {"fiz_yur_net_divergence": "fiz_pos - yur_pos", "delta_fiz_yur_net_divergence_1d": "delta_fiz_pos_1d - delta_yur_pos_1d", "fiz_yur_gross_activity_divergence": "fiz_gross_position - yur_gross_position", "fiz_yur_long_change_divergence": "delta_fiz_pos_long_1d - delta_yur_pos_long_1d", "fiz_yur_short_change_divergence": "delta_fiz_short_abs_1d - delta_yur_short_abs_1d"}
   },
-  "acceptance_matrix_leakage_policy": {
-    "artifact": "futoi_si_pit_acceptance_matrix.parquet",
-    "forbidden_acceptance_matrix_fields": ["target_phase_label", "target_is_labeled", "target_source", "fold_id", "y_true", "candidate_y_pred", "prediction", "probability_B", "probability_S", "probability_OUT"],
-    "forbidden_fields_must_be_absent": true,
-    "target_labels_allowed": false,
-    "predictions_allowed": false,
-    "class_probabilities_allowed": false,
-    "fold_assignments_allowed": false
-  },
+  "acceptance_matrix_leakage_policy": {"artifact": "futoi_si_pit_acceptance_matrix.parquet", "forbidden_acceptance_matrix_fields": ["target_phase_label", "target_is_labeled", "target_source", "fold_id", "y_true", "candidate_y_pred", "prediction", "probability_B", "probability_S", "probability_OUT"], "forbidden_fields_must_be_absent": true, "target_labels_allowed": false, "predictions_allowed": false, "class_probabilities_allowed": false, "fold_assignments_allowed": false},
   "required_runtime_artifacts": ["input_identity_verification.json", "official_route_validation.json", "futoi_si_license_access_validation.json", "futoi_si_schema_profile.json", "futoi_si_daily_positioning.parquet", "futoi_si_pit_acceptance_matrix.parquet", "coverage_by_source.csv", "session_alignment_diagnostics.csv", "source_blocker_register.json", "gate_results.json"],
   "gates": {
     "G1": "immutable input identities match and frozen 472/320 identity counts are reproduced",
-    "G2": "exact AlgoPack FUTOI Si route uses the canonical MOEX_ALGOPACK_TOKEN generic transport and authenticated product entitlement is reproducible while storage identity remains USDRUBF/USDRUBF",
+    "G2": "exact AlgoPack FUTOI Si route uses the canonical MOEX_ALGOPACK_TOKEN generic transport and the FUTOI adapter produces source-specific blockers while storage identity remains USDRUBF/USDRUBF",
     "G3": "provider license and access terms explicitly permit intended research use, local storage and derived-feature use; redistribution policy is documented",
     "G4": "FUTOI schema and aligned common FIZ/YUR daily-pair selection are stable without cross-group seqnum equality",
     "G5": "historical systime publication and revision semantics are PIT-provable before 06:00 Europe/Moscow",
     "G6": "exact prior-date coverage satisfies all 472 eligible and 320 validation identities without fill or substitution",
     "G7": "position signs, counts, net identities, zero-sum relationship, row-sequence provenance and chronology pass",
     "G8": "route and retrieval provenance are reproducible and no source substitution, target leakage, arbitrary date selection, raw redistribution or causal reinterpretation is used",
-    "G9": "all preceding gates pass, including canonical token transport and license/access approval, before Phase 8.7B entry"
+    "G9": "all preceding gates pass, including canonical token transport, source-adapter mappings and license/access approval, before Phase 8.7B entry"
   },
   "implementation_scope_next_pr": {
-    "required_new_files": [
-      "src/moex_research/external_data/moex_algopack_http.py",
-      "src/moex_research/runners/usdrubf_phase8_7a_futoi_si_source_validation.py",
-      "src/moex_research/runners/usdrubf_phase8_7a_futoi_si_runtime.py",
-      "tests/unit/test_moex_algopack_http.py",
-      "tests/unit/test_usdrubf_phase8_7a_futoi_si_source_validation.py",
-      "tests/contract/test_usdrubf_phase8_7a_futoi_si_source_validation_contract.py"
-    ],
+    "required_new_files": ["src/moex_research/external_data/moex_algopack_http.py", "src/moex_research/runners/usdrubf_phase8_7a_futoi_si_source_validation.py", "src/moex_research/runners/usdrubf_phase8_7a_futoi_si_runtime.py", "tests/unit/test_moex_algopack_http.py", "tests/unit/test_usdrubf_phase8_7a_futoi_si_source_validation.py", "tests/contract/test_usdrubf_phase8_7a_futoi_si_source_validation_contract.py"],
     "required_modified_files": ["src/moex_research/external_data/moex_cnyrubf_algopack_history.py", "tests/unit/test_usdrubf_phase8_6a_algopack_cnyrubf_history.py"],
     "generic_transport_refactor_required": true,
+    "source_adapter_mapping_required": true,
     "generic_transport_refactor_must_preserve_cnyrubf_behavior": true,
+    "design_contract_must_not_require_transport_implementation_to_remain_in_cnyrubf_module": true,
+    "generic_transport_properties_must_be_tested_in": "tests/unit/test_moex_algopack_http.py",
+    "cnyrubf_compatibility_must_be_tested_in": "tests/unit/test_usdrubf_phase8_6a_algopack_cnyrubf_history.py",
     "normalizer_reuse_required": true,
     "all_universe_orchestrator_reuse_required": false,
     "explicit_si_source_selection_required": true,
