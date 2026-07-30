@@ -177,7 +177,15 @@ def test_latest_common_pair_does_not_use_independent_latest_group_row() -> None:
         ([_row("FIZ")], "incomplete_identity_coverage"),
         (
             [_row("FIZ", ticker="USDRUBF"), _row("YUR")],
-            "official_schema_not_stable",
+            "provenance_not_sufficient",
+        ),
+        (
+            [_row("FIZ", ticker="CNY"), _row("YUR", ticker="CNY")],
+            "provenance_not_sufficient",
+        ),
+        (
+            [_row("FIZ", ticker=""), _row("YUR", ticker="")],
+            "provenance_not_sufficient",
         ),
         (
             [_row("FIZ", sess_id=""), _row("YUR", sess_id="")],
@@ -205,6 +213,17 @@ def test_schema_identity_and_numerical_fail_closed(
             retrieved_at_utc=NOW,
         )
     assert raised.value.blocker == blocker
+
+
+def test_empty_provider_payload_fails_closed_before_normalization() -> None:
+    with pytest.raises(source.FutoiSiSourceValidationError) as raised:
+        source.parse_futoi_daily_response(
+            _payload([]),
+            trade_date=DAY,
+            route=source.build_futoi_url(DAY),
+            retrieved_at_utc=NOW,
+        )
+    assert raised.value.blocker == "incomplete_identity_coverage"
 
 
 def test_systime_is_exact_pit_availability_and_cutoff_is_inclusive() -> None:
