@@ -73,12 +73,7 @@ def _row(
 
 def _payload(rows: list[list[object]], columns: list[str] | None = None) -> bytes:
     return json.dumps(
-        {
-            "data": {
-                "columns": columns or COLUMNS,
-                "data": rows,
-            }
-        },
+        {"data": {"columns": columns or COLUMNS, "data": rows}},
         separators=(",", ":"),
     ).encode("utf-8")
 
@@ -141,11 +136,12 @@ def test_route_rejected_before_network() -> None:
     assert calls == 0
 
 
-def test_aligned_pair_allows_cross_group_seqnum_difference() -> None:
+def test_aligned_pair_uses_canonical_normalizer_and_allows_seqnum_difference() -> None:
     pair = _pair()
     assert pair.source_ticker == "Si"
     assert pair.target_security_id == "USDRUBF"
     assert pair.storage_family_code == "USDRUBF"
+    assert pair.sess_id == "1"
     assert pair.fiz_seqnum == 101
     assert pair.yur_seqnum == 102
     assert pair.fiz_pos == 10.0
@@ -181,7 +177,11 @@ def test_latest_common_pair_does_not_use_independent_latest_group_row() -> None:
         ([_row("FIZ")], "incomplete_identity_coverage"),
         (
             [_row("FIZ", ticker="USDRUBF"), _row("YUR")],
-            "provenance_not_sufficient",
+            "official_schema_not_stable",
+        ),
+        (
+            [_row("FIZ", sess_id=""), _row("YUR", sess_id="")],
+            "official_schema_not_stable",
         ),
         (
             [_row("FIZ", pos=11.0), _row("YUR")],
@@ -207,13 +207,18 @@ def test_schema_identity_and_numerical_fail_closed(
     assert raised.value.blocker == blocker
 
 
-def test_systime_is_exact_pit_availability() -> None:
+def test_systime_is_exact_pit_availability_and_cutoff_is_inclusive() -> None:
     source.validate_prior_session_pair(
         _pair(),
         target_trade_date=date(2026, 7, 30),
         prior_trade_date=DAY,
     )
-    late = _pair(systime="2026-07-30 07:00:00")
+    source.validate_prior_session_pair(
+        _pair(systime="2026-07-30 06:00:00"),
+        target_trade_date=date(2026, 7, 30),
+        prior_trade_date=DAY,
+    )
+    late = _pair(systime="2026-07-30 06:00:01")
     with pytest.raises(source.FutoiSiSourceValidationError) as raised:
         source.validate_prior_session_pair(
             late,
@@ -250,23 +255,29 @@ def test_acceptance_matrix_is_exact_and_has_no_target_fields() -> None:
     assert diagnostics.nearest_date_substitution_used.eq(False).all()
 
 
-def test_license_gate_is_fail_closed() -> None:
+def test_license_gate_is_bound_to_exact_moex_futoi_identity() -> None:
     passed, evidence = source.validate_license_access_evidence({})
     assert passed is False
     assert evidence["blocker"] == "provider_license_and_access_terms_not_documented"
 
+    common = {
+        "product": "AlgoPack FUTOI",
+        "account_entitlement": True,
+        "permitted_research_use": True,
+        "permitted_local_raw_storage": True,
+        "permitted_derived_feature_use": True,
+        "redistribution_policy": "raw redistribution prohibited",
+        "evidence_source": "provider terms",
+        "verified_at": "2026-07-30T12:00:00Z",
+    }
     passed, evidence = source.validate_license_access_evidence(
-        {
-            "provider": "MOEX",
-            "product": "AlgoPack FUTOI",
-            "account_entitlement": True,
-            "permitted_research_use": True,
-            "permitted_local_raw_storage": True,
-            "permitted_derived_feature_use": True,
-            "redistribution_policy": "raw redistribution prohibited",
-            "evidence_source": "provider terms",
-            "verified_at": "2026-07-30T12:00:00Z",
-        }
+        {"provider": "unrelated vendor", **common}
+    )
+    assert passed is False
+    assert evidence["provider_identity_verified"] is False
+
+    passed, evidence = source.validate_license_access_evidence(
+        {"provider": "MOEX AlgoPack FUTOI", **common}
     )
     assert passed is True
     assert evidence["status"] == "passed"
