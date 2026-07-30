@@ -119,10 +119,34 @@ def test_http_outcomes_are_generic_and_sanitized(
     assert value.status_code == status
     assert value.retryable is retryable
     assert value.sanitized_header_markers == (
-        "x-moex-error-code=ticker-not-found",
+        "x-moex-error-code:not-found",
+        "x-moex-error-code:ticker",
     )
     assert TOKEN not in str(value)
     assert TOKEN not in repr(value)
+
+
+def test_provider_header_values_are_never_retained() -> None:
+    headers = Message()
+    headers["X-MOEX-Error-Code"] = f"ticker missing Bearer {TOKEN}"
+    error = HTTPError(URL, 404, "sanitized", headers, None)
+
+    def opener(_request: Request, timeout: int) -> Response:
+        assert timeout == 30
+        raise error
+
+    with pytest.raises(http.AlgoPackHttpError) as raised:
+        http.fetch_algopack_bytes(
+            URL,
+            TOKEN,
+            route_validator=exact_route,
+            opener=opener,
+        )
+    markers = " ".join(raised.value.sanitized_header_markers)
+    assert "ticker" in markers
+    assert "missing" in markers
+    assert TOKEN not in markers
+    assert "Bearer" not in markers
 
 
 def test_missing_token_and_empty_payload_fail_closed() -> None:
