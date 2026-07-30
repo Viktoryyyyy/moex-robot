@@ -1,7 +1,7 @@
 {
   "contract_identity": {
     "contract_id": "usdrubf_phase8_7a_futoi_si_source_and_feature_contract_v1",
-    "contract_version": "1.3",
+    "contract_version": "1.4",
     "project": "MOEX_Bot",
     "task_id": "ema_3_19_ai_phase_8_7a_futoi_si_source_contract_v1",
     "lane": "ema_3_19_ai",
@@ -60,16 +60,50 @@
     "approved_normalized_source_scope": "family_aggregate_futoi",
     "family_aggregate_is_approved_source_not_fallback": true,
     "exact_contract_futoi_scope_allowed": false,
-    "pass_status": "moex_futoi_si_source_candidate_for_phase8_7b",
+    "technical_pass_status": "moex_futoi_si_technical_source_validated",
+    "phase8_7b_pass_status": "moex_futoi_si_source_candidate_for_phase8_7b",
+    "phase8_7b_entry_requires_license_access_gate": true,
     "fail_status": "moex_futoi_si_source_not_ready"
   },
   "authorization_policy": {
     "required_environment_variable": "MOEX_ALGOPACK_TOKEN",
+    "token_proves_technical_entitlement_only": true,
+    "license_access_approval_implied_by_token": false,
     "token_in_cli_allowed": false,
     "token_in_url_allowed": false,
     "token_in_logs_allowed": false,
     "token_in_artifacts_allowed": false,
     "token_in_repository_allowed": false
+  },
+  "license_and_access_policy": {
+    "registry_contract": "contracts/datasets/usdrubf_phase4_external_sources_registry.v1.yaml",
+    "registry_source_id": "futoi_participant_positioning",
+    "registry_license_access_status": "blocked_until_provider_license_and_access_terms_are_documented",
+    "exact_provider": "MOEX AlgoPack FUTOI",
+    "subscription_product_entitlement_required": true,
+    "research_use_terms_documented_required": true,
+    "local_raw_storage_terms_documented_required": true,
+    "derived_feature_use_terms_documented_required": true,
+    "redistribution_terms_documented_required": true,
+    "raw_payload_redistribution_assumed_allowed": false,
+    "repository_or_artifact_publication_of_raw_payload_assumed_allowed": false,
+    "successful_authenticated_request_is_sufficient": false,
+    "current_status": "blocked_pending_documented_license_and_access_terms",
+    "phase8_7b_entry_allowed_before_pass": false,
+    "failure_blocker": "provider_license_and_access_terms_not_documented",
+    "required_evidence_artifact": "futoi_si_license_access_validation.json",
+    "required_evidence_fields": [
+      "provider",
+      "product",
+      "account_entitlement",
+      "permitted_research_use",
+      "permitted_local_raw_storage",
+      "permitted_derived_feature_use",
+      "redistribution_policy",
+      "evidence_source",
+      "verified_at"
+    ],
+    "legal_or_license_permission_must_not_be_inferred": true
   },
   "limited_probe_evidence": {
     "route": "https://apim.moex.com/iss/analyticalproducts/futoi/securities/si.json",
@@ -86,6 +120,7 @@
     "sha256": "cd0792552d516310d63435bf7989014e4b01dce6e79201c0d9bc2886e6e7dff9",
     "historical_coverage_proven": false,
     "pit_correctness_proven": false,
+    "license_access_terms_proven": false,
     "model_use_authorized": false
   },
   "raw_schema_policy": {
@@ -229,17 +264,17 @@
     "class_probabilities_allowed": false,
     "fold_assignments_allowed": false
   },
-  "required_runtime_artifacts": ["input_identity_verification.json", "official_route_validation.json", "futoi_si_schema_profile.json", "futoi_si_daily_positioning.parquet", "futoi_si_pit_acceptance_matrix.parquet", "coverage_by_source.csv", "session_alignment_diagnostics.csv", "source_blocker_register.json", "gate_results.json"],
+  "required_runtime_artifacts": ["input_identity_verification.json", "official_route_validation.json", "futoi_si_license_access_validation.json", "futoi_si_schema_profile.json", "futoi_si_daily_positioning.parquet", "futoi_si_pit_acceptance_matrix.parquet", "coverage_by_source.csv", "session_alignment_diagnostics.csv", "source_blocker_register.json", "gate_results.json"],
   "gates": {
     "G1": "immutable input identities match and frozen 472/320 identity counts are reproduced",
-    "G2": "exact AlgoPack FUTOI Si route and source ticker are reproducible while canonical storage identity remains USDRUBF/USDRUBF",
-    "G3": "FUTOI schema, canonical storage identity and aligned common FIZ/YUR daily-pair selection are stable without cross-group seqnum equality",
-    "G4": "historical systime publication and revision semantics are PIT-provable before 06:00 Europe/Moscow",
-    "G5": "exact prior-date coverage satisfies all 472 eligible and 320 validation identities without fill or substitution",
-    "G6": "position signs, counts, net identities, zero-sum relationship, row-sequence provenance and chronology pass",
-    "G7": "route, payload, retrieval and source-revision provenance are reproducible",
-    "G8": "no source substitution, target leakage, arbitrary date selection or causal reinterpretation is used",
-    "G9": "all preceding gates pass"
+    "G2": "exact AlgoPack FUTOI Si route, authenticated product entitlement and source ticker are reproducible while canonical storage identity remains USDRUBF/USDRUBF",
+    "G3": "provider license and access terms explicitly permit the intended research use, local storage and derived-feature use; redistribution policy is documented",
+    "G4": "FUTOI schema, canonical storage identity and aligned common FIZ/YUR daily-pair selection are stable without cross-group seqnum equality",
+    "G5": "historical systime publication and revision semantics are PIT-provable before 06:00 Europe/Moscow",
+    "G6": "exact prior-date coverage satisfies all 472 eligible and 320 validation identities without fill or substitution",
+    "G7": "position signs, counts, net identities, zero-sum relationship, row-sequence provenance and chronology pass",
+    "G8": "route and retrieval provenance are reproducible and no source substitution, target leakage, arbitrary date selection, raw redistribution or causal reinterpretation is used",
+    "G9": "all preceding gates pass, including license and access approval, before Phase 8.7B entry"
   },
   "implementation_scope_next_pr": {
     "required_new_files": ["src/moex_research/runners/usdrubf_phase8_7a_futoi_si_source_validation.py", "src/moex_research/runners/usdrubf_phase8_7a_futoi_si_runtime.py", "tests/unit/test_usdrubf_phase8_7a_futoi_si_source_validation.py", "tests/contract/test_usdrubf_phase8_7a_futoi_si_source_validation_contract.py"],
@@ -251,6 +286,8 @@
     "source_ticker_required": "Si",
     "source_ticker_must_not_be_used_as_storage_family": true,
     "duplicate_http_transport_allowed": false,
+    "license_access_validation_required": true,
+    "phase8_7b_entry_requires_license_access_pass": true,
     "existing_component_modification_requires_explicit_scope_and_justification": true,
     "feature_computation_requires_phase8_7a_pass": true,
     "incremental_value_evaluation_requires_separate_phase8_7b": true,
@@ -258,5 +295,5 @@
     "controlled_runtime_allowed": false,
     "controlled_runtime_requires_separate_explicit_authority": true
   },
-  "non_authorizations": ["no existing component modification in this contract task", "no server apply", "no controlled runtime", "no historical backfill", "no feature computation", "no model fit", "no incremental value evaluation", "no model serialization", "no promotion", "no broker action", "no trading action"]
+  "non_authorizations": ["no existing component modification in this contract task", "no server apply", "no controlled runtime", "no historical backfill", "no feature computation", "no model fit", "no incremental value evaluation", "no model serialization", "no promotion", "no raw payload redistribution", "no broker action", "no trading action"]
 }
