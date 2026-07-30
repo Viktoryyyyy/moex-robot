@@ -41,7 +41,7 @@ def test_contract_identity_and_canonical_futoi_si_source() -> None:
     source = contract["source_identity"]
 
     assert identity["project"] == "MOEX_Bot"
-    assert identity["contract_version"] == "1.5"
+    assert identity["contract_version"] == "1.6"
     assert identity["phase"] == "8.7A"
     assert identity["task_id"] == (
         "ema_3_19_ai_phase_8_7a_futoi_si_source_contract_v1"
@@ -77,7 +77,6 @@ def test_source_ticker_is_distinct_from_canonical_storage_identity() -> None:
     assert components["implemented_dataset_contract"] == (
         "contracts/datasets/futures_futoi_5m_raw_contract.md"
     )
-    assert components["implemented_schema_version"] == "futures_futoi_5m_raw.v1"
     assert components["normalizer_reuse_required"] is True
     assert components["canonical_storage_secid"] == "USDRUBF"
     assert components["canonical_storage_family_code"] == "USDRUBF"
@@ -90,19 +89,16 @@ def test_source_ticker_is_distinct_from_canonical_storage_identity() -> None:
     assert implementation["source_ticker_required"] == "Si"
 
 
-def test_canonical_algopack_token_transport_refactor_is_required() -> None:
+def test_generic_transport_and_source_adapter_contracts_are_frozen() -> None:
     contract = load_contract()
     components = contract["existing_canonical_components"]
     transport = contract["generic_algopack_transport_policy"]
     implementation = contract["implementation_scope_next_pr"]
     runtime_layout = RUNTIME_LAYOUT_PATH.read_text(encoding="utf-8")
-    reference_source = CNYRUBF_TRANSPORT_REFERENCE.read_text(encoding="utf-8")
 
+    assert CNYRUBF_TRANSPORT_REFERENCE.exists()
     assert "MOEX_ALGOPACK_TOKEN` is the sole credential variable" in runtime_layout
     assert "MOEX_API_KEY` is not an alias or fallback" in runtime_layout
-    assert 'ALGOPACK_TOKEN_ENV: Final[str] = "MOEX_ALGOPACK_TOKEN"' in reference_source
-    assert '"Authorization": f"Bearer {token}"' in reference_source
-    assert "class _RejectAllRedirects" in reference_source
     assert components["legacy_transport_module_forbidden"] == (
         "moex_data.futures.liquidity_history_metrics_probe"
     )
@@ -116,9 +112,6 @@ def test_canonical_algopack_token_transport_refactor_is_required() -> None:
     assert components["required_generic_transport_module"] == (
         "moex_research.external_data.moex_algopack_http"
     )
-    assert components["required_refactor_source_module"] == (
-        "moex_research.external_data.moex_cnyrubf_algopack_history"
-    )
     assert components["generic_refactor_must_preserve_existing_cnyrubf_behavior"] is True
     assert transport["required_environment_variable"] == "MOEX_ALGOPACK_TOKEN"
     assert transport["moex_api_key_alias_allowed"] is False
@@ -126,10 +119,39 @@ def test_canonical_algopack_token_transport_refactor_is_required() -> None:
     assert transport["authorization_on_redirect_allowed"] is False
     assert transport["bearer_header_required"] is True
     assert transport["token_in_logs_allowed"] is False
+    error_model = transport["generic_error_model"]
+    assert error_model["source_specific_blocker_assigned_by_generic_layer"] is False
+    assert error_model["source_adapter_mapping_required"] is True
+    assert error_model["response_body_retained"] is False
+    assert transport["generic_transport_outcomes"]["HTTP_404"] == (
+        "algopack_http_not_found"
+    )
+    assert transport["cnyrubf_adapter_frozen_mapping"] == {
+        "HTTP_404_route": "official_route_not_reproducible",
+        "HTTP_404_ticker": "cnyrubf_not_available",
+        "HTTP_5XX": "algopack_tradestats_not_available",
+        "transport_timeout": "algopack_tradestats_not_available",
+    }
+    assert transport["futoi_si_adapter_mapping"] == {
+        "HTTP_404_route": "official_route_not_reproducible",
+        "HTTP_404_source": "futoi_si_not_available",
+        "HTTP_5XX": "algopack_futoi_not_available",
+        "transport_timeout": "algopack_futoi_not_available",
+    }
     assert implementation["generic_transport_refactor_required"] is True
+    assert implementation["source_adapter_mapping_required"] is True
     assert implementation[
         "generic_transport_refactor_must_preserve_cnyrubf_behavior"
     ] is True
+    assert implementation[
+        "design_contract_must_not_require_transport_implementation_to_remain_in_cnyrubf_module"
+    ] is True
+    assert implementation["generic_transport_properties_must_be_tested_in"] == (
+        "tests/unit/test_moex_algopack_http.py"
+    )
+    assert implementation["cnyrubf_compatibility_must_be_tested_in"] == (
+        "tests/unit/test_usdrubf_phase8_6a_algopack_cnyrubf_history.py"
+    )
     assert "src/moex_research/external_data/moex_algopack_http.py" in implementation[
         "required_new_files"
     ]
@@ -202,9 +224,6 @@ def test_raw_schema_and_pairing_use_seqnum_as_row_provenance_only() -> None:
     assert schema["ticker_must_equal"] == "Si"
     assert schema["net_identity"] == "pos == pos_long + pos_short"
     assert schema["cross_group_zero_sum_identity"] == "FIZ.pos + YUR.pos == 0"
-    assert schema["seqnum_semantics"] == (
-        "provider row sequence identifier retained separately for provenance"
-    )
     assert schema["cross_group_seqnum_equality_required"] is False
     assert pairing["candidate_pair_key"] == ["trade_date", "moment", "sess_id"]
     assert pairing["group_row_identity"] == [
@@ -310,9 +329,9 @@ def test_gates_runtime_artifacts_and_authority_boundaries() -> None:
         "G8",
         "G9",
     ]
-    assert "MOEX_ALGOPACK_TOKEN generic transport" in contract["gates"]["G2"]
+    assert "FUTOI adapter" in contract["gates"]["G2"]
     assert "license and access" in contract["gates"]["G3"]
-    assert "canonical token transport" in contract["gates"]["G9"]
+    assert "source-adapter mappings" in contract["gates"]["G9"]
     assert implementation["license_access_validation_required"] is True
     assert implementation["phase8_7b_entry_requires_license_access_pass"] is True
     assert implementation["feature_computation_requires_phase8_7a_pass"] is True
