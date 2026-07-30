@@ -112,6 +112,7 @@ def test_cnyrubf_is_adapter_over_generic_transport() -> None:
 
 def test_pairing_and_pit_contract_are_frozen() -> None:
     contract = _contract()
+    schema = contract["raw_schema_policy"]
     pairing = contract["daily_pairing_policy"]
     pit = contract["pit_and_revision_policy"]
     assert pairing["candidate_pair_key"] == [
@@ -119,7 +120,7 @@ def test_pairing_and_pit_contract_are_frozen() -> None:
         "moment",
         "sess_id",
     ]
-    assert pairing["cross_group_seqnum_equality_required"] is False
+    assert schema["cross_group_seqnum_equality_required"] is False
     assert pairing["seqnum_cross_group_join_allowed"] is False
     assert source.PARTICIPANT_GROUPS == ("FIZ", "YUR")
     assert pit["availability_field"] == "systime"
