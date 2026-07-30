@@ -1,0 +1,281 @@
+{
+  "contract_identity": {
+    "contract_id": "usdrubf_phase8_7a_futoi_si_source_and_feature_contract_v1",
+    "contract_version": "1.0",
+    "project": "MOEX_Bot",
+    "task_id": "ema_3_19_ai_phase_8_7a_futoi_si_source_contract_v1",
+    "lane": "ema_3_19_ai",
+    "phase": "8.7A",
+    "execution_mode": "browser_controlled_github_route",
+    "base_main_sha": "4680b3073828e2b0abeac75dd16fc19b40e188be",
+    "status": "source_and_feature_contract_pending_implementation"
+  },
+  "approved_branch": "research/ema-3-19-ai/phase-8-7a-futoi-si-source-contract-v1",
+  "owner_decision": {
+    "target_external_factor": "MOEX FUTOI Si participant positioning",
+    "target_instrument_id": "forts.usdrubf",
+    "target_security_id": "USDRUBF",
+    "target_family_code": "Si",
+    "participant_groups": ["FIZ", "YUR"],
+    "futoi_means": "participant positioning and participant position structure",
+    "open_interest_interpretation_allowed": false,
+    "family_aggregate_fallback_allowed": false,
+    "substitute_security_allowed": false,
+    "causal_attribution_allowed": false
+  },
+  "existing_canonical_producer": {
+    "module": "moex_data.futures.all_universe_futoi_raw_backfill_slice",
+    "normalizer_module": "moex_data.futures.futoi_raw_loader",
+    "dataset_contract": "contracts/datasets/futures_futoi_raw.v1.yaml",
+    "dataset_id": "futures_futoi_raw",
+    "reuse_required": true,
+    "duplicate_source_client_allowed": false,
+    "producer_modification_allowed_in_this_task": false,
+    "exact_contract_only_required": true,
+    "secid_scope_filter": "USDRUBF",
+    "family_scope_filter": "Si"
+  },
+  "source_identity": {
+    "source_id": "moex_futoi_usdrubf_exact_contract",
+    "official_service": "MOEX FUTOI analytical product",
+    "allowed_hosts": ["apim.moex.com", "iss.moex.com"],
+    "exact_path": "/iss/analyticalproducts/futoi/securities/usdrubf.json",
+    "security_id": "USDRUBF",
+    "family_code": "Si",
+    "board_id": "RFUD",
+    "engine": "futures",
+    "market": "forts",
+    "source_scope_must_equal": "exact_contract_futoi",
+    "family_aggregate_source_scope_forbidden": "family_aggregate_futoi",
+    "pass_status": "moex_futoi_si_source_candidate_for_phase8_7b",
+    "fail_status": "moex_futoi_si_source_not_ready"
+  },
+  "limited_probe_evidence": {
+    "date_from": "2026-07-03",
+    "date_till": "2026-07-29",
+    "source_requests": 27,
+    "raw_rows": 54,
+    "daily_rows": 27,
+    "trade_dates": 27,
+    "format": "one_row_per_trade_date",
+    "selection_rule": "daily_latest_FIZ_and_YUR_wide",
+    "sha256": "cd0792552d516310d63435bf7989014e4b01dce6e79201c0d9bc2886e6e7dff9",
+    "historical_coverage_proven": false,
+    "pit_correctness_proven": false,
+    "model_use_authorized": false
+  },
+  "raw_schema_policy": {
+    "required_fields": [
+      "tradedate",
+      "tradetime_or_moment",
+      "SYSTIME",
+      "ticker",
+      "clgroup",
+      "pos",
+      "pos_long",
+      "pos_short",
+      "pos_long_num",
+      "pos_short_num",
+      "sess_id",
+      "seqnum"
+    ],
+    "required_participant_groups": ["FIZ", "YUR"],
+    "unexpected_participant_group_allowed": false,
+    "pos_long_must_be_nonnegative": true,
+    "pos_short_must_be_nonpositive": true,
+    "position_counts_must_be_nonnegative": true,
+    "net_identity": "pos == pos_long + pos_short",
+    "cross_group_zero_sum_identity": "FIZ.pos + YUR.pos == 0",
+    "duplicate_provider_identity_allowed": false,
+    "schema_stable_within_run_required": true
+  },
+  "daily_pairing_policy": {
+    "grain": "one aligned FIZ/YUR pair per FUTOI trade_date",
+    "candidate_pair_key": ["trade_date", "moment", "sess_id", "seqnum"],
+    "latest_common_pair_only": true,
+    "fiz_yur_moment_mismatch_allowed": false,
+    "fiz_yur_session_mismatch_allowed": false,
+    "independent_latest_row_per_group_allowed": false,
+    "arbitrary_last_row_allowed": false,
+    "forward_fill_allowed": false,
+    "backward_fill_allowed": false,
+    "nearest_date_substitution_allowed": false,
+    "missing_group_result": "null_and_fail_coverage"
+  },
+  "pit_and_revision_policy": {
+    "timezone": "Europe/Moscow",
+    "forecast_anchor_local_time": "06:00:00",
+    "target_join_date": "exact frozen prior_trade_date",
+    "availability_field_candidate": "SYSTIME",
+    "availability_field_semantics_must_be_proven": true,
+    "historical_original_publication_time_required": true,
+    "current_revision_timestamp_is_not_sufficient": true,
+    "revision_or_restatement_behavior_must_be_proven": true,
+    "daily_pair_must_be_available_before_target_anchor": true,
+    "eligibility_rule": "source_available_at <= target_trade_date 06:00:00 Europe/Moscow",
+    "same_day_or_future_observation_allowed": false,
+    "conservative_lag_allowed_only_if_contractually_frozen": true,
+    "immutable_daily_snapshot_alternative_allowed": true,
+    "fail_closed_if_publication_time_not_provable": true
+  },
+  "frozen_identity_counts": {
+    "eligible_identity_count": 472,
+    "validation_identity_count": 320,
+    "first_target_trade_date": "2024-08-05",
+    "last_target_trade_date": "2026-06-11"
+  },
+  "feature_semantics_for_phase8_7b": {
+    "computation_authorized_in_phase8_7a": false,
+    "model_evaluation_authorized_in_phase8_7a": false,
+    "source_trade_date_symbol": "D",
+    "target_trade_date_symbol": "T",
+    "alignment_rule": "D must equal the frozen prior_trade_date of T and pass the PIT cutoff",
+    "short_storage_semantics": "pos_short is signed and non-positive; short_abs = abs(pos_short)",
+    "base_levels": [
+      "fiz_pos",
+      "fiz_pos_long",
+      "fiz_short_abs",
+      "fiz_pos_long_num",
+      "fiz_pos_short_num",
+      "fiz_gross_position",
+      "yur_pos",
+      "yur_pos_long",
+      "yur_short_abs",
+      "yur_pos_long_num",
+      "yur_pos_short_num",
+      "yur_gross_position"
+    ],
+    "one_day_changes": [
+      "delta_fiz_pos_1d",
+      "delta_fiz_pos_long_1d",
+      "delta_fiz_short_abs_1d",
+      "delta_fiz_pos_long_num_1d",
+      "delta_fiz_pos_short_num_1d",
+      "delta_fiz_gross_position_1d",
+      "delta_yur_pos_1d",
+      "delta_yur_pos_long_1d",
+      "delta_yur_short_abs_1d",
+      "delta_yur_pos_long_num_1d",
+      "delta_yur_pos_short_num_1d",
+      "delta_yur_gross_position_1d"
+    ],
+    "percentage_change_policy": {
+      "enabled_for_core_levels": true,
+      "denominator": "absolute previous-day value",
+      "zero_denominator_result": "null",
+      "infinite_value_allowed": false
+    },
+    "previous_only_rolling_windows": [5, 20, 60],
+    "rolling_rule": "mean and standard deviation use only D-1 and earlier observations; D is excluded",
+    "rolling_feature_families": [
+      "level_minus_previous_mean",
+      "level_div_previous_mean",
+      "previous_only_zscore"
+    ],
+    "rolling_core_levels": [
+      "fiz_pos",
+      "fiz_pos_long",
+      "fiz_short_abs",
+      "fiz_gross_position",
+      "yur_pos",
+      "yur_pos_long",
+      "yur_short_abs",
+      "yur_gross_position"
+    ],
+    "within_group_net_change_decomposition": {
+      "formula": "delta_pos = delta_pos_long - delta_short_abs",
+      "opening_long": "delta_pos_long > 0",
+      "closing_short": "delta_short_abs < 0",
+      "closing_long": "delta_pos_long < 0",
+      "opening_short": "delta_short_abs > 0",
+      "mixed": "more than one material component is active",
+      "no_material_change": "all material component changes equal zero"
+    },
+    "participant_change_structure": {
+      "group_activity_measure": "abs(delta_pos_long) + abs(delta_short_abs)",
+      "fiz_activity_contribution_share": "fiz_group_activity / (fiz_group_activity + yur_group_activity)",
+      "yur_activity_contribution_share": "yur_group_activity / (fiz_group_activity + yur_group_activity)",
+      "zero_total_activity_result": "null",
+      "dominant_group_values": ["FIZ", "YUR", "TIE", "NO_MATERIAL_CHANGE"],
+      "interpretation": "observed position-change structure only; it does not identify trade initiator or causality"
+    },
+    "divergence_features": [
+      "fiz_yur_net_divergence",
+      "delta_fiz_yur_net_divergence_1d",
+      "fiz_yur_gross_activity_divergence",
+      "fiz_yur_long_change_divergence",
+      "fiz_yur_short_change_divergence"
+    ]
+  },
+  "acceptance_matrix_leakage_policy": {
+    "artifact": "futoi_si_pit_acceptance_matrix.parquet",
+    "forbidden_acceptance_matrix_fields": [
+      "target_phase_label",
+      "target_is_labeled",
+      "target_source",
+      "fold_id",
+      "y_true",
+      "candidate_y_pred",
+      "prediction",
+      "probability_B",
+      "probability_S",
+      "probability_OUT"
+    ],
+    "forbidden_fields_must_be_absent": true,
+    "target_labels_allowed": false,
+    "predictions_allowed": false,
+    "class_probabilities_allowed": false,
+    "fold_assignments_allowed": false
+  },
+  "required_runtime_artifacts": [
+    "input_identity_verification.json",
+    "official_route_validation.json",
+    "futoi_si_schema_profile.json",
+    "futoi_si_daily_positioning.parquet",
+    "futoi_si_pit_acceptance_matrix.parquet",
+    "coverage_by_source.csv",
+    "session_alignment_diagnostics.csv",
+    "source_blocker_register.json",
+    "gate_results.json"
+  ],
+  "gates": {
+    "G1": "immutable input identities match and frozen 472/320 identity counts are reproduced",
+    "G2": "exact USDRUBF FUTOI route, source scope and FIZ/YUR identities are reproducible",
+    "G3": "raw schema and aligned common FIZ/YUR daily-pair selection are stable",
+    "G4": "historical publication availability and revision semantics are PIT-provable before 06:00 Europe/Moscow",
+    "G5": "exact prior-date coverage satisfies all 472 eligible and 320 validation identities without fill or substitution",
+    "G6": "position signs, counts, net identities, zero-sum relationship and chronology pass",
+    "G7": "route, payload, retrieval and source-revision provenance are reproducible",
+    "G8": "no family aggregate fallback, target leakage, arbitrary date selection or causal reinterpretation is used",
+    "G9": "all preceding gates pass"
+  },
+  "implementation_scope_next_pr": {
+    "required_new_files": [
+      "src/moex_research/runners/usdrubf_phase8_7a_futoi_si_source_validation.py",
+      "src/moex_research/runners/usdrubf_phase8_7a_futoi_si_runtime.py",
+      "tests/unit/test_usdrubf_phase8_7a_futoi_si_source_validation.py",
+      "tests/contract/test_usdrubf_phase8_7a_futoi_si_source_validation_contract.py"
+    ],
+    "must_reuse_existing_canonical_producer_and_normalizer": true,
+    "duplicate_http_transport_allowed": false,
+    "existing_producer_modification_requires_separate_justification": true,
+    "feature_computation_requires_phase8_7a_pass": true,
+    "incremental_value_evaluation_requires_separate_phase8_7b": true,
+    "server_apply_allowed": false,
+    "controlled_runtime_allowed": false,
+    "controlled_runtime_requires_separate_explicit_authority": true
+  },
+  "non_authorizations": [
+    "no existing producer modification",
+    "no server apply",
+    "no controlled runtime",
+    "no historical backfill",
+    "no feature computation",
+    "no model fit",
+    "no incremental value evaluation",
+    "no model serialization",
+    "no promotion",
+    "no broker action",
+    "no trading action"
+  ]
+}
