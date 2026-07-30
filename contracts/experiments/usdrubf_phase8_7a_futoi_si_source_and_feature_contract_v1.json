@@ -1,7 +1,7 @@
 {
   "contract_identity": {
     "contract_id": "usdrubf_phase8_7a_futoi_si_source_and_feature_contract_v1",
-    "contract_version": "1.1",
+    "contract_version": "1.2",
     "project": "MOEX_Bot",
     "task_id": "ema_3_19_ai_phase_8_7a_futoi_si_source_contract_v1",
     "lane": "ema_3_19_ai",
@@ -77,26 +77,14 @@
     "trade_dates": 27,
     "participant_groups": ["FIZ", "YUR"],
     "format": "one_row_per_trade_date",
-    "selection_rule": "daily_latest_FIZ_and_YUR_wide",
+    "selection_rule": "daily_latest_aligned_FIZ_and_YUR_wide",
     "sha256": "cd0792552d516310d63435bf7989014e4b01dce6e79201c0d9bc2886e6e7dff9",
     "historical_coverage_proven": false,
     "pit_correctness_proven": false,
     "model_use_authorized": false
   },
   "raw_schema_policy": {
-    "required_fields": [
-      "sess_id",
-      "ticker",
-      "clgroup",
-      "pos",
-      "pos_long",
-      "pos_short",
-      "pos_long_num",
-      "pos_short_num",
-      "seqnum",
-      "moment",
-      "systime"
-    ],
+    "required_fields": ["sess_id", "ticker", "clgroup", "pos", "pos_long", "pos_short", "pos_long_num", "pos_short_num", "seqnum", "moment", "systime"],
     "required_participant_groups": ["FIZ", "YUR"],
     "ticker_must_equal": "Si",
     "unexpected_participant_group_allowed": false,
@@ -105,17 +93,23 @@
     "position_counts_must_be_nonnegative": true,
     "net_identity": "pos == pos_long + pos_short",
     "cross_group_zero_sum_identity": "FIZ.pos + YUR.pos == 0",
-    "duplicate_provider_identity_allowed": false,
+    "seqnum_semantics": "provider row sequence identifier retained separately for provenance",
+    "cross_group_seqnum_equality_required": false,
+    "duplicate_provider_row_identity_allowed": false,
     "schema_stable_within_run_required": true
   },
   "daily_pairing_policy": {
     "grain": "one aligned FIZ/YUR pair per FUTOI trade_date",
     "trade_date_derivation": "Europe/Moscow calendar date of moment",
-    "candidate_pair_key": ["trade_date", "moment", "sess_id", "seqnum"],
+    "candidate_pair_key": ["trade_date", "moment", "sess_id"],
+    "group_row_identity": ["trade_date", "moment", "sess_id", "clgroup", "seqnum"],
     "latest_common_pair_only": true,
     "fiz_yur_moment_mismatch_allowed": false,
     "fiz_yur_session_mismatch_allowed": false,
-    "fiz_yur_seqnum_mismatch_allowed": false,
+    "fiz_yur_seqnum_mismatch_allowed": true,
+    "seqnum_cross_group_join_allowed": false,
+    "seqnum_storage_rule": "retain separate fiz_seqnum and yur_seqnum in normalized evidence",
+    "duplicate_group_row_result": "fail_schema_integrity",
     "independent_latest_row_per_group_allowed": false,
     "arbitrary_last_row_allowed": false,
     "forward_fill_allowed": false,
@@ -133,6 +127,7 @@
     "historical_systime_semantics_must_be_verified": true,
     "current_revision_timestamp_is_not_sufficient": true,
     "revision_or_restatement_behavior_must_be_proven": true,
+    "daily_pair_source_available_at": "max(FIZ.systime,YUR.systime)",
     "daily_pair_must_be_available_before_target_anchor": true,
     "eligibility_rule": "max(FIZ.systime,YUR.systime) <= target_trade_date 06:00:00 Europe/Moscow",
     "same_day_or_future_observation_allowed": false,
@@ -168,20 +163,7 @@
       "yur_gross_position": "YUR.pos_long - YUR.pos_short"
     },
     "one_day_change_rule": "delta_x_1d = x_D - x_previous_accepted_source_trade_date",
-    "one_day_changes": [
-      "delta_fiz_pos_1d",
-      "delta_fiz_pos_long_1d",
-      "delta_fiz_short_abs_1d",
-      "delta_fiz_pos_long_num_1d",
-      "delta_fiz_pos_short_num_1d",
-      "delta_fiz_gross_position_1d",
-      "delta_yur_pos_1d",
-      "delta_yur_pos_long_1d",
-      "delta_yur_short_abs_1d",
-      "delta_yur_pos_long_num_1d",
-      "delta_yur_pos_short_num_1d",
-      "delta_yur_gross_position_1d"
-    ],
+    "one_day_changes": ["delta_fiz_pos_1d", "delta_fiz_pos_long_1d", "delta_fiz_short_abs_1d", "delta_fiz_pos_long_num_1d", "delta_fiz_pos_short_num_1d", "delta_fiz_gross_position_1d", "delta_yur_pos_1d", "delta_yur_pos_long_1d", "delta_yur_short_abs_1d", "delta_yur_pos_long_num_1d", "delta_yur_pos_short_num_1d", "delta_yur_gross_position_1d"],
     "percentage_change_policy": {
       "formula": "pct_delta_x_1d = (x_D - x_prev) / abs(x_prev)",
       "enabled_for_core_levels": true,
@@ -204,25 +186,15 @@
       "relative_deviation_formula": "x_relative_to_mean_prev_w = (x_D - mean_prev_w) / abs(mean_prev_w)",
       "zscore_formula": "x_zscore_prev_w = (x_D - mean_prev_w) / population_std_prev_w"
     },
-    "rolling_core_levels": [
-      "fiz_pos",
-      "fiz_pos_long",
-      "fiz_short_abs",
-      "fiz_gross_position",
-      "yur_pos",
-      "yur_pos_long",
-      "yur_short_abs",
-      "yur_gross_position"
-    ],
+    "rolling_core_levels": ["fiz_pos", "fiz_pos_long", "fiz_short_abs", "fiz_gross_position", "yur_pos", "yur_pos_long", "yur_short_abs", "yur_gross_position"],
     "within_group_net_change_decomposition": {
       "formula": "delta_pos = delta_pos_long - delta_short_abs",
       "opening_long_component": "max(delta_pos_long,0)",
       "closing_short_component": "max(-delta_short_abs,0)",
       "closing_long_component": "max(-delta_pos_long,0)",
       "opening_short_component": "max(delta_short_abs,0)",
-      "positive_net_change_identity": "max(delta_pos,0) = opening_long_component + closing_short_component only when negative components are zero; otherwise classify mixed",
-      "negative_net_change_identity": "max(-delta_pos,0) = closing_long_component + opening_short_component only when positive components are zero; otherwise classify mixed",
-      "classification_values": ["OPENING_LONG", "CLOSING_SHORT", "CLOSING_LONG", "OPENING_SHORT", "MIXED", "NO_MATERIAL_CHANGE"]
+      "classification_values": ["OPENING_LONG", "CLOSING_SHORT", "CLOSING_LONG", "OPENING_SHORT", "MIXED", "NO_MATERIAL_CHANGE"],
+      "classification_rule": "single active component maps to its class; opposing or multiple active components map to MIXED; all zero maps to NO_MATERIAL_CHANGE"
     },
     "participant_change_structure": {
       "fiz_group_activity": "abs(delta_fiz_pos_long_1d) + abs(delta_fiz_short_abs_1d)",
@@ -245,53 +217,27 @@
   },
   "acceptance_matrix_leakage_policy": {
     "artifact": "futoi_si_pit_acceptance_matrix.parquet",
-    "forbidden_acceptance_matrix_fields": [
-      "target_phase_label",
-      "target_is_labeled",
-      "target_source",
-      "fold_id",
-      "y_true",
-      "candidate_y_pred",
-      "prediction",
-      "probability_B",
-      "probability_S",
-      "probability_OUT"
-    ],
+    "forbidden_acceptance_matrix_fields": ["target_phase_label", "target_is_labeled", "target_source", "fold_id", "y_true", "candidate_y_pred", "prediction", "probability_B", "probability_S", "probability_OUT"],
     "forbidden_fields_must_be_absent": true,
     "target_labels_allowed": false,
     "predictions_allowed": false,
     "class_probabilities_allowed": false,
     "fold_assignments_allowed": false
   },
-  "required_runtime_artifacts": [
-    "input_identity_verification.json",
-    "official_route_validation.json",
-    "futoi_si_schema_profile.json",
-    "futoi_si_daily_positioning.parquet",
-    "futoi_si_pit_acceptance_matrix.parquet",
-    "coverage_by_source.csv",
-    "session_alignment_diagnostics.csv",
-    "source_blocker_register.json",
-    "gate_results.json"
-  ],
+  "required_runtime_artifacts": ["input_identity_verification.json", "official_route_validation.json", "futoi_si_schema_profile.json", "futoi_si_daily_positioning.parquet", "futoi_si_pit_acceptance_matrix.parquet", "coverage_by_source.csv", "session_alignment_diagnostics.csv", "source_blocker_register.json", "gate_results.json"],
   "gates": {
     "G1": "immutable input identities match and frozen 472/320 identity counts are reproduced",
     "G2": "exact AlgoPack FUTOI Si route, source ticker and FIZ/YUR identities are reproducible",
-    "G3": "implemented futures_futoi_5m_raw.v1 schema and aligned common FIZ/YUR daily-pair selection are stable",
+    "G3": "implemented futures_futoi_5m_raw.v1 schema and aligned common FIZ/YUR daily-pair selection are stable without cross-group seqnum equality",
     "G4": "historical systime publication and revision semantics are PIT-provable before 06:00 Europe/Moscow",
     "G5": "exact prior-date coverage satisfies all 472 eligible and 320 validation identities without fill or substitution",
-    "G6": "position signs, counts, net identities, zero-sum relationship and chronology pass",
+    "G6": "position signs, counts, net identities, zero-sum relationship, row-sequence provenance and chronology pass",
     "G7": "route, payload, retrieval and source-revision provenance are reproducible",
     "G8": "no source substitution, target leakage, arbitrary date selection or causal reinterpretation is used",
     "G9": "all preceding gates pass"
   },
   "implementation_scope_next_pr": {
-    "required_new_files": [
-      "src/moex_research/runners/usdrubf_phase8_7a_futoi_si_source_validation.py",
-      "src/moex_research/runners/usdrubf_phase8_7a_futoi_si_runtime.py",
-      "tests/unit/test_usdrubf_phase8_7a_futoi_si_source_validation.py",
-      "tests/contract/test_usdrubf_phase8_7a_futoi_si_source_validation_contract.py"
-    ],
+    "required_new_files": ["src/moex_research/runners/usdrubf_phase8_7a_futoi_si_source_validation.py", "src/moex_research/runners/usdrubf_phase8_7a_futoi_si_runtime.py", "tests/unit/test_usdrubf_phase8_7a_futoi_si_source_validation.py", "tests/contract/test_usdrubf_phase8_7a_futoi_si_source_validation_contract.py"],
     "must_reuse_existing_normalizer_and_transport_primitives": true,
     "explicit_si_source_selection_required": true,
     "duplicate_http_transport_allowed": false,
@@ -302,17 +248,5 @@
     "controlled_runtime_allowed": false,
     "controlled_runtime_requires_separate_explicit_authority": true
   },
-  "non_authorizations": [
-    "no existing component modification in this contract task",
-    "no server apply",
-    "no controlled runtime",
-    "no historical backfill",
-    "no feature computation",
-    "no model fit",
-    "no incremental value evaluation",
-    "no model serialization",
-    "no promotion",
-    "no broker action",
-    "no trading action"
-  ]
+  "non_authorizations": ["no existing component modification in this contract task", "no server apply", "no controlled runtime", "no historical backfill", "no feature computation", "no model fit", "no incremental value evaluation", "no model serialization", "no promotion", "no broker action", "no trading action"]
 }
