@@ -858,7 +858,12 @@ def _coverage(
     mask = pd.MultiIndex.from_frame(
         matrix.loc[:, IDENTITY_COLUMNS]
     ).isin(pd.MultiIndex.from_frame(validation))
-    complete = matrix.loc[:, ACCEPTANCE_MATRIX_COLUMNS[3:]].notna().all(axis=1)
+    required_columns = tuple(
+        column
+        for column in ACCEPTANCE_MATRIX_COLUMNS[3:]
+        if column != "cnyrubf_initial_margin_close"
+    )
+    complete = matrix.loc[:, required_columns].notna().all(axis=1)
     eligible_covered = int(complete.sum())
     validation_count = int(mask.sum())
     validation_covered = int(complete.to_numpy()[mask].sum())
@@ -1094,7 +1099,6 @@ def evaluate_gates(
         "trades",
         "trades_buy",
         "trades_sell",
-        "initial_margin_close",
         "open_interest_open",
         "open_interest_high",
         "open_interest_low",

@@ -165,7 +165,7 @@ class AlgoPackTradeStat:
     value_sell: float
     volume_buy: float
     volume_sell: float
-    initial_margin: float
+    initial_margin: float | None
     open_interest_open: float
     open_interest_high: float
     open_interest_low: float
@@ -195,7 +195,7 @@ class CnyrubfAlgoPackDailyCandle:
     trades: int
     trades_buy: int
     trades_sell: int
-    initial_margin_close: float
+    initial_margin_close: float | None
     open_interest_open: float
     open_interest_high: float
     open_interest_low: float
@@ -801,6 +801,12 @@ def _number(value: object, field: str, *, nonnegative: bool = False) -> float:
     return result
 
 
+def _optional_initial_margin(value: object) -> float | None:
+    if value is None or value == "":
+        return None
+    return _number(value, "im", nonnegative=True)
+
+
 def _integer(value: object, field: str) -> int:
     number = _number(value, field, nonnegative=True)
     if not number.is_integer():
@@ -1036,7 +1042,7 @@ def parse_tradestats_page_response(
                 value_sell=_number(row["val_s"], "val_s", nonnegative=True),
                 volume_buy=_number(row["vol_b"], "vol_b", nonnegative=True),
                 volume_sell=_number(row["vol_s"], "vol_s", nonnegative=True),
-                initial_margin=_number(row["im"], "im", nonnegative=True),
+                initial_margin=_optional_initial_margin(row["im"]),
                 open_interest_open=oi_open,
                 open_interest_high=oi_high,
                 open_interest_low=oi_low,
