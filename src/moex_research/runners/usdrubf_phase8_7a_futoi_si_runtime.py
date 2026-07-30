@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Mapping
 
 import pandas as pd
 
@@ -21,6 +21,22 @@ RUN_ID_PATTERN: Final[re.Pattern[str]] = re.compile(
 )
 SHA40_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{40}$")
 CONTRACT_GIT_BLOB_SHA1: Final[str] = "eeb64cb20e8a122bc1d962077d4ca748c19d5fad"
+EXPECTED_FROZEN_SHA256: Final[dict[str, str]] = {
+    "modeling_dataset": "fdd626f9e0522c6bbb653f9e17fbbbeef7ded77f57ff187b35246a2458d55d00",
+    "dataset_manifest": "fcbbb5e5ed0549c5c6f397e34f203f01836271f6bf471f90cab5a2fd64ace082",
+    "feature_schema": "8f08802c7fb0a4cc43ab4ba072ee22ff9edd92fe8d674ea0515545d20d143238",
+    "m0_validation_predictions": "9769d00a49adeb54c016d965387774e46a3e09e09f895aa61d48a90bbf3568cf",
+    "phase83_aggregate_metrics": "d6ad4f6587dadb32431bd7b8f3bd59c5393e04d742efb4af459b316b417f8756",
+    "phase83_gate_results": "d3f7e24022e550e725eae7ec5bc214d6b95e0e9c66393574c575e5d6f593f33c",
+}
+EXPECTED_PHASE83_STATUS: Final[str] = (
+    "external_factor_incremental_value_not_supported"
+)
+EXPECTED_PHASE83_RECOMMENDATION: Final[str] = (
+    "prioritize_blocked_oil_and_liquidity_sources"
+)
+EXPECTED_LICENSE_PROVIDER: Final[str] = "MOEX AlgoPack FUTOI"
+EXPECTED_LICENSE_PRODUCT: Final[str] = "AlgoPack FUTOI"
 REQUIRED_ARGS: Final[tuple[str, ...]] = (
     "--modeling-dataset-path",
     "--dataset-manifest-path",
@@ -190,7 +206,7 @@ def _git_blob_sha1(path: Path) -> str:
     return hashlib.sha1(header + payload, usedforsecurity=False).hexdigest()
 
 
-def _input_inventory(request: RuntimeRequest) -> dict[str, Path]:
+def _frozen_input_inventory(request: RuntimeRequest) -> dict[str, Path]:
     return {
         "modeling_dataset": request.modeling_dataset_path,
         "dataset_manifest": request.dataset_manifest_path,
@@ -198,6 +214,12 @@ def _input_inventory(request: RuntimeRequest) -> dict[str, Path]:
         "m0_validation_predictions": request.m0_validation_predictions_path,
         "phase83_aggregate_metrics": request.phase83_aggregate_metrics_path,
         "phase83_gate_results": request.phase83_gate_results_path,
+    }
+
+
+def _input_inventory(request: RuntimeRequest) -> dict[str, Path]:
+    return {
+        **_frozen_input_inventory(request),
         "experiment_contract": request.experiment_contract_path,
         "license_access_evidence": request.license_access_evidence_path,
         "pit_semantics_evidence": request.pit_semantics_evidence_path,
@@ -234,22 +256,78 @@ def _verify_contract(path: Path) -> dict[str, Any]:
     return contract
 
 
+def _validate_phase83_evidence(
+    aggregate: Mapping[str, Any],
+    gates: Mapping[str, Any],
+) -> None:
+    final = gates.get("G12_final_acceptance")
+    if (
+        not isinstance(final, Mapping)
+        or aggregate.get("final_status") != EXPECTED_PHASE83_STATUS
+        or final.get("status") != EXPECTED_PHASE83_STATUS
+        or final.get("recommendation") != EXPECTED_PHASE83_RECOMMENDATION
+    ):
+        raise validation.FutoiSiSourceValidationError(
+            "Phase 8.3 frozen evidence mismatch",
+            blocker="provenance_not_sufficient",
+        )
+
+
+def _verify_frozen_inputs(request: RuntimeRequest) -> dict[str, str]:
+    inventory = _frozen_input_inventory(request)
+    observed = {name: _sha256(path) for name, path in inventory.items()}
+    bad = [
+        name
+        for name, expected in EXPECTED_FROZEN_SHA256.items()
+        if observed.get(name) != expected
+    ]
+    if bad:
+        raise validation.FutoiSiSourceValidationError(
+            "immutable input hash mismatch: " + ", ".join(sorted(bad)),
+            blocker="provenance_not_sufficient",
+        )
+    manifest = _json(request.dataset_manifest_path)
+    feature_schema = _json(request.feature_schema_path)
+    if not manifest or not feature_schema:
+        raise validation.FutoiSiSourceValidationError(
+            "frozen manifest or feature schema is empty",
+            blocker="provenance_not_sufficient",
+        )
+    _validate_phase83_evidence(
+        _json(request.phase83_aggregate_metrics_path),
+        _json(request.phase83_gate_results_path),
+    )
+    _verify_contract(request.experiment_contract_path)
+    return {
+        **observed,
+        "experiment_contract": _git_blob_sha1(
+            request.experiment_contract_path
+        ),
+        "license_access_evidence": _sha256(
+            request.license_access_evidence_path
+        ),
+        "pit_semantics_evidence": _sha256(
+            request.pit_semantics_evidence_path
+        ),
+    }
+
+
 def _identity_frames(
     modeling: pd.DataFrame,
     validation_predictions: pd.DataFrame,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    required = {
+    identity_columns = [
         "target_trade_date",
         "target_instrument_id",
         "prior_trade_date",
-    }
-    if not required.issubset(modeling.columns):
+    ]
+    if not set(identity_columns).issubset(modeling.columns):
         raise validation.FutoiSiSourceValidationError(
             "modeling dataset lacks frozen identity fields",
             blocker="provenance_not_sufficient",
         )
     eligible = (
-        modeling.loc[:, list(required)]
+        modeling.loc[:, identity_columns]
         .assign(
             target_trade_date=lambda x: pd.to_datetime(
                 x.target_trade_date
@@ -263,19 +341,14 @@ def _identity_frames(
         .sort_values(["target_trade_date", "target_instrument_id"])
         .reset_index(drop=True)
     )
-    if not {
-        "target_trade_date",
-        "target_instrument_id",
-    }.issubset(validation_predictions.columns):
+    validation_columns = ["target_trade_date", "target_instrument_id"]
+    if not set(validation_columns).issubset(validation_predictions.columns):
         raise validation.FutoiSiSourceValidationError(
             "validation predictions lack frozen identity fields",
             blocker="provenance_not_sufficient",
         )
     validation_ids = (
-        validation_predictions.loc[
-            :,
-            ["target_trade_date", "target_instrument_id"],
-        ]
+        validation_predictions.loc[:, validation_columns]
         .assign(
             target_trade_date=lambda x: pd.to_datetime(
                 x.target_trade_date
@@ -306,9 +379,33 @@ def _identity_frames(
     return eligible, validation_ids
 
 
+def _license_access_validation(
+    evidence: dict[str, Any],
+) -> tuple[bool, dict[str, object]]:
+    passed, normalized = validation.validate_license_access_evidence(evidence)
+    provider_identity_verified = bool(
+        evidence.get("provider") == EXPECTED_LICENSE_PROVIDER
+        and evidence.get("product") == EXPECTED_LICENSE_PRODUCT
+    )
+    passed = bool(passed and provider_identity_verified)
+    normalized = {
+        **normalized,
+        "expected_provider": EXPECTED_LICENSE_PROVIDER,
+        "expected_product": EXPECTED_LICENSE_PRODUCT,
+        "provider_identity_verified": provider_identity_verified,
+        "status": "passed" if passed else "blocked",
+        "blocker": (
+            None
+            if passed
+            else "provider_license_and_access_terms_not_documented"
+        ),
+    }
+    return passed, normalized
+
+
 def _pit_semantics_passed(evidence: dict[str, Any]) -> bool:
     return bool(
-        evidence.get("provider") == "MOEX AlgoPack FUTOI"
+        evidence.get("provider") == EXPECTED_LICENSE_PROVIDER
         and evidence.get("availability_field") == "systime"
         and evidence.get("historical_original_publication_time_verified") is True
         and evidence.get("revision_behavior_documented") is True
@@ -317,17 +414,21 @@ def _pit_semantics_passed(evidence: dict[str, Any]) -> bool:
     )
 
 
-def execute(request: RuntimeRequest) -> dict[str, object]:
-    _verify_contract(request.experiment_contract_path)
-    inventory = _input_inventory(request)
-    input_hashes = {
-        name: (
-            _git_blob_sha1(path)
-            if name == "experiment_contract"
-            else _sha256(path)
-        )
-        for name, path in inventory.items()
+def _source_error_record(
+    *,
+    trade_date_value: str | None,
+    blocker: str,
+    reason: str,
+) -> dict[str, object]:
+    return {
+        "trade_date": trade_date_value,
+        "blocker": blocker,
+        "reason": reason,
     }
+
+
+def execute(request: RuntimeRequest) -> dict[str, object]:
+    input_hashes = _verify_frozen_inputs(request)
     modeling = pd.read_parquet(request.modeling_dataset_path)
     validation_predictions = pd.read_parquet(
         request.m0_validation_predictions_path
@@ -336,10 +437,8 @@ def execute(request: RuntimeRequest) -> dict[str, object]:
         modeling,
         validation_predictions,
     )
-    license_passed, license_validation = (
-        validation.validate_license_access_evidence(
-            _json(request.license_access_evidence_path)
-        )
+    license_passed, license_validation = _license_access_validation(
+        _json(request.license_access_evidence_path)
     )
     pit_evidence = _json(request.pit_semantics_evidence_path)
     pit_semantics_verified = _pit_semantics_passed(pit_evidence)
@@ -347,8 +446,31 @@ def execute(request: RuntimeRequest) -> dict[str, object]:
     pairs: list[validation.FutoiDailyPair] = []
     schema_columns: tuple[str, ...] | None = None
     source_errors: list[dict[str, object]] = []
+    token: str | None = None
     if license_passed:
-        token = validation.algopack_http.load_algopack_token()
+        try:
+            token = validation.algopack_http.load_algopack_token()
+        except validation.algopack_http.AlgoPackHttpError as exc:
+            source_errors.append(
+                _source_error_record(
+                    trade_date_value=None,
+                    blocker=exc.transport_outcome,
+                    reason=str(exc),
+                )
+            )
+    else:
+        source_errors.append(
+            _source_error_record(
+                trade_date_value=None,
+                blocker="provider_license_and_access_terms_not_documented",
+                reason=(
+                    "network retrieval not performed because license/access "
+                    "evidence is not approved for MOEX AlgoPack FUTOI"
+                ),
+            )
+        )
+
+    if token is not None:
         for value in sorted(eligible.prior_trade_date.unique()):
             source_date = date.fromisoformat(str(value))
             try:
@@ -358,32 +480,25 @@ def execute(request: RuntimeRequest) -> dict[str, object]:
                 )
             except validation.FutoiSiSourceValidationError as exc:
                 source_errors.append(
-                    {
-                        "trade_date": source_date.isoformat(),
-                        "blocker": exc.blocker,
-                        "reason": str(exc),
-                    }
+                    _source_error_record(
+                        trade_date_value=source_date.isoformat(),
+                        blocker=exc.blocker,
+                        reason=str(exc),
+                    )
                 )
                 continue
             if schema_columns is None:
                 schema_columns = columns
             elif schema_columns != columns:
-                raise validation.FutoiSiSourceValidationError(
-                    "FUTOI schema changed across requests",
-                    blocker="official_schema_not_stable",
+                source_errors.append(
+                    _source_error_record(
+                        trade_date_value=source_date.isoformat(),
+                        blocker="official_schema_not_stable",
+                        reason="FUTOI schema changed across requests",
+                    )
                 )
+                break
             pairs.append(pair)
-    else:
-        source_errors.append(
-            {
-                "trade_date": None,
-                "blocker": "provider_license_and_access_terms_not_documented",
-                "reason": (
-                    "network retrieval not performed because license/access "
-                    "evidence is not approved"
-                ),
-            }
-        )
 
     matrix, diagnostics = validation.build_futoi_pit_acceptance_matrix(
         eligible,
@@ -391,7 +506,7 @@ def execute(request: RuntimeRequest) -> dict[str, object]:
     )
     coverage = validation.coverage_by_source(matrix, validation_ids)
     route_validation = {
-        "official_service": "MOEX AlgoPack FUTOI",
+        "official_service": EXPECTED_LICENSE_PROVIDER,
         "host": validation.ALGOPACK_HOST,
         "exact_path": validation.FUTOI_PATH,
         "source_ticker": validation.SOURCE_TICKER,
@@ -412,7 +527,10 @@ def execute(request: RuntimeRequest) -> dict[str, object]:
         "pair_key": ["trade_date", "moment", "sess_id"],
         "cross_group_seqnum_equality_required": False,
         "daily_pair_count": len(pairs),
-        "schema_stable": not source_errors and schema_columns is not None,
+        "schema_stable": bool(schema_columns) and not any(
+            item["blocker"] == "official_schema_not_stable"
+            for item in source_errors
+        ),
         "pit_evidence": pit_evidence,
     }
     numerical_integrity = not any(
@@ -432,10 +550,7 @@ def execute(request: RuntimeRequest) -> dict[str, object]:
         validation_identity_count=len(validation_ids),
         route_validated=True,
         license_access_passed=license_passed,
-        schema_stable=bool(schema_columns) and not any(
-            item["blocker"] == "official_schema_not_stable"
-            for item in source_errors
-        ),
+        schema_stable=bool(schema_profile["schema_stable"]),
         pit_semantics_verified=pit_semantics_verified,
         matrix=matrix,
         coverage=coverage,
@@ -471,6 +586,8 @@ def execute(request: RuntimeRequest) -> dict[str, object]:
         "eligible_identity_count": len(eligible),
         "validation_identity_count": len(validation_ids),
         "input_hashes": input_hashes,
+        "expected_frozen_sha256": EXPECTED_FROZEN_SHA256,
+        "expected_contract_git_blob_sha1": CONTRACT_GIT_BLOB_SHA1,
         "immutable_inputs_verified": True,
     }
     artifact_names = validation.write_validation_artifacts(
