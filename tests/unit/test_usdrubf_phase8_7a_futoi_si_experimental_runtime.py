@@ -162,8 +162,25 @@ def test_experimental_runtime_retrieves_with_unverified_license_and_keeps_gates_
     )
 
     gates = {
-        name: {"passed": name not in {"G3", "G5", "G9"}}
-        for name in ("G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9")
+        name: {
+            "passed": name
+            not in {
+                "G3_license_and_access",
+                "G5_pit_publication_semantics",
+                "G9_final_acceptance",
+            }
+        }
+        for name in (
+            "G1_immutable_inputs",
+            "G2_exact_route_and_transport",
+            "G3_license_and_access",
+            "G4_schema_and_pairing",
+            "G5_pit_publication_semantics",
+            "G6_exact_coverage",
+            "G7_numerical_and_chronology",
+            "G8_provenance_and_no_leakage",
+            "G9_final_acceptance",
+        )
     }
 
     def evaluate_gates(**kwargs):
@@ -199,9 +216,9 @@ def test_experimental_runtime_retrieves_with_unverified_license_and_keeps_gates_
     assert isinstance(artifact_kwargs, dict)
     gate_artifact = artifact_kwargs["gates"]
     blocker_artifact = artifact_kwargs["blockers"]
-    assert gate_artifact["gates"]["G3"]["passed"] is False
-    assert gate_artifact["gates"]["G5"]["passed"] is False
-    assert gate_artifact["gates"]["G9"]["passed"] is False
+    assert gate_artifact["gates"]["G3_license_and_access"]["passed"] is False
+    assert gate_artifact["gates"]["G5_pit_publication_semantics"]["passed"] is False
+    assert gate_artifact["gates"]["G9_final_acceptance"]["passed"] is False
     assert blocker_artifact["historical_model_use_status"] == "experimental_only"
     assert blocker_artifact["experimental_authority"]["promotion_allowed"] is False
     assert blocker_artifact["experimental_authority"]["trading_allowed"] is False
@@ -227,7 +244,11 @@ def test_technical_gate_failure_keeps_source_not_ready(
     ].copy()
 
     monkeypatch.setattr(base, "_verify_frozen_inputs", lambda _request: {})
-    monkeypatch.setattr(experimental.pd, "read_parquet", lambda _path: pd.DataFrame())
+    monkeypatch.setattr(
+        experimental.pd,
+        "read_parquet",
+        lambda _path: pd.DataFrame(),
+    )
     monkeypatch.setattr(
         base,
         "_identity_frames",
@@ -263,8 +284,26 @@ def test_technical_gate_failure_keeps_source_not_ready(
         lambda _matrix, _validation_ids: pd.DataFrame(),
     )
     gates = {
-        name: {"passed": name not in {"G3", "G5", "G6", "G9"}}
-        for name in ("G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9")
+        name: {
+            "passed": name
+            not in {
+                "G3_license_and_access",
+                "G5_pit_publication_semantics",
+                "G6_exact_coverage",
+                "G9_final_acceptance",
+            }
+        }
+        for name in (
+            "G1_immutable_inputs",
+            "G2_exact_route_and_transport",
+            "G3_license_and_access",
+            "G4_schema_and_pairing",
+            "G5_pit_publication_semantics",
+            "G6_exact_coverage",
+            "G7_numerical_and_chronology",
+            "G8_provenance_and_no_leakage",
+            "G9_final_acceptance",
+        )
     }
     monkeypatch.setattr(
         base.validation,
