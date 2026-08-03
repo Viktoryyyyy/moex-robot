@@ -312,10 +312,47 @@ def _json_object(payload: bytes) -> dict[str, Any]:
 
 
 def _data_rows(payload: bytes) -> tuple[list[dict[str, object]], tuple[str, ...]]:
-    block = _json_object(payload).get("data")
-    if not isinstance(block, Mapping):
+    root = _json_object(payload)
+    candidates = [
+        candidate
+        for candidate in root.values()
+        if (
+            isinstance(candidate, Mapping)
+            and isinstance(candidate.get("columns"), list)
+            and isinstance(candidate.get("data"), list)
+        )
+    ]
+    schema_matches = [
+        candidate
+        for candidate in candidates
+        if all(
+            isinstance(column, str)
+            for column in candidate.get("columns", [])
+        )
+        and all(
+            field in candidate.get("columns", [])
+            for field in RAW_REQUIRED_FIELDS
+        )
+    ]
+    if len(schema_matches) == 1:
+        block: Mapping[str, object] | None = schema_matches[0]
+    elif len(schema_matches) > 1:
         raise FutoiSiSourceValidationError(
-            "FUTOI response lacks data block",
+            "FUTOI response contains multiple matching ISS tabular blocks",
+            blocker="official_schema_not_stable",
+        )
+    elif len(candidates) == 1:
+        block = candidates[0]
+    elif len(candidates) > 1:
+        raise FutoiSiSourceValidationError(
+            "FUTOI response contains multiple ambiguous ISS tabular blocks",
+            blocker="official_schema_not_stable",
+        )
+    else:
+        block = None
+    if block is None:
+        raise FutoiSiSourceValidationError(
+            "FUTOI response lacks an ISS tabular block",
             blocker="official_schema_not_stable",
         )
     columns = block.get("columns")

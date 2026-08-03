@@ -71,9 +71,14 @@ def _row(
     return [values[column] for column in COLUMNS]
 
 
-def _payload(rows: list[list[object]], columns: list[str] | None = None) -> bytes:
+def _payload(
+    rows: list[list[object]],
+    columns: list[str] | None = None,
+    *,
+    block_name: str = "data",
+) -> bytes:
     return json.dumps(
-        {"data": {"columns": columns or COLUMNS, "data": rows}},
+        {block_name: {"columns": columns or COLUMNS, "data": rows}},
         separators=(",", ":"),
     ).encode("utf-8")
 
@@ -134,6 +139,88 @@ def test_route_rejected_before_network() -> None:
         )
     assert raised.value.blocker == "provenance_not_sufficient"
     assert calls == 0
+
+
+def test_named_iss_futoi_block_is_parsed_like_canonical_loader() -> None:
+    pair, columns = source.parse_futoi_daily_response(
+        _payload([_row("FIZ"), _row("YUR")], block_name="futoi"),
+        trade_date=DAY,
+        route=source.build_futoi_url(DAY),
+        retrieved_at_utc=NOW,
+    )
+    assert pair.trade_date == DAY
+    assert pair.source_ticker == "Si"
+    assert tuple(columns) == tuple(COLUMNS)
+
+
+def test_payload_without_iss_tabular_block_fails_closed() -> None:
+    with pytest.raises(source.FutoiSiSourceValidationError) as raised:
+        source.parse_futoi_daily_response(
+            json.dumps({"metadata": {"version": 1}}).encode("utf-8"),
+            trade_date=DAY,
+            route=source.build_futoi_url(DAY),
+            retrieved_at_utc=NOW,
+        )
+    assert raised.value.blocker == "official_schema_not_stable"
+
+
+def test_futoi_schema_block_is_selected_when_cursor_precedes_it() -> None:
+    cursor = {
+        "columns": ["INDEX", "TOTAL", "PAGESIZE"],
+        "data": [[0, 2, 100]],
+    }
+    futoi = {
+        "columns": COLUMNS,
+        "data": [_row("FIZ"), _row("YUR")],
+    }
+    payload = json.dumps(
+        {"futoi.cursor": cursor, "futoi": futoi}
+    ).encode("utf-8")
+    pair, columns = source.parse_futoi_daily_response(
+        payload,
+        trade_date=DAY,
+        route=source.build_futoi_url(DAY),
+        retrieved_at_utc=NOW,
+    )
+    assert pair.trade_date == DAY
+    assert pair.source_ticker == "Si"
+    assert tuple(columns) == tuple(COLUMNS)
+
+
+def test_malformed_cursor_columns_do_not_abort_valid_futoi_selection() -> None:
+    malformed_cursor = {
+        "columns": [{}],
+        "data": [[0]],
+    }
+    futoi = {
+        "columns": COLUMNS,
+        "data": [_row("FIZ"), _row("YUR")],
+    }
+    payload = json.dumps(
+        {"futoi.cursor": malformed_cursor, "futoi": futoi}
+    ).encode("utf-8")
+    pair, columns = source.parse_futoi_daily_response(
+        payload,
+        trade_date=DAY,
+        route=source.build_futoi_url(DAY),
+        retrieved_at_utc=NOW,
+    )
+    assert pair.trade_date == DAY
+    assert pair.source_ticker == "Si"
+    assert tuple(columns) == tuple(COLUMNS)
+
+
+def test_multiple_unknown_iss_tabular_blocks_fail_closed() -> None:
+    table = {"columns": COLUMNS, "data": [_row("FIZ"), _row("YUR")]}
+    payload = json.dumps({"futoi": table, "alternate": table}).encode("utf-8")
+    with pytest.raises(source.FutoiSiSourceValidationError) as raised:
+        source.parse_futoi_daily_response(
+            payload,
+            trade_date=DAY,
+            route=source.build_futoi_url(DAY),
+            retrieved_at_utc=NOW,
+        )
+    assert raised.value.blocker == "official_schema_not_stable"
 
 
 def test_aligned_pair_uses_canonical_normalizer_and_allows_seqnum_difference() -> None:
