@@ -210,6 +210,56 @@ def test_malformed_cursor_columns_do_not_abort_valid_futoi_selection() -> None:
     assert tuple(columns) == tuple(COLUMNS)
 
 
+def test_uppercase_mixed_case_futoi_schema_is_normalized() -> None:
+    provider_columns = [
+        column.upper() if index % 2 == 0 else column.title()
+        for index, column in enumerate(COLUMNS)
+    ]
+    cursor = {
+        "columns": ["INDEX", "TOTAL", "PAGESIZE"],
+        "data": [[0, 2, 100]],
+    }
+    futoi = {
+        "columns": provider_columns,
+        "data": [_row("FIZ"), _row("YUR")],
+    }
+    payload = json.dumps(
+        {"futoi.cursor": cursor, "futoi": futoi}
+    ).encode("utf-8")
+    pair, columns = source.parse_futoi_daily_response(
+        payload,
+        trade_date=DAY,
+        route=source.build_futoi_url(DAY),
+        retrieved_at_utc=NOW,
+    )
+    assert pair.trade_date == DAY
+    assert pair.source_ticker == "Si"
+    assert tuple(columns) == tuple(COLUMNS)
+
+
+def test_duplicate_columns_after_case_normalization_fail_closed() -> None:
+    columns = COLUMNS + ["TICKER"]
+    payload = json.dumps(
+        {
+            "futoi": {
+                "columns": columns,
+                "data": [
+                    _row("FIZ") + ["Si"],
+                    _row("YUR") + ["Si"],
+                ],
+            }
+        }
+    ).encode("utf-8")
+    with pytest.raises(source.FutoiSiSourceValidationError) as raised:
+        source.parse_futoi_daily_response(
+            payload,
+            trade_date=DAY,
+            route=source.build_futoi_url(DAY),
+            retrieved_at_utc=NOW,
+        )
+    assert raised.value.blocker == "official_schema_not_stable"
+
+
 def test_multiple_unknown_iss_tabular_blocks_fail_closed() -> None:
     table = {"columns": COLUMNS, "data": [_row("FIZ"), _row("YUR")]}
     payload = json.dumps({"futoi": table, "alternate": table}).encode("utf-8")

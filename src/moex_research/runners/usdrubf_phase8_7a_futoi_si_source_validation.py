@@ -322,20 +322,22 @@ def _data_rows(payload: bytes) -> tuple[list[dict[str, object]], tuple[str, ...]
             and isinstance(candidate.get("data"), list)
         )
     ]
-    schema_matches = [
-        candidate
-        for candidate in candidates
-        if all(
-            isinstance(column, str)
-            for column in candidate.get("columns", [])
-        )
-        and all(
-            field in candidate.get("columns", [])
-            for field in RAW_REQUIRED_FIELDS
-        )
-    ]
+    schema_matches: list[tuple[Mapping[str, object], tuple[str, ...]]] = []
+    for candidate in candidates:
+        raw_columns = candidate.get("columns", [])
+        if not all(isinstance(column, str) for column in raw_columns):
+            continue
+        normalized = tuple(column.strip().lower() for column in raw_columns)
+        if not set(RAW_REQUIRED_FIELDS).issubset(normalized):
+            continue
+        if len(normalized) != len(set(normalized)):
+            raise FutoiSiSourceValidationError(
+                "FUTOI columns are duplicated after case normalization",
+                blocker="official_schema_not_stable",
+            )
+        schema_matches.append((candidate, normalized))
     if len(schema_matches) == 1:
-        block: Mapping[str, object] | None = schema_matches[0]
+        block, normalized_columns = schema_matches[0]
     elif len(schema_matches) > 1:
         raise FutoiSiSourceValidationError(
             "FUTOI response contains multiple matching ISS tabular blocks",
@@ -343,27 +345,42 @@ def _data_rows(payload: bytes) -> tuple[list[dict[str, object]], tuple[str, ...]
         )
     elif len(candidates) == 1:
         block = candidates[0]
+        raw_columns = block.get("columns", [])
+        if not all(isinstance(column, str) for column in raw_columns):
+            raise FutoiSiSourceValidationError(
+                "FUTOI columns are malformed",
+                blocker="official_schema_not_stable",
+            )
+        normalized_columns = tuple(
+            column.strip().lower() for column in raw_columns
+        )
     elif len(candidates) > 1:
         raise FutoiSiSourceValidationError(
             "FUTOI response contains multiple ambiguous ISS tabular blocks",
             blocker="official_schema_not_stable",
         )
     else:
-        block = None
-    if block is None:
         raise FutoiSiSourceValidationError(
             "FUTOI response lacks an ISS tabular block",
             blocker="official_schema_not_stable",
         )
     columns = block.get("columns")
     data = block.get("data")
-    if not isinstance(columns, list) or not all(isinstance(item, str) for item in columns):
+    if not isinstance(columns, list) or not all(
+        isinstance(item, str) for item in columns
+    ):
         raise FutoiSiSourceValidationError(
             "FUTOI columns are malformed",
             blocker="official_schema_not_stable",
         )
-    if not set(RAW_REQUIRED_FIELDS).issubset(columns):
-        missing = sorted(set(RAW_REQUIRED_FIELDS).difference(columns))
+    normalized_columns = tuple(item.strip().lower() for item in columns)
+    if len(normalized_columns) != len(set(normalized_columns)):
+        raise FutoiSiSourceValidationError(
+            "FUTOI columns are duplicated after case normalization",
+            blocker="official_schema_not_stable",
+        )
+    missing = sorted(set(RAW_REQUIRED_FIELDS).difference(normalized_columns))
+    if missing:
         raise FutoiSiSourceValidationError(
             "FUTOI schema is missing required fields: " + ",".join(missing),
             blocker=(
@@ -379,14 +396,13 @@ def _data_rows(payload: bytes) -> tuple[list[dict[str, object]], tuple[str, ...]
         )
     rows: list[dict[str, object]] = []
     for raw in data:
-        if not isinstance(raw, list) or len(raw) != len(columns):
+        if not isinstance(raw, list) or len(raw) != len(normalized_columns):
             raise FutoiSiSourceValidationError(
                 "FUTOI row width mismatch",
                 blocker="official_schema_not_stable",
             )
-        rows.append(dict(zip(columns, raw, strict=True)))
-    return rows, tuple(columns)
-
+        rows.append(dict(zip(normalized_columns, raw, strict=True)))
+    return rows, normalized_columns
 
 def _validate_raw_si_ticker_identity(
     raw_rows: Sequence[Mapping[str, object]],
