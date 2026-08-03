@@ -23,19 +23,19 @@ AUTHORITY_CONTRACT_ID: Final[str] = (
 )
 AUTHORITY_CONTRACT_VERSION: Final[str] = "1.0"
 AUTHORITY_MODE: Final[str] = "futoi_si_historical_experimental_only"
-AUTHORITY_CONTRACT_GIT_BLOB_SHA1: Final[str] = "ee4e0bedb90085dbcea883b9cb2cda09ec37e3c0"
+AUTHORITY_CONTRACT_GIT_BLOB_SHA1: Final[str] = "d0cfac63659dd6d881dd7b34d9b8db4248d615da"
 AUTHORITY_FLAG: Final[str] = "--experimental-authority-contract-path"
 EXPERIMENTAL_STATUS: Final[str] = (
     "moex_futoi_si_experimental_dataset_materialized"
 )
 FAIL_STATUS: Final[str] = "moex_futoi_si_source_not_ready"
 TECHNICAL_GATES: Final[tuple[str, ...]] = (
-    "G1",
-    "G2",
-    "G4",
-    "G6",
-    "G7",
-    "G8",
+    "G1_immutable_inputs",
+    "G2_exact_route_and_transport",
+    "G4_schema_and_pairing",
+    "G6_exact_coverage",
+    "G7_numerical_and_chronology",
+    "G8_provenance_and_no_leakage",
 )
 
 
@@ -132,7 +132,12 @@ def _verify_experimental_authority(path: Path) -> dict[str, Any]:
         or gate_policy.get("pit_revision_gate_must_reflect_actual_evidence")
         is not True
         or gate_policy.get("g3_or_g5_must_not_be_forced_to_pass") is not True
-        or tuple(gate_policy.get("experimental_dataset_status_requires_technical_gates") or ())
+        or tuple(
+            gate_policy.get(
+                "experimental_dataset_status_requires_technical_gates"
+            )
+            or ()
+        )
         != TECHNICAL_GATES
         or gate_policy.get("experimental_dataset_status") != EXPERIMENTAL_STATUS
         or gate_policy.get("failure_status") != FAIL_STATUS
