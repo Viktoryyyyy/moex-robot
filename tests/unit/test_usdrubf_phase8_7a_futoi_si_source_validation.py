@@ -164,6 +164,19 @@ def test_payload_without_iss_tabular_block_fails_closed() -> None:
     assert raised.value.blocker == "official_schema_not_stable"
 
 
+def test_multiple_unknown_iss_tabular_blocks_fail_closed() -> None:
+    table = {"columns": COLUMNS, "data": [_row("FIZ"), _row("YUR")]}
+    payload = json.dumps({"futoi": table, "alternate": table}).encode("utf-8")
+    with pytest.raises(source.FutoiSiSourceValidationError) as raised:
+        source.parse_futoi_daily_response(
+            payload,
+            trade_date=DAY,
+            route=source.build_futoi_url(DAY),
+            retrieved_at_utc=NOW,
+        )
+    assert raised.value.blocker == "official_schema_not_stable"
+
+
 def test_aligned_pair_uses_canonical_normalizer_and_allows_seqnum_difference() -> None:
     pair = _pair()
     assert pair.source_ticker == "Si"

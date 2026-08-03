@@ -324,14 +324,22 @@ def _data_rows(payload: bytes) -> tuple[list[dict[str, object]], tuple[str, ...]
             block = candidate
             break
     if block is None:
-        for candidate in root.values():
+        candidates = [
+            candidate
+            for candidate in root.values()
             if (
                 isinstance(candidate, Mapping)
                 and isinstance(candidate.get("columns"), list)
                 and isinstance(candidate.get("data"), list)
-            ):
-                block = candidate
-                break
+            )
+        ]
+        if len(candidates) == 1:
+            block = candidates[0]
+        elif len(candidates) > 1:
+            raise FutoiSiSourceValidationError(
+                "FUTOI response contains multiple ambiguous ISS tabular blocks",
+                blocker="official_schema_not_stable",
+            )
     if block is None:
         raise FutoiSiSourceValidationError(
             "FUTOI response lacks an ISS tabular block",
