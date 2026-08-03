@@ -328,7 +328,15 @@ def _data_rows(payload: bytes) -> tuple[list[dict[str, object]], tuple[str, ...]
         if not all(isinstance(column, str) for column in raw_columns):
             continue
         normalized = tuple(column.strip().lower() for column in raw_columns)
-        if not set(RAW_REQUIRED_FIELDS).issubset(normalized):
+        required_without_moment = set(RAW_REQUIRED_FIELDS).difference({"moment"})
+        timestamp_schema_supported = (
+            "moment" in normalized
+            or {"tradedate", "tradetime"}.issubset(normalized)
+        )
+        if (
+            not required_without_moment.issubset(normalized)
+            or not timestamp_schema_supported
+        ):
             continue
         if len(normalized) != len(set(normalized)):
             raise FutoiSiSourceValidationError(
@@ -379,7 +387,14 @@ def _data_rows(payload: bytes) -> tuple[list[dict[str, object]], tuple[str, ...]
             "FUTOI columns are duplicated after case normalization",
             blocker="official_schema_not_stable",
         )
-    missing = sorted(set(RAW_REQUIRED_FIELDS).difference(normalized_columns))
+    required_without_moment = set(RAW_REQUIRED_FIELDS).difference({"moment"})
+    missing = sorted(required_without_moment.difference(normalized_columns))
+    timestamp_schema_supported = (
+        "moment" in normalized_columns
+        or {"tradedate", "tradetime"}.issubset(normalized_columns)
+    )
+    if not timestamp_schema_supported:
+        missing.append("moment_or_tradedate_plus_tradetime")
     if missing:
         raise FutoiSiSourceValidationError(
             "FUTOI schema is missing required fields: " + ",".join(missing),
