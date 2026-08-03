@@ -312,10 +312,29 @@ def _json_object(payload: bytes) -> dict[str, Any]:
 
 
 def _data_rows(payload: bytes) -> tuple[list[dict[str, object]], tuple[str, ...]]:
-    block = _json_object(payload).get("data")
-    if not isinstance(block, Mapping):
+    root = _json_object(payload)
+    block: Mapping[str, object] | None = None
+    for block_name in ("data", "tradestats", "off_days", "securities"):
+        candidate = root.get(block_name)
+        if (
+            isinstance(candidate, Mapping)
+            and isinstance(candidate.get("columns"), list)
+            and isinstance(candidate.get("data"), list)
+        ):
+            block = candidate
+            break
+    if block is None:
+        for candidate in root.values():
+            if (
+                isinstance(candidate, Mapping)
+                and isinstance(candidate.get("columns"), list)
+                and isinstance(candidate.get("data"), list)
+            ):
+                block = candidate
+                break
+    if block is None:
         raise FutoiSiSourceValidationError(
-            "FUTOI response lacks data block",
+            "FUTOI response lacks an ISS tabular block",
             blocker="official_schema_not_stable",
         )
     columns = block.get("columns")
