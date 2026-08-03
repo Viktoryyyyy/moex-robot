@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import math
-import os
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -12,18 +11,28 @@ from http.client import HTTPResponse
 from typing import Any, Final
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import Request
 from zoneinfo import ZoneInfo
 
 from .models import ExternalDataError, parse_json_object, raw_payload_sha256
-
+from .moex_algopack_http import (
+    ALGOPACK_TOKEN_ENV,
+    HTTP_MAX_ATTEMPTS as ALGOPACK_HTTP_MAX_ATTEMPTS,
+    HTTP_RETRY_DELAYS_SECONDS as ALGOPACK_HTTP_RETRY_DELAYS_SECONDS,
+    MAX_RETRY_AFTER_SECONDS as ALGOPACK_MAX_RETRY_AFTER_SECONDS,
+    AlgoPackHttpError,
+    HttpOpener,
+    RejectAllRedirects as _RejectAllRedirects,
+    fetch_algopack_bytes as generic_fetch_algopack_bytes,
+    load_algopack_token as generic_load_algopack_token,
+    open_without_redirects as _open_without_redirects,
+)
 
 IssTransport = Callable[[str], bytes]
 AlgoPackTransport = Callable[[str, str], bytes]
 TokenLoader = Callable[[], str]
 Sleeper = Callable[[float], None]
 UtcClock = Callable[[], datetime]
-HttpOpener = Callable[..., HTTPResponse]
 
 SOURCE_ID: Final[str] = "moex_algopack_cnyrubf_fo_tradestats_5m"
 SECURITY_ID: Final[str] = "CNYRUBF"
@@ -35,8 +44,6 @@ ALGOPACK_MARKET_CODE: Final[str] = "FO"
 
 MOEX_ISS_HOST: Final[str] = "iss.moex.com"
 ALGOPACK_HOST: Final[str] = "apim.moex.com"
-ALGOPACK_TOKEN_ENV: Final[str] = "MOEX_ALGOPACK_TOKEN"
-
 SECURITY_METADATA_PATH: Final[str] = "/iss/securities/CNYRUBF.json"
 SECURITY_METADATA_ROUTE: Final[str] = f"https://{MOEX_ISS_HOST}{SECURITY_METADATA_PATH}"
 ALGOPACK_TRADESTATS_PATH: Final[str] = (
@@ -48,14 +55,6 @@ ALGOPACK_TRADESTATS_ROUTE: Final[str] = (
 
 SOURCE_REVISION_STATUS: Final[str] = "algopack_fo_tradestats_5m"
 HISTORICAL_MODEL_USE_STATUS: Final[str] = "source_validation_only"
-ALGOPACK_HTTP_MAX_ATTEMPTS: Final[int] = 5
-ALGOPACK_HTTP_RETRY_DELAYS_SECONDS: Final[tuple[float, ...]] = (
-    0.5,
-    1.0,
-    2.0,
-    4.0,
-)
-ALGOPACK_MAX_RETRY_AFTER_SECONDS: Final[float] = 60.0
 ALGOPACK_MAX_PAGES: Final[int] = 10_000
 ALGOPACK_BUCKET_MINUTES: Final[int] = 5
 MOSCOW: Final[ZoneInfo] = ZoneInfo("Europe/Moscow")
@@ -213,26 +212,6 @@ class CnyrubfAlgoPackDailyCandle:
         return asdict(self)
 
 
-class _RejectAllRedirects(HTTPRedirectHandler):
-    """Reject every redirect, including redirects carrying Authorization."""
-
-    def redirect_request(
-        self,
-        req: Request,
-        fp: Any,
-        code: int,
-        msg: str,
-        headers: Message,
-        newurl: str,
-    ) -> None:
-        del req, fp, code, msg, headers, newurl
-        return None
-
-
-def _open_without_redirects(request: Request, timeout: int) -> HTTPResponse:
-    return build_opener(_RejectAllRedirects()).open(request, timeout=timeout)
-
-
 def utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(microsecond=0)
 
@@ -256,13 +235,15 @@ def _utc(value: datetime) -> datetime:
 
 
 def load_algopack_token() -> str:
-    token = os.environ.get(ALGOPACK_TOKEN_ENV, "").strip()
-    if not token:
+    try:
+        return generic_load_algopack_token()
+    except AlgoPackHttpError as exc:
         raise CnyrubfAlgoPackError(
-            "AlgoPack token environment variable is not configured",
-            blocker="token_env_not_configured",
-        )
-    return token
+            str(exc),
+            blocker=exc.transport_outcome,
+            retryable=exc.retryable,
+            retry_after_seconds=exc.retry_after_seconds,
+        ) from None
 
 
 def build_security_metadata_url() -> str:
@@ -399,14 +380,9 @@ def _bounded_retry_after(headers: Mapping[str, Any] | Message | None) -> float |
     return seconds
 
 
-def _not_found_blocker(headers: Mapping[str, Any] | Message | None) -> str:
-    marker = ""
-    if headers is not None:
-        marker = " ".join(
-            str(headers.get(name, ""))
-            for name in ("X-MOEX-Error-Code", "X-Error-Code", "X-Route-Status")
-        ).lower()
-    if any(word in marker for word in ("ticker", "security", "instrument", "cnyrubf")):
+def _not_found_blocker(markers: Sequence[str]) -> str:
+    text = " ".join(markers).lower()
+    if any(word in text for word in ("ticker", "security", "instrument", "cnyrubf")):
         return "cnyrubf_not_available"
     return "official_route_not_reproducible"
 
@@ -465,85 +441,45 @@ def fetch_iss_bytes(
     return payload
 
 
+def _map_generic_error(error: AlgoPackHttpError) -> CnyrubfAlgoPackError:
+    outcome = error.transport_outcome
+    if outcome in {
+        "token_env_not_configured",
+        "algopack_authentication_failed",
+        "algopack_subscription_not_entitled",
+        "algopack_rate_limit_blocked",
+    }:
+        blocker = outcome
+    elif outcome == "algopack_http_not_found":
+        blocker = _not_found_blocker(error.sanitized_header_markers)
+    elif outcome == "algopack_http_redirect_refused":
+        blocker = "provenance_not_sufficient"
+    else:
+        blocker = "algopack_tradestats_not_available"
+    return CnyrubfAlgoPackError(
+        str(error),
+        blocker=blocker,
+        retryable=error.retryable,
+        retry_after_seconds=error.retry_after_seconds,
+    )
+
+
 def fetch_algopack_bytes(
     url: str,
     bearer_token: str,
     *,
     opener: HttpOpener = _open_without_redirects,
 ) -> bytes:
-    _exact_tradestats_route_values(url)
-    token = str(bearer_token).strip()
-    if not token:
-        raise CnyrubfAlgoPackError(
-            "AlgoPack token environment variable is not configured",
-            blocker="token_env_not_configured",
-        )
-    request = Request(
-        url,
-        headers={
-            "Accept": "application/json",
-            "Authorization": f"Bearer {token}",
-            "User-Agent": "moex-robot-algopack-cnyrubf/1.0",
-        },
-    )
     try:
-        with opener(request, timeout=30) as response:
-            payload = response.read()
-    except HTTPError as exc:
-        code = int(exc.code)
-        if 300 <= code < 400:
-            raise CnyrubfAlgoPackError(
-                "AlgoPack redirect was refused",
-                blocker="provenance_not_sufficient",
-            ) from None
-        if code == 401:
-            raise CnyrubfAlgoPackError(
-                "AlgoPack authentication failed",
-                blocker="algopack_authentication_failed",
-            ) from None
-        if code == 403:
-            raise CnyrubfAlgoPackError(
-                "AlgoPack subscription is not entitled for this dataset",
-                blocker="algopack_subscription_not_entitled",
-            ) from None
-        if code == 404:
-            blocker = _not_found_blocker(exc.headers)
-            message = (
-                "CNYRUBF AlgoPack data is not available"
-                if blocker == "cnyrubf_not_available"
-                else "official AlgoPack route is not reproducible"
-            )
-            raise CnyrubfAlgoPackError(message, blocker=blocker) from None
-        if code == 429:
-            raise CnyrubfAlgoPackError(
-                "AlgoPack rate limit blocked the request",
-                blocker="algopack_rate_limit_blocked",
-                retryable=True,
-                retry_after_seconds=_bounded_retry_after(exc.headers),
-            ) from None
-        if 500 <= code <= 599:
-            raise CnyrubfAlgoPackError(
-                "AlgoPack TradeStats service is temporarily unavailable",
-                blocker="algopack_tradestats_not_available",
-                retryable=True,
-            ) from None
-        raise CnyrubfAlgoPackError(
-            "AlgoPack HTTP response is not accepted",
-            blocker="algopack_tradestats_not_available",
-        ) from None
-    except (URLError, TimeoutError, OSError):
-        raise CnyrubfAlgoPackError(
-            "AlgoPack TradeStats transport is temporarily unavailable",
-            blocker="algopack_tradestats_not_available",
-            retryable=True,
-        ) from None
-    if not payload:
-        raise CnyrubfAlgoPackError(
-            "AlgoPack TradeStats response is empty",
-            blocker="algopack_tradestats_not_available",
-            retryable=True,
+        return generic_fetch_algopack_bytes(
+            url,
+            bearer_token,
+            route_validator=_exact_tradestats_route_values,
+            opener=opener,
+            user_agent="moex-robot-algopack-cnyrubf/1.0",
         )
-    return payload
+    except AlgoPackHttpError as exc:
+        raise _map_generic_error(exc) from None
 
 
 def _retry_bytes(
@@ -551,6 +487,7 @@ def _retry_bytes(
     *,
     sleeper: Sleeper,
 ) -> bytes:
+    error: CnyrubfAlgoPackError | None = None
     for attempt in range(ALGOPACK_HTTP_MAX_ATTEMPTS):
         try:
             return call()
@@ -676,7 +613,6 @@ def parse_security_metadata_response(
             "official ISS response is not valid UTF-8 JSON",
             blocker="official_schema_not_stable",
         ) from exc
-
     description, _ = _block(
         root,
         "description",
@@ -697,7 +633,6 @@ def parse_security_metadata_response(
             "official SECID does not match CNYRUBF",
             blocker="security_identity_not_reproducible",
         )
-
     board_rows, _ = _block(
         root,
         "boards",
@@ -749,7 +684,6 @@ def parse_security_metadata_response(
             "official security history interval is invalid",
             blocker="security_identity_not_reproducible",
         )
-    retrieved = _utc(retrieved_at_utc)
     return CnyrubfSecurityIdentity(
         source_id=SOURCE_ID,
         security_id=SECURITY_ID,
@@ -762,7 +696,7 @@ def parse_security_metadata_response(
         history_from=history_from,
         history_till=history_till,
         metadata_route=route,
-        retrieved_at_utc=retrieved,
+        retrieved_at_utc=_utc(retrieved_at_utc),
         raw_payload_sha256=raw_payload_sha256(payload),
         source_revision_status="official_iss_current_revision",
         historical_model_use_status=HISTORICAL_MODEL_USE_STATUS,
@@ -776,7 +710,11 @@ def load_security_identity(
     clock: UtcClock = utc_now,
 ) -> CnyrubfSecurityIdentity:
     route = build_security_metadata_url()
-    payload = fetch_iss_bytes_with_retry(route, transport=transport, sleeper=sleeper)
+    payload = fetch_iss_bytes_with_retry(
+        route,
+        transport=transport,
+        sleeper=sleeper,
+    )
     return parse_security_metadata_response(
         payload,
         route=route,
@@ -785,6 +723,11 @@ def load_security_identity(
 
 
 def _number(value: object, field: str, *, nonnegative: bool = False) -> float:
+    if isinstance(value, bool):
+        raise CnyrubfAlgoPackError(
+            f"AlgoPack {field} is malformed",
+            blocker="numerical_or_chronology_integrity_failure",
+        )
     try:
         result = float(value)
     except (TypeError, ValueError) as exc:
@@ -922,8 +865,8 @@ def parse_tradestats_page_response(
     route: str,
     retrieved_at_utc: datetime,
 ) -> tuple[list[AlgoPackTradeStat], tuple[str, ...], AlgoPackCursor, str]:
-    found_from, found_till, found_start = _exact_tradestats_route_values(route)
-    if (found_from, found_till, found_start) != (from_date, till_date, start):
+    found = _exact_tradestats_route_values(route)
+    if found != (from_date, till_date, start):
         raise CnyrubfAlgoPackError(
             "AlgoPack route does not pin exact ticker, range, and page",
             blocker="provenance_not_sufficient",
@@ -970,7 +913,6 @@ def parse_tradestats_page_response(
             blocker="algopack_schema_not_stable",
         )
     _utc(retrieved_at_utc)
-
     result: list[AlgoPackTradeStat] = []
     previous_end: datetime | None = None
     identities: set[tuple[date, datetime, str, str]] = set()
@@ -1224,13 +1166,11 @@ def load_daily_history(
             "AlgoPack token environment variable is not configured",
             blocker="token_env_not_configured",
         )
-
     all_rows: list[AlgoPackTradeStat] = []
     provider_ids: set[tuple[date, datetime, str, str]] = set()
     page_digests: list[str] = []
     expected_columns: tuple[str, ...] | None = None
     expected_total: int | None = None
-
     for _page in range(ALGOPACK_MAX_PAGES):
         start = len(all_rows)
         route = build_tradestats_url(from_date, till_date, start=start)
@@ -1240,14 +1180,13 @@ def load_daily_history(
             transport=transport,
             sleeper=sleeper,
         )
-        page_retrieved_at = _utc(clock())
         page_rows, columns, cursor, digest = parse_tradestats_page_response(
             payload,
             from_date=from_date,
             till_date=till_date,
             start=start,
             route=route,
-            retrieved_at_utc=page_retrieved_at,
+            retrieved_at_utc=_utc(clock()),
         )
         if expected_columns is None:
             expected_columns = columns
@@ -1266,12 +1205,6 @@ def load_daily_history(
         if cursor.index != start or start > cursor.total:
             raise CnyrubfAlgoPackError(
                 "AlgoPack pagination index is not exact",
-                blocker="algopack_schema_not_stable",
-            )
-        remaining = cursor.total - start
-        if len(page_rows) > remaining:
-            raise CnyrubfAlgoPackError(
-                "AlgoPack page exceeds remaining cursor total",
                 blocker="algopack_schema_not_stable",
             )
         page_digests.append(digest)
@@ -1318,7 +1251,6 @@ def load_daily_history(
             "AlgoPack pagination exceeded the bounded page limit",
             blocker="algopack_schema_not_stable",
         )
-
     if expected_total is None or len(all_rows) != expected_total:
         raise CnyrubfAlgoPackError(
             "AlgoPack pagination did not complete the exact cursor total",
@@ -1408,6 +1340,7 @@ __all__ = [
     "SOURCE_REVISION_STATUS",
     "TokenLoader",
     "UtcClock",
+    "_RejectAllRedirects",
     "aggregate_daily_tradestats",
     "build_security_metadata_url",
     "build_tradestats_url",
