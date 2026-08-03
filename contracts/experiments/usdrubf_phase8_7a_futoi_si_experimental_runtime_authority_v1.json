@@ -1,0 +1,60 @@
+{
+  "contract_identity": {
+    "project": "MOEX_Bot",
+    "contract_id": "usdrubf_phase8_7a_futoi_si_experimental_runtime_authority_v1",
+    "contract_version": "1.0",
+    "task_id": "ema_3_19_ai_phase_8_7a_futoi_si_historical_runtime_enablement_v1",
+    "lane": "ema_3_19_ai",
+    "phase": "8.7A",
+    "execution_mode": "browser_controlled_github_route",
+    "status": "experimental_runtime_authority_active"
+  },
+  "parent_contract": {
+    "path": "contracts/experiments/usdrubf_phase8_7a_futoi_si_source_and_feature_contract_v1.json",
+    "git_blob_sha1": "eeb64cb20e8a122bc1d962077d4ca748c19d5fad",
+    "source_ticker": "Si",
+    "target_instrument_id": "forts.usdrubf",
+    "target_security_id": "USDRUBF"
+  },
+  "authority": {
+    "mode": "futoi_si_historical_experimental_only",
+    "authority_owner": "PM_L2_PHASE_OWNER",
+    "historical_authenticated_retrieval_allowed": true,
+    "local_research_artifact_storage_allowed": true,
+    "phase8_7a_source_validation_allowed": true,
+    "phase8_7b_feature_computation_allowed": false,
+    "model_fitting_allowed": false,
+    "production_prediction_allowed": false,
+    "model_or_strategy_promotion_allowed": false,
+    "raw_payload_redistribution_allowed": false,
+    "broker_action_allowed": false,
+    "trading_action_allowed": false
+  },
+  "gate_policy": {
+    "license_access_gate_must_reflect_actual_evidence": true,
+    "pit_revision_gate_must_reflect_actual_evidence": true,
+    "g3_or_g5_must_not_be_forced_to_pass": true,
+    "production_phase8_7b_entry_requires_all_parent_gates": true,
+    "experimental_dataset_status_requires_technical_gates": [
+      "G1",
+      "G2",
+      "G4",
+      "G6",
+      "G7",
+      "G8"
+    ],
+    "experimental_dataset_status": "moex_futoi_si_experimental_dataset_materialized",
+    "failure_status": "moex_futoi_si_source_not_ready"
+  },
+  "runtime_policy": {
+    "required_parent_runtime": "moex_research.runners.usdrubf_phase8_7a_futoi_si_runtime",
+    "required_experimental_runtime": "moex_research.runners.usdrubf_phase8_7a_futoi_si_experimental_runtime",
+    "required_authority_flag": "--experimental-authority-contract-path",
+    "output_artifact_count": 10,
+    "output_directory_must_not_preexist": true,
+    "one_trade_date_per_request": true,
+    "latest": 1,
+    "fallback_or_substitution_allowed": false,
+    "raw_response_persistence_allowed": false
+  }
+}
