@@ -313,33 +313,36 @@ def _json_object(payload: bytes) -> dict[str, Any]:
 
 def _data_rows(payload: bytes) -> tuple[list[dict[str, object]], tuple[str, ...]]:
     root = _json_object(payload)
-    block: Mapping[str, object] | None = None
-    for block_name in ("data", "tradestats", "off_days", "securities"):
-        candidate = root.get(block_name)
+    candidates = [
+        candidate
+        for candidate in root.values()
         if (
             isinstance(candidate, Mapping)
             and isinstance(candidate.get("columns"), list)
             and isinstance(candidate.get("data"), list)
-        ):
-            block = candidate
-            break
-    if block is None:
-        candidates = [
-            candidate
-            for candidate in root.values()
-            if (
-                isinstance(candidate, Mapping)
-                and isinstance(candidate.get("columns"), list)
-                and isinstance(candidate.get("data"), list)
-            )
-        ]
-        if len(candidates) == 1:
-            block = candidates[0]
-        elif len(candidates) > 1:
-            raise FutoiSiSourceValidationError(
-                "FUTOI response contains multiple ambiguous ISS tabular blocks",
-                blocker="official_schema_not_stable",
-            )
+        )
+    ]
+    schema_matches = [
+        candidate
+        for candidate in candidates
+        if set(RAW_REQUIRED_FIELDS).issubset(candidate.get("columns", []))
+    ]
+    if len(schema_matches) == 1:
+        block: Mapping[str, object] | None = schema_matches[0]
+    elif len(schema_matches) > 1:
+        raise FutoiSiSourceValidationError(
+            "FUTOI response contains multiple matching ISS tabular blocks",
+            blocker="official_schema_not_stable",
+        )
+    elif len(candidates) == 1:
+        block = candidates[0]
+    elif len(candidates) > 1:
+        raise FutoiSiSourceValidationError(
+            "FUTOI response contains multiple ambiguous ISS tabular blocks",
+            blocker="official_schema_not_stable",
+        )
+    else:
+        block = None
     if block is None:
         raise FutoiSiSourceValidationError(
             "FUTOI response lacks an ISS tabular block",

@@ -164,6 +164,29 @@ def test_payload_without_iss_tabular_block_fails_closed() -> None:
     assert raised.value.blocker == "official_schema_not_stable"
 
 
+def test_futoi_schema_block_is_selected_when_cursor_precedes_it() -> None:
+    cursor = {
+        "columns": ["INDEX", "TOTAL", "PAGESIZE"],
+        "data": [[0, 2, 100]],
+    }
+    futoi = {
+        "columns": COLUMNS,
+        "data": [_row("FIZ"), _row("YUR")],
+    }
+    payload = json.dumps(
+        {"futoi.cursor": cursor, "futoi": futoi}
+    ).encode("utf-8")
+    pair, columns = source.parse_futoi_daily_response(
+        payload,
+        trade_date=DAY,
+        route=source.build_futoi_url(DAY),
+        retrieved_at_utc=NOW,
+    )
+    assert pair.trade_date == DAY
+    assert pair.source_ticker == "Si"
+    assert tuple(columns) == tuple(COLUMNS)
+
+
 def test_multiple_unknown_iss_tabular_blocks_fail_closed() -> None:
     table = {"columns": COLUMNS, "data": [_row("FIZ"), _row("YUR")]}
     payload = json.dumps({"futoi": table, "alternate": table}).encode("utf-8")
