@@ -325,7 +325,14 @@ def _data_rows(payload: bytes) -> tuple[list[dict[str, object]], tuple[str, ...]
     schema_matches = [
         candidate
         for candidate in candidates
-        if set(RAW_REQUIRED_FIELDS).issubset(candidate.get("columns", []))
+        if all(
+            isinstance(column, str)
+            for column in candidate.get("columns", [])
+        )
+        and all(
+            field in candidate.get("columns", [])
+            for field in RAW_REQUIRED_FIELDS
+        )
     ]
     if len(schema_matches) == 1:
         block: Mapping[str, object] | None = schema_matches[0]
