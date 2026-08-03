@@ -36,12 +36,12 @@
     "g3_or_g5_must_not_be_forced_to_pass": true,
     "production_phase8_7b_entry_requires_all_parent_gates": true,
     "experimental_dataset_status_requires_technical_gates": [
-      "G1",
-      "G2",
-      "G4",
-      "G6",
-      "G7",
-      "G8"
+      "G1_immutable_inputs",
+      "G2_exact_route_and_transport",
+      "G4_schema_and_pairing",
+      "G6_exact_coverage",
+      "G7_numerical_and_chronology",
+      "G8_provenance_and_no_leakage"
     ],
     "experimental_dataset_status": "moex_futoi_si_experimental_dataset_materialized",
     "failure_status": "moex_futoi_si_source_not_ready"
