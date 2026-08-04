@@ -13,6 +13,14 @@ from moex_research.runners import (
 )
 
 
+def _repository_bytecode_inventory(repo_root: Path) -> set[str]:
+    inventory: set[str] = set()
+    for path in repo_root.rglob("*"):
+        if path.name == "__pycache__" or path.suffix.lower() in {".pyc", ".pyo"}:
+            inventory.add(path.relative_to(repo_root).as_posix())
+    return inventory
+
+
 def test_experimental_runtime_policy_contract() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     path = repo_root / runtime.POLICY_REPO_PATH
@@ -115,61 +123,54 @@ def test_no_bytecode_gate_precedes_critical_imports() -> None:
     assert gate_position < pandas_position
     assert gate_position < base_position
     assert runtime.build_argument_parser().prog == runtime.OPERATIONAL_INVOCATION
-    assert runtime.OPERATIONAL_INVOCATION.startswith("python -B -m ")
+    assert runtime.OPERATIONAL_INVOCATION == (
+        "PYTHONPATH=src python -B "
+        "src/moex_research/runners/"
+        "usdrubf_phase8_7a_futoi_si_experimental_runtime.py"
+    )
 
 
-def test_ordinary_module_launch_fails_before_critical_runtime(
-    tmp_path: Path,
-) -> None:
+def test_ordinary_script_launch_fails_before_critical_runtime() -> None:
     repo_root = Path(__file__).resolve().parents[2]
+    runtime_script = (
+        repo_root
+        / "src/moex_research/runners/"
+        "usdrubf_phase8_7a_futoi_si_experimental_runtime.py"
+    )
     environment = os.environ.copy()
-    environment["PYTHONPATH"] = str(repo_root / "src")
-    environment["PYTHONPYCACHEPREFIX"] = str(tmp_path / "external-pycache")
     environment.pop("PYTHONDONTWRITEBYTECODE", None)
-    before = {
-        path.relative_to(repo_root).as_posix()
-        for path in repo_root.rglob("*.pyc")
-    }
+    environment.pop("PYTHONPYCACHEPREFIX", None)
+    environment.pop("PYTHONPATH", None)
+    before = _repository_bytecode_inventory(repo_root)
 
     completed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "moex_research.runners."
-            "usdrubf_phase8_7a_futoi_si_experimental_runtime",
-            "--help",
-        ],
+        [sys.executable, str(runtime_script), "--help"],
         cwd=repo_root,
         env=environment,
         check=False,
         capture_output=True,
         text=True,
     )
-    after = {
-        path.relative_to(repo_root).as_posix()
-        for path in repo_root.rglob("*.pyc")
-    }
+    after = _repository_bytecode_inventory(repo_root)
 
     assert completed.returncode != 0
     assert "requires no-bytecode startup" in completed.stderr
     assert after == before
 
 
-def test_no_bytecode_module_launch_reaches_argument_parser() -> None:
+def test_no_bytecode_script_launch_reaches_argument_parser() -> None:
     repo_root = Path(__file__).resolve().parents[2]
+    runtime_script = (
+        repo_root
+        / "src/moex_research/runners/"
+        "usdrubf_phase8_7a_futoi_si_experimental_runtime.py"
+    )
     environment = os.environ.copy()
     environment["PYTHONPATH"] = str(repo_root / "src")
     environment.pop("PYTHONPYCACHEPREFIX", None)
 
     completed = subprocess.run(
-        [
-            sys.executable,
-            "-B",
-            "-m",
-            "moex_research.runners."
-            "usdrubf_phase8_7a_futoi_si_experimental_runtime",
-            "--help",
-        ],
+        [sys.executable, "-B", str(runtime_script), "--help"],
         cwd=repo_root,
         env=environment,
         check=False,
