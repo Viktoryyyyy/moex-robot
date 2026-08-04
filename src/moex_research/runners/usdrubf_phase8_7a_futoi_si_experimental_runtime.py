@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import subprocess
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Final, Mapping
 
@@ -21,10 +23,27 @@ TASK_ID: Final[str] = (
 AUTHORITY_CONTRACT_ID: Final[str] = (
     "usdrubf_phase8_7a_futoi_si_experimental_runtime_authority_v1"
 )
-AUTHORITY_CONTRACT_VERSION: Final[str] = "1.0"
+AUTHORITY_CONTRACT_VERSION: Final[str] = "1.1"
 AUTHORITY_MODE: Final[str] = "futoi_si_historical_experimental_only"
-AUTHORITY_CONTRACT_GIT_BLOB_SHA1: Final[str] = "d0cfac63659dd6d881dd7b34d9b8db4248d615da"
 AUTHORITY_FLAG: Final[str] = "--experimental-authority-contract-path"
+AUTHORITY_REPO_PATH: Final[str] = (
+    "contracts/experiments/"
+    "usdrubf_phase8_7a_futoi_si_experimental_runtime_authority_v1.json"
+)
+AUTHORIZED_RUN_ID: Final[str] = (
+    "phase8_7a_futoi_si_source_validation_20260804_v1"
+)
+OUTPUT_PARENT_RELATIVE: Final[Path] = Path(
+    "research/ema_3_19_ai/phase8_7a_futoi_si_source_validation"
+)
+CANONICAL_OUTPUT_RELATIVE: Final[Path] = (
+    OUTPUT_PARENT_RELATIVE / f"run_id={AUTHORIZED_RUN_ID}"
+)
+CONSUMPTION_MARKER_RELATIVE: Final[Path] = (
+    OUTPUT_PARENT_RELATIVE
+    / "authority_consumption"
+    / f"{AUTHORITY_CONTRACT_ID}.json"
+)
 EXPERIMENTAL_STATUS: Final[str] = (
     "moex_futoi_si_experimental_dataset_materialized"
 )
@@ -78,16 +97,112 @@ def request_from_args(args: argparse.Namespace) -> ExperimentalRuntimeRequest:
     )
 
 
-def _verify_experimental_authority(path: Path) -> dict[str, Any]:
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _data_root() -> Path:
+    raw = str(os.environ.get("MOEX_DATA_ROOT") or "").strip()
+    if not raw:
+        raise base.validation.FutoiSiSourceValidationError(
+            "MOEX_DATA_ROOT is required for experimental authority binding",
+            blocker="provenance_not_sufficient",
+        )
+    root = Path(raw).expanduser().resolve()
+    if not root.is_absolute():
+        raise base.validation.FutoiSiSourceValidationError(
+            "MOEX_DATA_ROOT must resolve to an absolute path",
+            blocker="provenance_not_sufficient",
+        )
+    return root
+
+
+def _run_git(repo_root: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    value = completed.stdout.strip()
+    if completed.returncode != 0 or not value:
+        raise base.validation.FutoiSiSourceValidationError(
+            "applied git state cannot prove experimental authority provenance",
+            blocker="provenance_not_sufficient",
+        )
+    return value
+
+
+def _verify_tracked_authority_blob(
+    base_request: base.RuntimeRequest,
+    authority_path: Path,
+) -> str:
+    repo_root = _repo_root()
+    expected_path = (repo_root / AUTHORITY_REPO_PATH).resolve()
+    if authority_path.resolve() != expected_path:
+        raise base.validation.FutoiSiSourceValidationError(
+            "experimental authority must be read from its canonical repository path",
+            blocker="provenance_not_sufficient",
+        )
+    observed_head = _run_git(repo_root, "rev-parse", "HEAD").lower()
+    if observed_head != base_request.git_commit_sha:
+        raise base.validation.FutoiSiSourceValidationError(
+            "runtime git SHA does not match the applied repository HEAD",
+            blocker="provenance_not_sufficient",
+        )
+    tracked_blob = _run_git(
+        repo_root,
+        "rev-parse",
+        f"{base_request.git_commit_sha}:{AUTHORITY_REPO_PATH}",
+    ).lower()
+    actual_blob = base._git_blob_sha1(authority_path)
+    if tracked_blob != actual_blob:
+        raise base.validation.FutoiSiSourceValidationError(
+            "experimental authority differs from the blob tracked by applied git SHA",
+            blocker="provenance_not_sufficient",
+        )
+    return actual_blob
+
+
+def _authority_marker_path() -> Path:
+    return (_data_root() / CONSUMPTION_MARKER_RELATIVE).resolve()
+
+
+def _canonical_output_path() -> Path:
+    return (_data_root() / CANONICAL_OUTPUT_RELATIVE).resolve()
+
+
+def _assert_authority_unused() -> None:
+    if _authority_marker_path().exists():
+        raise base.validation.FutoiSiSourceValidationError(
+            "experimental authority has already been consumed",
+            blocker="provenance_not_sufficient",
+        )
+
+
+def _verify_experimental_authority(
+    request: ExperimentalRuntimeRequest,
+) -> dict[str, Any]:
+    base_request = request.base_request
+    path = request.authority_contract_path
     payload = base._json(path)
     identity = payload.get("contract_identity")
     parent = payload.get("parent_contract")
     authority = payload.get("authority")
     gate_policy = payload.get("gate_policy")
     runtime_policy = payload.get("runtime_policy")
+    single_execution = payload.get("single_execution")
     if not all(
         isinstance(item, Mapping)
-        for item in (identity, parent, authority, gate_policy, runtime_policy)
+        for item in (
+            identity,
+            parent,
+            authority,
+            gate_policy,
+            runtime_policy,
+            single_execution,
+        )
     ):
         raise base.validation.FutoiSiSourceValidationError(
             "experimental authority contract structure mismatch",
@@ -98,6 +213,7 @@ def _verify_experimental_authority(path: Path) -> dict[str, Any]:
     assert isinstance(authority, Mapping)
     assert isinstance(gate_policy, Mapping)
     assert isinstance(runtime_policy, Mapping)
+    assert isinstance(single_execution, Mapping)
 
     expected_false = (
         "phase8_7b_feature_computation_allowed",
@@ -145,17 +261,84 @@ def _verify_experimental_authority(path: Path) -> dict[str, Any]:
         or runtime_policy.get("output_artifact_count") != 10
         or runtime_policy.get("fallback_or_substitution_allowed") is not False
         or runtime_policy.get("raw_response_persistence_allowed") is not False
+        or single_execution.get("authorized_run_id") != AUTHORIZED_RUN_ID
+        or single_execution.get("authority_reuse_allowed") is not False
+        or single_execution.get("authority_file_repo_path")
+        != AUTHORITY_REPO_PATH
+        or single_execution.get("applied_repo_head_must_equal_git_commit_sha")
+        is not True
+        or single_execution.get("applied_commit_must_track_exact_authority_blob")
+        is not True
+        or single_execution.get("canonical_output_relative_path")
+        != CANONICAL_OUTPUT_RELATIVE.as_posix()
+        or single_execution.get("consumption_marker_relative_path")
+        != CONSUMPTION_MARKER_RELATIVE.as_posix()
+        or single_execution.get("consumption_marker_create_mode")
+        != "atomic_create_exclusive"
     ):
         raise base.validation.FutoiSiSourceValidationError(
             "experimental authority contract policy mismatch",
             blocker="provenance_not_sufficient",
         )
-    if base._git_blob_sha1(path) != AUTHORITY_CONTRACT_GIT_BLOB_SHA1:
+    if base_request.run_id != AUTHORIZED_RUN_ID:
         raise base.validation.FutoiSiSourceValidationError(
-            "experimental authority contract digest mismatch",
+            "runtime run ID is not authorized by the experimental contract",
             blocker="provenance_not_sufficient",
         )
-    return dict(payload)
+    if base_request.output_dir.resolve() != _canonical_output_path():
+        raise base.validation.FutoiSiSourceValidationError(
+            "runtime output directory is not the authorized canonical path",
+            blocker="provenance_not_sufficient",
+        )
+    authority_blob_sha1 = _verify_tracked_authority_blob(base_request, path)
+    _assert_authority_unused()
+    normalized = dict(payload)
+    normalized["authority_blob_sha1"] = authority_blob_sha1
+    return normalized
+
+
+def _consume_authority(request: ExperimentalRuntimeRequest) -> Path:
+    marker = _authority_marker_path()
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "project": PROJECT,
+        "task_id": TASK_ID,
+        "contract_id": AUTHORITY_CONTRACT_ID,
+        "contract_version": AUTHORITY_CONTRACT_VERSION,
+        "run_id": request.base_request.run_id,
+        "git_commit_sha": request.base_request.git_commit_sha,
+        "authority_blob_sha1": base._git_blob_sha1(
+            request.authority_contract_path
+        ),
+        "consumed_at_utc": datetime.now(timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z"),
+    }
+    try:
+        descriptor = os.open(
+            marker,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+    except FileExistsError as exc:
+        raise base.validation.FutoiSiSourceValidationError(
+            "experimental authority has already been consumed",
+            blocker="provenance_not_sufficient",
+        ) from exc
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(
+                payload,
+                stream,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            stream.write("\n")
+    except Exception:
+        marker.unlink(missing_ok=True)
+        raise
+    return marker
 
 
 def _sha256(path: Path) -> str:
@@ -180,8 +363,9 @@ def _source_error_record(
 
 
 def execute(request: ExperimentalRuntimeRequest) -> dict[str, object]:
-    _verify_experimental_authority(request.authority_contract_path)
+    authority_payload = _verify_experimental_authority(request)
     base_request = request.base_request
+    authority_blob_sha1 = str(authority_payload["authority_blob_sha1"])
     input_hashes = base._verify_frozen_inputs(base_request)
     input_hashes["experimental_authority_contract"] = _sha256(
         request.authority_contract_path
@@ -242,7 +426,9 @@ def execute(request: ExperimentalRuntimeRequest) -> dict[str, object]:
             )
         )
 
+    consumption_marker: Path | None = None
     if token is not None:
+        consumption_marker = _consume_authority(request)
         for value in sorted(eligible.prior_trade_date.unique()):
             source_date = date.fromisoformat(str(value))
             try:
@@ -299,6 +485,7 @@ def execute(request: ExperimentalRuntimeRequest) -> dict[str, object]:
         "transport_exercised": transport_exercised,
         "route_validated": transport_exercised,
         "runtime_mode": AUTHORITY_MODE,
+        "authority_consumed": consumption_marker is not None,
     }
     schema_profile = {
         "required_fields": list(base.validation.RAW_REQUIRED_FIELDS),
@@ -358,8 +545,13 @@ def execute(request: ExperimentalRuntimeRequest) -> dict[str, object]:
         "contract_id": AUTHORITY_CONTRACT_ID,
         "contract_version": AUTHORITY_CONTRACT_VERSION,
         "mode": AUTHORITY_MODE,
-        "git_blob_sha1": AUTHORITY_CONTRACT_GIT_BLOB_SHA1,
+        "authority_blob_sha1": authority_blob_sha1,
+        "authorized_run_id": AUTHORIZED_RUN_ID,
         "technical_gates": list(TECHNICAL_GATES),
+        "authority_consumed": consumption_marker is not None,
+        "consumption_marker_relative_path": (
+            CONSUMPTION_MARKER_RELATIVE.as_posix()
+        ),
         "production_use_allowed": False,
         "feature_computation_allowed": False,
         "model_fitting_allowed": False,
@@ -433,6 +625,7 @@ def execute(request: ExperimentalRuntimeRequest) -> dict[str, object]:
         "final_status": final_status,
         "failed_gates": failed_gates,
         "technical_gates_passed": technical_gates_passed,
+        "authority_consumed": consumption_marker is not None,
         "production_use_allowed": False,
     }
 
