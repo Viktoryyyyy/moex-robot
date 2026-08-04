@@ -2,7 +2,7 @@
   "contract_identity": {
     "project": "MOEX_Bot",
     "contract_id": "usdrubf_phase8_7a_futoi_si_experimental_runtime_authority_v1",
-    "contract_version": "1.0",
+    "contract_version": "1.1",
     "task_id": "ema_3_19_ai_phase_8_7a_futoi_si_historical_runtime_enablement_v1",
     "lane": "ema_3_19_ai",
     "phase": "8.7A",
@@ -56,5 +56,15 @@
     "latest": 1,
     "fallback_or_substitution_allowed": false,
     "raw_response_persistence_allowed": false
+  },
+  "single_execution": {
+    "authorized_run_id": "phase8_7a_futoi_si_source_validation_20260804_v1",
+    "authority_reuse_allowed": false,
+    "authority_file_repo_path": "contracts/experiments/usdrubf_phase8_7a_futoi_si_experimental_runtime_authority_v1.json",
+    "applied_repo_head_must_equal_git_commit_sha": true,
+    "applied_commit_must_track_exact_authority_blob": true,
+    "canonical_output_relative_path": "research/ema_3_19_ai/phase8_7a_futoi_si_source_validation/run_id=phase8_7a_futoi_si_source_validation_20260804_v1",
+    "consumption_marker_relative_path": "research/ema_3_19_ai/phase8_7a_futoi_si_source_validation/authority_consumption/usdrubf_phase8_7a_futoi_si_experimental_runtime_authority_v1.json",
+    "consumption_marker_create_mode": "atomic_create_exclusive"
   }
 }
