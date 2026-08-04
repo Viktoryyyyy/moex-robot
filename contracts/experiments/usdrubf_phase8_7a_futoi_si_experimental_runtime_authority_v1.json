@@ -2,7 +2,7 @@
   "contract_identity": {
     "project": "MOEX_Bot",
     "contract_id": "usdrubf_phase8_7a_futoi_si_experimental_runtime_policy_v2",
-    "contract_version": "2.0",
+    "contract_version": "2.1",
     "task_id": "ema_3_19_ai_phase_8_7a_futoi_si_historical_runtime_enablement_v1",
     "lane": "ema_3_19_ai",
     "phase": "8.7A",
@@ -26,6 +26,11 @@
     "runtime_authority_must_bind_exact_output_dir": true,
     "runtime_authority_must_bind_canonical_data_root": true,
     "canonical_data_root": "/home/trader/moex_bot/data",
+    "trusted_runtime_authority_root": "/etc/moex_bot/runtime_authorities/ema_3_19_ai",
+    "trusted_runtime_authority_owner_uid": 0,
+    "trusted_runtime_authority_filename_rule": "authorization_id.json",
+    "trusted_runtime_authority_group_world_writable_allowed": false,
+    "trusted_runtime_authority_ancestors_must_be_root_owned": true,
     "module_claims_global_single_use": false,
     "one_run_per_operational_authority_is_orchestration_responsibility": true
   },
