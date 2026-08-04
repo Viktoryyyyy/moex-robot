@@ -61,6 +61,7 @@
     "authorized_run_id": "phase8_7a_futoi_si_source_validation_20260804_v1",
     "authority_reuse_allowed": false,
     "authority_file_repo_path": "contracts/experiments/usdrubf_phase8_7a_futoi_si_experimental_runtime_authority_v1.json",
+    "authorized_data_root": "/home/trader/moex_bot/data",
     "applied_repo_head_must_equal_git_commit_sha": true,
     "applied_commit_must_track_exact_authority_blob": true,
     "canonical_output_relative_path": "research/ema_3_19_ai/phase8_7a_futoi_si_source_validation/run_id=phase8_7a_futoi_si_source_validation_20260804_v1",
