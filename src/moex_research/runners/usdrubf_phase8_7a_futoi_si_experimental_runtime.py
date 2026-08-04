@@ -8,6 +8,7 @@ import os
 import re
 import stat
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -219,6 +220,62 @@ def _read_git_blob_bytes(repo_root: Path, blob_sha: str) -> bytes:
     if observed != blob_sha:
         raise _fail("tracked policy Git blob identity mismatch")
     return payload
+
+
+def _verify_no_repository_bytecode(repo_root: Path) -> None:
+    offenders: list[str] = []
+    try:
+        for root, directory_names, file_names in os.walk(
+            repo_root,
+            topdown=True,
+            followlinks=False,
+        ):
+            current = Path(root)
+            relative = current.relative_to(repo_root)
+            if ".git" in directory_names:
+                directory_names.remove(".git")
+            for directory_name in tuple(directory_names):
+                if directory_name == "__pycache__":
+                    offenders.append((relative / directory_name).as_posix())
+                    directory_names.remove(directory_name)
+            for file_name in file_names:
+                if Path(file_name).suffix.lower() in {".pyc", ".pyo"}:
+                    offenders.append((relative / file_name).as_posix())
+    except (OSError, ValueError) as exc:
+        raise _fail("repository bytecode inventory cannot be verified") from exc
+    if offenders:
+        raise _fail(
+            "ignored executable Python bytecode is present: "
+            + ", ".join(sorted(offenders))
+        )
+
+
+def _verify_loaded_runtime_modules(
+    repo_root: Path,
+    modules: Sequence[object] | None = None,
+) -> None:
+    resolved_root = repo_root.resolve()
+    critical_modules = tuple(
+        modules
+        if modules is not None
+        else (sys.modules.get(__name__), base, base.validation)
+    )
+    for module in critical_modules:
+        module_name = str(getattr(module, "__name__", "<unknown>"))
+        raw_path = getattr(module, "__file__", None)
+        if not isinstance(raw_path, str) or not raw_path:
+            raise _fail(f"loaded runtime module has no source path: {module_name}")
+        try:
+            source_path = Path(raw_path).resolve(strict=True)
+            source_path.relative_to(resolved_root)
+        except (OSError, ValueError) as exc:
+            raise _fail(
+                f"loaded runtime module is outside the executed repository: {module_name}"
+            ) from exc
+        if source_path.suffix.lower() != ".py" or "__pycache__" in source_path.parts:
+            raise _fail(
+                f"loaded runtime module does not use trusted Python source: {module_name}"
+            )
 
 
 def _verify_no_hidden_index_flags(repo_root: Path) -> None:
@@ -584,6 +641,8 @@ def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, An
     head = _run_git(repo_root, "rev-parse", "HEAD").lower()
     if head != request.base_request.git_commit_sha:
         raise _fail("runtime git SHA differs from applied repository HEAD")
+    _verify_no_repository_bytecode(repo_root)
+    _verify_loaded_runtime_modules(repo_root)
     _verify_no_hidden_index_flags(repo_root)
     _verify_clean_worktree(repo_root)
     tracked_blob = _run_git(
