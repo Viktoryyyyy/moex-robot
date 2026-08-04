@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -56,6 +57,39 @@ def _bind_test_data_root(
         "_data_root",
         lambda: tmp_path.resolve(),
     )
+
+
+def _bind_test_authority_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> Path:
+    trusted_root = tmp_path / "trusted-authorities"
+    trusted_root.mkdir(mode=0o750, exist_ok=True)
+    trusted_root.chmod(0o750)
+    monkeypatch.setattr(
+        experimental,
+        "TRUSTED_AUTHORITY_ROOT",
+        trusted_root.resolve(),
+    )
+    monkeypatch.setattr(
+        experimental,
+        "TRUSTED_AUTHORITY_OWNER_UID",
+        os.getuid(),
+    )
+    monkeypatch.setattr(
+        experimental,
+        "_open_trusted_authority_root",
+        lambda: os.open(trusted_root, experimental.OPEN_DIRECTORY_FLAGS),
+    )
+    return trusted_root.resolve()
+
+
+def _bind_test_roots(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> Path:
+    _bind_test_data_root(monkeypatch, tmp_path)
+    return _bind_test_authority_root(monkeypatch, tmp_path)
 
 
 def _base_request(
@@ -116,19 +150,22 @@ def _authority_payload(request: base.RuntimeRequest) -> dict[str, object]:
 
 
 def _authority_file(
-    tmp_path: Path,
     request: base.RuntimeRequest,
     *,
     mutate=None,
+    filename: str | None = None,
 ) -> Path:
     payload = _authority_payload(request)
     if mutate is not None:
         mutate(payload)
-    path = tmp_path / "runtime-authority.json"
+    path = experimental.TRUSTED_AUTHORITY_ROOT / (
+        filename or f"{payload['authorization_id']}.json"
+    )
     path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    path.chmod(0o640)
     return path
 
 
@@ -142,7 +179,6 @@ def _request(
         base_request=base_request,
         policy_contract_path=_policy_path(),
         runtime_authority_evidence_path=_authority_file(
-            tmp_path,
             base_request,
             mutate=mutate_authority,
         ),
@@ -191,21 +227,50 @@ def test_dirty_worktree_is_rejected(
     assert raised.value.blocker == "provenance_not_sufficient"
 
 
-def test_external_authority_is_captured_from_one_descriptor(
+def test_trusted_authority_is_captured_from_one_descriptor(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    path = tmp_path / "authority.json"
-    path.write_text('{"value":1}\n', encoding="utf-8")
+    _bind_test_authority_root(monkeypatch, tmp_path)
+    request = _base_request(tmp_path)
+    path = _authority_file(request)
 
-    payload, raw, opened_path = experimental._read_external_authority_once(path)
+    payload, raw, opened_path = experimental._read_trusted_authority_once(path)
     path.write_text('{"value":2}\n', encoding="utf-8")
 
-    assert payload == {"value": 1}
-    assert raw == b'{"value":1}\n'
-    assert opened_path == path.resolve()
+    assert payload["authorization_id"] == AUTHORIZATION_ID
+    assert json.loads(raw.decode("utf-8"))["authorization_id"] == AUTHORIZATION_ID
+    assert opened_path == path
     assert experimental._sha256_bytes(raw) != experimental._sha256_bytes(
         path.read_bytes()
     )
+
+
+def test_trusted_authority_rejects_filename_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _bind_test_authority_root(monkeypatch, tmp_path)
+    request = _base_request(tmp_path)
+    path = _authority_file(request, filename="wrong-name.json")
+
+    with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
+        experimental._read_trusted_authority_once(path)
+    assert raised.value.blocker == "provenance_not_sufficient"
+
+
+def test_trusted_authority_rejects_group_writable_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _bind_test_authority_root(monkeypatch, tmp_path)
+    request = _base_request(tmp_path)
+    path = _authority_file(request)
+    path.chmod(0o660)
+
+    with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
+        experimental._read_trusted_authority_once(path)
+    assert raised.value.blocker == "provenance_not_sufficient"
 
 
 def test_symlinked_output_descendant_is_rejected(
@@ -226,7 +291,7 @@ def test_checked_in_policy_is_tracked_but_not_runtime_authority(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    _bind_test_data_root(monkeypatch, tmp_path)
+    _bind_test_roots(monkeypatch, tmp_path)
     request = _request(tmp_path)
 
     summary = experimental._verify_policy_contract(request)
@@ -236,13 +301,16 @@ def test_checked_in_policy_is_tracked_but_not_runtime_authority(
     policy = json.loads(_policy_path().read_text(encoding="utf-8"))
     assert policy["policy_boundary"]["checked_in_policy_is_runtime_authority"] is False
     assert policy["policy_boundary"]["separate_runtime_authority_evidence_required"] is True
+    assert policy["policy_boundary"]["trusted_runtime_authority_root"] == (
+        experimental.TRUSTED_AUTHORITY_ROOT.as_posix()
+    )
 
 
 def test_external_runtime_authority_binds_exact_invocation(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    _bind_test_data_root(monkeypatch, tmp_path)
+    _bind_test_roots(monkeypatch, tmp_path)
     request = _request(tmp_path)
 
     summary = experimental._verify_runtime_authority(request)
@@ -252,8 +320,9 @@ def test_external_runtime_authority_binds_exact_invocation(
     assert summary["run_id"] == RUN_ID
     assert summary["output_dir"] == request.base_request.output_dir.as_posix()
     assert summary["evidence_path"] == (
-        request.runtime_authority_evidence_path.resolve().as_posix()
+        request.runtime_authority_evidence_path.as_posix()
     )
+    assert summary["trusted_owner_uid"] == os.getuid()
     assert summary["global_single_use_claimed"] is False
     assert summary["production_use_allowed"] is False
 
@@ -274,7 +343,7 @@ def test_runtime_authority_rejects_mismatched_invocation(
     field: str,
     value: object,
 ) -> None:
-    _bind_test_data_root(monkeypatch, tmp_path)
+    _bind_test_roots(monkeypatch, tmp_path)
 
     def mutate(payload: dict[str, object]) -> None:
         payload[field] = value
@@ -285,17 +354,21 @@ def test_runtime_authority_rejects_mismatched_invocation(
     assert raised.value.blocker == "provenance_not_sufficient"
 
 
-def test_runtime_authority_inside_repository_is_rejected(
+def test_runtime_authority_outside_trusted_root_is_rejected(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    _bind_test_data_root(monkeypatch, tmp_path)
+    _bind_test_roots(monkeypatch, tmp_path)
     request = _request(tmp_path)
+    outside = tmp_path / f"{AUTHORIZATION_ID}.json"
+    outside.write_bytes(request.runtime_authority_evidence_path.read_bytes())
+    outside.chmod(0o640)
     request = experimental.ExperimentalRuntimeRequest(
         base_request=request.base_request,
         policy_contract_path=request.policy_contract_path,
-        runtime_authority_evidence_path=request.policy_contract_path,
+        runtime_authority_evidence_path=outside,
     )
+
     with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
         experimental._verify_runtime_authority(request)
     assert raised.value.blocker == "provenance_not_sufficient"
@@ -447,7 +520,7 @@ def test_runtime_retrieves_with_external_authority_and_preserves_gates(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    _bind_test_data_root(monkeypatch, tmp_path)
+    _bind_test_roots(monkeypatch, tmp_path)
     request = _request(tmp_path)
     eligible = pd.DataFrame(
         {
@@ -491,7 +564,7 @@ def test_technical_gate_failure_keeps_source_not_ready(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    _bind_test_data_root(monkeypatch, tmp_path)
+    _bind_test_roots(monkeypatch, tmp_path)
     request = _request(tmp_path)
     eligible = pd.DataFrame(
         {
