@@ -354,6 +354,65 @@ def test_dirty_worktree_is_rejected(
     assert raised.value.blocker == "provenance_not_sufficient"
 
 
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        Path("src/package/__pycache__/module.cpython-312.pyc"),
+        Path("src/package/module.pyc"),
+        Path("src/package/module.pyo"),
+    ],
+)
+def test_repository_bytecode_is_rejected(
+    tmp_path: Path,
+    relative_path: Path,
+) -> None:
+    path = tmp_path / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"bytecode")
+
+    with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
+        experimental._verify_no_repository_bytecode(tmp_path)
+    assert raised.value.blocker == "provenance_not_sufficient"
+
+
+def test_clean_repository_bytecode_inventory_is_accepted(tmp_path: Path) -> None:
+    source = tmp_path / "src/package/module.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+
+    experimental._verify_no_repository_bytecode(tmp_path)
+
+
+def test_loaded_runtime_bytecode_is_rejected(tmp_path: Path) -> None:
+    bytecode = tmp_path / "src/package/__pycache__/module.pyc"
+    bytecode.parent.mkdir(parents=True)
+    bytecode.write_bytes(b"bytecode")
+    module = SimpleNamespace(__name__="package.module", __file__=str(bytecode))
+
+    with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
+        experimental._verify_loaded_runtime_modules(tmp_path, (module,))
+    assert raised.value.blocker == "provenance_not_sufficient"
+
+
+def test_loaded_runtime_external_source_is_rejected(tmp_path: Path) -> None:
+    source = tmp_path.parent / f"{tmp_path.name}-external-module.py"
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    module = SimpleNamespace(__name__="package.module", __file__=str(source))
+
+    with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
+        experimental._verify_loaded_runtime_modules(tmp_path, (module,))
+    assert raised.value.blocker == "provenance_not_sufficient"
+
+
+def test_loaded_runtime_repository_source_is_accepted(tmp_path: Path) -> None:
+    source = tmp_path / "src/package/module.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    module = SimpleNamespace(__name__="package.module", __file__=str(source))
+
+    experimental._verify_loaded_runtime_modules(tmp_path, (module,))
+
+
 def test_captured_input_remains_stable_after_path_replacement(
     tmp_path: Path,
 ) -> None:
@@ -449,6 +508,16 @@ def test_checked_in_policy_is_tracked_but_not_runtime_authority(
     tmp_path: Path,
 ) -> None:
     _bind_test_data_root(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        experimental,
+        "_verify_no_repository_bytecode",
+        lambda _repo_root: None,
+    )
+    monkeypatch.setattr(
+        experimental,
+        "_verify_loaded_runtime_modules",
+        lambda _repo_root: None,
+    )
     base_request = _base_request(tmp_path)
     request = experimental.ExperimentalRuntimeRequest(
         base_request=base_request,
