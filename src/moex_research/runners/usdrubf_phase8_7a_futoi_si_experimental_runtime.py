@@ -163,6 +163,10 @@ def _git_command(repo_root: Path, *args: str) -> list[str]:
         "core.fsmonitor=false",
         "-c",
         "core.untrackedCache=false",
+        "-c",
+        "core.checkStat=default",
+        "-c",
+        "core.trustctime=true",
         *args,
     ]
 
