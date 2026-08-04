@@ -25,7 +25,7 @@ TASK_ID: Final[str] = (
 POLICY_CONTRACT_ID: Final[str] = (
     "usdrubf_phase8_7a_futoi_si_experimental_runtime_policy_v2"
 )
-POLICY_CONTRACT_VERSION: Final[str] = "2.1"
+POLICY_CONTRACT_VERSION: Final[str] = "2.2"
 AUTHORITY_MODE: Final[str] = "futoi_si_historical_experimental_only"
 POLICY_FLAG: Final[str] = "--experimental-authority-contract-path"
 RUNTIME_AUTHORITY_FLAG: Final[str] = "--runtime-authority-evidence-path"
@@ -183,15 +183,9 @@ def _data_root() -> Path:
     raw = str(os.environ.get("MOEX_DATA_ROOT") or "").strip()
     if not raw:
         raise _fail("MOEX_DATA_ROOT is required for experimental runtime")
-    candidate = Path(raw).expanduser()
-    if not candidate.is_absolute() or candidate.resolve() != AUTHORIZED_DATA_ROOT:
+    candidate = Path(os.path.abspath(os.path.expanduser(raw)))
+    if candidate != AUTHORIZED_DATA_ROOT:
         raise _fail("MOEX_DATA_ROOT differs from the canonical data root")
-    try:
-        metadata = AUTHORIZED_DATA_ROOT.lstat()
-    except OSError as exc:
-        raise _fail("canonical data root is not accessible") from exc
-    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
-        raise _fail("canonical data root must be a physical directory")
     return AUTHORIZED_DATA_ROOT
 
 
@@ -218,6 +212,12 @@ def _read_fd_all(descriptor: int) -> bytes:
         chunks.append(chunk)
 
 
+def _positive_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        return None
+    return value
+
+
 def _validate_trusted_metadata(
     metadata: os.stat_result,
     *,
@@ -233,6 +233,17 @@ def _validate_trusted_metadata(
         raise _fail(f"{label} has an invalid filesystem type")
     if metadata.st_uid != TRUSTED_AUTHORITY_OWNER_UID:
         raise _fail(f"{label} is not owned by the trusted authority owner")
+    if metadata.st_mode & 0o022:
+        raise _fail(f"{label} is group or world writable")
+
+
+def _validate_data_root_metadata(
+    metadata: os.stat_result,
+    *,
+    label: str,
+) -> None:
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise _fail(f"{label} is not a directory")
     if metadata.st_mode & 0o022:
         raise _fail(f"{label} is group or world writable")
 
@@ -276,6 +287,57 @@ def _open_trusted_authority_root() -> int:
     except Exception:
         os.close(current)
         raise
+
+
+def _open_canonical_data_root(
+    expected_device: int | None = None,
+    expected_inode: int | None = None,
+) -> int:
+    _data_root()
+    if (expected_device is None) != (expected_inode is None):
+        raise _fail("canonical data root identity is incomplete")
+    try:
+        current = os.open("/", OPEN_DIRECTORY_FLAGS)
+    except OSError as exc:
+        raise _fail("filesystem root cannot be opened for data-root traversal") from exc
+    try:
+        _validate_data_root_metadata(
+            os.fstat(current),
+            label="filesystem root",
+        )
+        for part in AUTHORIZED_DATA_ROOT.parts[1:]:
+            try:
+                next_fd = os.open(
+                    part,
+                    OPEN_DIRECTORY_FLAGS,
+                    dir_fd=current,
+                )
+            except OSError as exc:
+                raise _fail("canonical data root cannot be traversed safely") from exc
+            try:
+                _validate_data_root_metadata(
+                    os.fstat(next_fd),
+                    label=f"canonical data-root ancestor {part}",
+                )
+            except Exception:
+                os.close(next_fd)
+                raise
+            os.close(current)
+            current = next_fd
+        metadata = os.fstat(current)
+        if expected_device is not None and (
+            metadata.st_dev != expected_device or metadata.st_ino != expected_inode
+        ):
+            raise _fail("canonical data root physical identity mismatch")
+        return current
+    except Exception:
+        os.close(current)
+        raise
+
+
+def _assert_data_root_identity(device: int, inode: int) -> None:
+    descriptor = _open_canonical_data_root(device, inode)
+    os.close(descriptor)
 
 
 def _read_trusted_authority_once(
@@ -342,10 +404,11 @@ def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, An
     authority = payload.get("authority_boundaries")
     gates = payload.get("gate_policy")
     runtime = payload.get("runtime_policy")
+    required_fields = payload.get("required_runtime_authority_fields")
     if not all(
         isinstance(item, Mapping)
         for item in (identity, parent, boundary, authority, gates, runtime)
-    ):
+    ) or not isinstance(required_fields, list):
         raise _fail("experimental runtime policy structure mismatch")
     assert isinstance(identity, Mapping)
     assert isinstance(parent, Mapping)
@@ -379,8 +442,14 @@ def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, An
         != RUNTIME_AUTHORITY_FLAG
         or boundary.get("runtime_authority_must_not_be_stored_in_repository")
         is not True
+        or boundary.get("runtime_authority_must_bind_data_root_identity")
+        is not True
         or boundary.get("canonical_data_root")
         != AUTHORIZED_DATA_ROOT.as_posix()
+        or boundary.get("canonical_data_root_open_mode")
+        != "nofollow_dirfd_from_filesystem_root"
+        or boundary.get("data_root_ancestor_group_world_writable_allowed")
+        is not False
         or boundary.get("trusted_runtime_authority_root")
         != TRUSTED_AUTHORITY_ROOT.as_posix()
         or boundary.get("trusted_runtime_authority_owner_uid")
@@ -394,6 +463,8 @@ def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, An
         or boundary.get("trusted_runtime_authority_ancestors_must_be_root_owned")
         is not True
         or boundary.get("module_claims_global_single_use") is not False
+        or "data_root_device" not in required_fields
+        or "data_root_inode" not in required_fields
         or authority.get("mode") != AUTHORITY_MODE
         or authority.get("approved_by") != "PM_L2_PHASE_OWNER"
         or authority.get("historical_authenticated_retrieval_allowed") is not True
@@ -409,6 +480,10 @@ def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, An
         or gates.get("failure_status") != FAIL_STATUS
         or runtime.get("required_policy_flag") != POLICY_FLAG
         or runtime.get("output_artifact_count") != 10
+        or runtime.get(
+            "data_root_identity_verified_before_retrieval_and_artifact_write"
+        )
+        is not True
         or runtime.get("fallback_or_substitution_allowed") is not False
         or runtime.get("raw_response_persistence_allowed") is not False
     ):
@@ -459,6 +534,8 @@ def _verify_runtime_authority(
     )
     authorization_id = str(payload.get("authorization_id") or "").strip()
     authority_sha = str(payload.get("git_commit_sha") or "").strip().lower()
+    data_root_device = _positive_int(payload.get("data_root_device"))
+    data_root_inode = _positive_int(payload.get("data_root_inode"))
     if (
         payload.get("project") != PROJECT
         or payload.get("task_id") != TASK_ID
@@ -469,6 +546,8 @@ def _verify_runtime_authority(
         or authority_sha != base_request.git_commit_sha
         or payload.get("run_id") != base_request.run_id
         or payload.get("data_root") != AUTHORIZED_DATA_ROOT.as_posix()
+        or data_root_device is None
+        or data_root_inode is None
         or payload.get("output_dir") != expected_output.as_posix()
         or not _aware_timestamp(payload.get("issued_at"))
         or payload.get("historical_authenticated_retrieval_allowed") is not True
@@ -478,6 +557,9 @@ def _verify_runtime_authority(
         raise _fail("runtime authority evidence does not match the exact invocation")
     if base_request.output_dir.absolute() != expected_output:
         raise _fail("runtime output directory differs from exact authority evidence")
+    assert data_root_device is not None
+    assert data_root_inode is not None
+    _assert_data_root_identity(data_root_device, data_root_inode)
     return {
         "authorization_id": authorization_id,
         "approved_by": "PM_L2_PHASE_OWNER",
@@ -485,6 +567,8 @@ def _verify_runtime_authority(
         "git_commit_sha": authority_sha,
         "run_id": base_request.run_id,
         "data_root": AUTHORIZED_DATA_ROOT.as_posix(),
+        "data_root_device": data_root_device,
+        "data_root_inode": data_root_inode,
         "output_dir": expected_output.as_posix(),
         "issued_at": str(payload.get("issued_at")),
         "evidence_path": trusted_path.as_posix(),
@@ -532,10 +616,15 @@ def _open_existing_chain(root_fd: int, parts: Sequence[str]) -> int:
         raise
 
 
-def _create_output_directory(run_id: str) -> tuple[int, int, Path]:
+def _create_output_directory(
+    run_id: str,
+    *,
+    data_root_device: int,
+    data_root_inode: int,
+) -> tuple[int, int, Path]:
     root = _data_root()
     relative = _canonical_output_relative(run_id)
-    root_fd = os.open(root, OPEN_DIRECTORY_FLAGS)
+    root_fd = _open_canonical_data_root(data_root_device, data_root_inode)
     parent_fd = os.dup(root_fd)
     try:
         for part in relative.parts[:-1]:
@@ -594,15 +683,23 @@ def _verify_output_directory_identity(
     root_fd: int,
     output_fd: int,
     run_id: str,
+    *,
+    data_root_device: int,
+    data_root_inode: int,
 ) -> None:
     relative = _canonical_output_relative(run_id)
-    try:
-        fresh_root_fd = os.open(_data_root(), OPEN_DIRECTORY_FLAGS)
-    except OSError as exc:
-        raise _fail("canonical data root cannot be reopened") from exc
+    fresh_root_fd = _open_canonical_data_root(
+        data_root_device,
+        data_root_inode,
+    )
     observed_fd: int | None = None
     try:
         retained_root = os.fstat(root_fd)
+        if (retained_root.st_dev, retained_root.st_ino) != (
+            data_root_device,
+            data_root_inode,
+        ):
+            raise _fail("retained data root differs from authority evidence")
         current_root = os.fstat(fresh_root_fd)
         if (retained_root.st_dev, retained_root.st_ino) != (
             current_root.st_dev,
@@ -627,6 +724,8 @@ def _write_validation_artifacts_secure(
     output_dir: Path,
     *,
     run_id: str,
+    data_root_device: int,
+    data_root_inode: int,
     input_identity_verification: Mapping[str, object],
     route_validation: Mapping[str, object],
     license_validation: Mapping[str, object],
@@ -641,7 +740,11 @@ def _write_validation_artifacts_secure(
     expected_output = _canonical_output_path(run_id)
     if output_dir.absolute() != expected_output:
         raise _fail("secure artifact writer received a non-canonical output path")
-    root_fd, output_fd, created_path = _create_output_directory(run_id)
+    root_fd, output_fd, created_path = _create_output_directory(
+        run_id,
+        data_root_device=data_root_device,
+        data_root_inode=data_root_inode,
+    )
     try:
         if created_path != expected_output:
             raise _fail("secure artifact writer created an unexpected output path")
@@ -679,7 +782,13 @@ def _write_validation_artifacts_secure(
         if set(names) != set(base.validation.REQUIRED_RUNTIME_ARTIFACTS):
             raise _fail("runtime artifact inventory mismatch")
         os.fsync(output_fd)
-        _verify_output_directory_identity(root_fd, output_fd, run_id)
+        _verify_output_directory_identity(
+            root_fd,
+            output_fd,
+            run_id,
+            data_root_device=data_root_device,
+            data_root_inode=data_root_inode,
+        )
         return names
     finally:
         os.close(output_fd)
@@ -703,6 +812,8 @@ def execute(request: ExperimentalRuntimeRequest) -> dict[str, object]:
     policy_summary = _verify_policy_contract(request)
     authority_summary = _verify_runtime_authority(request)
     base_request = request.base_request
+    data_root_device = int(authority_summary["data_root_device"])
+    data_root_inode = int(authority_summary["data_root_inode"])
     input_hashes = base._verify_frozen_inputs(base_request)
     input_hashes["experimental_runtime_policy"] = policy_summary["sha256"]
     input_hashes["runtime_authority_evidence"] = authority_summary[
@@ -749,6 +860,7 @@ def execute(request: ExperimentalRuntimeRequest) -> dict[str, object]:
             )
         )
 
+    _assert_data_root_identity(data_root_device, data_root_inode)
     token: str | None = None
     try:
         token = base.validation.algopack_http.load_algopack_token()
@@ -899,6 +1011,8 @@ def execute(request: ExperimentalRuntimeRequest) -> dict[str, object]:
     artifact_names = _write_validation_artifacts_secure(
         base_request.output_dir,
         run_id=base_request.run_id,
+        data_root_device=data_root_device,
+        data_root_inode=data_root_inode,
         input_identity_verification=input_verification,
         route_validation=route_validation,
         license_validation=license_validation,
