@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -213,6 +214,17 @@ def _request(
     )
 
 
+def _snapshot(name: str, payload: bytes = b"{}") -> experimental.CapturedInput:
+    return experimental.CapturedInput(
+        name=name,
+        path=Path(f"/{name}"),
+        payload=payload,
+        sha256=experimental._sha256_bytes(payload),
+        device=1,
+        inode=1,
+    )
+
+
 def test_data_root_binding_rejects_alternate_root(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -267,7 +279,6 @@ def test_data_root_symlinked_ancestor_is_rejected(
 
     def validate(metadata: os.stat_result, *, label: str) -> None:
         if label in {"filesystem root", "canonical data-root ancestor tmp"}:
-            assert os.path.isdir("/")
             return
         original_validator(metadata, label=label)
 
@@ -301,6 +312,29 @@ def test_data_root_writable_ancestor_is_rejected(
     assert raised.value.blocker == "provenance_not_sufficient"
 
 
+def test_git_commands_ignore_repository_selection_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("GIT_DIR", "/tmp/decoy.git")
+    monkeypatch.setenv("GIT_WORK_TREE", "/tmp/decoy-worktree")
+    monkeypatch.setenv("GIT_INDEX_FILE", "/tmp/decoy-index")
+    observed: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        observed["command"] = command
+        observed["env"] = kwargs["env"]
+        return SimpleNamespace(returncode=0, stdout="actual\n", stderr="")
+
+    monkeypatch.setattr(experimental.subprocess, "run", fake_run)
+    assert experimental._run_git(tmp_path, "rev-parse", "HEAD") == "actual"
+
+    command = observed["command"]
+    environment = observed["env"]
+    assert command[:3] == ["git", "-C", str(tmp_path.resolve())]
+    assert all(not key.startswith("GIT_") for key in environment)
+
+
 def test_dirty_worktree_is_rejected(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -318,6 +352,31 @@ def test_dirty_worktree_is_rejected(
     with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
         experimental._verify_clean_worktree(tmp_path)
     assert raised.value.blocker == "provenance_not_sufficient"
+
+
+def test_captured_input_remains_stable_after_path_replacement(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "evidence.json"
+    path.write_bytes(b'{"version":1}')
+    snapshot = experimental._capture_file_once(path, "evidence")
+    path.write_bytes(b'{"version":2}')
+
+    assert experimental._json_snapshot(snapshot) == {"version": 1}
+    assert snapshot.sha256 == experimental._sha256_bytes(b'{"version":1}')
+    assert snapshot.sha256 != experimental._sha256_bytes(path.read_bytes())
+
+
+def test_parquet_snapshot_remains_stable_after_path_replacement(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "modeling.parquet"
+    pd.DataFrame({"value": [1]}).to_parquet(path, index=False)
+    snapshot = experimental._capture_file_once(path, "modeling_dataset")
+    pd.DataFrame({"value": [2]}).to_parquet(path, index=False)
+
+    observed = experimental._parquet_snapshot(snapshot)
+    assert observed.value.tolist() == [1]
 
 
 def test_trusted_authority_is_captured_from_one_descriptor(
@@ -559,12 +618,49 @@ def _mock_runtime_dependencies(
         }
 
     monkeypatch.setattr(experimental, "_verify_runtime_authority", authority)
+    snapshots = {
+        name: _snapshot(name)
+        for name in (
+            "modeling_dataset",
+            "dataset_manifest",
+            "feature_schema",
+            "m0_validation_predictions",
+            "phase83_aggregate_metrics",
+            "phase83_gate_results",
+            "experiment_contract",
+            "license_access_evidence",
+            "pit_semantics_evidence",
+        )
+    }
     monkeypatch.setattr(
-        base,
-        "_verify_frozen_inputs",
-        lambda _request: {"modeling_dataset": "c" * 64},
+        experimental,
+        "_capture_runtime_inputs",
+        lambda _request: snapshots,
     )
-    monkeypatch.setattr(experimental.pd, "read_parquet", lambda _path: pd.DataFrame())
+    monkeypatch.setattr(
+        experimental,
+        "_verify_captured_inputs",
+        lambda observed_snapshots: (
+            observed.setdefault("snapshots", observed_snapshots)
+            or {"modeling_dataset": "c" * 64}
+        ),
+    )
+
+    def parquet(snapshot: experimental.CapturedInput) -> pd.DataFrame:
+        if snapshot.name == "modeling_dataset":
+            return pd.DataFrame({"source": ["modeling"]})
+        return pd.DataFrame({"source": ["predictions"]})
+
+    monkeypatch.setattr(experimental, "_parquet_snapshot", parquet)
+
+    def json_snapshot(snapshot: experimental.CapturedInput) -> dict[str, object]:
+        if snapshot.name == "license_access_evidence":
+            return {"kind": "license"}
+        if snapshot.name == "pit_semantics_evidence":
+            return {"kind": "pit"}
+        return {}
+
+    monkeypatch.setattr(experimental, "_json_snapshot", json_snapshot)
     monkeypatch.setattr(
         base,
         "_identity_frames",
@@ -573,7 +669,10 @@ def _mock_runtime_dependencies(
     monkeypatch.setattr(
         base,
         "_license_access_validation",
-        lambda _evidence: (False, {"provider": "MOEX AlgoPack FUTOI", "approved": False}),
+        lambda _evidence: (
+            False,
+            {"provider": "MOEX AlgoPack FUTOI", "approved": False},
+        ),
     )
     monkeypatch.setattr(base, "_pit_semantics_passed", lambda _evidence: False)
     monkeypatch.setattr(
@@ -645,7 +744,7 @@ def _gate_results(*, fail_g6: bool = False) -> dict[str, dict[str, bool]]:
     }
 
 
-def test_runtime_retrieves_with_external_authority_and_preserves_gates(
+def test_runtime_consumes_snapshots_and_preserves_gates(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -658,7 +757,9 @@ def test_runtime_retrieves_with_external_authority_and_preserves_gates(
             "prior_trade_date": ["2026-07-29", "2026-07-30"],
         }
     )
-    validation_ids = eligible.loc[:, ["target_trade_date", "target_instrument_id"]].copy()
+    validation_ids = eligible.loc[
+        :, ["target_trade_date", "target_instrument_id"]
+    ].copy()
     observed: dict[str, object] = {}
     _mock_runtime_dependencies(
         monkeypatch,
@@ -671,6 +772,17 @@ def test_runtime_retrieves_with_external_authority_and_preserves_gates(
     result = experimental.execute(request)
 
     assert observed["calls"] == ["2026-07-29", "2026-07-30"]
+    assert set(observed["snapshots"]) == {
+        "modeling_dataset",
+        "dataset_manifest",
+        "feature_schema",
+        "m0_validation_predictions",
+        "phase83_aggregate_metrics",
+        "phase83_gate_results",
+        "experiment_contract",
+        "license_access_evidence",
+        "pit_semantics_evidence",
+    }
     assert result["artifact_count"] == 10
     assert result["technical_gates_passed"] is True
     assert result["final_status"] == experimental.EXPERIMENTAL_STATUS
@@ -704,7 +816,9 @@ def test_technical_gate_failure_keeps_source_not_ready(
             "prior_trade_date": ["2026-07-29"],
         }
     )
-    validation_ids = eligible.loc[:, ["target_trade_date", "target_instrument_id"]].copy()
+    validation_ids = eligible.loc[
+        :, ["target_trade_date", "target_instrument_id"]
+    ].copy()
     observed: dict[str, object] = {}
     _mock_runtime_dependencies(
         monkeypatch,
