@@ -15,6 +15,7 @@ def test_experimental_runtime_policy_contract() -> None:
 
     identity = contract["contract_identity"]
     boundary = contract["policy_boundary"]
+    required_fields = contract["required_runtime_authority_fields"]
     authority = contract["authority_boundaries"]
     gate_policy = contract["gate_policy"]
     runtime_policy = contract["runtime_policy"]
@@ -34,9 +35,14 @@ def test_experimental_runtime_policy_contract() -> None:
     assert boundary["runtime_authority_must_bind_exact_git_sha"] is True
     assert boundary["runtime_authority_must_bind_exact_run_id"] is True
     assert boundary["runtime_authority_must_bind_exact_output_dir"] is True
+    assert boundary["runtime_authority_must_bind_data_root_identity"] is True
     assert boundary["canonical_data_root"] == (
         runtime.AUTHORIZED_DATA_ROOT.as_posix()
     )
+    assert boundary["canonical_data_root_open_mode"] == (
+        "nofollow_dirfd_from_filesystem_root"
+    )
+    assert boundary["data_root_ancestor_group_world_writable_allowed"] is False
     assert boundary["trusted_runtime_authority_root"] == (
         runtime.TRUSTED_AUTHORITY_ROOT.as_posix()
     )
@@ -56,6 +62,8 @@ def test_experimental_runtime_policy_contract() -> None:
         boundary["one_run_per_operational_authority_is_orchestration_responsibility"]
         is True
     )
+    assert "data_root_device" in required_fields
+    assert "data_root_inode" in required_fields
 
     assert authority["mode"] == runtime.AUTHORITY_MODE
     assert authority["approved_by"] == "PM_L2_PHASE_OWNER"
@@ -79,5 +87,11 @@ def test_experimental_runtime_policy_contract() -> None:
     assert gate_policy["experimental_dataset_status"] == runtime.EXPERIMENTAL_STATUS
     assert runtime_policy["required_policy_flag"] == runtime.POLICY_FLAG
     assert runtime_policy["output_artifact_count"] == 10
+    assert (
+        runtime_policy[
+            "data_root_identity_verified_before_retrieval_and_artifact_write"
+        ]
+        is True
+    )
     assert runtime_policy["fallback_or_substitution_allowed"] is False
     assert runtime_policy["raw_response_persistence_allowed"] is False
