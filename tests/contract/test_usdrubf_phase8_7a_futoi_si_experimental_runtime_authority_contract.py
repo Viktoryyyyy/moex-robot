@@ -99,15 +99,65 @@ def test_experimental_runtime_policy_contract() -> None:
     assert runtime_policy["raw_response_persistence_allowed"] is False
 
 
-def test_git_environment_uses_trusted_search_path(
+def test_git_environment_uses_trusted_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PATH", "/tmp/fake-git:/usr/local/bin")
+    monkeypatch.setenv("HOME", "/tmp/fake-home")
+    monkeypatch.setenv("XDG_CONFIG_HOME", "/tmp/fake-xdg")
     monkeypatch.setenv("GIT_DIR", "/tmp/decoy.git")
     monkeypatch.setenv("GIT_WORK_TREE", "/tmp/decoy-worktree")
 
     environment = runtime._sanitized_git_environment()
 
     assert environment["PATH"] == runtime.TRUSTED_GIT_PATH
+    assert environment["HOME"] == runtime.TRUSTED_GIT_CONFIG_HOME
+    assert environment["XDG_CONFIG_HOME"] == runtime.TRUSTED_GIT_CONFIG_HOME
     assert "/tmp/fake-git" not in environment["PATH"]
     assert all(not key.upper().startswith("GIT_") for key in environment)
+
+
+def test_git_command_disables_fsmonitor_and_untracked_cache() -> None:
+    repo_root = Path("/tmp/repository")
+
+    command = runtime._git_command(repo_root, "status")
+
+    assert command[:3] == ["git", "-C", str(repo_root.resolve())]
+    assert command[3:7] == [
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.untrackedCache=false",
+    ]
+    assert command[-1] == "status"
+
+
+@pytest.mark.parametrize(
+    "tagged",
+    [
+        "h hidden.py\0",
+        "S skipped.py\0",
+    ],
+)
+def test_hidden_index_flags_are_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    tagged: str,
+) -> None:
+    monkeypatch.setattr(runtime, "_run_git", lambda *_args, **_kwargs: tagged)
+
+    with pytest.raises(runtime.base.validation.FutoiSiSourceValidationError):
+        runtime._verify_no_hidden_index_flags(tmp_path)
+
+
+def test_normal_index_flags_are_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        runtime,
+        "_run_git",
+        lambda *_args, **_kwargs: "H normal.py\0",
+    )
+
+    runtime._verify_no_hidden_index_flags(tmp_path)
