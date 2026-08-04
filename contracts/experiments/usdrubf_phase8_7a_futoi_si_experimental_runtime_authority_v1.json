@@ -92,6 +92,7 @@
   "runtime_policy": {
     "required_parent_runtime": "moex_research.runners.usdrubf_phase8_7a_futoi_si_runtime",
     "required_experimental_runtime": "moex_research.runners.usdrubf_phase8_7a_futoi_si_experimental_runtime",
+    "operational_invocation": "python -B -m moex_research.runners.usdrubf_phase8_7a_futoi_si_experimental_runtime",
     "required_policy_flag": "--experimental-authority-contract-path",
     "output_artifact_count": 10,
     "output_directory_must_not_preexist": true,
