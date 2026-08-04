@@ -14,6 +14,19 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Final, Mapping, Sequence
 
+OPERATIONAL_INVOCATION: Final[str] = (
+    "python -B -m moex_research.runners."
+    "usdrubf_phase8_7a_futoi_si_experimental_runtime"
+)
+
+if __name__ == "__main__" and (
+    not sys.dont_write_bytecode or sys.pycache_prefix is not None
+):
+    raise RuntimeError(
+        "experimental runtime requires no-bytecode startup; use "
+        + OPERATIONAL_INVOCATION
+    )
+
 import pandas as pd
 
 from moex_research.runners import (
@@ -89,10 +102,7 @@ class CapturedInput:
 
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = base.build_argument_parser()
-    parser.prog = (
-        "python -m moex_research.runners."
-        "usdrubf_phase8_7a_futoi_si_experimental_runtime"
-    )
+    parser.prog = OPERATIONAL_INVOCATION
     parser.add_argument(POLICY_FLAG, required=True)
     parser.add_argument(RUNTIME_AUTHORITY_FLAG, required=True)
     return parser
@@ -733,6 +743,7 @@ def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, An
         or gates.get("experimental_dataset_status") != EXPERIMENTAL_STATUS
         or gates.get("failure_status") != FAIL_STATUS
         or runtime.get("required_policy_flag") != POLICY_FLAG
+        or runtime.get("operational_invocation") != OPERATIONAL_INVOCATION
         or runtime.get("output_artifact_count") != 10
         or runtime.get(
             "data_root_identity_verified_before_retrieval_and_artifact_write"
