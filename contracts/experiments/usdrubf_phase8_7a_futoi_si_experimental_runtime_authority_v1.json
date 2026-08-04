@@ -1,13 +1,13 @@
 {
   "contract_identity": {
     "project": "MOEX_Bot",
-    "contract_id": "usdrubf_phase8_7a_futoi_si_experimental_runtime_authority_v1",
-    "contract_version": "1.1",
+    "contract_id": "usdrubf_phase8_7a_futoi_si_experimental_runtime_policy_v2",
+    "contract_version": "2.0",
     "task_id": "ema_3_19_ai_phase_8_7a_futoi_si_historical_runtime_enablement_v1",
     "lane": "ema_3_19_ai",
     "phase": "8.7A",
     "execution_mode": "browser_controlled_github_route",
-    "status": "experimental_runtime_authority_active"
+    "status": "experimental_runtime_policy_active"
   },
   "parent_contract": {
     "path": "contracts/experiments/usdrubf_phase8_7a_futoi_si_source_and_feature_contract_v1.json",
@@ -16,11 +16,44 @@
     "target_instrument_id": "forts.usdrubf",
     "target_security_id": "USDRUBF"
   },
-  "authority": {
+  "policy_boundary": {
+    "checked_in_policy_is_runtime_authority": false,
+    "separate_runtime_authority_evidence_required": true,
+    "required_runtime_authority_flag": "--runtime-authority-evidence-path",
+    "runtime_authority_must_not_be_stored_in_repository": true,
+    "runtime_authority_must_bind_exact_git_sha": true,
+    "runtime_authority_must_bind_exact_run_id": true,
+    "runtime_authority_must_bind_exact_output_dir": true,
+    "runtime_authority_must_bind_canonical_data_root": true,
+    "canonical_data_root": "/home/trader/moex_bot/data",
+    "module_claims_global_single_use": false,
+    "one_run_per_operational_authority_is_orchestration_responsibility": true
+  },
+  "required_runtime_authority_fields": [
+    "project",
+    "task_id",
+    "authorization_id",
+    "approved_by",
+    "mode",
+    "git_commit_sha",
+    "run_id",
+    "data_root",
+    "output_dir",
+    "issued_at",
+    "historical_authenticated_retrieval_allowed",
+    "phase8_7a_source_validation_allowed",
+    "phase8_7b_feature_computation_allowed",
+    "model_fitting_allowed",
+    "production_prediction_allowed",
+    "model_or_strategy_promotion_allowed",
+    "raw_payload_redistribution_allowed",
+    "broker_action_allowed",
+    "trading_action_allowed"
+  ],
+  "authority_boundaries": {
     "mode": "futoi_si_historical_experimental_only",
-    "authority_owner": "PM_L2_PHASE_OWNER",
+    "approved_by": "PM_L2_PHASE_OWNER",
     "historical_authenticated_retrieval_allowed": true,
-    "local_research_artifact_storage_allowed": true,
     "phase8_7a_source_validation_allowed": true,
     "phase8_7b_feature_computation_allowed": false,
     "model_fitting_allowed": false,
@@ -49,23 +82,12 @@
   "runtime_policy": {
     "required_parent_runtime": "moex_research.runners.usdrubf_phase8_7a_futoi_si_runtime",
     "required_experimental_runtime": "moex_research.runners.usdrubf_phase8_7a_futoi_si_experimental_runtime",
-    "required_authority_flag": "--experimental-authority-contract-path",
+    "required_policy_flag": "--experimental-authority-contract-path",
     "output_artifact_count": 10,
     "output_directory_must_not_preexist": true,
     "one_trade_date_per_request": true,
     "latest": 1,
     "fallback_or_substitution_allowed": false,
     "raw_response_persistence_allowed": false
-  },
-  "single_execution": {
-    "authorized_run_id": "phase8_7a_futoi_si_source_validation_20260804_v1",
-    "authority_reuse_allowed": false,
-    "authority_file_repo_path": "contracts/experiments/usdrubf_phase8_7a_futoi_si_experimental_runtime_authority_v1.json",
-    "authorized_data_root": "/home/trader/moex_bot/data",
-    "applied_repo_head_must_equal_git_commit_sha": true,
-    "applied_commit_must_track_exact_authority_blob": true,
-    "canonical_output_relative_path": "research/ema_3_19_ai/phase8_7a_futoi_si_source_validation/run_id=phase8_7a_futoi_si_source_validation_20260804_v1",
-    "consumption_marker_relative_path": "research/ema_3_19_ai/phase8_7a_futoi_si_source_validation/authority_consumption/usdrubf_phase8_7a_futoi_si_experimental_runtime_authority_v1.json",
-    "consumption_marker_create_mode": "atomic_create_exclusive"
   }
 }
