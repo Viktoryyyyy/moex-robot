@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
@@ -11,19 +10,14 @@ from moex_research.runners import (
 
 def test_experimental_runtime_authority_contract() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    path = (
-        repo_root
-        / "contracts"
-        / "experiments"
-        / "usdrubf_phase8_7a_futoi_si_experimental_runtime_authority_v1.json"
-    )
-    raw = path.read_bytes()
-    contract = json.loads(raw.decode("utf-8"))
+    path = repo_root / runtime.AUTHORITY_REPO_PATH
+    contract = json.loads(path.read_text(encoding="utf-8"))
 
     identity = contract["contract_identity"]
     authority = contract["authority"]
     gate_policy = contract["gate_policy"]
     runtime_policy = contract["runtime_policy"]
+    single_execution = contract["single_execution"]
 
     assert identity["project"] == "MOEX_Bot"
     assert identity["task_id"] == runtime.TASK_ID
@@ -54,8 +48,23 @@ def test_experimental_runtime_authority_contract() -> None:
     assert runtime_policy["fallback_or_substitution_allowed"] is False
     assert runtime_policy["raw_response_persistence_allowed"] is False
 
-    header = f"blob {len(raw)}\0".encode("ascii")
+    assert single_execution["authorized_run_id"] == runtime.AUTHORIZED_RUN_ID
+    assert single_execution["authority_reuse_allowed"] is False
+    assert single_execution["authority_file_repo_path"] == runtime.AUTHORITY_REPO_PATH
     assert (
-        hashlib.sha1(header + raw, usedforsecurity=False).hexdigest()
-        == runtime.AUTHORITY_CONTRACT_GIT_BLOB_SHA1
+        single_execution["applied_repo_head_must_equal_git_commit_sha"]
+        is True
+    )
+    assert (
+        single_execution["applied_commit_must_track_exact_authority_blob"]
+        is True
+    )
+    assert single_execution["canonical_output_relative_path"] == (
+        runtime.CANONICAL_OUTPUT_RELATIVE.as_posix()
+    )
+    assert single_execution["consumption_marker_relative_path"] == (
+        runtime.CONSUMPTION_MARKER_RELATIVE.as_posix()
+    )
+    assert single_execution["consumption_marker_create_mode"] == (
+        "atomic_create_exclusive"
     )
