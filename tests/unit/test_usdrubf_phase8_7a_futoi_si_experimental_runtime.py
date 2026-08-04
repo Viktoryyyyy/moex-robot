@@ -637,13 +637,15 @@ def _mock_runtime_dependencies(
         "_capture_runtime_inputs",
         lambda _request: snapshots,
     )
+
+    def verify_snapshots(observed_snapshots):
+        observed["snapshots"] = dict(observed_snapshots)
+        return {"modeling_dataset": "c" * 64}
+
     monkeypatch.setattr(
         experimental,
         "_verify_captured_inputs",
-        lambda observed_snapshots: (
-            observed.setdefault("snapshots", observed_snapshots)
-            or {"modeling_dataset": "c" * 64}
-        ),
+        verify_snapshots,
     )
 
     def parquet(snapshot: experimental.CapturedInput) -> pd.DataFrame:
