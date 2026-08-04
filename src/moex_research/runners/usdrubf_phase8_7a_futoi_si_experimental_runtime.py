@@ -33,6 +33,7 @@ AUTHORITY_REPO_PATH: Final[str] = (
 AUTHORIZED_RUN_ID: Final[str] = (
     "phase8_7a_futoi_si_source_validation_20260804_v1"
 )
+AUTHORIZED_DATA_ROOT: Final[Path] = Path("/home/trader/moex_bot/data")
 OUTPUT_PARENT_RELATIVE: Final[Path] = Path(
     "research/ema_3_19_ai/phase8_7a_futoi_si_source_validation"
 )
@@ -108,10 +109,16 @@ def _data_root() -> Path:
             "MOEX_DATA_ROOT is required for experimental authority binding",
             blocker="provenance_not_sufficient",
         )
-    root = Path(raw).expanduser().resolve()
-    if not root.is_absolute():
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
         raise base.validation.FutoiSiSourceValidationError(
-            "MOEX_DATA_ROOT must resolve to an absolute path",
+            "MOEX_DATA_ROOT must be an absolute path",
+            blocker="provenance_not_sufficient",
+        )
+    root = candidate.resolve()
+    if root != AUTHORIZED_DATA_ROOT:
+        raise base.validation.FutoiSiSourceValidationError(
+            "MOEX_DATA_ROOT differs from the authorized canonical data root",
             blocker="provenance_not_sufficient",
         )
     return root
@@ -265,6 +272,8 @@ def _verify_experimental_authority(
         or single_execution.get("authority_reuse_allowed") is not False
         or single_execution.get("authority_file_repo_path")
         != AUTHORITY_REPO_PATH
+        or single_execution.get("authorized_data_root")
+        != AUTHORIZED_DATA_ROOT.as_posix()
         or single_execution.get("applied_repo_head_must_equal_git_commit_sha")
         is not True
         or single_execution.get("applied_commit_must_track_exact_authority_blob")
