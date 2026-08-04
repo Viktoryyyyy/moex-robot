@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import re
@@ -73,6 +74,16 @@ class ExperimentalRuntimeRequest:
     runtime_authority_evidence_path: Path
 
 
+@dataclass(frozen=True)
+class CapturedInput:
+    name: str
+    path: Path
+    payload: bytes
+    sha256: str
+    device: int
+    inode: int
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = base.build_argument_parser()
     parser.prog = (
@@ -129,17 +140,29 @@ def _fail(message: str) -> base.validation.FutoiSiSourceValidationError:
     )
 
 
+def _sanitized_git_environment() -> dict[str, str]:
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not key.upper().startswith("GIT_")
+    }
+
+
+def _git_command(repo_root: Path, *args: str) -> list[str]:
+    return ["git", "-C", str(repo_root.resolve()), *args]
+
+
 def _run_git(
     repo_root: Path,
     *args: str,
     allow_empty: bool = False,
 ) -> str:
     completed = subprocess.run(
-        ["git", *args],
-        cwd=repo_root,
+        _git_command(repo_root, *args),
         check=False,
         capture_output=True,
         text=True,
+        env=_sanitized_git_environment(),
     )
     value = completed.stdout.strip()
     if completed.returncode != 0 or (not allow_empty and not value):
@@ -147,16 +170,28 @@ def _run_git(
     return value
 
 
-def _read_git_blob_bytes(repo_root: Path, blob_sha: str) -> bytes:
+def _run_git_bytes(repo_root: Path, *args: str) -> bytes:
     completed = subprocess.run(
-        ["git", "cat-file", "blob", blob_sha],
-        cwd=repo_root,
+        _git_command(repo_root, *args),
         check=False,
         capture_output=True,
+        env=_sanitized_git_environment(),
     )
     if completed.returncode != 0:
-        raise _fail("tracked policy Git blob cannot be read")
-    payload = bytes(completed.stdout)
+        raise _fail("applied git object cannot prove runtime provenance")
+    return bytes(completed.stdout)
+
+
+def _verify_git_context(repo_root: Path) -> None:
+    observed = Path(_run_git(repo_root, "rev-parse", "--show-toplevel")).resolve()
+    if observed != repo_root.resolve():
+        raise _fail("Git commands are not bound to the executed repository")
+    if _run_git(repo_root, "rev-parse", "--is-inside-work-tree") != "true":
+        raise _fail("executed repository is not a Git worktree")
+
+
+def _read_git_blob_bytes(repo_root: Path, blob_sha: str) -> bytes:
+    payload = _run_git_bytes(repo_root, "cat-file", "blob", blob_sha)
     header = f"blob {len(payload)}\0".encode("ascii")
     observed = hashlib.sha1(
         header + payload,
@@ -203,6 +238,14 @@ def _sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _git_blob_sha1_bytes(payload: bytes) -> str:
+    header = f"blob {len(payload)}\0".encode("ascii")
+    return hashlib.sha1(
+        header + payload,
+        usedforsecurity=False,
+    ).hexdigest()
+
+
 def _read_fd_all(descriptor: int) -> bytes:
     chunks: list[bytes] = []
     while True:
@@ -210,6 +253,114 @@ def _read_fd_all(descriptor: int) -> bytes:
         if not chunk:
             return b"".join(chunks)
         chunks.append(chunk)
+
+
+def _capture_file_once(path: Path, name: str) -> CapturedInput:
+    try:
+        descriptor = os.open(path, OPEN_READ_FLAGS)
+    except OSError as exc:
+        raise _fail(f"runtime input cannot be opened safely: {name}") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise _fail(f"runtime input is not a regular file: {name}")
+        payload = _read_fd_all(descriptor)
+    finally:
+        os.close(descriptor)
+    return CapturedInput(
+        name=name,
+        path=path,
+        payload=payload,
+        sha256=_sha256_bytes(payload),
+        device=metadata.st_dev,
+        inode=metadata.st_ino,
+    )
+
+
+def _capture_runtime_inputs(
+    request: base.RuntimeRequest,
+) -> dict[str, CapturedInput]:
+    inventory = {
+        "modeling_dataset": request.modeling_dataset_path,
+        "dataset_manifest": request.dataset_manifest_path,
+        "feature_schema": request.feature_schema_path,
+        "m0_validation_predictions": request.m0_validation_predictions_path,
+        "phase83_aggregate_metrics": request.phase83_aggregate_metrics_path,
+        "phase83_gate_results": request.phase83_gate_results_path,
+        "experiment_contract": request.experiment_contract_path,
+        "license_access_evidence": request.license_access_evidence_path,
+        "pit_semantics_evidence": request.pit_semantics_evidence_path,
+    }
+    return {
+        name: _capture_file_once(path, name)
+        for name, path in inventory.items()
+    }
+
+
+def _json_snapshot(snapshot: CapturedInput) -> dict[str, Any]:
+    return _json_object_from_bytes(snapshot.payload, snapshot.name)
+
+
+def _parquet_snapshot(snapshot: CapturedInput) -> pd.DataFrame:
+    try:
+        return pd.read_parquet(io.BytesIO(snapshot.payload))
+    except Exception as exc:
+        raise _fail(f"invalid parquet input: {snapshot.name}") from exc
+
+
+def _verify_contract_snapshot(snapshot: CapturedInput) -> dict[str, Any]:
+    contract = _json_snapshot(snapshot)
+    identity = contract.get("contract_identity")
+    source = contract.get("source_identity")
+    if not isinstance(identity, dict) or not isinstance(source, dict):
+        raise _fail("FUTOI contract identity is malformed")
+    if (
+        identity.get("project") != PROJECT
+        or identity.get("phase") != "8.7A"
+        or identity.get("contract_version") != "1.6"
+        or source.get("source_ticker") != "Si"
+        or source.get("exact_path") != base.validation.FUTOI_PATH
+        or source.get("target_security_id")
+        != base.validation.TARGET_SECURITY_ID
+    ):
+        raise _fail("FUTOI experiment contract mismatch")
+    if _git_blob_sha1_bytes(snapshot.payload) != base.CONTRACT_GIT_BLOB_SHA1:
+        raise _fail("FUTOI experiment contract digest mismatch")
+    return contract
+
+
+def _verify_captured_inputs(
+    snapshots: Mapping[str, CapturedInput],
+) -> dict[str, str]:
+    bad = [
+        name
+        for name, expected in base.EXPECTED_FROZEN_SHA256.items()
+        if snapshots.get(name) is None or snapshots[name].sha256 != expected
+    ]
+    if bad:
+        raise _fail("immutable input hash mismatch: " + ", ".join(sorted(bad)))
+    manifest = _json_snapshot(snapshots["dataset_manifest"])
+    schema = _json_snapshot(snapshots["feature_schema"])
+    if not manifest or not schema:
+        raise _fail("frozen manifest or feature schema is empty")
+    base._validate_phase83_evidence(
+        _json_snapshot(snapshots["phase83_aggregate_metrics"]),
+        _json_snapshot(snapshots["phase83_gate_results"]),
+    )
+    _verify_contract_snapshot(snapshots["experiment_contract"])
+    return {
+        **{
+            name: snapshots[name].sha256
+            for name in base.EXPECTED_FROZEN_SHA256
+        },
+        "experiment_contract": _git_blob_sha1_bytes(
+            snapshots["experiment_contract"].payload
+        ),
+        "license_access_evidence": snapshots[
+            "license_access_evidence"
+        ].sha256,
+        "pit_semantics_evidence": snapshots["pit_semantics_evidence"].sha256,
+    }
 
 
 def _positive_int(value: object) -> int | None:
@@ -387,6 +538,7 @@ def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, An
     canonical_path = (repo_root / POLICY_REPO_PATH).resolve()
     if path.resolve() != canonical_path:
         raise _fail("experimental policy must use its canonical repository path")
+    _verify_git_context(repo_root)
     head = _run_git(repo_root, "rev-parse", "HEAD").lower()
     if head != request.base_request.git_commit_sha:
         raise _fail("runtime git SHA differs from applied repository HEAD")
@@ -814,24 +966,26 @@ def execute(request: ExperimentalRuntimeRequest) -> dict[str, object]:
     base_request = request.base_request
     data_root_device = int(authority_summary["data_root_device"])
     data_root_inode = int(authority_summary["data_root_inode"])
-    input_hashes = base._verify_frozen_inputs(base_request)
+
+    snapshots = _capture_runtime_inputs(base_request)
+    input_hashes = _verify_captured_inputs(snapshots)
     input_hashes["experimental_runtime_policy"] = policy_summary["sha256"]
     input_hashes["runtime_authority_evidence"] = authority_summary[
         "evidence_sha256"
     ]
 
-    modeling = pd.read_parquet(base_request.modeling_dataset_path)
-    validation_predictions = pd.read_parquet(
-        base_request.m0_validation_predictions_path
+    modeling = _parquet_snapshot(snapshots["modeling_dataset"])
+    validation_predictions = _parquet_snapshot(
+        snapshots["m0_validation_predictions"]
     )
     eligible, validation_ids = base._identity_frames(
         modeling,
         validation_predictions,
     )
     license_passed, license_validation = base._license_access_validation(
-        base._json(base_request.license_access_evidence_path)
+        _json_snapshot(snapshots["license_access_evidence"])
     )
-    pit_evidence = base._json(base_request.pit_semantics_evidence_path)
+    pit_evidence = _json_snapshot(snapshots["pit_semantics_evidence"])
     pit_semantics_verified = base._pit_semantics_passed(pit_evidence)
 
     pairs: list[base.validation.FutoiDailyPair] = []
@@ -1007,6 +1161,7 @@ def execute(request: ExperimentalRuntimeRequest) -> dict[str, object]:
         "experimental_runtime_policy": policy_summary,
         "runtime_authority": authority_summary,
         "immutable_inputs_verified": True,
+        "input_snapshot_count": len(snapshots),
     }
     artifact_names = _write_validation_artifacts_secure(
         base_request.output_dir,
