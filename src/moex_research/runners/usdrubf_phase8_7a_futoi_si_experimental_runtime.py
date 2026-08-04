@@ -25,7 +25,7 @@ TASK_ID: Final[str] = (
 POLICY_CONTRACT_ID: Final[str] = (
     "usdrubf_phase8_7a_futoi_si_experimental_runtime_policy_v2"
 )
-POLICY_CONTRACT_VERSION: Final[str] = "2.0"
+POLICY_CONTRACT_VERSION: Final[str] = "2.1"
 AUTHORITY_MODE: Final[str] = "futoi_si_historical_experimental_only"
 POLICY_FLAG: Final[str] = "--experimental-authority-contract-path"
 RUNTIME_AUTHORITY_FLAG: Final[str] = "--runtime-authority-evidence-path"
@@ -34,6 +34,10 @@ POLICY_REPO_PATH: Final[str] = (
     "usdrubf_phase8_7a_futoi_si_experimental_runtime_authority_v1.json"
 )
 AUTHORIZED_DATA_ROOT: Final[Path] = Path("/home/trader/moex_bot/data")
+TRUSTED_AUTHORITY_ROOT: Final[Path] = Path(
+    "/etc/moex_bot/runtime_authorities/ema_3_19_ai"
+)
+TRUSTED_AUTHORITY_OWNER_UID: Final[int] = 0
 OUTPUT_PARENT_RELATIVE: Final[Path] = Path(
     "research/ema_3_19_ai/phase8_7a_futoi_si_source_validation"
 )
@@ -92,12 +96,12 @@ def request_from_args(args: argparse.Namespace) -> ExperimentalRuntimeRequest:
         ".json",
         RUNTIME_AUTHORITY_FLAG,
     )
-    paths = {
+    existing = {
         path.resolve()
         for name, path in base_request.__dict__.items()
         if name.endswith("_path")
     }
-    if policy_path.resolve() in paths or authority_path.resolve() in paths:
+    if policy_path.resolve() in existing or authority_path.resolve() in existing:
         raise base.validation.FutoiSiSourceValidationError(
             "experimental policy and runtime authority must be distinct inputs",
             blocker="provenance_not_sufficient",
@@ -118,6 +122,13 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def _fail(message: str) -> base.validation.FutoiSiSourceValidationError:
+    return base.validation.FutoiSiSourceValidationError(
+        message,
+        blocker="provenance_not_sufficient",
+    )
+
+
 def _run_git(
     repo_root: Path,
     *args: str,
@@ -132,10 +143,7 @@ def _run_git(
     )
     value = completed.stdout.strip()
     if completed.returncode != 0 or (not allow_empty and not value):
-        raise base.validation.FutoiSiSourceValidationError(
-            "applied git state cannot prove runtime provenance",
-            blocker="provenance_not_sufficient",
-        )
+        raise _fail("applied git state cannot prove runtime provenance")
     return value
 
 
@@ -147,10 +155,7 @@ def _read_git_blob_bytes(repo_root: Path, blob_sha: str) -> bytes:
         capture_output=True,
     )
     if completed.returncode != 0:
-        raise base.validation.FutoiSiSourceValidationError(
-            "tracked policy Git blob cannot be read",
-            blocker="provenance_not_sufficient",
-        )
+        raise _fail("tracked policy Git blob cannot be read")
     payload = bytes(completed.stdout)
     header = f"blob {len(payload)}\0".encode("ascii")
     observed = hashlib.sha1(
@@ -158,10 +163,7 @@ def _read_git_blob_bytes(repo_root: Path, blob_sha: str) -> bytes:
         usedforsecurity=False,
     ).hexdigest()
     if observed != blob_sha:
-        raise base.validation.FutoiSiSourceValidationError(
-            "tracked policy Git blob identity mismatch",
-            blocker="provenance_not_sufficient",
-        )
+        raise _fail("tracked policy Git blob identity mismatch")
     return payload
 
 
@@ -174,37 +176,22 @@ def _verify_clean_worktree(repo_root: Path) -> None:
         allow_empty=True,
     )
     if status:
-        raise base.validation.FutoiSiSourceValidationError(
-            "executed repository worktree or index differs from HEAD",
-            blocker="provenance_not_sufficient",
-        )
+        raise _fail("executed repository worktree or index differs from HEAD")
 
 
 def _data_root() -> Path:
     raw = str(os.environ.get("MOEX_DATA_ROOT") or "").strip()
     if not raw:
-        raise base.validation.FutoiSiSourceValidationError(
-            "MOEX_DATA_ROOT is required for experimental runtime",
-            blocker="provenance_not_sufficient",
-        )
+        raise _fail("MOEX_DATA_ROOT is required for experimental runtime")
     candidate = Path(raw).expanduser()
     if not candidate.is_absolute() or candidate.resolve() != AUTHORIZED_DATA_ROOT:
-        raise base.validation.FutoiSiSourceValidationError(
-            "MOEX_DATA_ROOT differs from the canonical data root",
-            blocker="provenance_not_sufficient",
-        )
+        raise _fail("MOEX_DATA_ROOT differs from the canonical data root")
     try:
-        mode = AUTHORIZED_DATA_ROOT.lstat().st_mode
+        metadata = AUTHORIZED_DATA_ROOT.lstat()
     except OSError as exc:
-        raise base.validation.FutoiSiSourceValidationError(
-            "canonical data root is not accessible",
-            blocker="provenance_not_sufficient",
-        ) from exc
-    if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
-        raise base.validation.FutoiSiSourceValidationError(
-            "canonical data root must be a physical directory",
-            blocker="provenance_not_sufficient",
-        )
+        raise _fail("canonical data root is not accessible") from exc
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+        raise _fail("canonical data root must be a physical directory")
     return AUTHORIZED_DATA_ROOT
 
 
@@ -212,15 +199,9 @@ def _json_object_from_bytes(payload: bytes, label: str) -> dict[str, Any]:
     try:
         value = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise base.validation.FutoiSiSourceValidationError(
-            f"{label} is not valid UTF-8 JSON",
-            blocker="provenance_not_sufficient",
-        ) from exc
+        raise _fail(f"{label} is not valid UTF-8 JSON") from exc
     if not isinstance(value, dict):
-        raise base.validation.FutoiSiSourceValidationError(
-            f"{label} must be a JSON object",
-            blocker="provenance_not_sufficient",
-        )
+        raise _fail(f"{label} must be a JSON object")
     return value
 
 
@@ -237,66 +218,105 @@ def _read_fd_all(descriptor: int) -> bytes:
         chunks.append(chunk)
 
 
-def _opened_fd_path(descriptor: int) -> Path:
-    proc_link = Path(f"/proc/self/fd/{descriptor}")
-    try:
-        value = os.readlink(proc_link)
-    except OSError as exc:
-        raise base.validation.FutoiSiSourceValidationError(
-            "opened authority evidence path cannot be proven",
-            blocker="provenance_not_sufficient",
-        ) from exc
-    if value.endswith(" (deleted)"):
-        raise base.validation.FutoiSiSourceValidationError(
-            "runtime authority evidence was removed during verification",
-            blocker="provenance_not_sufficient",
-        )
-    path = Path(value)
-    if not path.is_absolute():
-        raise base.validation.FutoiSiSourceValidationError(
-            "opened authority evidence path is not absolute",
-            blocker="provenance_not_sufficient",
-        )
-    return path
+def _validate_trusted_metadata(
+    metadata: os.stat_result,
+    *,
+    label: str,
+    require_directory: bool,
+) -> None:
+    expected_type = (
+        stat.S_ISDIR(metadata.st_mode)
+        if require_directory
+        else stat.S_ISREG(metadata.st_mode)
+    )
+    if not expected_type:
+        raise _fail(f"{label} has an invalid filesystem type")
+    if metadata.st_uid != TRUSTED_AUTHORITY_OWNER_UID:
+        raise _fail(f"{label} is not owned by the trusted authority owner")
+    if metadata.st_mode & 0o022:
+        raise _fail(f"{label} is group or world writable")
 
 
-def _read_external_authority_once(path: Path) -> tuple[dict[str, Any], bytes, Path]:
+def _open_trusted_authority_root() -> int:
+    if not TRUSTED_AUTHORITY_ROOT.is_absolute():
+        raise _fail("trusted runtime-authority root must be absolute")
     try:
-        descriptor = os.open(path, OPEN_READ_FLAGS)
+        current = os.open("/", OPEN_DIRECTORY_FLAGS)
     except OSError as exc:
-        raise base.validation.FutoiSiSourceValidationError(
-            "runtime authority evidence cannot be opened safely",
-            blocker="provenance_not_sufficient",
-        ) from exc
+        raise _fail("filesystem root cannot be opened safely") from exc
+    try:
+        _validate_trusted_metadata(
+            os.fstat(current),
+            label="filesystem root",
+            require_directory=True,
+        )
+        for part in TRUSTED_AUTHORITY_ROOT.parts[1:]:
+            try:
+                next_fd = os.open(
+                    part,
+                    OPEN_DIRECTORY_FLAGS,
+                    dir_fd=current,
+                )
+            except OSError as exc:
+                raise _fail(
+                    "trusted runtime-authority root cannot be traversed safely"
+                ) from exc
+            try:
+                _validate_trusted_metadata(
+                    os.fstat(next_fd),
+                    label=f"trusted authority ancestor {part}",
+                    require_directory=True,
+                )
+            except Exception:
+                os.close(next_fd)
+                raise
+            os.close(current)
+            current = next_fd
+        return current
+    except Exception:
+        os.close(current)
+        raise
+
+
+def _read_trusted_authority_once(
+    path: Path,
+) -> tuple[dict[str, Any], bytes, Path]:
+    if (
+        not path.is_absolute()
+        or path.parent != TRUSTED_AUTHORITY_ROOT
+        or path.suffix.lower() != ".json"
+        or path.name in {"", ".", ".."}
+    ):
+        raise _fail("runtime authority evidence is outside the trusted issuer root")
+    root_fd = _open_trusted_authority_root()
+    try:
+        try:
+            descriptor = os.open(
+                path.name,
+                OPEN_READ_FLAGS,
+                dir_fd=root_fd,
+            )
+        except OSError as exc:
+            raise _fail("runtime authority evidence cannot be opened safely") from exc
+    finally:
+        os.close(root_fd)
     try:
         metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode):
-            raise base.validation.FutoiSiSourceValidationError(
-                "runtime authority evidence must be a physical regular file",
-                blocker="provenance_not_sufficient",
-            )
-        opened_path = _opened_fd_path(descriptor)
-        repo_root = _repo_root().resolve()
-        try:
-            opened_canonical = opened_path.resolve(strict=True)
-        except OSError as exc:
-            raise base.validation.FutoiSiSourceValidationError(
-                "opened authority evidence cannot be resolved",
-                blocker="provenance_not_sufficient",
-            ) from exc
-        if opened_canonical.is_relative_to(repo_root):
-            raise base.validation.FutoiSiSourceValidationError(
-                "runtime authority evidence must not be stored in the repository",
-                blocker="provenance_not_sufficient",
-            )
+        _validate_trusted_metadata(
+            metadata,
+            label="runtime authority evidence",
+            require_directory=False,
+        )
         payload = _read_fd_all(descriptor)
     finally:
         os.close(descriptor)
-    return (
-        _json_object_from_bytes(payload, "runtime authority evidence"),
-        payload,
-        opened_canonical,
-    )
+    parsed = _json_object_from_bytes(payload, "runtime authority evidence")
+    authorization_id = str(parsed.get("authorization_id") or "").strip()
+    if not AUTHORIZATION_ID_PATTERN.fullmatch(authorization_id):
+        raise _fail("runtime authority authorization_id is malformed")
+    if path.name != f"{authorization_id}.json":
+        raise _fail("runtime authority filename does not match authorization_id")
+    return parsed, payload, TRUSTED_AUTHORITY_ROOT / path.name
 
 
 def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, Any]:
@@ -304,16 +324,10 @@ def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, An
     repo_root = _repo_root()
     canonical_path = (repo_root / POLICY_REPO_PATH).resolve()
     if path.resolve() != canonical_path:
-        raise base.validation.FutoiSiSourceValidationError(
-            "experimental policy must be read from its canonical repository path",
-            blocker="provenance_not_sufficient",
-        )
+        raise _fail("experimental policy must use its canonical repository path")
     head = _run_git(repo_root, "rev-parse", "HEAD").lower()
     if head != request.base_request.git_commit_sha:
-        raise base.validation.FutoiSiSourceValidationError(
-            "runtime git SHA differs from applied repository HEAD",
-            blocker="provenance_not_sufficient",
-        )
+        raise _fail("runtime git SHA differs from applied repository HEAD")
     _verify_clean_worktree(repo_root)
     tracked_blob = _run_git(
         repo_root,
@@ -332,10 +346,7 @@ def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, An
         isinstance(item, Mapping)
         for item in (identity, parent, boundary, authority, gates, runtime)
     ):
-        raise base.validation.FutoiSiSourceValidationError(
-            "experimental runtime policy structure mismatch",
-            blocker="provenance_not_sufficient",
-        )
+        raise _fail("experimental runtime policy structure mismatch")
     assert isinstance(identity, Mapping)
     assert isinstance(parent, Mapping)
     assert isinstance(boundary, Mapping)
@@ -370,6 +381,18 @@ def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, An
         is not True
         or boundary.get("canonical_data_root")
         != AUTHORIZED_DATA_ROOT.as_posix()
+        or boundary.get("trusted_runtime_authority_root")
+        != TRUSTED_AUTHORITY_ROOT.as_posix()
+        or boundary.get("trusted_runtime_authority_owner_uid")
+        != TRUSTED_AUTHORITY_OWNER_UID
+        or boundary.get("trusted_runtime_authority_filename_rule")
+        != "authorization_id.json"
+        or boundary.get(
+            "trusted_runtime_authority_group_world_writable_allowed"
+        )
+        is not False
+        or boundary.get("trusted_runtime_authority_ancestors_must_be_root_owned")
+        is not True
         or boundary.get("module_claims_global_single_use") is not False
         or authority.get("mode") != AUTHORITY_MODE
         or authority.get("approved_by") != "PM_L2_PHASE_OWNER"
@@ -389,10 +412,7 @@ def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, An
         or runtime.get("fallback_or_substitution_allowed") is not False
         or runtime.get("raw_response_persistence_allowed") is not False
     ):
-        raise base.validation.FutoiSiSourceValidationError(
-            "experimental runtime policy mismatch",
-            blocker="provenance_not_sufficient",
-        )
+        raise _fail("experimental runtime policy mismatch")
     return {
         "contract_id": POLICY_CONTRACT_ID,
         "contract_version": POLICY_CONTRACT_VERSION,
@@ -423,7 +443,7 @@ def _canonical_output_path(run_id: str) -> Path:
 def _verify_runtime_authority(
     request: ExperimentalRuntimeRequest,
 ) -> dict[str, Any]:
-    payload, raw_bytes, opened_path = _read_external_authority_once(
+    payload, raw_bytes, trusted_path = _read_trusted_authority_once(
         request.runtime_authority_evidence_path
     )
     base_request = request.base_request
@@ -455,15 +475,9 @@ def _verify_runtime_authority(
         or payload.get("phase8_7a_source_validation_allowed") is not True
         or any(payload.get(name) is not False for name in forbidden)
     ):
-        raise base.validation.FutoiSiSourceValidationError(
-            "runtime authority evidence does not match the exact invocation",
-            blocker="provenance_not_sufficient",
-        )
+        raise _fail("runtime authority evidence does not match the exact invocation")
     if base_request.output_dir.absolute() != expected_output:
-        raise base.validation.FutoiSiSourceValidationError(
-            "runtime output directory differs from exact authority evidence",
-            blocker="provenance_not_sufficient",
-        )
+        raise _fail("runtime output directory differs from exact authority evidence")
     return {
         "authorization_id": authorization_id,
         "approved_by": "PM_L2_PHASE_OWNER",
@@ -473,8 +487,9 @@ def _verify_runtime_authority(
         "data_root": AUTHORIZED_DATA_ROOT.as_posix(),
         "output_dir": expected_output.as_posix(),
         "issued_at": str(payload.get("issued_at")),
-        "evidence_path": opened_path.as_posix(),
+        "evidence_path": trusted_path.as_posix(),
         "evidence_sha256": _sha256_bytes(raw_bytes),
+        "trusted_owner_uid": TRUSTED_AUTHORITY_OWNER_UID,
         "global_single_use_claimed": False,
         "production_use_allowed": False,
         "feature_computation_allowed": False,
@@ -491,26 +506,17 @@ def _open_child_directory(parent_fd: int, name: str, *, create: bool) -> int:
         if not create:
             raise
     except OSError as exc:
-        raise base.validation.FutoiSiSourceValidationError(
-            "canonical output ancestor cannot be opened safely",
-            blocker="provenance_not_sufficient",
-        ) from exc
+        raise _fail("canonical output ancestor cannot be opened safely") from exc
     try:
         os.mkdir(name, mode=0o750, dir_fd=parent_fd)
     except FileExistsError:
         pass
     except OSError as exc:
-        raise base.validation.FutoiSiSourceValidationError(
-            "canonical output ancestor cannot be created safely",
-            blocker="provenance_not_sufficient",
-        ) from exc
+        raise _fail("canonical output ancestor cannot be created safely") from exc
     try:
         return os.open(name, OPEN_DIRECTORY_FLAGS, dir_fd=parent_fd)
     except OSError as exc:
-        raise base.validation.FutoiSiSourceValidationError(
-            "canonical output ancestor cannot be reopened safely",
-            blocker="provenance_not_sufficient",
-        ) from exc
+        raise _fail("canonical output ancestor cannot be reopened safely") from exc
 
 
 def _open_existing_chain(root_fd: int, parts: Sequence[str]) -> int:
@@ -540,15 +546,9 @@ def _create_output_directory(run_id: str) -> tuple[int, int, Path]:
         try:
             os.mkdir(leaf, mode=0o750, dir_fd=parent_fd)
         except FileExistsError as exc:
-            raise base.validation.FutoiSiSourceValidationError(
-                "experimental output directory must not pre-exist",
-                blocker="provenance_not_sufficient",
-            ) from exc
+            raise _fail("experimental output directory must not pre-exist") from exc
         except OSError as exc:
-            raise base.validation.FutoiSiSourceValidationError(
-                "experimental output directory cannot be created safely",
-                blocker="provenance_not_sufficient",
-            ) from exc
+            raise _fail("experimental output directory cannot be created safely") from exc
         output_fd = os.open(leaf, OPEN_DIRECTORY_FLAGS, dir_fd=parent_fd)
         return root_fd, output_fd, root / relative
     except Exception:
@@ -562,10 +562,7 @@ def _open_output_file(output_fd: int, name: str) -> int:
     try:
         return os.open(name, OPEN_WRITE_FLAGS, 0o640, dir_fd=output_fd)
     except OSError as exc:
-        raise base.validation.FutoiSiSourceValidationError(
-            f"runtime artifact cannot be created safely: {name}",
-            blocker="provenance_not_sufficient",
-        ) from exc
+        raise _fail(f"runtime artifact cannot be created safely: {name}") from exc
 
 
 def _write_json_fd(output_fd: int, name: str, payload: Mapping[str, object]) -> None:
@@ -602,10 +599,7 @@ def _verify_output_directory_identity(
     try:
         fresh_root_fd = os.open(_data_root(), OPEN_DIRECTORY_FLAGS)
     except OSError as exc:
-        raise base.validation.FutoiSiSourceValidationError(
-            "canonical data root cannot be reopened for final verification",
-            blocker="provenance_not_sufficient",
-        ) from exc
+        raise _fail("canonical data root cannot be reopened") from exc
     observed_fd: int | None = None
     try:
         retained_root = os.fstat(root_fd)
@@ -614,24 +608,15 @@ def _verify_output_directory_identity(
             current_root.st_dev,
             current_root.st_ino,
         ):
-            raise base.validation.FutoiSiSourceValidationError(
-                "canonical data root changed during artifact creation",
-                blocker="provenance_not_sufficient",
-            )
+            raise _fail("canonical data root changed during artifact creation")
         try:
             observed_fd = _open_existing_chain(fresh_root_fd, relative.parts)
         except OSError as exc:
-            raise base.validation.FutoiSiSourceValidationError(
-                "canonical output path changed during artifact creation",
-                blocker="provenance_not_sufficient",
-            ) from exc
+            raise _fail("canonical output path changed during artifact creation") from exc
         expected = os.fstat(output_fd)
         observed = os.fstat(observed_fd)
         if (expected.st_dev, expected.st_ino) != (observed.st_dev, observed.st_ino):
-            raise base.validation.FutoiSiSourceValidationError(
-                "canonical output path no longer identifies written artifacts",
-                blocker="provenance_not_sufficient",
-            )
+            raise _fail("canonical output path no longer identifies artifacts")
     finally:
         if observed_fd is not None:
             os.close(observed_fd)
@@ -655,17 +640,11 @@ def _write_validation_artifacts_secure(
 ) -> tuple[str, ...]:
     expected_output = _canonical_output_path(run_id)
     if output_dir.absolute() != expected_output:
-        raise base.validation.FutoiSiSourceValidationError(
-            "secure artifact writer received a non-canonical output path",
-            blocker="provenance_not_sufficient",
-        )
+        raise _fail("secure artifact writer received a non-canonical output path")
     root_fd, output_fd, created_path = _create_output_directory(run_id)
     try:
         if created_path != expected_output:
-            raise base.validation.FutoiSiSourceValidationError(
-                "secure artifact writer created an unexpected output path",
-                blocker="provenance_not_sufficient",
-            )
+            raise _fail("secure artifact writer created an unexpected output path")
         json_payloads = {
             "input_identity_verification.json": input_identity_verification,
             "official_route_validation.json": route_validation,
@@ -698,10 +677,7 @@ def _write_validation_artifacts_secure(
         )
         names = tuple(sorted(os.listdir(output_fd)))
         if set(names) != set(base.validation.REQUIRED_RUNTIME_ARTIFACTS):
-            raise base.validation.FutoiSiSourceValidationError(
-                "runtime artifact inventory mismatch",
-                blocker="provenance_not_sufficient",
-            )
+            raise _fail("runtime artifact inventory mismatch")
         os.fsync(output_fd)
         _verify_output_directory_identity(root_fd, output_fd, run_id)
         return names
