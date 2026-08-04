@@ -139,6 +139,32 @@ def _run_git(
     return value
 
 
+def _read_git_blob_bytes(repo_root: Path, blob_sha: str) -> bytes:
+    completed = subprocess.run(
+        ["git", "cat-file", "blob", blob_sha],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+    )
+    if completed.returncode != 0:
+        raise base.validation.FutoiSiSourceValidationError(
+            "tracked policy Git blob cannot be read",
+            blocker="provenance_not_sufficient",
+        )
+    payload = bytes(completed.stdout)
+    header = f"blob {len(payload)}\0".encode("ascii")
+    observed = hashlib.sha1(
+        header + payload,
+        usedforsecurity=False,
+    ).hexdigest()
+    if observed != blob_sha:
+        raise base.validation.FutoiSiSourceValidationError(
+            "tracked policy Git blob identity mismatch",
+            blocker="provenance_not_sufficient",
+        )
+    return payload
+
+
 def _verify_clean_worktree(repo_root: Path) -> None:
     status = _run_git(
         repo_root,
@@ -294,13 +320,8 @@ def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, An
         "rev-parse",
         f"{head}:{POLICY_REPO_PATH}",
     ).lower()
-    actual_blob = base._git_blob_sha1(path)
-    if tracked_blob != actual_blob:
-        raise base.validation.FutoiSiSourceValidationError(
-            "experimental policy differs from the applied tracked blob",
-            blocker="provenance_not_sufficient",
-        )
-    payload = base._json(path)
+    policy_bytes = _read_git_blob_bytes(repo_root, tracked_blob)
+    payload = _json_object_from_bytes(policy_bytes, "experimental runtime policy")
     identity = payload.get("contract_identity")
     parent = payload.get("parent_contract")
     boundary = payload.get("policy_boundary")
@@ -372,11 +393,10 @@ def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, An
             "experimental runtime policy mismatch",
             blocker="provenance_not_sufficient",
         )
-    policy_bytes = path.read_bytes()
     return {
         "contract_id": POLICY_CONTRACT_ID,
         "contract_version": POLICY_CONTRACT_VERSION,
-        "git_blob_sha1": actual_blob,
+        "git_blob_sha1": tracked_blob,
         "sha256": _sha256_bytes(policy_bytes),
     }
 
@@ -580,13 +600,31 @@ def _verify_output_directory_identity(
 ) -> None:
     relative = _canonical_output_relative(run_id)
     try:
-        observed_fd = _open_existing_chain(root_fd, relative.parts)
+        fresh_root_fd = os.open(_data_root(), OPEN_DIRECTORY_FLAGS)
     except OSError as exc:
         raise base.validation.FutoiSiSourceValidationError(
-            "canonical output path changed during artifact creation",
+            "canonical data root cannot be reopened for final verification",
             blocker="provenance_not_sufficient",
         ) from exc
+    observed_fd: int | None = None
     try:
+        retained_root = os.fstat(root_fd)
+        current_root = os.fstat(fresh_root_fd)
+        if (retained_root.st_dev, retained_root.st_ino) != (
+            current_root.st_dev,
+            current_root.st_ino,
+        ):
+            raise base.validation.FutoiSiSourceValidationError(
+                "canonical data root changed during artifact creation",
+                blocker="provenance_not_sufficient",
+            )
+        try:
+            observed_fd = _open_existing_chain(fresh_root_fd, relative.parts)
+        except OSError as exc:
+            raise base.validation.FutoiSiSourceValidationError(
+                "canonical output path changed during artifact creation",
+                blocker="provenance_not_sufficient",
+            ) from exc
         expected = os.fstat(output_fd)
         observed = os.fstat(observed_fd)
         if (expected.st_dev, expected.st_ino) != (observed.st_dev, observed.st_ino):
@@ -595,7 +633,9 @@ def _verify_output_directory_identity(
                 blocker="provenance_not_sufficient",
             )
     finally:
-        os.close(observed_fd)
+        if observed_fd is not None:
+            os.close(observed_fd)
+        os.close(fresh_root_fd)
 
 
 def _write_validation_artifacts_secure(
