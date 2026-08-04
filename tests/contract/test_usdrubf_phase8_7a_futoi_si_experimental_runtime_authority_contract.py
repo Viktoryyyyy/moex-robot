@@ -126,6 +126,10 @@ def test_ordinary_module_launch_fails_before_critical_runtime(
     environment["PYTHONPATH"] = str(repo_root / "src")
     environment["PYTHONPYCACHEPREFIX"] = str(tmp_path / "external-pycache")
     environment.pop("PYTHONDONTWRITEBYTECODE", None)
+    before = {
+        path.relative_to(repo_root).as_posix()
+        for path in repo_root.rglob("*.pyc")
+    }
 
     completed = subprocess.run(
         [
@@ -141,10 +145,14 @@ def test_ordinary_module_launch_fails_before_critical_runtime(
         capture_output=True,
         text=True,
     )
+    after = {
+        path.relative_to(repo_root).as_posix()
+        for path in repo_root.rglob("*.pyc")
+    }
 
     assert completed.returncode != 0
     assert "requires no-bytecode startup" in completed.stderr
-    assert not any(repo_root.rglob("*.pyc"))
+    assert after == before
 
 
 def test_no_bytecode_module_launch_reaches_argument_parser() -> None:
