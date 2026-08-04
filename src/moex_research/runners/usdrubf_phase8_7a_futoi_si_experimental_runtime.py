@@ -40,6 +40,7 @@ TRUSTED_AUTHORITY_ROOT: Final[Path] = Path(
 )
 TRUSTED_AUTHORITY_OWNER_UID: Final[int] = 0
 TRUSTED_GIT_PATH: Final[str] = "/usr/bin:/bin"
+TRUSTED_GIT_CONFIG_HOME: Final[str] = "/nonexistent"
 OUTPUT_PARENT_RELATIVE: Final[Path] = Path(
     "research/ema_3_19_ai/phase8_7a_futoi_si_source_validation"
 )
@@ -148,11 +149,22 @@ def _sanitized_git_environment() -> dict[str, str]:
         if not key.upper().startswith("GIT_")
     }
     environment["PATH"] = TRUSTED_GIT_PATH
+    environment["HOME"] = TRUSTED_GIT_CONFIG_HOME
+    environment["XDG_CONFIG_HOME"] = TRUSTED_GIT_CONFIG_HOME
     return environment
 
 
 def _git_command(repo_root: Path, *args: str) -> list[str]:
-    return ["git", "-C", str(repo_root.resolve()), *args]
+    return [
+        "git",
+        "-C",
+        str(repo_root.resolve()),
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.untrackedCache=false",
+        *args,
+    ]
 
 
 def _run_git(
@@ -203,6 +215,29 @@ def _read_git_blob_bytes(repo_root: Path, blob_sha: str) -> bytes:
     if observed != blob_sha:
         raise _fail("tracked policy Git blob identity mismatch")
     return payload
+
+
+def _verify_no_hidden_index_flags(repo_root: Path) -> None:
+    tagged = _run_git(
+        repo_root,
+        "ls-files",
+        "-v",
+        "-z",
+        allow_empty=True,
+    )
+    hidden: list[str] = []
+    for entry in tagged.split("\0"):
+        if not entry:
+            continue
+        tag = entry[0]
+        path = entry[2:] if len(entry) > 2 and entry[1] == " " else entry[1:]
+        if tag.islower() or tag == "S":
+            hidden.append(path)
+    if hidden:
+        raise _fail(
+            "tracked files use assume-unchanged or skip-worktree flags: "
+            + ", ".join(sorted(hidden))
+        )
 
 
 def _verify_clean_worktree(repo_root: Path) -> None:
@@ -545,6 +580,7 @@ def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, An
     head = _run_git(repo_root, "rev-parse", "HEAD").lower()
     if head != request.base_request.git_commit_sha:
         raise _fail("runtime git SHA differs from applied repository HEAD")
+    _verify_no_hidden_index_flags(repo_root)
     _verify_clean_worktree(repo_root)
     tracked_blob = _run_git(
         repo_root,
