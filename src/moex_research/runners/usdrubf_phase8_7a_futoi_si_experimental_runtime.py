@@ -15,8 +15,9 @@ from pathlib import Path
 from typing import Any, Final, Mapping, Sequence
 
 OPERATIONAL_INVOCATION: Final[str] = (
-    "python -B -m moex_research.runners."
-    "usdrubf_phase8_7a_futoi_si_experimental_runtime"
+    "PYTHONPATH=src python -B "
+    "src/moex_research/runners/"
+    "usdrubf_phase8_7a_futoi_si_experimental_runtime.py"
 )
 
 if __name__ == "__main__" and (
