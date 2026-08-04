@@ -172,6 +172,42 @@ def test_data_root_binding_rejects_alternate_root(
     assert experimental._data_root() == canonical.resolve()
 
 
+def test_dirty_worktree_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fake_run_git(
+        _repo_root: Path,
+        *args: str,
+        allow_empty: bool = False,
+    ) -> str:
+        assert allow_empty is True
+        assert args[:2] == ("status", "--porcelain=v1")
+        return "?? untracked_runtime.py"
+
+    monkeypatch.setattr(experimental, "_run_git", fake_run_git)
+    with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
+        experimental._verify_clean_worktree(tmp_path)
+    assert raised.value.blocker == "provenance_not_sufficient"
+
+
+def test_external_authority_is_captured_from_one_descriptor(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "authority.json"
+    path.write_text('{"value":1}\n', encoding="utf-8")
+
+    payload, raw, opened_path = experimental._read_external_authority_once(path)
+    path.write_text('{"value":2}\n', encoding="utf-8")
+
+    assert payload == {"value": 1}
+    assert raw == b'{"value":1}\n'
+    assert opened_path == path.resolve()
+    assert experimental._sha256_bytes(raw) != experimental._sha256_bytes(
+        path.read_bytes()
+    )
+
+
 def test_symlinked_output_descendant_is_rejected(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -182,7 +218,7 @@ def test_symlinked_output_descendant_is_rejected(
     (tmp_path / "research").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
-        experimental._canonical_output_path(RUN_ID, require_absent=True)
+        experimental._create_output_directory(RUN_ID)
     assert raised.value.blocker == "provenance_not_sufficient"
 
 
@@ -215,6 +251,9 @@ def test_external_runtime_authority_binds_exact_invocation(
     assert summary["git_commit_sha"] == request.base_request.git_commit_sha
     assert summary["run_id"] == RUN_ID
     assert summary["output_dir"] == request.base_request.output_dir.as_posix()
+    assert summary["evidence_path"] == (
+        request.runtime_authority_evidence_path.resolve().as_posix()
+    )
     assert summary["global_single_use_claimed"] is False
     assert summary["production_use_allowed"] is False
 
@@ -262,6 +301,33 @@ def test_runtime_authority_inside_repository_is_rejected(
     assert raised.value.blocker == "provenance_not_sufficient"
 
 
+def test_secure_writer_creates_exact_artifact_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _bind_test_data_root(monkeypatch, tmp_path)
+    output_dir = (
+        tmp_path / experimental.OUTPUT_PARENT_RELATIVE / f"run_id={RUN_ID}"
+    )
+    names = experimental._write_validation_artifacts_secure(
+        output_dir,
+        run_id=RUN_ID,
+        input_identity_verification={"project": "MOEX_Bot"},
+        route_validation={"route_validated": True},
+        license_validation={"status": "blocked"},
+        schema_profile={"schema_stable": True},
+        pairs=[],
+        matrix=pd.DataFrame({"accepted": [True]}),
+        coverage=pd.DataFrame({"coverage": [1.0]}),
+        diagnostics=pd.DataFrame({"diagnostic": ["ok"]}),
+        blockers={"blockers": []},
+        gates={"gates": {}},
+    )
+
+    assert names == tuple(sorted(ARTIFACT_NAMES))
+    assert tuple(sorted(path.name for path in output_dir.iterdir())) == names
+
+
 def _mock_runtime_dependencies(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -276,6 +342,7 @@ def _mock_runtime_dependencies(
         lambda _request: {
             "contract_id": experimental.POLICY_CONTRACT_ID,
             "contract_version": experimental.POLICY_CONTRACT_VERSION,
+            "sha256": "a" * 64,
         },
     )
     monkeypatch.setattr(
@@ -284,6 +351,7 @@ def _mock_runtime_dependencies(
         lambda request: {
             "authorization_id": AUTHORIZATION_ID,
             "run_id": request.base_request.run_id,
+            "evidence_sha256": "b" * 64,
             "production_use_allowed": False,
             "promotion_allowed": False,
             "trading_allowed": False,
@@ -292,7 +360,7 @@ def _mock_runtime_dependencies(
     monkeypatch.setattr(
         base,
         "_verify_frozen_inputs",
-        lambda _request: {"modeling_dataset": "a" * 64},
+        lambda _request: {"modeling_dataset": "c" * 64},
     )
     monkeypatch.setattr(experimental.pd, "read_parquet", lambda _path: pd.DataFrame())
     monkeypatch.setattr(
@@ -343,7 +411,11 @@ def _mock_runtime_dependencies(
         observed["artifact_kwargs"] = kwargs
         return ARTIFACT_NAMES
 
-    monkeypatch.setattr(base.validation, "write_validation_artifacts", write_artifacts)
+    monkeypatch.setattr(
+        experimental,
+        "_write_validation_artifacts_secure",
+        write_artifacts,
+    )
     observed["calls"] = calls
 
 
