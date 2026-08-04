@@ -291,8 +291,13 @@ def test_checked_in_policy_is_tracked_but_not_runtime_authority(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    _bind_test_roots(monkeypatch, tmp_path)
-    request = _request(tmp_path)
+    _bind_test_data_root(monkeypatch, tmp_path)
+    base_request = _base_request(tmp_path)
+    request = experimental.ExperimentalRuntimeRequest(
+        base_request=base_request,
+        policy_contract_path=_policy_path(),
+        runtime_authority_evidence_path=tmp_path / "unused-authority.json",
+    )
 
     summary = experimental._verify_policy_contract(request)
 
