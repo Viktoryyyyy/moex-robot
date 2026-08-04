@@ -48,15 +48,40 @@ def _git_head() -> str:
     ).strip()
 
 
+def _request_data_root(request: base.RuntimeRequest) -> Path:
+    root = request.output_dir
+    for _ in experimental._canonical_output_relative(request.run_id).parts:
+        root = root.parent
+    return root.resolve()
+
+
 def _bind_test_data_root(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(
-        experimental,
-        "_data_root",
-        lambda: tmp_path.resolve(),
-    )
+    root = tmp_path.resolve()
+    monkeypatch.setattr(experimental, "_data_root", lambda: root)
+
+    def open_root(
+        expected_device: int | None = None,
+        expected_inode: int | None = None,
+    ) -> int:
+        descriptor = os.open(root, experimental.OPEN_DIRECTORY_FLAGS)
+        metadata = os.fstat(descriptor)
+        if (expected_device is None) != (expected_inode is None):
+            os.close(descriptor)
+            raise experimental._fail("canonical data root identity is incomplete")
+        if expected_device is not None and (
+            metadata.st_dev != expected_device
+            or metadata.st_ino != expected_inode
+        ):
+            os.close(descriptor)
+            raise experimental._fail(
+                "canonical data root physical identity mismatch"
+            )
+        return descriptor
+
+    monkeypatch.setattr(experimental, "_open_canonical_data_root", open_root)
 
 
 def _bind_test_authority_root(
@@ -126,6 +151,7 @@ def _base_request(
 
 
 def _authority_payload(request: base.RuntimeRequest) -> dict[str, object]:
+    root_metadata = _request_data_root(request).stat()
     return {
         "project": "MOEX_Bot",
         "task_id": experimental.TASK_ID,
@@ -135,6 +161,8 @@ def _authority_payload(request: base.RuntimeRequest) -> dict[str, object]:
         "git_commit_sha": request.git_commit_sha,
         "run_id": request.run_id,
         "data_root": experimental.AUTHORIZED_DATA_ROOT.as_posix(),
+        "data_root_device": root_metadata.st_dev,
+        "data_root_inode": root_metadata.st_ino,
         "output_dir": request.output_dir.absolute().as_posix(),
         "issued_at": "2026-08-04T08:00:00+03:00",
         "historical_authenticated_retrieval_allowed": True,
@@ -206,6 +234,71 @@ def test_data_root_binding_rejects_alternate_root(
 
     monkeypatch.setenv("MOEX_DATA_ROOT", str(canonical))
     assert experimental._data_root() == canonical.resolve()
+
+
+def test_data_root_physical_identity_match_and_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _bind_test_data_root(monkeypatch, tmp_path)
+    metadata = tmp_path.stat()
+
+    experimental._assert_data_root_identity(metadata.st_dev, metadata.st_ino)
+    with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
+        experimental._assert_data_root_identity(
+            metadata.st_dev,
+            metadata.st_ino + 1,
+        )
+    assert raised.value.blocker == "provenance_not_sufficient"
+
+
+def test_data_root_symlinked_ancestor_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    physical = tmp_path / "physical"
+    physical.mkdir()
+    linked = tmp_path / "linked"
+    linked.symlink_to(physical, target_is_directory=True)
+    monkeypatch.setattr(experimental, "AUTHORIZED_DATA_ROOT", linked)
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(linked))
+
+    original_validator = experimental._validate_data_root_metadata
+
+    def validate(metadata: os.stat_result, *, label: str) -> None:
+        if label in {"filesystem root", "canonical data-root ancestor tmp"}:
+            assert os.path.isdir("/")
+            return
+        original_validator(metadata, label=label)
+
+    monkeypatch.setattr(experimental, "_validate_data_root_metadata", validate)
+    with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
+        experimental._open_canonical_data_root()
+    assert raised.value.blocker == "provenance_not_sufficient"
+
+
+def test_data_root_writable_ancestor_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    writable = tmp_path / "writable-component"
+    data_root = writable / "data"
+    data_root.mkdir(parents=True)
+    writable.chmod(0o770)
+    monkeypatch.setattr(experimental, "AUTHORIZED_DATA_ROOT", data_root)
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(data_root))
+
+    original_validator = experimental._validate_data_root_metadata
+
+    def validate(metadata: os.stat_result, *, label: str) -> None:
+        if label in {"filesystem root", "canonical data-root ancestor tmp"}:
+            return
+        original_validator(metadata, label=label)
+
+    monkeypatch.setattr(experimental, "_validate_data_root_metadata", validate)
+    with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
+        experimental._open_canonical_data_root()
+    assert raised.value.blocker == "provenance_not_sufficient"
 
 
 def test_dirty_worktree_is_rejected(
@@ -281,9 +374,14 @@ def test_symlinked_output_descendant_is_rejected(
     outside = tmp_path.parent / f"{tmp_path.name}-outside"
     outside.mkdir()
     (tmp_path / "research").symlink_to(outside, target_is_directory=True)
+    metadata = tmp_path.stat()
 
     with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
-        experimental._create_output_directory(RUN_ID)
+        experimental._create_output_directory(
+            RUN_ID,
+            data_root_device=metadata.st_dev,
+            data_root_inode=metadata.st_ino,
+        )
     assert raised.value.blocker == "provenance_not_sufficient"
 
 
@@ -305,7 +403,7 @@ def test_checked_in_policy_is_tracked_but_not_runtime_authority(
     assert summary["contract_version"] == experimental.POLICY_CONTRACT_VERSION
     policy = json.loads(_policy_path().read_text(encoding="utf-8"))
     assert policy["policy_boundary"]["checked_in_policy_is_runtime_authority"] is False
-    assert policy["policy_boundary"]["separate_runtime_authority_evidence_required"] is True
+    assert policy["policy_boundary"]["runtime_authority_must_bind_data_root_identity"] is True
     assert policy["policy_boundary"]["trusted_runtime_authority_root"] == (
         experimental.TRUSTED_AUTHORITY_ROOT.as_posix()
     )
@@ -319,10 +417,13 @@ def test_external_runtime_authority_binds_exact_invocation(
     request = _request(tmp_path)
 
     summary = experimental._verify_runtime_authority(request)
+    metadata = tmp_path.stat()
 
     assert summary["authorization_id"] == AUTHORIZATION_ID
     assert summary["git_commit_sha"] == request.base_request.git_commit_sha
     assert summary["run_id"] == RUN_ID
+    assert summary["data_root_device"] == metadata.st_dev
+    assert summary["data_root_inode"] == metadata.st_ino
     assert summary["output_dir"] == request.base_request.output_dir.as_posix()
     assert summary["evidence_path"] == (
         request.runtime_authority_evidence_path.as_posix()
@@ -337,6 +438,8 @@ def test_external_runtime_authority_binds_exact_invocation(
     [
         ("git_commit_sha", "0" * 40),
         ("run_id", "phase8_7a_futoi_si_source_validation_20260804_v2"),
+        ("data_root_device", 0),
+        ("data_root_inode", 0),
         ("output_dir", "/tmp/not-authorized"),
         ("historical_authenticated_retrieval_allowed", False),
         ("model_fitting_allowed", True),
@@ -352,6 +455,21 @@ def test_runtime_authority_rejects_mismatched_invocation(
 
     def mutate(payload: dict[str, object]) -> None:
         payload[field] = value
+
+    request = _request(tmp_path, mutate_authority=mutate)
+    with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
+        experimental._verify_runtime_authority(request)
+    assert raised.value.blocker == "provenance_not_sufficient"
+
+
+def test_runtime_authority_rejects_wrong_physical_data_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _bind_test_roots(monkeypatch, tmp_path)
+
+    def mutate(payload: dict[str, object]) -> None:
+        payload["data_root_inode"] = int(payload["data_root_inode"]) + 1
 
     request = _request(tmp_path, mutate_authority=mutate)
     with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
@@ -387,9 +505,12 @@ def test_secure_writer_creates_exact_artifact_inventory(
     output_dir = (
         tmp_path / experimental.OUTPUT_PARENT_RELATIVE / f"run_id={RUN_ID}"
     )
+    metadata = tmp_path.stat()
     names = experimental._write_validation_artifacts_secure(
         output_dir,
         run_id=RUN_ID,
+        data_root_device=metadata.st_dev,
+        data_root_inode=metadata.st_ino,
         input_identity_verification={"project": "MOEX_Bot"},
         route_validation={"route_validated": True},
         license_validation={"status": "blocked"},
@@ -423,18 +544,21 @@ def _mock_runtime_dependencies(
             "sha256": "a" * 64,
         },
     )
-    monkeypatch.setattr(
-        experimental,
-        "_verify_runtime_authority",
-        lambda request: {
+
+    def authority(request):
+        metadata = experimental._data_root().stat()
+        return {
             "authorization_id": AUTHORIZATION_ID,
             "run_id": request.base_request.run_id,
+            "data_root_device": metadata.st_dev,
+            "data_root_inode": metadata.st_ino,
             "evidence_sha256": "b" * 64,
             "production_use_allowed": False,
             "promotion_allowed": False,
             "trading_allowed": False,
-        },
-    )
+        }
+
+    monkeypatch.setattr(experimental, "_verify_runtime_authority", authority)
     monkeypatch.setattr(
         base,
         "_verify_frozen_inputs",
@@ -559,6 +683,8 @@ def test_runtime_retrieves_with_external_authority_and_preserves_gates(
     assert gate_kwargs["pit_semantics_verified"] is False
     artifact_kwargs = observed["artifact_kwargs"]
     assert isinstance(artifact_kwargs, dict)
+    assert artifact_kwargs["data_root_device"] == tmp_path.stat().st_dev
+    assert artifact_kwargs["data_root_inode"] == tmp_path.stat().st_ino
     gates = artifact_kwargs["gates"]["gates"]
     assert gates["G3_license_and_access"]["passed"] is False
     assert gates["G5_pit_publication_semantics"]["passed"] is False
