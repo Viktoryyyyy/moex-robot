@@ -111,6 +111,20 @@ def test_data_root_binding_rejects_alternate_root(
     assert experimental._data_root() == experimental.AUTHORIZED_DATA_ROOT
 
 
+def test_symlinked_authorized_descendant_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _bind_test_data_root(monkeypatch, tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (tmp_path / "research").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
+        experimental._authority_marker_path()
+    assert raised.value.blocker == "provenance_not_sufficient"
+
+
 def test_checked_in_authority_is_bound_to_current_git_state(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -179,7 +193,7 @@ def test_authority_consumption_is_atomic_and_rejects_reuse(
     assert payload["git_commit_sha"] == request.base_request.git_commit_sha
     assert marker == (
         tmp_path / experimental.CONSUMPTION_MARKER_RELATIVE
-    ).resolve()
+    )
 
     with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
         experimental._consume_authority(request)
