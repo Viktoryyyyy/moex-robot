@@ -99,16 +99,23 @@ def test_data_root_binding_rejects_alternate_root(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    canonical = tmp_path / "canonical"
+    alternate = tmp_path / "alternate"
+    canonical.mkdir()
+    alternate.mkdir()
+    monkeypatch.setattr(
+        experimental,
+        "AUTHORIZED_DATA_ROOT",
+        canonical.resolve(),
+    )
+
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(alternate))
     with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
         experimental._data_root()
     assert raised.value.blocker == "provenance_not_sufficient"
 
-    monkeypatch.setenv(
-        "MOEX_DATA_ROOT",
-        experimental.AUTHORIZED_DATA_ROOT.as_posix(),
-    )
-    assert experimental._data_root() == experimental.AUTHORIZED_DATA_ROOT
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(canonical))
+    assert experimental._data_root() == canonical.resolve()
 
 
 def test_symlinked_authorized_descendant_is_rejected(
