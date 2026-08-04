@@ -27,14 +27,16 @@ ARTIFACT_NAMES = (
     "source_blocker_register.json",
     "gate_results.json",
 )
+RUN_ID = "phase8_7a_futoi_si_source_validation_20260804_v1"
+AUTHORIZATION_ID = "futoi-si-20260804-v1"
 
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _authority_path() -> Path:
-    return _repo_root() / experimental.AUTHORITY_REPO_PATH
+def _policy_path() -> Path:
+    return _repo_root() / experimental.POLICY_REPO_PATH
 
 
 def _git_head() -> str:
@@ -59,7 +61,7 @@ def _bind_test_data_root(
 def _base_request(
     tmp_path: Path,
     *,
-    run_id: str = experimental.AUTHORIZED_RUN_ID,
+    run_id: str = RUN_ID,
     output_dir: Path | None = None,
     git_commit_sha: str | None = None,
 ) -> base.RuntimeRequest:
@@ -68,6 +70,11 @@ def _base_request(
         path.write_text("{}", encoding="utf-8")
         return path
 
+    expected_output = (
+        tmp_path
+        / experimental.OUTPUT_PARENT_RELATIVE
+        / f"run_id={run_id}"
+    )
     return base.RuntimeRequest(
         modeling_dataset_path=tmp_path / "modeling.parquet",
         dataset_manifest_path=json_file("manifest.json"),
@@ -78,20 +85,67 @@ def _base_request(
         experiment_contract_path=json_file("parent_contract.json"),
         license_access_evidence_path=json_file("license.json"),
         pit_semantics_evidence_path=json_file("pit.json"),
-        output_dir=(
-            output_dir
-            if output_dir is not None
-            else tmp_path / experimental.CANONICAL_OUTPUT_RELATIVE
-        ),
+        output_dir=output_dir or expected_output,
         run_id=run_id,
         git_commit_sha=git_commit_sha or _git_head(),
     )
 
 
-def _request(tmp_path: Path) -> experimental.ExperimentalRuntimeRequest:
+def _authority_payload(request: base.RuntimeRequest) -> dict[str, object]:
+    return {
+        "project": "MOEX_Bot",
+        "task_id": experimental.TASK_ID,
+        "authorization_id": AUTHORIZATION_ID,
+        "approved_by": "PM_L2_PHASE_OWNER",
+        "mode": experimental.AUTHORITY_MODE,
+        "git_commit_sha": request.git_commit_sha,
+        "run_id": request.run_id,
+        "data_root": experimental.AUTHORIZED_DATA_ROOT.as_posix(),
+        "output_dir": request.output_dir.absolute().as_posix(),
+        "issued_at": "2026-08-04T08:00:00+03:00",
+        "historical_authenticated_retrieval_allowed": True,
+        "phase8_7a_source_validation_allowed": True,
+        "phase8_7b_feature_computation_allowed": False,
+        "model_fitting_allowed": False,
+        "production_prediction_allowed": False,
+        "model_or_strategy_promotion_allowed": False,
+        "raw_payload_redistribution_allowed": False,
+        "broker_action_allowed": False,
+        "trading_action_allowed": False,
+    }
+
+
+def _authority_file(
+    tmp_path: Path,
+    request: base.RuntimeRequest,
+    *,
+    mutate=None,
+) -> Path:
+    payload = _authority_payload(request)
+    if mutate is not None:
+        mutate(payload)
+    path = tmp_path / "runtime-authority.json"
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _request(
+    tmp_path: Path,
+    *,
+    mutate_authority=None,
+) -> experimental.ExperimentalRuntimeRequest:
+    base_request = _base_request(tmp_path)
     return experimental.ExperimentalRuntimeRequest(
-        base_request=_base_request(tmp_path),
-        authority_contract_path=_authority_path(),
+        base_request=base_request,
+        policy_contract_path=_policy_path(),
+        runtime_authority_evidence_path=_authority_file(
+            tmp_path,
+            base_request,
+            mutate=mutate_authority,
+        ),
     )
 
 
@@ -118,7 +172,7 @@ def test_data_root_binding_rejects_alternate_root(
     assert experimental._data_root() == canonical.resolve()
 
 
-def test_symlinked_authorized_descendant_is_rejected(
+def test_symlinked_output_descendant_is_rejected(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -128,82 +182,83 @@ def test_symlinked_authorized_descendant_is_rejected(
     (tmp_path / "research").symlink_to(outside, target_is_directory=True)
 
     with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
-        experimental._authority_marker_path()
+        experimental._canonical_output_path(RUN_ID, require_absent=True)
     assert raised.value.blocker == "provenance_not_sufficient"
 
 
-def test_checked_in_authority_is_bound_to_current_git_state(
+def test_checked_in_policy_is_tracked_but_not_runtime_authority(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     _bind_test_data_root(monkeypatch, tmp_path)
     request = _request(tmp_path)
 
-    payload = experimental._verify_experimental_authority(request)
+    summary = experimental._verify_policy_contract(request)
 
-    assert payload["authority"]["mode"] == experimental.AUTHORITY_MODE
-    assert payload["single_execution"]["authorized_run_id"] == (
-        experimental.AUTHORIZED_RUN_ID
-    )
-    assert payload["single_execution"]["authorized_data_root"] == (
-        experimental.AUTHORIZED_DATA_ROOT.as_posix()
-    )
-    assert payload["single_execution"]["authority_reuse_allowed"] is False
-    assert payload["authority_blob_sha1"] == base._git_blob_sha1(
-        _authority_path()
-    )
-    assert payload["authority"]["production_prediction_allowed"] is False
-    assert payload["authority"]["model_fitting_allowed"] is False
-    assert payload["authority"]["raw_payload_redistribution_allowed"] is False
-    assert payload["authority"]["trading_action_allowed"] is False
+    assert summary["contract_id"] == experimental.POLICY_CONTRACT_ID
+    assert summary["contract_version"] == experimental.POLICY_CONTRACT_VERSION
+    policy = json.loads(_policy_path().read_text(encoding="utf-8"))
+    assert policy["policy_boundary"]["checked_in_policy_is_runtime_authority"] is False
+    assert policy["policy_boundary"]["separate_runtime_authority_evidence_required"] is True
 
 
-def test_authority_rejects_wrong_run_id_and_output_path(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _bind_test_data_root(monkeypatch, tmp_path)
-    wrong_run = experimental.ExperimentalRuntimeRequest(
-        base_request=_base_request(
-            tmp_path,
-            run_id="phase8_7a_futoi_si_source_validation_20260804_v2",
-        ),
-        authority_contract_path=_authority_path(),
-    )
-    with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
-        experimental._verify_experimental_authority(wrong_run)
-    assert raised.value.blocker == "provenance_not_sufficient"
-
-    wrong_output = experimental.ExperimentalRuntimeRequest(
-        base_request=_base_request(
-            tmp_path,
-            output_dir=tmp_path / "another-output",
-        ),
-        authority_contract_path=_authority_path(),
-    )
-    with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
-        experimental._verify_experimental_authority(wrong_output)
-    assert raised.value.blocker == "provenance_not_sufficient"
-
-
-def test_authority_consumption_is_atomic_and_rejects_reuse(
+def test_external_runtime_authority_binds_exact_invocation(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     _bind_test_data_root(monkeypatch, tmp_path)
     request = _request(tmp_path)
 
-    marker = experimental._consume_authority(request)
-    payload = json.loads(marker.read_text(encoding="utf-8"))
+    summary = experimental._verify_runtime_authority(request)
 
-    assert payload["run_id"] == experimental.AUTHORIZED_RUN_ID
-    assert payload["git_commit_sha"] == request.base_request.git_commit_sha
-    assert marker == (
-        tmp_path / experimental.CONSUMPTION_MARKER_RELATIVE
-    )
+    assert summary["authorization_id"] == AUTHORIZATION_ID
+    assert summary["git_commit_sha"] == request.base_request.git_commit_sha
+    assert summary["run_id"] == RUN_ID
+    assert summary["output_dir"] == request.base_request.output_dir.as_posix()
+    assert summary["global_single_use_claimed"] is False
+    assert summary["production_use_allowed"] is False
 
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("git_commit_sha", "0" * 40),
+        ("run_id", "phase8_7a_futoi_si_source_validation_20260804_v2"),
+        ("output_dir", "/tmp/not-authorized"),
+        ("historical_authenticated_retrieval_allowed", False),
+        ("model_fitting_allowed", True),
+    ],
+)
+def test_runtime_authority_rejects_mismatched_invocation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    _bind_test_data_root(monkeypatch, tmp_path)
+
+    def mutate(payload: dict[str, object]) -> None:
+        payload[field] = value
+
+    request = _request(tmp_path, mutate_authority=mutate)
     with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
-        experimental._consume_authority(request)
+        experimental._verify_runtime_authority(request)
+    assert raised.value.blocker == "provenance_not_sufficient"
+
+
+def test_runtime_authority_inside_repository_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _bind_test_data_root(monkeypatch, tmp_path)
+    request = _request(tmp_path)
+    request = experimental.ExperimentalRuntimeRequest(
+        base_request=request.base_request,
+        policy_contract_path=request.policy_contract_path,
+        runtime_authority_evidence_path=request.policy_contract_path,
+    )
+    with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
+        experimental._verify_runtime_authority(request)
     assert raised.value.blocker == "provenance_not_sufficient"
 
 
@@ -217,11 +272,21 @@ def _mock_runtime_dependencies(
 ) -> None:
     monkeypatch.setattr(
         experimental,
-        "_verify_experimental_authority",
+        "_verify_policy_contract",
+        lambda _request: {
+            "contract_id": experimental.POLICY_CONTRACT_ID,
+            "contract_version": experimental.POLICY_CONTRACT_VERSION,
+        },
+    )
+    monkeypatch.setattr(
+        experimental,
+        "_verify_runtime_authority",
         lambda request: {
-            "authority_blob_sha1": base._git_blob_sha1(
-                request.authority_contract_path
-            )
+            "authorization_id": AUTHORIZATION_ID,
+            "run_id": request.base_request.run_id,
+            "production_use_allowed": False,
+            "promotion_allowed": False,
+            "trading_allowed": False,
         },
     )
     monkeypatch.setattr(
@@ -229,11 +294,7 @@ def _mock_runtime_dependencies(
         "_verify_frozen_inputs",
         lambda _request: {"modeling_dataset": "a" * 64},
     )
-    monkeypatch.setattr(
-        experimental.pd,
-        "read_parquet",
-        lambda _path: pd.DataFrame(),
-    )
+    monkeypatch.setattr(experimental.pd, "read_parquet", lambda _path: pd.DataFrame())
     monkeypatch.setattr(
         base,
         "_identity_frames",
@@ -242,13 +303,7 @@ def _mock_runtime_dependencies(
     monkeypatch.setattr(
         base,
         "_license_access_validation",
-        lambda _evidence: (
-            False,
-            {
-                "provider": "MOEX AlgoPack FUTOI",
-                "approved": False,
-            },
-        ),
+        lambda _evidence: (False, {"provider": "MOEX AlgoPack FUTOI", "approved": False}),
     )
     monkeypatch.setattr(base, "_pit_semantics_passed", lambda _evidence: False)
     monkeypatch.setattr(
@@ -256,7 +311,6 @@ def _mock_runtime_dependencies(
         "load_algopack_token",
         lambda: "token",
     )
-
     calls: list[str] = []
 
     def load_pair(source_date, *, bearer_token):
@@ -289,11 +343,7 @@ def _mock_runtime_dependencies(
         observed["artifact_kwargs"] = kwargs
         return ARTIFACT_NAMES
 
-    monkeypatch.setattr(
-        base.validation,
-        "write_validation_artifacts",
-        write_artifacts,
-    )
+    monkeypatch.setattr(base.validation, "write_validation_artifacts", write_artifacts)
     observed["calls"] = calls
 
 
@@ -321,7 +371,7 @@ def _gate_results(*, fail_g6: bool = False) -> dict[str, dict[str, bool]]:
     }
 
 
-def test_runtime_retrieves_once_and_preserves_unverified_gates(
+def test_runtime_retrieves_with_external_authority_and_preserves_gates(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -330,16 +380,11 @@ def test_runtime_retrieves_once_and_preserves_unverified_gates(
     eligible = pd.DataFrame(
         {
             "target_trade_date": ["2026-07-30", "2026-07-31"],
-            "target_instrument_id": [
-                "forts.usdrubf",
-                "forts.usdrubf",
-            ],
+            "target_instrument_id": ["forts.usdrubf", "forts.usdrubf"],
             "prior_trade_date": ["2026-07-29", "2026-07-30"],
         }
     )
-    validation_ids = eligible.loc[
-        :, ["target_trade_date", "target_instrument_id"]
-    ].copy()
+    validation_ids = eligible.loc[:, ["target_trade_date", "target_instrument_id"]].copy()
     observed: dict[str, object] = {}
     _mock_runtime_dependencies(
         monkeypatch,
@@ -355,28 +400,19 @@ def test_runtime_retrieves_once_and_preserves_unverified_gates(
     assert result["artifact_count"] == 10
     assert result["technical_gates_passed"] is True
     assert result["final_status"] == experimental.EXPERIMENTAL_STATUS
-    assert result["authority_consumed"] is True
+    assert result["runtime_authorization_id"] == AUTHORIZATION_ID
     assert result["production_use_allowed"] is False
-    assert experimental._authority_marker_path().exists()
 
     gate_kwargs = observed["gate_kwargs"]
     assert isinstance(gate_kwargs, dict)
     assert gate_kwargs["license_access_passed"] is False
     assert gate_kwargs["pit_semantics_verified"] is False
-
     artifact_kwargs = observed["artifact_kwargs"]
     assert isinstance(artifact_kwargs, dict)
-    gate_artifact = artifact_kwargs["gates"]
-    blocker_artifact = artifact_kwargs["blockers"]
-    assert gate_artifact["gates"]["G3_license_and_access"]["passed"] is False
-    assert (
-        gate_artifact["gates"]["G5_pit_publication_semantics"]["passed"]
-        is False
-    )
-    assert gate_artifact["gates"]["G9_final_acceptance"]["passed"] is False
-    assert blocker_artifact["historical_model_use_status"] == "experimental_only"
-    assert blocker_artifact["experimental_authority"]["promotion_allowed"] is False
-    assert blocker_artifact["experimental_authority"]["trading_allowed"] is False
+    gates = artifact_kwargs["gates"]["gates"]
+    assert gates["G3_license_and_access"]["passed"] is False
+    assert gates["G5_pit_publication_semantics"]["passed"] is False
+    assert gates["G9_final_acceptance"]["passed"] is False
 
 
 def test_technical_gate_failure_keeps_source_not_ready(
@@ -392,9 +428,7 @@ def test_technical_gate_failure_keeps_source_not_ready(
             "prior_trade_date": ["2026-07-29"],
         }
     )
-    validation_ids = eligible.loc[
-        :, ["target_trade_date", "target_instrument_id"]
-    ].copy()
+    validation_ids = eligible.loc[:, ["target_trade_date", "target_instrument_id"]].copy()
     observed: dict[str, object] = {}
     _mock_runtime_dependencies(
         monkeypatch,
