@@ -2,7 +2,7 @@
   "contract_identity": {
     "project": "MOEX_Bot",
     "contract_id": "usdrubf_phase8_7a_futoi_si_experimental_runtime_policy_v2",
-    "contract_version": "2.1",
+    "contract_version": "2.2",
     "task_id": "ema_3_19_ai_phase_8_7a_futoi_si_historical_runtime_enablement_v1",
     "lane": "ema_3_19_ai",
     "phase": "8.7A",
@@ -25,7 +25,10 @@
     "runtime_authority_must_bind_exact_run_id": true,
     "runtime_authority_must_bind_exact_output_dir": true,
     "runtime_authority_must_bind_canonical_data_root": true,
+    "runtime_authority_must_bind_data_root_identity": true,
     "canonical_data_root": "/home/trader/moex_bot/data",
+    "canonical_data_root_open_mode": "nofollow_dirfd_from_filesystem_root",
+    "data_root_ancestor_group_world_writable_allowed": false,
     "trusted_runtime_authority_root": "/etc/moex_bot/runtime_authorities/ema_3_19_ai",
     "trusted_runtime_authority_owner_uid": 0,
     "trusted_runtime_authority_filename_rule": "authorization_id.json",
@@ -43,6 +46,8 @@
     "git_commit_sha",
     "run_id",
     "data_root",
+    "data_root_device",
+    "data_root_inode",
     "output_dir",
     "issued_at",
     "historical_authenticated_retrieval_allowed",
@@ -92,6 +97,7 @@
     "output_directory_must_not_preexist": true,
     "one_trade_date_per_request": true,
     "latest": 1,
+    "data_root_identity_verified_before_retrieval_and_artifact_write": true,
     "fallback_or_substitution_allowed": false,
     "raw_response_persistence_allowed": false
   }
