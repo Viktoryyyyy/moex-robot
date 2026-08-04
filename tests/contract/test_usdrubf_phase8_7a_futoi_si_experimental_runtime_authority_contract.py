@@ -117,19 +117,34 @@ def test_git_environment_uses_trusted_configuration(
     assert all(not key.upper().startswith("GIT_") for key in environment)
 
 
-def test_git_command_disables_fsmonitor_and_untracked_cache() -> None:
+@pytest.mark.parametrize(
+    "git_args",
+    [
+        ("rev-parse", "HEAD"),
+        ("status", "--porcelain=v1"),
+        ("ls-files", "-v", "-z"),
+        ("cat-file", "blob", "0" * 40),
+    ],
+)
+def test_git_commands_neutralize_all_stat_caches(
+    git_args: tuple[str, ...],
+) -> None:
     repo_root = Path("/tmp/repository")
 
-    command = runtime._git_command(repo_root, "status")
+    command = runtime._git_command(repo_root, *git_args)
 
     assert command[:3] == ["git", "-C", str(repo_root.resolve())]
-    assert command[3:7] == [
+    assert command[3:11] == [
         "-c",
         "core.fsmonitor=false",
         "-c",
         "core.untrackedCache=false",
+        "-c",
+        "core.checkStat=default",
+        "-c",
+        "core.trustctime=true",
     ]
-    assert command[-1] == "status"
+    assert command[11:] == list(git_args)
 
 
 @pytest.mark.parametrize(
