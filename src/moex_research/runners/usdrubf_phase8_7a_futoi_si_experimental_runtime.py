@@ -39,6 +39,7 @@ TRUSTED_AUTHORITY_ROOT: Final[Path] = Path(
     "/etc/moex_bot/runtime_authorities/ema_3_19_ai"
 )
 TRUSTED_AUTHORITY_OWNER_UID: Final[int] = 0
+TRUSTED_GIT_PATH: Final[str] = "/usr/bin:/bin"
 OUTPUT_PARENT_RELATIVE: Final[Path] = Path(
     "research/ema_3_19_ai/phase8_7a_futoi_si_source_validation"
 )
@@ -141,11 +142,13 @@ def _fail(message: str) -> base.validation.FutoiSiSourceValidationError:
 
 
 def _sanitized_git_environment() -> dict[str, str]:
-    return {
+    environment = {
         key: value
         for key, value in os.environ.items()
         if not key.upper().startswith("GIT_")
     }
+    environment["PATH"] = TRUSTED_GIT_PATH
+    return environment
 
 
 def _git_command(repo_root: Path, *args: str) -> list[str]:
