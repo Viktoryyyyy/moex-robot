@@ -51,6 +51,9 @@ def test_experimental_runtime_authority_contract() -> None:
     assert single_execution["authorized_run_id"] == runtime.AUTHORIZED_RUN_ID
     assert single_execution["authority_reuse_allowed"] is False
     assert single_execution["authority_file_repo_path"] == runtime.AUTHORITY_REPO_PATH
+    assert single_execution["authorized_data_root"] == (
+        runtime.AUTHORIZED_DATA_ROOT.as_posix()
+    )
     assert (
         single_execution["applied_repo_head_must_equal_git_commit_sha"]
         is True
