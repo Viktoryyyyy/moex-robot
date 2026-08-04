@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from moex_research.runners import (
     usdrubf_phase8_7a_futoi_si_experimental_runtime as runtime,
 )
@@ -95,3 +97,17 @@ def test_experimental_runtime_policy_contract() -> None:
     )
     assert runtime_policy["fallback_or_substitution_allowed"] is False
     assert runtime_policy["raw_response_persistence_allowed"] is False
+
+
+def test_git_environment_uses_trusted_search_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PATH", "/tmp/fake-git:/usr/local/bin")
+    monkeypatch.setenv("GIT_DIR", "/tmp/decoy.git")
+    monkeypatch.setenv("GIT_WORK_TREE", "/tmp/decoy-worktree")
+
+    environment = runtime._sanitized_git_environment()
+
+    assert environment["PATH"] == runtime.TRUSTED_GIT_PATH
+    assert "/tmp/fake-git" not in environment["PATH"]
+    assert all(not key.upper().startswith("GIT_") for key in environment)
