@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -88,6 +91,9 @@ def test_experimental_runtime_policy_contract() -> None:
     assert gate_policy["g3_or_g5_must_not_be_forced_to_pass"] is True
     assert gate_policy["experimental_dataset_status"] == runtime.EXPERIMENTAL_STATUS
     assert runtime_policy["required_policy_flag"] == runtime.POLICY_FLAG
+    assert runtime_policy["operational_invocation"] == (
+        runtime.OPERATIONAL_INVOCATION
+    )
     assert runtime_policy["output_artifact_count"] == 10
     assert (
         runtime_policy[
@@ -97,6 +103,74 @@ def test_experimental_runtime_policy_contract() -> None:
     )
     assert runtime_policy["fallback_or_substitution_allowed"] is False
     assert runtime_policy["raw_response_persistence_allowed"] is False
+
+
+def test_no_bytecode_gate_precedes_critical_imports() -> None:
+    source = Path(runtime.__file__).read_text(encoding="utf-8")
+
+    gate_position = source.index('if __name__ == "__main__"')
+    pandas_position = source.index("import pandas as pd")
+    base_position = source.index("from moex_research.runners import")
+
+    assert gate_position < pandas_position
+    assert gate_position < base_position
+    assert runtime.build_argument_parser().prog == runtime.OPERATIONAL_INVOCATION
+    assert runtime.OPERATIONAL_INVOCATION.startswith("python -B -m ")
+
+
+def test_ordinary_module_launch_fails_before_critical_runtime(
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(repo_root / "src")
+    environment["PYTHONPYCACHEPREFIX"] = str(tmp_path / "external-pycache")
+    environment.pop("PYTHONDONTWRITEBYTECODE", None)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "moex_research.runners."
+            "usdrubf_phase8_7a_futoi_si_experimental_runtime",
+            "--help",
+        ],
+        cwd=repo_root,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode != 0
+    assert "requires no-bytecode startup" in completed.stderr
+    assert not any(repo_root.rglob("*.pyc"))
+
+
+def test_no_bytecode_module_launch_reaches_argument_parser() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = str(repo_root / "src")
+    environment.pop("PYTHONPYCACHEPREFIX", None)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-m",
+            "moex_research.runners."
+            "usdrubf_phase8_7a_futoi_si_experimental_runtime",
+            "--help",
+        ],
+        cwd=repo_root,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0
+    assert runtime.OPERATIONAL_INVOCATION in completed.stdout
 
 
 def test_git_environment_uses_trusted_configuration(
