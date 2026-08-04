@@ -10,7 +10,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Final, Mapping
+from typing import Any, Final, Mapping, Sequence
 
 import pandas as pd
 
@@ -53,6 +53,13 @@ AUTHORIZATION_ID_PATTERN: Final[re.Pattern[str]] = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9_.:-]{7,127}$"
 )
 SHA40_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[0-9a-f]{40}$")
+OPEN_DIRECTORY_FLAGS: Final[int] = (
+    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+)
+OPEN_READ_FLAGS: Final[int] = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
+OPEN_WRITE_FLAGS: Final[int] = (
+    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+)
 
 
 @dataclass(frozen=True)
@@ -111,6 +118,42 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def _run_git(
+    repo_root: Path,
+    *args: str,
+    allow_empty: bool = False,
+) -> str:
+    completed = subprocess.run(
+        ["git", *args],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    value = completed.stdout.strip()
+    if completed.returncode != 0 or (not allow_empty and not value):
+        raise base.validation.FutoiSiSourceValidationError(
+            "applied git state cannot prove runtime provenance",
+            blocker="provenance_not_sufficient",
+        )
+    return value
+
+
+def _verify_clean_worktree(repo_root: Path) -> None:
+    status = _run_git(
+        repo_root,
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        allow_empty=True,
+    )
+    if status:
+        raise base.validation.FutoiSiSourceValidationError(
+            "executed repository worktree or index differs from HEAD",
+            blocker="provenance_not_sufficient",
+        )
+
+
 def _data_root() -> Path:
     raw = str(os.environ.get("MOEX_DATA_ROOT") or "").strip()
     if not raw:
@@ -139,94 +182,95 @@ def _data_root() -> Path:
     return AUTHORIZED_DATA_ROOT
 
 
-def _validate_descendant(
-    root: Path,
-    relative: Path,
-    *,
-    leaf_must_not_exist: bool,
-) -> Path:
-    if relative.is_absolute() or not relative.parts or any(
-        part in {"", ".", ".."} for part in relative.parts
-    ):
+def _json_object_from_bytes(payload: bytes, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise base.validation.FutoiSiSourceValidationError(
-            "canonical output descendant is malformed",
+            f"{label} is not valid UTF-8 JSON",
             blocker="provenance_not_sufficient",
-        )
-    current = root
-    for index, part in enumerate(relative.parts):
-        current = current / part
-        is_leaf = index == len(relative.parts) - 1
-        try:
-            mode = current.lstat().st_mode
-        except FileNotFoundError:
-            continue
-        except OSError as exc:
-            raise base.validation.FutoiSiSourceValidationError(
-                "canonical output descendant cannot be inspected",
-                blocker="provenance_not_sufficient",
-            ) from exc
-        if stat.S_ISLNK(mode):
-            raise base.validation.FutoiSiSourceValidationError(
-                "symlinked canonical output descendant is forbidden",
-                blocker="provenance_not_sufficient",
-            )
-        if not is_leaf and not stat.S_ISDIR(mode):
-            raise base.validation.FutoiSiSourceValidationError(
-                "canonical output ancestor must be a directory",
-                blocker="provenance_not_sufficient",
-            )
-        if is_leaf and leaf_must_not_exist:
-            raise base.validation.FutoiSiSourceValidationError(
-                "experimental output directory must not pre-exist",
-                blocker="provenance_not_sufficient",
-            )
-        try:
-            resolved = current.resolve(strict=True)
-        except OSError as exc:
-            raise base.validation.FutoiSiSourceValidationError(
-                "canonical output descendant cannot be resolved",
-                blocker="provenance_not_sufficient",
-            ) from exc
-        if not resolved.is_relative_to(root):
-            raise base.validation.FutoiSiSourceValidationError(
-                "canonical output descendant escapes the data root",
-                blocker="provenance_not_sufficient",
-            )
-    return root / relative
-
-
-def _canonical_output_path(run_id: str, *, require_absent: bool) -> Path:
-    relative = OUTPUT_PARENT_RELATIVE / f"run_id={run_id}"
-    return _validate_descendant(
-        _data_root(),
-        relative,
-        leaf_must_not_exist=require_absent,
-    )
-
-
-def _run_git(repo_root: Path, *args: str) -> str:
-    completed = subprocess.run(
-        ["git", *args],
-        cwd=repo_root,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    value = completed.stdout.strip()
-    if completed.returncode != 0 or not value:
+        ) from exc
+    if not isinstance(value, dict):
         raise base.validation.FutoiSiSourceValidationError(
-            "applied git state cannot prove runtime provenance",
+            f"{label} must be a JSON object",
             blocker="provenance_not_sufficient",
         )
     return value
 
 
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _sha256_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _read_fd_all(descriptor: int) -> bytes:
+    chunks: list[bytes] = []
+    while True:
+        chunk = os.read(descriptor, 1024 * 1024)
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
+
+
+def _opened_fd_path(descriptor: int) -> Path:
+    proc_link = Path(f"/proc/self/fd/{descriptor}")
+    try:
+        value = os.readlink(proc_link)
+    except OSError as exc:
+        raise base.validation.FutoiSiSourceValidationError(
+            "opened authority evidence path cannot be proven",
+            blocker="provenance_not_sufficient",
+        ) from exc
+    if value.endswith(" (deleted)"):
+        raise base.validation.FutoiSiSourceValidationError(
+            "runtime authority evidence was removed during verification",
+            blocker="provenance_not_sufficient",
+        )
+    path = Path(value)
+    if not path.is_absolute():
+        raise base.validation.FutoiSiSourceValidationError(
+            "opened authority evidence path is not absolute",
+            blocker="provenance_not_sufficient",
+        )
+    return path
+
+
+def _read_external_authority_once(path: Path) -> tuple[dict[str, Any], bytes, Path]:
+    try:
+        descriptor = os.open(path, OPEN_READ_FLAGS)
+    except OSError as exc:
+        raise base.validation.FutoiSiSourceValidationError(
+            "runtime authority evidence cannot be opened safely",
+            blocker="provenance_not_sufficient",
+        ) from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise base.validation.FutoiSiSourceValidationError(
+                "runtime authority evidence must be a physical regular file",
+                blocker="provenance_not_sufficient",
+            )
+        opened_path = _opened_fd_path(descriptor)
+        repo_root = _repo_root().resolve()
+        try:
+            opened_canonical = opened_path.resolve(strict=True)
+        except OSError as exc:
+            raise base.validation.FutoiSiSourceValidationError(
+                "opened authority evidence cannot be resolved",
+                blocker="provenance_not_sufficient",
+            ) from exc
+        if opened_canonical.is_relative_to(repo_root):
+            raise base.validation.FutoiSiSourceValidationError(
+                "runtime authority evidence must not be stored in the repository",
+                blocker="provenance_not_sufficient",
+            )
+        payload = _read_fd_all(descriptor)
+    finally:
+        os.close(descriptor)
+    return (
+        _json_object_from_bytes(payload, "runtime authority evidence"),
+        payload,
+        opened_canonical,
+    )
 
 
 def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, Any]:
@@ -244,6 +288,7 @@ def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, An
             "runtime git SHA differs from applied repository HEAD",
             blocker="provenance_not_sufficient",
         )
+    _verify_clean_worktree(repo_root)
     tracked_blob = _run_git(
         repo_root,
         "rev-parse",
@@ -327,11 +372,12 @@ def _verify_policy_contract(request: ExperimentalRuntimeRequest) -> dict[str, An
             "experimental runtime policy mismatch",
             blocker="provenance_not_sufficient",
         )
+    policy_bytes = path.read_bytes()
     return {
         "contract_id": POLICY_CONTRACT_ID,
         "contract_version": POLICY_CONTRACT_VERSION,
         "git_blob_sha1": actual_blob,
-        "sha256": _sha256(path),
+        "sha256": _sha256_bytes(policy_bytes),
     }
 
 
@@ -346,34 +392,22 @@ def _aware_timestamp(value: object) -> bool:
     return parsed.tzinfo is not None and parsed.utcoffset() is not None
 
 
+def _canonical_output_relative(run_id: str) -> Path:
+    return OUTPUT_PARENT_RELATIVE / f"run_id={run_id}"
+
+
+def _canonical_output_path(run_id: str) -> Path:
+    return _data_root() / _canonical_output_relative(run_id)
+
+
 def _verify_runtime_authority(
     request: ExperimentalRuntimeRequest,
 ) -> dict[str, Any]:
-    path = request.runtime_authority_evidence_path
-    try:
-        mode = path.lstat().st_mode
-    except OSError as exc:
-        raise base.validation.FutoiSiSourceValidationError(
-            "runtime authority evidence is not accessible",
-            blocker="provenance_not_sufficient",
-        ) from exc
-    if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
-        raise base.validation.FutoiSiSourceValidationError(
-            "runtime authority evidence must be a physical regular file",
-            blocker="provenance_not_sufficient",
-        )
-    repo_root = _repo_root().resolve()
-    if path.resolve().is_relative_to(repo_root):
-        raise base.validation.FutoiSiSourceValidationError(
-            "runtime authority evidence must not be stored in the repository",
-            blocker="provenance_not_sufficient",
-        )
-    payload = base._json(path)
-    base_request = request.base_request
-    expected_output = _canonical_output_path(
-        base_request.run_id,
-        require_absent=True,
+    payload, raw_bytes, opened_path = _read_external_authority_once(
+        request.runtime_authority_evidence_path
     )
+    base_request = request.base_request
+    expected_output = _canonical_output_path(base_request.run_id)
     forbidden = (
         "phase8_7b_feature_computation_allowed",
         "model_fitting_allowed",
@@ -419,7 +453,8 @@ def _verify_runtime_authority(
         "data_root": AUTHORIZED_DATA_ROOT.as_posix(),
         "output_dir": expected_output.as_posix(),
         "issued_at": str(payload.get("issued_at")),
-        "evidence_sha256": _sha256(path),
+        "evidence_path": opened_path.as_posix(),
+        "evidence_sha256": _sha256_bytes(raw_bytes),
         "global_single_use_claimed": False,
         "production_use_allowed": False,
         "feature_computation_allowed": False,
@@ -427,6 +462,212 @@ def _verify_runtime_authority(
         "promotion_allowed": False,
         "trading_allowed": False,
     }
+
+
+def _open_child_directory(parent_fd: int, name: str, *, create: bool) -> int:
+    try:
+        return os.open(name, OPEN_DIRECTORY_FLAGS, dir_fd=parent_fd)
+    except FileNotFoundError:
+        if not create:
+            raise
+    except OSError as exc:
+        raise base.validation.FutoiSiSourceValidationError(
+            "canonical output ancestor cannot be opened safely",
+            blocker="provenance_not_sufficient",
+        ) from exc
+    try:
+        os.mkdir(name, mode=0o750, dir_fd=parent_fd)
+    except FileExistsError:
+        pass
+    except OSError as exc:
+        raise base.validation.FutoiSiSourceValidationError(
+            "canonical output ancestor cannot be created safely",
+            blocker="provenance_not_sufficient",
+        ) from exc
+    try:
+        return os.open(name, OPEN_DIRECTORY_FLAGS, dir_fd=parent_fd)
+    except OSError as exc:
+        raise base.validation.FutoiSiSourceValidationError(
+            "canonical output ancestor cannot be reopened safely",
+            blocker="provenance_not_sufficient",
+        ) from exc
+
+
+def _open_existing_chain(root_fd: int, parts: Sequence[str]) -> int:
+    current = os.dup(root_fd)
+    try:
+        for part in parts:
+            next_fd = os.open(part, OPEN_DIRECTORY_FLAGS, dir_fd=current)
+            os.close(current)
+            current = next_fd
+        return current
+    except Exception:
+        os.close(current)
+        raise
+
+
+def _create_output_directory(run_id: str) -> tuple[int, int, Path]:
+    root = _data_root()
+    relative = _canonical_output_relative(run_id)
+    root_fd = os.open(root, OPEN_DIRECTORY_FLAGS)
+    parent_fd = os.dup(root_fd)
+    try:
+        for part in relative.parts[:-1]:
+            next_fd = _open_child_directory(parent_fd, part, create=True)
+            os.close(parent_fd)
+            parent_fd = next_fd
+        leaf = relative.parts[-1]
+        try:
+            os.mkdir(leaf, mode=0o750, dir_fd=parent_fd)
+        except FileExistsError as exc:
+            raise base.validation.FutoiSiSourceValidationError(
+                "experimental output directory must not pre-exist",
+                blocker="provenance_not_sufficient",
+            ) from exc
+        except OSError as exc:
+            raise base.validation.FutoiSiSourceValidationError(
+                "experimental output directory cannot be created safely",
+                blocker="provenance_not_sufficient",
+            ) from exc
+        output_fd = os.open(leaf, OPEN_DIRECTORY_FLAGS, dir_fd=parent_fd)
+        return root_fd, output_fd, root / relative
+    except Exception:
+        os.close(root_fd)
+        raise
+    finally:
+        os.close(parent_fd)
+
+
+def _open_output_file(output_fd: int, name: str) -> int:
+    try:
+        return os.open(name, OPEN_WRITE_FLAGS, 0o640, dir_fd=output_fd)
+    except OSError as exc:
+        raise base.validation.FutoiSiSourceValidationError(
+            f"runtime artifact cannot be created safely: {name}",
+            blocker="provenance_not_sufficient",
+        ) from exc
+
+
+def _write_json_fd(output_fd: int, name: str, payload: Mapping[str, object]) -> None:
+    descriptor = _open_output_file(output_fd, name)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, ensure_ascii=False, indent=2, sort_keys=True)
+        stream.write("\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _write_csv_fd(output_fd: int, name: str, frame: pd.DataFrame) -> None:
+    descriptor = _open_output_file(output_fd, name)
+    with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+        frame.to_csv(stream, index=False)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _write_parquet_fd(output_fd: int, name: str, frame: pd.DataFrame) -> None:
+    descriptor = _open_output_file(output_fd, name)
+    with os.fdopen(descriptor, "wb") as stream:
+        frame.to_parquet(stream, index=False)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _verify_output_directory_identity(
+    root_fd: int,
+    output_fd: int,
+    run_id: str,
+) -> None:
+    relative = _canonical_output_relative(run_id)
+    try:
+        observed_fd = _open_existing_chain(root_fd, relative.parts)
+    except OSError as exc:
+        raise base.validation.FutoiSiSourceValidationError(
+            "canonical output path changed during artifact creation",
+            blocker="provenance_not_sufficient",
+        ) from exc
+    try:
+        expected = os.fstat(output_fd)
+        observed = os.fstat(observed_fd)
+        if (expected.st_dev, expected.st_ino) != (observed.st_dev, observed.st_ino):
+            raise base.validation.FutoiSiSourceValidationError(
+                "canonical output path no longer identifies written artifacts",
+                blocker="provenance_not_sufficient",
+            )
+    finally:
+        os.close(observed_fd)
+
+
+def _write_validation_artifacts_secure(
+    output_dir: Path,
+    *,
+    run_id: str,
+    input_identity_verification: Mapping[str, object],
+    route_validation: Mapping[str, object],
+    license_validation: Mapping[str, object],
+    schema_profile: Mapping[str, object],
+    pairs: Sequence[base.validation.FutoiDailyPair],
+    matrix: pd.DataFrame,
+    coverage: pd.DataFrame,
+    diagnostics: pd.DataFrame,
+    blockers: Mapping[str, object],
+    gates: Mapping[str, object],
+) -> tuple[str, ...]:
+    expected_output = _canonical_output_path(run_id)
+    if output_dir.absolute() != expected_output:
+        raise base.validation.FutoiSiSourceValidationError(
+            "secure artifact writer received a non-canonical output path",
+            blocker="provenance_not_sufficient",
+        )
+    root_fd, output_fd, created_path = _create_output_directory(run_id)
+    try:
+        if created_path != expected_output:
+            raise base.validation.FutoiSiSourceValidationError(
+                "secure artifact writer created an unexpected output path",
+                blocker="provenance_not_sufficient",
+            )
+        json_payloads = {
+            "input_identity_verification.json": input_identity_verification,
+            "official_route_validation.json": route_validation,
+            "futoi_si_license_access_validation.json": license_validation,
+            "futoi_si_schema_profile.json": schema_profile,
+            "source_blocker_register.json": blockers,
+            "gate_results.json": gates,
+        }
+        for name, payload in json_payloads.items():
+            _write_json_fd(output_fd, name, payload)
+        daily = pd.DataFrame(
+            [pair.as_record() for pair in pairs],
+            columns=base.validation.DAILY_POSITIONING_COLUMNS,
+        )
+        _write_parquet_fd(
+            output_fd,
+            "futoi_si_daily_positioning.parquet",
+            daily,
+        )
+        _write_parquet_fd(
+            output_fd,
+            "futoi_si_pit_acceptance_matrix.parquet",
+            matrix,
+        )
+        _write_csv_fd(output_fd, "coverage_by_source.csv", coverage)
+        _write_csv_fd(
+            output_fd,
+            "session_alignment_diagnostics.csv",
+            diagnostics,
+        )
+        names = tuple(sorted(os.listdir(output_fd)))
+        if set(names) != set(base.validation.REQUIRED_RUNTIME_ARTIFACTS):
+            raise base.validation.FutoiSiSourceValidationError(
+                "runtime artifact inventory mismatch",
+                blocker="provenance_not_sufficient",
+            )
+        os.fsync(output_fd)
+        _verify_output_directory_identity(root_fd, output_fd, run_id)
+        return names
+    finally:
+        os.close(output_fd)
+        os.close(root_fd)
 
 
 def _source_error_record(
@@ -447,12 +688,10 @@ def execute(request: ExperimentalRuntimeRequest) -> dict[str, object]:
     authority_summary = _verify_runtime_authority(request)
     base_request = request.base_request
     input_hashes = base._verify_frozen_inputs(base_request)
-    input_hashes["experimental_runtime_policy"] = _sha256(
-        request.policy_contract_path
-    )
-    input_hashes["runtime_authority_evidence"] = _sha256(
-        request.runtime_authority_evidence_path
-    )
+    input_hashes["experimental_runtime_policy"] = policy_summary["sha256"]
+    input_hashes["runtime_authority_evidence"] = authority_summary[
+        "evidence_sha256"
+    ]
 
     modeling = pd.read_parquet(base_request.modeling_dataset_path)
     validation_predictions = pd.read_parquet(
@@ -641,9 +880,9 @@ def execute(request: ExperimentalRuntimeRequest) -> dict[str, object]:
         "runtime_authority": authority_summary,
         "immutable_inputs_verified": True,
     }
-    _canonical_output_path(base_request.run_id, require_absent=True)
-    artifact_names = base.validation.write_validation_artifacts(
+    artifact_names = _write_validation_artifacts_secure(
         base_request.output_dir,
+        run_id=base_request.run_id,
         input_identity_verification=input_verification,
         route_validation=route_validation,
         license_validation=license_validation,
@@ -665,11 +904,6 @@ def execute(request: ExperimentalRuntimeRequest) -> dict[str, object]:
             "gates": gates,
         },
     )
-    if len(artifact_names) != 10:
-        raise base.validation.FutoiSiSourceValidationError(
-            "experimental runtime artifact inventory mismatch",
-            blocker="provenance_not_sufficient",
-        )
     return {
         "project": PROJECT,
         "task_id": TASK_ID,
