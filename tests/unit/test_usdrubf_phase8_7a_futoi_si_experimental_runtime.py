@@ -45,6 +45,17 @@ def _git_head() -> str:
     ).strip()
 
 
+def _bind_test_data_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        experimental,
+        "_data_root",
+        lambda: tmp_path.resolve(),
+    )
+
+
 def _base_request(
     tmp_path: Path,
     *,
@@ -84,11 +95,27 @@ def _request(tmp_path: Path) -> experimental.ExperimentalRuntimeRequest:
     )
 
 
-def test_checked_in_authority_is_bound_to_current_git_state(
+def test_data_root_binding_rejects_alternate_root(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    with pytest.raises(base.validation.FutoiSiSourceValidationError) as raised:
+        experimental._data_root()
+    assert raised.value.blocker == "provenance_not_sufficient"
+
+    monkeypatch.setenv(
+        "MOEX_DATA_ROOT",
+        experimental.AUTHORIZED_DATA_ROOT.as_posix(),
+    )
+    assert experimental._data_root() == experimental.AUTHORIZED_DATA_ROOT
+
+
+def test_checked_in_authority_is_bound_to_current_git_state(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _bind_test_data_root(monkeypatch, tmp_path)
     request = _request(tmp_path)
 
     payload = experimental._verify_experimental_authority(request)
@@ -96,6 +123,9 @@ def test_checked_in_authority_is_bound_to_current_git_state(
     assert payload["authority"]["mode"] == experimental.AUTHORITY_MODE
     assert payload["single_execution"]["authorized_run_id"] == (
         experimental.AUTHORIZED_RUN_ID
+    )
+    assert payload["single_execution"]["authorized_data_root"] == (
+        experimental.AUTHORIZED_DATA_ROOT.as_posix()
     )
     assert payload["single_execution"]["authority_reuse_allowed"] is False
     assert payload["authority_blob_sha1"] == base._git_blob_sha1(
@@ -111,7 +141,7 @@ def test_authority_rejects_wrong_run_id_and_output_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    _bind_test_data_root(monkeypatch, tmp_path)
     wrong_run = experimental.ExperimentalRuntimeRequest(
         base_request=_base_request(
             tmp_path,
@@ -139,7 +169,7 @@ def test_authority_consumption_is_atomic_and_rejects_reuse(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    _bind_test_data_root(monkeypatch, tmp_path)
     request = _request(tmp_path)
 
     marker = experimental._consume_authority(request)
@@ -274,7 +304,7 @@ def test_runtime_retrieves_once_and_preserves_unverified_gates(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    _bind_test_data_root(monkeypatch, tmp_path)
     request = _request(tmp_path)
     eligible = pd.DataFrame(
         {
@@ -332,7 +362,7 @@ def test_technical_gate_failure_keeps_source_not_ready(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    _bind_test_data_root(monkeypatch, tmp_path)
     request = _request(tmp_path)
     eligible = pd.DataFrame(
         {
