@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import os
+import stat
 import subprocess
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -121,7 +122,75 @@ def _data_root() -> Path:
             "MOEX_DATA_ROOT differs from the authorized canonical data root",
             blocker="provenance_not_sufficient",
         )
+    try:
+        root_mode = root.lstat().st_mode
+    except OSError as exc:
+        raise base.validation.FutoiSiSourceValidationError(
+            "authorized canonical data root is not accessible",
+            blocker="provenance_not_sufficient",
+        ) from exc
+    if stat.S_ISLNK(root_mode) or not stat.S_ISDIR(root_mode):
+        raise base.validation.FutoiSiSourceValidationError(
+            "authorized canonical data root must be a physical directory",
+            blocker="provenance_not_sufficient",
+        )
     return root
+
+
+def _authorized_descendant(
+    relative: Path,
+    *,
+    leaf_must_not_exist: bool = False,
+) -> Path:
+    if relative.is_absolute() or not relative.parts or any(
+        part in {"", ".", ".."} for part in relative.parts
+    ):
+        raise base.validation.FutoiSiSourceValidationError(
+            "authorized data-root descendant is malformed",
+            blocker="provenance_not_sufficient",
+        )
+    root = _data_root()
+    current = root
+    for index, part in enumerate(relative.parts):
+        current = current / part
+        is_leaf = index == len(relative.parts) - 1
+        try:
+            mode = current.lstat().st_mode
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise base.validation.FutoiSiSourceValidationError(
+                "authorized descendant cannot be inspected",
+                blocker="provenance_not_sufficient",
+            ) from exc
+        if stat.S_ISLNK(mode):
+            raise base.validation.FutoiSiSourceValidationError(
+                "symlinked authorized data-root descendant is forbidden",
+                blocker="provenance_not_sufficient",
+            )
+        if not is_leaf and not stat.S_ISDIR(mode):
+            raise base.validation.FutoiSiSourceValidationError(
+                "authorized data-root ancestor must be a directory",
+                blocker="provenance_not_sufficient",
+            )
+        if is_leaf and leaf_must_not_exist:
+            raise base.validation.FutoiSiSourceValidationError(
+                "authorized runtime output path must not pre-exist",
+                blocker="provenance_not_sufficient",
+            )
+        try:
+            resolved = current.resolve(strict=True)
+        except OSError as exc:
+            raise base.validation.FutoiSiSourceValidationError(
+                "authorized descendant cannot be resolved",
+                blocker="provenance_not_sufficient",
+            ) from exc
+        if not resolved.is_relative_to(root):
+            raise base.validation.FutoiSiSourceValidationError(
+                "authorized descendant escapes the canonical data root",
+                blocker="provenance_not_sufficient",
+            )
+    return root / relative
 
 
 def _run_git(repo_root: Path, *args: str) -> str:
@@ -173,19 +242,36 @@ def _verify_tracked_authority_blob(
 
 
 def _authority_marker_path() -> Path:
-    return (_data_root() / CONSUMPTION_MARKER_RELATIVE).resolve()
+    return _authorized_descendant(CONSUMPTION_MARKER_RELATIVE)
 
 
-def _canonical_output_path() -> Path:
-    return (_data_root() / CANONICAL_OUTPUT_RELATIVE).resolve()
+def _canonical_output_path(*, require_absent: bool = False) -> Path:
+    return _authorized_descendant(
+        CANONICAL_OUTPUT_RELATIVE,
+        leaf_must_not_exist=require_absent,
+    )
 
 
 def _assert_authority_unused() -> None:
-    if _authority_marker_path().exists():
+    marker = _authority_marker_path()
+    try:
+        mode = marker.lstat().st_mode
+    except FileNotFoundError:
+        return
+    except OSError as exc:
         raise base.validation.FutoiSiSourceValidationError(
-            "experimental authority has already been consumed",
+            "experimental authority marker cannot be inspected",
+            blocker="provenance_not_sufficient",
+        ) from exc
+    if stat.S_ISLNK(mode):
+        raise base.validation.FutoiSiSourceValidationError(
+            "symlinked experimental authority marker is forbidden",
             blocker="provenance_not_sufficient",
         )
+    raise base.validation.FutoiSiSourceValidationError(
+        "experimental authority has already been consumed",
+        blocker="provenance_not_sufficient",
+    )
 
 
 def _verify_experimental_authority(
@@ -294,7 +380,8 @@ def _verify_experimental_authority(
             "runtime run ID is not authorized by the experimental contract",
             blocker="provenance_not_sufficient",
         )
-    if base_request.output_dir.resolve() != _canonical_output_path():
+    expected_output = _canonical_output_path(require_absent=True)
+    if base_request.output_dir.absolute() != expected_output:
         raise base.validation.FutoiSiSourceValidationError(
             "runtime output directory is not the authorized canonical path",
             blocker="provenance_not_sufficient",
@@ -308,7 +395,11 @@ def _verify_experimental_authority(
 
 def _consume_authority(request: ExperimentalRuntimeRequest) -> Path:
     marker = _authority_marker_path()
-    marker.parent.mkdir(parents=True, exist_ok=True)
+    parent_relative = CONSUMPTION_MARKER_RELATIVE.parent
+    parent = _authorized_descendant(parent_relative)
+    parent.mkdir(parents=True, exist_ok=True)
+    _authorized_descendant(parent_relative)
+    marker = _authority_marker_path()
     payload = {
         "project": PROJECT,
         "task_id": TASK_ID,
@@ -326,12 +417,17 @@ def _consume_authority(request: ExperimentalRuntimeRequest) -> Path:
     try:
         descriptor = os.open(
             marker,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
             0o600,
         )
     except FileExistsError as exc:
         raise base.validation.FutoiSiSourceValidationError(
             "experimental authority has already been consumed",
+            blocker="provenance_not_sufficient",
+        ) from exc
+    except OSError as exc:
+        raise base.validation.FutoiSiSourceValidationError(
+            "experimental authority marker cannot be created safely",
             blocker="provenance_not_sufficient",
         ) from exc
     try:
@@ -593,6 +689,7 @@ def execute(request: ExperimentalRuntimeRequest) -> dict[str, object]:
         "experimental_authority": authority_summary,
         "immutable_inputs_verified": True,
     }
+    _canonical_output_path(require_absent=True)
     artifact_names = base.validation.write_validation_artifacts(
         base_request.output_dir,
         input_identity_verification=input_verification,
