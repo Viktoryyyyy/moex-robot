@@ -37,6 +37,20 @@ def test_experimental_runtime_policy_contract() -> None:
     assert boundary["canonical_data_root"] == (
         runtime.AUTHORIZED_DATA_ROOT.as_posix()
     )
+    assert boundary["trusted_runtime_authority_root"] == (
+        runtime.TRUSTED_AUTHORITY_ROOT.as_posix()
+    )
+    assert boundary["trusted_runtime_authority_owner_uid"] == (
+        runtime.TRUSTED_AUTHORITY_OWNER_UID
+    )
+    assert boundary["trusted_runtime_authority_filename_rule"] == (
+        "authorization_id.json"
+    )
+    assert (
+        boundary["trusted_runtime_authority_group_world_writable_allowed"]
+        is False
+    )
+    assert boundary["trusted_runtime_authority_ancestors_must_be_root_owned"] is True
     assert boundary["module_claims_global_single_use"] is False
     assert (
         boundary["one_run_per_operational_authority_is_orchestration_responsibility"]
