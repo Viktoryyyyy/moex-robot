@@ -245,3 +245,27 @@ def test_runtime_enforces_provider_kind(tmp_path: Path) -> None:
             macro_observations=[_macro_observation()],
             as_of_timestamp=T2,
         )
+
+
+def test_runtime_rejects_news_source_tier_mismatch(tmp_path: Path) -> None:
+    runtime = NewsMacroRuntime(
+        provider_registry=ProviderRegistry([_news_provider(), _macro_provider()]),
+        news_classifier=lambda _payload: _news_classification(),
+        macro_interpreter=lambda _payload: _macro_interpretation(),
+        store=JsonSnapshotStore(tmp_path),
+    )
+    mismatched = NewsSourceRecord(
+        source_id="news_official",
+        source_tier="MAJOR_AGENCY_OR_FINANCIAL_MEDIA",
+        source_reference="https://example.test/news/2",
+        published_at=T0,
+        available_at=T1,
+        ingested_at=T2,
+        headline="CBR rate update",
+    )
+    with pytest.raises(RuntimeIntegrationError, match="tier mismatch"):
+        runtime.run(
+            news_records=[mismatched],
+            macro_observations=[_macro_observation()],
+            as_of_timestamp=T2,
+        )
