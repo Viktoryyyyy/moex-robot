@@ -69,10 +69,29 @@ def test_level_is_a_zone_and_forbids_lookahead() -> None:
     level = contract["level_zone"]
 
     assert level["numeric_representation"] == "zone_not_single_magic_price"
-    assert {"center_price", "lower_bound", "upper_bound"}.issubset(
+    assert {"level_id", "center_price", "lower_bound", "upper_bound"}.issubset(
         set(level["required_fields"])
     )
     assert any("future target labels" in rule for rule in level["constraints"])
+
+
+def test_level_interaction_is_bound_to_one_level_and_keeps_per_level_history() -> None:
+    contract = _load_contract()
+    interaction = contract["level_interaction"]
+
+    assert interaction["record_cardinality"] == "one_interaction_record_per_level_id"
+    assert {
+        "level_id",
+        "state",
+        "direction",
+        "event_timestamp",
+        "previous_state",
+        "structural_quality",
+    }.issubset(set(interaction["required_fields"]))
+    assert interaction["level_id_reference"] == (
+        "must reference exactly one level_id present in MarketState.active_levels"
+    )
+    assert interaction["history_partition_key"] == "level_id"
 
 
 def test_level_state_machine_contains_required_test_retest_paths() -> None:
