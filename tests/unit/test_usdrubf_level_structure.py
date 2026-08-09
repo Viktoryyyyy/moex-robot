@@ -62,6 +62,18 @@ def test_support_breakout_requires_two_downside_closes() -> None:
     assert result.breakout_side == "BELOW"
 
 
+def test_direction_neutral_range_boundary_can_break_out_either_side() -> None:
+    zone = LevelZone("range1", "RANGE_BOUNDARY", 82.70, 82.65, 82.75)
+    bars = [
+        _bar("2026-08-09T10:00:00+03:00", 82.72, 82.66, 82.70),
+        _bar("2026-08-09T10:05:00+03:00", 82.88, 82.80, 82.84),
+        _bar("2026-08-09T10:10:00+03:00", 82.94, 82.82, 82.90),
+    ]
+    result = classify_level_history(zone, bars)
+    assert result.state == "BREAKOUT"
+    assert result.breakout_side == "ABOVE"
+
+
 def test_successful_breakout_retest_hold_path() -> None:
     zone = LevelZone("r1", "RESISTANCE", 82.70, 82.65, 82.75)
     bars = [
