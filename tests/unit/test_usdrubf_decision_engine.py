@@ -294,10 +294,12 @@ def test_breakout_alone_does_not_automatically_create_long_trade_state() -> None
     assert state.final_bias == "NEUTRAL"
 
 
-def test_ema_target_position_helper_maps_existing_signal_semantics() -> None:
+def test_ema_target_position_helper_maps_only_explicit_positions() -> None:
     assert ema_context_from_target_position(1, available_at=T1).direction == "BULLISH_USD"
     assert ema_context_from_target_position(-1, available_at=T1).direction == "BEARISH_USD"
-    assert ema_context_from_target_position(None, available_at=T1).direction == "NEUTRAL"
+    assert ema_context_from_target_position(0, available_at=T1).direction == "NEUTRAL"
+    with pytest.raises(DecisionEngineError, match="target_position"):
+        ema_context_from_target_position(None, available_at=T1)  # type: ignore[arg-type]
     with pytest.raises(DecisionEngineError, match="target_position"):
         ema_context_from_target_position(2, available_at=T1)
 
