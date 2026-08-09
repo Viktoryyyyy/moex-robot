@@ -68,15 +68,21 @@ def _dt(value: datetime | str, field: str) -> datetime:
     return value
 
 
-def _required_text(value: str, field: str) -> str:
+def _required_text(value: object, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} must be non-empty")
     return value.strip()
 
 
+def _classifier_text(value: object, field: str) -> str:
+    try:
+        return _required_text(value, field)
+    except ValueError as exc:
+        raise ClassifierOutputError(str(exc)) from exc
+
+
 def normalize_text(value: str) -> str:
-    value = _required_text(value, "text")
-    return " ".join(value.casefold().split())
+    return " ".join(_required_text(value, "text").casefold().split())
 
 
 def _tokens(value: str) -> frozenset[str]:
@@ -96,6 +102,20 @@ def _stable_id(prefix: str, *parts: str) -> str:
     return f"{prefix}_{digest[:24]}"
 
 
+def _source_rank(tier: str) -> int:
+    return {
+        "OFFICIAL_PRIMARY": 0,
+        "OFFICIAL_SECONDARY": 1,
+        "MAJOR_AGENCY_OR_FINANCIAL_MEDIA": 2,
+    }[tier]
+
+
+def _enum_string(value: object, allowed: set[str], field: str) -> str:
+    if not isinstance(value, str) or value not in allowed:
+        raise ClassifierOutputError(f"invalid {field}")
+    return value
+
+
 @dataclass(frozen=True)
 class NewsSourceRecord:
     source_id: str
@@ -111,7 +131,7 @@ class NewsSourceRecord:
         object.__setattr__(self, "source_id", _required_text(self.source_id, "source_id"))
         object.__setattr__(self, "source_reference", _required_text(self.source_reference, "source_reference"))
         object.__setattr__(self, "headline", _required_text(self.headline, "headline"))
-        if self.source_tier not in _ALLOWED_SOURCE_TIERS:
+        if not isinstance(self.source_tier, str) or self.source_tier not in _ALLOWED_SOURCE_TIERS:
             raise ValueError("invalid source_tier")
         if not isinstance(self.body, str):
             raise ValueError("body must be a string")
@@ -188,7 +208,7 @@ class MacroObservation:
         object.__setattr__(self, "source_id", _required_text(self.source_id, "source_id"))
         object.__setattr__(self, "source_reference", _required_text(self.source_reference, "source_reference"))
         object.__setattr__(self, "unit", _required_text(self.unit, "unit"))
-        if self.quality_status not in _ALLOWED_MACRO_QUALITY:
+        if not isinstance(self.quality_status, str) or self.quality_status not in _ALLOWED_MACRO_QUALITY:
             raise ValueError("invalid macro quality_status")
         if self.value is not None and (isinstance(self.value, bool) or not isinstance(self.value, (int, float))):
             raise ValueError("value must be numeric or None")
@@ -238,24 +258,16 @@ def _validate_news_output(output: Mapping[str, object]) -> dict[str, object]:
     if missing:
         raise ClassifierOutputError(f"classifier missing fields: {sorted(missing)}")
 
-    event_type = _required_text(output["event_type"], "event_type")  # type: ignore[arg-type]
+    event_type = _classifier_text(output["event_type"], "event_type")
     entities_raw = output["entities"]
     if not isinstance(entities_raw, Sequence) or isinstance(entities_raw, (str, bytes)):
         raise ClassifierOutputError("entities must be a sequence of strings")
-    entities = tuple(_required_text(entity, "entity") for entity in entities_raw)  # type: ignore[arg-type]
-    direction = output["direction"]
-    importance = output["importance"]
-    novelty = output["novelty"]
-    horizon = output["horizon"]
-    if direction not in _ALLOWED_DIRECTIONS:
-        raise ClassifierOutputError("invalid direction")
-    if importance not in _ALLOWED_IMPORTANCE:
-        raise ClassifierOutputError("invalid importance")
-    if novelty not in _ALLOWED_NOVELTY:
-        raise ClassifierOutputError("invalid novelty")
-    if horizon not in _ALLOWED_HORIZONS:
-        raise ClassifierOutputError("invalid horizon")
-    mechanism = _required_text(output["mechanism"], "mechanism")  # type: ignore[arg-type]
+    entities = tuple(_classifier_text(entity, "entity") for entity in entities_raw)
+    direction = _enum_string(output["direction"], _ALLOWED_DIRECTIONS, "direction")
+    importance = _enum_string(output["importance"], _ALLOWED_IMPORTANCE, "importance")
+    novelty = _enum_string(output["novelty"], _ALLOWED_NOVELTY, "novelty")
+    horizon = _enum_string(output["horizon"], _ALLOWED_HORIZONS, "horizon")
+    mechanism = _classifier_text(output["mechanism"], "mechanism")
     return {
         "event_type": event_type,
         "entities": entities,
@@ -269,14 +281,6 @@ def _validate_news_output(output: Mapping[str, object]) -> dict[str, object]:
     }
 
 
-def _source_rank(tier: str) -> int:
-    return {
-        "OFFICIAL_PRIMARY": 0,
-        "OFFICIAL_SECONDARY": 1,
-        "MAJOR_AGENCY_OR_FINANCIAL_MEDIA": 2,
-    }[tier]
-
-
 def _assign_clusters(
     records: Sequence[NewsSourceRecord],
     prior_clusters: Mapping[str, Sequence[str]],
@@ -284,13 +288,11 @@ def _assign_clusters(
 ) -> dict[str, list[NewsSourceRecord]]:
     if not 0.0 < similarity_threshold <= 1.0:
         raise ValueError("similarity_threshold must be within (0, 1]")
-    normalized_prior = {
-        cluster_id: tuple(normalize_text(text) for text in texts)
+    cluster_texts: dict[str, list[str]] = {
+        cluster_id: [normalize_text(text) for text in texts]
         for cluster_id, texts in prior_clusters.items()
     }
     clusters: dict[str, list[NewsSourceRecord]] = {}
-    cluster_texts: dict[str, list[str]] = {key: list(value) for key, value in normalized_prior.items()}
-
     for record in records:
         headline = normalize_text(record.headline)
         best_cluster: str | None = None
@@ -320,11 +322,7 @@ def process_news_batch(
     prior_event_history: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
     similarity_threshold: float = 0.72,
 ) -> NewsPipelineResult:
-    """Normalize, PIT-filter, deduplicate, cluster, then classify one representative per cluster.
-
-    Raw `body` content is transient input. Persistable `NewsEvent` records contain only
-    source metadata, hashes and bounded classification outputs.
-    """
+    """PIT-filter, deduplicate, cluster, and classify with transient cluster content."""
 
     as_of = _dt(as_of_timestamp, "as_of_timestamp")
     ordered = sorted(
@@ -333,8 +331,8 @@ def process_news_batch(
     )
     eligible: list[NewsSourceRecord] = []
     future_filtered = 0
-    seen_hashes: set[str] = set()
     duplicate_count = 0
+    seen_hashes: set[str] = set()
     for record in ordered:
         if record.available_at > as_of:
             future_filtered += 1
@@ -350,11 +348,12 @@ def process_news_batch(
     events: list[NewsEvent] = []
     for cluster_id in sorted(clusters):
         members = clusters[cluster_id]
-        representative = min(
+        # Latest evidence owns the persisted event timestamp; source tier is the tie-breaker.
+        representative = max(
             members,
             key=lambda item: (
-                _source_rank(item.source_tier),
-                -item.available_at.timestamp(),
+                item.available_at,
+                -_source_rank(item.source_tier),
                 item.source_id,
                 item.source_reference,
             ),
@@ -367,10 +366,12 @@ def process_news_batch(
                 "published_at": member.published_at.isoformat(),
                 "available_at": member.available_at.isoformat(),
                 "content_hash": member.content_hash,
+                # Transient classifier evidence only; NewsEvent never persists raw/normalized body.
+                "normalized_text": member.normalized_text,
             }
             for member in sorted(
                 members,
-                key=lambda item: (_source_rank(item.source_tier), item.available_at, item.source_id),
+                key=lambda item: (item.available_at, _source_rank(item.source_tier), item.source_id),
             )
         )
         payload = {
@@ -401,15 +402,15 @@ def process_news_batch(
                 available_at=representative.available_at.isoformat(),
                 ingested_at=representative.ingested_at.isoformat(),
                 content_hash=representative.content_hash,
-                event_type=bounded["event_type"],  # type: ignore[arg-type]
-                entities=bounded["entities"],  # type: ignore[arg-type]
-                rub_relevance=bounded["rub_relevance"],  # type: ignore[arg-type]
-                direction=bounded["direction"],  # type: ignore[arg-type]
-                importance=bounded["importance"],  # type: ignore[arg-type]
-                novelty=bounded["novelty"],  # type: ignore[arg-type]
-                horizon=bounded["horizon"],  # type: ignore[arg-type]
-                confidence=bounded["confidence"],  # type: ignore[arg-type]
-                mechanism=bounded["mechanism"],  # type: ignore[arg-type]
+                event_type=bounded["event_type"],
+                entities=bounded["entities"],
+                rub_relevance=bounded["rub_relevance"],
+                direction=bounded["direction"],
+                importance=bounded["importance"],
+                novelty=bounded["novelty"],
+                horizon=bounded["horizon"],
+                confidence=bounded["confidence"],
+                mechanism=bounded["mechanism"],
             )
         )
     return NewsPipelineResult(
@@ -420,25 +421,45 @@ def process_news_batch(
     )
 
 
+def _latest_macro_by_metric(
+    observations: Iterable[MacroObservation], as_of: datetime
+) -> tuple[MacroObservation, ...]:
+    latest: dict[str, MacroObservation] = {}
+    for item in observations:
+        if item.available_at > as_of:
+            continue
+        current = latest.get(item.metric_id)
+        if current is None or (
+            item.available_at,
+            item.published_at,
+            item.ingested_at,
+            item.source_id,
+            item.source_reference,
+        ) > (
+            current.available_at,
+            current.published_at,
+            current.ingested_at,
+            current.source_id,
+            current.source_reference,
+        ):
+            latest[item.metric_id] = item
+    return tuple(latest[key] for key in sorted(latest))
+
+
 def build_macro_state(
     observations: Iterable[MacroObservation],
     *,
     as_of_timestamp: datetime | str,
     interpreter: Callable[[Mapping[str, object]], Mapping[str, object]] | None = None,
 ) -> MacroState:
-    """Build a PIT-safe macro state; the interpreter may only assess direction/confidence/drivers."""
+    """Build a current PIT-safe macro state using the latest eligible vintage per metric."""
 
     as_of = _dt(as_of_timestamp, "as_of_timestamp")
-    eligible = tuple(
-        sorted(
-            (item for item in observations if item.available_at <= as_of),
-            key=lambda item: (item.metric_id, item.available_at, item.source_id),
-        )
-    )
+    current = _latest_macro_by_metric(observations, as_of)
     if interpreter is None:
         return MacroState(
             as_of_timestamp=as_of.isoformat(),
-            observations=eligible,
+            observations=current,
             overall_direction="NEUTRAL",
             confidence=0.0,
             dominant_drivers=(),
@@ -456,7 +477,7 @@ def build_macro_state(
             "available_at": item.available_at.isoformat(),
             "quality_status": item.quality_status,
         }
-        for item in eligible
+        for item in current
     )
     output = interpreter(
         {
@@ -473,20 +494,21 @@ def build_macro_state(
         raise ClassifierOutputError(f"macro interpreter may not output factual fields: {sorted(extra)}")
     if missing:
         raise ClassifierOutputError(f"macro interpreter missing fields: {sorted(missing)}")
-    direction = output["overall_direction"]
-    if direction not in _ALLOWED_DIRECTIONS:
-        raise ClassifierOutputError("invalid macro overall_direction")
+
+    direction = _enum_string(
+        output["overall_direction"], _ALLOWED_DIRECTIONS, "macro overall_direction"
+    )
     drivers_raw = output["dominant_drivers"]
     if not isinstance(drivers_raw, Sequence) or isinstance(drivers_raw, (str, bytes)):
         raise ClassifierOutputError("dominant_drivers must be a sequence")
-    drivers = tuple(_required_text(driver, "dominant_driver") for driver in drivers_raw)  # type: ignore[arg-type]
-    usable_metric_ids = {item.metric_id for item in eligible if item.quality_status == "OK"}
+    drivers = tuple(_classifier_text(driver, "dominant_driver") for driver in drivers_raw)
+    usable_metric_ids = {item.metric_id for item in current if item.quality_status == "OK"}
     if not set(drivers).issubset(usable_metric_ids):
         raise ClassifierOutputError("dominant_drivers must reference eligible OK observations")
     return MacroState(
         as_of_timestamp=as_of.isoformat(),
-        observations=eligible,
-        overall_direction=direction,  # type: ignore[arg-type]
+        observations=current,
+        overall_direction=direction,
         confidence=_validate_probability(output["confidence"], "confidence"),
         dominant_drivers=drivers,
     )
