@@ -94,19 +94,18 @@ class DirectionalContext:
 
 
 def ema_context_from_target_position(
-    target_position: int | None,
+    target_position: int,
     *,
     available_at: datetime | str,
     confidence: float = 1.0,
     details: Mapping[str, object] | None = None,
 ) -> DirectionalContext:
-    if target_position not in {-1, 0, 1, None}:
-        raise DecisionEngineError("EMA target_position must be one of -1, 0, 1 or None")
+    if target_position not in {-1, 0, 1}:
+        raise DecisionEngineError("EMA target_position must be one of -1, 0 or 1")
     direction = {
         1: "BULLISH_USD",
         -1: "BEARISH_USD",
         0: "NEUTRAL",
-        None: "NEUTRAL",
     }[target_position]
     return DirectionalContext(
         source_id="ema_3_19_ai",
