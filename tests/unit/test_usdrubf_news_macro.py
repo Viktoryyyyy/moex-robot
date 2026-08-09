@@ -101,6 +101,46 @@ def test_semantically_similar_headlines_cluster_before_classifier() -> None:
     assert len(calls[0]["cluster_evidence"]) == 2
 
 
+def test_classifier_receives_transient_content_for_every_cluster_update() -> None:
+    captured = {}
+
+    def classifier(payload):
+        captured["evidence"] = payload["cluster_evidence"]
+        return _classification(novelty="UPDATE")
+
+    older = _record(
+        "official",
+        "CBR keeps key rate unchanged after meeting",
+        source_id="cbr",
+        source_tier="OFFICIAL_PRIMARY",
+        available_at=T1,
+        ingested_at=T2,
+        body="Initial statement.",
+    )
+    update = _record(
+        "agency-update",
+        "CBR keeps key rate unchanged after meeting update",
+        source_id="agency",
+        source_tier="MAJOR_AGENCY_OR_FINANCIAL_MEDIA",
+        published_at=T1,
+        available_at=T2,
+        ingested_at=T2,
+        body="Updated guidance changes the forward-rate interpretation.",
+    )
+    result = process_news_batch(
+        [older, update],
+        as_of_timestamp=T3,
+        classifier=classifier,
+        similarity_threshold=0.5,
+    )
+
+    evidence = captured["evidence"]
+    assert len(evidence) == 2
+    assert all("normalized_text" in item for item in evidence)
+    assert any("updated guidance" in item["normalized_text"] for item in evidence)
+    assert result.events[0].available_at == T2.isoformat()
+
+
 def test_future_news_is_filtered_before_classifier() -> None:
     calls = []
 
@@ -129,6 +169,14 @@ def test_classifier_outputs_are_bounded() -> None:
         return _classification(confidence=1.5)
 
     with pytest.raises(ClassifierOutputError, match="confidence"):
+        process_news_batch([_record("a", "CBR decision")], as_of_timestamp=T3, classifier=classifier)
+
+
+def test_malformed_news_enum_raises_contract_exception() -> None:
+    def classifier(_payload):
+        return _classification(direction=[])
+
+    with pytest.raises(ClassifierOutputError, match="direction"):
         process_news_batch([_record("a", "CBR decision")], as_of_timestamp=T3, classifier=classifier)
 
 
@@ -224,6 +272,25 @@ def test_macro_missing_data_remains_explicit_and_cannot_be_dominant_driver() -> 
         build_macro_state([missing], as_of_timestamp=T2, interpreter=interpreter)
 
 
+def test_latest_macro_quality_status_overrides_older_ok_vintage() -> None:
+    older_ok = _macro("oil", 70.0, available_at=T1, quality_status="OK")
+    latest_missing = _macro("oil", None, available_at=T2, quality_status="MISSING")
+    captured = {}
+
+    def interpreter(payload):
+        captured["observations"] = payload["observations"]
+        return {
+            "overall_direction": "NEUTRAL",
+            "confidence": 0.1,
+            "dominant_drivers": ["oil"],
+        }
+
+    with pytest.raises(ClassifierOutputError, match="eligible OK"):
+        build_macro_state([older_ok, latest_missing], as_of_timestamp=T3, interpreter=interpreter)
+    assert len(captured["observations"]) == 1
+    assert captured["observations"][0]["quality_status"] == "MISSING"
+
+
 def test_macro_interpreter_cannot_rewrite_numeric_observations() -> None:
     def interpreter(_payload):
         return {
@@ -234,6 +301,18 @@ def test_macro_interpreter_cannot_rewrite_numeric_observations() -> None:
         }
 
     with pytest.raises(ClassifierOutputError, match="factual fields"):
+        build_macro_state([_macro("oil", 70.0)], as_of_timestamp=T2, interpreter=interpreter)
+
+
+def test_malformed_macro_direction_raises_contract_exception() -> None:
+    def interpreter(_payload):
+        return {
+            "overall_direction": {},
+            "confidence": 0.2,
+            "dominant_drivers": [],
+        }
+
+    with pytest.raises(ClassifierOutputError, match="macro overall_direction"):
         build_macro_state([_macro("oil", 70.0)], as_of_timestamp=T2, interpreter=interpreter)
 
 
