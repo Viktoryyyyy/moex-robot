@@ -23,6 +23,19 @@ _ALLOWED_STATES = {
     "AWAY",
 }
 
+_ALLOWED_LEVEL_TYPES = {
+    "SUPPORT",
+    "RESISTANCE",
+    "RANGE_BOUNDARY",
+    "PREVIOUS_SESSION_HIGH",
+    "PREVIOUS_SESSION_LOW",
+    "CURRENT_SESSION_HIGH",
+    "CURRENT_SESSION_LOW",
+    "BREAKOUT_ORIGIN",
+    "VOLUME_LIQUIDITY_ZONE",
+    "EMA_CONTEXT_ZONE",
+}
+
 
 @dataclass(frozen=True)
 class LevelZone:
@@ -35,6 +48,8 @@ class LevelZone:
     def __post_init__(self) -> None:
         if not self.level_id.strip():
             raise ValueError("level_id must be non-empty")
+        if self.level_type not in _ALLOWED_LEVEL_TYPES:
+            raise ValueError("invalid level_type")
         if not (0 < self.lower_bound <= self.center_price <= self.upper_bound):
             raise ValueError("invalid level zone bounds")
         if self.upper_bound == self.lower_bound:
@@ -127,13 +142,24 @@ def _close_side(zone: LevelZone, close: float) -> str:
     return "INSIDE"
 
 
-def _direction(zone: LevelZone, close: float) -> str:
-    side = _close_side(zone, close)
+def _direction_from_side(side: str) -> str:
     if side == "ABOVE":
         return "FROM_ABOVE"
     if side == "BELOW":
         return "FROM_BELOW"
     return "INSIDE_ZONE"
+
+
+def _expected_breakout_side(zone: LevelZone, direction: str) -> str | None:
+    if direction == "FROM_BELOW":
+        return "ABOVE"
+    if direction == "FROM_ABOVE":
+        return "BELOW"
+    if zone.level_type in {"RESISTANCE", "PREVIOUS_SESSION_HIGH", "CURRENT_SESSION_HIGH"}:
+        return "ABOVE"
+    if zone.level_type in {"SUPPORT", "PREVIOUS_SESSION_LOW", "CURRENT_SESSION_LOW"}:
+        return "BELOW"
+    return None
 
 
 def _distance_to_zone(zone: LevelZone, close: float) -> float:
@@ -160,8 +186,8 @@ def classify_level_history(
     """Classify one level against closed bars only.
 
     The function is deterministic and causal: state after bar N is based only on
-    bars <= N. A breakout requires two consecutive closes beyond the zone; a
-    retest requires a later touch from the breakout side.
+    bars <= N. A breakout requires two consecutive closes beyond the zone in the
+    valid breakout direction; a retest requires a later touch from that side.
     """
 
     cfg = config or EngineConfig()
@@ -176,6 +202,7 @@ def classify_level_history(
     state = "UNTOUCHED"
     touch_count = 0
     direction = "NONE"
+    approach_side: str | None = None
     breakout_side: str | None = None
     breakout_close_count = 0
     acceptance_close_count = 0
@@ -188,33 +215,48 @@ def classify_level_history(
 
         if state in {"UNTOUCHED", "AWAY", "RANGE_RETURN", "REJECTION", "ACCEPTANCE", "FALSE_BREAKOUT"}:
             if touched:
-                direction = _direction(zone, close)
+                if approach_side in {"ABOVE", "BELOW"}:
+                    direction = _direction_from_side(approach_side)
+                else:
+                    direction = _direction_from_side(side)
                 touch_count += 1
                 state = "TEST" if touch_count == 1 else "REPEATED_TEST"
             elif distance <= zone.width * cfg.approach_distance_widths:
-                direction = _direction(zone, close)
+                approach_side = side if side in {"ABOVE", "BELOW"} else approach_side
+                direction = _direction_from_side(side)
                 state = "APPROACH"
             else:
+                approach_side = side if side in {"ABOVE", "BELOW"} else approach_side
+                direction = _direction_from_side(side)
                 state = "AWAY"
             continue
 
         if state == "APPROACH":
             if touched:
-                direction = _direction(zone, close)
+                if approach_side in {"ABOVE", "BELOW"}:
+                    direction = _direction_from_side(approach_side)
+                else:
+                    direction = _direction_from_side(side)
                 touch_count += 1
                 state = "TEST" if touch_count == 1 else "REPEATED_TEST"
             elif distance > zone.width * cfg.approach_distance_widths:
+                approach_side = side if side in {"ABOVE", "BELOW"} else approach_side
+                direction = _direction_from_side(side)
                 state = "AWAY"
             continue
 
         if state in {"TEST", "REPEATED_TEST"}:
-            if side in {"ABOVE", "BELOW"}:
+            expected_breakout_side = _expected_breakout_side(zone, direction)
+            if side in {"ABOVE", "BELOW"} and side == expected_breakout_side:
                 breakout_side = side
                 breakout_close_count = 1
                 state = "BREAKOUT_ATTEMPT"
             elif touched:
                 touch_count += 1
                 state = "REPEATED_TEST"
+            elif side in {"ABOVE", "BELOW"} and side != expected_breakout_side:
+                reaction_widths = distance / zone.width
+                state = "REJECTION" if distance >= zone.width * cfg.rejection_distance_widths else "AWAY"
             elif distance >= zone.width * cfg.rejection_distance_widths:
                 reaction_widths = distance / zone.width
                 state = "REJECTION"
@@ -226,10 +268,6 @@ def classify_level_history(
                 if breakout_close_count >= 2:
                     state = "BREAKOUT"
                     acceptance_close_count = 0
-            elif side == "INSIDE":
-                state = "REJECTION"
-                breakout_side = None
-                breakout_close_count = 0
             else:
                 state = "REJECTION"
                 breakout_side = None
@@ -245,6 +283,7 @@ def classify_level_history(
                 continue
             if touched:
                 touch_count += 1
+                acceptance_close_count = 0
                 state = "RETEST"
                 continue
             if side == breakout_side:
@@ -268,6 +307,7 @@ def classify_level_history(
                 state = "FALSE_BREAKOUT"
             elif touched:
                 touch_count += 1
+                acceptance_close_count = 0
                 state = "RETEST"
             elif side == breakout_side:
                 away = _distance_to_zone(zone, close) / zone.width
@@ -276,6 +316,8 @@ def classify_level_history(
                     if acceptance_close_count >= cfg.acceptance_close_count:
                         reaction_widths = away
                         state = "ACCEPTANCE"
+                else:
+                    acceptance_close_count = 0
             continue
 
         if state == "RETEST":
@@ -284,6 +326,7 @@ def classify_level_history(
             opposite = "BELOW" if breakout_side == "ABOVE" else "ABOVE"
             if side == breakout_side:
                 reaction_widths = _distance_to_zone(zone, close) / zone.width
+                acceptance_close_count = 0
                 state = "RETEST_HOLD"
             elif side == opposite:
                 state = "RETEST_FAIL"
@@ -297,6 +340,7 @@ def classify_level_history(
                 state = "RETEST_FAIL"
             elif touched:
                 touch_count += 1
+                acceptance_close_count = 0
                 state = "RETEST"
             elif side == breakout_side:
                 away = _distance_to_zone(zone, close) / zone.width
@@ -305,6 +349,8 @@ def classify_level_history(
                     if acceptance_close_count >= cfg.acceptance_close_count:
                         reaction_widths = away
                         state = "ACCEPTANCE"
+                else:
+                    acceptance_close_count = 0
             continue
 
         if state == "RETEST_FAIL":
