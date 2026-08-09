@@ -247,14 +247,20 @@ def classify_level_history(
 
         if state in {"TEST", "REPEATED_TEST"}:
             expected_breakout_side = _expected_breakout_side(zone, direction)
-            if side in {"ABOVE", "BELOW"} and side == expected_breakout_side:
+            if side in {"ABOVE", "BELOW"} and (
+                expected_breakout_side is None or side == expected_breakout_side
+            ):
                 breakout_side = side
                 breakout_close_count = 1
                 state = "BREAKOUT_ATTEMPT"
             elif touched:
                 touch_count += 1
                 state = "REPEATED_TEST"
-            elif side in {"ABOVE", "BELOW"} and side != expected_breakout_side:
+            elif (
+                side in {"ABOVE", "BELOW"}
+                and expected_breakout_side is not None
+                and side != expected_breakout_side
+            ):
                 reaction_widths = distance / zone.width
                 state = "REJECTION" if distance >= zone.width * cfg.rejection_distance_widths else "AWAY"
             elif distance >= zone.width * cfg.rejection_distance_widths:
