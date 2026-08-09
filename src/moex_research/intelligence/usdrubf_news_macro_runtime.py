@@ -8,6 +8,7 @@ from tempfile import NamedTemporaryFile
 from typing import Callable, Iterable, Mapping, Sequence
 from urllib.request import Request, urlopen
 
+from ..external_data.models import BLOCKED_STATUSES
 from ..external_data.registry import SOURCE_REGISTRY
 from .usdrubf_news_macro import (
     MacroObservation,
@@ -75,6 +76,10 @@ class ProviderRegistry:
         if provider.provider_kind != provider_kind:
             raise RuntimeIntegrationError(
                 f"provider kind mismatch for {source_id}: expected {provider_kind}"
+            )
+        if provider.source_status in BLOCKED_STATUSES:
+            raise RuntimeIntegrationError(
+                f"blocked provider: {source_id} status={provider.source_status}"
             )
         return provider
 
@@ -199,6 +204,8 @@ class JsonSnapshotStore:
         self.root = Path(root)
         self.news_filename = self._validate_filename(news_filename)
         self.macro_filename = self._validate_filename(macro_filename)
+        if self.news_filename == self.macro_filename:
+            raise RuntimeIntegrationError("snapshot filenames must be distinct")
 
     @staticmethod
     def _validate_filename(value: str) -> str:
