@@ -59,19 +59,25 @@ def test_identity_frames_apply_frozen_contract_window_before_count() -> None:
 
 
 def test_identity_frames_fail_closed_when_frozen_window_boundary_is_missing() -> None:
-    modeling = _modeling_with_full_history()
-    contract_mask = pd.to_datetime(modeling.target_trade_date).between(
-        runtime.FROZEN_ELIGIBLE_TARGET_DATE_FROM,
-        runtime.FROZEN_ELIGIBLE_TARGET_DATE_TILL,
-        inclusive="both",
+    historical_dates = list(
+        pd.date_range(end="2024-08-04", periods=576, freq="D")
     )
-    contract = modeling.loc[contract_mask].copy()
-    contract.loc[
-        contract.target_trade_date.eq(pd.Timestamp(runtime.FROZEN_ELIGIBLE_TARGET_DATE_TILL)),
-        "target_trade_date",
-    ] = pd.Timestamp("2026-06-10 12:00:00")
-    historical = modeling.loc[~contract_mask].copy()
-    malformed = pd.concat([historical, contract], ignore_index=True)
+    malformed_contract_dates = list(
+        pd.date_range(
+            runtime.FROZEN_ELIGIBLE_TARGET_DATE_FROM,
+            "2026-06-10",
+            periods=472,
+        ).normalize()
+    )
+    target_dates = historical_dates + malformed_contract_dates
+    malformed = pd.DataFrame(
+        {
+            "target_trade_date": target_dates,
+            "target_instrument_id": [runtime.validation.TARGET_INSTRUMENT_ID]
+            * len(target_dates),
+            "prior_trade_date": [value - pd.Timedelta(days=1) for value in target_dates],
+        }
+    )
     validation_predictions = _validation_predictions(malformed)
 
     with pytest.raises(
