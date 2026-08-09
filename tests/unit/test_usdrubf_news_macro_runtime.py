@@ -113,6 +113,24 @@ def test_provider_registry_fails_closed_on_unknown_source() -> None:
         registry.require("unknown", "NEWS")
 
 
+def test_runtime_rejects_blocked_external_provider_before_interpretation(tmp_path: Path) -> None:
+    blocked_provider = provider_from_external_registry("cbr_banking_liquidity_daily")
+    calls = []
+    runtime = NewsMacroRuntime(
+        provider_registry=ProviderRegistry([blocked_provider]),
+        news_classifier=lambda _payload: _news_classification(),
+        macro_interpreter=lambda payload: calls.append(payload) or _macro_interpretation(),
+        store=JsonSnapshotStore(tmp_path),
+    )
+    with pytest.raises(RuntimeIntegrationError, match="blocked provider"):
+        runtime.run(
+            news_records=[],
+            macro_observations=[_macro_observation("cbr_banking_liquidity_daily")],
+            as_of_timestamp=T2,
+        )
+    assert calls == []
+
+
 class _FakeResponse:
     def __init__(self, payload: object) -> None:
         self._raw = json.dumps(payload).encode("utf-8")
@@ -182,6 +200,15 @@ def test_snapshot_store_uses_only_explicit_root_and_atomic_files(tmp_path: Path)
 def test_snapshot_store_rejects_path_in_filename(tmp_path: Path) -> None:
     with pytest.raises(RuntimeIntegrationError, match="basename"):
         JsonSnapshotStore(tmp_path, news_filename="../news.json")
+
+
+def test_snapshot_store_requires_distinct_filenames(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeIntegrationError, match="distinct"):
+        JsonSnapshotStore(
+            tmp_path,
+            news_filename="state.json",
+            macro_filename="state.json",
+        )
 
 
 def test_runtime_rejects_unregistered_source_before_classification(tmp_path: Path) -> None:
