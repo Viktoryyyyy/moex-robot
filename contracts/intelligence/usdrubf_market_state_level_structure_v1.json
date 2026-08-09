@@ -91,6 +91,17 @@
     ]
   },
   "level_interaction": {
+    "record_cardinality": "one_interaction_record_per_level_id",
+    "required_fields": [
+      "level_id",
+      "state",
+      "direction",
+      "event_timestamp",
+      "previous_state",
+      "structural_quality"
+    ],
+    "level_id_reference": "must reference exactly one level_id present in MarketState.active_levels",
+    "history_partition_key": "level_id",
     "direction_allowed": [
       "FROM_BELOW",
       "FROM_ABOVE",
@@ -175,6 +186,7 @@
   },
   "minimum_implementation_acceptance": [
     "deterministic level zones are reproducible from the same closed-bar input",
+    "every level interaction references exactly one active level_id and keeps transition history partitioned by level_id",
     "test/retest/breakout/rejection/acceptance/false-breakout states follow the frozen transition map",
     "no look-ahead is possible in level construction or event classification",
     "technical events are generated without LLM involvement",
