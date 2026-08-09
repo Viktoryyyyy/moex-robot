@@ -28,6 +28,40 @@ def test_single_tick_or_single_close_does_not_confirm_breakout() -> None:
     assert result.breakout_side == "ABOVE"
 
 
+def test_resistance_rejection_is_not_downside_breakout() -> None:
+    zone = LevelZone("r1", "RESISTANCE", 82.70, 82.65, 82.75)
+    bars = [
+        _bar("2026-08-09T10:00:00+03:00", 82.72, 82.60, 82.68),
+        _bar("2026-08-09T10:05:00+03:00", 82.64, 82.45, 82.50),
+    ]
+    result = classify_level_history(zone, bars)
+    assert result.state == "REJECTION"
+    assert result.breakout_side is None
+
+
+def test_support_rejection_is_not_upside_breakout() -> None:
+    zone = LevelZone("s1", "SUPPORT", 80.00, 79.95, 80.05)
+    bars = [
+        _bar("2026-08-09T10:00:00+03:00", 80.04, 79.92, 80.01),
+        _bar("2026-08-09T10:05:00+03:00", 80.25, 80.08, 80.20),
+    ]
+    result = classify_level_history(zone, bars)
+    assert result.state == "REJECTION"
+    assert result.breakout_side is None
+
+
+def test_support_breakout_requires_two_downside_closes() -> None:
+    zone = LevelZone("s1", "SUPPORT", 80.00, 79.95, 80.05)
+    bars = [
+        _bar("2026-08-09T10:00:00+03:00", 80.04, 79.92, 80.01),
+        _bar("2026-08-09T10:05:00+03:00", 80.00, 79.78, 79.88),
+        _bar("2026-08-09T10:10:00+03:00", 79.92, 79.72, 79.82),
+    ]
+    result = classify_level_history(zone, bars)
+    assert result.state == "BREAKOUT"
+    assert result.breakout_side == "BELOW"
+
+
 def test_successful_breakout_retest_hold_path() -> None:
     zone = LevelZone("r1", "RESISTANCE", 82.70, 82.65, 82.75)
     bars = [
@@ -74,6 +108,22 @@ def test_acceptance_requires_multiple_closed_bars_away_from_zone() -> None:
     assert result.structural_quality > 0.5
 
 
+def test_retest_resets_pre_retest_acceptance_counter() -> None:
+    zone = LevelZone("r1", "RESISTANCE", 82.70, 82.65, 82.75)
+    cfg = EngineConfig(acceptance_distance_widths=0.5, acceptance_close_count=2)
+    bars = [
+        _bar("2026-08-09T10:00:00+03:00", 82.72, 82.61, 82.67),
+        _bar("2026-08-09T10:05:00+03:00", 82.88, 82.69, 82.83),
+        _bar("2026-08-09T10:10:00+03:00", 82.98, 82.82, 82.92),
+        _bar("2026-08-09T10:15:00+03:00", 83.00, 82.88, 82.96),
+        _bar("2026-08-09T10:20:00+03:00", 82.88, 82.70, 82.78),
+        _bar("2026-08-09T10:25:00+03:00", 82.94, 82.78, 82.88),
+        _bar("2026-08-09T10:30:00+03:00", 83.02, 82.90, 82.97),
+    ]
+    result = classify_level_history(zone, bars, cfg)
+    assert result.state == "RETEST_HOLD"
+
+
 def test_same_input_is_reproducible_and_causal_prefix_differs() -> None:
     zone = LevelZone("r1", "RESISTANCE", 82.70, 82.65, 82.75)
     bars = [
@@ -99,5 +149,14 @@ def test_rejects_non_increasing_bar_time() -> None:
         classify_level_history(zone, bars)
     except ValueError as exc:
         assert "strictly increasing" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_rejects_unknown_level_type() -> None:
+    try:
+        LevelZone("x", "UNKNOWN", 82.70, 82.65, 82.75)
+    except ValueError as exc:
+        assert "level_type" in str(exc)
     else:
         raise AssertionError("expected ValueError")
