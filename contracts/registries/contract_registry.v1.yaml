@@ -1,0 +1,177 @@
+# Authoritative Contract Registry (v1)
+#
+# This file is the authoritative index of all contract artifacts in the
+# repository. It is the single source of truth for locating, versioning and
+# resolving contract artifacts. Later Phase 2A batches will populate the
+# remaining artifacts incrementally; this skeleton seeds representative
+# entries across multiple categories using evidence from the Phase 1 audit.
+#
+# Status vocabulary (exactly one of):
+#   active      - currently authoritative and in force
+#   superseded  - replaced by a newer contract; retained for history
+#   deprecated  - no longer recommended; retained for history
+#   historical  - no longer in force; retained for audit/history only
+#
+# Required fields per entry:
+#   contract_id          - stable unique identifier for the contract
+#   canonical_path       - repo-relative path to the authoritative artifact
+#   version              - contract version (e.g. v1)
+#   scope                - category/lane (architecture, datasets, runtime,
+#                          experiments, features, instruments, registries, ...)
+#   supersedes           - contract_id(s) this entry replaces (empty if none)
+#   superseded_by        - contract_id(s) that replace this entry (empty if none)
+#   implementation_refs  - repo-relative paths to implementation artifacts
+#   enforcement_test_refs - repo-relative paths to enforcement/validation tests
+#   authority            - authority/runtime notes for this contract
+#   duplicate_overlap_notes - notes on YAML/MD overlap resolution (see README)
+
+schema_version: contract_registry.v1
+registry_kind: contract
+artifact_class: repo_relative
+status_vocabulary:
+  - active
+  - superseded
+  - deprecated
+  - historical
+
+contracts:
+  # ---------------------------------------------------------------------------
+  # Architecture
+  # ---------------------------------------------------------------------------
+  - contract_id: moex_data_access_canon.v1
+    canonical_path: contracts/architecture/moex_data_access_canon_v1.yaml
+    version: v1
+    scope: architecture
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/
+    enforcement_test_refs:
+      - tests/
+    authority: Canonical MOEX data access architecture contract; authoritative for data access boundaries.
+    duplicate_overlap_notes: YAML is authoritative; any MD describing data access must defer to this YAML.
+
+  # ---------------------------------------------------------------------------
+  # Datasets
+  # ---------------------------------------------------------------------------
+  - contract_id: futures_raw_5m.v1
+    canonical_path: contracts/datasets/futures_raw_5m.v1.yaml
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/
+    enforcement_test_refs:
+      - tests/
+    authority: Raw 5-minute futures OHLCV dataset contract; authoritative for raw 5m schema and semantics.
+    duplicate_overlap_notes: YAML is authoritative; futures_raw_5m_contract.md is a companion narrative and must defer to this YAML.
+
+  - contract_id: futures_continuous_5m.v1
+    canonical_path: contracts/datasets/futures_continuous_5m.v1.yaml
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/
+    enforcement_test_refs:
+      - tests/
+    authority: Continuous 5-minute futures series contract; authoritative for continuous series construction semantics.
+    duplicate_overlap_notes: YAML is authoritative; futures_continuous_5m_contract.md is a companion narrative and must defer to this YAML.
+
+  - contract_id: futures_derived_d1.v1
+    canonical_path: contracts/datasets/futures_derived_d1.v1.yaml
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/
+    enforcement_test_refs:
+      - tests/
+    authority: Derived daily (D1) futures dataset contract; authoritative for derived D1 schema and semantics.
+    duplicate_overlap_notes: YAML is authoritative; futures_derived_d1_ohlcv_contract.md is a companion narrative and must defer to this YAML.
+
+  # ---------------------------------------------------------------------------
+  # Runtime
+  # ---------------------------------------------------------------------------
+  - contract_id: runtime_input_state.v1
+    canonical_path: contracts/runtime/runtime_input_state_contract.v1.yaml
+    version: v1
+    scope: runtime
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/
+    enforcement_test_refs:
+      - tests/
+    authority: Runtime input state contract; authoritative for runtime input state shape and validation.
+    duplicate_overlap_notes: YAML is authoritative; runtime narrative docs must defer to this YAML.
+
+  # ---------------------------------------------------------------------------
+  # Experiments
+  # ---------------------------------------------------------------------------
+  - contract_id: d1_tsmom_backtest_semantics.v1
+    canonical_path: contracts/experiments/d1_tsmom_backtest_semantics_contract.md
+    version: v1
+    scope: experiments
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/
+    enforcement_test_refs:
+      - tests/
+    authority: D1 TSMOM backtest semantics contract; authoritative for backtest semantics of the D1 TSMOM experiment.
+    duplicate_overlap_notes: MD is authoritative for this experiment semantics; no conflicting YAML exists.
+
+  - contract_id: experiment_registry_entry.v1
+    canonical_path: contracts/experiments/experiment_registry_entry.v1.yaml
+    version: v1
+    scope: experiments
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/
+    enforcement_test_refs:
+      - tests/
+    authority: Experiment registry entry contract; authoritative for experiment registry entry schema.
+    duplicate_overlap_notes: YAML is authoritative; experiment narrative docs must defer to this YAML.
+
+  # ---------------------------------------------------------------------------
+  # Registries
+  # ---------------------------------------------------------------------------
+  - contract_id: dataset_registry.v1
+    canonical_path: contracts/registries/dataset_registry.v1.yaml
+    version: v1
+    scope: registries
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - configs/datasets/dataset_registry.v1.yaml
+    enforcement_test_refs:
+      - tests/
+    authority: Dataset registry contract; authoritative for dataset registry schema and required dependency kinds.
+    duplicate_overlap_notes: YAML is authoritative; registry narrative docs must defer to this YAML.
+
+  - contract_id: strategy_registry.v1
+    canonical_path: contracts/registries/strategy_registry.v1.yaml
+    version: v1
+    scope: registries
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - configs/strategies/strategy_registry.v1.yaml
+    enforcement_test_refs:
+      - tests/
+    authority: Strategy registry contract; authoritative for strategy registry schema and required dependency kinds.
+    duplicate_overlap_notes: YAML is authoritative; registry narrative docs must defer to this YAML.
