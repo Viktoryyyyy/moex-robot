@@ -1,0 +1,205 @@
+{
+  "contract_id": "usdrubf_market_state_level_structure_v1",
+  "contract_version": 1,
+  "project": "MOEX_Bot",
+  "lane": "rub_intelligence",
+  "instrument": "USDRUBF",
+  "status": "design_contract_only",
+  "purpose": "Freeze the deterministic market-state and level/structure semantics used by the RUB Intelligence decision layer before implementation.",
+  "runtime_readiness_claim": false,
+  "implementation_authorized": false,
+  "trading_authorized": false,
+  "source_of_facts": {
+    "technical_market_facts_owner": "deterministic_python_engine",
+    "llm_may_create_numeric_levels": false,
+    "llm_may_classify_level_events": false,
+    "llm_role": [
+      "interpret_structured_market_state",
+      "combine_structured_market_facts_with_news_macro_positioning_and_model_context",
+      "generate_scenarios_and_explanations"
+    ]
+  },
+  "market_state": {
+    "required_fields": [
+      "instrument",
+      "as_of_timestamp",
+      "price",
+      "trend",
+      "market_regime",
+      "active_levels",
+      "level_interaction",
+      "ema_3_19_ai",
+      "futoi",
+      "news_state",
+      "macro_state",
+      "final_bias",
+      "trade_state",
+      "confidence",
+      "targets",
+      "invalidation"
+    ],
+    "final_bias_allowed": [
+      "BULLISH_USD",
+      "NEUTRAL",
+      "BEARISH_USD"
+    ],
+    "trade_state_allowed": [
+      "WAIT",
+      "ENTER",
+      "HOLD",
+      "ADD",
+      "REDUCE",
+      "EXIT"
+    ],
+    "confidence_range": [0.0, 1.0],
+    "previous_state_required_for_change_detection": true
+  },
+  "level_zone": {
+    "numeric_representation": "zone_not_single_magic_price",
+    "required_fields": [
+      "level_id",
+      "level_type",
+      "center_price",
+      "lower_bound",
+      "upper_bound",
+      "created_at",
+      "source_timeframe",
+      "status"
+    ],
+    "level_type_allowed": [
+      "SUPPORT",
+      "RESISTANCE",
+      "RANGE_BOUNDARY",
+      "PREVIOUS_SESSION_HIGH",
+      "PREVIOUS_SESSION_LOW",
+      "CURRENT_SESSION_HIGH",
+      "CURRENT_SESSION_LOW",
+      "BREAKOUT_ORIGIN",
+      "VOLUME_LIQUIDITY_ZONE",
+      "EMA_CONTEXT_ZONE"
+    ],
+    "status_allowed": [
+      "ACTIVE",
+      "BROKEN",
+      "INVALIDATED",
+      "RETIRED"
+    ],
+    "constraints": [
+      "lower_bound <= center_price <= upper_bound",
+      "levels must be derived only from observations available at or before as_of_timestamp",
+      "future target labels must not influence level construction"
+    ]
+  },
+  "level_interaction": {
+    "record_cardinality": "one_interaction_record_per_level_id",
+    "required_fields": [
+      "level_id",
+      "state",
+      "direction",
+      "event_timestamp",
+      "previous_state",
+      "structural_quality"
+    ],
+    "level_id_reference": "must reference exactly one level_id present in MarketState.active_levels",
+    "history_partition_key": "level_id",
+    "direction_allowed": [
+      "FROM_BELOW",
+      "FROM_ABOVE",
+      "INSIDE_ZONE",
+      "NONE"
+    ],
+    "state_allowed": [
+      "UNTOUCHED",
+      "APPROACH",
+      "TEST",
+      "REPEATED_TEST",
+      "REJECTION",
+      "BREAKOUT_ATTEMPT",
+      "BREAKOUT",
+      "RETEST_PENDING",
+      "RETEST",
+      "RETEST_HOLD",
+      "RETEST_FAIL",
+      "ACCEPTANCE",
+      "FALSE_BREAKOUT",
+      "RANGE_RETURN",
+      "AWAY"
+    ],
+    "transition_map": {
+      "UNTOUCHED": ["APPROACH"],
+      "APPROACH": ["TEST", "AWAY"],
+      "TEST": ["REPEATED_TEST", "REJECTION", "BREAKOUT_ATTEMPT"],
+      "REPEATED_TEST": ["REJECTION", "BREAKOUT_ATTEMPT"],
+      "BREAKOUT_ATTEMPT": ["BREAKOUT", "REJECTION"],
+      "BREAKOUT": ["RETEST_PENDING", "ACCEPTANCE", "FALSE_BREAKOUT"],
+      "RETEST_PENDING": ["RETEST", "ACCEPTANCE", "FALSE_BREAKOUT"],
+      "RETEST": ["RETEST_HOLD", "RETEST_FAIL"],
+      "RETEST_HOLD": ["ACCEPTANCE", "RETEST"],
+      "RETEST_FAIL": ["FALSE_BREAKOUT", "RANGE_RETURN"],
+      "REJECTION": ["APPROACH", "RANGE_RETURN", "AWAY"],
+      "ACCEPTANCE": ["APPROACH", "AWAY"],
+      "FALSE_BREAKOUT": ["RANGE_RETURN", "AWAY"],
+      "RANGE_RETURN": ["APPROACH", "AWAY"],
+      "AWAY": ["APPROACH"]
+    },
+    "event_detection_inputs": [
+      "distance_to_zone",
+      "penetration_depth",
+      "time_near_zone",
+      "touch_count",
+      "reaction_distance",
+      "closed_bar_positions",
+      "volume_context",
+      "volatility_context"
+    ],
+    "single_tick_is_sufficient_for_test": false,
+    "closed_bar_confirmation_required_for_breakout_or_acceptance": true,
+    "lookahead_forbidden": true
+  },
+  "quality_model": {
+    "structural_quality_range": [0.0, 1.0],
+    "structural_quality_inputs": [
+      "touch_count",
+      "penetration_depth_normalized",
+      "reaction_distance_normalized",
+      "dwell_bars",
+      "close_confirmation_count",
+      "volume_confirmation",
+      "volatility_context"
+    ],
+    "composite_confirmation_range": [0.0, 1.0],
+    "composite_confirmation_inputs": [
+      "structural_quality",
+      "ema_3_19_ai_confirmation",
+      "futoi_confirmation"
+    ],
+    "news_or_macro_must_not_rewrite_technical_event": true,
+    "exact_weighting": "implementation_phase_only"
+  },
+  "integration_boundary": {
+    "ema_3_19_ai": "input_signal_context_only",
+    "futoi": "participant_positioning_context_only",
+    "news": "reserved_structured_context; detailed NewsEvent contract is a later stage",
+    "macro": "reserved_structured_context; detailed MacroState contract is a later stage",
+    "decision_agent": "must consume structured facts and must not originate technical market facts",
+    "change_detector": "compares previous and current MarketState after deterministic technical state is produced"
+  },
+  "minimum_implementation_acceptance": [
+    "deterministic level zones are reproducible from the same closed-bar input",
+    "every level interaction references exactly one active level_id and keeps transition history partitioned by level_id",
+    "test/retest/breakout/rejection/acceptance/false-breakout states follow the frozen transition map",
+    "no look-ahead is possible in level construction or event classification",
+    "technical events are generated without LLM involvement",
+    "historical scenario tests cover successful retest and failed retest/false breakout",
+    "MarketState can be serialized and compared with its previous state"
+  ],
+  "explicit_non_authorizations": [
+    "no runtime deployment",
+    "no server apply",
+    "no broker action",
+    "no trading action",
+    "no news ingestion implementation",
+    "no LLM news classification implementation",
+    "no alert delivery implementation"
+  ]
+}
