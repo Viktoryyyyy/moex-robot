@@ -288,7 +288,12 @@ class NewsMacroRuntime:
         macro_observations_tuple = tuple(macro_observations)
 
         for item in news_records_tuple:
-            self._provider_registry.require(item.source_id, "NEWS")
+            provider = self._provider_registry.require(item.source_id, "NEWS")
+            if item.source_tier != provider.source_tier:
+                raise RuntimeIntegrationError(
+                    f"source tier mismatch for {item.source_id}: "
+                    f"record={item.source_tier} registry={provider.source_tier}"
+                )
         for item in macro_observations_tuple:
             self._provider_registry.require(item.source_id, "MACRO")
 
