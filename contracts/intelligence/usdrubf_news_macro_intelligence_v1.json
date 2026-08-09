@@ -1,0 +1,245 @@
+{
+  "contract_id": "usdrubf_news_macro_intelligence_v1",
+  "contract_version": 1,
+  "project": "MOEX_Bot",
+  "lane": "rub_intelligence",
+  "instrument": "USDRUBF",
+  "status": "design_contract_only",
+  "purpose": "Freeze source, provenance, normalization, NewsEvent, MacroState and LLM-classification boundaries for the RUB Intelligence layer before implementation.",
+  "runtime_readiness_claim": false,
+  "implementation_authorized": false,
+  "trading_authorized": false,
+  "scope_supersession": {
+    "prior_contract": "contracts/features/usdrubf_external_feature_contract_v0.json",
+    "prior_news_restrictions": [
+      "raw_news_ingestion=forbidden_now",
+      "LLM_news_classification=forbidden_now"
+    ],
+    "superseded_only_for_lane": "rub_intelligence",
+    "prior_contract_remains_unchanged": true,
+    "ema_3_19_ai_research_semantics_unchanged": true,
+    "authorization_effect": "future rub_intelligence implementation may implement bounded news ingestion and LLM classification only after a separate implementation change is approved"
+  },
+  "fact_ownership": {
+    "deterministic_or_source_bound_facts": [
+      "source identity",
+      "publication timestamp",
+      "ingestion timestamp",
+      "content hash",
+      "event existence",
+      "numeric macro values",
+      "units",
+      "technical price levels",
+      "technical level events"
+    ],
+    "llm_may_invent_facts": false,
+    "llm_may_modify_technical_level_events": false,
+    "llm_allowed_outputs": [
+      "event_type classification",
+      "entity extraction from supplied content",
+      "RUB relevance assessment",
+      "USDRUBF directional interpretation",
+      "importance assessment",
+      "novelty assessment against supplied cluster history",
+      "expected horizon",
+      "mechanism explanation",
+      "classification confidence"
+    ]
+  },
+  "source_policy": {
+    "source_tiers": [
+      "OFFICIAL_PRIMARY",
+      "OFFICIAL_SECONDARY",
+      "MAJOR_AGENCY_OR_FINANCIAL_MEDIA"
+    ],
+    "source_groups": [
+      "CBR",
+      "MINFIN_RU",
+      "RU_GOVERNMENT",
+      "MOEX",
+      "ROSSTAT",
+      "FEDERAL_RESERVE",
+      "US_TREASURY_OFAC",
+      "US_MACRO_OFFICIAL",
+      "ENERGY_OFFICIAL_OR_APPROVED_MARKET_SOURCE",
+      "SANCTIONS_AND_GEOPOLITICAL_OFFICIAL",
+      "MAJOR_NEWS_AGENCY",
+      "MAJOR_FINANCIAL_MEDIA"
+    ],
+    "exact_provider_registry": "implementation_phase_only",
+    "unverified_source_fallback_forbidden": true,
+    "scraped_social_media_as_factual_source": false,
+    "source_reference_required": true,
+    "publication_timestamp_required": true,
+    "availability_rule": "an observation or event is usable only after its factual source publication or availability timestamp"
+  },
+  "news_pipeline": [
+    "SOURCE_FETCH",
+    "PROVENANCE_AND_TIMESTAMP_VALIDATION",
+    "NORMALIZATION",
+    "CONTENT_HASH",
+    "DEDUPLICATION_AND_CLUSTERING",
+    "LLM_CLASSIFICATION",
+    "SCHEMA_VALIDATION",
+    "PERSIST_NEWS_EVENT"
+  ],
+  "news_event": {
+    "required_fields": [
+      "event_id",
+      "cluster_id",
+      "source_id",
+      "source_tier",
+      "source_reference",
+      "published_at",
+      "available_at",
+      "ingested_at",
+      "content_hash",
+      "event_type",
+      "entities",
+      "rub_relevance",
+      "direction",
+      "importance",
+      "novelty",
+      "horizon",
+      "confidence",
+      "mechanism",
+      "quality_status"
+    ],
+    "rub_relevance_range": [0.0, 1.0],
+    "direction_allowed": [
+      "USD_BULLISH",
+      "USD_BEARISH",
+      "NEUTRAL",
+      "MIXED"
+    ],
+    "importance_allowed": [
+      "LOW",
+      "MEDIUM",
+      "HIGH",
+      "CRITICAL"
+    ],
+    "novelty_allowed": [
+      "NEW",
+      "UPDATE",
+      "REPEAT",
+      "STALE"
+    ],
+    "horizon_allowed": [
+      "INTRADAY",
+      "SHORT_TERM",
+      "MEDIUM_TERM",
+      "LONG_TERM"
+    ],
+    "confidence_range": [0.0, 1.0],
+    "quality_status_allowed": [
+      "OK",
+      "SOURCE_UNAVAILABLE",
+      "TIMESTAMP_UNPROVABLE",
+      "DUPLICATE",
+      "CLASSIFICATION_FAILED",
+      "STALE"
+    ],
+    "event_id_rule": "stable deterministic identity derived from source-bound normalized event evidence; never generated from LLM prose alone",
+    "cluster_rule": "semantically equivalent or updating headlines must share cluster history so repeated coverage does not appear as new independent information"
+  },
+  "macro_observation": {
+    "required_fields": [
+      "metric_id",
+      "source_id",
+      "source_reference",
+      "value",
+      "unit",
+      "observed_or_effective_at",
+      "published_at",
+      "available_at",
+      "ingested_at",
+      "quality_status"
+    ],
+    "metric_groups": [
+      "OIL",
+      "CBR_RATE",
+      "INFLATION",
+      "LIQUIDITY",
+      "DOLLAR_CONTEXT",
+      "CNYRUBF_CONTEXT",
+      "CALENDAR_EVENT_CONTEXT"
+    ],
+    "quality_status_allowed": [
+      "OK",
+      "MISSING",
+      "LATE_PUBLICATION",
+      "SOURCE_UNAVAILABLE",
+      "STALE",
+      "BLOCKED_BY_SOURCE_POLICY"
+    ],
+    "numeric_fact_owner": "deterministic_source_adapter",
+    "llm_may_create_numeric_macro_values": false,
+    "future_observation_use_forbidden": true
+  },
+  "macro_state": {
+    "required_fields": [
+      "as_of_timestamp",
+      "observations",
+      "overall_direction",
+      "confidence",
+      "dominant_drivers"
+    ],
+    "overall_direction_allowed": [
+      "USD_BULLISH",
+      "USD_BEARISH",
+      "NEUTRAL",
+      "MIXED"
+    ],
+    "confidence_range": [0.0, 1.0],
+    "observation_selection_rule": "only observations with available_at <= as_of_timestamp are eligible",
+    "missing_data_rule": "missing or stale observations remain explicit and must not be imputed by the LLM"
+  },
+  "deduplication_and_novelty": {
+    "content_hash_required": true,
+    "cluster_id_required": true,
+    "duplicate_headline_must_not_raise_independent_event_count": true,
+    "update_may_change_existing_cluster_assessment": true,
+    "novelty_must_use_supplied_cluster_history": true,
+    "llm_memory_alone_must_not_determine_novelty": true
+  },
+  "rights_and_storage": {
+    "raw_content_redistribution_assumed": false,
+    "raw_full_text_retention_authorized_by_this_contract": false,
+    "default_persisted_material": [
+      "source metadata",
+      "timestamps",
+      "content hash",
+      "normalized event metadata",
+      "classification outputs"
+    ],
+    "licensed_excerpt_or_raw_text_storage": "implementation must follow provider-specific rights and source policy; no right is inferred from technical access"
+  },
+  "decision_boundary": {
+    "news_event_may_directly_rewrite_technical_event": false,
+    "macro_state_may_directly_rewrite_technical_event": false,
+    "news_or_macro_may_directly_trigger_broker_action": false,
+    "decision_engine_integration": "later stage combines structured NewsEvent and MacroState with deterministic market structure, EMA 3/19 AI and FUTOI",
+    "trade_recommendation_generation": "later_stage_only",
+    "alert_delivery": "later_stage_only"
+  },
+  "minimum_implementation_acceptance": [
+    "every factual event and macro observation is bound to a source reference and factual availability timestamp",
+    "no event or observation is usable before available_at",
+    "duplicate coverage is clustered before downstream significance assessment",
+    "LLM output is schema validated and cannot create source facts or numeric macro facts",
+    "news and macro outputs cannot mutate deterministic technical level events",
+    "missing and stale data remain explicit",
+    "provider rights are not inferred from technical access"
+  ],
+  "explicit_non_authorizations": [
+    "no news ingestion runtime",
+    "no macro ingestion runtime",
+    "no Flowise runtime classification",
+    "no server apply",
+    "no alert delivery",
+    "no decision engine implementation",
+    "no model promotion",
+    "no broker action",
+    "no trading action"
+  ]
+}
