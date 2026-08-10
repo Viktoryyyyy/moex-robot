@@ -28,6 +28,7 @@ def test_contract_identity_and_shadow_boundary() -> None:
 
     boundary = contract["runtime_boundary"]
     assert boundary["shadow_only"] is True
+    assert boundary["stage_11_trade_state_guard_enabled"] is True
     assert boundary["alert_delivery"] is False
     assert boundary["broker_action"] is False
     assert boundary["order_placement"] is False
@@ -62,7 +63,20 @@ def test_contract_matches_bounded_decision_output_shape() -> None:
         "EXIT",
     }
     assert output["stage_11_shadow_trade_state_allowed"] == ["WAIT", "ENTER"]
+    assert output["stage_11_runtime_enforced"] is True
     assert output["numeric_level_output_forbidden"] is True
+
+
+def test_stage_11_runtime_guard_is_authoritative_for_flowise_path() -> None:
+    contract = _contract()
+    assert contract["source_runtime"]["stage_11_runtime_guard"] == (
+        "src/moex_research/intelligence/usdrubf_flowise_decision_agent.py::"
+        "stage11_shadow_decision_agent"
+    )
+    assert contract["input_contract"]["stage_11_runtime_trade_state_override"] == [
+        "WAIT",
+        "ENTER",
+    ]
 
 
 def test_transport_is_explicit_and_runtime_only() -> None:
