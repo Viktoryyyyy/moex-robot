@@ -50,6 +50,15 @@ def _positive_number(value: object, field: str) -> float:
     return result
 
 
+def _nonnegative_number(value: object, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise LiveShadowBridgeError(f"{field} must be numeric")
+    result = float(value)
+    if not isfinite(result) or result < 0.0:
+        raise LiveShadowBridgeError(f"{field} must be finite and non-negative")
+    return result
+
+
 def _normalize_bar(raw: Mapping[str, object]) -> dict[str, object]:
     if not isinstance(raw, Mapping):
         raise LiveShadowBridgeError("bar must be a mapping")
@@ -58,7 +67,7 @@ def _normalize_bar(raw: Mapping[str, object]) -> dict[str, object]:
     high = _positive_number(raw.get("high"), "bar.high")
     low = _positive_number(raw.get("low"), "bar.low")
     close = _positive_number(raw.get("close"), "bar.close")
-    volume = _positive_number(raw.get("volume"), "bar.volume")
+    volume = _nonnegative_number(raw.get("volume"), "bar.volume")
     if low > high or not low <= open_price <= high or not low <= close <= high:
         raise LiveShadowBridgeError("bar OHLC values are inconsistent")
     return {
@@ -271,7 +280,6 @@ def load_futoi_context(
         )
     try:
         from src.moex_research.runners.usdrubf_phase8_7a_futoi_si_source_validation import (
-            FutoiSiSourceValidationError,
             load_futoi_daily_pair,
             validate_prior_session_pair,
         )
@@ -304,7 +312,15 @@ def empty_macro_state(as_of_timestamp: datetime | str) -> MacroState:
 
 def _market_regime(interactions: Sequence[InteractionSnapshot]) -> str:
     states = {item.state for item in interactions}
-    if states & {"BREAKOUT", "RETEST_PENDING", "RETEST", "RETEST_HOLD", "RETEST_FAIL", "ACCEPTANCE", "FALSE_BREAKOUT"}:
+    if states & {
+        "BREAKOUT",
+        "RETEST_PENDING",
+        "RETEST",
+        "RETEST_HOLD",
+        "RETEST_FAIL",
+        "ACCEPTANCE",
+        "FALSE_BREAKOUT",
+    }:
         return "PREVIOUS_SESSION_BOUNDARY_BREAKOUT_OR_RETEST"
     if states & {"APPROACH", "TEST", "REPEATED_TEST", "REJECTION", "RANGE_RETURN"}:
         return "PREVIOUS_SESSION_BOUNDARY_INTERACTION"
@@ -342,7 +358,11 @@ def build_live_decision_input(
         reason="futoi_context_not_supplied",
     )
     macro = macro_state or empty_macro_state(decision_as_of)
-    trend = ema.direction if ema.direction in {"BULLISH_USD", "NEUTRAL", "BEARISH_USD"} else "NEUTRAL"
+    trend = (
+        ema.direction
+        if ema.direction in {"BULLISH_USD", "NEUTRAL", "BEARISH_USD"}
+        else "NEUTRAL"
+    )
 
     return DecisionInput(
         as_of_timestamp=decision_as_of,
