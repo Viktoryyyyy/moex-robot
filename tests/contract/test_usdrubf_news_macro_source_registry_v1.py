@@ -3,10 +3,15 @@ from pathlib import Path
 
 
 CONTRACT_PATH = Path("contracts/intelligence/usdrubf_news_macro_source_registry_v1.json")
+BASE_CONTRACT_PATH = Path("contracts/intelligence/usdrubf_news_macro_intelligence_v1.json")
 
 
 def _load_contract() -> dict:
     return json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+
+
+def _load_base_contract() -> dict:
+    return json.loads(BASE_CONTRACT_PATH.read_text(encoding="utf-8"))
 
 
 def test_registry_identity_and_boundary() -> None:
@@ -66,6 +71,24 @@ def test_primary_registry_has_required_high_value_sources() -> None:
     assert required.issubset(sources)
     assert all(item["references"] for item in sources.values())
     assert all(item["available_at_policy"] for item in sources.values())
+
+
+def test_primary_source_groups_are_frozen_stage_four_groups() -> None:
+    contract = _load_contract()
+    base_contract = _load_base_contract()
+    allowed_groups = set(base_contract["source_policy"]["source_groups"])
+    actual_groups = {item["group"] for item in contract["primary_sources"]}
+    assert actual_groups <= allowed_groups
+    sources = {item["source_id"]: item for item in contract["primary_sources"]}
+    assert sources["whitehouse_releases"]["group"] == "SANCTIONS_AND_GEOPOLITICAL_OFFICIAL"
+
+
+def test_opec_uses_exact_press_release_index() -> None:
+    contract = _load_contract()
+    sources = {item["source_id"]: item for item in contract["primary_sources"]}
+    assert sources["opec_press_releases"]["references"] == [
+        "https://www.opec.org/press-releases.html"
+    ]
 
 
 def test_stage12b_ready_sources_are_official_only() -> None:
