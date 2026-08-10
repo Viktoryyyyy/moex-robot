@@ -325,6 +325,44 @@ contracts:
     authority: Authoritative MOEX FUTOI raw dataset contract; authoritative for FUTOI raw schema, identity model, partitioning, availability and path rules.
     duplicate_overlap_notes: UNKNOWN / NOT PROVEN
 
+  - contract_id: futures_futoi_5m_raw_loader_manifest_contract
+    canonical_path: contracts/datasets/futures_futoi_5m_raw_loader_manifest_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs:
+      - src/moex_data/futures/futoi_raw_loader.py
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Run manifest contract for FUTOI raw loader execution (whitelist or eligibility-snapshot-driven selection, excluded instruments, input/output artifacts, partition list, per-instrument summaries, source scope notes, APIM futures calendar validation); authoritative for the FUTOI raw loader manifest schema and semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
+  - contract_id: futures_futoi_5m_raw_quality_report_contract
+    canonical_path: contracts/datasets/futures_futoi_5m_raw_quality_report_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs:
+      - src/moex_data/futures/futoi_raw_loader.py
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Per-run quality report contract for Slice 1 FUTOI raw loader outputs; authoritative for the FUTOI raw 5m quality report schema and semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
+  - contract_id: futures_futoi_availability_report_contract
+    canonical_path: contracts/datasets/futures_futoi_availability_report_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs: UNKNOWN / NOT PROVEN
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Availability report contract for MOEX FUTOI data by instrument and date range; authoritative for the FUTOI availability report schema and semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
   # ---------------------------------------------------------------------------
   # Calendars
   # ---------------------------------------------------------------------------
