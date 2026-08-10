@@ -147,6 +147,30 @@ contracts:
     authority: Derived daily (D1) futures dataset contract; authoritative for derived D1 schema and semantics.
     duplicate_overlap_notes: YAML is authoritative; futures_derived_d1_ohlcv_contract.md is a companion narrative and must defer to this YAML.
 
+  - contract_id: futures_continuous_series_policy.v1
+    canonical_path: contracts/datasets/futures_continuous_series_policy.v1.yaml
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs: UNKNOWN / NOT PROVEN
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Fail-closed policy boundary placeholder for continuous futures series (continuous_series_status: blocked_placeholder, materialization_allowed: false); gates materialization and requires roll_policy_contract, expiration_family_mapping_contract and parent_native_series_contracts before unblock. Defers to futures_continuous_series_v1_contract.md for substantive continuous-series semantics.
+    duplicate_overlap_notes: Complementary policy boundary YAML to futures_continuous_series_v1_contract.md design contract; NOT a strict supersession chain. Supersession not provable from repository evidence. MD is the authoritative design contract for continuous-series semantics; this YAML is a policy boundary placeholder that gates materialization and defers to the design contract for substantive continuous-series semantics. Both files preserved.
+
+  - contract_id: futures_continuous_series_v1_contract
+    canonical_path: contracts/datasets/futures_continuous_series_v1_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs: UNKNOWN / NOT PROVEN
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Design contract umbrella for unadjusted continuous futures v1 artifacts; authoritative for overlapping continuous-series semantics (roll policy, family mapping, perpetual rule, validation boundary, blocking conditions).
+    duplicate_overlap_notes: Complementary design contract MD to futures_continuous_series_policy.v1.yaml policy boundary; NOT a strict supersession chain. Supersession not provable from repository evidence. This MD is the authoritative design contract for continuous-series semantics; the YAML is a policy boundary placeholder that gates materialization and defers to this design contract for substantive continuous-series semantics. Both files preserved.
+
   # ---------------------------------------------------------------------------
   # Calendars
   # ---------------------------------------------------------------------------
