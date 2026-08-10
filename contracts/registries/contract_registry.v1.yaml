@@ -173,6 +173,19 @@ contracts:
     authority: Run manifest contract for derived D1 OHLCV builder execution, including applied whitelist or eligibility-snapshot-driven selection, excluded instruments, input raw 5m partitions, output D1 artifacts, per-instrument summaries, and source-to-output row checks; authoritative for the derived D1 OHLCV manifest schema and semantics.
     duplicate_overlap_notes: UNKNOWN / NOT PROVEN
 
+  - contract_id: futures_derived_d1_ohlcv_quality_report_contract
+    canonical_path: contracts/datasets/futures_derived_d1_ohlcv_quality_report_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs:
+      - src/moex_data/futures/derived_d1_ohlcv_builder.py
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Per-run quality report contract for Slice 1 derived D1 OHLCV builder outputs, validating one-row-per-secid/trade_date output from futures_raw_5m and preserving short-history handling; authoritative for the derived D1 OHLCV quality report schema and semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
   - contract_id: futures_continuous_series_policy.v1
     canonical_path: contracts/datasets/futures_continuous_series_policy.v1.yaml
     version: v1
