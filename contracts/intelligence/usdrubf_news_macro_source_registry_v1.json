@@ -1,0 +1,308 @@
+{
+  "contract_id": "usdrubf_news_macro_source_registry.v1",
+  "version": "1.0",
+  "status": "source_registry_contract_only",
+  "project": "MOEX_Bot",
+  "lane": "rub_intelligence",
+  "instrument": "USDRUBF",
+  "as_of": "2026-08-10",
+  "base_contract": "contracts/intelligence/usdrubf_news_macro_intelligence_v1.json",
+  "purpose": "Freeze the first concrete News/Macro provider registry and X high-velocity discovery whitelist before live acquisition implementation.",
+  "source_of_truth": "GitHub",
+  "compatibility": {
+    "scraped_social_media_as_factual_source_remains_false": true,
+    "x_posts_are_discovery_only": true,
+    "x_post_alone_may_create_usable_news_event": false,
+    "major_agency_access_does_not_imply_storage_or_redistribution_rights": true,
+    "existing_macro_registry_must_be_reused_not_duplicated": "src/moex_research/external_data/registry.py"
+  },
+  "source_classes": {
+    "OFFICIAL_PRIMARY": "Official publisher website, RSS or API. May provide source-bound factual evidence after timestamp/provenance validation.",
+    "OFFICIAL_SECONDARY": "Official related institution or official statement mirror. Confirmation policy may require primary-source linkage.",
+    "MAJOR_AGENCY_OR_FINANCIAL_MEDIA": "Professional news provider. Factual use requires an approved acquisition route and provider-specific rights policy.",
+    "X_OFFICIAL_DISCOVERY": "Official or principal X account used only to discover a candidate event quickly; not factual authority for Stage 12A/B.",
+    "X_WIRE_DISCOVERY": "Major-agency X account used only for discovery unless an approved agency route separately confirms the event.",
+    "X_SQUAWK_DISCOVERY": "Fast market headline account; discovery only and always requires confirmation.",
+    "X_OSINT_DISCOVERY": "Open-source geopolitical account; early warning only and never sufficient for factual or ACTION authority."
+  },
+  "primary_sources": [
+    {
+      "source_id": "cbr_press_rss",
+      "group": "CBR",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "RSS",
+      "references": ["https://www.cbr.ru/rss/RssPress"],
+      "topics": ["CBR_RATE", "FX_POLICY", "FINANCIAL_STABILITY", "REGULATION"],
+      "stage12b_status": "READY_CANDIDATE",
+      "available_at_policy": "Use the source publication timestamp; ingestion time must not precede publication time."
+    },
+    {
+      "source_id": "cbr_events_rss",
+      "group": "CBR",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "RSS",
+      "references": ["https://www.cbr.ru/rss/eventrss"],
+      "topics": ["CBR_SPEECH", "CBR_INTERVIEW", "MONETARY_POLICY"],
+      "stage12b_status": "READY_CANDIDATE",
+      "available_at_policy": "Use the source publication timestamp; speeches/interviews are not backdated to event start."
+    },
+    {
+      "source_id": "moex_all_news_rss",
+      "group": "MOEX",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "RSS",
+      "references": ["https://www.moex.com/export/news.aspx?cat=200"],
+      "topics": ["MOEX_OPERATIONS", "DERIVATIVES", "TRADING_STATUS", "RISK_PARAMETERS"],
+      "stage12b_status": "READY_CANDIDATE",
+      "available_at_policy": "Use the exchange publication timestamp from the feed."
+    },
+    {
+      "source_id": "moex_fx_news_rss",
+      "group": "MOEX",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "RSS",
+      "references": ["https://www.moex.com/export/news.aspx?cat=210"],
+      "topics": ["FX_MARKET", "RUB_MARKET", "TRADING_STATUS"],
+      "stage12b_status": "READY_CANDIDATE",
+      "available_at_policy": "Use the exchange publication timestamp from the feed."
+    },
+    {
+      "source_id": "fed_press_all_rss",
+      "group": "FEDERAL_RESERVE",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "RSS",
+      "references": ["https://www.federalreserve.gov/feeds/press_all.xml"],
+      "topics": ["FOMC", "FED_POLICY", "FED_COMMUNICATION"],
+      "stage12b_status": "READY_CANDIDATE",
+      "available_at_policy": "Use the Federal Reserve publication timestamp."
+    },
+    {
+      "source_id": "fed_monetary_policy_rss",
+      "group": "FEDERAL_RESERVE",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "RSS",
+      "references": ["https://www.federalreserve.gov/feeds/press_monetary.xml"],
+      "topics": ["FOMC", "FED_RATE", "FED_GUIDANCE"],
+      "stage12b_status": "READY_CANDIDATE",
+      "available_at_policy": "Use the Federal Reserve publication timestamp; scheduled release time does not make content available early."
+    },
+    {
+      "source_id": "bls_employment_situation_rss",
+      "group": "US_MACRO_OFFICIAL",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "RSS",
+      "references": ["https://www.bls.gov/feed/empsit.rss"],
+      "topics": ["NFP", "UNEMPLOYMENT", "WAGES"],
+      "stage12b_status": "READY_CANDIDATE",
+      "available_at_policy": "Usable only at or after the BLS release publication timestamp; embargoed material is never assumed available."
+    },
+    {
+      "source_id": "bls_cpi_rss",
+      "group": "US_MACRO_OFFICIAL",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "RSS",
+      "references": ["https://www.bls.gov/feed/cpi.rss"],
+      "topics": ["US_CPI", "US_INFLATION"],
+      "stage12b_status": "READY_CANDIDATE",
+      "available_at_policy": "Usable only at or after the BLS release publication timestamp; embargoed material is never assumed available."
+    },
+    {
+      "source_id": "bls_release_calendar",
+      "group": "US_MACRO_OFFICIAL",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "ICS_OR_HTML",
+      "references": ["https://www.bls.gov/schedule/news_release/bls.ics", "https://www.bls.gov/schedule/"],
+      "topics": ["CALENDAR_EVENT_CONTEXT"],
+      "stage12b_status": "READY_CANDIDATE",
+      "available_at_policy": "Calendar provides expected release time only; it never proves release content availability."
+    },
+    {
+      "source_id": "us_treasury_press_releases",
+      "group": "US_TREASURY_OFAC",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "HTML_INDEX",
+      "references": ["https://home.treasury.gov/news/press-releases"],
+      "topics": ["SANCTIONS", "TREASURY_POLICY", "FX_POLICY", "RUSSIA_POLICY"],
+      "stage12b_status": "READY_CANDIDATE",
+      "available_at_policy": "Use the Treasury publication timestamp from the release page."
+    },
+    {
+      "source_id": "ofac_recent_actions",
+      "group": "US_TREASURY_OFAC",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "HTML_INDEX",
+      "references": ["https://ofac.treasury.gov/recent-actions"],
+      "topics": ["SANCTIONS", "RUSSIA_SANCTIONS", "ENERGY_SANCTIONS", "FINANCIAL_SANCTIONS"],
+      "stage12b_status": "READY_CANDIDATE",
+      "available_at_policy": "Use the OFAC action publication date/time when exposed; otherwise ingestion must remain timestamp-unprovable until a source timestamp is resolved."
+    },
+    {
+      "source_id": "whitehouse_releases",
+      "group": "RU_GOVERNMENT_EXTERNAL_POLICY",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "HTML_INDEX",
+      "references": ["https://www.whitehouse.gov/releases/"],
+      "topics": ["US_RUSSIA_POLICY", "SANCTIONS", "NEGOTIATIONS", "ENERGY_POLICY", "GEOPOLITICS"],
+      "stage12b_status": "READY_CANDIDATE",
+      "available_at_policy": "Use the White House release publication timestamp."
+    },
+    {
+      "source_id": "eu_council_press_releases",
+      "group": "SANCTIONS_AND_GEOPOLITICAL_OFFICIAL",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "HTML_INDEX",
+      "references": ["https://www.consilium.europa.eu/en/press/press-releases/"],
+      "topics": ["EU_SANCTIONS", "RUSSIA_SANCTIONS", "UKRAINE", "ENERGY_POLICY"],
+      "stage12b_status": "READY_CANDIDATE",
+      "available_at_policy": "Use the Council publication timestamp shown on the release."
+    },
+    {
+      "source_id": "eu_commission_news",
+      "group": "SANCTIONS_AND_GEOPOLITICAL_OFFICIAL",
+      "tier": "OFFICIAL_SECONDARY",
+      "transport": "RSS_OR_HTML_INDEX",
+      "references": ["https://commission.europa.eu/news-and-media/news_en"],
+      "topics": ["EU_POLICY", "SANCTIONS", "TRADE", "ENERGY_POLICY"],
+      "stage12b_status": "READY_CANDIDATE",
+      "available_at_policy": "Use the Commission publication timestamp; use Council source as primary authority for Council-adopted sanctions when available."
+    },
+    {
+      "source_id": "opec_press_releases",
+      "group": "ENERGY_OFFICIAL_OR_APPROVED_MARKET_SOURCE",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "HTML_INDEX",
+      "references": ["https://www.opec.org/"],
+      "topics": ["OPEC_PLUS", "OIL_SUPPLY", "PRODUCTION_POLICY"],
+      "stage12b_status": "READY_CANDIDATE",
+      "available_at_policy": "Use the OPEC publication timestamp; meeting schedule does not imply outcome availability."
+    },
+    {
+      "source_id": "kremlin_events",
+      "group": "RU_GOVERNMENT",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "HTML_INDEX",
+      "references": ["https://kremlin.ru/"],
+      "topics": ["NEGOTIATIONS", "RUSSIA_POLICY", "ENERGY", "GEOPOLITICS"],
+      "stage12b_status": "BLOCKED_PENDING_STABLE_ROUTE_ADAPTER",
+      "available_at_policy": "A stable event-index route and publication timestamp extractor must be proven before live use."
+    },
+    {
+      "source_id": "minfin_ru_press_center",
+      "group": "MINFIN_RU",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "HTML_INDEX",
+      "references": ["https://minfin.gov.ru/ru/press-center/"],
+      "topics": ["BUDGET", "FX_OPERATIONS", "FISCAL_POLICY", "OFZ"],
+      "stage12b_status": "BLOCKED_PENDING_ROUTE_VERIFICATION",
+      "available_at_policy": "Research-environment verification returned HTTP 503; no live adapter until a stable route and timestamp semantics are proven."
+    },
+    {
+      "source_id": "rosstat_official_releases",
+      "group": "ROSSTAT",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "HTML_INDEX",
+      "references": ["https://rosstat.gov.ru/"],
+      "topics": ["RU_CPI", "RU_INFLATION", "RU_MACRO"],
+      "stage12b_status": "BLOCKED_PENDING_STABLE_INDEX_ROUTE",
+      "available_at_policy": "Individual official releases are visible, but a stable machine-readable index/availability policy must be proven before live use."
+    },
+    {
+      "source_id": "mfa_ru_news",
+      "group": "SANCTIONS_AND_GEOPOLITICAL_OFFICIAL",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "HTML_INDEX",
+      "references": ["https://www.mid.ru/"],
+      "topics": ["NEGOTIATIONS", "RUSSIA_FOREIGN_POLICY", "SANCTIONS", "GEOPOLITICS"],
+      "stage12b_status": "BLOCKED_PENDING_ROUTE_VERIFICATION",
+      "available_at_policy": "No live adapter until a stable official news index and publication timestamp extractor are proven."
+    },
+    {
+      "source_id": "reuters_major_agency",
+      "group": "MAJOR_NEWS_AGENCY",
+      "tier": "MAJOR_AGENCY_OR_FINANCIAL_MEDIA",
+      "transport": "LICENSED_OR_APPROVED_ROUTE_ONLY",
+      "references": ["https://www.reuters.com/"],
+      "topics": ["SANCTIONS", "GEOPOLITICS", "NEGOTIATIONS", "OIL", "FED", "RUSSIA_MACRO"],
+      "stage12b_status": "BLOCKED_PENDING_APPROVED_ROUTE_AND_RIGHTS",
+      "available_at_policy": "No scraping fallback. Factual use requires an approved acquisition route with publication timestamp and rights policy."
+    }
+  ],
+  "existing_macro_sources_to_reuse": [
+    "moex_brent_futures_daily",
+    "cme_wti_pre_moex",
+    "cbr_ruonia_daily",
+    "cbr_key_rate_daily",
+    "cbr_banking_liquidity_daily"
+  ],
+  "x_discovery_whitelist": [
+    {"source_id": "x_whitehouse", "handle": "@WhiteHouse", "url": "https://x.com/WhiteHouse", "class": "X_OFFICIAL_DISCOVERY", "topics": ["SANCTIONS", "NEGOTIATIONS", "GEOPOLITICS", "ENERGY_POLICY"]},
+    {"source_id": "x_us_treasury", "handle": "@USTreasury", "url": "https://x.com/USTreasury", "class": "X_OFFICIAL_DISCOVERY", "topics": ["SANCTIONS", "TREASURY_POLICY", "RUSSIA_POLICY"]},
+    {"source_id": "x_federal_reserve", "handle": "@FederalReserve", "url": "https://x.com/FederalReserve", "class": "X_OFFICIAL_DISCOVERY", "topics": ["FOMC", "FED_POLICY"]},
+    {"source_id": "x_bls_gov", "handle": "@BLS_gov", "url": "https://x.com/BLS_gov", "class": "X_OFFICIAL_DISCOVERY", "topics": ["NFP", "CPI", "US_MACRO"]},
+    {"source_id": "x_state_dept", "handle": "@StateDept", "url": "https://x.com/StateDept", "class": "X_OFFICIAL_DISCOVERY", "topics": ["SANCTIONS", "NEGOTIATIONS", "GEOPOLITICS"]},
+    {"source_id": "x_eu_commission", "handle": "@EU_Commission", "url": "https://x.com/EU_Commission", "class": "X_OFFICIAL_DISCOVERY", "topics": ["EU_POLICY", "SANCTIONS", "TRADE"]},
+    {"source_id": "x_opec_secretariat", "handle": "@OPECSecretariat", "url": "https://x.com/OPECSecretariat", "class": "X_OFFICIAL_DISCOVERY", "topics": ["OPEC_PLUS", "OIL_SUPPLY"]},
+    {"source_id": "x_kremlin_russia_e", "handle": "@KremlinRussia_E", "url": "https://x.com/KremlinRussia_E", "class": "X_OFFICIAL_DISCOVERY", "topics": ["NEGOTIATIONS", "RUSSIA_POLICY", "GEOPOLITICS"]},
+    {"source_id": "x_mfa_russia", "handle": "@mfa_russia", "url": "https://x.com/mfa_russia", "class": "X_OFFICIAL_DISCOVERY", "topics": ["NEGOTIATIONS", "SANCTIONS", "RUSSIA_FOREIGN_POLICY"]},
+    {"source_id": "x_zelenskyyua", "handle": "@ZelenskyyUa", "url": "https://x.com/ZelenskyyUa", "class": "X_OFFICIAL_DISCOVERY", "topics": ["NEGOTIATIONS", "UKRAINE", "GEOPOLITICS"]},
+    {"source_id": "x_reuters", "handle": "@Reuters", "url": "https://x.com/Reuters", "class": "X_WIRE_DISCOVERY", "topics": ["SANCTIONS", "GEOPOLITICS", "OIL", "MACRO"]},
+    {"source_id": "x_deitaone", "handle": "@DeItaone", "url": "https://x.com/DeItaone", "class": "X_SQUAWK_DISCOVERY", "topics": ["MACRO", "FED", "GEOPOLITICS", "OIL", "FX"]},
+    {"source_id": "x_firstsquawk", "handle": "@FirstSquawk", "url": "https://x.com/FirstSquawk", "class": "X_SQUAWK_DISCOVERY", "topics": ["MACRO", "GEOPOLITICS", "OIL", "FX"]},
+    {"source_id": "x_financialjuice", "handle": "@financialjuice", "url": "https://x.com/financialjuice", "class": "X_SQUAWK_DISCOVERY", "topics": ["MACRO", "FED", "GEOPOLITICS", "FX"]},
+    {"source_id": "x_faytuks", "handle": "@Faytuks", "url": "https://x.com/Faytuks", "class": "X_OSINT_DISCOVERY", "topics": ["GEOPOLITICS", "UKRAINE", "MIDDLE_EAST"]},
+    {"source_id": "x_sentdefender", "handle": "@sentdefender", "url": "https://x.com/sentdefender", "class": "X_OSINT_DISCOVERY", "topics": ["GEOPOLITICS", "MIDDLE_EAST", "MILITARY_EVENTS"]},
+    {"source_id": "x_clashreport", "handle": "@clashreport", "url": "https://x.com/clashreport", "class": "X_OSINT_DISCOVERY", "topics": ["GEOPOLITICS", "MIDDLE_EAST", "MILITARY_EVENTS"]},
+    {"source_id": "x_mario_nawfal", "handle": "@MarioNawfal", "url": "https://x.com/MarioNawfal", "class": "X_OSINT_DISCOVERY", "topics": ["GEOPOLITICS", "POLITICAL_HEADLINES"]}
+  ],
+  "x_policy": {
+    "purpose": "Reduce detection latency for market-moving candidate events.",
+    "candidate_event_only": true,
+    "usable_news_event_requires_confirmation": true,
+    "confirmation_sources_allowed": ["OFFICIAL_PRIMARY", "OFFICIAL_SECONDARY", "MAJOR_AGENCY_OR_FINANCIAL_MEDIA_WITH_APPROVED_ROUTE"],
+    "blue_check_or_platform_verification_is_not_source_authority": true,
+    "multiple_x_reposts_do_not_count_as_independent_confirmation": true,
+    "quoted_or_reposted_primary_source_must_be_resolved_to_original_publisher": true,
+    "osint_may_trigger_action_directly": false,
+    "squawk_may_trigger_action_directly": false,
+    "official_x_may_trigger_action_directly": false
+  },
+  "confirmation_policy": {
+    "official_primary_web_or_rss": "One validated official primary publication is sufficient factual authority for the statement it actually contains.",
+    "official_secondary": "Use as confirmation only within its institutional scope; prefer primary authority when the event belongs to another institution.",
+    "major_agency": "May provide factual authority only through an approved acquisition route and rights policy.",
+    "x_any_class": "Discovery only; create or update an unconfirmed candidate cluster until a permitted factual source confirms it.",
+    "conflicting_sources": "Keep conflict explicit, lower confidence, and do not collapse contradictory claims into one fact."
+  },
+  "deduplication_policy": {
+    "same_underlying_event_across_sources": "One cluster, not one event per headline.",
+    "same_x_post_repeated_by_accounts": "One discovery candidate; repost count is metadata only.",
+    "official_update": "May update an existing cluster and change novelty from NEW to UPDATE without creating a duplicate event."
+  },
+  "rights_and_storage": {
+    "default_persist": ["source_id", "source_reference", "timestamps", "normalized headline or bounded metadata when permitted", "content_hash", "cluster metadata", "classification outputs"],
+    "raw_full_text_storage_default": false,
+    "x_raw_post_storage_default": false,
+    "reuters_raw_storage_default": false,
+    "redistribution_rights_assumed": false
+  },
+  "stage12a_boundary": {
+    "live_fetch": false,
+    "x_api_or_scraping": false,
+    "provider_credentials": false,
+    "flowise_applied_state": false,
+    "scheduler": false,
+    "alert_delivery": false,
+    "broker_action": false,
+    "order_placement": false,
+    "autonomous_trading": false,
+    "server_apply": false
+  },
+  "stage12b_entry_gate": [
+    "implement only sources whose stage12b_status is READY_CANDIDATE",
+    "prove source identity and publication/availability timestamps",
+    "reuse existing macro registry sources without duplicating their semantics",
+    "retain X as discovery-only unless the base contract is explicitly amended in a separate task",
+    "no scraping fallback for blocked or licensed providers",
+    "provider-specific storage and rights policy must be explicit before raw-content retention"
+  ]
+}
