@@ -1,0 +1,148 @@
+{
+  "contract_id": "usdrubf_flowise_decision_agent.v1",
+  "version": "1.0",
+  "status": "design_contract_for_flow_creation",
+  "project": "MOEX_Bot",
+  "instrument": "USDRUBF",
+  "purpose": "Define the first bounded Flowise decision flow for RUB Intelligence shadow operation.",
+  "source_runtime": {
+    "decision_payload_builder": "src/moex_research/intelligence/usdrubf_decision_engine.py::build_decision_payload",
+    "decision_output_validator": "src/moex_research/intelligence/usdrubf_decision_engine.py::_validate_agent_output",
+    "stage_11_runtime_guard": "src/moex_research/intelligence/usdrubf_flowise_decision_agent.py::stage11_shadow_decision_agent",
+    "transport_adapter": "src/moex_research/intelligence/usdrubf_news_macro_runtime.py::FlowiseJsonAdapter",
+    "shadow_runner": "src/moex_research/runners/usdrubf_live_shadow_smoke.py"
+  },
+  "flowise": {
+    "flow_name": "usdrubf-rub-intelligence-decision-v1",
+    "applied_state_required": true,
+    "architecture": "single_bounded_decision_agent",
+    "persistent_memory": false,
+    "tools": [],
+    "external_fact_fetch": false,
+    "temperature_max": 0.2,
+    "transport": {
+      "endpoint": "runtime_applied_state_only_not_committed",
+      "request_field": "question",
+      "response_field": "text",
+      "environment": {
+        "endpoint": "MOEX_RUB_INTELLIGENCE_FLOWISE_ENDPOINT",
+        "request_field": "MOEX_RUB_INTELLIGENCE_FLOWISE_REQUEST_FIELD",
+        "response_field": "MOEX_RUB_INTELLIGENCE_FLOWISE_RESPONSE_FIELD",
+        "timeout_seconds": "MOEX_RUB_INTELLIGENCE_FLOWISE_TIMEOUT_SECONDS"
+      }
+    }
+  },
+  "input_contract": {
+    "format": "serialized_json_mapping",
+    "authoritative_source": "build_decision_payload wrapped by stage11_shadow_decision_agent",
+    "required_top_level_fields": [
+      "instrument",
+      "as_of_timestamp",
+      "market_facts",
+      "ema_3_19_ai",
+      "futoi",
+      "news_state",
+      "macro_state",
+      "output_contract"
+    ],
+    "facts_are_read_only": true,
+    "missing_facts_must_not_be_invented": true,
+    "stage_11_runtime_trade_state_override": [
+      "WAIT",
+      "ENTER"
+    ]
+  },
+  "fact_ownership": {
+    "python_source_bound": [
+      "instrument",
+      "as_of_timestamp",
+      "price",
+      "trend",
+      "market_regime",
+      "active_levels",
+      "level_interactions",
+      "ema_3_19_ai",
+      "futoi",
+      "news_state",
+      "macro_state",
+      "allowed_evidence_refs"
+    ],
+    "flowise_may_only_select_or_interpret": [
+      "final_bias",
+      "trade_state",
+      "confidence",
+      "target_references",
+      "invalidation_reference",
+      "scenario",
+      "reason",
+      "evidence_refs"
+    ]
+  },
+  "output_contract": {
+    "exact_fields": [
+      "final_bias",
+      "trade_state",
+      "confidence",
+      "target_references",
+      "invalidation_reference",
+      "scenario",
+      "reason",
+      "evidence_refs"
+    ],
+    "final_bias_allowed": [
+      "BULLISH_USD",
+      "NEUTRAL",
+      "BEARISH_USD"
+    ],
+    "decision_engine_trade_state_allowed": [
+      "WAIT",
+      "ENTER",
+      "HOLD",
+      "ADD",
+      "REDUCE",
+      "EXIT"
+    ],
+    "stage_11_shadow_trade_state_allowed": [
+      "WAIT",
+      "ENTER"
+    ],
+    "stage_11_runtime_enforced": true,
+    "price_anchor_allowed": [
+      "LOWER_BOUND",
+      "CENTER",
+      "UPPER_BOUND"
+    ],
+    "numeric_level_output_forbidden": true,
+    "target_reference_shape": {
+      "level_id": "existing active level_id",
+      "price_anchor": "LOWER_BOUND|CENTER|UPPER_BOUND"
+    },
+    "invalidation_reference_shape": "same_as_target_reference_or_null",
+    "evidence_refs": "non_empty_unique_subset_of_input.output_contract.allowed_evidence_refs",
+    "scenario_language": "Russian",
+    "reason_language": "Russian"
+  },
+  "decision_rules": [
+    "If factual support is insufficient, choose WAIT.",
+    "Never create, estimate or modify price levels.",
+    "Never rewrite deterministic level interaction states.",
+    "Never cite a signal or source whose usable flag is false.",
+    "BREAKOUT, RETEST_PENDING or RETEST alone cannot justify ENTER.",
+    "ENTER requires at least one structurally confirmed active-level evidence reference and target plus invalidation references to existing active levels.",
+    "News and macro may change interpretation but cannot overwrite technical facts.",
+    "FUTOI is participant positioning only and must not be described as open interest.",
+    "For Stage 11 shadow pilot do not emit HOLD, ADD, REDUCE or EXIT because explicit live position context is not supplied yet.",
+    "The Python Stage 11 runtime guard rewrites the advertised trade_state_allowed set to WAIT/ENTER and rejects any other returned trade_state before persistence.",
+    "Return JSON only, with exactly the eight output fields."
+  ],
+  "runtime_boundary": {
+    "shadow_only": true,
+    "stage_11_trade_state_guard_enabled": true,
+    "alert_delivery": false,
+    "broker_action": false,
+    "order_placement": false,
+    "autonomous_trading": false,
+    "server_apply_proven_by_this_contract": false,
+    "flowise_applied_state_proven_by_this_contract": false
+  }
+}
