@@ -223,7 +223,7 @@ def test_live_pipeline_rejects_future_cluster_history_before_agent_call(tmp_path
         called = True
         return _classifier_agent(payload)
 
-    with pytest.raises(ClassifierOutputError, match="cluster_history may not contain future entries"):
+    with pytest.raises(ClassifierOutputError, match="cluster history may not be available after as_of_timestamp"):
         run_live_official_news_pipeline(
             classifier_agent=classifier_agent,
             registry_path=registry,
