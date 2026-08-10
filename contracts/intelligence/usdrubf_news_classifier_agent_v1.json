@@ -9,6 +9,7 @@
     "cluster_builder": "src/moex_research/intelligence/usdrubf_news_macro.py::process_news_batch",
     "live_pipeline": "src/moex_research/intelligence/usdrubf_news_live_pipeline.py::run_live_official_news_pipeline",
     "stage12b3_guard": "src/moex_research/intelligence/usdrubf_news_classifier_agent.py::stage12b3_news_classifier",
+    "flowise_transport_adapter": "src/moex_research/intelligence/usdrubf_news_classifier_transport.py::news_classifier_flowise_agent_from_env",
     "downstream_news_event_validator": "src/moex_research/intelligence/usdrubf_news_macro.py::_validate_news_output",
     "live_pipeline_classifier_argument": "classifier_agent",
     "live_pipeline_guard_enforced": true,
@@ -22,6 +23,23 @@
     "temperature_max": 0.2,
     "temperature_recommended": 0.1,
     "applied_state_claimed": false
+  },
+  "transport_contract": {
+    "kind": "FLOWISE_JSON_OVER_HTTPS",
+    "shared_adapter": "src/moex_research/intelligence/usdrubf_news_macro_runtime.py::FlowiseJsonAdapter",
+    "endpoint_committed": false,
+    "endpoint_guessing_forbidden": true,
+    "dotenv_loading_inside_adapter": false,
+    "canonical_dotenv_load_owned_by_caller": true,
+    "required_env": [
+      "MOEX_RUB_INTELLIGENCE_NEWS_CLASSIFIER_FLOWISE_ENDPOINT",
+      "MOEX_RUB_INTELLIGENCE_NEWS_CLASSIFIER_FLOWISE_REQUEST_FIELD",
+      "MOEX_RUB_INTELLIGENCE_NEWS_CLASSIFIER_FLOWISE_RESPONSE_FIELD",
+      "MOEX_RUB_INTELLIGENCE_NEWS_CLASSIFIER_FLOWISE_TIMEOUT_SECONDS"
+    ],
+    "endpoint_scheme_required": "https",
+    "request_payload_rule": "The complete bounded classifier payload is serialized as JSON text into the configured request field.",
+    "response_payload_rule": "The configured response field must contain or decode to one JSON mapping; Stage 12B.3 validates the exact nine-field classifier output afterward."
   },
   "input_contract": {
     "required_top_level_fields": [
