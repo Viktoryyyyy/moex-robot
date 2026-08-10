@@ -1,6 +1,6 @@
 # USDRUBF RUB Intelligence Decision Agent Prompt v1
 
-status: source_for_flowise_applied_state
+status: flowise_applied_state_verified
 contract: `contracts/intelligence/usdrubf_flowise_decision_agent_v1.json`
 flow_name: `usdrubf-rub-intelligence-decision-v1`
 
