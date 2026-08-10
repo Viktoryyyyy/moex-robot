@@ -14,16 +14,25 @@ def _contract() -> dict[str, object]:
     return json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
 
 
-def test_news_classifier_contract_is_bounded_and_not_applied_state() -> None:
+def test_news_classifier_contract_is_bounded_and_applied_state_verified() -> None:
     contract = _contract()
     assert contract["project"] == "MOEX_Bot"
     assert contract["instrument"] == "USDRUBF"
-    assert contract["status"] == "design_contract_for_classifier_applied_state"
+    assert contract["status"] == "flowise_applied_state_verified"
     target = contract["flow_target"]
+    assert target["flow_id"] == "69b38496-7013-4474-be6c-7dce43177b95"
     assert target["persistent_memory"] is False
+    assert target["llm_memory"] is False
     assert target["tools"] == []
     assert target["external_fact_retrieval"] is False
-    assert target["applied_state_claimed"] is False
+    assert target["applied_state_claimed"] is True
+    assert target["model_provider"] == "Deepseek"
+    assert target["model_name"] == "deepseek-chat"
+    assert target["temperature_applied"] == 0.1
+    assert target["streaming"] is False
+    assert target["thinking"] is False
+    assert target["json_structured_output"] is False
+    assert target["authorization"] == "NONE"
     assert target["temperature_max"] <= 0.2
 
 
@@ -36,7 +45,7 @@ def test_news_classifier_contract_enforces_live_guard_composition() -> None:
     assert runtime["live_pipeline"].endswith("::run_live_official_news_pipeline")
 
 
-def test_news_classifier_transport_is_env_bound_and_not_applied_state() -> None:
+def test_news_classifier_transport_records_verified_applied_state() -> None:
     contract = _contract()
     runtime = contract["source_runtime"]
     transport = contract["transport_contract"]
@@ -48,7 +57,14 @@ def test_news_classifier_transport_is_env_bound_and_not_applied_state() -> None:
     }
     assert runtime["flowise_transport_adapter"].endswith("::news_classifier_flowise_agent_from_env")
     assert transport["kind"] == "FLOWISE_JSON_OVER_HTTPS"
-    assert transport["endpoint_committed"] is False
+    assert transport["endpoint"] == (
+        "https://flowise.foods-tech.store/api/v1/prediction/"
+        "69b38496-7013-4474-be6c-7dce43177b95"
+    )
+    assert transport["endpoint_committed"] is True
+    assert transport["authorization"] == "NONE"
+    assert transport["request_field"] == "question"
+    assert transport["response_field"] == "text"
     assert transport["endpoint_guessing_forbidden"] is True
     assert transport["dotenv_loading_inside_adapter"] is False
     assert transport["canonical_dotenv_load_owned_by_caller"] is True
@@ -58,7 +74,11 @@ def test_news_classifier_transport_is_env_bound_and_not_applied_state() -> None:
     env_example = ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
     for name in expected_env:
         assert f"{name}=" in env_example
-    assert "MOEX_RUB_INTELLIGENCE_NEWS_CLASSIFIER_FLOWISE_ENDPOINT=\n" in env_example
+    assert (
+        "MOEX_RUB_INTELLIGENCE_NEWS_CLASSIFIER_FLOWISE_ENDPOINT="
+        "https://flowise.foods-tech.store/api/v1/prediction/"
+        "69b38496-7013-4474-be6c-7dce43177b95\n"
+    ) in env_example
 
 
 def test_news_classifier_contract_freezes_exact_input_and_output_fields() -> None:
