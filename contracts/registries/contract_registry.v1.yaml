@@ -69,6 +69,30 @@ contracts:
     authority: Raw 5-minute futures OHLCV dataset contract; authoritative for raw 5m schema and semantics.
     duplicate_overlap_notes: YAML is authoritative; futures_raw_5m_contract.md is a companion narrative and must defer to this YAML.
 
+  - contract_id: forts_raw_5m_tradestats.v1
+    canonical_path: contracts/datasets/forts_raw_5m_tradestats.v1.yaml
+    version: v1
+    scope: datasets
+    status: target_declaration
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs: UNKNOWN / NOT PROVEN
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Authoritative FORTS raw 5m tradestats dataset contract; authoritative for FORTS raw 5m tradestats schema, materialization, incremental refresh and readiness semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
+  - contract_id: forts_raw_5m_multi_instrument_onboarding.v1
+    canonical_path: contracts/datasets/forts_raw_5m_multi_instrument_onboarding.v1.yaml
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs: UNKNOWN / NOT PROVEN
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Authoritative FORTS raw 5m multi-instrument onboarding contract; authoritative for per-instrument onboarding sequence, pointer strategy and production scheduler policy for FORTS raw 5m tradestats.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
   - contract_id: futures_continuous_5m.v1
     canonical_path: contracts/datasets/futures_continuous_5m.v1.yaml
     version: v1
