@@ -6,6 +6,10 @@ from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
 from urllib.request import urlopen
 
+from .usdrubf_news_classifier_agent import (
+    ClassifierAgent,
+    stage12b3_news_classifier,
+)
 from .usdrubf_news_live_rss import (
     FIRST_SLICE_SOURCE_IDS,
     SOURCE_REGISTRY_PATH,
@@ -13,9 +17,6 @@ from .usdrubf_news_live_rss import (
     fetch_official_rss_batch,
 )
 from .usdrubf_news_macro import NewsPipelineResult, process_news_batch
-
-
-Classifier = Callable[[Mapping[str, object]], Mapping[str, object]]
 
 
 @dataclass(frozen=True)
@@ -43,7 +44,7 @@ def _aware_datetime(value: datetime, field: str) -> datetime:
 
 def run_live_official_news_pipeline(
     *,
-    classifier: Classifier,
+    classifier_agent: ClassifierAgent,
     registry_path: Path | str = SOURCE_REGISTRY_PATH,
     source_ids: Iterable[str] = FIRST_SLICE_SOURCE_IDS,
     opener: Callable[..., object] = urlopen,
@@ -54,17 +55,21 @@ def run_live_official_news_pipeline(
     prior_event_history: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
     similarity_threshold: float = 0.72,
 ) -> LiveNewsPipelineResult:
-    """Acquire official RSS records and feed healthy records into News Pipeline.
+    """Acquire official RSS records and run the bounded Stage 12B.3 classifier path.
 
-    The classifier is an explicit caller-supplied boundary. This function does
-    not provide an LLM, Flowise endpoint, heuristic news interpretation, or
-    fallback classifier. Acquisition failures remain visible in the returned
-    RssBatchResult while healthy records continue through the existing bounded
-    process_news_batch() path.
+    The caller supplies only the external classifier transport/callable. This live
+    composition always wraps it with stage12b3_news_classifier() before any
+    cluster reaches process_news_batch(), so callers cannot accidentally bypass
+    the Stage 12B.3 PIT/input/output guard through this API.
+
+    This function still provides no LLM, Flowise endpoint, heuristic news
+    interpretation, fallback classifier, scheduler, alerting, or trading action.
+    Acquisition failures remain visible while healthy records continue through
+    the existing deterministic News Pipeline.
     """
 
-    if not callable(classifier):
-        raise ValueError("classifier must be callable")
+    if not callable(classifier_agent):
+        raise ValueError("classifier_agent must be callable")
 
     now = _aware_datetime(
         (now_fn or (lambda: datetime.now(timezone.utc)))(),
@@ -82,10 +87,11 @@ def run_live_official_news_pipeline(
         timeout_seconds=timeout_seconds,
     )
 
+    bounded_classifier = stage12b3_news_classifier(classifier_agent)
     news = process_news_batch(
         acquisition.records,
         as_of_timestamp=as_of,
-        classifier=classifier,
+        classifier=bounded_classifier,
         prior_clusters=prior_clusters,
         prior_event_history=prior_event_history,
         similarity_threshold=similarity_threshold,
