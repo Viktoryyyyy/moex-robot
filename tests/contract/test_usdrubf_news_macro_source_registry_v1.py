@@ -156,6 +156,21 @@ def test_x_whitelist_has_official_wire_squawk_and_osint_classes() -> None:
     assert all(item["url"].startswith("https://x.com/") for item in x_sources)
 
 
+def test_x_confirmation_allowlist_uses_declared_source_classes() -> None:
+    contract = _load_contract()
+    x_policy = contract["x_policy"]
+    declared_classes = set(contract["source_classes"])
+    allowed = set(x_policy["confirmation_sources_allowed"])
+    assert allowed == {
+        "OFFICIAL_PRIMARY",
+        "OFFICIAL_SECONDARY",
+        "MAJOR_AGENCY_OR_FINANCIAL_MEDIA",
+    }
+    assert allowed <= declared_classes
+    assert x_policy["major_agency_confirmation_requires_approved_route_and_rights"] is True
+    assert "approved acquisition route and rights policy" in contract["confirmation_policy"]["major_agency"]
+
+
 def test_x_reposts_never_become_independent_confirmation() -> None:
     contract = _load_contract()
     x_policy = contract["x_policy"]
