@@ -6,7 +6,8 @@ import os
 from pathlib import Path
 from typing import Mapping
 
-from src.api.futures.fo_feed_intraday import load_fo_5m_day
+from dotenv import load_dotenv
+
 from src.moex_research.intelligence.usdrubf_live_shadow_bridge import (
     MOSCOW,
     SECID_KEY,
@@ -25,6 +26,11 @@ from src.moex_research.intelligence.usdrubf_shadow_runtime import ShadowJsonStor
 
 PROJECT = "MOEX_Bot"
 MODE = "short_live_shadow_input_bridge"
+PROJECT_ENV_PATH = Path(__file__).resolve().parents[3] / ".env"
+
+
+def _load_project_env() -> None:
+    load_dotenv(PROJECT_ENV_PATH, override=False)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -72,6 +78,9 @@ def _decision_agent(args: argparse.Namespace):
 
 
 def _load_bars(secid: str, trade_date):
+    _load_project_env()
+    from src.api.futures.fo_feed_intraday import load_fo_5m_day
+
     return load_fo_5m_day(secid=secid, trade_date=trade_date)
 
 
@@ -169,6 +178,7 @@ def _print_result(result: Mapping[str, object]) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _load_project_env()
     args = _parser().parse_args(argv)
     try:
         result = run_once(args)

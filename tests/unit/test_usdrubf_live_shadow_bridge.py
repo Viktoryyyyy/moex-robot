@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import builtins
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
@@ -190,6 +191,34 @@ def test_blocked_futoi_context_is_explicit() -> None:
     )
     assert context.quality_status == "BLOCKED"
     assert context.details == {"reason": "not enabled"}
+
+
+def test_runner_loads_project_dotenv_before_moex_feed_import(monkeypatch) -> None:
+    events = []
+    trade_day = date(2026, 8, 10)
+
+    def fake_load_dotenv(path, override=False):
+        events.append(("dotenv", path, override))
+        return True
+
+    real_import = builtins.__import__
+
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "src.api.futures.fo_feed_intraday":
+            events.append(("import", name))
+            return SimpleNamespace(
+                load_fo_5m_day=lambda secid, trade_date: (secid, trade_date)
+            )
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(runner, "load_dotenv", fake_load_dotenv)
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    result = runner._load_bars("Si", trade_day)
+
+    assert events[0] == ("dotenv", runner.PROJECT_ENV_PATH, False)
+    assert events[1] == ("import", "src.api.futures.fo_feed_intraday")
+    assert result == ("Si", trade_day)
 
 
 def test_runner_requires_explicit_flowise_config_without_safe_wait() -> None:
