@@ -438,6 +438,42 @@ contracts:
     authority: Authoritative derived higher-timeframe futures OHLCV dataset contract; authoritative for the derived timeframe OHLCV schema, allowed_timeframes (10m, 15m, 30m, 1h, 4h, 1D, 1W), parent dataset dependency (futures_ohlcv_5m.v1) and parent-manifest-required semantics (producer moex_data.futures.resampling).
     duplicate_overlap_notes: UNKNOWN / NOT PROVEN
 
+  - contract_id: futures_calendar_session.v1
+    canonical_path: contracts/datasets/futures_calendar_session.v1.yaml
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs: UNKNOWN / NOT PROVEN
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Authoritative MOEX/ISS futures calendar and session resolver contract; authoritative for futures calendar/session resolution semantics (market FORTS, board RFUD, timezone Europe/Moscow, session rules, resolver constraints, path rules).
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
+  - contract_id: moex_futures_session_calendar.v1
+    canonical_path: contracts/datasets/moex_futures_session_calendar_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs: UNKNOWN / NOT PROVEN
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Canonical MOEX futures trading-day and session-calendar binding contract for data validation, roll-window logic, and on-demand higher-timeframe resampling from futures_continuous_5m.v1; authoritative for futures session-calendar schema and semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
+  - contract_id: futures_roll_expiry_mapping.v1
+    canonical_path: contracts/datasets/futures_roll_expiry_mapping.v1.yaml
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs: UNKNOWN / NOT PROVEN
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Design-only roll/expiry mapping contract for future USDRUBF / Si daily phase research alignment; authoritative for roll/expiry mapping schema and point-in-time semantics. Does not register a dataset and does not create or update any runtime mapping.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
   # ---------------------------------------------------------------------------
   # Calendars
   # ---------------------------------------------------------------------------
