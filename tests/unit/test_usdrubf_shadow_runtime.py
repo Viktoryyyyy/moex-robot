@@ -129,6 +129,7 @@ def _inputs(
     *,
     resistance_state: str = "BREAKOUT",
     resistance_previous_state: str = "BREAKOUT_ATTEMPT",
+    signal_details: bool = True,
 ) -> DecisionInput:
     return DecisionInput(
         as_of_timestamp=as_of,
@@ -155,14 +156,16 @@ def _inputs(
             available_at=as_of,
             direction="BULLISH_USD",
             confidence=0.8,
-            details={"target_position": 1},
+            details={"target_position": 1} if signal_details else None,
         ),
         futoi=DirectionalContext(
             source_id="futoi",
             available_at=as_of,
             direction="BULLISH_USD",
             confidence=0.6,
-            details={"interpretation": "participant_positioning_only"},
+            details={"interpretation": "participant_positioning_only"}
+            if signal_details
+            else None,
         ),
         news_events=(_news(as_of),),
         macro_state=_macro(as_of),
@@ -270,6 +273,21 @@ def test_store_restores_market_state_across_runtime_instance_restart(tmp_path) -
     assert second.change_detection.current_as_of_timestamp == T2.isoformat()
 
 
+def test_directional_context_none_details_survive_restart_restore(tmp_path) -> None:
+    first_runtime = ShadowRuntime(ShadowJsonStore(tmp_path))
+    first_runtime.run_cycle(
+        _inputs(T1, signal_details=False),
+        decision_agent=lambda _payload: _wait_decision(),
+    )
+
+    restarted_store = ShadowJsonStore(tmp_path)
+    restored = restarted_store.load_market_state()
+
+    assert restored is not None
+    assert restored.ema_3_19_ai.details is None
+    assert restored.futoi.details is None
+
+
 def test_tampered_numeric_target_price_fails_closed_on_restore(tmp_path) -> None:
     store = ShadowJsonStore(tmp_path)
     runtime = ShadowRuntime(store)
@@ -288,6 +306,41 @@ def test_tampered_numeric_target_price_fails_closed_on_restore(tmp_path) -> None
     path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(ShadowRuntimeError, match="deterministic level anchor"):
+        store.load_market_state()
+
+
+def test_tampered_enter_without_risk_references_fails_closed_on_restore(tmp_path) -> None:
+    store = ShadowJsonStore(tmp_path)
+    ShadowRuntime(store).run_cycle(
+        _inputs(T1),
+        decision_agent=lambda _payload: _wait_decision(),
+    )
+
+    path = tmp_path / "market_state.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["trade_state"] = "ENTER"
+    payload["final_bias"] = "BULLISH_USD"
+    payload["targets"] = []
+    payload["invalidation"] = None
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ShadowRuntimeError, match="persisted ENTER requires target"):
+        store.load_market_state()
+
+
+def test_tampered_evidence_reference_fails_closed_on_restore(tmp_path) -> None:
+    store = ShadowJsonStore(tmp_path)
+    ShadowRuntime(store).run_cycle(
+        _inputs(T1),
+        decision_agent=lambda _payload: _wait_decision(),
+    )
+
+    path = tmp_path / "market_state.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["evidence_refs"] = ["level:invented"]
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ShadowRuntimeError, match="unavailable facts"):
         store.load_market_state()
 
 
