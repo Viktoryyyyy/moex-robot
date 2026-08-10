@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from hashlib import sha256
 import json
 from math import isclose, isfinite
 from pathlib import Path
@@ -25,6 +26,25 @@ _ALLOWED_FINAL_BIAS = {"BULLISH_USD", "NEUTRAL", "BEARISH_USD"}
 _ALLOWED_TRADE_STATES = {"WAIT", "ENTER", "HOLD", "ADD", "REDUCE", "EXIT"}
 _ALLOWED_PRICE_ANCHORS = {"LOWER_BOUND", "CENTER", "UPPER_BOUND"}
 _PENDING_CONFIRMATION_STATES = {"BREAKOUT", "RETEST_PENDING", "RETEST"}
+_ALLOWED_NEWS_TIERS = {
+    "OFFICIAL_PRIMARY",
+    "OFFICIAL_SECONDARY",
+    "MAJOR_AGENCY_OR_FINANCIAL_MEDIA",
+}
+_ALLOWED_NEWS_DIRECTIONS = {"USD_BULLISH", "USD_BEARISH", "NEUTRAL", "MIXED"}
+_ALLOWED_NEWS_IMPORTANCE = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
+_ALLOWED_NEWS_NOVELTY = {"NEW", "UPDATE", "REPEAT", "STALE"}
+_ALLOWED_NEWS_HORIZONS = {"INTRADAY", "SHORT_TERM", "MEDIUM_TERM", "LONG_TERM"}
+_ALLOWED_NEWS_QUALITY = {
+    "OK",
+    "SOURCE_UNAVAILABLE",
+    "TIMESTAMP_UNPROVABLE",
+    "DUPLICATE",
+    "CLASSIFICATION_FAILED",
+    "STALE",
+}
+_ALLOWED_MACRO_DIRECTIONS = _ALLOWED_NEWS_DIRECTIONS
+_POINTER_VERSION = 1
 
 
 class ShadowRuntimeError(ValueError):
@@ -56,6 +76,32 @@ def _number(value: object, field: str) -> float:
     if not isfinite(numeric):
         raise ShadowRuntimeError(f"{field} must be finite")
     return numeric
+
+
+def _probability(value: object, field: str) -> float:
+    numeric = _number(value, field)
+    if not 0.0 <= numeric <= 1.0:
+        raise ShadowRuntimeError(f"{field} must be within 0..1")
+    return numeric
+
+
+def _aware_datetime(value: object, field: str) -> datetime:
+    raw = _text(value, field)
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise ShadowRuntimeError(f"{field} must be ISO datetime") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ShadowRuntimeError(f"{field} must be timezone-aware")
+    return parsed
+
+
+def _plain_json_basename(value: object, field: str) -> str:
+    name = _text(value, field)
+    path = Path(name)
+    if path.name != name or name in {".", ".."} or path.suffix != ".json":
+        raise ShadowRuntimeError(f"{field} must be a plain .json basename")
+    return name
 
 
 def _level_reference_from_mapping(
@@ -94,38 +140,65 @@ def _directional_context(raw: object, field: str) -> DirectionalContext:
         source_id=_text(item.get("source_id"), f"{field}.source_id"),
         available_at=item.get("available_at"),
         direction=_text(item.get("direction"), f"{field}.direction"),
-        confidence=_number(item.get("confidence"), f"{field}.confidence"),
+        confidence=_probability(item.get("confidence"), f"{field}.confidence"),
         quality_status=_text(item.get("quality_status"), f"{field}.quality_status"),
         details=details,
     )
 
 
 def _news_event(raw: object, index: int) -> NewsEvent:
-    item = _mapping(raw, f"news_state[{index}]")
+    field = f"news_state[{index}]"
+    item = _mapping(raw, field)
+    source_tier = _text(item.get("source_tier"), f"{field}.source_tier")
+    direction = _text(item.get("direction"), f"{field}.direction")
+    importance = _text(item.get("importance"), f"{field}.importance")
+    novelty = _text(item.get("novelty"), f"{field}.novelty")
+    horizon = _text(item.get("horizon"), f"{field}.horizon")
+    quality = _text(item.get("quality_status"), f"{field}.quality_status")
+    if source_tier not in _ALLOWED_NEWS_TIERS:
+        raise ShadowRuntimeError(f"invalid {field}.source_tier")
+    if direction not in _ALLOWED_NEWS_DIRECTIONS:
+        raise ShadowRuntimeError(f"invalid {field}.direction")
+    if importance not in _ALLOWED_NEWS_IMPORTANCE:
+        raise ShadowRuntimeError(f"invalid {field}.importance")
+    if novelty not in _ALLOWED_NEWS_NOVELTY:
+        raise ShadowRuntimeError(f"invalid {field}.novelty")
+    if horizon not in _ALLOWED_NEWS_HORIZONS:
+        raise ShadowRuntimeError(f"invalid {field}.horizon")
+    if quality not in _ALLOWED_NEWS_QUALITY:
+        raise ShadowRuntimeError(f"invalid {field}.quality_status")
+    published = _aware_datetime(item.get("published_at"), f"{field}.published_at")
+    available = _aware_datetime(item.get("available_at"), f"{field}.available_at")
+    ingested = _aware_datetime(item.get("ingested_at"), f"{field}.ingested_at")
+    if published > available or available > ingested:
+        raise ShadowRuntimeError(f"invalid {field} timestamp ordering")
+    content_hash = _text(item.get("content_hash"), f"{field}.content_hash")
+    if len(content_hash) != 64 or any(ch not in "0123456789abcdef" for ch in content_hash):
+        raise ShadowRuntimeError(f"invalid {field}.content_hash")
     entities = tuple(
-        _text(value, f"news_state[{index}].entities")
-        for value in _sequence(item.get("entities", ()), f"news_state[{index}].entities")
+        _text(value, f"{field}.entities")
+        for value in _sequence(item.get("entities", ()), f"{field}.entities")
     )
     return NewsEvent(
-        event_id=_text(item.get("event_id"), "event_id"),
-        cluster_id=_text(item.get("cluster_id"), "cluster_id"),
-        source_id=_text(item.get("source_id"), "source_id"),
-        source_tier=_text(item.get("source_tier"), "source_tier"),
-        source_reference=_text(item.get("source_reference"), "source_reference"),
-        published_at=_text(item.get("published_at"), "published_at"),
-        available_at=_text(item.get("available_at"), "available_at"),
-        ingested_at=_text(item.get("ingested_at"), "ingested_at"),
-        content_hash=_text(item.get("content_hash"), "content_hash"),
-        event_type=_text(item.get("event_type"), "event_type"),
+        event_id=_text(item.get("event_id"), f"{field}.event_id"),
+        cluster_id=_text(item.get("cluster_id"), f"{field}.cluster_id"),
+        source_id=_text(item.get("source_id"), f"{field}.source_id"),
+        source_tier=source_tier,
+        source_reference=_text(item.get("source_reference"), f"{field}.source_reference"),
+        published_at=published.isoformat(),
+        available_at=available.isoformat(),
+        ingested_at=ingested.isoformat(),
+        content_hash=content_hash,
+        event_type=_text(item.get("event_type"), f"{field}.event_type"),
         entities=entities,
-        rub_relevance=_number(item.get("rub_relevance"), "rub_relevance"),
-        direction=_text(item.get("direction"), "direction"),
-        importance=_text(item.get("importance"), "importance"),
-        novelty=_text(item.get("novelty"), "novelty"),
-        horizon=_text(item.get("horizon"), "horizon"),
-        confidence=_number(item.get("confidence"), "confidence"),
-        mechanism=_text(item.get("mechanism"), "mechanism"),
-        quality_status=_text(item.get("quality_status"), "quality_status"),
+        rub_relevance=_probability(item.get("rub_relevance"), f"{field}.rub_relevance"),
+        direction=direction,
+        importance=importance,
+        novelty=novelty,
+        horizon=horizon,
+        confidence=_probability(item.get("confidence"), f"{field}.confidence"),
+        mechanism=_text(item.get("mechanism"), f"{field}.mechanism"),
+        quality_status=quality,
     )
 
 
@@ -154,15 +227,23 @@ def _macro_state(raw: object) -> MacroState:
                 quality_status=_text(observation.get("quality_status"), "quality_status"),
             )
         )
+    overall_direction = _text(item.get("overall_direction"), "macro_state.overall_direction")
+    if overall_direction not in _ALLOWED_MACRO_DIRECTIONS:
+        raise ShadowRuntimeError("invalid macro_state.overall_direction")
     dominant_drivers = tuple(
         _text(value, "macro_state.dominant_drivers")
         for value in _sequence(item.get("dominant_drivers", ()), "macro_state.dominant_drivers")
     )
+    usable_metrics = {obs.metric_id for obs in observations if obs.quality_status == "OK"}
+    if not set(dominant_drivers).issubset(usable_metrics):
+        raise ShadowRuntimeError("macro_state.dominant_drivers reference unavailable metrics")
     return MacroState(
-        as_of_timestamp=_text(item.get("as_of_timestamp"), "macro_state.as_of_timestamp"),
+        as_of_timestamp=_aware_datetime(
+            item.get("as_of_timestamp"), "macro_state.as_of_timestamp"
+        ).isoformat(),
         observations=tuple(observations),
-        overall_direction=_text(item.get("overall_direction"), "macro_state.overall_direction"),
-        confidence=_number(item.get("confidence"), "macro_state.confidence"),
+        overall_direction=overall_direction,
+        confidence=_probability(item.get("confidence"), "macro_state.confidence"),
         dominant_drivers=dominant_drivers,
     )
 
@@ -194,6 +275,9 @@ def _validate_persisted_decision_fields(
     invalidation: ResolvedLevelReference | None,
     evidence_refs: tuple[str, ...],
 ) -> None:
+    target_keys = tuple((item.level_id, item.price_anchor) for item in targets)
+    if len(target_keys) != len(set(target_keys)):
+        raise ShadowRuntimeError("persisted target references must be unique")
     if trade_state in {"ENTER", "ADD"} and not targets:
         raise ShadowRuntimeError(f"persisted {trade_state} requires target references")
     if trade_state in {"ENTER", "ADD", "HOLD"} and invalidation is None:
@@ -225,7 +309,7 @@ def _validate_persisted_decision_fields(
 
 
 def market_state_from_dict(raw: object) -> DecisionMarketState:
-    """Restore one persisted state and revalidate deterministic and bounded decision fields."""
+    """Restore a persisted state and revalidate factual and decision invariants."""
 
     item = _mapping(raw, "market_state")
     required = {
@@ -283,7 +367,9 @@ def market_state_from_dict(raw: object) -> DecisionMarketState:
             news_events=news,
             macro_state=macro,
         )
-    except (DecisionEngineError, TypeError, ValueError) as exc:
+    except (DecisionEngineError, ShadowRuntimeError, TypeError, ValueError) as exc:
+        if isinstance(exc, ShadowRuntimeError):
+            raise
         raise ShadowRuntimeError("persisted MarketState factual inputs are invalid") from exc
 
     levels_by_id = {level.level_id: level for level in levels}
@@ -306,13 +392,11 @@ def market_state_from_dict(raw: object) -> DecisionMarketState:
     )
     final_bias = _text(item["final_bias"], "final_bias")
     trade_state = _text(item["trade_state"], "trade_state")
-    confidence = _number(item["confidence"], "confidence")
+    confidence = _probability(item["confidence"], "confidence")
     if final_bias not in _ALLOWED_FINAL_BIAS:
         raise ShadowRuntimeError("invalid persisted final_bias")
     if trade_state not in _ALLOWED_TRADE_STATES:
         raise ShadowRuntimeError("invalid persisted trade_state")
-    if not 0.0 <= confidence <= 1.0:
-        raise ShadowRuntimeError("invalid persisted confidence")
     evidence_refs = tuple(
         _text(value, "evidence_ref")
         for value in _sequence(item["evidence_refs"], "evidence_refs")
@@ -348,8 +432,15 @@ def market_state_from_dict(raw: object) -> DecisionMarketState:
     )
 
 
+@dataclass(frozen=True)
+class _CyclePointer:
+    current_as_of_timestamp: str
+    market_state_file: str
+    change_detection_file: str
+
+
 class ShadowJsonStore:
-    """Restart-safe snapshots under an explicit caller root."""
+    """Restart-safe generation snapshots committed by one atomic pointer update."""
 
     def __init__(
         self,
@@ -357,21 +448,16 @@ class ShadowJsonStore:
         *,
         market_state_filename: str = "market_state.json",
         change_filename: str = "change_detection.json",
+        pointer_filename: str = "current_cycle.json",
     ) -> None:
         self.root = Path(root)
-        self.market_state_filename = self._basename(market_state_filename)
-        self.change_filename = self._basename(change_filename)
-        if self.market_state_filename == self.change_filename:
-            raise ShadowRuntimeError("shadow snapshot filenames must be distinct")
-
-    @staticmethod
-    def _basename(value: str) -> str:
-        if not isinstance(value, str) or not value.strip():
-            raise ShadowRuntimeError("snapshot filename must be a plain basename")
-        path = Path(value)
-        if path.name != value or value in {".", ".."}:
-            raise ShadowRuntimeError("snapshot filename must be a plain basename")
-        return value
+        self.market_state_filename = _plain_json_basename(
+            market_state_filename, "market_state_filename"
+        )
+        self.change_filename = _plain_json_basename(change_filename, "change_filename")
+        self.pointer_filename = _plain_json_basename(pointer_filename, "pointer_filename")
+        if len({self.market_state_filename, self.change_filename, self.pointer_filename}) != 3:
+            raise ShadowRuntimeError("shadow snapshot basenames must be distinct")
 
     def _path(self, filename: str) -> Path:
         return self.root / filename
@@ -406,24 +492,102 @@ class ShadowJsonStore:
             raise
         return target
 
-    def load_market_state(self) -> DecisionMarketState | None:
-        path = self._path(self.market_state_filename)
+    def _read_json_file(self, filename: str, field: str) -> object:
+        safe_name = _plain_json_basename(filename, field)
+        path = self._path(safe_name)
+        if path.is_symlink() or not path.is_file():
+            raise ShadowRuntimeError(f"{field} is not a regular non-symlink file")
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ShadowRuntimeError(f"{field} is unreadable or invalid JSON") from exc
+
+    @staticmethod
+    def _generation_filename(base: str, cycle_id: str) -> str:
+        path = Path(base)
+        return f"{path.stem}.{cycle_id}{path.suffix}"
+
+    @staticmethod
+    def _cycle_id(as_of_timestamp: str) -> str:
+        return sha256(as_of_timestamp.encode("utf-8")).hexdigest()[:20]
+
+    def _load_pointer(self) -> _CyclePointer | None:
+        path = self._path(self.pointer_filename)
         if not path.exists():
             return None
-        if path.is_symlink() or not path.is_file():
-            raise ShadowRuntimeError("market state snapshot is not a regular non-symlink file")
-        try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ShadowRuntimeError("market state snapshot is unreadable or invalid JSON") from exc
-        return market_state_from_dict(raw)
+        raw = _mapping(
+            self._read_json_file(self.pointer_filename, "current cycle pointer"),
+            "current cycle pointer",
+        )
+        required = {
+            "version",
+            "current_as_of_timestamp",
+            "market_state_file",
+            "change_detection_file",
+        }
+        if set(raw) != required or raw.get("version") != _POINTER_VERSION:
+            raise ShadowRuntimeError("current cycle pointer field set or version mismatch")
+        current_as_of = _aware_datetime(
+            raw.get("current_as_of_timestamp"), "current cycle pointer timestamp"
+        ).isoformat()
+        market_file = _plain_json_basename(
+            raw.get("market_state_file"), "current cycle market_state_file"
+        )
+        change_file = _plain_json_basename(
+            raw.get("change_detection_file"), "current cycle change_detection_file"
+        )
+        if self.pointer_filename in {market_file, change_file} or market_file == change_file:
+            raise ShadowRuntimeError("current cycle pointer references invalid snapshot files")
+        return _CyclePointer(
+            current_as_of_timestamp=current_as_of,
+            market_state_file=market_file,
+            change_detection_file=change_file,
+        )
 
-    def save_market_state(self, state: DecisionMarketState) -> Path:
-        return self._write_atomic(self.market_state_filename, state.to_dict())
+    def load_market_state(self) -> DecisionMarketState | None:
+        pointer = self._load_pointer()
+        if pointer is None:
+            return None
+        raw = self._read_json_file(pointer.market_state_file, "market state generation")
+        state = market_state_from_dict(raw)
+        if state.as_of_timestamp != pointer.current_as_of_timestamp:
+            raise ShadowRuntimeError("market state generation timestamp does not match pointer")
+        return state
 
-    def save_change_detection(self, result: ChangeDetectionResult | None) -> Path:
-        payload = None if result is None else result.to_dict()
-        return self._write_atomic(self.change_filename, payload)
+    def load_change_detection_raw(self) -> object | None:
+        pointer = self._load_pointer()
+        if pointer is None:
+            return None
+        return self._read_json_file(
+            pointer.change_detection_file, "change detection generation"
+        )
+
+    def commit_cycle(
+        self,
+        state: DecisionMarketState,
+        change_detection: ChangeDetectionResult | None,
+    ) -> tuple[Path, Path]:
+        cycle_id = self._cycle_id(state.as_of_timestamp)
+        state_name = self._generation_filename(self.market_state_filename, cycle_id)
+        change_name = self._generation_filename(self.change_filename, cycle_id)
+
+        state_path = self._write_atomic(state_name, state.to_dict())
+        change_path = self._write_atomic(
+            change_name,
+            None if change_detection is None else change_detection.to_dict(),
+        )
+
+        # Commit point: both immutable generation files exist before pointer replacement.
+        self._write_atomic(
+            self.pointer_filename,
+            {
+                "version": _POINTER_VERSION,
+                "current_as_of_timestamp": state.as_of_timestamp,
+                "market_state_file": state_name,
+                "change_detection_file": change_name,
+            },
+        )
+        return state_path, change_path
 
 
 @dataclass(frozen=True)
@@ -449,11 +613,7 @@ class ShadowRuntime:
         previous = self._store.load_market_state()
         current = build_market_state(inputs, decision_agent=decision_agent)
         changes = None if previous is None else detect_market_state_changes(previous, current)
-
-        # The MarketState snapshot is the restart authority and is committed last.
-        # If the process fails between these writes, restart still reads the prior state.
-        change_detection_path = self._store.save_change_detection(changes)
-        market_state_path = self._store.save_market_state(current)
+        market_state_path, change_detection_path = self._store.commit_cycle(current, changes)
         return ShadowCycleResult(
             market_state=current,
             change_detection=changes,
