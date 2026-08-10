@@ -1,8 +1,8 @@
 # USDRUBF RUB Intelligence News Classifier Prompt v1
 
-status: source_for_future_classifier_applied_state
+status: flowise_applied_state_verified
 contract: `contracts/intelligence/usdrubf_news_classifier_agent_v1.json`
-suggested_flow_name: `usdrubf-rub-intelligence-news-classifier-v1`
+flow_name: `usdrubf-rub-intelligence-news-classifier-v1`
 
 ---
 

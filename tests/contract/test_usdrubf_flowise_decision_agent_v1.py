@@ -18,13 +18,23 @@ def test_contract_identity_and_shadow_boundary() -> None:
     contract = _contract()
     assert contract["project"] == "MOEX_Bot"
     assert contract["instrument"] == "USDRUBF"
-    assert contract["status"] == "design_contract_for_flow_creation"
+    assert contract["status"] == "flowise_applied_state_verified"
 
     flowise = contract["flowise"]
     assert flowise["flow_name"] == "usdrubf-rub-intelligence-decision-v1"
+    assert flowise["flow_id"] == "9ad1f42c-e7f1-44a3-a574-09a7da4ddecf"
+    assert flowise["applied_state_verified"] is True
+    assert flowise["model_provider"] == "Deepseek"
+    assert flowise["model_name"] == "deepseek-chat"
     assert flowise["persistent_memory"] is False
+    assert flowise["llm_memory"] is False
     assert flowise["tools"] == []
     assert flowise["external_fact_fetch"] is False
+    assert flowise["temperature_applied"] == 0.1
+    assert flowise["streaming"] is False
+    assert flowise["thinking"] is False
+    assert flowise["json_structured_output"] is False
+    assert flowise["authorization"] == "BEARER_API_KEY"
 
     boundary = contract["runtime_boundary"]
     assert boundary["shadow_only"] is True
@@ -33,7 +43,8 @@ def test_contract_identity_and_shadow_boundary() -> None:
     assert boundary["broker_action"] is False
     assert boundary["order_placement"] is False
     assert boundary["autonomous_trading"] is False
-    assert boundary["flowise_applied_state_proven_by_this_contract"] is False
+    assert boundary["server_apply_proven_by_this_contract"] is False
+    assert boundary["flowise_applied_state_proven_by_this_contract"] is True
 
 
 def test_contract_matches_bounded_decision_output_shape() -> None:
@@ -69,27 +80,34 @@ def test_contract_matches_bounded_decision_output_shape() -> None:
 
 def test_stage_11_runtime_guard_is_authoritative_for_flowise_path() -> None:
     contract = _contract()
-    assert contract["source_runtime"]["stage_11_runtime_guard"] == (
+    runtime = contract["source_runtime"]
+    assert runtime["stage_11_runtime_guard"] == (
         "src/moex_research/intelligence/usdrubf_flowise_decision_agent.py::"
         "stage11_shadow_decision_agent"
     )
+    assert runtime["bearer_auth_helper"].endswith("::flowise_bearer_opener")
     assert contract["input_contract"]["stage_11_runtime_trade_state_override"] == [
         "WAIT",
         "ENTER",
     ]
 
 
-def test_transport_is_explicit_and_runtime_only() -> None:
+def test_transport_records_verified_authenticated_applied_state() -> None:
     contract = _contract()
     transport = contract["flowise"]["transport"]
-    assert transport["endpoint"] == "runtime_applied_state_only_not_committed"
+    assert transport["endpoint"] == (
+        "https://flowise.foods-tech.store/api/v1/prediction/"
+        "9ad1f42c-e7f1-44a3-a574-09a7da4ddecf"
+    )
     assert transport["request_field"] == "question"
     assert transport["response_field"] == "text"
+    assert transport["authorization_header"] == "Authorization: Bearer <runtime API key>"
     assert transport["environment"] == {
         "endpoint": "MOEX_RUB_INTELLIGENCE_FLOWISE_ENDPOINT",
         "request_field": "MOEX_RUB_INTELLIGENCE_FLOWISE_REQUEST_FIELD",
         "response_field": "MOEX_RUB_INTELLIGENCE_FLOWISE_RESPONSE_FIELD",
         "timeout_seconds": "MOEX_RUB_INTELLIGENCE_FLOWISE_TIMEOUT_SECONDS",
+        "api_key": "MOEX_RUB_INTELLIGENCE_FLOWISE_API_KEY",
     }
 
 
@@ -102,11 +120,20 @@ def test_prompt_is_exact_bounded_source_for_flowise() -> None:
     assert "Не придумывай evidence refs." in persistent
     assert "Верни только один JSON object" in persistent
     assert "Числовую цену не выводить." in persistent
+    assert "## CRITICAL OUTPUT ENFORCEMENT" in persistent
+    assert "отсутствует reasoning" in persistent
+    assert "## LANGUAGE ENFORCEMENT" in persistent
+    assert "`scenario` и `reason` всегда должны быть написаны на русском языке" in persistent
 
 
-def test_env_example_declares_flowise_applied_state_variables_without_endpoint_value() -> None:
+def test_env_example_declares_verified_flowise_applied_state_endpoint_and_secret_name() -> None:
     env_text = ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
-    assert "MOEX_RUB_INTELLIGENCE_FLOWISE_ENDPOINT=\n" in env_text
+    assert (
+        "MOEX_RUB_INTELLIGENCE_FLOWISE_ENDPOINT="
+        "https://flowise.foods-tech.store/api/v1/prediction/"
+        "9ad1f42c-e7f1-44a3-a574-09a7da4ddecf\n"
+    ) in env_text
     assert "MOEX_RUB_INTELLIGENCE_FLOWISE_REQUEST_FIELD=question\n" in env_text
     assert "MOEX_RUB_INTELLIGENCE_FLOWISE_RESPONSE_FIELD=text\n" in env_text
     assert "MOEX_RUB_INTELLIGENCE_FLOWISE_TIMEOUT_SECONDS=20\n" in env_text
+    assert "MOEX_RUB_INTELLIGENCE_FLOWISE_API_KEY=\n" in env_text
