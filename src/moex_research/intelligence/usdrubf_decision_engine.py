@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from math import isfinite
 from typing import Callable, Mapping, Sequence
 
 from .usdrubf_level_structure import InteractionSnapshot, LevelZone
@@ -13,6 +14,7 @@ _ALLOWED_FINAL_BIAS = {"BULLISH_USD", "NEUTRAL", "BEARISH_USD"}
 _ALLOWED_TRADE_STATES = {"WAIT", "ENTER", "HOLD", "ADD", "REDUCE", "EXIT"}
 _ALLOWED_SIGNAL_QUALITY = {"OK", "MISSING", "STALE", "BLOCKED"}
 _ALLOWED_PRICE_ANCHORS = {"LOWER_BOUND", "CENTER", "UPPER_BOUND"}
+_PENDING_CONFIRMATION_STATES = {"BREAKOUT", "RETEST_PENDING", "RETEST"}
 _DECISION_OUTPUT_FIELDS = {
     "final_bias",
     "trade_state",
@@ -52,8 +54,17 @@ def _probability(value: object, field: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise DecisionEngineError(f"{field} must be numeric")
     numeric = float(value)
-    if not 0.0 <= numeric <= 1.0:
+    if not isfinite(numeric) or not 0.0 <= numeric <= 1.0:
         raise DecisionEngineError(f"{field} must be within 0..1")
+    return numeric
+
+
+def _positive_finite(value: object, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise DecisionEngineError(f"{field} must be numeric")
+    numeric = float(value)
+    if not isfinite(numeric) or numeric <= 0.0:
+        raise DecisionEngineError(f"{field} must be a finite positive number")
     return numeric
 
 
@@ -78,8 +89,7 @@ class DirectionalContext:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "source_id", _text(self.source_id, "source_id"))
-        available = _dt(self.available_at, "available_at")
-        object.__setattr__(self, "available_at", available)
+        object.__setattr__(self, "available_at", _dt(self.available_at, "available_at"))
         if self.direction not in _ALLOWED_DIRECTIONS:
             raise DecisionEngineError("invalid directional context direction")
         object.__setattr__(self, "confidence", _probability(self.confidence, "confidence"))
@@ -100,7 +110,7 @@ def ema_context_from_target_position(
     confidence: float = 1.0,
     details: Mapping[str, object] | None = None,
 ) -> DirectionalContext:
-    if target_position not in {-1, 0, 1}:
+    if isinstance(target_position, bool) or target_position not in {-1, 0, 1}:
         raise DecisionEngineError("EMA target_position must be one of -1, 0 or 1")
     direction = {
         1: "BULLISH_USD",
@@ -136,11 +146,7 @@ class DecisionInput:
             raise DecisionEngineError("instrument must be USDRUBF")
         as_of = _dt(self.as_of_timestamp, "as_of_timestamp")
         object.__setattr__(self, "as_of_timestamp", as_of)
-        if isinstance(self.price, bool) or not isinstance(self.price, (int, float)):
-            raise DecisionEngineError("price must be numeric")
-        if float(self.price) <= 0:
-            raise DecisionEngineError("price must be positive")
-        object.__setattr__(self, "price", float(self.price))
+        object.__setattr__(self, "price", _positive_finite(self.price, "price"))
         if self.trend not in _ALLOWED_FINAL_BIAS:
             raise DecisionEngineError("invalid trend")
         object.__setattr__(self, "market_regime", _text(self.market_regime, "market_regime"))
@@ -178,6 +184,10 @@ class DecisionInput:
             ) > as_of:
                 raise DecisionEngineError("level interaction snapshot is in the future")
 
+        if self.ema_3_19_ai.source_id != "ema_3_19_ai":
+            raise DecisionEngineError("ema_3_19_ai context source_id mismatch")
+        if self.futoi.source_id != "futoi":
+            raise DecisionEngineError("futoi context source_id mismatch")
         for signal, label in (
             (self.ema_3_19_ai, "ema_3_19_ai"),
             (self.futoi, "futoi"),
@@ -311,9 +321,7 @@ def build_decision_payload(inputs: DecisionInput) -> dict[str, object]:
         },
         "ema_3_19_ai": _signal_payload(inputs.ema_3_19_ai),
         "futoi": _signal_payload(inputs.futoi),
-        "news_state": {
-            "events": tuple(_news_payload(event) for event in inputs.news_events),
-        },
+        "news_state": {"events": tuple(_news_payload(event) for event in inputs.news_events)},
         "macro_state": _macro_payload(inputs.macro_state),
         "output_contract": {
             "final_bias_allowed": tuple(sorted(_ALLOWED_FINAL_BIAS)),
@@ -322,6 +330,7 @@ def build_decision_payload(inputs: DecisionInput) -> dict[str, object]:
             "numeric_level_creation_forbidden": True,
             "targets_and_invalidation_must_reference_active_level_id": True,
             "technical_level_events_are_read_only": True,
+            "actionable_entry_requires_structural_confirmation": True,
             "allowed_evidence_refs": tuple(sorted(_allowed_evidence_refs(inputs))),
         },
     }
@@ -431,6 +440,23 @@ def _validate_agent_output(
     allowed_refs = _allowed_evidence_refs(inputs)
     if not set(evidence_refs).issubset(allowed_refs):
         raise DecisionEngineError("evidence_refs must reference supplied usable facts")
+
+    if trade_state in {"ENTER", "ADD"}:
+        interaction_by_id = {item.level_id: item for item in inputs.level_interactions}
+        structural_ids = tuple(
+            ref.removeprefix("level:")
+            for ref in evidence_refs
+            if ref.startswith("level:")
+        )
+        if not structural_ids:
+            raise DecisionEngineError(
+                f"{trade_state} requires at least one structural level evidence reference"
+            )
+        structural_states = tuple(interaction_by_id[level_id].state for level_id in structural_ids)
+        if all(state in _PENDING_CONFIRMATION_STATES for state in structural_states):
+            raise DecisionEngineError(
+                f"{trade_state} cannot rely only on unconfirmed breakout or retest state"
+            )
 
     return (
         final_bias,
