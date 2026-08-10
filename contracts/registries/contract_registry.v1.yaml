@@ -474,6 +474,18 @@ contracts:
     authority: Design-only roll/expiry mapping contract for future USDRUBF / Si daily phase research alignment; authoritative for roll/expiry mapping schema and point-in-time semantics. Does not register a dataset and does not create or update any runtime mapping.
     duplicate_overlap_notes: UNKNOWN / NOT PROVEN
 
+  - contract_id: futures_source_contracts.v1
+    canonical_path: contracts/datasets/futures_source_contracts.v1.yaml
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs: UNKNOWN / NOT PROVEN
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Authoritative MOEX source contract declarations for futures historical data core; declares explicit source systems (MOEX_ISS FORTS/RFUD 5m candles, MOEX_APIM_ALGOPACK FORTS/RFUD 5m tradestats, ALGOPACK FUTOI raw) and their output contract refs (futures_ohlcv_5m.v1, futures_futoi_raw.v1), plus path rules forbidding hardcoded server paths, implicit file selection and dynamic scan.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
   # ---------------------------------------------------------------------------
   # Calendars
   # ---------------------------------------------------------------------------
