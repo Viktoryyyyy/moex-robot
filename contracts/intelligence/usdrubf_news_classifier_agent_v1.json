@@ -1,7 +1,7 @@
 {
   "contract_id": "usdrubf_news_classifier_agent.v1",
   "version": "1.0",
-  "status": "design_contract_for_classifier_applied_state",
+  "status": "flowise_applied_state_verified",
   "project": "MOEX_Bot",
   "instrument": "USDRUBF",
   "purpose": "Bound interpretation of source-grounded news clusters into validated RUB-relevant NewsEvent classification fields without creating or modifying source-bound facts.",
@@ -17,17 +17,39 @@
   },
   "flow_target": {
     "suggested_name": "usdrubf-rub-intelligence-news-classifier-v1",
+    "flow_id": "69b38496-7013-4474-be6c-7dce43177b95",
     "persistent_memory": false,
+    "llm_memory": false,
     "tools": [],
     "external_fact_retrieval": false,
+    "model_provider": "Deepseek",
+    "model_name": "deepseek-chat",
     "temperature_max": 0.2,
     "temperature_recommended": 0.1,
-    "applied_state_claimed": false
+    "temperature_applied": 0.1,
+    "streaming": false,
+    "thinking": false,
+    "json_structured_output": false,
+    "json_structured_output_note": "Disabled in Flowise Applied State because the UI JSON Array parser expects object items while the repository contract requires entities as an array of strings; exact output validation remains enforced by Stage 12B.3 Python guard.",
+    "authorization": "NONE",
+    "applied_state_claimed": true,
+    "applied_state_observation": {
+      "verified_date": "2026-08-10",
+      "verification_basis": [
+        "Flowise Agentflow V2 UI",
+        "News Classifier acceptance test",
+        "Flowise CURL panel"
+      ]
+    }
   },
   "transport_contract": {
     "kind": "FLOWISE_JSON_OVER_HTTPS",
     "shared_adapter": "src/moex_research/intelligence/usdrubf_news_macro_runtime.py::FlowiseJsonAdapter",
-    "endpoint_committed": false,
+    "endpoint": "https://flowise.foods-tech.store/api/v1/prediction/69b38496-7013-4474-be6c-7dce43177b95",
+    "endpoint_committed": true,
+    "authorization": "NONE",
+    "request_field": "question",
+    "response_field": "text",
     "endpoint_guessing_forbidden": true,
     "dotenv_loading_inside_adapter": false,
     "canonical_dotenv_load_owned_by_caller": true,
