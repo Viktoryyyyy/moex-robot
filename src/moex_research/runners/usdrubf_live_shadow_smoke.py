@@ -8,6 +8,9 @@ from typing import Mapping
 
 from dotenv import load_dotenv
 
+from src.moex_research.intelligence.usdrubf_flowise_decision_agent import (
+    stage11_shadow_decision_agent,
+)
 from src.moex_research.intelligence.usdrubf_live_shadow_bridge import (
     MOSCOW,
     SECID_KEY,
@@ -74,7 +77,7 @@ def _decision_agent(args: argparse.Namespace):
             timeout_seconds=args.flowise_timeout_seconds,
         )
     )
-    return adapter, "FLOWISE"
+    return stage11_shadow_decision_agent(adapter), "FLOWISE"
 
 
 def _load_bars(secid: str, trade_date):
