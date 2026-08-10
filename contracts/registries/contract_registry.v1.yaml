@@ -287,6 +287,44 @@ contracts:
     authority: Shared consumer access contract for on-demand higher-timeframe OHLCV bars derived from futures_continuous_5m.v1 without materializing separate 15m/30m/1h/4h parquet zones; authoritative for the HTF on-demand resampling schema and semantics.
     duplicate_overlap_notes: UNKNOWN / NOT PROVEN
 
+  - contract_id: futures_continuous_d1_contract
+    canonical_path: contracts/datasets/futures_continuous_d1_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs:
+      - src/moex_data/futures/continuous_d1_builder.py
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Unadjusted daily continuous futures OHLCV D1 contract derived from futures_continuous_5m.v1; authoritative for continuous D1 schema, aggregation, roll-boundary and lineage semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
+  - contract_id: futures_futoi_5m_raw_contract
+    canonical_path: contracts/datasets/futures_futoi_5m_raw_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs:
+      - src/moex_data/futures/futoi_raw_loader.py
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Canonical raw 5-minute MOEX FUTOI open-interest dataset contract for the accepted Slice 1 whitelist; authoritative for FUTOI raw 5m schema, whitelist, position-sign and calendar-denominator semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
+  - contract_id: futures_futoi_raw.v1
+    canonical_path: contracts/datasets/futures_futoi_raw.v1.yaml
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs: UNKNOWN / NOT PROVEN
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Authoritative MOEX FUTOI raw dataset contract; authoritative for FUTOI raw schema, identity model, partitioning, availability and path rules.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
   # ---------------------------------------------------------------------------
   # Calendars
   # ---------------------------------------------------------------------------
