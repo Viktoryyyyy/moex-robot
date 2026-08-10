@@ -98,6 +98,51 @@ contracts:
     duplicate_overlap_notes: YAML is authoritative; futures_derived_d1_ohlcv_contract.md is a companion narrative and must defer to this YAML.
 
   # ---------------------------------------------------------------------------
+  # Calendars
+  # ---------------------------------------------------------------------------
+  - contract_id: calendar.ru_tax_periods.v1
+    canonical_path: contracts/calendars/calendar/ru_tax_periods.v1.yaml
+    version: v1
+    scope: calendars
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/
+    enforcement_test_refs:
+      - tests/
+    authority: Design-only deterministic calendar placeholder contract for Russian tax-period schedule context (Phase 2.5). Authoritative for Russian tax-period calendar semantics.
+    duplicate_overlap_notes: YAML is authoritative; no conflicting MD exists for this subject.
+
+  - contract_id: calendar.ru_us_holidays.v1
+    canonical_path: contracts/calendars/calendar/ru_us_holidays.v1.yaml
+    version: v1
+    scope: calendars
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/
+    enforcement_test_refs:
+      - tests/
+    authority: Design-only calendar placeholder contract for preannounced Russian and US holidays and trading-calendar context (Phase 2.5). Authoritative for RU/US holiday calendar semantics.
+    duplicate_overlap_notes: YAML is authoritative; no conflicting MD exists for this subject.
+
+  - contract_id: rates.cbr_key_rate_calendar.v1
+    canonical_path: contracts/calendars/rates/cbr_key_rate_calendar.v1.yaml
+    version: v1
+    scope: calendars
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/
+    enforcement_test_refs:
+      - tests/
+    authority: Design-only placeholder contract for preannounced Bank of Russia key-rate meeting schedule context (Phase 2.5). Authoritative for CBR key-rate calendar semantics.
+    duplicate_overlap_notes: YAML is authoritative; no conflicting MD exists for this subject.
+
+  # ---------------------------------------------------------------------------
   # Runtime
   # ---------------------------------------------------------------------------
   - contract_id: runtime_input_state.v1
@@ -113,6 +158,20 @@ contracts:
       - tests/
     authority: Runtime input state contract; authoritative for runtime input state shape and validation.
     duplicate_overlap_notes: YAML is authoritative; runtime narrative docs must defer to this YAML.
+
+  - contract_id: futures_daily_refresh_scheduler.v1
+    canonical_path: contracts/runtime/futures_daily_refresh_scheduler_contract.md
+    version: v1
+    scope: runtime
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/futures/daily_refresh_runner.py
+    enforcement_test_refs:
+      - tests/
+    authority: Operational scheduler contract for unattended Slice 1.1 futures daily data refresh (systemd timer). Authoritative for the daily refresh scheduler behavior.
+    duplicate_overlap_notes: MD is authoritative for this operational scheduler contract; no conflicting YAML exists for this subject.
 
   # ---------------------------------------------------------------------------
   # Experiments
