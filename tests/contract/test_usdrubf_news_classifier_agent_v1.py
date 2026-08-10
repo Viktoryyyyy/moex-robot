@@ -7,6 +7,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = PROJECT_ROOT / "contracts" / "intelligence" / "usdrubf_news_classifier_agent_v1.json"
 PROMPT_PATH = PROJECT_ROOT / "docs" / "flowise" / "USDRUBF_RUB_INTELLIGENCE_NEWS_CLASSIFIER_PROMPT_V1.md"
+ENV_EXAMPLE_PATH = PROJECT_ROOT / ".env.example"
 
 
 def _contract() -> dict[str, object]:
@@ -33,6 +34,31 @@ def test_news_classifier_contract_enforces_live_guard_composition() -> None:
     assert runtime["raw_classifier_injection_through_live_pipeline_forbidden"] is True
     assert runtime["stage12b3_guard"].endswith("::stage12b3_news_classifier")
     assert runtime["live_pipeline"].endswith("::run_live_official_news_pipeline")
+
+
+def test_news_classifier_transport_is_env_bound_and_not_applied_state() -> None:
+    contract = _contract()
+    runtime = contract["source_runtime"]
+    transport = contract["transport_contract"]
+    expected_env = {
+        "MOEX_RUB_INTELLIGENCE_NEWS_CLASSIFIER_FLOWISE_ENDPOINT",
+        "MOEX_RUB_INTELLIGENCE_NEWS_CLASSIFIER_FLOWISE_REQUEST_FIELD",
+        "MOEX_RUB_INTELLIGENCE_NEWS_CLASSIFIER_FLOWISE_RESPONSE_FIELD",
+        "MOEX_RUB_INTELLIGENCE_NEWS_CLASSIFIER_FLOWISE_TIMEOUT_SECONDS",
+    }
+    assert runtime["flowise_transport_adapter"].endswith("::news_classifier_flowise_agent_from_env")
+    assert transport["kind"] == "FLOWISE_JSON_OVER_HTTPS"
+    assert transport["endpoint_committed"] is False
+    assert transport["endpoint_guessing_forbidden"] is True
+    assert transport["dotenv_loading_inside_adapter"] is False
+    assert transport["canonical_dotenv_load_owned_by_caller"] is True
+    assert set(transport["required_env"]) == expected_env
+    assert transport["endpoint_scheme_required"] == "https"
+
+    env_example = ENV_EXAMPLE_PATH.read_text(encoding="utf-8")
+    for name in expected_env:
+        assert f"{name}=" in env_example
+    assert "MOEX_RUB_INTELLIGENCE_NEWS_CLASSIFIER_FLOWISE_ENDPOINT=\n" in env_example
 
 
 def test_news_classifier_contract_freezes_exact_input_and_output_fields() -> None:
