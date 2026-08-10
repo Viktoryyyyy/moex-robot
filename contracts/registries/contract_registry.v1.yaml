@@ -475,6 +475,45 @@ contracts:
     duplicate_overlap_notes: UNKNOWN / NOT PROVEN
 
   # ---------------------------------------------------------------------------
+  # Sources
+  # ---------------------------------------------------------------------------
+  - contract_id: futures_source_contracts.v1
+    canonical_path: contracts/sources/futures/futures_source_contracts.v1.yaml
+    version: v1
+    scope: sources
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs: UNKNOWN / NOT PROVEN
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Authoritative source contracts manifest for MOEX futures source artifacts; authoritative for the futures source contracts schema and semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
+  - contract_id: futures_source_snapshot.v1
+    canonical_path: contracts/sources/futures/futures_source_snapshot.v1.yaml
+    version: v1
+    scope: sources
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs: UNKNOWN / NOT PROVEN
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Authoritative futures source snapshot contract; authoritative for the futures source snapshot schema and semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
+  - contract_id: moex_algopack_fo_tradestats_snapshot.v1
+    canonical_path: contracts/sources/futures/moex_algopack_fo_tradestats_snapshot.v1.yaml
+    version: v1
+    scope: sources
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs: UNKNOWN / NOT PROVEN
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Authoritative MOEX AlgoPack FO tradestats snapshot source contract; authoritative for the AlgoPack FO tradestats snapshot schema and semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
+  # ---------------------------------------------------------------------------
   # Calendars
   # ---------------------------------------------------------------------------
   - contract_id: calendar.ru_tax_periods.v1
