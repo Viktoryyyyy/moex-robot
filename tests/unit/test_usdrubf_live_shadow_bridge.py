@@ -11,6 +11,8 @@ from src.moex_research.intelligence.usdrubf_live_shadow_bridge import (
     LiveShadowBridgeError,
     MOSCOW,
     blocked_futoi_context,
+    build_closed_15m_bars,
+    build_ema_context,
     build_live_decision_input,
     build_previous_session_zones,
     closed_bars,
@@ -71,19 +73,43 @@ def test_closed_bars_excludes_future_rows() -> None:
     assert [item["end"] for item in result] == [current[0]["end"], current[1]["end"]]
 
 
+def test_ema_context_uses_only_complete_aligned_15m_bars() -> None:
+    _prior_day, _current_day, _prior, current = _sessions()
+    incomplete_next = _bar(
+        datetime(2026, 8, 10, 10, 15, tzinfo=MOSCOW), 80.35, 80.5, 80.3, 80.45
+    )
+    bars = (*current, incomplete_next)
+
+    aggregated = build_closed_15m_bars(bars)
+    context = build_ema_context(bars)
+
+    assert len(aggregated) == 1
+    assert aggregated[0]["end"] == datetime(2026, 8, 10, 10, 0, tzinfo=MOSCOW).isoformat()
+    assert aggregated[0]["open"] == current[0]["open"]
+    assert aggregated[0]["close"] == current[2]["close"]
+    assert aggregated[0]["high"] == max(item["high"] for item in current)
+    assert aggregated[0]["low"] == min(item["low"] for item in current)
+    assert aggregated[0]["volume"] == sum(item["volume"] for item in current)
+    assert context.available_at == current[2]["end"]
+    assert context.details["bar_count"] == 1
+    assert context.details["source"] == "closed_15m_bar_replay_from_5m"
+    assert context.direction == "NEUTRAL"
+
+
 def test_live_decision_input_uses_last_closed_bar_and_blocked_futoi_by_default() -> None:
     _prior_day, _current_day, prior, current = _sessions()
     inputs = build_live_decision_input(
         current_session_bars=current,
         prior_session_bars=prior,
-        wall_clock_as_of=datetime(2026, 8, 10, 10, 6, tzinfo=MOSCOW),
+        wall_clock_as_of=datetime(2026, 8, 10, 10, 11, tzinfo=MOSCOW),
     )
 
-    assert inputs.as_of_timestamp == current[1]["end"]
-    assert inputs.price == current[1]["close"]
+    assert inputs.as_of_timestamp == current[2]["end"]
+    assert inputs.price == current[2]["close"]
     assert inputs.futoi.source_id == "futoi"
     assert inputs.futoi.quality_status == "BLOCKED"
     assert inputs.ema_3_19_ai.source_id == "ema_3_19_ai"
+    assert inputs.ema_3_19_ai.available_at == current[2]["end"]
     assert len(inputs.active_levels) == 2
     assert {item.level_id for item in inputs.level_interactions} == {
         item.level_id for item in inputs.active_levels
@@ -183,8 +209,29 @@ def test_runner_one_shot_safe_wait_uses_explicit_state_root(monkeypatch, tmp_pat
     current_day = now.date()
     prior_day = current_day - timedelta(days=1)
     current = (
-        _bar(now - timedelta(minutes=10), 80.0, 80.1, 79.9, 80.0),
-        _bar(now - timedelta(minutes=5), 80.0, 80.2, 80.0, 80.1),
+        _bar(
+            datetime.combine(current_day, datetime.min.time(), tzinfo=MOSCOW) + timedelta(hours=10),
+            80.0,
+            80.1,
+            79.9,
+            80.0,
+        ),
+        _bar(
+            datetime.combine(current_day, datetime.min.time(), tzinfo=MOSCOW)
+            + timedelta(hours=10, minutes=5),
+            80.0,
+            80.2,
+            80.0,
+            80.1,
+        ),
+        _bar(
+            datetime.combine(current_day, datetime.min.time(), tzinfo=MOSCOW)
+            + timedelta(hours=10, minutes=10),
+            80.1,
+            80.3,
+            80.05,
+            80.25,
+        ),
     )
     prior = (
         _bar(
@@ -195,7 +242,8 @@ def test_runner_one_shot_safe_wait_uses_explicit_state_root(monkeypatch, tmp_pat
             79.9,
         ),
         _bar(
-            datetime.combine(prior_day, datetime.min.time(), tzinfo=MOSCOW) + timedelta(hours=10, minutes=5),
+            datetime.combine(prior_day, datetime.min.time(), tzinfo=MOSCOW)
+            + timedelta(hours=10, minutes=5),
             79.9,
             80.2,
             79.6,
