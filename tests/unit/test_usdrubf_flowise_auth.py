@@ -4,15 +4,19 @@ from urllib.request import Request
 
 import pytest
 
-from src.moex_research.intelligence.usdrubf_flowise_auth import flowise_bearer_opener
+from src.moex_research.intelligence.usdrubf_flowise_auth import (
+    FLOWISE_USER_AGENT,
+    flowise_bearer_opener,
+)
 from src.moex_research.intelligence.usdrubf_news_macro_runtime import RuntimeIntegrationError
 
 
-def test_flowise_bearer_opener_adds_authorization_header_without_touching_body() -> None:
+def test_flowise_bearer_opener_adds_runtime_headers_without_touching_body() -> None:
     captured = {}
 
     def opener(request, timeout):
         captured["authorization"] = request.headers.get("Authorization")
+        captured["user_agent"] = request.headers.get("User-agent")
         captured["body"] = request.data
         captured["timeout"] = timeout
         return object()
@@ -28,6 +32,7 @@ def test_flowise_bearer_opener_adds_authorization_header_without_touching_body()
 
     assert result is not None
     assert captured["authorization"] == "Bearer secret-key"
+    assert captured["user_agent"] == FLOWISE_USER_AGENT
     assert captured["body"] == b'{"question":"payload"}'
     assert captured["timeout"] == 9.0
 
