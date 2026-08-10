@@ -32,7 +32,7 @@ def test_news_classifier_contract_is_bounded_and_applied_state_verified() -> Non
     assert target["streaming"] is False
     assert target["thinking"] is False
     assert target["json_structured_output"] is False
-    assert target["authorization"] == "NONE"
+    assert target["authorization"] == "BEARER_API_KEY"
     assert target["temperature_max"] <= 0.2
 
 
@@ -43,9 +43,10 @@ def test_news_classifier_contract_enforces_live_guard_composition() -> None:
     assert runtime["raw_classifier_injection_through_live_pipeline_forbidden"] is True
     assert runtime["stage12b3_guard"].endswith("::stage12b3_news_classifier")
     assert runtime["live_pipeline"].endswith("::run_live_official_news_pipeline")
+    assert runtime["bearer_auth_helper"].endswith("::flowise_bearer_opener")
 
 
-def test_news_classifier_transport_records_verified_applied_state() -> None:
+def test_news_classifier_transport_records_verified_authenticated_applied_state() -> None:
     contract = _contract()
     runtime = contract["source_runtime"]
     transport = contract["transport_contract"]
@@ -54,6 +55,7 @@ def test_news_classifier_transport_records_verified_applied_state() -> None:
         "MOEX_RUB_INTELLIGENCE_NEWS_CLASSIFIER_FLOWISE_REQUEST_FIELD",
         "MOEX_RUB_INTELLIGENCE_NEWS_CLASSIFIER_FLOWISE_RESPONSE_FIELD",
         "MOEX_RUB_INTELLIGENCE_NEWS_CLASSIFIER_FLOWISE_TIMEOUT_SECONDS",
+        "MOEX_RUB_INTELLIGENCE_FLOWISE_API_KEY",
     }
     assert runtime["flowise_transport_adapter"].endswith("::news_classifier_flowise_agent_from_env")
     assert transport["kind"] == "FLOWISE_JSON_OVER_HTTPS"
@@ -62,7 +64,8 @@ def test_news_classifier_transport_records_verified_applied_state() -> None:
         "69b38496-7013-4474-be6c-7dce43177b95"
     )
     assert transport["endpoint_committed"] is True
-    assert transport["authorization"] == "NONE"
+    assert transport["authorization"] == "BEARER_API_KEY"
+    assert transport["authorization_header"] == "Authorization: Bearer <runtime API key>"
     assert transport["request_field"] == "question"
     assert transport["response_field"] == "text"
     assert transport["endpoint_guessing_forbidden"] is True
@@ -79,6 +82,7 @@ def test_news_classifier_transport_records_verified_applied_state() -> None:
         "https://flowise.foods-tech.store/api/v1/prediction/"
         "69b38496-7013-4474-be6c-7dce43177b95\n"
     ) in env_example
+    assert "MOEX_RUB_INTELLIGENCE_FLOWISE_API_KEY=\n" in env_example
 
 
 def test_news_classifier_contract_freezes_exact_input_and_output_fields() -> None:
@@ -127,6 +131,8 @@ def test_news_classifier_direction_semantics_are_usdrubf_oriented() -> None:
 
 def test_news_classifier_prompt_contains_fail_safe_and_no_trading_boundary() -> None:
     prompt = PROMPT_PATH.read_text(encoding="utf-8")
+    assert "status: flowise_applied_state_verified" in prompt
+    assert "flow_name: `usdrubf-rub-intelligence-news-classifier-v1`" in prompt
     assert "USD_BULLISH" in prompt
     assert "USD_BEARISH" in prompt
     assert "не выдумывай surprise" in prompt
