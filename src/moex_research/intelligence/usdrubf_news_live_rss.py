@@ -234,6 +234,33 @@ def _validate_item_link(url: str, *, allowed_host: str) -> str:
     return url
 
 
+def _validate_final_response_url(response: object, *, allowed_host: str) -> str:
+    geturl = getattr(response, "geturl", None)
+    if not callable(geturl):
+        raise RssAcquisitionError(
+            "SOURCE_INVALID",
+            "RSS response does not expose final URL",
+        )
+    try:
+        final_url = geturl()
+    except Exception as exc:
+        raise RssAcquisitionError(
+            "SOURCE_UNAVAILABLE",
+            "RSS final response URL could not be resolved",
+        ) from exc
+    if not isinstance(final_url, str):
+        raise RssAcquisitionError("SOURCE_INVALID", "RSS final response URL must be a string")
+    parsed = urlparse(final_url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        raise RssAcquisitionError("SOURCE_INVALID", "RSS final response URL must be HTTPS")
+    if _normalize_host(parsed.hostname) != _normalize_host(allowed_host):
+        raise RssAcquisitionError(
+            "SOURCE_INVALID",
+            "RSS final response host does not match the registered publisher",
+        )
+    return final_url
+
+
 def _read_response(response: object, *, max_bytes: int) -> bytes:
     read = getattr(response, "read", None)
     if not callable(read):
@@ -332,6 +359,7 @@ def fetch_rss_source(
     )
     try:
         response = opener(request, timeout=timeout_seconds)
+        _validate_final_response_url(response, allowed_host=binding.allowed_host)
         raw = _read_response(response, max_bytes=max_bytes)
         records, future_items = _parse_rss_records(
             binding,
