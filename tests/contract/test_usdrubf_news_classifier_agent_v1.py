@@ -28,7 +28,8 @@ def test_news_classifier_contract_is_bounded_and_not_applied_state() -> None:
 
 def test_news_classifier_contract_freezes_exact_input_and_output_fields() -> None:
     contract = _contract()
-    assert set(contract["input_contract"]["required_top_level_fields"]) == {
+    input_contract = contract["input_contract"]
+    assert set(input_contract["required_top_level_fields"]) == {
         "instrument",
         "cluster_id",
         "headline",
@@ -37,6 +38,8 @@ def test_news_classifier_contract_freezes_exact_input_and_output_fields() -> Non
         "cluster_history",
         "as_of_timestamp",
     }
+    assert input_contract["cluster_history_available_at_required"] is True
+    assert "cluster_history.available_at" in input_contract["point_in_time_rule"]
     assert set(contract["output_contract"]["required_fields_exactly"]) == {
         "event_type",
         "entities",
@@ -48,7 +51,7 @@ def test_news_classifier_contract_freezes_exact_input_and_output_fields() -> Non
         "confidence",
         "mechanism",
     }
-    assert contract["input_contract"]["extra_top_level_fields_forbidden"] is True
+    assert input_contract["extra_top_level_fields_forbidden"] is True
     assert contract["output_contract"]["extra_fields_forbidden"] is True
 
 
