@@ -119,6 +119,20 @@ contracts:
     authority: Continuous 5-minute futures series contract; authoritative for continuous series construction semantics.
     duplicate_overlap_notes: YAML is authoritative; futures_continuous_5m_contract.md is a companion narrative and must defer to this YAML.
 
+  - contract_id: futures_continuous_5m_contract
+    canonical_path: contracts/datasets/futures_continuous_5m_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/
+    enforcement_test_refs:
+      - tests/
+    authority: Companion narrative contract for the continuous 5-minute futures series; defers to futures_continuous_5m.v1 YAML for authoritative overlapping semantics.
+    duplicate_overlap_notes: MD is a companion narrative; futures_continuous_5m.v1.yaml is authoritative for overlapping continuous-5m semantics and this MD must defer to it.
+
   - contract_id: futures_derived_d1.v1
     canonical_path: contracts/datasets/futures_derived_d1.v1.yaml
     version: v1
