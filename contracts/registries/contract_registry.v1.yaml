@@ -147,6 +147,32 @@ contracts:
     authority: Derived daily (D1) futures dataset contract; authoritative for derived D1 schema and semantics.
     duplicate_overlap_notes: YAML is authoritative; futures_derived_d1_ohlcv_contract.md is a companion narrative and must defer to this YAML.
 
+  - contract_id: futures_derived_d1_ohlcv_contract
+    canonical_path: contracts/datasets/futures_derived_d1_ohlcv_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs:
+      - src/moex_data/futures/derived_d1_ohlcv_builder.py
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Canonical derived daily OHLCV bars built from futures_raw_5m for the accepted Slice 1 whitelist; authoritative for derived D1 OHLCV schema and semantics. Does not join FUTOI and does not create continuous futures series.
+    duplicate_overlap_notes: MD is a companion narrative to futures_derived_d1.v1.yaml; the YAML is authoritative for overlapping derived-D1 semantics and this MD must defer to it.
+
+  - contract_id: futures_derived_d1_ohlcv_manifest_contract
+    canonical_path: contracts/datasets/futures_derived_d1_ohlcv_manifest_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs:
+      - src/moex_data/futures/derived_d1_ohlcv_builder.py
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Run manifest contract for derived D1 OHLCV builder execution, including applied whitelist or eligibility-snapshot-driven selection, excluded instruments, input raw 5m partitions, output D1 artifacts, per-instrument summaries, and source-to-output row checks; authoritative for the derived D1 OHLCV manifest schema and semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
   - contract_id: futures_continuous_series_policy.v1
     canonical_path: contracts/datasets/futures_continuous_series_policy.v1.yaml
     version: v1
