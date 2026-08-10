@@ -171,6 +171,45 @@ contracts:
     authority: Design contract umbrella for unadjusted continuous futures v1 artifacts; authoritative for overlapping continuous-series semantics (roll policy, family mapping, perpetual rule, validation boundary, blocking conditions).
     duplicate_overlap_notes: Complementary design contract MD to futures_continuous_series_policy.v1.yaml policy boundary; NOT a strict supersession chain. Supersession not provable from repository evidence. This MD is the authoritative design contract for continuous-series semantics; the YAML is a policy boundary placeholder that gates materialization and defers to this design contract for substantive continuous-series semantics. Both files preserved.
 
+  - contract_id: futures_continuous_v1_l3_6_manifest_contract
+    canonical_path: contracts/datasets/futures_continuous_v1_l3_6_manifest_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs:
+      - src/moex_data/futures/continuous_v1_l3_6_runner_v2.py
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Run manifest contract for PM L3-6 continuous futures v1 over the RFUD included universe; authoritative for the L3-6 manifest schema and semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
+  - contract_id: futures_continuous_v1_l3_6_quality_report_contract
+    canonical_path: contracts/datasets/futures_continuous_v1_l3_6_quality_report_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs:
+      - src/moex_data/futures/continuous_v1_l3_6_quality_report.py
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Scoped quality report contract for PM L3-6 continuous futures v1 outputs produced by the L3-6 manifest flow; authoritative for the L3-6 quality report schema and semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
+  - contract_id: futures_continuous_w1_contract
+    canonical_path: contracts/datasets/futures_continuous_w1_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs:
+      - src/moex_data/futures/continuous_w1_builder.py
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Design contract for unadjusted weekly continuous futures OHLCV bars derived only from accepted futures_continuous_d1.v1; authoritative for W1 schema, week-boundary and lineage semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
   # ---------------------------------------------------------------------------
   # Calendars
   # ---------------------------------------------------------------------------
