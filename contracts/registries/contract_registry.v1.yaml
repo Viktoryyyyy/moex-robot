@@ -93,6 +93,18 @@ contracts:
     authority: Authoritative FORTS raw 5m multi-instrument onboarding contract; authoritative for per-instrument onboarding sequence, pointer strategy and production scheduler policy for FORTS raw 5m tradestats.
     duplicate_overlap_notes: UNKNOWN / NOT PROVEN
 
+  - contract_id: forts_derived_d1_from_raw_5m.v1
+    canonical_path: contracts/datasets/forts_derived_d1_from_raw_5m.v1.yaml
+    version: v1
+    scope: datasets
+    status: target_declaration
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs: UNKNOWN / NOT PROVEN
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Authoritative FORTS derived D1 (from raw 5m) dataset contract; authoritative for derived D1 schema, materialization, recompute and readiness semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
   - contract_id: futures_continuous_5m.v1
     canonical_path: contracts/datasets/futures_continuous_5m.v1.yaml
     version: v1
