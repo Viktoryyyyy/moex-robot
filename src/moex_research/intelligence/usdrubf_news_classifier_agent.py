@@ -171,13 +171,26 @@ def _validate_classifier_payload(payload: Mapping[str, object]) -> dict[str, obj
         )
 
     history = _mapping_sequence(payload["cluster_history"], "cluster_history", allow_empty=True)
+    bounded_history: list[dict[str, object]] = []
+    for index, item in enumerate(history):
+        if "available_at" not in item:
+            raise ClassifierOutputError(
+                f"cluster_history[{index}].available_at is required for PIT validation"
+            )
+        available = _aware_iso(item["available_at"], f"cluster_history[{index}].available_at")
+        if available > as_of:
+            raise ClassifierOutputError("cluster history may not be available after as_of_timestamp")
+        bounded_item = dict(item)
+        bounded_item["available_at"] = available.isoformat()
+        bounded_history.append(bounded_item)
+
     return {
         "instrument": "USDRUBF",
         "cluster_id": cluster_id,
         "headline": headline,
         "normalized_text": normalized_text,
         "cluster_evidence": tuple(bounded_evidence),
-        "cluster_history": tuple(dict(item) for item in history),
+        "cluster_history": tuple(bounded_history),
         "as_of_timestamp": as_of.isoformat(),
     }
 
