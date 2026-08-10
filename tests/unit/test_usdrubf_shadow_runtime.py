@@ -208,7 +208,7 @@ def _enter_decision():
     }
 
 
-def test_first_shadow_cycle_persists_state_without_change_alert(tmp_path) -> None:
+def test_first_shadow_cycle_commits_generation_without_change_alert(tmp_path) -> None:
     store = ShadowJsonStore(tmp_path)
     runtime = ShadowRuntime(store)
 
@@ -220,11 +220,15 @@ def test_first_shadow_cycle_persists_state_without_change_alert(tmp_path) -> Non
     assert result.change_detection is None
     assert result.significant_change is False
     assert result.action_candidate is False
-    assert result.market_state_path == tmp_path / "market_state.json"
-    assert result.change_detection_path == tmp_path / "change_detection.json"
+    assert result.market_state_path.parent == tmp_path
+    assert result.change_detection_path.parent == tmp_path
+    assert result.market_state_path.name.startswith("market_state.")
+    assert result.change_detection_path.name.startswith("change_detection.")
+    assert (tmp_path / "current_cycle.json").is_file()
     assert json.loads(result.change_detection_path.read_text(encoding="utf-8")) is None
     persisted = json.loads(result.market_state_path.read_text(encoding="utf-8"))
     assert persisted["trade_state"] == "WAIT"
+    assert store.load_change_detection_raw() is None
 
 
 def test_second_cycle_loads_previous_state_and_emits_action_candidate(tmp_path) -> None:
@@ -249,6 +253,8 @@ def test_second_cycle_loads_previous_state_and_emits_action_candidate(tmp_path) 
     codes = {item.code for item in second.change_detection.events}
     assert "RETEST_HOLD_CONFIRMED" in codes
     assert "TRADE_STATE_CHANGED" in codes
+    persisted_change = json.loads(second.change_detection_path.read_text(encoding="utf-8"))
+    assert persisted_change["highest_severity"] == "ACTION"
 
 
 def test_store_restores_market_state_across_runtime_instance_restart(tmp_path) -> None:
@@ -280,8 +286,7 @@ def test_directional_context_none_details_survive_restart_restore(tmp_path) -> N
         decision_agent=lambda _payload: _wait_decision(),
     )
 
-    restarted_store = ShadowJsonStore(tmp_path)
-    restored = restarted_store.load_market_state()
+    restored = ShadowJsonStore(tmp_path).load_market_state()
 
     assert restored is not None
     assert restored.ema_3_19_ai.details is None
@@ -290,8 +295,7 @@ def test_directional_context_none_details_survive_restart_restore(tmp_path) -> N
 
 def test_tampered_numeric_target_price_fails_closed_on_restore(tmp_path) -> None:
     store = ShadowJsonStore(tmp_path)
-    runtime = ShadowRuntime(store)
-    runtime.run_cycle(
+    result = ShadowRuntime(store).run_cycle(
         _inputs(
             T1,
             resistance_state="RETEST_HOLD",
@@ -300,10 +304,9 @@ def test_tampered_numeric_target_price_fails_closed_on_restore(tmp_path) -> None
         decision_agent=lambda _payload: _enter_decision(),
     )
 
-    path = tmp_path / "market_state.json"
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(result.market_state_path.read_text(encoding="utf-8"))
     payload["targets"][0]["price"] = 99.0
-    path.write_text(json.dumps(payload), encoding="utf-8")
+    result.market_state_path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(ShadowRuntimeError, match="deterministic level anchor"):
         store.load_market_state()
@@ -311,18 +314,17 @@ def test_tampered_numeric_target_price_fails_closed_on_restore(tmp_path) -> None
 
 def test_tampered_enter_without_risk_references_fails_closed_on_restore(tmp_path) -> None:
     store = ShadowJsonStore(tmp_path)
-    ShadowRuntime(store).run_cycle(
+    result = ShadowRuntime(store).run_cycle(
         _inputs(T1),
         decision_agent=lambda _payload: _wait_decision(),
     )
 
-    path = tmp_path / "market_state.json"
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(result.market_state_path.read_text(encoding="utf-8"))
     payload["trade_state"] = "ENTER"
     payload["final_bias"] = "BULLISH_USD"
     payload["targets"] = []
     payload["invalidation"] = None
-    path.write_text(json.dumps(payload), encoding="utf-8")
+    result.market_state_path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(ShadowRuntimeError, match="persisted ENTER requires target"):
         store.load_market_state()
@@ -330,18 +332,53 @@ def test_tampered_enter_without_risk_references_fails_closed_on_restore(tmp_path
 
 def test_tampered_evidence_reference_fails_closed_on_restore(tmp_path) -> None:
     store = ShadowJsonStore(tmp_path)
-    ShadowRuntime(store).run_cycle(
+    result = ShadowRuntime(store).run_cycle(
         _inputs(T1),
         decision_agent=lambda _payload: _wait_decision(),
     )
 
-    path = tmp_path / "market_state.json"
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(result.market_state_path.read_text(encoding="utf-8"))
     payload["evidence_refs"] = ["level:invented"]
-    path.write_text(json.dumps(payload), encoding="utf-8")
+    result.market_state_path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(ShadowRuntimeError, match="unavailable facts"):
         store.load_market_state()
+
+
+def test_failed_pointer_commit_keeps_previous_cycle_authoritative(tmp_path) -> None:
+    store = ShadowJsonStore(tmp_path)
+    runtime = ShadowRuntime(store)
+    first = runtime.run_cycle(
+        _inputs(T1),
+        decision_agent=lambda _payload: _wait_decision(),
+    )
+    pointer_path = tmp_path / "current_cycle.json"
+    prior_pointer = pointer_path.read_bytes()
+
+    original_write = store._write_atomic
+
+    def fail_pointer(filename, payload):
+        if filename == store.pointer_filename:
+            raise OSError("simulated pointer commit failure")
+        return original_write(filename, payload)
+
+    store._write_atomic = fail_pointer  # type: ignore[method-assign]
+    with pytest.raises(OSError, match="pointer commit failure"):
+        runtime.run_cycle(
+            _inputs(
+                T2,
+                resistance_state="RETEST_HOLD",
+                resistance_previous_state="RETEST",
+            ),
+            decision_agent=lambda _payload: _enter_decision(),
+        )
+
+    assert pointer_path.read_bytes() == prior_pointer
+    restored = ShadowJsonStore(tmp_path).load_market_state()
+    assert restored is not None
+    assert restored.as_of_timestamp == T1.isoformat()
+    assert restored.trade_state == "WAIT"
+    assert first.market_state_path.is_file()
 
 
 def test_shadow_store_uses_only_explicit_root_and_distinct_basenames(tmp_path) -> None:
@@ -349,11 +386,22 @@ def test_shadow_store_uses_only_explicit_root_and_distinct_basenames(tmp_path) -
         tmp_path,
         market_state_filename="current.json",
         change_filename="changes.json",
+        pointer_filename="pointer.json",
     )
     assert store.root == tmp_path
 
     with pytest.raises(ShadowRuntimeError, match="distinct"):
-        ShadowJsonStore(tmp_path, market_state_filename="same.json", change_filename="same.json")
+        ShadowJsonStore(
+            tmp_path,
+            market_state_filename="same.json",
+            change_filename="same.json",
+        )
+    with pytest.raises(ShadowRuntimeError, match="distinct"):
+        ShadowJsonStore(
+            tmp_path,
+            market_state_filename="same.json",
+            pointer_filename="same.json",
+        )
     with pytest.raises(ShadowRuntimeError, match="basename"):
         ShadowJsonStore(tmp_path, market_state_filename="../state.json")
 
