@@ -16,11 +16,15 @@ from src.moex_research.intelligence.usdrubf_news_live_rss import (
 
 
 class _Response:
-    def __init__(self, payload: bytes) -> None:
+    def __init__(self, payload: bytes, url: str = "https://www.cbr.ru/rss/RssPress") -> None:
         self.payload = payload
+        self.url = url
 
     def read(self, size: int = -1) -> bytes:
         return self.payload if size < 0 else self.payload[:size]
+
+    def geturl(self) -> str:
+        return self.url
 
 
 def _rss(*items: str) -> bytes:
@@ -98,7 +102,7 @@ def test_fetch_rss_source_builds_source_bound_records_and_strips_html() -> None:
 
     result = fetch_rss_source(
         binding,
-        opener=lambda request, timeout: _Response(payload),
+        opener=lambda request, timeout: _Response(payload, request.full_url),
         now_fn=lambda: now,
     )
 
@@ -114,6 +118,42 @@ def test_fetch_rss_source_builds_source_bound_records_and_strips_html() -> None:
     assert record.body == "Details & context"
 
 
+def test_fetch_rss_source_rejects_cross_host_redirect() -> None:
+    binding = RssFeedBinding(
+        source_id="cbr_press_rss",
+        source_tier="OFFICIAL_PRIMARY",
+        feed_url="https://www.cbr.ru/rss/RssPress",
+        allowed_host="www.cbr.ru",
+    )
+    payload = _rss(_item())
+    now = datetime(2026, 8, 10, 11, 0, tzinfo=timezone.utc)
+
+    with pytest.raises(ValueError, match="final response host does not match"):
+        fetch_rss_source(
+            binding,
+            opener=lambda request, timeout: _Response(payload, "https://evil.example/feed.xml"),
+            now_fn=lambda: now,
+        )
+
+
+def test_fetch_rss_source_rejects_https_to_http_redirect() -> None:
+    binding = RssFeedBinding(
+        source_id="cbr_press_rss",
+        source_tier="OFFICIAL_PRIMARY",
+        feed_url="https://www.cbr.ru/rss/RssPress",
+        allowed_host="www.cbr.ru",
+    )
+    payload = _rss(_item())
+    now = datetime(2026, 8, 10, 11, 0, tzinfo=timezone.utc)
+
+    with pytest.raises(ValueError, match="final response URL must be HTTPS"):
+        fetch_rss_source(
+            binding,
+            opener=lambda request, timeout: _Response(payload, "http://www.cbr.ru/rss/RssPress"),
+            now_fn=lambda: now,
+        )
+
+
 def test_fetch_rss_source_rejects_off_domain_item_link() -> None:
     binding = RssFeedBinding(
         source_id="cbr_press_rss",
@@ -127,7 +167,7 @@ def test_fetch_rss_source_rejects_off_domain_item_link() -> None:
     with pytest.raises(ValueError, match="host does not match"):
         fetch_rss_source(
             binding,
-            opener=lambda request, timeout: _Response(payload),
+            opener=lambda request, timeout: _Response(payload, request.full_url),
             now_fn=lambda: now,
         )
 
@@ -147,7 +187,7 @@ def test_fetch_rss_source_requires_provable_publication_timestamp() -> None:
     with pytest.raises(ValueError, match="missing publication timestamp"):
         fetch_rss_source(
             binding,
-            opener=lambda request, timeout: _Response(payload),
+            opener=lambda request, timeout: _Response(payload, request.full_url),
             now_fn=lambda: now,
         )
 
@@ -164,7 +204,7 @@ def test_future_feed_item_is_not_exposed_as_record() -> None:
 
     result = fetch_rss_source(
         binding,
-        opener=lambda request, timeout: _Response(payload),
+        opener=lambda request, timeout: _Response(payload, request.full_url),
         now_fn=lambda: now,
     )
     assert result.records == ()
@@ -190,7 +230,7 @@ def test_batch_keeps_other_sources_when_one_source_is_unavailable(tmp_path: Path
     def opener(request, timeout):
         if request.full_url.startswith("https://two.example/"):
             raise OSError("network down")
-        return _Response(payload)
+        return _Response(payload, request.full_url)
 
     result = fetch_official_rss_batch(
         registry_path=path,
