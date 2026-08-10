@@ -63,11 +63,55 @@ contracts:
     supersedes: []
     superseded_by: []
     implementation_refs:
-      - src/
+      - src/moex_data/futures/raw_5m_loader.py
+      - src/moex_data/futures/materialize_raw_5m.py
     enforcement_test_refs:
       - tests/
-    authority: Raw 5-minute futures OHLCV dataset contract; authoritative for raw 5m schema and semantics.
+    authority: Raw 5-minute futures OHLCV dataset contract; authoritative for raw 5m schema and semantics. Producer moex_data.futures.raw_5m_loader; materializer moex_data.futures.materialize_raw_5m.
     duplicate_overlap_notes: YAML is authoritative; futures_raw_5m_contract.md is a companion narrative and must defer to this YAML.
+
+  - contract_id: forts_raw_5m_tradestats.v1
+    canonical_path: contracts/datasets/forts_raw_5m_tradestats.v1.yaml
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/futures/materialize_forts_raw_5m_tradestats.py
+      - src/moex_data/futures/refresh_forts_raw_5m_incremental_pointer.py
+    enforcement_test_refs:
+      - tests/
+    authority: FORTS raw 5m tradestats dataset contract (target_declaration, repo_only_not_registered_in_loaded_dataset_config). Authoritative for FORTS raw 5m tradestats schema, incremental pointer and observed-source refresh semantics.
+    duplicate_overlap_notes: YAML is authoritative; no conflicting MD exists for this subject.
+
+  - contract_id: forts_raw_5m_multi_instrument_onboarding.v1
+    canonical_path: contracts/datasets/forts_raw_5m_multi_instrument_onboarding.v1.yaml
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - configs/instruments/forts_instrument_registry.v1.yaml
+    enforcement_test_refs:
+      - tests/
+    authority: FORTS raw 5m multi-instrument onboarding contract; authoritative for per-instrument pointer strategy, onboarding sequence and production scheduler policy for FORTS raw 5m tradestats.
+    duplicate_overlap_notes: YAML is authoritative; no conflicting MD exists for this subject.
+
+  - contract_id: forts_derived_d1_from_raw_5m.v1
+    canonical_path: contracts/datasets/forts_derived_d1_from_raw_5m.v1.yaml
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/futures/resampler.py
+    enforcement_test_refs:
+      - tests/
+    authority: FORTS derived D1 dataset contract (target_declaration). Authoritative for derived D1 schema, derivation from raw 5m tradestats, and recompute policy.
+    duplicate_overlap_notes: YAML is authoritative; no conflicting MD exists for this subject.
 
   - contract_id: futures_continuous_5m.v1
     canonical_path: contracts/datasets/futures_continuous_5m.v1.yaml
@@ -77,11 +121,223 @@ contracts:
     supersedes: []
     superseded_by: []
     implementation_refs:
-      - src/
+      - src/moex_data/futures/continuous_series_builder.py
     enforcement_test_refs:
       - tests/
-    authority: Continuous 5-minute futures series contract; authoritative for continuous series construction semantics.
+    authority: Continuous 5-minute futures series contract (blocked_placeholder); authoritative for continuous series construction semantics. Producer moex_data.futures.continuous_builder.
     duplicate_overlap_notes: YAML is authoritative; futures_continuous_5m_contract.md is a companion narrative and must defer to this YAML.
+
+  - contract_id: futures_continuous_5m_contract.v1
+    canonical_path: contracts/datasets/futures_continuous_5m_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/futures/continuous_series_builder.py
+    enforcement_test_refs:
+      - tests/
+    authority: Companion narrative contract for unadjusted 5-minute continuous futures bars (design_contract, schema_version futures_continuous_5m.v1). Documents lineage, validation and blocking conditions for continuous 5m construction.
+    duplicate_overlap_notes: YAML futures_continuous_5m.v1 is authoritative; this MD companion narrative defers to the YAML for schema and semantics.
+
+  - contract_id: futures_continuous_series_policy.v1
+    canonical_path: contracts/datasets/futures_continuous_series_policy.v1.yaml
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/futures/continuous_series_builder.py
+    enforcement_test_refs:
+      - tests/
+    authority: Fail-closed policy boundary for continuous futures series (blocked_placeholder). Authoritative for the policy boundary that gates continuous series materialization until roll policy, expiration family mapping and parent native series contracts are approved.
+    duplicate_overlap_notes: YAML is authoritative for the policy boundary. futures_continuous_series_v1_contract.md is a related but distinct series umbrella contract; the YAML policy boundary and the MD umbrella overlap in scope but are not strict duplicates. YAML governs the fail-closed policy boundary; MD governs the series umbrella contract narrative.
+
+  - contract_id: futures_continuous_series_v1_contract.v1
+    canonical_path: contracts/datasets/futures_continuous_series_v1_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/futures/continuous_series_builder.py
+    enforcement_test_refs:
+      - tests/
+    authority: Contract umbrella for unadjusted continuous futures v1 artifacts (design_contract, schema_version futures_continuous_series_v1.v1). Authoritative for the series umbrella contract narrative covering roll policy, family mapping, raw-vs-continuous boundary and accepted scope.
+    duplicate_overlap_notes: MD is authoritative for the series umbrella contract subject (narrative by nature; no YAML covers the umbrella contract subject). futures_continuous_series_policy.v1.yaml is a related but distinct fail-closed policy boundary; the MD umbrella and the YAML policy boundary overlap in scope but are not strict duplicates. MD governs the series umbrella contract; YAML governs the policy boundary.
+
+  - contract_id: futures_continuous_v1_l3_6_manifest.v1
+    canonical_path: contracts/datasets/futures_continuous_v1_l3_6_manifest_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/futures/continuous_v1_l3_6_runner_v2.py
+    enforcement_test_refs:
+      - tests/
+    authority: Run manifest contract for PM L3-6 continuous futures v1 over the RFUD included universe (implemented_contract, schema_version futures_continuous_v1_l3_6_manifest.v1). Authoritative for the L3-6 run manifest schema and validation.
+    duplicate_overlap_notes: MD is authoritative for this run manifest contract; no conflicting YAML exists for this subject.
+
+  - contract_id: futures_continuous_v1_l3_6_quality_report.v1
+    canonical_path: contracts/datasets/futures_continuous_v1_l3_6_quality_report_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/futures/continuous_v1_l3_6_quality_report.py
+    enforcement_test_refs:
+      - tests/
+    authority: Scoped quality report contract for PM L3-6 continuous futures v1 outputs (implemented_contract, schema_version futures_continuous_v1_l3_6_quality_report.v1). Authoritative for the L3-6 scoped quality report schema and validation.
+    duplicate_overlap_notes: MD is authoritative for this quality report contract; no conflicting YAML exists for this subject.
+
+  - contract_id: futures_continuous_w1.v1
+    canonical_path: contracts/datasets/futures_continuous_w1_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/futures/continuous_w1_builder.py
+    enforcement_test_refs:
+      - tests/
+    authority: Unadjusted weekly continuous futures OHLCV bars contract (design_contract, schema_version futures_continuous_w1.v1). Authoritative for W1 construction semantics derived only from futures_continuous_d1.v1.
+    duplicate_overlap_notes: MD is authoritative for this W1 contract; no conflicting YAML exists for this subject.
+
+  - contract_id: futures_continuous_w1_quality_report.v1
+    canonical_path: contracts/datasets/futures_continuous_w1_quality_report_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/futures/continuous_w1_builder.py
+    enforcement_test_refs:
+      - tests/
+    authority: Per-run quality and lineage validation report contract for futures_continuous_w1.v1 outputs (design_contract, schema_version futures_continuous_w1_quality_report.v1). Authoritative for W1 quality report schema and validation.
+    duplicate_overlap_notes: MD is authoritative for this W1 quality report contract; no conflicting YAML exists for this subject.
+
+  - contract_id: futures_continuous_roll_map.v1
+    canonical_path: contracts/datasets/futures_continuous_roll_map_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/futures/continuous_roll_map_builder.py
+      - src/moex_data/futures/continuous_series_builder.py
+    enforcement_test_refs:
+      - tests/
+    authority: Versioned roll-window map contract for continuous futures v1 (design_contract, schema_version futures_continuous_roll_map.v1). Authoritative for roll-map schema, roll-window selection and validation.
+    duplicate_overlap_notes: MD is authoritative for this roll-map contract; no conflicting YAML exists for this subject.
+
+  - contract_id: futures_continuous_quality_report.v1
+    canonical_path: contracts/datasets/futures_continuous_quality_report_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/futures/continuous_series_builder.py
+    enforcement_test_refs:
+      - tests/
+    authority: Per-run quality and roll-boundary validation report contract for continuous futures v1 outputs (design_contract, schema_version futures_continuous_quality_report.v1). Authoritative for continuous quality report schema and validation.
+    duplicate_overlap_notes: MD is authoritative for this continuous quality report contract; no conflicting YAML exists for this subject.
+
+  - contract_id: futures_continuous_builder_manifest.v1
+    canonical_path: contracts/datasets/futures_continuous_builder_manifest_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/futures/continuous_series_builder.py
+    enforcement_test_refs:
+      - tests/
+    authority: Run manifest contract for continuous futures v1 roll-map, 5m, and D1 build steps (design_contract, schema_version futures_continuous_builder_manifest.v1). Authoritative for the continuous builder manifest schema and validation.
+    duplicate_overlap_notes: MD is authoritative for this builder manifest contract; no conflicting YAML exists for this subject.
+
+  - contract_id: futures_continuous_bars_access_api.v1
+    canonical_path: contracts/datasets/futures_continuous_bars_access_api_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/futures/continuous_bars_access.py
+      - src/moex_data/futures/continuous_htf_resampling.py
+    enforcement_test_refs:
+      - tests/
+    authority: Consumer-facing canonical Python data access API contract for MOEX futures continuous OHLCV bars across 5m, 15m, 30m, 1h, 4h, and D1 (access_contract, design). Authoritative for the access API signature, routing, timeframe policy and fail-closed semantics.
+    duplicate_overlap_notes: MD is authoritative for this access API contract; no conflicting YAML exists for this subject.
+
+  - contract_id: futures_continuous_htf_ondemand_resampling.v1
+    canonical_path: contracts/datasets/futures_continuous_htf_ondemand_resampling_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/futures/continuous_htf_resampling.py
+    enforcement_test_refs:
+      - tests/
+    authority: Shared consumer access contract for on-demand higher-timeframe OHLCV bars derived from futures_continuous_5m.v1 without materializing separate 15m/30m/1h/4h parquet zones (access_contract, design). Authoritative for HTF on-demand resampling semantics and non-materialization clause.
+    duplicate_overlap_notes: MD is authoritative for this HTF on-demand resampling contract; no conflicting YAML exists for this subject.
+
+  - contract_id: futures_continuous_d1.v1
+    canonical_path: contracts/datasets/futures_continuous_d1_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/futures/continuous_d1_builder.py
+    enforcement_test_refs:
+      - tests/
+    authority: Unadjusted daily continuous futures OHLCV bars contract (design_contract, schema_version futures_continuous_d1.v1). Authoritative for continuous D1 construction semantics derived from futures_continuous_5m.v1.
+    duplicate_overlap_notes: MD is authoritative for this continuous D1 contract; no conflicting YAML exists for this subject.
+
+  - contract_id: futures_futoi_5m_raw.v1
+    canonical_path: contracts/datasets/futures_futoi_5m_raw_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/futures/futoi_raw_loader.py
+    enforcement_test_refs:
+      - tests/
+    authority: Canonical raw 5-minute MOEX FUTOI open-interest rows contract (implemented_contract, schema_version futures_futoi_5m_raw.v1). Authoritative for FUTOI raw 5m schema, whitelist scope and validation.
+    duplicate_overlap_notes: MD is authoritative for this FUTOI raw 5m contract; no conflicting YAML exists for this subject.
+
+  - contract_id: futures_futoi_raw.v1
+    canonical_path: contracts/datasets/futures_futoi_raw.v1.yaml
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: []
+    superseded_by: []
+    implementation_refs:
+      - src/moex_data/iss/source_contracts.py
+    enforcement_test_refs:
+      - tests/
+    authority: Raw FUTOI dataset contract; authoritative for raw FUTOI schema, identity model and storage semantics. Producer moex_data.iss.source_contracts.
+    duplicate_overlap_notes: YAML is authoritative; futures_futoi_5m_raw_contract.md is a related companion narrative for the 5m FUTOI raw loader and must defer to this YAML for schema and semantics.
 
   - contract_id: futures_derived_d1.v1
     canonical_path: contracts/datasets/futures_derived_d1.v1.yaml
