@@ -52,12 +52,12 @@ Existing macro adapters are reused rather than duplicated:
 
 ## Blocked pending source work
 
-These are desired sources but are not authorized for Stage 12B live ingestion yet:
+These desired sources are not authorized for Stage 12B live ingestion yet:
 
-- Kremlin — stable event route/timestamp adapter still required.
-- Russian Ministry of Finance — route verification required; research environment returned HTTP 503 for the press-center route.
-- Rosstat — individual releases are visible, but a stable machine-readable index and availability policy are not yet frozen.
-- Russian MFA — stable news index/timestamp adapter still required.
+- Kremlin — stable event route/timestamp adapter required.
+- Russian Ministry of Finance — stable route and timestamp semantics required.
+- Rosstat — stable machine-readable index and availability policy required.
+- Russian MFA — stable news index/timestamp adapter required.
 - Reuters — approved acquisition route and rights policy required; no scraping fallback.
 
 ## X/Twitter discovery whitelist
@@ -66,14 +66,16 @@ These are desired sources but are not authorized for Stage 12B live ingestion ye
 
 - `@WhiteHouse`
 - `@USTreasury`
-- `@FederalReserve`
+- `@SecScottBessent`
+- `@federalreserve`
 - `@BLS_gov`
 - `@StateDept`
 - `@EU_Commission`
 - `@OPECSecretariat`
-- `@KremlinRussia_E`
 - `@mfa_russia`
+- `@MID_RF`
 - `@ZelenskyyUa`
+- `@MedvedevRussia`
 
 ### Wire discovery
 
@@ -84,13 +86,15 @@ These are desired sources but are not authorized for Stage 12B live ingestion ye
 - `@DeItaone`
 - `@FirstSquawk`
 - `@financialjuice`
+- `@Newsquawk`
 
 ### OSINT early warning
 
 - `@Faytuks`
 - `@sentdefender`
 - `@clashreport`
-- `@MarioNawfal`
+
+The active v1 whitelist is intentionally bounded to 20 accounts. Accounts outside the whitelist are ignored by Stage 12A policy until a separate registry change is accepted.
 
 ## X/Twitter policy
 
