@@ -100,6 +100,64 @@ def test_guard_rejects_future_evidence_before_agent_call() -> None:
     assert called is False
 
 
+def test_guard_rejects_future_cluster_history_before_agent_call() -> None:
+    payload = _payload()
+    payload["cluster_history"] = (
+        {
+            "event_id": "future_event",
+            "available_at": (AS_OF + timedelta(seconds=1)).isoformat(),
+            "novelty": "NEW",
+        },
+    )
+    called = False
+
+    def agent(payload):
+        nonlocal called
+        called = True
+        return _output()
+
+    with pytest.raises(ClassifierOutputError, match="cluster history may not be available after"):
+        stage12b3_news_classifier(agent)(payload)
+    assert called is False
+
+
+def test_guard_requires_cluster_history_available_at_for_pit_validation() -> None:
+    payload = _payload()
+    payload["cluster_history"] = ({"event_id": "old_event", "novelty": "NEW"},)
+    called = False
+
+    def agent(payload):
+        nonlocal called
+        called = True
+        return _output()
+
+    with pytest.raises(ClassifierOutputError, match="available_at is required"):
+        stage12b3_news_classifier(agent)(payload)
+    assert called is False
+
+
+def test_guard_accepts_pit_safe_cluster_history() -> None:
+    payload = _payload()
+    payload["cluster_history"] = (
+        {
+            "event_id": "old_event",
+            "available_at": (AS_OF - timedelta(minutes=5)).isoformat(),
+            "novelty": "NEW",
+        },
+    )
+    seen: dict[str, object] = {}
+
+    def agent(bounded_payload):
+        seen.update(bounded_payload)
+        return _output(novelty="UPDATE")
+
+    result = stage12b3_news_classifier(agent)(payload)
+
+    history = seen["cluster_history"]
+    assert history[0]["available_at"] == (AS_OF - timedelta(minutes=5)).isoformat()
+    assert result["novelty"] == "UPDATE"
+
+
 def test_guard_rejects_extra_input_field() -> None:
     payload = _payload()
     payload["market_price"] = 99999.0
