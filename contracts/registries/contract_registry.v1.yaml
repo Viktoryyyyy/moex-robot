@@ -210,6 +210,45 @@ contracts:
     authority: Design contract for unadjusted weekly continuous futures OHLCV bars derived only from accepted futures_continuous_d1.v1; authoritative for W1 schema, week-boundary and lineage semantics.
     duplicate_overlap_notes: UNKNOWN / NOT PROVEN
 
+  - contract_id: futures_continuous_w1_quality_report_contract
+    canonical_path: contracts/datasets/futures_continuous_w1_quality_report_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs:
+      - src/moex_data/futures/continuous_w1_builder.py
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Per-run quality and lineage validation report contract for futures_continuous_w1.v1 outputs; authoritative for the W1 quality report schema and semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
+  - contract_id: futures_continuous_roll_map_contract
+    canonical_path: contracts/datasets/futures_continuous_roll_map_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs:
+      - src/moex_data/futures/continuous_roll_map_builder.py
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Versioned roll-window map contract that selects the active source contract for each continuous futures family under continuous v1; authoritative for the roll-map schema and semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
+  - contract_id: futures_continuous_quality_report_contract
+    canonical_path: contracts/datasets/futures_continuous_quality_report_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs:
+      - src/moex_data/futures/continuous_series_builder.py
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Per-run quality and roll-boundary validation report contract for continuous futures v1 outputs; authoritative for the continuous quality report schema and semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
   # ---------------------------------------------------------------------------
   # Calendars
   # ---------------------------------------------------------------------------
