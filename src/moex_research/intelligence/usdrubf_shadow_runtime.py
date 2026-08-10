@@ -24,6 +24,7 @@ from .usdrubf_news_macro import MacroObservation, MacroState, NewsEvent
 _ALLOWED_FINAL_BIAS = {"BULLISH_USD", "NEUTRAL", "BEARISH_USD"}
 _ALLOWED_TRADE_STATES = {"WAIT", "ENTER", "HOLD", "ADD", "REDUCE", "EXIT"}
 _ALLOWED_PRICE_ANCHORS = {"LOWER_BOUND", "CENTER", "UPPER_BOUND"}
+_PENDING_CONFIRMATION_STATES = {"BREAKOUT", "RETEST_PENDING", "RETEST"}
 
 
 class ShadowRuntimeError(ValueError):
@@ -87,13 +88,15 @@ def _level_reference_from_mapping(
 
 def _directional_context(raw: object, field: str) -> DirectionalContext:
     item = _mapping(raw, field)
+    raw_details = item.get("details")
+    details = None if raw_details is None else _mapping(raw_details, f"{field}.details")
     return DirectionalContext(
         source_id=_text(item.get("source_id"), f"{field}.source_id"),
         available_at=item.get("available_at"),
         direction=_text(item.get("direction"), f"{field}.direction"),
         confidence=_number(item.get("confidence"), f"{field}.confidence"),
         quality_status=_text(item.get("quality_status"), f"{field}.quality_status"),
-        details=_mapping(item.get("details", {}), f"{field}.details"),
+        details=details,
     )
 
 
@@ -164,8 +167,65 @@ def _macro_state(raw: object) -> MacroState:
     )
 
 
+def _allowed_evidence_refs(inputs: DecisionInput) -> set[str]:
+    refs = {f"level:{item.level_id}" for item in inputs.active_levels}
+    refs.update(
+        f"news:{item.event_id}"
+        for item in inputs.news_events
+        if item.quality_status == "OK"
+    )
+    refs.update(
+        f"macro:{item.metric_id}"
+        for item in inputs.macro_state.observations
+        if item.quality_status == "OK"
+    )
+    if inputs.ema_3_19_ai.usable:
+        refs.add("signal:ema_3_19_ai")
+    if inputs.futoi.usable:
+        refs.add("signal:futoi")
+    return refs
+
+
+def _validate_persisted_decision_fields(
+    *,
+    inputs: DecisionInput,
+    trade_state: str,
+    targets: tuple[ResolvedLevelReference, ...],
+    invalidation: ResolvedLevelReference | None,
+    evidence_refs: tuple[str, ...],
+) -> None:
+    if trade_state in {"ENTER", "ADD"} and not targets:
+        raise ShadowRuntimeError(f"persisted {trade_state} requires target references")
+    if trade_state in {"ENTER", "ADD", "HOLD"} and invalidation is None:
+        raise ShadowRuntimeError(f"persisted {trade_state} requires invalidation")
+    if not evidence_refs:
+        raise ShadowRuntimeError("persisted evidence_refs must not be empty")
+    if len(evidence_refs) != len(set(evidence_refs)):
+        raise ShadowRuntimeError("persisted evidence_refs must be unique")
+    if not set(evidence_refs).issubset(_allowed_evidence_refs(inputs)):
+        raise ShadowRuntimeError("persisted evidence_refs reference unavailable facts")
+    if trade_state in {"ENTER", "ADD"}:
+        interactions = {item.level_id: item for item in inputs.level_interactions}
+        structural_ids = tuple(
+            value.removeprefix("level:")
+            for value in evidence_refs
+            if value.startswith("level:")
+        )
+        if not structural_ids:
+            raise ShadowRuntimeError(
+                f"persisted {trade_state} requires structural level evidence"
+            )
+        if all(
+            interactions[level_id].state in _PENDING_CONFIRMATION_STATES
+            for level_id in structural_ids
+        ):
+            raise ShadowRuntimeError(
+                f"persisted {trade_state} relies only on unconfirmed breakout/retest"
+            )
+
+
 def market_state_from_dict(raw: object) -> DecisionMarketState:
-    """Restore one persisted state and revalidate all deterministic/source-bound inputs."""
+    """Restore one persisted state and revalidate deterministic and bounded decision fields."""
 
     item = _mapping(raw, "market_state")
     required = {
@@ -257,8 +317,13 @@ def market_state_from_dict(raw: object) -> DecisionMarketState:
         _text(value, "evidence_ref")
         for value in _sequence(item["evidence_refs"], "evidence_refs")
     )
-    if len(evidence_refs) != len(set(evidence_refs)):
-        raise ShadowRuntimeError("persisted evidence_refs must be unique")
+    _validate_persisted_decision_fields(
+        inputs=validated_inputs,
+        trade_state=trade_state,
+        targets=targets,
+        invalidation=invalidation,
+        evidence_refs=evidence_refs,
+    )
 
     return DecisionMarketState(
         instrument=validated_inputs.instrument,
@@ -284,7 +349,7 @@ def market_state_from_dict(raw: object) -> DecisionMarketState:
 
 
 class ShadowJsonStore:
-    """Restart-safe MarketState/change snapshots under an explicit caller root."""
+    """Restart-safe snapshots under an explicit caller root."""
 
     def __init__(
         self,
@@ -345,8 +410,8 @@ class ShadowJsonStore:
         path = self._path(self.market_state_filename)
         if not path.exists():
             return None
-        if not path.is_file():
-            raise ShadowRuntimeError("market state snapshot is not a regular file")
+        if path.is_symlink() or not path.is_file():
+            raise ShadowRuntimeError("market state snapshot is not a regular non-symlink file")
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -384,8 +449,11 @@ class ShadowRuntime:
         previous = self._store.load_market_state()
         current = build_market_state(inputs, decision_agent=decision_agent)
         changes = None if previous is None else detect_market_state_changes(previous, current)
-        market_state_path = self._store.save_market_state(current)
+
+        # The MarketState snapshot is the restart authority and is committed last.
+        # If the process fails between these writes, restart still reads the prior state.
         change_detection_path = self._store.save_change_detection(changes)
+        market_state_path = self._store.save_market_state(current)
         return ShadowCycleResult(
             market_state=current,
             change_detection=changes,
