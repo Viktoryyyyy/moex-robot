@@ -8,6 +8,7 @@
   "source_runtime": {
     "decision_payload_builder": "src/moex_research/intelligence/usdrubf_decision_engine.py::build_decision_payload",
     "decision_output_validator": "src/moex_research/intelligence/usdrubf_decision_engine.py::_validate_agent_output",
+    "stage_11_runtime_guard": "src/moex_research/intelligence/usdrubf_flowise_decision_agent.py::stage11_shadow_decision_agent",
     "transport_adapter": "src/moex_research/intelligence/usdrubf_news_macro_runtime.py::FlowiseJsonAdapter",
     "shadow_runner": "src/moex_research/runners/usdrubf_live_shadow_smoke.py"
   },
@@ -33,7 +34,7 @@
   },
   "input_contract": {
     "format": "serialized_json_mapping",
-    "authoritative_source": "build_decision_payload",
+    "authoritative_source": "build_decision_payload wrapped by stage11_shadow_decision_agent",
     "required_top_level_fields": [
       "instrument",
       "as_of_timestamp",
@@ -45,7 +46,11 @@
       "output_contract"
     ],
     "facts_are_read_only": true,
-    "missing_facts_must_not_be_invented": true
+    "missing_facts_must_not_be_invented": true,
+    "stage_11_runtime_trade_state_override": [
+      "WAIT",
+      "ENTER"
+    ]
   },
   "fact_ownership": {
     "python_source_bound": [
@@ -101,6 +106,7 @@
       "WAIT",
       "ENTER"
     ],
+    "stage_11_runtime_enforced": true,
     "price_anchor_allowed": [
       "LOWER_BOUND",
       "CENTER",
@@ -126,10 +132,12 @@
     "News and macro may change interpretation but cannot overwrite technical facts.",
     "FUTOI is participant positioning only and must not be described as open interest.",
     "For Stage 11 shadow pilot do not emit HOLD, ADD, REDUCE or EXIT because explicit live position context is not supplied yet.",
+    "The Python Stage 11 runtime guard rewrites the advertised trade_state_allowed set to WAIT/ENTER and rejects any other returned trade_state before persistence.",
     "Return JSON only, with exactly the eight output fields."
   ],
   "runtime_boundary": {
     "shadow_only": true,
+    "stage_11_trade_state_guard_enabled": true,
     "alert_delivery": false,
     "broker_action": false,
     "order_placement": false,
