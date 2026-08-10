@@ -8,6 +8,10 @@ from typing import Mapping
 
 from dotenv import load_dotenv
 
+from src.moex_research.intelligence.usdrubf_flowise_auth import (
+    FLOWISE_API_KEY_ENV,
+    flowise_bearer_opener,
+)
 from src.moex_research.intelligence.usdrubf_flowise_decision_agent import (
     stage11_shadow_decision_agent,
 )
@@ -69,13 +73,17 @@ def _decision_agent(args: argparse.Namespace):
         raise RuntimeError(
             "explicit Flowise endpoint/request/response configuration is required unless --safe-wait-agent is selected"
         )
+    api_key = os.getenv(FLOWISE_API_KEY_ENV, "").strip()
+    if not api_key:
+        raise RuntimeError(f"required Flowise API key env missing: {FLOWISE_API_KEY_ENV}")
     adapter = FlowiseJsonAdapter(
         FlowiseTransportConfig(
             endpoint=args.flowise_endpoint,
             request_field=args.flowise_request_field,
             response_field=args.flowise_response_field,
             timeout_seconds=args.flowise_timeout_seconds,
-        )
+        ),
+        opener=flowise_bearer_opener(api_key),
     )
     return stage11_shadow_decision_agent(adapter), "FLOWISE"
 
