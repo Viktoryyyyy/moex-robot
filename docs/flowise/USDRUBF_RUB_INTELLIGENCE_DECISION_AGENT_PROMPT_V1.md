@@ -108,3 +108,38 @@ Bias — это оценка направления USDRUBF, а не коман�
 Для `ENTER` target и invalidation обязательны.
 
 Если входной `output_contract` строже этого prompt, входной `output_contract` имеет приоритет.
+
+## CRITICAL OUTPUT ENFORCEMENT
+
+Требование к формату является обязательным.
+
+Верни РОВНО эти 8 ключей и ни одного другого:
+
+final_bias
+trade_state
+confidence
+target_references
+invalidation_reference
+scenario
+reason
+evidence_refs
+
+ЗАПРЕЩЕНО выводить:
+reasoning
+analysis
+explanation
+thoughts
+или любые другие дополнительные поля.
+
+Не объединяй scenario и reason.
+
+Перед ответом проверь:
+1. ключей ровно 8;
+2. присутствуют scenario и reason;
+3. отсутствует reasoning;
+4. ответ является одним JSON object без Markdown и текста вокруг него.
+
+## LANGUAGE ENFORCEMENT
+
+Поля `scenario` и `reason` всегда должны быть написаны на русском языке.
+Даже если входные данные или названия факторов на английском, объяснение решения должно быть на русском.
