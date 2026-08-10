@@ -249,6 +249,44 @@ contracts:
     authority: Per-run quality and roll-boundary validation report contract for continuous futures v1 outputs; authoritative for the continuous quality report schema and semantics.
     duplicate_overlap_notes: UNKNOWN / NOT PROVEN
 
+  - contract_id: futures_continuous_builder_manifest.v1
+    canonical_path: contracts/datasets/futures_continuous_builder_manifest_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs:
+      - src/moex_data/futures/continuous_series_builder.py
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Run manifest contract for continuous futures v1 roll-map, 5m, and D1 build steps; authoritative for the builder manifest schema and semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
+  - contract_id: futures_continuous_bars_access_api.v1
+    canonical_path: contracts/datasets/futures_continuous_bars_access_api_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs:
+      - src/moex_data/futures/continuous_bars_access.py
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Consumer-facing canonical Python data access API contract for MOEX futures continuous OHLCV bars across 5m, 15m, 30m, 1h, 4h, and D1; authoritative for the access API and access semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
+  - contract_id: futures_continuous_htf_ondemand_resampling.v1
+    canonical_path: contracts/datasets/futures_continuous_htf_ondemand_resampling_contract.md
+    version: v1
+    scope: datasets
+    status: active
+    supersedes: UNKNOWN / NOT PROVEN
+    superseded_by: UNKNOWN / NOT PROVEN
+    implementation_refs: UNKNOWN / NOT PROVEN
+    enforcement_test_refs: UNKNOWN / NOT PROVEN
+    authority: Shared consumer access contract for on-demand higher-timeframe OHLCV bars derived from futures_continuous_5m.v1 without materializing separate 15m/30m/1h/4h parquet zones; authoritative for the HTF on-demand resampling schema and semantics.
+    duplicate_overlap_notes: UNKNOWN / NOT PROVEN
+
   # ---------------------------------------------------------------------------
   # Calendars
   # ---------------------------------------------------------------------------
