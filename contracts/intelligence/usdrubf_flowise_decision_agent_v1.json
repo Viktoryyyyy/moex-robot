@@ -1,7 +1,7 @@
 {
   "contract_id": "usdrubf_flowise_decision_agent.v1",
   "version": "1.0",
-  "status": "design_contract_for_flow_creation",
+  "status": "flowise_applied_state_verified",
   "project": "MOEX_Bot",
   "instrument": "USDRUBF",
   "purpose": "Define the first bounded Flowise decision flow for RUB Intelligence shadow operation.",
@@ -14,14 +14,24 @@
   },
   "flowise": {
     "flow_name": "usdrubf-rub-intelligence-decision-v1",
+    "flow_id": "9ad1f42c-e7f1-44a3-a574-09a7da4ddecf",
     "applied_state_required": true,
+    "applied_state_verified": true,
     "architecture": "single_bounded_decision_agent",
+    "model_provider": "Deepseek",
+    "model_name": "deepseek-chat",
     "persistent_memory": false,
+    "llm_memory": false,
     "tools": [],
     "external_fact_fetch": false,
     "temperature_max": 0.2,
+    "temperature_applied": 0.1,
+    "streaming": false,
+    "thinking": false,
+    "json_structured_output": false,
+    "authorization": "NONE",
     "transport": {
-      "endpoint": "runtime_applied_state_only_not_committed",
+      "endpoint": "https://flowise.foods-tech.store/api/v1/prediction/9ad1f42c-e7f1-44a3-a574-09a7da4ddecf",
       "request_field": "question",
       "response_field": "text",
       "environment": {
@@ -30,6 +40,14 @@
         "response_field": "MOEX_RUB_INTELLIGENCE_FLOWISE_RESPONSE_FIELD",
         "timeout_seconds": "MOEX_RUB_INTELLIGENCE_FLOWISE_TIMEOUT_SECONDS"
       }
+    },
+    "applied_state_observation": {
+      "verified_date": "2026-08-10",
+      "verification_basis": [
+        "Flowise Agentflow V2 UI",
+        "Decision Agent acceptance test",
+        "Flowise CURL panel"
+      ]
     }
   },
   "input_contract": {
@@ -143,6 +161,6 @@
     "order_placement": false,
     "autonomous_trading": false,
     "server_apply_proven_by_this_contract": false,
-    "flowise_applied_state_proven_by_this_contract": false
+    "flowise_applied_state_proven_by_this_contract": true
   }
 }
