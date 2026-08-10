@@ -5,6 +5,7 @@ import os
 from typing import Callable, Mapping
 from urllib.request import urlopen
 
+from .usdrubf_flowise_auth import FLOWISE_API_KEY_ENV, flowise_bearer_opener
 from .usdrubf_news_macro_runtime import (
     FlowiseJsonAdapter,
     FlowiseTransportConfig,
@@ -22,6 +23,7 @@ NEWS_CLASSIFIER_FLOWISE_REQUIRED_ENV = (
     NEWS_CLASSIFIER_FLOWISE_REQUEST_FIELD_ENV,
     NEWS_CLASSIFIER_FLOWISE_RESPONSE_FIELD_ENV,
     NEWS_CLASSIFIER_FLOWISE_TIMEOUT_SECONDS_ENV,
+    FLOWISE_API_KEY_ENV,
 )
 
 
@@ -51,12 +53,12 @@ def news_classifier_flowise_agent_from_env(
     env: Mapping[str, str] | None = None,
     opener: Callable[..., object] = urlopen,
 ) -> FlowiseJsonAdapter:
-    """Build the raw News Classifier Flowise transport from explicit env values.
+    """Build the authenticated News Classifier Flowise transport from env.
 
     This function does not load dotenv, guess an endpoint, create a Flowise flow,
-    or claim Applied State. The caller owns canonical dotenv load order. The
-    returned adapter is the raw external classifier_agent expected by the live
-    pipeline, which then enforces the Stage 12B.3 guard before and after transport.
+    or persist credentials. The caller owns canonical dotenv load order. The
+    API key is read only from explicit runtime environment and is attached as a
+    Bearer Authorization header by the bounded opener.
     """
 
     values: Mapping[str, str] = os.environ if env is None else env
@@ -66,6 +68,7 @@ def news_classifier_flowise_agent_from_env(
     timeout_seconds = _timeout_seconds(
         _required_env(values, NEWS_CLASSIFIER_FLOWISE_TIMEOUT_SECONDS_ENV)
     )
+    api_key = _required_env(values, FLOWISE_API_KEY_ENV)
 
     config = FlowiseTransportConfig(
         endpoint=endpoint,
@@ -73,4 +76,7 @@ def news_classifier_flowise_agent_from_env(
         response_field=response_field,
         timeout_seconds=timeout_seconds,
     )
-    return FlowiseJsonAdapter(config, opener=opener)
+    return FlowiseJsonAdapter(
+        config,
+        opener=flowise_bearer_opener(api_key, opener=opener),
+    )
