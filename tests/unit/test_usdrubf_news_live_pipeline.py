@@ -60,11 +60,11 @@ def _registry(tmp_path: Path, *sources: dict[str, object]) -> Path:
     return path
 
 
-def _classifier(payload: dict[str, object]) -> dict[str, object]:
+def _classifier_agent(payload: dict[str, object]) -> dict[str, object]:
     assert payload["instrument"] == "USDRUBF"
     assert payload["cluster_evidence"]
     return {
-        "event_type": "OFFICIAL_POLICY_UPDATE",
+        "event_type": "OFFICIAL_COMMUNICATION",
         "entities": ["official_source"],
         "rub_relevance": 0.7,
         "direction": "NEUTRAL",
@@ -72,7 +72,7 @@ def _classifier(payload: dict[str, object]) -> dict[str, object]:
         "novelty": "NEW",
         "horizon": "SHORT_TERM",
         "confidence": 0.8,
-        "mechanism": "Official source update requires bounded RUB interpretation.",
+        "mechanism": "Переданное официальное сообщение не подтверждает направленный эффект для USDRUBF.",
     }
 
 
@@ -96,7 +96,7 @@ def test_live_pipeline_preserves_source_failure_and_classifies_healthy_records(t
         return _Response(payload, request.full_url)
 
     result = run_live_official_news_pipeline(
-        classifier=_classifier,
+        classifier_agent=_classifier_agent,
         registry_path=registry,
         source_ids=("one", "two"),
         opener=opener,
@@ -111,7 +111,7 @@ def test_live_pipeline_preserves_source_failure_and_classifies_healthy_records(t
     assert len(result.news.events) == 1
     event = result.news.events[0]
     assert event.source_id == "one"
-    assert event.event_type == "OFFICIAL_POLICY_UPDATE"
+    assert event.event_type == "OFFICIAL_COMMUNICATION"
     assert event.direction == "NEUTRAL"
     assert event.quality_status == "OK"
 
@@ -127,13 +127,13 @@ def test_live_pipeline_does_not_classify_future_rss_items(tmp_path: Path) -> Non
     )
     calls = 0
 
-    def classifier(payload):
+    def classifier_agent(payload):
         nonlocal calls
         calls += 1
-        return _classifier(payload)
+        return _classifier_agent(payload)
 
     result = run_live_official_news_pipeline(
-        classifier=classifier,
+        classifier_agent=classifier_agent,
         registry_path=registry,
         source_ids=("one",),
         opener=lambda request, timeout: _Response(payload, request.full_url),
@@ -152,7 +152,7 @@ def test_live_pipeline_rejects_future_as_of_timestamp_before_acquisition(tmp_pat
 
     with pytest.raises(ValueError, match="later than acquisition time"):
         run_live_official_news_pipeline(
-            classifier=_classifier,
+            classifier_agent=_classifier_agent,
             registry_path=registry,
             source_ids=("one",),
             opener=lambda request, timeout: pytest.fail("network must not be called"),
@@ -161,7 +161,7 @@ def test_live_pipeline_rejects_future_as_of_timestamp_before_acquisition(tmp_pat
         )
 
 
-def test_live_pipeline_fails_closed_on_classifier_contract_violation(tmp_path: Path) -> None:
+def test_live_pipeline_enforces_stage12b3_output_contract(tmp_path: Path) -> None:
     registry = _registry(tmp_path, _source("one", "one.example"))
     now = datetime(2026, 8, 10, 14, 0, tzinfo=timezone.utc)
     payload = _rss(
@@ -171,14 +171,70 @@ def test_live_pipeline_fails_closed_on_classifier_contract_violation(tmp_path: P
         )
     )
 
-    def invalid_classifier(payload):
-        return {**_classifier(payload), "source_id": "invented"}
+    def invalid_agent(payload):
+        return {**_classifier_agent(payload), "event_type": "UNFROZEN_EVENT_TYPE"}
 
-    with pytest.raises(ClassifierOutputError, match="source-bound fields"):
+    with pytest.raises(ClassifierOutputError, match="invalid event_type"):
         run_live_official_news_pipeline(
-            classifier=invalid_classifier,
+            classifier_agent=invalid_agent,
             registry_path=registry,
             source_ids=("one",),
             opener=lambda request, timeout: _Response(payload, request.full_url),
             now_fn=lambda: now,
         )
+
+
+def test_live_pipeline_enforces_stage12b3_source_bound_output_guard(tmp_path: Path) -> None:
+    registry = _registry(tmp_path, _source("one", "one.example"))
+    now = datetime(2026, 8, 10, 14, 0, tzinfo=timezone.utc)
+    payload = _rss(
+        _item(
+            host="one.example",
+            pub_date="Mon, 10 Aug 2026 13:30:00 +0000",
+        )
+    )
+
+    def invalid_agent(payload):
+        return {**_classifier_agent(payload), "source_id": "invented"}
+
+    with pytest.raises(ClassifierOutputError, match="extra fields"):
+        run_live_official_news_pipeline(
+            classifier_agent=invalid_agent,
+            registry_path=registry,
+            source_ids=("one",),
+            opener=lambda request, timeout: _Response(payload, request.full_url),
+            now_fn=lambda: now,
+        )
+
+
+def test_live_pipeline_rejects_future_cluster_history_before_agent_call(tmp_path: Path) -> None:
+    registry = _registry(tmp_path, _source("one", "one.example"))
+    now = datetime(2026, 8, 10, 14, 0, tzinfo=timezone.utc)
+    payload = _rss(
+        _item(
+            host="one.example",
+            pub_date="Mon, 10 Aug 2026 13:30:00 +0000",
+        )
+    )
+    called = False
+
+    def classifier_agent(payload):
+        nonlocal called
+        called = True
+        return _classifier_agent(payload)
+
+    with pytest.raises(ClassifierOutputError, match="cluster history may not be available after as_of_timestamp"):
+        run_live_official_news_pipeline(
+            classifier_agent=classifier_agent,
+            registry_path=registry,
+            source_ids=("one",),
+            opener=lambda request, timeout: _Response(payload, request.full_url),
+            now_fn=lambda: now,
+            prior_clusters={"cluster_existing": ("Policy update",)},
+            prior_event_history={
+                "cluster_existing": (
+                    {"available_at": (now + timedelta(seconds=1)).isoformat(), "novelty": "NEW"},
+                )
+            },
+        )
+    assert called is False

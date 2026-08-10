@@ -26,6 +26,15 @@ def test_news_classifier_contract_is_bounded_and_not_applied_state() -> None:
     assert target["temperature_max"] <= 0.2
 
 
+def test_news_classifier_contract_enforces_live_guard_composition() -> None:
+    runtime = _contract()["source_runtime"]
+    assert runtime["live_pipeline_classifier_argument"] == "classifier_agent"
+    assert runtime["live_pipeline_guard_enforced"] is True
+    assert runtime["raw_classifier_injection_through_live_pipeline_forbidden"] is True
+    assert runtime["stage12b3_guard"].endswith("::stage12b3_news_classifier")
+    assert runtime["live_pipeline"].endswith("::run_live_official_news_pipeline")
+
+
 def test_news_classifier_contract_freezes_exact_input_and_output_fields() -> None:
     contract = _contract()
     input_contract = contract["input_contract"]

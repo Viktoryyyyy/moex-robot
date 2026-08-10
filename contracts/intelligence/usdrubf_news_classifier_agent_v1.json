@@ -9,7 +9,10 @@
     "cluster_builder": "src/moex_research/intelligence/usdrubf_news_macro.py::process_news_batch",
     "live_pipeline": "src/moex_research/intelligence/usdrubf_news_live_pipeline.py::run_live_official_news_pipeline",
     "stage12b3_guard": "src/moex_research/intelligence/usdrubf_news_classifier_agent.py::stage12b3_news_classifier",
-    "downstream_news_event_validator": "src/moex_research/intelligence/usdrubf_news_macro.py::_validate_news_output"
+    "downstream_news_event_validator": "src/moex_research/intelligence/usdrubf_news_macro.py::_validate_news_output",
+    "live_pipeline_classifier_argument": "classifier_agent",
+    "live_pipeline_guard_enforced": true,
+    "raw_classifier_injection_through_live_pipeline_forbidden": true
   },
   "flow_target": {
     "suggested_name": "usdrubf-rub-intelligence-news-classifier-v1",
