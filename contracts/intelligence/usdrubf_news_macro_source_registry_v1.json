@@ -134,7 +134,7 @@
       "references": ["https://ofac.treasury.gov/recent-actions"],
       "topics": ["SANCTIONS", "RUSSIA_SANCTIONS", "ENERGY_SANCTIONS", "FINANCIAL_SANCTIONS"],
       "stage12b_status": "READY_CANDIDATE",
-      "available_at_policy": "Use the OFAC action publication date/time when exposed; otherwise ingestion must remain timestamp-unprovable until a source timestamp is resolved."
+      "available_at_policy": "Use the OFAC action publication timestamp when exposed; otherwise remain timestamp-unprovable until a source timestamp is resolved."
     },
     {
       "source_id": "whitehouse_releases",
@@ -194,7 +194,7 @@
       "references": ["https://minfin.gov.ru/ru/press-center/"],
       "topics": ["BUDGET", "FX_OPERATIONS", "FISCAL_POLICY", "OFZ"],
       "stage12b_status": "BLOCKED_PENDING_ROUTE_VERIFICATION",
-      "available_at_policy": "Research-environment verification returned HTTP 503; no live adapter until a stable route and timestamp semantics are proven."
+      "available_at_policy": "No live adapter until a stable route and publication timestamp semantics are proven."
     },
     {
       "source_id": "rosstat_official_releases",
@@ -204,7 +204,7 @@
       "references": ["https://rosstat.gov.ru/"],
       "topics": ["RU_CPI", "RU_INFLATION", "RU_MACRO"],
       "stage12b_status": "BLOCKED_PENDING_STABLE_INDEX_ROUTE",
-      "available_at_policy": "Individual official releases are visible, but a stable machine-readable index/availability policy must be proven before live use."
+      "available_at_policy": "A stable machine-readable index and availability policy must be proven before live use."
     },
     {
       "source_id": "mfa_ru_news",
@@ -237,22 +237,24 @@
   "x_discovery_whitelist": [
     {"source_id": "x_whitehouse", "handle": "@WhiteHouse", "url": "https://x.com/WhiteHouse", "class": "X_OFFICIAL_DISCOVERY", "topics": ["SANCTIONS", "NEGOTIATIONS", "GEOPOLITICS", "ENERGY_POLICY"]},
     {"source_id": "x_us_treasury", "handle": "@USTreasury", "url": "https://x.com/USTreasury", "class": "X_OFFICIAL_DISCOVERY", "topics": ["SANCTIONS", "TREASURY_POLICY", "RUSSIA_POLICY"]},
-    {"source_id": "x_federal_reserve", "handle": "@FederalReserve", "url": "https://x.com/FederalReserve", "class": "X_OFFICIAL_DISCOVERY", "topics": ["FOMC", "FED_POLICY"]},
+    {"source_id": "x_sec_scott_bessent", "handle": "@SecScottBessent", "url": "https://x.com/SecScottBessent", "class": "X_OFFICIAL_DISCOVERY", "topics": ["TREASURY_POLICY", "SANCTIONS", "FX_POLICY", "RUSSIA_POLICY"]},
+    {"source_id": "x_federal_reserve", "handle": "@federalreserve", "url": "https://x.com/federalreserve", "class": "X_OFFICIAL_DISCOVERY", "topics": ["FOMC", "FED_POLICY"]},
     {"source_id": "x_bls_gov", "handle": "@BLS_gov", "url": "https://x.com/BLS_gov", "class": "X_OFFICIAL_DISCOVERY", "topics": ["NFP", "CPI", "US_MACRO"]},
     {"source_id": "x_state_dept", "handle": "@StateDept", "url": "https://x.com/StateDept", "class": "X_OFFICIAL_DISCOVERY", "topics": ["SANCTIONS", "NEGOTIATIONS", "GEOPOLITICS"]},
     {"source_id": "x_eu_commission", "handle": "@EU_Commission", "url": "https://x.com/EU_Commission", "class": "X_OFFICIAL_DISCOVERY", "topics": ["EU_POLICY", "SANCTIONS", "TRADE"]},
     {"source_id": "x_opec_secretariat", "handle": "@OPECSecretariat", "url": "https://x.com/OPECSecretariat", "class": "X_OFFICIAL_DISCOVERY", "topics": ["OPEC_PLUS", "OIL_SUPPLY"]},
-    {"source_id": "x_kremlin_russia_e", "handle": "@KremlinRussia_E", "url": "https://x.com/KremlinRussia_E", "class": "X_OFFICIAL_DISCOVERY", "topics": ["NEGOTIATIONS", "RUSSIA_POLICY", "GEOPOLITICS"]},
     {"source_id": "x_mfa_russia", "handle": "@mfa_russia", "url": "https://x.com/mfa_russia", "class": "X_OFFICIAL_DISCOVERY", "topics": ["NEGOTIATIONS", "SANCTIONS", "RUSSIA_FOREIGN_POLICY"]},
+    {"source_id": "x_mid_rf", "handle": "@MID_RF", "url": "https://x.com/MID_RF", "class": "X_OFFICIAL_DISCOVERY", "topics": ["NEGOTIATIONS", "SANCTIONS", "RUSSIA_FOREIGN_POLICY"]},
     {"source_id": "x_zelenskyyua", "handle": "@ZelenskyyUa", "url": "https://x.com/ZelenskyyUa", "class": "X_OFFICIAL_DISCOVERY", "topics": ["NEGOTIATIONS", "UKRAINE", "GEOPOLITICS"]},
+    {"source_id": "x_medvedev_russia", "handle": "@MedvedevRussia", "url": "https://x.com/MedvedevRussia", "class": "X_OFFICIAL_DISCOVERY", "topics": ["RUSSIA_POLICY", "SANCTIONS", "GEOPOLITICS"]},
     {"source_id": "x_reuters", "handle": "@Reuters", "url": "https://x.com/Reuters", "class": "X_WIRE_DISCOVERY", "topics": ["SANCTIONS", "GEOPOLITICS", "OIL", "MACRO"]},
     {"source_id": "x_deitaone", "handle": "@DeItaone", "url": "https://x.com/DeItaone", "class": "X_SQUAWK_DISCOVERY", "topics": ["MACRO", "FED", "GEOPOLITICS", "OIL", "FX"]},
     {"source_id": "x_firstsquawk", "handle": "@FirstSquawk", "url": "https://x.com/FirstSquawk", "class": "X_SQUAWK_DISCOVERY", "topics": ["MACRO", "GEOPOLITICS", "OIL", "FX"]},
     {"source_id": "x_financialjuice", "handle": "@financialjuice", "url": "https://x.com/financialjuice", "class": "X_SQUAWK_DISCOVERY", "topics": ["MACRO", "FED", "GEOPOLITICS", "FX"]},
+    {"source_id": "x_newsquawk", "handle": "@Newsquawk", "url": "https://x.com/Newsquawk", "class": "X_SQUAWK_DISCOVERY", "topics": ["MACRO", "CENTRAL_BANKS", "GEOPOLITICS", "OIL", "FX"]},
     {"source_id": "x_faytuks", "handle": "@Faytuks", "url": "https://x.com/Faytuks", "class": "X_OSINT_DISCOVERY", "topics": ["GEOPOLITICS", "UKRAINE", "MIDDLE_EAST"]},
     {"source_id": "x_sentdefender", "handle": "@sentdefender", "url": "https://x.com/sentdefender", "class": "X_OSINT_DISCOVERY", "topics": ["GEOPOLITICS", "MIDDLE_EAST", "MILITARY_EVENTS"]},
-    {"source_id": "x_clashreport", "handle": "@clashreport", "url": "https://x.com/clashreport", "class": "X_OSINT_DISCOVERY", "topics": ["GEOPOLITICS", "MIDDLE_EAST", "MILITARY_EVENTS"]},
-    {"source_id": "x_mario_nawfal", "handle": "@MarioNawfal", "url": "https://x.com/MarioNawfal", "class": "X_OSINT_DISCOVERY", "topics": ["GEOPOLITICS", "POLITICAL_HEADLINES"]}
+    {"source_id": "x_clashreport", "handle": "@clashreport", "url": "https://x.com/clashreport", "class": "X_OSINT_DISCOVERY", "topics": ["GEOPOLITICS", "MIDDLE_EAST", "MILITARY_EVENTS"]}
   ],
   "x_policy": {
     "purpose": "Reduce detection latency for market-moving candidate events.",
