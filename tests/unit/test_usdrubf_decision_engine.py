@@ -69,7 +69,12 @@ def _interaction(
         previous_state=previous_state,
         structural_quality=quality,
         touch_count=2,
-        breakout_side="ABOVE" if state in {"BREAKOUT", "RETEST_PENDING", "RETEST", "RETEST_HOLD", "ACCEPTANCE"} else None,
+        breakout_side=(
+            "ABOVE"
+            if state
+            in {"BREAKOUT", "RETEST_PENDING", "RETEST", "RETEST_HOLD", "ACCEPTANCE"}
+            else None
+        ),
         as_of_timestamp=T1.isoformat(),
     )
 
@@ -120,41 +125,61 @@ def _macro(*, available_at: datetime = T1, quality_status: str = "OK") -> MacroS
     )
 
 
+def _ema_context(source_id: str = "ema_3_19_ai") -> DirectionalContext:
+    return DirectionalContext(
+        source_id=source_id,
+        available_at=T1,
+        direction="BULLISH_USD",
+        confidence=0.8,
+        details={"target_position": 1},
+    )
+
+
+def _futoi_context(
+    source_id: str = "futoi",
+    quality_status: str = "OK",
+) -> DirectionalContext:
+    return DirectionalContext(
+        source_id=source_id,
+        available_at=T1,
+        direction="BULLISH_USD",
+        confidence=0.6,
+        quality_status=quality_status,
+        details={"interpretation": "participant_positioning_only"},
+    )
+
+
 def _inputs(
     *,
+    price: float = 81.0,
     futoi_quality: str = "OK",
     news_event: NewsEvent | None = None,
     macro_state: MacroState | None = None,
     interactions=None,
+    ema_context: DirectionalContext | None = None,
+    futoi_context: DirectionalContext | None = None,
 ) -> DecisionInput:
     levels = (_support(), _resistance())
     return DecisionInput(
         as_of_timestamp=T2,
-        price=81.0,
+        price=price,
         trend="BULLISH_USD",
         market_regime="RANGE_TO_TREND",
         active_levels=levels,
-        level_interactions=interactions
-        if interactions is not None
-        else (
-            _interaction("support_80"),
-            _interaction("resistance_82", state="RETEST_HOLD", previous_state="RETEST"),
+        level_interactions=(
+            interactions
+            if interactions is not None
+            else (
+                _interaction("support_80"),
+                _interaction(
+                    "resistance_82",
+                    state="RETEST_HOLD",
+                    previous_state="RETEST",
+                ),
+            )
         ),
-        ema_3_19_ai=DirectionalContext(
-            source_id="ema_3_19_ai",
-            available_at=T1,
-            direction="BULLISH_USD",
-            confidence=0.8,
-            details={"target_position": 1},
-        ),
-        futoi=DirectionalContext(
-            source_id="futoi",
-            available_at=T1,
-            direction="BULLISH_USD",
-            confidence=0.6,
-            quality_status=futoi_quality,
-            details={"interpretation": "participant_positioning_only"},
-        ),
+        ema_3_19_ai=ema_context or _ema_context(),
+        futoi=futoi_context or _futoi_context(quality_status=futoi_quality),
         news_events=(news_event or _news(),),
         macro_state=macro_state or _macro(),
     )
@@ -262,6 +287,7 @@ def test_payload_contains_all_five_decision_domains() -> None:
     assert payload["news_state"]["events"][0]["event_id"] == "news_1"
     assert payload["macro_state"]["observations"][0]["metric_id"] == "cbr_rate"
     assert payload["output_contract"]["numeric_level_creation_forbidden"] is True
+    assert payload["output_contract"]["actionable_entry_requires_structural_confirmation"] is True
 
 
 def test_breakout_alone_does_not_automatically_create_long_trade_state() -> None:
@@ -294,6 +320,33 @@ def test_breakout_alone_does_not_automatically_create_long_trade_state() -> None
     assert state.final_bias == "NEUTRAL"
 
 
+def test_breakout_only_enter_is_rejected_by_validator() -> None:
+    interactions = (
+        _interaction("support_80"),
+        _interaction(
+            "resistance_82",
+            state="BREAKOUT",
+            previous_state="BREAKOUT_ATTEMPT",
+            quality=0.65,
+        ),
+    )
+    inputs = _inputs(interactions=interactions)
+    with pytest.raises(DecisionEngineError, match="unconfirmed breakout or retest"):
+        build_market_state(
+            inputs,
+            decision_agent=lambda _payload: _decision(
+                evidence_refs=["level:resistance_82"],
+            ),
+        )
+
+
+def test_signal_contexts_are_bound_to_expected_sources() -> None:
+    with pytest.raises(DecisionEngineError, match="ema_3_19_ai context source_id mismatch"):
+        _inputs(ema_context=_ema_context(source_id="futoi"))
+    with pytest.raises(DecisionEngineError, match="futoi context source_id mismatch"):
+        _inputs(futoi_context=_futoi_context(source_id="ema_3_19_ai"))
+
+
 def test_ema_target_position_helper_maps_only_explicit_positions() -> None:
     assert ema_context_from_target_position(1, available_at=T1).direction == "BULLISH_USD"
     assert ema_context_from_target_position(-1, available_at=T1).direction == "BEARISH_USD"
@@ -302,6 +355,16 @@ def test_ema_target_position_helper_maps_only_explicit_positions() -> None:
         ema_context_from_target_position(None, available_at=T1)  # type: ignore[arg-type]
     with pytest.raises(DecisionEngineError, match="target_position"):
         ema_context_from_target_position(2, available_at=T1)
+    with pytest.raises(DecisionEngineError, match="target_position"):
+        ema_context_from_target_position(True, available_at=T1)  # type: ignore[arg-type]
+    with pytest.raises(DecisionEngineError, match="target_position"):
+        ema_context_from_target_position(False, available_at=T1)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("price", [float("nan"), float("inf")])
+def test_non_finite_market_price_is_rejected(price: float) -> None:
+    with pytest.raises(DecisionEngineError, match="finite positive"):
+        _inputs(price=price)
 
 
 def test_future_macro_observation_is_rejected() -> None:
