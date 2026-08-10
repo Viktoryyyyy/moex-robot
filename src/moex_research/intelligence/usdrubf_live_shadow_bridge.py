@@ -169,6 +169,56 @@ def build_previous_session_zones(
     return high_zone, low_zone
 
 
+def _bucket_label_15m(value: datetime) -> datetime:
+    return value.replace(minute=(value.minute // 15) * 15, second=0, microsecond=0)
+
+
+def build_closed_15m_bars(
+    current_session_bars: Sequence[Mapping[str, object]],
+) -> tuple[dict[str, object], ...]:
+    """Aggregate complete aligned 5m triples exactly like the established 15m runtime."""
+
+    if not current_session_bars:
+        raise LiveShadowBridgeError("current session bars are required for 15m aggregation")
+    normalized = [_normalize_bar(item) for item in current_session_bars]
+    normalized.sort(key=lambda item: item["end"])
+    for index in range(1, len(normalized)):
+        if normalized[index]["end"] <= normalized[index - 1]["end"]:
+            raise LiveShadowBridgeError("current session bars must be strictly increasing")
+
+    aggregates: list[dict[str, object]] = []
+    for index in range(2, len(normalized)):
+        b0 = normalized[index - 2]
+        b1 = normalized[index - 1]
+        b2 = normalized[index]
+        t0 = b0["end"]
+        t1 = b1["end"]
+        t2 = b2["end"]
+        if not all(isinstance(value, datetime) for value in (t0, t1, t2)):
+            raise AssertionError("normalized bar ends must be datetime")
+        label = _bucket_label_15m(t2)
+        if t2 != label + timedelta(minutes=10):
+            continue
+        if t0 != label or t1 != label + timedelta(minutes=5):
+            raise LiveShadowBridgeError(
+                "broken 15m bucket aligned to broker label " + label.isoformat()
+            )
+        aggregates.append(
+            {
+                "end": label.isoformat(),
+                "open": float(b0["open"]),
+                "high": max(float(b0["high"]), float(b1["high"]), float(b2["high"])),
+                "low": min(float(b0["low"]), float(b1["low"]), float(b2["low"])),
+                "close": float(b2["close"]),
+                "volume": float(b0["volume"]) + float(b1["volume"]) + float(b2["volume"]),
+                "source_available_at": t2,
+            }
+        )
+    if not aggregates:
+        raise LiveShadowBridgeError("no complete aligned 15m bars are available")
+    return tuple(aggregates)
+
+
 def build_ema_context(
     current_session_bars: Sequence[Mapping[str, object]],
 ) -> DirectionalContext:
@@ -180,26 +230,30 @@ def build_ema_context(
     if any(item["end"].astimezone(MOSCOW).date().isoformat() != trade_date for item in normalized):
         raise LiveShadowBridgeError("current session bars must belong to one Moscow trade date")
 
+    synthetic_15m = build_closed_15m_bars(normalized)
     state = SessionStateEma31915m(trade_date=trade_date)
-    for bar in normalized:
+    for bar in synthetic_15m:
         state = update_signal_state_on_closed_bar(state, bar)
     if state.ema_fast is None or state.ema_slow is None:
-        raise LiveShadowBridgeError("EMA state is unavailable after closed-bar replay")
+        raise LiveShadowBridgeError("EMA state is unavailable after closed 15m replay")
     if state.ema_fast > state.ema_slow:
         target = 1
     elif state.ema_fast < state.ema_slow:
         target = -1
     else:
         target = 0
+    available_at = synthetic_15m[-1]["source_available_at"]
+    if not isinstance(available_at, datetime):
+        raise AssertionError("15m source_available_at must be datetime")
     return ema_context_from_target_position(
         target,
-        available_at=normalized[-1]["end"],
+        available_at=available_at,
         confidence=1.0,
         details={
             "ema_fast": state.ema_fast,
             "ema_slow": state.ema_slow,
-            "bar_count": len(normalized),
-            "source": "closed_5m_bar_replay",
+            "bar_count": len(synthetic_15m),
+            "source": "closed_15m_bar_replay_from_5m",
         },
     )
 
@@ -427,6 +481,7 @@ __all__ = [
     "MOSCOW",
     "SECID_KEY",
     "blocked_futoi_context",
+    "build_closed_15m_bars",
     "build_ema_context",
     "build_live_decision_input",
     "build_previous_session_zones",
