@@ -138,7 +138,7 @@
     },
     {
       "source_id": "whitehouse_releases",
-      "group": "RU_GOVERNMENT_EXTERNAL_POLICY",
+      "group": "SANCTIONS_AND_GEOPOLITICAL_OFFICIAL",
       "tier": "OFFICIAL_PRIMARY",
       "transport": "HTML_INDEX",
       "references": ["https://www.whitehouse.gov/releases/"],
@@ -171,7 +171,7 @@
       "group": "ENERGY_OFFICIAL_OR_APPROVED_MARKET_SOURCE",
       "tier": "OFFICIAL_PRIMARY",
       "transport": "HTML_INDEX",
-      "references": ["https://www.opec.org/"],
+      "references": ["https://www.opec.org/press-releases.html"],
       "topics": ["OPEC_PLUS", "OIL_SUPPLY", "PRODUCTION_POLICY"],
       "stage12b_status": "READY_CANDIDATE",
       "available_at_policy": "Use the OPEC publication timestamp; meeting schedule does not imply outcome availability."
