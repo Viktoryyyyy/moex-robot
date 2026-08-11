@@ -30,6 +30,7 @@ FIRST_SLICE_SOURCE_IDS = (
     "bls_employment_situation_rss",
     "bls_cpi_rss",
 )
+LIVE_RSS_SOURCE_IDS = FIRST_SLICE_SOURCE_IDS + ("whitehouse_releases",)
 
 _ALLOWED_TIERS = {"OFFICIAL_PRIMARY", "OFFICIAL_SECONDARY"}
 _ALLOWED_STATUS = {"OK", "SOURCE_UNAVAILABLE", "SOURCE_INVALID", "TIMESTAMP_UNPROVABLE"}
@@ -405,7 +406,7 @@ def fetch_rss_source(
 def fetch_official_rss_batch(
     *,
     registry_path: Path | str = SOURCE_REGISTRY_PATH,
-    source_ids: Iterable[str] = FIRST_SLICE_SOURCE_IDS,
+    source_ids: Iterable[str] = LIVE_RSS_SOURCE_IDS,
     opener: Callable[..., object] = urlopen,
     now_fn: Callable[[], datetime] | None = None,
     timeout_seconds: float = 10.0,
