@@ -17,6 +17,7 @@ SOURCE_ID = "us_treasury_press_releases"
 _ALLOWED_TIERS = {"OFFICIAL_PRIMARY", "OFFICIAL_SECONDARY"}
 _ALLOWED_QUALITY = {"OK", "SOURCE_UNAVAILABLE", "SOURCE_INVALID", "TIMESTAMP_UNPROVABLE"}
 _RELEASE_PATH_PREFIX = "/news/press-releases/"
+_HUB_SLUGS = {"press-releases", "readouts", "statements-remarks", "testimonies"}
 
 
 class TreasuryAcquisitionError(ValueError):
@@ -41,6 +42,7 @@ class TreasurySourceResult:
     quality_status: str
     records: tuple[NewsSourceRecord, ...]
     future_items_skipped: int = 0
+    candidate_count: int = 0
     error: str | None = None
 
     def __post_init__(self) -> None:
@@ -50,6 +52,8 @@ class TreasurySourceResult:
             raise ValueError("OK Treasury result may not include error")
         if self.quality_status != "OK" and self.records:
             raise ValueError("failed Treasury result may not include records")
+        if self.candidate_count < 0:
+            raise ValueError("candidate_count must be non-negative")
 
 
 def _normalize_host(host: str) -> str:
@@ -139,13 +143,12 @@ def _read_response(response: object, *, max_bytes: int) -> bytes:
 
 
 class _TreasuryIndexParser(HTMLParser):
-    """Extract release links only from the primary chronological listing.
+    """Collect same-host Treasury release candidates without DOM-layout assumptions.
 
-    Treasury renders mega-menu/featured release links before the page's actual
-    <main><h1>Press Releases</h1> listing. Treating every matching href as an
-    index item can therefore fill a bounded detail-page budget with stale
-    navigation entries. The parser remains fail-closed and starts collecting
-    only after the main-page H1 has been proven to be the Press Releases list.
+    The extraction rule mirrors the currently maintained us-legal-mcp Treasury
+    adapter: accept anchors under /news/press-releases/, skip known section hubs,
+    and deduplicate by URL. Freshness is resolved later from each detail page's
+    authoritative publication timestamp rather than from index ordering.
     """
 
     def __init__(self, *, base_url: str, allowed_host: str) -> None:
@@ -153,23 +156,9 @@ class _TreasuryIndexParser(HTMLParser):
         self.base_url = base_url
         self.allowed_host = allowed_host
         self.links: list[str] = []
-        self._in_main = False
-        self._in_h1 = False
-        self._h1_parts: list[str] = []
-        self._listing_started = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        name = tag.casefold()
-        if name == "main":
-            self._in_main = True
-            return
-        if not self._in_main:
-            return
-        if name == "h1" and not self._listing_started:
-            self._in_h1 = True
-            self._h1_parts = []
-            return
-        if not self._listing_started or name != "a":
+        if tag.casefold() != "a":
             return
         href = dict(attrs).get("href")
         if not href:
@@ -178,7 +167,8 @@ class _TreasuryIndexParser(HTMLParser):
         parsed = urlparse(absolute)
         if not parsed.path.startswith(_RELEASE_PATH_PREFIX):
             return
-        if parsed.path.rstrip("/") == _RELEASE_PATH_PREFIX.rstrip("/"):
+        slug = parsed.path.rstrip("/").split("/")[-1].casefold()
+        if slug in _HUB_SLUGS:
             return
         if parsed.scheme != "https" or not parsed.hostname:
             raise TreasuryAcquisitionError("SOURCE_INVALID", "Treasury release link must be HTTPS")
@@ -189,24 +179,6 @@ class _TreasuryIndexParser(HTMLParser):
         clean = parsed._replace(fragment="").geturl()
         if clean not in self.links:
             self.links.append(clean)
-
-    def handle_endtag(self, tag: str) -> None:
-        name = tag.casefold()
-        if name == "h1" and self._in_h1:
-            title = " ".join(" ".join(self._h1_parts).split())
-            self._in_h1 = False
-            self._h1_parts = []
-            if title.casefold() == "press releases":
-                self._listing_started = True
-            return
-        if name == "main" and self._in_main:
-            self._in_main = False
-            self._in_h1 = False
-            self._h1_parts = []
-
-    def handle_data(self, data: str) -> None:
-        if self._in_h1:
-            self._h1_parts.append(data)
 
 
 class _TreasuryDetailParser(HTMLParser):
@@ -310,11 +282,14 @@ def fetch_treasury_press_releases(
     timeout_seconds: float = 10.0,
     max_bytes: int = 2_000_000,
     max_detail_pages: int = 10,
+    max_candidate_pages: int = 40,
 ) -> TreasurySourceResult:
     if timeout_seconds <= 0:
         raise ValueError("timeout_seconds must be positive")
-    if max_bytes <= 0 or max_detail_pages <= 0:
+    if max_bytes <= 0 or max_detail_pages <= 0 or max_candidate_pages <= 0:
         raise ValueError("Treasury limits must be positive")
+    if max_detail_pages > max_candidate_pages:
+        raise ValueError("max_detail_pages may not exceed max_candidate_pages")
     now = (now_fn or (lambda: datetime.now(timezone.utc)))()
     if not isinstance(now, datetime) or now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("now_fn must return timezone-aware datetime")
@@ -331,6 +306,7 @@ def fetch_treasury_press_releases(
         index_text = index_raw.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise TreasuryAcquisitionError("SOURCE_INVALID", "Treasury index is not UTF-8") from exc
+
     index_parser = _TreasuryIndexParser(
         base_url=binding.index_url,
         allowed_host=binding.allowed_host,
@@ -338,13 +314,16 @@ def fetch_treasury_press_releases(
     index_parser.feed(index_text)
     index_parser.close()
     if not index_parser.links:
+        raise TreasuryAcquisitionError("SOURCE_INVALID", "Treasury index contains no release candidates")
+    if len(index_parser.links) > max_candidate_pages:
         raise TreasuryAcquisitionError(
-            "SOURCE_INVALID", "Treasury primary Press Releases listing contains no release links"
+            "SOURCE_INVALID",
+            "Treasury release candidate set exceeds bounded detail scan limit",
         )
 
     records: list[NewsSourceRecord] = []
     future_items = 0
-    for detail_url in index_parser.links[:max_detail_pages]:
+    for detail_url in index_parser.links:
         raw = _request_html(
             detail_url,
             opener=opener,
@@ -382,9 +361,11 @@ def fetch_treasury_press_releases(
             )
         )
 
+    records.sort(key=lambda record: (record.published_at, record.source_reference), reverse=True)
     return TreasurySourceResult(
         source_id=binding.source_id,
         quality_status="OK",
-        records=tuple(records),
+        records=tuple(records[:max_detail_pages]),
         future_items_skipped=future_items,
+        candidate_count=len(index_parser.links),
     )
