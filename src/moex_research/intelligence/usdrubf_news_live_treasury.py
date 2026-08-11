@@ -147,8 +147,8 @@ def _read_response(response: object, *, max_bytes: int) -> bytes:
 class _TreasuryIndexParser(HTMLParser):
     """Collect same-host Treasury release candidates without DOM-layout assumptions.
 
-    The extraction rule mirrors the currently maintained us-legal-mcp Treasury
-    adapter: accept anchors under /news/press-releases/, skip known section hubs,
+    The extraction rule mirrors the maintained us-legal-mcp Treasury pattern:
+    accept anchors under /news/press-releases/, exclude known section subtrees,
     and deduplicate by URL. Freshness is resolved later from each detail page's
     authoritative publication timestamp rather than from index ordering.
     """
@@ -177,8 +177,11 @@ class _TreasuryIndexParser(HTMLParser):
         parsed = urlparse(absolute)
         if not parsed.path.startswith(_RELEASE_PATH_PREFIX):
             return
-        slug = parsed.path.rstrip("/").split("/")[-1].casefold()
-        if slug in _HUB_SLUGS:
+        relative_path = parsed.path[len(_RELEASE_PATH_PREFIX) :].strip("/")
+        if not relative_path:
+            return
+        first_segment = relative_path.split("/", 1)[0].casefold()
+        if first_segment in _HUB_SLUGS:
             return
         if parsed.scheme != "https" or not parsed.hostname:
             raise TreasuryAcquisitionError("SOURCE_INVALID", "Treasury release link must be HTTPS")
