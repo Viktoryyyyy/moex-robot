@@ -12,6 +12,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--timeout-seconds", type=float, default=20.0)
     parser.add_argument("--max-detail-pages", type=int, default=10)
+    parser.add_argument("--max-candidate-pages", type=int, default=40)
     args = parser.parse_args()
 
     print("PROJECT=MOEX_Bot")
@@ -20,6 +21,7 @@ def main() -> int:
         result = fetch_treasury_press_releases(
             timeout_seconds=args.timeout_seconds,
             max_detail_pages=args.max_detail_pages,
+            max_candidate_pages=args.max_candidate_pages,
         )
     except TreasuryAcquisitionError as exc:
         print("STATUS=BLOCKED")
@@ -32,6 +34,7 @@ def main() -> int:
     print("STATUS=COMPLETED")
     print(f"SOURCE={result.source_id}")
     print(f"QUALITY={result.quality_status}")
+    print(f"CANDIDATE_COUNT={result.candidate_count}")
     print(f"RECORD_COUNT={len(result.records)}")
     print(f"FUTURE_SKIPPED={result.future_items_skipped}")
     print(f"LATEST_PUBLISHED_AT={latest.isoformat() if latest is not None else 'NONE'}")
