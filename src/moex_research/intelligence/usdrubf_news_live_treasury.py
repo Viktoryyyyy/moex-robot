@@ -139,14 +139,37 @@ def _read_response(response: object, *, max_bytes: int) -> bytes:
 
 
 class _TreasuryIndexParser(HTMLParser):
+    """Extract release links only from the primary chronological listing.
+
+    Treasury renders mega-menu/featured release links before the page's actual
+    <main><h1>Press Releases</h1> listing. Treating every matching href as an
+    index item can therefore fill a bounded detail-page budget with stale
+    navigation entries. The parser remains fail-closed and starts collecting
+    only after the main-page H1 has been proven to be the Press Releases list.
+    """
+
     def __init__(self, *, base_url: str, allowed_host: str) -> None:
         super().__init__(convert_charrefs=True)
         self.base_url = base_url
         self.allowed_host = allowed_host
         self.links: list[str] = []
+        self._in_main = False
+        self._in_h1 = False
+        self._h1_parts: list[str] = []
+        self._listing_started = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag.casefold() != "a":
+        name = tag.casefold()
+        if name == "main":
+            self._in_main = True
+            return
+        if not self._in_main:
+            return
+        if name == "h1" and not self._listing_started:
+            self._in_h1 = True
+            self._h1_parts = []
+            return
+        if not self._listing_started or name != "a":
             return
         href = dict(attrs).get("href")
         if not href:
@@ -166,6 +189,24 @@ class _TreasuryIndexParser(HTMLParser):
         clean = parsed._replace(fragment="").geturl()
         if clean not in self.links:
             self.links.append(clean)
+
+    def handle_endtag(self, tag: str) -> None:
+        name = tag.casefold()
+        if name == "h1" and self._in_h1:
+            title = " ".join(" ".join(self._h1_parts).split())
+            self._in_h1 = False
+            self._h1_parts = []
+            if title.casefold() == "press releases":
+                self._listing_started = True
+            return
+        if name == "main" and self._in_main:
+            self._in_main = False
+            self._in_h1 = False
+            self._h1_parts = []
+
+    def handle_data(self, data: str) -> None:
+        if self._in_h1:
+            self._h1_parts.append(data)
 
 
 class _TreasuryDetailParser(HTMLParser):
@@ -297,7 +338,9 @@ def fetch_treasury_press_releases(
     index_parser.feed(index_text)
     index_parser.close()
     if not index_parser.links:
-        raise TreasuryAcquisitionError("SOURCE_INVALID", "Treasury index contains no release links")
+        raise TreasuryAcquisitionError(
+            "SOURCE_INVALID", "Treasury primary Press Releases listing contains no release links"
+        )
 
     records: list[NewsSourceRecord] = []
     future_items = 0
