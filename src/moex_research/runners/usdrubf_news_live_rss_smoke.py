@@ -5,7 +5,7 @@ from collections import Counter
 from typing import Sequence
 
 from ..intelligence.usdrubf_news_live_rss import (
-    FIRST_SLICE_SOURCE_IDS,
+    LIVE_RSS_SOURCE_IDS,
     fetch_official_rss_batch,
 )
 
@@ -18,7 +18,7 @@ def _parser() -> argparse.ArgumentParser:
         "--source-id",
         action="append",
         dest="source_ids",
-        choices=FIRST_SLICE_SOURCE_IDS,
+        choices=LIVE_RSS_SOURCE_IDS,
         help="Fetch only this registered source; may be repeated.",
     )
     parser.add_argument("--timeout-seconds", type=float, default=10.0)
@@ -33,7 +33,7 @@ def _latest_timestamp(records) -> str:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    source_ids = tuple(args.source_ids or FIRST_SLICE_SOURCE_IDS)
+    source_ids = tuple(args.source_ids or LIVE_RSS_SOURCE_IDS)
     result = fetch_official_rss_batch(
         source_ids=source_ids,
         timeout_seconds=args.timeout_seconds,

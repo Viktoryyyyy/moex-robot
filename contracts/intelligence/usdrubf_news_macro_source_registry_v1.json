@@ -140,11 +140,11 @@
       "source_id": "whitehouse_releases",
       "group": "SANCTIONS_AND_GEOPOLITICAL_OFFICIAL",
       "tier": "OFFICIAL_PRIMARY",
-      "transport": "HTML_INDEX",
-      "references": ["https://www.whitehouse.gov/releases/"],
+      "transport": "RSS",
+      "references": ["https://www.whitehouse.gov/releases/feed/"],
       "topics": ["US_RUSSIA_POLICY", "SANCTIONS", "NEGOTIATIONS", "ENERGY_POLICY", "GEOPOLITICS"],
       "stage12b_status": "READY_CANDIDATE",
-      "available_at_policy": "Use the White House release publication timestamp."
+      "available_at_policy": "Use the White House RSS item publication timestamp; the feed pubDate is authoritative for content availability."
     },
     {
       "source_id": "eu_council_press_releases",
