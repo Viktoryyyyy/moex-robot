@@ -15,6 +15,7 @@ from src.moex_research.intelligence.usdrubf_news_live_treasury import (
 
 INDEX_URL = "https://home.treasury.gov/news/press-releases"
 DETAIL_URL = "https://home.treasury.gov/news/press-releases/sb0599"
+FEATURED_URL = "https://home.treasury.gov/news/press-releases/jy2400"
 
 
 class _Response:
@@ -52,11 +53,17 @@ def _registry(tmp_path: Path, *, status: str = "READY_CANDIDATE") -> Path:
     return path
 
 
-def _index(detail_url: str = DETAIL_URL) -> bytes:
+def _index(detail_url: str = DETAIL_URL, nav_detail_url: str = FEATURED_URL) -> bytes:
     return (
-        '<html><body><a href="/news/press-releases">Press Releases</a>'
+        '<html><body>'
+        '<nav><h2>Featured Stories</h2>'
+        f'<a href="{nav_detail_url}">stale navigation release</a>'
+        '<h2>Press Releases</h2>'
+        f'<a href="{nav_detail_url}">mega-menu release</a></nav>'
+        '<main><h1>Press Releases</h1>'
         f'<a href="{detail_url}">Treasury Releases CFIUS Annual Report for 2025</a>'
-        f'<a href="{detail_url}">duplicate nav link</a></body></html>'
+        f'<a href="{detail_url}">duplicate list link</a>'
+        '</main></body></html>'
     ).encode("utf-8")
 
 
@@ -114,7 +121,25 @@ def test_live_acquisition_binds_first_time_after_main_h1(tmp_path: Path) -> None
     assert record.body.startswith("WASHINGTON, D.C.")
 
 
-def test_duplicate_index_links_are_fetched_once(tmp_path: Path) -> None:
+def test_navigation_release_links_are_ignored_before_primary_listing(tmp_path: Path) -> None:
+    calls: list[str] = []
+    responses = {INDEX_URL: _index(), DETAIL_URL: _detail()}
+
+    def opener(request, timeout):
+        calls.append(request.full_url)
+        return _Response(responses[request.full_url], request.full_url)
+
+    result = fetch_treasury_press_releases(
+        registry_path=_registry(tmp_path),
+        opener=opener,
+        now_fn=lambda: datetime(2026, 8, 11, 9, 0, tzinfo=timezone.utc),
+        max_detail_pages=1,
+    )
+    assert calls == [INDEX_URL, DETAIL_URL]
+    assert result.records[0].source_reference == DETAIL_URL
+
+
+def test_duplicate_primary_listing_links_are_fetched_once(tmp_path: Path) -> None:
     calls: list[str] = []
     responses = {INDEX_URL: _index(), DETAIL_URL: _detail()}
 
@@ -129,6 +154,25 @@ def test_duplicate_index_links_are_fetched_once(tmp_path: Path) -> None:
         max_detail_pages=10,
     )
     assert calls == [INDEX_URL, DETAIL_URL]
+
+
+def test_index_without_main_press_releases_h1_is_invalid(tmp_path: Path) -> None:
+    bad_index = (
+        '<html><body><nav><h2>Press Releases</h2>'
+        f'<a href="{FEATURED_URL}">navigation only</a></nav></body></html>'
+    ).encode("utf-8")
+
+    def opener(request, timeout):
+        return _Response(bad_index, request.full_url)
+
+    with pytest.raises(TreasuryAcquisitionError) as exc_info:
+        fetch_treasury_press_releases(
+            registry_path=_registry(tmp_path),
+            opener=opener,
+            now_fn=lambda: datetime(2026, 8, 11, 9, 0, tzinfo=timezone.utc),
+            max_detail_pages=1,
+        )
+    assert exc_info.value.code == "SOURCE_INVALID"
 
 
 def test_detail_without_main_timestamp_is_timestamp_unprovable(tmp_path: Path) -> None:
