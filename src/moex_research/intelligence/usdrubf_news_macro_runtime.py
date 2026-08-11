@@ -126,11 +126,28 @@ class FlowiseTransportConfig:
             raise RuntimeIntegrationError("timeout_seconds must be positive")
 
 
+def _decode_flowise_json_text(value: str) -> object:
+    text = value.strip()
+    candidates = [text]
+    for prefix, suffix in (("```json", "```"), ("```", "```"), ("`json", "`")):
+        if text.startswith(prefix) and text.endswith(suffix):
+            candidates.append(text[len(prefix) : -len(suffix)].strip())
+            break
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+    raise RuntimeIntegrationError("Flowise configured response field is not JSON")
+
+
 class FlowiseJsonAdapter:
     """Bounded JSON-over-HTTP adapter.
 
     Endpoint and envelope field names are explicit runtime configuration. This
     module does not guess a Flowise endpoint or assume a repository-global schema.
+    A response string may be raw JSON or a single JSON-only code fence; prose or
+    any additional wrapper content remains invalid and fails closed.
     """
 
     def __init__(
@@ -178,12 +195,7 @@ class FlowiseJsonAdapter:
             raise RuntimeIntegrationError("Flowise response field missing")
         value = envelope[self._config.response_field]
         if isinstance(value, str):
-            try:
-                value = json.loads(value)
-            except json.JSONDecodeError as exc:
-                raise RuntimeIntegrationError(
-                    "Flowise configured response field is not JSON"
-                ) from exc
+            value = _decode_flowise_json_text(value)
         if not isinstance(value, Mapping):
             raise RuntimeIntegrationError(
                 "Flowise configured response field must decode to a mapping"
