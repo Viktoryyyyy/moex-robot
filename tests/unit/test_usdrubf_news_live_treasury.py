@@ -62,6 +62,7 @@ def _index(*, include_cross_host: bool = False) -> bytes:
     return (
         '<html><body>'
         '<nav><a href="/news/press-releases/readouts">Readouts</a>'
+        '<a href="/news/press-releases/statements-remarks/secretary">Secretary remarks hub</a>'
         f'<a href="{STALE_URL}">Featured stale release</a>'
         f'<a href="{STALE_URL}">duplicate stale release</a></nav>'
         f'{malicious}'
@@ -74,11 +75,19 @@ def _index(*, include_cross_host: bool = False) -> bytes:
 
 def _detail(title: str, timestamp: str) -> bytes:
     return (
-        '<html><body>'
-        '<nav><time datetime="2025-01-01T00:00:00Z">navigation</time></nav>'
-        f'<main><h1>{title}</h1><time datetime="{timestamp}">published</time>'
+        '<html><head>'
+        f'<meta property="og:title" content="{title}" />'
+        '<meta property="og:updated_time" content="2026-08-07" />'
+        '</head><body>'
+        '<h1>U.S. Department of the Treasury</h1>'
+        '<nav><time datetime="2026-06-23T14:30:00Z">global featured timestamp</time></nav>'
+        '<div class="field field--name-field-news-publication-date field--type-datetime">'
+        f'<time datetime="{timestamp}" class="datetime">published</time>'
+        '</div>'
+        '<div class="clearfix text-formatted field field--name-field-news-body field--type-text-long">'
         '<p>WASHINGTON, D.C. – Treasury publication body.</p>'
-        '<p>Additional official detail.</p></main>'
+        '<div><p>Additional official detail.</p></div>'
+        '</div>'
         '</body></html>'
     ).encode("utf-8")
 
@@ -107,7 +116,7 @@ def test_registry_rejects_non_ready_treasury_source(tmp_path: Path) -> None:
         load_treasury_binding(registry_path=_registry(tmp_path, status="BLOCKED_PENDING_TIMESTAMP"))
 
 
-def test_upstream_listing_pattern_dedupes_skips_hubs_and_sorts_by_detail_timestamp(
+def test_semantic_detail_binding_ignores_global_h1_and_time_and_sorts_by_publication_timestamp(
     tmp_path: Path,
 ) -> None:
     responses = _responses()
@@ -137,7 +146,26 @@ def test_upstream_listing_pattern_dedupes_skips_hubs_and_sorts_by_detail_timesta
     assert record.available_at == record.published_at
     assert record.ingested_at == now
     assert record.headline == "Treasury Releases CFIUS Annual Report for 2025"
-    assert record.body.startswith("WASHINGTON, D.C.")
+    assert record.body == "WASHINGTON, D.C. – Treasury publication body. Additional official detail."
+
+
+def test_section_subtrees_are_not_release_candidates(tmp_path: Path) -> None:
+    responses = _responses()
+    calls: list[str] = []
+
+    def opener(request, timeout):
+        calls.append(request.full_url)
+        return responses[request.full_url]
+
+    result = fetch_treasury_press_releases(
+        registry_path=_registry(tmp_path),
+        opener=opener,
+        now_fn=lambda: datetime(2026, 8, 11, 9, 0, tzinfo=timezone.utc),
+        max_detail_pages=2,
+        max_candidate_pages=10,
+    )
+    assert result.candidate_count == 2
+    assert calls == [INDEX_URL, STALE_URL, LATEST_URL]
 
 
 def test_all_candidates_are_returned_newest_first_when_within_record_limit(tmp_path: Path) -> None:
@@ -184,7 +212,10 @@ def test_candidate_set_over_bound_aborts_parser_immediately(tmp_path: Path) -> N
 
 def test_index_without_release_candidates_is_invalid(tmp_path: Path) -> None:
     def opener(request, timeout):
-        return _Response(b'<html><body><a href="/news/press-releases/readouts">Readouts</a></body></html>', request.full_url)
+        return _Response(
+            b'<html><body><a href="/news/press-releases/readouts">Readouts</a></body></html>',
+            request.full_url,
+        )
 
     with pytest.raises(TreasuryAcquisitionError) as exc_info:
         fetch_treasury_press_releases(
@@ -196,11 +227,18 @@ def test_index_without_release_candidates_is_invalid(tmp_path: Path) -> None:
     assert exc_info.value.code == "SOURCE_INVALID"
 
 
-def test_detail_without_main_timestamp_is_timestamp_unprovable(tmp_path: Path) -> None:
+def test_detail_without_semantic_publication_timestamp_is_timestamp_unprovable(tmp_path: Path) -> None:
     index = f'<a href="{LATEST_URL}">release</a>'.encode("utf-8")
+    detail = (
+        '<html><head><meta property="og:title" content="Treasury Release" /></head><body>'
+        '<h1>U.S. Department of the Treasury</h1>'
+        '<time datetime="2026-06-23T14:30:00Z">navigation only</time>'
+        '<div class="field field--name-field-news-body"><p>Body.</p></div>'
+        '</body></html>'
+    ).encode("utf-8")
     responses = {
         INDEX_URL: _Response(index, INDEX_URL),
-        LATEST_URL: _Response(b'<html><body><h1>Treasury Release</h1><p>No timestamp.</p></body></html>', LATEST_URL),
+        LATEST_URL: _Response(detail, LATEST_URL),
     }
 
     def opener(request, timeout):
@@ -214,6 +252,32 @@ def test_detail_without_main_timestamp_is_timestamp_unprovable(tmp_path: Path) -
             max_detail_pages=1,
         )
     assert exc_info.value.code == "TIMESTAMP_UNPROVABLE"
+
+
+def test_detail_without_og_title_is_invalid(tmp_path: Path) -> None:
+    index = f'<a href="{LATEST_URL}">release</a>'.encode("utf-8")
+    detail = (
+        '<html><body><h1>U.S. Department of the Treasury</h1>'
+        '<div class="field--name-field-news-publication-date">'
+        '<time datetime="2026-08-07T20:39:09Z">published</time></div>'
+        '</body></html>'
+    ).encode("utf-8")
+    responses = {
+        INDEX_URL: _Response(index, INDEX_URL),
+        LATEST_URL: _Response(detail, LATEST_URL),
+    }
+
+    def opener(request, timeout):
+        return responses[request.full_url]
+
+    with pytest.raises(TreasuryAcquisitionError) as exc_info:
+        fetch_treasury_press_releases(
+            registry_path=_registry(tmp_path),
+            opener=opener,
+            now_fn=lambda: datetime(2026, 8, 11, 9, 0, tzinfo=timezone.utc),
+            max_detail_pages=1,
+        )
+    assert exc_info.value.code == "SOURCE_INVALID"
 
 
 def test_future_detail_is_not_exposed(tmp_path: Path) -> None:

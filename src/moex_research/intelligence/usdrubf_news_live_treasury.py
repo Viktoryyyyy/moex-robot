@@ -18,6 +18,8 @@ _ALLOWED_TIERS = {"OFFICIAL_PRIMARY", "OFFICIAL_SECONDARY"}
 _ALLOWED_QUALITY = {"OK", "SOURCE_UNAVAILABLE", "SOURCE_INVALID", "TIMESTAMP_UNPROVABLE"}
 _RELEASE_PATH_PREFIX = "/news/press-releases/"
 _HUB_SLUGS = {"press-releases", "readouts", "statements-remarks", "testimonies"}
+_PUBLICATION_DATE_CLASS = "field--name-field-news-publication-date"
+_BODY_CLASS = "field--name-field-news-body"
 
 
 class TreasuryAcquisitionError(ValueError):
@@ -145,8 +147,8 @@ def _read_response(response: object, *, max_bytes: int) -> bytes:
 class _TreasuryIndexParser(HTMLParser):
     """Collect same-host Treasury release candidates without DOM-layout assumptions.
 
-    The extraction rule mirrors the currently maintained us-legal-mcp Treasury
-    adapter: accept anchors under /news/press-releases/, skip known section hubs,
+    The extraction rule mirrors the maintained us-legal-mcp Treasury pattern:
+    accept anchors under /news/press-releases/, exclude known section subtrees,
     and deduplicate by URL. Freshness is resolved later from each detail page's
     authoritative publication timestamp rather than from index ordering.
     """
@@ -175,8 +177,11 @@ class _TreasuryIndexParser(HTMLParser):
         parsed = urlparse(absolute)
         if not parsed.path.startswith(_RELEASE_PATH_PREFIX):
             return
-        slug = parsed.path.rstrip("/").split("/")[-1].casefold()
-        if slug in _HUB_SLUGS:
+        relative_path = parsed.path[len(_RELEASE_PATH_PREFIX) :].strip("/")
+        if not relative_path:
+            return
+        first_segment = relative_path.split("/", 1)[0].casefold()
+        if first_segment in _HUB_SLUGS:
             return
         if parsed.scheme != "https" or not parsed.hostname:
             raise TreasuryAcquisitionError("SOURCE_INVALID", "Treasury release link must be HTTPS")
@@ -197,56 +202,81 @@ class _TreasuryIndexParser(HTMLParser):
 
 
 class _TreasuryDetailParser(HTMLParser):
+    """Bind detail facts only to Treasury's semantic article markup.
+
+    Treasury detail pages contain global navigation H1/time elements before the
+    article. The release title is exposed by OpenGraph `og:title`, while the
+    authoritative timestamp and body are exposed by Drupal field classes
+    `field--name-field-news-publication-date` and `field--name-field-news-body`.
+    Positional H1/time elements are intentionally ignored.
+    """
+
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self._in_h1 = False
-        self._h1_seen = False
-        self._title_parts: list[str] = []
-        self._in_p = False
-        self._p_parts: list[str] = []
-        self._paragraphs: list[str] = []
+        self._title: str | None = None
+        self._publication_depth = 0
+        self._body_depth = 0
+        self._body_parts: list[str] = []
         self.primary_datetime: str | None = None
 
     @property
     def title(self) -> str:
-        return " ".join(" ".join(self._title_parts).split())
+        return " ".join((self._title or "").split())
 
     @property
     def body(self) -> str:
-        return " ".join(self._paragraphs)[:2000]
+        return " ".join(" ".join(self._body_parts).split())[:2000]
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         name = tag.casefold()
-        if name == "h1" and not self._h1_seen:
-            self._in_h1 = True
+        attr_map = {key.casefold(): value for key, value in attrs}
+
+        if name == "meta":
+            property_name = (attr_map.get("property") or "").strip().casefold()
+            if property_name == "og:title":
+                content = (attr_map.get("content") or "").strip()
+                if content:
+                    if self._title is not None and self._title != content:
+                        raise TreasuryAcquisitionError(
+                            "SOURCE_INVALID", "Treasury detail has conflicting og:title values"
+                        )
+                    self._title = content
             return
-        if self._h1_seen and self.primary_datetime is None and name == "time":
-            value = dict(attrs).get("datetime")
-            if value and value.strip():
-                self.primary_datetime = value.strip()
+
+        if name == "div":
+            classes = set((attr_map.get("class") or "").split())
+            if self._publication_depth:
+                self._publication_depth += 1
+            elif _PUBLICATION_DATE_CLASS in classes:
+                self._publication_depth = 1
+
+            if self._body_depth:
+                self._body_depth += 1
+            elif _BODY_CLASS in classes:
+                self._body_depth = 1
             return
-        if self._h1_seen and self.primary_datetime is not None and name == "p" and len(self._paragraphs) < 3:
-            self._in_p = True
-            self._p_parts = []
+
+        if name == "time" and self._publication_depth:
+            value = (attr_map.get("datetime") or "").strip()
+            if value:
+                if self.primary_datetime is not None and self.primary_datetime != value:
+                    raise TreasuryAcquisitionError(
+                        "TIMESTAMP_UNPROVABLE",
+                        "Treasury publication field contains conflicting timestamps",
+                    )
+                self.primary_datetime = value
 
     def handle_endtag(self, tag: str) -> None:
-        name = tag.casefold()
-        if name == "h1" and self._in_h1:
-            self._in_h1 = False
-            self._h1_seen = True
+        if tag.casefold() != "div":
             return
-        if name == "p" and self._in_p:
-            value = " ".join(" ".join(self._p_parts).split())
-            if value:
-                self._paragraphs.append(value)
-            self._p_parts = []
-            self._in_p = False
+        if self._publication_depth:
+            self._publication_depth -= 1
+        if self._body_depth:
+            self._body_depth -= 1
 
     def handle_data(self, data: str) -> None:
-        if self._in_h1:
-            self._title_parts.append(data)
-        elif self._in_p:
-            self._p_parts.append(data)
+        if self._body_depth:
+            self._body_parts.append(data)
 
 
 def _parse_iso_timestamp(value: str) -> datetime:
@@ -350,10 +380,11 @@ def fetch_treasury_press_releases(
         parser.feed(text)
         parser.close()
         if not parser.title:
-            raise TreasuryAcquisitionError("SOURCE_INVALID", "Treasury release is missing main title")
+            raise TreasuryAcquisitionError("SOURCE_INVALID", "Treasury release is missing og:title")
         if parser.primary_datetime is None:
             raise TreasuryAcquisitionError(
-                "TIMESTAMP_UNPROVABLE", "Treasury release main publication timestamp is missing"
+                "TIMESTAMP_UNPROVABLE",
+                "Treasury release semantic publication timestamp is missing",
             )
         published_at = _parse_iso_timestamp(parser.primary_datetime)
         if published_at > now:
