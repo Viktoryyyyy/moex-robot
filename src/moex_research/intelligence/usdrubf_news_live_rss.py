@@ -290,6 +290,12 @@ def _parse_rss_records(
 
     items = [element for element in root.iter() if _local_name(element.tag) in {"item", "entry"}]
     if not items:
+        root_name = _local_name(root.tag)
+        has_rss_channel = root_name == "rss" and any(
+            _local_name(child.tag) == "channel" for child in root
+        )
+        if has_rss_channel or root_name == "feed":
+            return (), 0
         raise RssAcquisitionError("SOURCE_INVALID", "RSS feed contains no items")
 
     records: list[NewsSourceRecord] = []
