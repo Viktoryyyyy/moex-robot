@@ -156,9 +156,10 @@ def test_all_candidates_are_returned_newest_first_when_within_record_limit(tmp_p
     assert [record.source_reference for record in result.records] == [LATEST_URL, STALE_URL]
 
 
-def test_candidate_set_over_bound_fails_closed_before_detail_fetch(tmp_path: Path) -> None:
-    links = "".join(
-        f'<a href="/news/press-releases/item-{i}">release {i}</a>' for i in range(3)
+def test_candidate_set_over_bound_aborts_parser_immediately(tmp_path: Path) -> None:
+    links = (
+        "".join(f'<a href="/news/press-releases/item-{i}">release {i}</a>' for i in range(3))
+        + '<a href="https://example.com/news/press-releases/evil">later malicious link</a>'
     ).encode("utf-8")
     calls: list[str] = []
 
@@ -166,7 +167,10 @@ def test_candidate_set_over_bound_fails_closed_before_detail_fetch(tmp_path: Pat
         calls.append(request.full_url)
         return _Response(links, request.full_url)
 
-    with pytest.raises(TreasuryAcquisitionError) as exc_info:
+    with pytest.raises(
+        TreasuryAcquisitionError,
+        match="candidate set exceeds bounded detail scan limit",
+    ) as exc_info:
         fetch_treasury_press_releases(
             registry_path=_registry(tmp_path),
             opener=opener,
