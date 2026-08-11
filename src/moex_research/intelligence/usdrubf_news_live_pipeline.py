@@ -11,7 +11,7 @@ from .usdrubf_news_classifier_agent import (
     stage12b3_news_classifier,
 )
 from .usdrubf_news_live_rss import (
-    FIRST_SLICE_SOURCE_IDS,
+    LIVE_RSS_SOURCE_IDS,
     SOURCE_REGISTRY_PATH,
     RssBatchResult,
     fetch_official_rss_batch,
@@ -46,7 +46,7 @@ def run_live_official_news_pipeline(
     *,
     classifier_agent: ClassifierAgent,
     registry_path: Path | str = SOURCE_REGISTRY_PATH,
-    source_ids: Iterable[str] = FIRST_SLICE_SOURCE_IDS,
+    source_ids: Iterable[str] = LIVE_RSS_SOURCE_IDS,
     opener: Callable[..., object] = urlopen,
     now_fn: Callable[[], datetime] | None = None,
     as_of_timestamp: datetime | None = None,
