@@ -35,6 +35,7 @@ _ALLOWED_TIERS = {"OFFICIAL_PRIMARY", "OFFICIAL_SECONDARY"}
 _ALLOWED_STATUS = {"OK", "SOURCE_UNAVAILABLE", "SOURCE_INVALID", "TIMESTAMP_UNPROVABLE"}
 _TAG_RE = re.compile(r"<[^>]+>")
 _SPACE_RE = re.compile(r"\s+")
+_ATOM_NAMESPACE = "http://www.w3.org/2005/Atom"
 
 
 class RssAcquisitionError(ValueError):
@@ -276,6 +277,25 @@ def _read_response(response: object, *, max_bytes: int) -> bytes:
     return bytes(raw)
 
 
+def _valid_empty_feed_structure(root: ET.Element) -> bool:
+    root_name = _local_name(root.tag)
+    if root_name == "rss" and not root.tag.startswith("{"):
+        channels = [child for child in root if _local_name(child.tag) == "channel"]
+        if len(channels) != 1:
+            return False
+        channel = channels[0]
+        return all(
+            _child_text(channel, (field,)) is not None
+            for field in ("title", "link", "description")
+        )
+    if root.tag == f"{{{_ATOM_NAMESPACE}}}feed":
+        return all(
+            _child_text(root, (field,)) is not None
+            for field in ("title", "id", "updated")
+        )
+    return False
+
+
 def _parse_rss_records(
     binding: RssFeedBinding,
     raw: bytes,
@@ -290,6 +310,8 @@ def _parse_rss_records(
 
     items = [element for element in root.iter() if _local_name(element.tag) in {"item", "entry"}]
     if not items:
+        if _valid_empty_feed_structure(root):
+            return (), 0
         raise RssAcquisitionError("SOURCE_INVALID", "RSS feed contains no items")
 
     records: list[NewsSourceRecord] = []
