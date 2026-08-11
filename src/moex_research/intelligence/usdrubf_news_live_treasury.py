@@ -151,11 +151,19 @@ class _TreasuryIndexParser(HTMLParser):
     authoritative publication timestamp rather than from index ordering.
     """
 
-    def __init__(self, *, base_url: str, allowed_host: str) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        allowed_host: str,
+        max_candidate_pages: int,
+    ) -> None:
         super().__init__(convert_charrefs=True)
         self.base_url = base_url
         self.allowed_host = allowed_host
+        self.max_candidate_pages = max_candidate_pages
         self.links: list[str] = []
+        self._seen: set[str] = set()
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag.casefold() != "a":
@@ -177,8 +185,15 @@ class _TreasuryIndexParser(HTMLParser):
                 "SOURCE_INVALID", "Treasury release link host does not match registry"
             )
         clean = parsed._replace(fragment="").geturl()
-        if clean not in self.links:
-            self.links.append(clean)
+        if clean in self._seen:
+            return
+        self._seen.add(clean)
+        if len(self._seen) > self.max_candidate_pages:
+            raise TreasuryAcquisitionError(
+                "SOURCE_INVALID",
+                "Treasury release candidate set exceeds bounded detail scan limit",
+            )
+        self.links.append(clean)
 
 
 class _TreasuryDetailParser(HTMLParser):
@@ -310,16 +325,12 @@ def fetch_treasury_press_releases(
     index_parser = _TreasuryIndexParser(
         base_url=binding.index_url,
         allowed_host=binding.allowed_host,
+        max_candidate_pages=max_candidate_pages,
     )
     index_parser.feed(index_text)
     index_parser.close()
     if not index_parser.links:
         raise TreasuryAcquisitionError("SOURCE_INVALID", "Treasury index contains no release candidates")
-    if len(index_parser.links) > max_candidate_pages:
-        raise TreasuryAcquisitionError(
-            "SOURCE_INVALID",
-            "Treasury release candidate set exceeds bounded detail scan limit",
-        )
 
     records: list[NewsSourceRecord] = []
     future_items = 0
