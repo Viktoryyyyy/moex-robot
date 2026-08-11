@@ -31,28 +31,54 @@ def _binding() -> RssFeedBinding:
     )
 
 
-def test_structurally_valid_empty_rss_is_ok_with_zero_records() -> None:
-    payload = (
-        b'<?xml version="1.0" encoding="utf-8"?>'
-        b'<rss version="2.0"><channel><title>Moscow Exchange FX news</title></channel></rss>'
-    )
-    result = fetch_rss_source(
+def _fetch(payload: bytes):
+    return fetch_rss_source(
         _binding(),
         opener=lambda request, timeout: _Response(payload, request.full_url),
         now_fn=lambda: datetime(2026, 8, 11, 9, 0, tzinfo=timezone.utc),
     )
+
+
+def test_structurally_valid_empty_rss_is_ok_with_zero_records() -> None:
+    payload = (
+        b'<?xml version="1.0" encoding="utf-8"?>'
+        b'<rss version="2.0"><channel>'
+        b'<title>Moscow Exchange FX news</title>'
+        b'<link>https://www.moex.com/</link>'
+        b'<description>Official FX market news</description>'
+        b'</channel></rss>'
+    )
+    result = _fetch(payload)
 
     assert result.quality_status == "OK"
     assert result.records == ()
     assert result.future_items_skipped == 0
 
 
-def test_arbitrary_empty_xml_remains_invalid() -> None:
-    payload = b'<?xml version="1.0" encoding="utf-8"?><root />'
+def test_structurally_valid_empty_atom_is_ok_with_zero_records() -> None:
+    payload = (
+        b'<?xml version="1.0" encoding="utf-8"?>'
+        b'<feed xmlns="http://www.w3.org/2005/Atom">'
+        b'<title>Official feed</title>'
+        b'<id>https://www.moex.com/feed</id>'
+        b'<updated>2026-08-11T08:00:00Z</updated>'
+        b'</feed>'
+    )
+    result = _fetch(payload)
 
+    assert result.quality_status == "OK"
+    assert result.records == ()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        b'<?xml version="1.0" encoding="utf-8"?><root />',
+        b'<?xml version="1.0" encoding="utf-8"?><rss><channel /></rss>',
+        b'<?xml version="1.0" encoding="utf-8"?><feed />',
+        b'<?xml version="1.0" encoding="utf-8"?><feed xmlns="https://evil.example/ns"><title>x</title><id>y</id><updated>2026-08-11T08:00:00Z</updated></feed>',
+    ),
+)
+def test_malformed_or_non_feed_empty_xml_remains_invalid(payload: bytes) -> None:
     with pytest.raises(ValueError, match="contains no items"):
-        fetch_rss_source(
-            _binding(),
-            opener=lambda request, timeout: _Response(payload, request.full_url),
-            now_fn=lambda: datetime(2026, 8, 11, 9, 0, tzinfo=timezone.utc),
-        )
+        _fetch(payload)
