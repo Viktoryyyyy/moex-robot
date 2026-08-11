@@ -10,10 +10,10 @@ Baseline main SHA used for this inventory: `0d472979f987c922e9b4cf131a28057f11d1
 
 A source is **source-complete** only when it is either:
 
-1. `LIVE_ACCEPTED`: registered, deterministic acquisition adapter exists, provenance/PIT semantics are enforced, a current live source smoke is accepted, and the resulting typed data is wired into the RUB Intelligence DecisionInput path; or
+1. `LIVE_ACCEPTED`: registered, deterministic acquisition adapter exists, provenance/PIT semantics are enforced, all governing license/access gates are passed, a current live source smoke is accepted, and the resulting typed data is wired into the RUB Intelligence DecisionInput path; or
 2. `GOVERNED_BLOCKED`: it has an explicit blocker and cannot silently contribute facts or ACTION authority.
 
-Registry presence, parser/unit tests, Flowise availability, or a synthetic classifier smoke alone do not make a source `LIVE_ACCEPTED`.
+Registry presence, parser/unit tests, technical endpoint access, Flowise availability, or a synthetic classifier smoke alone do not make a source `LIVE_ACCEPTED`.
 
 ## 2. Current runtime boundary
 
@@ -21,7 +21,7 @@ The current live Decision smoke is not yet a source-integrated runtime:
 
 - `src/moex_research/runners/usdrubf_live_shadow_smoke.py` explicitly calls `build_live_decision_input(..., news_events=(), macro_state=None)`;
 - `src/moex_research/intelligence/usdrubf_live_shadow_bridge.py` turns `macro_state=None` into an empty neutral MacroState;
-- FUTOI is `BLOCKED` unless the operator explicitly runs the smoke with `--enable-futoi`;
+- FUTOI is `BLOCKED` unless the operator explicitly runs the smoke with `--enable-futoi`; even an enabled technical `OK` does not clear its separate license/access blocker;
 - the separate live News composition exists in `src/moex_research/intelligence/usdrubf_news_live_pipeline.py`, but it is not yet composed into the live Decision runner.
 
 Therefore the successful authenticated Decision Agent smoke proves the Decision/Flowise path, not completion of News/Macro/FUTOI source integration.
@@ -31,7 +31,7 @@ Therefore the successful authenticated Decision Agent smoke proves the Decision/
 | Source | Acquisition / validation | PIT / causal boundary | Current live acceptance | Decision wiring | Status | Next gate |
 |---|---|---|---|---|---|---|
 | USDRUBF/Si 5m MOEX FO feed | Existing `load_fo_5m_day` path reused by live shadow bridge | Only bars closed by `as_of_timestamp`; prior session is causal | Accepted in current server Decision smoke | Yes | `LIVE_ACCEPTED` | Keep unchanged |
-| FUTOI Si | Existing validated FUTOI loader and prior-session validator reused by bridge | Prior-session pair validation against current trade date | Not accepted in current source gate: latest smoke ran without `--enable-futoi`, so quality was `BLOCKED` | Typed FUTOI context is wired when enabled | `IMPLEMENTED_NOT_LIVE_ACCEPTED` | Run explicit-enabled source smoke; require quality `OK` for an accepted run. Direction remains `MIXED`/zero-confidence until a separate directional rule is frozen. |
+| FUTOI Si | Existing validated FUTOI loader and prior-session validator reused by bridge | Prior-session pair validation exists; governing Phase 8.7A contract additionally requires documented provider license/access terms | Latest Decision smoke ran without `--enable-futoi`; separately, the governing contract status is `blocked_pending_documented_license_and_access_terms` and explicitly says successful authenticated access is insufficient | Typed FUTOI context is technically wired when enabled, but it must not obtain factual/ACTION authority while the governance blocker remains | `GOVERNED_BLOCKED` | An explicit-enabled smoke may prove transport/schema only. Before `LIVE_ACCEPTED`, require the contract's license/access evidence and close `provider_license_and_access_terms_not_documented`; only then accept `FUTOI_QUALITY=OK` as live-source evidence. Direction remains `MIXED`/zero-confidence until a separate directional rule is frozen. |
 
 ## 4. News factual-source matrix
 
@@ -132,20 +132,29 @@ Replace the current `macro_state=None` boundary with the accepted Macro pipeline
 ### S3.4 — Additional macro/oil sources
 Only after registry blockers are resolved. `cbr_banking_liquidity_daily`, MOEX Brent and CME WTI remain blocked until their existing blocker is actually closed.
 
-### S4 — FUTOI explicit-enabled live acceptance
-Run the existing live shadow smoke with FUTOI explicitly enabled. Require `FUTOI_QUALITY=OK` for at least one accepted current run. Do not invent directional semantics; current frozen positioning-only semantics remain valid.
+### S4 — FUTOI governance and technical acceptance
+The existing explicit-enabled live smoke may be used only to prove current transport/schema/PIT runtime behavior. A technical `FUTOI_QUALITY=OK` does **not** promote the source.
+
+The governing `usdrubf_phase8_7a_futoi_si_source_and_feature_contract_v1` requires documented MOEX AlgoPack FUTOI license/access evidence and states that a successful authenticated request is insufficient. Until `provider_license_and_access_terms_not_documented` is closed with the required evidence artifact, FUTOI remains `GOVERNED_BLOCKED` and must not receive factual/ACTION authority.
+
+Acceptance for `LIVE_ACCEPTED` requires both:
+
+1. approved license/access evidence satisfying the governing contract; and
+2. an explicit-enabled current smoke with `FUTOI_QUALITY=OK` and causal prior-session validation.
+
+Do not invent directional semantics; current frozen positioning-only semantics remain `MIXED`/zero-confidence until a separate directional rule is frozen.
 
 ### S5 — Integrated source acceptance
 One current shadow run must consume, at minimum:
 
 - live USDRUBF/Si market data;
 - EMA context;
-- explicitly enabled and accepted FUTOI context;
+- FUTOI only after S4 is fully `LIVE_ACCEPTED`; while its governance blocker remains, it must stay excluded/blocked and S5 cannot claim FUTOI integration;
 - at least one accepted factual News source path, with real NewsEvent when an eligible current item exists;
 - accepted CBR MacroState from key rate/RUONIA;
 - authenticated Decision Agent.
 
-The acceptance output must retain per-source quality/degraded status so `0` events or missing observations are distinguishable from source failure.
+The acceptance output must retain per-source quality/degraded status so `0` events or missing observations are distinguishable from source failure. If FUTOI remains `GOVERNED_BLOCKED`, integrated acceptance must explicitly report that blocker rather than treating technical access as source acceptance.
 
 ### S6 — Only after S5
 Proceed to scheduler, persistence/history policy, significant-change ACTION delivery and user alerts. Autonomous broker/order execution remains outside v1.
