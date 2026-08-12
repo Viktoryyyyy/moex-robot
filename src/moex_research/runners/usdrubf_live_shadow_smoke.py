@@ -53,6 +53,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable-futoi", action="store_true")
     parser.add_argument("--safe-wait-agent", action="store_true")
     parser.add_argument(
+        "--cbr-macro",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable accepted CBR key-rate/RUONIA MacroState composition (default: enabled)",
+    )
+    parser.add_argument(
         "--flowise-endpoint",
         default=os.getenv("MOEX_RUB_INTELLIGENCE_FLOWISE_ENDPOINT"),
     )
@@ -175,7 +181,17 @@ def run_once(args: argparse.Namespace) -> Mapping[str, object]:
         news_events=(),
         macro_state=None,
     )
-    macro_state = _load_current_cbr_macro_state(as_of_timestamp=wall_clock)
+
+    # Parser-generated CLI args always include cbr_macro=True by default. A missing
+    # attribute is treated as legacy-disabled only for older direct run_once callers.
+    cbr_macro_enabled = bool(getattr(args, "cbr_macro", False))
+    if cbr_macro_enabled:
+        macro_state = _load_current_cbr_macro_state(as_of_timestamp=wall_clock)
+        macro_mode = "LIVE_CBR"
+    else:
+        macro_state = market_input.macro_state
+        macro_mode = "DISABLED"
+
     decision_input = _compose_wall_clock_decision_input(
         market_input=market_input,
         wall_clock=wall_clock,
@@ -204,6 +220,7 @@ def run_once(args: argparse.Namespace) -> Mapping[str, object]:
         "futoi_direction": decision_input.futoi.direction,
         "futoi_quality": decision_input.futoi.quality_status,
         "news_event_count": len(decision_input.news_events),
+        "macro_mode": macro_mode,
         "macro_observation_count": len(decision_input.macro_state.observations),
         "macro_metric_ids": ",".join(macro_metric_ids),
         "macro_direction": decision_input.macro_state.overall_direction,
@@ -238,6 +255,7 @@ def _print_result(result: Mapping[str, object]) -> None:
         "futoi_direction",
         "futoi_quality",
         "news_event_count",
+        "macro_mode",
         "macro_observation_count",
         "macro_metric_ids",
         "macro_direction",
