@@ -159,7 +159,11 @@ def run_once(args: argparse.Namespace) -> Mapping[str, object]:
         raise RuntimeError("current Moscow trade date has no USDRUBF/Si 5m bars")
     current_closed = closed_bars(current_raw, as_of_timestamp=wall_clock)
     market_data_as_of = current_closed[-1]["end"]
-    if not isinstance(market_data_as_of, datetime):
+    if (
+        not hasattr(market_data_as_of, "tzinfo")
+        or market_data_as_of.tzinfo is None
+        or market_data_as_of.utcoffset() is None
+    ):
         raise RuntimeError("latest closed market bar timestamp is malformed")
 
     prior_trade_date, prior_bars = find_prior_session(
