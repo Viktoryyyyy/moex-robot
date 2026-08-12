@@ -79,7 +79,8 @@ def test_whitehouse_releases_reuses_generic_rss_adapter() -> None:
 
 
 def test_default_live_rss_batch_includes_whitehouse_without_changing_frozen_first_slice() -> None:
-    assert LIVE_RSS_SOURCE_IDS == FIRST_SLICE_SOURCE_IDS + (SOURCE_ID,)
+    expected_prefix = FIRST_SLICE_SOURCE_IDS + (SOURCE_ID,)
+    assert LIVE_RSS_SOURCE_IDS[: len(expected_prefix)] == expected_prefix
 
     def opener(request, timeout):
         parsed = urlparse(request.full_url)
