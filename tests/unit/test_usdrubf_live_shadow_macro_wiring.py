@@ -105,6 +105,31 @@ def test_wall_clock_composition_does_not_backdate_cbr_retrieval() -> None:
     assert all(item.ingested_at == WALL_CLOCK for item in combined.macro_state.observations)
 
 
+def test_cbr_macro_state_uses_fresh_post_acquisition_decision_timestamp(monkeypatch) -> None:
+    post_acquisition = WALL_CLOCK + timedelta(seconds=3)
+    source_state = _macro_state(WALL_CLOCK)
+
+    class PostAcquisitionDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            if tz is None:
+                return post_acquisition.replace(tzinfo=None)
+            return post_acquisition.astimezone(tz)
+
+    monkeypatch.setattr(runner, "datetime", PostAcquisitionDateTime)
+    monkeypatch.setattr(
+        runner,
+        "run_current_cbr_macro_smoke",
+        lambda: source_state.observations,
+    )
+
+    macro_state, decision_as_of = runner._load_current_cbr_macro_state()
+
+    assert decision_as_of == post_acquisition
+    assert macro_state.as_of_timestamp == post_acquisition
+    assert all(item.ingested_at <= decision_as_of for item in macro_state.observations)
+
+
 def test_runner_wires_current_cbr_macrostate_and_reports_separate_market_timestamp(
     monkeypatch,
     tmp_path,
@@ -127,9 +152,9 @@ def test_runner_wires_current_cbr_macrostate_and_reports_separate_market_timesta
 
     captured = {}
 
-    def fake_macro_state(*, as_of_timestamp: datetime):
-        captured["as_of"] = as_of_timestamp
-        return _macro_state(as_of_timestamp)
+    def fake_macro_state():
+        captured["called"] = True
+        return _macro_state(WALL_CLOCK), WALL_CLOCK
 
     monkeypatch.setattr(runner, "datetime", FixedDateTime)
     monkeypatch.setattr(runner, "_load_bars", fake_load)
@@ -148,7 +173,7 @@ def test_runner_wires_current_cbr_macrostate_and_reports_separate_market_timesta
     )
     result = runner.run_once(args)
 
-    assert captured["as_of"] == WALL_CLOCK
+    assert captured["called"] is True
     assert result["status"] == "COMPLETED"
     assert result["market_data_as_of_timestamp"] == current[-1]["end"].isoformat()
     assert result["as_of_timestamp"] == WALL_CLOCK.isoformat()
