@@ -8,6 +8,7 @@ from src.moex_research.external_data.models import ExternalDataError
 from src.moex_research.intelligence.usdrubf_macro_live_cbr import (
     CbrMacroAdapterError,
     KEY_RATE_SOURCE_ID,
+    MOSCOW_TZ,
     RUONIA_SOURCE_ID,
     build_current_cbr_macro_observations,
 )
@@ -32,7 +33,7 @@ def run_current_cbr_macro_smoke(
     if anchor.tzinfo is None or anchor.utcoffset() is None:
         raise ValueError("now_utc must be timezone-aware")
     anchor = anchor.astimezone(timezone.utc)
-    end_date = anchor.date()
+    end_date = anchor.astimezone(MOSCOW_TZ).date()
 
     ruonia_retrieved_at = anchor
     ruonia_records = ruonia_loader(
