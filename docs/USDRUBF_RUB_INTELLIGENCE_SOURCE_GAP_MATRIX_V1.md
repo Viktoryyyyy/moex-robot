@@ -68,12 +68,12 @@ The Stage 12A X whitelist remains `DISCOVERY_ONLY` by contract. There is no live
 
 ## 5. Macro-source matrix
 
-The existing external-data foundation is reusable, but it is not yet converted into live RUB Intelligence `MacroObservation` values or composed into the live Decision runner.
+The existing external-data foundation is reused. `cbr_key_rate_daily` and `cbr_ruonia_daily` now have a bounded deterministic adapter into typed RUB Intelligence `MacroObservation` values, but current live source acceptance and DecisionInput composition are not yet complete.
 
 | source_id | Deterministic loader | Source/PIT state | Current RUB Intelligence live smoke | MacroObservation / Decision wiring | Status | Next gate |
 |---|---|---|---|---|---|---|
-| `cbr_key_rate_daily` | Yes — `external_data/cbr.py::load_key_rate_daily` using official change-date history | Candidate; effective-date semantics implemented | Not proven in current RUB Intelligence live runtime after final semantics | No | `LOADER_READY_NOT_INTEGRATED` | Add bounded adapter to MacroObservation, current live smoke, then Decision wiring |
-| `cbr_ruonia_daily` | Yes — `external_data/cbr.py::load_ruonia_daily` | Candidate; row publication date is explicit; Phase 8.2 PIT eligibility exists | Earlier research foundation had read-only checks, but current RUB Intelligence live acceptance is not proven | No | `LOADER_READY_NOT_INTEGRATED` | Add bounded adapter to MacroObservation, current live smoke, then Decision wiring |
+| `cbr_key_rate_daily` | Yes — `external_data/cbr.py::load_key_rate_daily` using official change-date history | Candidate; effective-date semantics implemented; new rate is not usable before `effective_date` | Not yet run through current RUB Intelligence Macro live smoke | MacroObservation adapter: Yes — `intelligence/usdrubf_macro_live_cbr.py`; Decision wiring: No | `ADAPTER_READY_NOT_LIVE_ACCEPTED` | Current live smoke, then Decision wiring |
+| `cbr_ruonia_daily` | Yes — `external_data/cbr.py::load_ruonia_daily` | Candidate; row publication date is explicit; Phase 8.2 strict-prior-publication rule preserved by next-day Moscow availability boundary | Not yet run through current RUB Intelligence Macro live smoke | MacroObservation adapter: Yes — `intelligence/usdrubf_macro_live_cbr.py`; Decision wiring: No | `ADAPTER_READY_NOT_LIVE_ACCEPTED` | Current live smoke, then Decision wiring |
 | `cbr_banking_liquidity_daily` | Yes | `blocked_pending_vintage_policy` | Not eligible | No | `GOVERNED_BLOCKED` | Keep blocked until row-level historical/current vintage governance is frozen |
 | `moex_brent_futures_daily` | External-data foundation exists | `blocked_pending_source_validation` | Not eligible as accepted RUB Intelligence macro source | No | `GOVERNED_BLOCKED` | Complete source validation before use |
 | `cme_wti_pre_moex` | External-data foundation/current delayed snapshot route exists | `blocked_pending_license` | Not eligible | No | `GOVERNED_BLOCKED` | Resolve license/approved data route before use |
@@ -163,6 +163,6 @@ Proceed to scheduler, persistence/history policy, significant-change ACTION deli
 
 ## 8. Immediate next task
 
-`S2.1_existing_eight_rss_live_source_acceptance_v1`
+`S3.2_cbr_macro_current_live_acceptance_v1`
 
-This is the next gate. It is a current-server read-only acquisition acceptance; no scheduler, alert, broker or trading mutation is included.
+After S3.1 is merged, run the bounded current CBR Macro source smoke for key rate and RUONIA. Prove causal timestamp normalization, current source access, explicit missing/failure status and no future/same-day RUONIA leakage. No DecisionInput wiring, scheduler, alert, broker or trading mutation is included.
