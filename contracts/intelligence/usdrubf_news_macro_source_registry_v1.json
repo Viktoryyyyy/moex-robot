@@ -174,8 +174,8 @@
       "transport": "HTML_INDEX",
       "references": ["https://www.opec.org/press-releases.html"],
       "topics": ["OPEC_PLUS", "OIL_SUPPLY", "PRODUCTION_POLICY"],
-      "stage12b_status": "READY_CANDIDATE",
-      "available_at_policy": "Use the OPEC publication timestamp; meeting schedule does not imply outcome availability."
+      "stage12b_status": "BLOCKED_PENDING_PROVABLE_PUBLICATION_TIMESTAMP",
+      "available_at_policy": "Official OPEC index and detail pages currently expose a calendar publication date but no proven timezone-aware publication timestamp. Do not create a NewsSourceRecord or factual/ACTION authority until a provable publication timestamp is resolved; meeting schedule does not imply outcome availability."
     },
     {
       "source_id": "kremlin_events",
