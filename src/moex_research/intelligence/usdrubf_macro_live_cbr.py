@@ -4,6 +4,7 @@ from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from ..external_data.registry import SOURCE_REGISTRY
 from .usdrubf_news_macro import MacroObservation
 
 
@@ -60,6 +61,25 @@ def _next_day_start(day: date) -> datetime:
     return _day_start(day + timedelta(days=1))
 
 
+def _registered_route(source_id: str) -> str:
+    try:
+        definition = SOURCE_REGISTRY[source_id]
+    except KeyError as exc:
+        raise CbrMacroAdapterError(f"{source_id} is absent from source registry") from exc
+    if not definition.selected_for_production_loader:
+        raise CbrMacroAdapterError(f"{source_id} is not selected for production loader")
+    if definition.historical_model_use_status != _READY_STATUS:
+        raise CbrMacroAdapterError(
+            f"{source_id} registry status is not governed as {_READY_STATUS}"
+        )
+    if len(definition.official_routes) != 1:
+        raise CbrMacroAdapterError(f"{source_id} must have one registered official route")
+    official_route = definition.official_routes[0]
+    if not official_route.startswith("https://"):
+        raise CbrMacroAdapterError(f"{source_id} registered route must be HTTPS")
+    return official_route
+
+
 def _require_record(
     record: Mapping[str, object],
     *,
@@ -67,13 +87,38 @@ def _require_record(
 ) -> tuple[str, datetime]:
     if record.get("source_id") != source_id:
         raise CbrMacroAdapterError(f"unexpected source_id for {source_id}")
+    official_route = _registered_route(source_id)
     if record.get("historical_model_use_status") != _READY_STATUS:
-        raise CbrMacroAdapterError(f"{source_id} is not governed as {_READY_STATUS}")
+        raise CbrMacroAdapterError(f"{source_id} record is not governed as {_READY_STATUS}")
     route = record.get("source_route")
-    if not isinstance(route, str) or not route.startswith("https://"):
-        raise CbrMacroAdapterError(f"{source_id} source_route must be HTTPS")
+    if not isinstance(route, str) or not (
+        route == official_route or route.startswith(f"{official_route}?")
+    ):
+        raise CbrMacroAdapterError(f"{source_id} source_route is not the registered official route")
     retrieved = _aware_datetime(record.get("retrieved_at_utc"), "retrieved_at_utc")
     return route, retrieved
+
+
+def _choose_ruonia_candidate(
+    candidates: list[tuple[date, date, datetime, Mapping[str, object], str, float]],
+) -> tuple[date, date, datetime, Mapping[str, object], str, float]:
+    best_key = max((item[0], item[1], item[2]) for item in candidates)
+    latest = [item for item in candidates if (item[0], item[1], item[2]) == best_key]
+    signatures = {(item[4], item[5]) for item in latest}
+    if len(signatures) != 1:
+        raise CbrMacroAdapterError("conflicting RUONIA records for latest retrieval vintage")
+    return latest[0]
+
+
+def _choose_key_rate_candidate(
+    candidates: list[tuple[date, datetime, Mapping[str, object], str, float]],
+) -> tuple[date, datetime, Mapping[str, object], str, float]:
+    best_key = max((item[0], item[1]) for item in candidates)
+    latest = [item for item in candidates if (item[0], item[1]) == best_key]
+    signatures = {(item[3], item[4]) for item in latest}
+    if len(signatures) != 1:
+        raise CbrMacroAdapterError("conflicting key-rate records for latest retrieval vintage")
+    return latest[0]
 
 
 def latest_ruonia_macro_observation(
@@ -94,12 +139,13 @@ def latest_ruonia_macro_observation(
 
     as_of = _aware_datetime(as_of_timestamp, "as_of_timestamp")
     local_date = as_of.astimezone(MOSCOW_TZ).date()
-    candidates: list[tuple[date, date, Mapping[str, object], str, datetime]] = []
+    candidates: list[tuple[date, date, datetime, Mapping[str, object], str, float]] = []
 
     for record in records:
         route, retrieved = _require_record(record, source_id=RUONIA_SOURCE_ID)
         observation_date = _iso_date(record.get("observation_date"), "observation_date")
         publication_date = _iso_date(record.get("publication_date"), "publication_date")
+        value = _finite_number(record.get("ruonia_rate_pct"), "ruonia_rate_pct")
         if publication_date < observation_date:
             raise CbrMacroAdapterError("RUONIA publication_date precedes observation_date")
         if retrieved > as_of:
@@ -107,14 +153,13 @@ def latest_ruonia_macro_observation(
         available_at = _next_day_start(publication_date)
         if publication_date >= local_date or available_at > as_of or retrieved < available_at:
             continue
-        candidates.append((publication_date, observation_date, record, route, retrieved))
+        candidates.append((publication_date, observation_date, retrieved, record, route, value))
 
     if not candidates:
         raise CbrMacroAdapterError("no causally eligible RUONIA observation")
 
-    publication_date, observation_date, record, route, retrieved = max(
-        candidates,
-        key=lambda item: (item[0], item[1]),
+    publication_date, observation_date, retrieved, _record, route, value = (
+        _choose_ruonia_candidate(candidates)
     )
     available_at = _next_day_start(publication_date)
     published_at = available_at - timedelta(microseconds=1)
@@ -122,7 +167,7 @@ def latest_ruonia_macro_observation(
         metric_id=RUONIA_METRIC_ID,
         source_id=RUONIA_SOURCE_ID,
         source_reference=route,
-        value=_finite_number(record.get("ruonia_rate_pct"), "ruonia_rate_pct"),
+        value=value,
         unit="PERCENT_PER_ANNUM",
         observed_or_effective_at=_day_start(observation_date),
         published_at=published_at,
@@ -146,28 +191,29 @@ def latest_key_rate_macro_observation(
 
     as_of = _aware_datetime(as_of_timestamp, "as_of_timestamp")
     local_date = as_of.astimezone(MOSCOW_TZ).date()
-    candidates: list[tuple[date, Mapping[str, object], str, datetime]] = []
+    candidates: list[tuple[date, datetime, Mapping[str, object], str, float]] = []
 
     for record in records:
         route, retrieved = _require_record(record, source_id=KEY_RATE_SOURCE_ID)
         effective_date = _iso_date(record.get("effective_date"), "effective_date")
+        value = _finite_number(record.get("key_rate_pct"), "key_rate_pct")
         effective_at = _day_start(effective_date)
         if retrieved > as_of:
             continue
         if effective_date > local_date or effective_at > as_of or retrieved < effective_at:
             continue
-        candidates.append((effective_date, record, route, retrieved))
+        candidates.append((effective_date, retrieved, record, route, value))
 
     if not candidates:
         raise CbrMacroAdapterError("no causally eligible key-rate observation")
 
-    effective_date, record, route, retrieved = max(candidates, key=lambda item: item[0])
+    effective_date, retrieved, _record, route, value = _choose_key_rate_candidate(candidates)
     effective_at = _day_start(effective_date)
     return MacroObservation(
         metric_id=KEY_RATE_METRIC_ID,
         source_id=KEY_RATE_SOURCE_ID,
         source_reference=route,
-        value=_finite_number(record.get("key_rate_pct"), "key_rate_pct"),
+        value=value,
         unit="PERCENT_PER_ANNUM",
         observed_or_effective_at=effective_at,
         published_at=effective_at,
