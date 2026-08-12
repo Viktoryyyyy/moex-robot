@@ -16,6 +16,26 @@ from src.moex_research.intelligence.usdrubf_news_macro import MacroObservation
 
 
 Loader = Callable[..., list[dict[str, object]]]
+Clock = Callable[[], datetime]
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_utc(value: datetime, field: str) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{field} must be timezone-aware")
+    return value.astimezone(timezone.utc)
+
+
+def _restamp_retrieved_at(
+    records: list[dict[str, object]],
+    *,
+    retrieved_at_utc: datetime,
+) -> list[dict[str, object]]:
+    stamp = _as_utc(retrieved_at_utc, "retrieved_at_utc").isoformat().replace("+00:00", "Z")
+    return [{**record, "retrieved_at_utc": stamp} for record in records]
 
 
 def run_current_cbr_macro_smoke(
@@ -25,31 +45,51 @@ def run_current_cbr_macro_smoke(
     key_rate_lookback_days: int = 3650,
     ruonia_loader: Loader = load_ruonia_daily,
     key_rate_loader: Loader = load_key_rate_daily,
+    clock_utc: Clock = _utc_now,
 ) -> tuple[MacroObservation, MacroObservation]:
+    """Acquire current governed CBR observations with causal ingestion timestamps.
+
+    ``now_utc`` is a deterministic fixed-time mode for tests/replay. In live mode
+    it is omitted: each loader result is restamped only after that response has
+    returned, and final eligibility is evaluated at a fresh post-acquisition
+    timestamp. This prevents response content from being backdated to cycle start.
+    """
+
     if ruonia_lookback_days <= 0 or key_rate_lookback_days <= 0:
         raise ValueError("lookback days must be positive")
 
-    anchor = now_utc or datetime.now(timezone.utc)
-    if anchor.tzinfo is None or anchor.utcoffset() is None:
-        raise ValueError("now_utc must be timezone-aware")
-    anchor = anchor.astimezone(timezone.utc)
+    fixed_time = now_utc is not None
+    anchor = _as_utc(now_utc, "now_utc") if fixed_time else _as_utc(clock_utc(), "clock_utc")
     end_date = anchor.astimezone(MOSCOW_TZ).date()
 
-    ruonia_retrieved_at = anchor
     ruonia_records = ruonia_loader(
         end_date - timedelta(days=ruonia_lookback_days),
         end_date,
-        retrieved_at_utc=ruonia_retrieved_at,
+        retrieved_at_utc=anchor,
     )
+    if not fixed_time:
+        ruonia_records = _restamp_retrieved_at(
+            ruonia_records,
+            retrieved_at_utc=_as_utc(clock_utc(), "clock_utc"),
+        )
 
-    key_rate_retrieved_at = anchor
     key_rate_records = key_rate_loader(
         end_date - timedelta(days=key_rate_lookback_days),
         end_date,
-        retrieved_at_utc=key_rate_retrieved_at,
+        retrieved_at_utc=anchor,
     )
+    if not fixed_time:
+        key_rate_records = _restamp_retrieved_at(
+            key_rate_records,
+            retrieved_at_utc=_as_utc(clock_utc(), "clock_utc"),
+        )
 
-    as_of = anchor if now_utc is not None else datetime.now(timezone.utc)
+    as_of = anchor if fixed_time else _as_utc(clock_utc(), "clock_utc")
+    if as_of.astimezone(MOSCOW_TZ).date() != end_date:
+        raise CbrMacroAdapterError(
+            "CBR live acquisition crossed the Moscow calendar-date boundary; retry the cycle"
+        )
+
     observations = build_current_cbr_macro_observations(
         ruonia_records=ruonia_records,
         key_rate_records=key_rate_records,
