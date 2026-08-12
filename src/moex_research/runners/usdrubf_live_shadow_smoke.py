@@ -107,9 +107,13 @@ def _load_bars(secid: str, trade_date):
     return load_fo_5m_day(secid=secid, trade_date=trade_date)
 
 
-def _load_current_cbr_macro_state(*, as_of_timestamp: datetime) -> MacroState:
-    observations = run_current_cbr_macro_smoke(now_utc=as_of_timestamp)
-    macro_state = build_macro_state(observations, as_of_timestamp=as_of_timestamp)
+def _load_current_cbr_macro_state() -> tuple[MacroState, datetime]:
+    observations = run_current_cbr_macro_smoke()
+    decision_as_of = datetime.now(MOSCOW)
+    latest_ingested = max(item.ingested_at for item in observations)
+    if latest_ingested > decision_as_of:
+        decision_as_of = latest_ingested.astimezone(MOSCOW)
+    macro_state = build_macro_state(observations, as_of_timestamp=decision_as_of)
     metric_ids = {item.metric_id for item in macro_state.observations}
     if metric_ids != _REQUIRED_CBR_MACRO_METRICS:
         raise RuntimeError(
@@ -117,7 +121,7 @@ def _load_current_cbr_macro_state(*, as_of_timestamp: datetime) -> MacroState:
         )
     if any(item.quality_status != "OK" for item in macro_state.observations):
         raise RuntimeError("current CBR MacroState contains a non-OK observation")
-    return macro_state
+    return macro_state, decision_as_of
 
 
 def _compose_wall_clock_decision_input(
@@ -152,12 +156,12 @@ def _compose_wall_clock_decision_input(
 
 
 def run_once(args: argparse.Namespace) -> Mapping[str, object]:
-    wall_clock = datetime.now(MOSCOW).replace(microsecond=0)
-    current_trade_date = wall_clock.date()
+    cycle_started_at = datetime.now(MOSCOW).replace(microsecond=0)
+    current_trade_date = cycle_started_at.date()
     current_raw = tuple(_load_bars(SECID_KEY, current_trade_date))
     if not current_raw:
         raise RuntimeError("current Moscow trade date has no USDRUBF/Si 5m bars")
-    current_closed = closed_bars(current_raw, as_of_timestamp=wall_clock)
+    current_closed = closed_bars(current_raw, as_of_timestamp=cycle_started_at)
     market_data_as_of = current_closed[-1]["end"]
     if (
         not hasattr(market_data_as_of, "tzinfo")
@@ -180,7 +184,7 @@ def run_once(args: argparse.Namespace) -> Mapping[str, object]:
     market_input = build_live_decision_input(
         current_session_bars=current_closed,
         prior_session_bars=prior_bars,
-        wall_clock_as_of=wall_clock,
+        wall_clock_as_of=cycle_started_at,
         futoi_context=futoi,
         news_events=(),
         macro_state=None,
@@ -190,15 +194,21 @@ def run_once(args: argparse.Namespace) -> Mapping[str, object]:
     # attribute is treated as legacy-disabled only for older direct run_once callers.
     cbr_macro_enabled = bool(getattr(args, "cbr_macro", False))
     if cbr_macro_enabled:
-        macro_state = _load_current_cbr_macro_state(as_of_timestamp=wall_clock)
+        macro_state, decision_as_of = _load_current_cbr_macro_state()
         macro_mode = "LIVE_CBR"
     else:
         macro_state = market_input.macro_state
+        decision_as_of = cycle_started_at
         macro_mode = "DISABLED"
+
+    if decision_as_of < cycle_started_at:
+        raise RuntimeError("decision timestamp precedes cycle start")
+    if decision_as_of.astimezone(MOSCOW).date() != current_trade_date:
+        raise RuntimeError("live cycle crossed the Moscow calendar-date boundary; retry")
 
     decision_input = _compose_wall_clock_decision_input(
         market_input=market_input,
-        wall_clock=wall_clock,
+        wall_clock=decision_as_of,
         macro_state=macro_state,
     )
     decision_agent, decision_agent_mode = _decision_agent(args)
@@ -210,7 +220,7 @@ def run_once(args: argparse.Namespace) -> Mapping[str, object]:
         "project": PROJECT,
         "mode": MODE,
         "status": "COMPLETED",
-        "wall_clock": wall_clock.isoformat(),
+        "wall_clock": decision_as_of.isoformat(),
         "current_trade_date": current_trade_date.isoformat(),
         "prior_trade_date": prior_trade_date.isoformat(),
         "market_data_as_of_timestamp": market_data_as_of.isoformat(),
