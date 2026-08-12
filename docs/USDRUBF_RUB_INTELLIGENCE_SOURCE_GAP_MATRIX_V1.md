@@ -35,7 +35,7 @@ Therefore the successful authenticated Decision Agent smoke proves the Decision/
 
 ## 4. News factual-source matrix
 
-The first live RSS adapter is intentionally limited to the eight `FIRST_SLICE_SOURCE_IDS` below. It enforces HTTPS publisher identity, bounded content, timezone-aware publication timestamps, future-item exclusion and `available_at=published_at`.
+The generic live RSS adapter retains the eight `FIRST_SLICE_SOURCE_IDS` as its original baseline; `LIVE_RSS_SOURCE_IDS` may add separately validated official sources. It enforces HTTPS publisher identity, bounded content, timezone-aware publication timestamps, future-item exclusion and `available_at=published_at`.
 
 | source_id | Registry state | Live acquisition adapter | PIT semantics | Current live source smoke | News Classifier path | Live Decision wiring | Source status |
 |---|---|---|---|---|---|---|---|
@@ -50,9 +50,9 @@ The first live RSS adapter is intentionally limited to the eight `FIRST_SLICE_SO
 | `bls_release_calendar` | `READY_CANDIDATE` | No | Policy only: calendar time is context and never proves content availability | Not run | No | No | `ADAPTER_MISSING` |
 | `us_treasury_press_releases` | `READY_CANDIDATE` | No | Registry policy only | Not run | No | No | `ADAPTER_MISSING` |
 | `ofac_recent_actions` | `READY_CANDIDATE` | No | Registry requires a provable publication timestamp; otherwise timestamp-unprovable | Not run | No | No | `ADAPTER_MISSING` |
-| `whitehouse_releases` | `READY_CANDIDATE` | No | Registry policy only | Not run | No | No | `ADAPTER_MISSING` |
-| `eu_council_press_releases` | `READY_CANDIDATE` | No | Registry policy only | Not run | No | No | `ADAPTER_MISSING` |
-| `eu_commission_news` | `READY_CANDIDATE` | No | Registry policy only; Council remains primary authority for Council-adopted sanctions when available | Not run | No | No | `ADAPTER_MISSING` |
+| `whitehouse_releases` | `READY_CANDIDATE` | Yes — generic Stage 12B.1 RSS | Implemented: RSS publication timestamp; `available_at=published_at` | Not proven on current server | Wired through bounded live News pipeline | No | `ADAPTER_READY_NOT_LIVE_ACCEPTED` |
+| `eu_council_press_releases` | `READY_CANDIDATE` | Yes — generic Stage 12B.1 RSS | Implemented: Atom `updated`; `available_at=published_at` | Not proven on current server | Wired through bounded live News pipeline | No | `ADAPTER_READY_NOT_LIVE_ACCEPTED` |
+| `eu_commission_news` | `READY_CANDIDATE` | Yes — generic Stage 12B.1 RSS with explicit item-host allowlist | Implemented: RSS `pubDate`; `available_at=published_at`; Council remains primary authority for Council-adopted sanctions when available | Not proven on current server | Wired through bounded live News pipeline | No | `ADAPTER_READY_NOT_LIVE_ACCEPTED` |
 | `opec_press_releases` | `READY_CANDIDATE` | No | Registry policy only; meeting schedule is not outcome availability | Not run | No | No | `ADAPTER_MISSING` |
 | `kremlin_events` | `BLOCKED_PENDING_STABLE_ROUTE_ADAPTER` | No | Not proven | Not run | No | No | `GOVERNED_BLOCKED` |
 | `minfin_ru_press_center` | `BLOCKED_PENDING_ROUTE_VERIFICATION` | No | Not proven | Not run | No | No | `GOVERNED_BLOCKED` |

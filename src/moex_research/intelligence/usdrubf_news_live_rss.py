@@ -33,6 +33,7 @@ FIRST_SLICE_SOURCE_IDS = (
 LIVE_RSS_SOURCE_IDS = FIRST_SLICE_SOURCE_IDS + (
     "whitehouse_releases",
     "eu_council_press_releases",
+    "eu_commission_news",
 )
 
 _ALLOWED_TIERS = {"OFFICIAL_PRIMARY", "OFFICIAL_SECONDARY"}
@@ -56,6 +57,7 @@ class RssFeedBinding:
     source_tier: str
     feed_url: str
     allowed_host: str
+    additional_allowed_hosts: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.source_id:
@@ -65,8 +67,21 @@ class RssFeedBinding:
         parsed = urlparse(self.feed_url)
         if parsed.scheme != "https" or not parsed.hostname:
             raise ValueError("feed_url must be explicit HTTPS URL")
-        if _normalize_host(parsed.hostname) != _normalize_host(self.allowed_host):
+        primary_host = _normalize_host(self.allowed_host)
+        if _normalize_host(parsed.hostname) != primary_host:
             raise ValueError("allowed_host must match feed_url host")
+        seen = {primary_host}
+        for host in self.additional_allowed_hosts:
+            normalized = _normalize_host(host)
+            if not normalized:
+                raise ValueError("additional_allowed_hosts must contain non-empty hostnames")
+            if normalized in seen:
+                raise ValueError("additional_allowed_hosts must be unique and exclude allowed_host")
+            seen.add(normalized)
+
+    @property
+    def item_allowed_hosts(self) -> tuple[str, ...]:
+        return (self.allowed_host,) + self.additional_allowed_hosts
 
 
 @dataclass(frozen=True)
@@ -162,12 +177,38 @@ def load_first_slice_bindings(
         parsed = urlparse(feed_url)
         if parsed.scheme != "https" or not parsed.hostname:
             raise ValueError(f"RSS source must use HTTPS: {source_id}")
+        primary_host = parsed.hostname
+        allowed_item_hosts = item.get("item_link_allowed_hosts")
+        additional_allowed_hosts: tuple[str, ...] = ()
+        if allowed_item_hosts is not None:
+            if (
+                not isinstance(allowed_item_hosts, list)
+                or not allowed_item_hosts
+                or not all(isinstance(host, str) and host for host in allowed_item_hosts)
+            ):
+                raise ValueError(
+                    f"item_link_allowed_hosts must be a non-empty hostname list: {source_id}"
+                )
+            normalized_hosts = [_normalize_host(host) for host in allowed_item_hosts]
+            if len(normalized_hosts) != len(set(normalized_hosts)):
+                raise ValueError(f"item_link_allowed_hosts contains duplicates: {source_id}")
+            normalized_primary = _normalize_host(primary_host)
+            if normalized_primary not in normalized_hosts:
+                raise ValueError(
+                    f"item_link_allowed_hosts must include the RSS feed host: {source_id}"
+                )
+            additional_allowed_hosts = tuple(
+                host
+                for host in allowed_item_hosts
+                if _normalize_host(host) != normalized_primary
+            )
         bindings.append(
             RssFeedBinding(
                 source_id=source_id,
                 source_tier=tier,
                 feed_url=feed_url,
-                allowed_host=parsed.hostname,
+                allowed_host=primary_host,
+                additional_allowed_hosts=additional_allowed_hosts,
             )
         )
     return tuple(bindings)
@@ -227,14 +268,15 @@ def _bounded_description(value: str | None, *, max_chars: int) -> str:
     return cleaned[:max_chars]
 
 
-def _validate_item_link(url: str, *, allowed_host: str) -> str:
+def _validate_item_link(url: str, *, allowed_hosts: Iterable[str]) -> str:
     parsed = urlparse(url)
     if parsed.scheme != "https" or not parsed.hostname:
         raise RssAcquisitionError("SOURCE_INVALID", "RSS item link must be HTTPS")
-    if _normalize_host(parsed.hostname) != _normalize_host(allowed_host):
+    normalized_allowed = {_normalize_host(host) for host in allowed_hosts}
+    if _normalize_host(parsed.hostname) not in normalized_allowed:
         raise RssAcquisitionError(
             "SOURCE_INVALID",
-            "RSS item link host does not match the registered publisher",
+            "RSS item link host does not match the registered publisher allowlist",
         )
     return url
 
@@ -338,7 +380,10 @@ def _parse_rss_records(
         if published_at > ingested_at:
             future_items += 1
             continue
-        source_reference = _validate_item_link(link, allowed_host=binding.allowed_host)
+        source_reference = _validate_item_link(
+            link,
+            allowed_hosts=binding.item_allowed_hosts,
+        )
         body = _bounded_description(
             _child_text(item, ("description", "summary", "content")),
             max_chars=max_description_chars,
