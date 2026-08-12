@@ -140,6 +140,7 @@ def test_runner_wires_current_cbr_macrostate_and_reports_separate_market_timesta
         max_prior_lookback_days=7,
         enable_futoi=False,
         safe_wait_agent=True,
+        cbr_macro=True,
         flowise_endpoint=None,
         flowise_request_field=None,
         flowise_response_field=None,
@@ -151,6 +152,7 @@ def test_runner_wires_current_cbr_macrostate_and_reports_separate_market_timesta
     assert result["status"] == "COMPLETED"
     assert result["market_data_as_of_timestamp"] == current[-1]["end"].isoformat()
     assert result["as_of_timestamp"] == WALL_CLOCK.isoformat()
+    assert result["macro_mode"] == "LIVE_CBR"
     assert result["macro_observation_count"] == 2
     assert result["macro_metric_ids"] == "cbr_ruonia_rate_pct,cbr_key_rate_pct"
     assert result["macro_direction"] == "NEUTRAL"
