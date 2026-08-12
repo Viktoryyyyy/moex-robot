@@ -160,11 +160,12 @@
       "source_id": "eu_commission_news",
       "group": "SANCTIONS_AND_GEOPOLITICAL_OFFICIAL",
       "tier": "OFFICIAL_SECONDARY",
-      "transport": "RSS_OR_HTML_INDEX",
-      "references": ["https://commission.europa.eu/news-and-media/news_en"],
+      "transport": "RSS",
+      "references": ["https://commission.europa.eu/node/29665/rss_en"],
+      "item_link_allowed_hosts": ["commission.europa.eu", "ec.europa.eu", "civil-protection-humanitarian-aid.ec.europa.eu"],
       "topics": ["EU_POLICY", "SANCTIONS", "TRADE", "ENERGY_POLICY"],
       "stage12b_status": "READY_CANDIDATE",
-      "available_at_policy": "Use the Commission publication timestamp; use Council source as primary authority for Council-adopted sanctions when available."
+      "available_at_policy": "Use the Commission RSS item pubDate as the authoritative publication and content-availability timestamp; use Council source as primary authority for Council-adopted sanctions when available."
     },
     {
       "source_id": "opec_press_releases",
