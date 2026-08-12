@@ -126,7 +126,7 @@ def test_cbr_macro_state_uses_fresh_post_acquisition_decision_timestamp(monkeypa
     macro_state, decision_as_of = runner._load_current_cbr_macro_state()
 
     assert decision_as_of == post_acquisition
-    assert macro_state.as_of_timestamp == post_acquisition
+    assert macro_state.as_of_timestamp == post_acquisition.isoformat()
     assert all(item.ingested_at <= decision_as_of for item in macro_state.observations)
 
 
