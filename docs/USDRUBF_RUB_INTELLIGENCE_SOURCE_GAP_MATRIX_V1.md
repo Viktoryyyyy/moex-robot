@@ -53,12 +53,14 @@ The generic live RSS adapter retains the eight `FIRST_SLICE_SOURCE_IDS` as its o
 | `whitehouse_releases` | `READY_CANDIDATE` | Yes — generic Stage 12B.1 RSS | Implemented: RSS publication timestamp; `available_at=published_at` | Not proven on current server | Wired through bounded live News pipeline | No | `ADAPTER_READY_NOT_LIVE_ACCEPTED` |
 | `eu_council_press_releases` | `READY_CANDIDATE` | Yes — generic Stage 12B.1 RSS | Implemented: Atom `updated`; `available_at=published_at` | Not proven on current server | Wired through bounded live News pipeline | No | `ADAPTER_READY_NOT_LIVE_ACCEPTED` |
 | `eu_commission_news` | `READY_CANDIDATE` | Yes — generic Stage 12B.1 RSS with explicit item-host allowlist | Implemented: RSS `pubDate`; `available_at=published_at`; Council remains primary authority for Council-adopted sanctions when available | Not proven on current server | Wired through bounded live News pipeline | No | `ADAPTER_READY_NOT_LIVE_ACCEPTED` |
-| `opec_press_releases` | `READY_CANDIDATE` | No | Registry policy only; meeting schedule is not outcome availability | Not run | No | No | `ADAPTER_MISSING` |
+| `opec_press_releases` | `BLOCKED_PENDING_PROVABLE_PUBLICATION_TIMESTAMP` | No | Official index/detail pages expose only a calendar publication date; no timezone-aware publication timestamp is currently proven. Synthetic midnight/meeting-time substitution is forbidden. | Not eligible | No | No | `GOVERNED_BLOCKED` |
 | `kremlin_events` | `BLOCKED_PENDING_STABLE_ROUTE_ADAPTER` | No | Not proven | Not run | No | No | `GOVERNED_BLOCKED` |
 | `minfin_ru_press_center` | `BLOCKED_PENDING_ROUTE_VERIFICATION` | No | Not proven | Not run | No | No | `GOVERNED_BLOCKED` |
 | `rosstat_official_releases` | `BLOCKED_PENDING_STABLE_INDEX_ROUTE` | No | Not proven | Not run | No | No | `GOVERNED_BLOCKED` |
 | `mfa_ru_news` | `BLOCKED_PENDING_ROUTE_VERIFICATION` | No | Not proven | Not run | No | No | `GOVERNED_BLOCKED` |
 | `reuters_major_agency` | `BLOCKED_PENDING_APPROVED_ROUTE_AND_RIGHTS` | No approved factual route | Rights/timestamp policy unresolved | Not run | No | No | `GOVERNED_BLOCKED` |
+
+OPEC blocker evidence (2026-08-12): the official press-release index provides a calendar date and detail links, while inspected detail pages expose no machine-readable `datePublished` or timezone-aware publication timestamp. Do not infer `00:00`, meeting time, or any other synthetic release time. Reopen this source only when an official provable publication timestamp or a separately approved first-observed-time contract is available.
 
 ### X/Twitter discovery class
 
@@ -114,7 +116,7 @@ Implement one source family at a time, in this order unless new evidence changes
 2. US Treasury + OFAC;
 3. White House;
 4. EU Council, then EU Commission;
-5. OPEC;
+5. OPEC — currently `GOVERNED_BLOCKED` pending a provable timezone-aware publication timestamp;
 6. blocked Russian official sources only after stable route/timestamp proof;
 7. Reuters only after an approved route and rights policy.
 
