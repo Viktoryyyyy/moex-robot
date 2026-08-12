@@ -63,6 +63,37 @@ def test_current_cbr_macro_smoke_builds_two_pit_safe_observations() -> None:
     assert all(item.ingested_at <= ANCHOR for item in observations)
 
 
+def test_live_mode_stamps_each_source_after_its_loader_returns() -> None:
+    clock_values = iter(
+        (
+            datetime(2026, 8, 12, 12, 0, 0, tzinfo=timezone.utc),
+            datetime(2026, 8, 12, 12, 0, 1, tzinfo=timezone.utc),
+            datetime(2026, 8, 12, 12, 0, 2, tzinfo=timezone.utc),
+            datetime(2026, 8, 12, 12, 0, 3, tzinfo=timezone.utc),
+        )
+    )
+
+    def clock_utc():
+        return next(clock_values)
+
+    observations = run_current_cbr_macro_smoke(
+        ruonia_loader=_ruonia_loader,
+        key_rate_loader=_key_rate_loader,
+        clock_utc=clock_utc,
+    )
+
+    assert observations[0].ingested_at == datetime(
+        2026, 8, 12, 12, 0, 1, tzinfo=timezone.utc
+    )
+    assert observations[1].ingested_at == datetime(
+        2026, 8, 12, 12, 0, 2, tzinfo=timezone.utc
+    )
+    assert all(
+        item.ingested_at <= datetime(2026, 8, 12, 12, 0, 3, tzinfo=timezone.utc)
+        for item in observations
+    )
+
+
 def test_current_cbr_macro_smoke_uses_moscow_calendar_for_request_window() -> None:
     boundary_anchor = datetime(2026, 8, 11, 21, 30, tzinfo=timezone.utc)
     seen_end_dates = []
