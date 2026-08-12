@@ -44,16 +44,16 @@ Existing macro adapters are reused rather than duplicated:
 - OFAC Recent Actions — `ofac_recent_actions`
 - White House releases — `whitehouse_releases`
 
-### EU / Energy
+### EU
 
 - Council of the EU press releases/statements — `eu_council_press_releases`
 - European Commission news — `eu_commission_news`
-- OPEC official releases — `opec_press_releases`
 
 ## Blocked pending source work
 
 These desired sources are not authorized for Stage 12B live ingestion yet:
 
+- OPEC official releases — `opec_press_releases`: official pages expose a calendar publication date but no proven timezone-aware publication timestamp; synthetic midnight or meeting-time substitution is forbidden.
 - Kremlin — stable event route/timestamp adapter required.
 - Russian Ministry of Finance — stable route and timestamp semantics required.
 - Rosstat — stable machine-readable index and availability policy required.
