@@ -150,11 +150,11 @@
       "source_id": "eu_council_press_releases",
       "group": "SANCTIONS_AND_GEOPOLITICAL_OFFICIAL",
       "tier": "OFFICIAL_PRIMARY",
-      "transport": "HTML_INDEX",
-      "references": ["https://www.consilium.europa.eu/en/press/press-releases/"],
+      "transport": "RSS",
+      "references": ["https://www.consilium.europa.eu/en/rss/pressreleases.ashx"],
       "topics": ["EU_SANCTIONS", "RUSSIA_SANCTIONS", "UKRAINE", "ENERGY_POLICY"],
       "stage12b_status": "READY_CANDIDATE",
-      "available_at_policy": "Use the Council publication timestamp shown on the release."
+      "available_at_policy": "Use the EU Council RSS item Atom updated timestamp as the authoritative publication and content-availability timestamp."
     },
     {
       "source_id": "eu_commission_news",

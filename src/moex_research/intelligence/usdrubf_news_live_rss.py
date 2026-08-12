@@ -30,7 +30,10 @@ FIRST_SLICE_SOURCE_IDS = (
     "bls_employment_situation_rss",
     "bls_cpi_rss",
 )
-LIVE_RSS_SOURCE_IDS = FIRST_SLICE_SOURCE_IDS + ("whitehouse_releases",)
+LIVE_RSS_SOURCE_IDS = FIRST_SLICE_SOURCE_IDS + (
+    "whitehouse_releases",
+    "eu_council_press_releases",
+)
 
 _ALLOWED_TIERS = {"OFFICIAL_PRIMARY", "OFFICIAL_SECONDARY"}
 _ALLOWED_STATUS = {"OK", "SOURCE_UNAVAILABLE", "SOURCE_INVALID", "TIMESTAMP_UNPROVABLE"}
