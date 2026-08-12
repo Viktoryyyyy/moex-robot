@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
 
+import src.moex_research.intelligence.usdrubf_macro_live_cbr as cbr_macro
 from src.moex_research.intelligence.usdrubf_macro_live_cbr import (
     CbrMacroAdapterError,
     KEY_RATE_METRIC_ID,
@@ -133,7 +135,7 @@ def test_future_retrieval_cannot_enter_as_of_state() -> None:
         )
 
 
-def test_source_policy_and_identity_fail_closed() -> None:
+def test_source_policy_identity_and_registered_route_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     wrong_source = _ruonia("2026-07-13", "2026-07-14", 12.0)
     wrong_source["source_id"] = "not_cbr"
     with pytest.raises(CbrMacroAdapterError, match="unexpected source_id"):
@@ -141,8 +143,65 @@ def test_source_policy_and_identity_fail_closed() -> None:
 
     blocked = _key_rate("2026-06-01", 12.0)
     blocked["historical_model_use_status"] = "blocked_pending_vintage_policy"
-    with pytest.raises(CbrMacroAdapterError, match="not governed"):
+    with pytest.raises(CbrMacroAdapterError, match="record is not governed"):
         latest_key_rate_macro_observation([blocked], as_of_timestamp=AS_OF)
+
+    wrong_route = _ruonia("2026-07-13", "2026-07-14", 12.0)
+    wrong_route["source_route"] = "https://evil.example/eng/hd_base/ruonia/dynamics/"
+    with pytest.raises(CbrMacroAdapterError, match="registered official route"):
+        latest_ruonia_macro_observation([wrong_route], as_of_timestamp=AS_OF)
+
+    definition = cbr_macro.SOURCE_REGISTRY["cbr_key_rate_daily"]
+    patched = dict(cbr_macro.SOURCE_REGISTRY)
+    patched["cbr_key_rate_daily"] = replace(
+        definition,
+        historical_model_use_status="blocked_pending_source_validation",
+    )
+    monkeypatch.setattr(cbr_macro, "SOURCE_REGISTRY", patched)
+    with pytest.raises(CbrMacroAdapterError, match="registry status"):
+        latest_key_rate_macro_observation(
+            [_key_rate("2026-06-01", 12.0)],
+            as_of_timestamp=AS_OF,
+        )
+
+
+def test_latest_retrieval_vintage_wins_independent_of_input_order() -> None:
+    older = _ruonia(
+        "2026-07-13",
+        "2026-07-14",
+        11.5,
+        retrieved_at="2026-07-15T09:00:00Z",
+    )
+    newer = _ruonia(
+        "2026-07-13",
+        "2026-07-14",
+        12.0,
+        retrieved_at="2026-07-15T11:00:00Z",
+    )
+    assert latest_ruonia_macro_observation([newer, older], as_of_timestamp=AS_OF).value == 12.0
+    assert latest_ruonia_macro_observation([older, newer], as_of_timestamp=AS_OF).value == 12.0
+
+    older_key = _key_rate("2026-06-01", 12.0, retrieved_at="2026-07-15T09:00:00Z")
+    newer_key = _key_rate("2026-06-01", 12.5, retrieved_at="2026-07-15T11:00:00Z")
+    assert latest_key_rate_macro_observation([newer_key, older_key], as_of_timestamp=AS_OF).value == 12.5
+    assert latest_key_rate_macro_observation([older_key, newer_key], as_of_timestamp=AS_OF).value == 12.5
+
+
+def test_conflicting_same_identity_and_retrieval_vintage_fails_closed() -> None:
+    with pytest.raises(CbrMacroAdapterError, match="conflicting RUONIA"):
+        latest_ruonia_macro_observation(
+            [
+                _ruonia("2026-07-13", "2026-07-14", 11.5),
+                _ruonia("2026-07-13", "2026-07-14", 12.0),
+            ],
+            as_of_timestamp=AS_OF,
+        )
+
+    with pytest.raises(CbrMacroAdapterError, match="conflicting key-rate"):
+        latest_key_rate_macro_observation(
+            [_key_rate("2026-06-01", 12.0), _key_rate("2026-06-01", 12.5)],
+            as_of_timestamp=AS_OF,
+        )
 
 
 def test_pair_builder_returns_both_governed_metrics() -> None:
