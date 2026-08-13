@@ -2,9 +2,9 @@
 
 PROJECT=MOEX_Bot
 
-Status: working Source of Truth for source-completion gates before scheduler/ACTION delivery.
+Status: working Source of Truth for source-completion and controlled shadow-runtime gates before alert delivery.
 
-Baseline main SHA used for this inventory: `b23cc36d35c5219a682f451085800f4493b3745f`.
+Baseline main SHA used for this inventory: `143387789e39c17e2f179251678274b9d5c8e04c`.
 
 ## 1. Completion rule
 
@@ -15,18 +15,21 @@ A source is **source-complete** only when it is either:
 
 Registry presence, parser/unit tests, technical endpoint access, Flowise availability, or synthetic classifier output alone do not make a source `LIVE_ACCEPTED`.
 
+Runtime stages have a separate acceptance rule: code/CI does not make a stage operationally accepted until the canonical server proves the intended state and restart semantics.
+
 ## 2. Current runtime boundary
 
-The live shadow Decision path is now source-integrated for market, EMA, bounded official RSS NewsEvents and accepted CBR MacroState:
+The live shadow Decision path is source-integrated for market, EMA, bounded official RSS NewsEvents and accepted CBR MacroState:
 
 - market/EMA use the latest causally closed MOEX 5m data;
 - News uses deterministic official-source acquisition and a bounded deterministic-neutral classifier (`direction=NEUTRAL`, `rub_relevance=0`, `confidence=0`); no Flowise/LLM factual or directional authority is required in the current News path;
 - successful News records are conservatively stamped after acquisition completion; explicit historical `as_of` excludes records ingested after the cutoff;
 - live `DecisionInput` receives at most 20 NewsEvents and reports the dropped count explicitly;
 - CBR Key Rate + RUONIA are composed into `MacroState` with their frozen PIT semantics;
-- FUTOI remains `GOVERNED_BLOCKED` unless its separate license/access gate is closed; technical wiring does not grant authority.
+- FUTOI remains `GOVERNED_BLOCKED` unless its separate license/access gate is closed; technical wiring does not grant authority;
+- the accepted recurring shadow boundary uses one explicit persistent `ShadowJsonStore` root, OS `flock` single-instance protection, bounded cadence, restart-safe prior-state reuse, atomic scheduler status, `SAFE_WAIT` only, no alert delivery and no broker/order execution.
 
-Accepted integrated server smoke on 2026-08-13 at applied main `b23cc36d35c5219a682f451085800f4493b3745f` proved:
+Accepted integrated source server smoke on 2026-08-13 at applied main `b23cc36d35c5219a682f451085800f4493b3745f` proved:
 
 - `STATUS=COMPLETED`;
 - `MARKET_DATA_AS_OF_TIMESTAMP=2026-08-13T13:15:00+03:00`;
@@ -50,6 +53,17 @@ Accepted integrated server smoke on 2026-08-13 at applied main `b23cc36d35c5219a
 - `ACTION_CANDIDATE=False`.
 
 Therefore the nine healthy official RSS paths listed below satisfy the current `LIVE_ACCEPTED` rule. The two BLS RSS routes remain fail-closed because the current server returned `SOURCE_UNAVAILABLE`; they do not silently contribute NewsEvents or ACTION authority.
+
+Accepted S6.1 canonical-server persistence proof on 2026-08-13 at applied main `143387789e39c17e2f179251678274b9d5c8e04c` used the same explicit state root across two separate scheduler process invocations:
+
+- `STATE_ROOT=/tmp/tmp.KPkAlAZrwH` for the bounded proof only;
+- first invocation: `SCHEDULER_STATUS=COMPLETED`, `PRIOR_STATE_PRESENT=False`, `LAST_CYCLE_AS_OF_TIMESTAMP=2026-08-13T10:55:50.055752+00:00`;
+- restarted invocation on the same root: `SCHEDULER_STATUS=COMPLETED`, `PRIOR_STATE_PRESENT=True`, `PRIOR_AS_OF_TIMESTAMP=2026-08-13T10:55:50.055752+00:00`;
+- restarted invocation advanced to `LAST_CYCLE_AS_OF_TIMESTAMP=2026-08-13T10:55:56.550179+00:00`;
+- both invocations reported `SUCCESSFUL_CYCLES=1`, `FAILED_CYCLES=0`, `LAST_SIGNIFICANT_CHANGE=False`, `LAST_ACTION_CANDIDATE=False`;
+- `shadow_scheduler_status.json` persisted the restored prior timestamp and new generation paths under the same explicit state root.
+
+This proves S6.1 restart-safe persistent state reuse. The temporary proof path is evidence only and is not a canonical permanent server path.
 
 ## 3. Market and positioning sources
 
@@ -109,9 +123,10 @@ The Stage 12A X whitelist remains `DISCOVERY_ONLY`. There is no live X factual a
 - bounded NewsEvents wired into live `DecisionInput`;
 - source failure visibility and 20-event DecisionInput bound;
 - CBR Key Rate + RUONIA deterministic MacroObservation adapter, current live acceptance and live DecisionInput wiring;
-- historical Flowise Decision/News classifier contracts remain available but are not required by the current no-Flowise News path.
+- controlled recurring shadow scheduler with explicit persistent state root, bounded cadence, `flock` single-instance protection, atomic status and restart-safe prior-state reuse;
+- historical Flowise Decision/News classifier contracts remain available but are not required by the current no-Flowise path.
 
-FUTOI governance and additional blocked source families remain separate from the accepted integrated shadow path.
+FUTOI governance and additional blocked source families remain separate from the accepted integrated shadow path. Alert delivery is not yet accepted. Autonomous broker/order execution remains outside v1.
 
 ## 7. Canonical source-completion workflow
 
@@ -159,11 +174,28 @@ The accepted 2026-08-13 shadow run consumed:
 
 It explicitly reported `FUTOI_QUALITY=BLOCKED`, `ACTION_CANDIDATE=False` and did not treat missing FUTOI authority as accepted positioning data.
 
-### S6 — Scheduler, persistence and alert delivery
-Only after S5. Autonomous broker/order execution remains outside v1. Scheduler and alert delivery must consume the existing Change Detector/ShadowRuntime boundary and must not invent ACTION authority.
+### S6.1 — Controlled shadow scheduler + persistent state — COMPLETED
+Merged runtime: `143387789e39c17e2f179251678274b9d5c8e04c`.
+
+Canonical-server proof demonstrated:
+
+- explicit state root;
+- single bounded cycle completing successfully;
+- a second independent scheduler process reusing the same root;
+- `PRIOR_STATE_PRESENT=True` after restart;
+- prior `as_of` restored exactly;
+- new `as_of` strictly later than persisted prior state;
+- zero failed cycles;
+- `LAST_ACTION_CANDIDATE=False`;
+- scheduler status persisted atomically under the state root.
+
+No alert delivery or broker/order execution was activated.
+
+### S6.2 — Change Detector alert delivery — NEXT
+Alert delivery may now be added only as a consumer of persisted Change Detector / scheduler output. It must not create market facts, alter DecisionInput, invent ACTION authority, or enable broker/order execution. Delivery deduplication and restart safety must be proven before acceptance.
 
 ## 8. Immediate next task
 
-`S6.1_shadow_scheduler_persistent_state_v1`
+`S6.2_change_detector_alert_delivery_v1`
 
-Build the smallest controlled recurring shadow runner around the accepted live Decision path. Requirements: explicit persistent state root, single-instance protection, bounded cadence, restart-safe Change Detector state reuse, observable cycle status, no broker/order execution, and no alert delivery in the same change. Alert delivery follows only after the scheduler/persistence boundary is proven on the canonical server.
+Build the smallest bounded alert-delivery layer after the accepted scheduler/persistence boundary. Requirements: consume only persisted Change Detector / scheduler results, deterministic severity gate, restart-safe deduplication, explicit delivery status, fail-closed transport errors, no mutation of MarketState/DecisionInput, no Flowise dependency, and no broker/order execution. Prove first with a non-delivering/dry transport fixture, then with an explicitly approved live notification transport in a separate acceptance step.
