@@ -54,7 +54,7 @@ Accepted integrated source server smoke on 2026-08-13 at applied main `b23cc36d3
 
 Therefore the nine healthy official RSS paths listed below satisfy the current `LIVE_ACCEPTED` rule. The two BLS RSS routes remain fail-closed because the current server returned `SOURCE_UNAVAILABLE`; they do not silently contribute NewsEvents or ACTION authority.
 
-Accepted S6.1 canonical-server persistence proof on 2026-08-13 at applied main `143387789e39c17e2f179251678274b9d5c8e04c` used the same explicit state root across two separate scheduler process invocations:
+Accepted S6.1 canonical-server persistence proof on 2026-08-13 at applied main `143387789e39c17e2f179251678274b9d5c8e04c` first used the same explicit state root across two separate scheduler process invocations:
 
 - `STATE_ROOT=/tmp/tmp.KPkAlAZrwH` for the bounded proof only;
 - first invocation: `SCHEDULER_STATUS=COMPLETED`, `PRIOR_STATE_PRESENT=False`, `LAST_CYCLE_AS_OF_TIMESTAMP=2026-08-13T10:55:50.055752+00:00`;
@@ -63,7 +63,15 @@ Accepted S6.1 canonical-server persistence proof on 2026-08-13 at applied main `
 - both invocations reported `SUCCESSFUL_CYCLES=1`, `FAILED_CYCLES=0`, `LAST_SIGNIFICANT_CHANGE=False`, `LAST_ACTION_CANDIDATE=False`;
 - `shadow_scheduler_status.json` persisted the restored prior timestamp and new generation paths under the same explicit state root.
 
-This proves S6.1 restart-safe persistent state reuse. The temporary proof path is evidence only and is not a canonical permanent server path.
+Additional canonical-server safeguards were then proven on the same applied main:
+
+- recurring cadence proof used `STATE_ROOT=/tmp/tmp.HDWHc4z8Rq` for the bounded proof only, `interval_seconds=60`, `max_cycles=2` in one scheduler process;
+- cycle 1 reported `SCHEDULER_STATUS=RUNNING`, `CYCLE_COUNT=1`, `SUCCESSFUL_CYCLES=1`, `FAILED_CYCLES=0`, `PRIOR_STATE_PRESENT=False`, `LAST_CYCLE_AS_OF_TIMESTAMP=2026-08-13T11:04:38.853360+00:00`;
+- cycle 2 completed in the same process with `SCHEDULER_STATUS=COMPLETED`, `CYCLE_COUNT=2`, `SUCCESSFUL_CYCLES=2`, `FAILED_CYCLES=0`, `PRIOR_STATE_PRESENT=True`, `PRIOR_AS_OF_TIMESTAMP=2026-08-13T11:04:38.853360+00:00`, `LAST_CYCLE_AS_OF_TIMESTAMP=2026-08-13T11:05:47.451091+00:00`, `LAST_ACTION_CANDIDATE=False`;
+- concurrent-process contention proof used a separate temporary proof root `/tmp/tmp.PmVsmqtr1q` while a primary scheduler held `.shadow_scheduler.lock`;
+- the competing scheduler was rejected with `SCHEDULER_STATUS=BLOCKED`, `ERROR_CLASS=SchedulerAlreadyRunning`, `ERROR=another shadow scheduler already holds /tmp/tmp.PmVsmqtr1q/.shadow_scheduler.lock`, `SECOND_RC=2`.
+
+This proves S6.1 restart-safe persistent state reuse, real recurring cadence within one process, and fail-closed single-instance lock contention. All temporary proof paths are evidence only and are not canonical permanent server paths.
 
 ## 3. Market and positioning sources
 
@@ -179,14 +187,12 @@ Merged runtime: `143387789e39c17e2f179251678274b9d5c8e04c`.
 
 Canonical-server proof demonstrated:
 
-- explicit state root;
-- single bounded cycle completing successfully;
-- a second independent scheduler process reusing the same root;
-- `PRIOR_STATE_PRESENT=True` after restart;
-- prior `as_of` restored exactly;
-- new `as_of` strictly later than persisted prior state;
-- zero failed cycles;
-- `LAST_ACTION_CANDIDATE=False`;
+- explicit temporary state roots for bounded proof runs, without defining a permanent server path;
+- restart reuse across two independent process invocations on one root, with exact prior `as_of` restoration and strictly later new `as_of`;
+- real recurring cadence inside one process at `interval_seconds=60`, `max_cycles=2`, ending `CYCLE_COUNT=2`, `SUCCESSFUL_CYCLES=2`, `FAILED_CYCLES=0`;
+- cycle 2 reported `PRIOR_STATE_PRESENT=True` and restored the exact prior cycle timestamp before advancing it;
+- concurrent-process contention was fail-closed: the secondary scheduler returned `SCHEDULER_STATUS=BLOCKED`, `ERROR_CLASS=SchedulerAlreadyRunning`, `SECOND_RC=2` while the primary held `.shadow_scheduler.lock`;
+- `LAST_ACTION_CANDIDATE=False` in the accepted recurring proof;
 - scheduler status persisted atomically under the state root.
 
 No alert delivery or broker/order execution was activated.
