@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable, Mapping, Sequence
@@ -42,6 +42,66 @@ def _aware_datetime(value: datetime, field: str) -> datetime:
     return value
 
 
+def deterministic_neutral_news_classifier(payload: Mapping[str, object]) -> Mapping[str, object]:
+    """Conservative no-LLM classifier for factual live wiring.
+
+    It deliberately assigns no directional or confidence authority. Mandatory
+    Stage 12B.3 fields receive bounded neutral values only, while source-bound
+    facts continue to come exclusively from deterministic acquisition.
+    """
+
+    history = payload.get("cluster_history")
+    has_history = isinstance(history, Sequence) and not isinstance(
+        history, (str, bytes, bytearray)
+    ) and bool(history)
+    return {
+        "event_type": "OFFICIAL_COMMUNICATION",
+        "entities": (),
+        "rub_relevance": 0.0,
+        "direction": "NEUTRAL",
+        "importance": "LOW",
+        "novelty": "UPDATE" if has_history else "NEW",
+        "horizon": "SHORT_TERM",
+        "confidence": 0.0,
+        "mechanism": "Deterministic neutral classification; no directional effect is inferred.",
+    }
+
+
+def _restamp_live_acquisition(
+    acquisition: RssBatchResult,
+    *,
+    ingested_at: datetime,
+) -> RssBatchResult:
+    """Conservatively stamp successful records no earlier than batch completion."""
+
+    stamped_results = []
+    for source_result in acquisition.source_results:
+        records = tuple(
+            replace(record, ingested_at=ingested_at)
+            for record in source_result.records
+        )
+        stamped_results.append(replace(source_result, records=records))
+    return RssBatchResult(tuple(stamped_results))
+
+
+def _filter_acquisition_by_ingestion(
+    acquisition: RssBatchResult,
+    *,
+    as_of: datetime,
+) -> RssBatchResult:
+    """Exclude records not yet ingested at an explicit historical PIT cutoff."""
+
+    filtered_results = []
+    for source_result in acquisition.source_results:
+        records = tuple(
+            record
+            for record in source_result.records
+            if record.ingested_at <= as_of
+        )
+        filtered_results.append(replace(source_result, records=records))
+    return RssBatchResult(tuple(filtered_results))
+
+
 def run_live_official_news_pipeline(
     *,
     classifier_agent: ClassifierAgent,
@@ -62,30 +122,45 @@ def run_live_official_news_pipeline(
     cluster reaches process_news_batch(), so callers cannot accidentally bypass
     the Stage 12B.3 PIT/input/output guard through this API.
 
-    This function still provides no LLM, Flowise endpoint, heuristic news
-    interpretation, fallback classifier, scheduler, alerting, or trading action.
     Acquisition failures remain visible while healthy records continue through
-    the existing deterministic News Pipeline.
+    the deterministic News Pipeline. For current-live use, successful source
+    records are conservatively restamped at batch completion so HTTP latency can
+    never be represented as pre-response ingestion. An explicit historical as-of
+    additionally excludes records whose conservative ingestion stamp is later
+    than that cutoff.
     """
 
     if not callable(classifier_agent):
         raise ValueError("classifier_agent must be callable")
 
-    now = _aware_datetime(
-        (now_fn or (lambda: datetime.now(timezone.utc)))(),
-        "now_fn result",
+    clock = now_fn or (lambda: datetime.now(timezone.utc))
+    started_at = _aware_datetime(clock(), "now_fn result")
+    explicit_as_of = (
+        None
+        if as_of_timestamp is None
+        else _aware_datetime(as_of_timestamp, "as_of_timestamp")
     )
-    as_of = now if as_of_timestamp is None else _aware_datetime(as_of_timestamp, "as_of_timestamp")
-    if as_of > now:
+    if explicit_as_of is not None and explicit_as_of > started_at:
         raise ValueError("as_of_timestamp may not be later than acquisition time")
 
     acquisition = fetch_official_rss_batch(
         registry_path=registry_path,
         source_ids=source_ids,
         opener=opener,
-        now_fn=lambda: now,
+        now_fn=clock,
         timeout_seconds=timeout_seconds,
     )
+
+    completed_at = _aware_datetime(clock(), "now_fn result")
+    if completed_at < started_at:
+        raise ValueError("now_fn moved backwards during acquisition")
+    acquisition = _restamp_live_acquisition(acquisition, ingested_at=completed_at)
+
+    as_of = completed_at if explicit_as_of is None else explicit_as_of
+    if as_of > completed_at:
+        raise ValueError("as_of_timestamp may not be later than acquisition completion")
+    if explicit_as_of is not None:
+        acquisition = _filter_acquisition_by_ingestion(acquisition, as_of=as_of)
 
     bounded_classifier = stage12b3_news_classifier(classifier_agent)
     news = process_news_batch(

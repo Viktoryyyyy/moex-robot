@@ -4,7 +4,7 @@ import argparse
 from datetime import datetime
 import os
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from dotenv import load_dotenv
 
@@ -25,7 +25,15 @@ from src.moex_research.intelligence.usdrubf_live_shadow_bridge import (
     load_futoi_context,
     safe_wait_decision_agent,
 )
-from src.moex_research.intelligence.usdrubf_news_macro import MacroState, build_macro_state
+from src.moex_research.intelligence.usdrubf_news_live_pipeline import (
+    deterministic_neutral_news_classifier,
+    run_live_official_news_pipeline,
+)
+from src.moex_research.intelligence.usdrubf_news_macro import (
+    MacroState,
+    NewsEvent,
+    build_macro_state,
+)
 from src.moex_research.intelligence.usdrubf_news_macro_runtime import (
     FlowiseJsonAdapter,
     FlowiseTransportConfig,
@@ -40,6 +48,7 @@ PROJECT = "MOEX_Bot"
 MODE = "short_live_shadow_input_bridge"
 PROJECT_ENV_PATH = Path(__file__).resolve().parents[3] / ".env"
 _REQUIRED_CBR_MACRO_METRICS = frozenset({"cbr_ruonia_rate_pct", "cbr_key_rate_pct"})
+_DEFAULT_NEWS_MAX_EVENTS = 20
 
 
 def _load_project_env() -> None:
@@ -58,6 +67,14 @@ def _parser() -> argparse.ArgumentParser:
         default=True,
         help="Enable accepted CBR key-rate/RUONIA MacroState composition (default: enabled)",
     )
+    parser.add_argument(
+        "--live-news",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable bounded official RSS NewsEvent composition (default: enabled)",
+    )
+    parser.add_argument("--news-timeout-seconds", type=float, default=10.0)
+    parser.add_argument("--news-max-events", type=int, default=_DEFAULT_NEWS_MAX_EVENTS)
     parser.add_argument(
         "--flowise-endpoint",
         default=os.getenv("MOEX_RUB_INTELLIGENCE_FLOWISE_ENDPOINT"),
@@ -124,23 +141,88 @@ def _load_current_cbr_macro_state() -> tuple[MacroState, datetime]:
     return macro_state, decision_as_of
 
 
+def _event_time(value: str, field: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise RuntimeError(f"{field} must be ISO datetime") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise RuntimeError(f"{field} must be timezone-aware")
+    return parsed
+
+
+def _load_current_live_news(
+    *,
+    timeout_seconds: float,
+    max_events: int,
+) -> tuple[tuple[NewsEvent, ...], datetime, Mapping[str, object]]:
+    if timeout_seconds <= 0:
+        raise RuntimeError("news timeout must be positive")
+    if max_events <= 0:
+        raise RuntimeError("news max_events must be positive")
+
+    result = run_live_official_news_pipeline(
+        classifier_agent=deterministic_neutral_news_classifier,
+        timeout_seconds=timeout_seconds,
+    )
+    source_results = result.acquisition.source_results
+    if not source_results:
+        raise RuntimeError("live News acquisition returned no configured sources")
+    if result.acquisition.ok_source_count == 0:
+        raise RuntimeError("all configured live News sources failed")
+
+    news_as_of = _event_time(result.as_of_timestamp, "news as_of_timestamp")
+    ordered_events = sorted(
+        result.news.events,
+        key=lambda item: (
+            _event_time(item.available_at, f"news {item.event_id} available_at"),
+            item.source_id,
+            item.event_id,
+        ),
+    )
+    selected_events = tuple(ordered_events[-max_events:])
+    for event in selected_events:
+        if _event_time(event.ingested_at, f"news {event.event_id} ingested_at") > news_as_of:
+            raise RuntimeError("live News event ingestion is later than News as_of_timestamp")
+
+    failures = result.acquisition.failures
+    summary = {
+        "source_count": len(source_results),
+        "ok_source_count": result.acquisition.ok_source_count,
+        "failed_source_count": len(failures),
+        "failed_source_ids": ",".join(item.source_id for item in failures),
+        "source_quality": ",".join(
+            f"{item.source_id}:{item.quality_status}" for item in source_results
+        ),
+        "acquired_record_count": result.acquired_record_count,
+        "pipeline_event_count": len(result.news.events),
+        "events_dropped_by_bound": len(result.news.events) - len(selected_events),
+    }
+    return selected_events, news_as_of, summary
+
+
 def _compose_wall_clock_decision_input(
     *,
     market_input: DecisionInput,
     wall_clock: datetime,
     macro_state: MacroState,
+    news_events: Sequence[NewsEvent] | None = None,
 ) -> DecisionInput:
     """Compose asynchronous factual inputs at the actual decision wall clock.
 
     Market/EMA/level facts remain based only on the latest closed market bars.
-    The DecisionInput as-of moves to wall clock so a CBR observation retrieved
-    after the last 5m bar is never backdated into the market-bar timestamp.
+    The DecisionInput as-of moves to wall clock so external records retrieved
+    after the last 5m bar are never backdated into the market-bar timestamp.
     """
 
     if wall_clock.tzinfo is None or wall_clock.utcoffset() is None:
         raise RuntimeError("wall_clock must be timezone-aware")
     if market_input.as_of_timestamp > wall_clock:
         raise RuntimeError("market input is from the future relative to wall clock")
+    selected_news = market_input.news_events if news_events is None else tuple(news_events)
+    for event in selected_news:
+        if _event_time(event.ingested_at, f"news {event.event_id} ingested_at") > wall_clock:
+            raise RuntimeError("news event was ingested after decision wall clock")
     return DecisionInput(
         as_of_timestamp=wall_clock,
         price=market_input.price,
@@ -150,7 +232,7 @@ def _compose_wall_clock_decision_input(
         level_interactions=market_input.level_interactions,
         ema_3_19_ai=market_input.ema_3_19_ai,
         futoi=market_input.futoi,
-        news_events=market_input.news_events,
+        news_events=selected_news,
         macro_state=macro_state,
     )
 
@@ -190,16 +272,42 @@ def run_once(args: argparse.Namespace) -> Mapping[str, object]:
         macro_state=None,
     )
 
+    decision_as_of = cycle_started_at
+
     # Parser-generated CLI args always include cbr_macro=True by default. A missing
     # attribute is treated as legacy-disabled only for older direct run_once callers.
     cbr_macro_enabled = bool(getattr(args, "cbr_macro", False))
     if cbr_macro_enabled:
-        macro_state, decision_as_of = _load_current_cbr_macro_state()
+        macro_state, macro_as_of = _load_current_cbr_macro_state()
+        decision_as_of = max(decision_as_of, macro_as_of)
         macro_mode = "LIVE_CBR"
     else:
         macro_state = market_input.macro_state
-        decision_as_of = cycle_started_at
         macro_mode = "DISABLED"
+
+    # Same compatibility rule as CBR: parser-generated CLI args enable live News
+    # by default, while older direct Namespace callers remain explicitly disabled.
+    live_news_enabled = bool(getattr(args, "live_news", False))
+    if live_news_enabled:
+        news_events, news_as_of, news_summary = _load_current_live_news(
+            timeout_seconds=float(getattr(args, "news_timeout_seconds", 10.0)),
+            max_events=int(getattr(args, "news_max_events", _DEFAULT_NEWS_MAX_EVENTS)),
+        )
+        decision_as_of = max(decision_as_of, news_as_of)
+        news_mode = "LIVE_RSS_DETERMINISTIC_NEUTRAL"
+    else:
+        news_events = market_input.news_events
+        news_mode = "DISABLED"
+        news_summary = {
+            "source_count": 0,
+            "ok_source_count": 0,
+            "failed_source_count": 0,
+            "failed_source_ids": "",
+            "source_quality": "DISABLED",
+            "acquired_record_count": 0,
+            "pipeline_event_count": 0,
+            "events_dropped_by_bound": 0,
+        }
 
     if decision_as_of < cycle_started_at:
         raise RuntimeError("decision timestamp precedes cycle start")
@@ -210,6 +318,7 @@ def run_once(args: argparse.Namespace) -> Mapping[str, object]:
         market_input=market_input,
         wall_clock=decision_as_of,
         macro_state=macro_state,
+        news_events=news_events,
     )
     decision_agent, decision_agent_mode = _decision_agent(args)
     runtime = ShadowRuntime(ShadowJsonStore(Path(args.state_root)))
@@ -233,7 +342,16 @@ def run_once(args: argparse.Namespace) -> Mapping[str, object]:
         "ema_quality": decision_input.ema_3_19_ai.quality_status,
         "futoi_direction": decision_input.futoi.direction,
         "futoi_quality": decision_input.futoi.quality_status,
+        "news_mode": news_mode,
+        "news_source_count": news_summary["source_count"],
+        "news_ok_source_count": news_summary["ok_source_count"],
+        "news_failed_source_count": news_summary["failed_source_count"],
+        "news_failed_source_ids": news_summary["failed_source_ids"] or "NONE",
+        "news_source_quality": news_summary["source_quality"],
+        "news_acquired_record_count": news_summary["acquired_record_count"],
+        "news_pipeline_event_count": news_summary["pipeline_event_count"],
         "news_event_count": len(decision_input.news_events),
+        "news_events_dropped_by_bound": news_summary["events_dropped_by_bound"],
         "macro_mode": macro_mode,
         "macro_observation_count": len(decision_input.macro_state.observations),
         "macro_metric_ids": ",".join(macro_metric_ids),
@@ -268,7 +386,16 @@ def _print_result(result: Mapping[str, object]) -> None:
         "ema_quality",
         "futoi_direction",
         "futoi_quality",
+        "news_mode",
+        "news_source_count",
+        "news_ok_source_count",
+        "news_failed_source_count",
+        "news_failed_source_ids",
+        "news_source_quality",
+        "news_acquired_record_count",
+        "news_pipeline_event_count",
         "news_event_count",
+        "news_events_dropped_by_bound",
         "macro_mode",
         "macro_observation_count",
         "macro_metric_ids",
