@@ -83,6 +83,27 @@ def test_live_pipeline_restamps_ingestion_at_batch_completion(tmp_path: Path) ->
     assert event.novelty == "NEW"
 
 
+def test_explicit_as_of_excludes_records_ingested_after_cutoff(tmp_path: Path) -> None:
+    started = datetime(2026, 8, 13, 9, 0, 0, tzinfo=timezone.utc)
+    source_clock = started + timedelta(seconds=1)
+    completed = started + timedelta(seconds=4)
+    values = iter((started, source_clock, completed))
+
+    result = run_live_official_news_pipeline(
+        classifier_agent=deterministic_neutral_news_classifier,
+        registry_path=_registry(tmp_path),
+        source_ids=("official",),
+        opener=lambda request, timeout: _Response(_rss(), request.full_url),
+        now_fn=lambda: next(values),
+        as_of_timestamp=started,
+    )
+
+    assert result.as_of_timestamp == started.isoformat()
+    assert result.acquired_record_count == 0
+    assert result.acquisition.source_results[0].quality_status == "OK"
+    assert result.news.events == ()
+
+
 def test_neutral_classifier_marks_existing_cluster_as_update() -> None:
     output = deterministic_neutral_news_classifier(
         {
