@@ -4,7 +4,7 @@ PROJECT=MOEX_Bot
 
 Status: working Source of Truth for source-completion gates before scheduler/ACTION delivery.
 
-Baseline main SHA used for this inventory: `0d472979f987c922e9b4cf131a28057f11d10ea7`.
+Baseline main SHA used for this inventory: `09a68666c2c45d1c96aebddb2211d51c710d6283`.
 
 ## 1. Completion rule
 
@@ -17,14 +17,26 @@ Registry presence, parser/unit tests, technical endpoint access, Flowise availab
 
 ## 2. Current runtime boundary
 
-The current live Decision smoke is not yet a source-integrated runtime:
+The current live Decision smoke is partially source-integrated:
 
-- `src/moex_research/runners/usdrubf_live_shadow_smoke.py` explicitly calls `build_live_decision_input(..., news_events=(), macro_state=None)`;
-- `src/moex_research/intelligence/usdrubf_live_shadow_bridge.py` turns `macro_state=None` into an empty neutral MacroState;
+- `src/moex_research/runners/usdrubf_live_shadow_smoke.py` still composes `news_events=()`; accepted factual NewsEvents are not yet wired into the live Decision runner;
+- CBR Macro is enabled by default in the live Decision runner and composes accepted Key Rate + RUONIA `MacroObservation` values into `MacroState`;
+- each live CBR source is stamped after its loader response returns, and final `DecisionInput.as_of_timestamp` is captured after CBR acquisition; `MARKET_DATA_AS_OF_TIMESTAMP` separately preserves the latest closed 5m market-bar timestamp;
 - FUTOI is `BLOCKED` unless the operator explicitly runs the smoke with `--enable-futoi`; even an enabled technical `OK` does not clear its separate license/access blocker;
 - the separate live News composition exists in `src/moex_research/intelligence/usdrubf_news_live_pipeline.py`, but it is not yet composed into the live Decision runner.
 
-Therefore the successful authenticated Decision Agent smoke proves the Decision/Flowise path, not completion of News/Macro/FUTOI source integration.
+Accepted integrated server smoke on 2026-08-13 at applied main `09a68666c2c45d1c96aebddb2211d51c710d6283` proved:
+
+- `STATUS=COMPLETED`;
+- `MARKET_DATA_AS_OF_TIMESTAMP=2026-08-13T12:00:00+03:00`;
+- `AS_OF_TIMESTAMP=2026-08-13T12:02:51.168876+03:00`;
+- `MACRO_MODE=LIVE_CBR`;
+- `MACRO_OBSERVATION_COUNT=2`;
+- `MACRO_METRIC_IDS=cbr_key_rate_pct,cbr_ruonia_rate_pct`;
+- `DECISION_AGENT_MODE=SAFE_WAIT`;
+- `ACTION_CANDIDATE=False`.
+
+Therefore CBR Key Rate and RUONIA satisfy the current `LIVE_ACCEPTED` rule. News integration and FUTOI governance remain separate incomplete boundaries.
 
 ## 3. Market and positioning sources
 
@@ -68,12 +80,12 @@ The Stage 12A X whitelist remains `DISCOVERY_ONLY` by contract. There is no live
 
 ## 5. Macro-source matrix
 
-The existing external-data foundation is reused. `cbr_key_rate_daily` and `cbr_ruonia_daily` now have a bounded deterministic adapter into typed RUB Intelligence `MacroObservation` values, but current live source acceptance and DecisionInput composition are not yet complete.
+The existing external-data foundation is reused. `cbr_key_rate_daily` and `cbr_ruonia_daily` now have deterministic loaders, typed `MacroObservation` adapters, current live acceptance, and live `DecisionInput` composition.
 
 | source_id | Deterministic loader | Source/PIT state | Current RUB Intelligence live smoke | MacroObservation / Decision wiring | Status | Next gate |
 |---|---|---|---|---|---|---|
-| `cbr_key_rate_daily` | Yes — `external_data/cbr.py::load_key_rate_daily` using official change-date history | Candidate; effective-date semantics implemented; new rate is not usable before `effective_date` | Not yet run through current RUB Intelligence Macro live smoke | MacroObservation adapter: Yes — `intelligence/usdrubf_macro_live_cbr.py`; Decision wiring: No | `ADAPTER_READY_NOT_LIVE_ACCEPTED` | Current live smoke, then Decision wiring |
-| `cbr_ruonia_daily` | Yes — `external_data/cbr.py::load_ruonia_daily` | Candidate; row publication date is explicit; Phase 8.2 strict-prior-publication rule preserved by next-day Moscow availability boundary | Not yet run through current RUB Intelligence Macro live smoke | MacroObservation adapter: Yes — `intelligence/usdrubf_macro_live_cbr.py`; Decision wiring: No | `ADAPTER_READY_NOT_LIVE_ACCEPTED` | Current live smoke, then Decision wiring |
+| `cbr_key_rate_daily` | Yes — `external_data/cbr.py::load_key_rate_daily` using official change-date history | Effective-date semantics implemented; new rate is not usable before `effective_date`; source provenance/route enforced by adapter | Accepted: 2026-08-12 source smoke `QUALITY=OK`, value `14.0`; 2026-08-13 integrated Decision smoke `MACRO_MODE=LIVE_CBR` | MacroObservation adapter: Yes — `intelligence/usdrubf_macro_live_cbr.py`; Decision wiring: Yes | `LIVE_ACCEPTED` | Keep source/PIT regression tests and current live smoke available |
+| `cbr_ruonia_daily` | Yes — `external_data/cbr.py::load_ruonia_daily` | Row publication date explicit; Phase 8.2 strict-prior-publication rule preserved by next-day Moscow availability boundary; source provenance/route enforced by adapter | Accepted: 2026-08-12 source smoke `QUALITY=OK`, value `13.57`, `AVAILABLE_AT=2026-08-12T00:00:00+03:00`; 2026-08-13 integrated Decision smoke `MACRO_MODE=LIVE_CBR` | MacroObservation adapter: Yes — `intelligence/usdrubf_macro_live_cbr.py`; Decision wiring: Yes | `LIVE_ACCEPTED` | Keep source/PIT regression tests and current live smoke available |
 | `cbr_banking_liquidity_daily` | Yes | `blocked_pending_vintage_policy` | Not eligible | No | `GOVERNED_BLOCKED` | Keep blocked until row-level historical/current vintage governance is frozen |
 | `moex_brent_futures_daily` | External-data foundation exists | `blocked_pending_source_validation` | Not eligible as accepted RUB Intelligence macro source | No | `GOVERNED_BLOCKED` | Complete source validation before use |
 | `cme_wti_pre_moex` | External-data foundation/current delayed snapshot route exists | `blocked_pending_license` | Not eligible | No | `GOVERNED_BLOCKED` | Resolve license/approved data route before use |
@@ -88,9 +100,10 @@ The existing external-data foundation is reused. `cbr_key_rate_daily` and `cbr_r
 - Flowise runtime User-Agent correction;
 - bounded parsing of the deployed JSON response fence;
 - synthetic authenticated News Classifier smoke;
-- authenticated live Decision Agent smoke.
+- authenticated live Decision Agent smoke;
+- CBR Key Rate + RUONIA deterministic MacroObservation adapter, current live source acceptance, and live DecisionInput wiring.
 
-These prove the interpretation/runtime layer. They do not substitute for source completion.
+These prove the interpretation/runtime layer and accepted CBR Macro path. They do not substitute for remaining News source completion or FUTOI governance.
 
 ## 7. Canonical source-completion workflow
 
@@ -122,14 +135,14 @@ Implement one source family at a time, in this order unless new evidence changes
 
 X remains discovery-only and is not a blocker for factual-source completion.
 
-### S3.1 — CBR Macro adapter
+### S3.1 — CBR Macro adapter — COMPLETED
 Convert `cbr_key_rate_daily` and `cbr_ruonia_daily` deterministic loader outputs into typed `MacroObservation` records without LLM-created numeric facts.
 
-### S3.2 — CBR Macro current live acceptance
-Run current live source smoke and prove source timestamps, `available_at`, PIT exclusion and stale/missing semantics.
+### S3.2 — CBR Macro current live acceptance — COMPLETED
+Current live source smoke proved source timestamps, `available_at`, PIT exclusion and current source access for Key Rate + RUONIA.
 
-### S3.3 — Wire MacroState into live DecisionInput
-Replace the current `macro_state=None` boundary with the accepted Macro pipeline. Missing sources must remain explicit, not imputed.
+### S3.3 — Wire MacroState into live DecisionInput — COMPLETED
+The live Decision runner now composes accepted CBR MacroState by default. CBR acquisition timestamps are not backdated to the latest market bar; decision `as_of` is captured after acquisition and the latest closed market-bar time is reported separately.
 
 ### S3.4 — Additional macro/oil sources
 Only after registry blockers are resolved. `cbr_banking_liquidity_daily`, MOEX Brent and CME WTI remain blocked until their existing blocker is actually closed.
@@ -163,6 +176,6 @@ Proceed to scheduler, persistence/history policy, significant-change ACTION deli
 
 ## 8. Immediate next task
 
-`S3.2_cbr_macro_current_live_acceptance_v1`
+`S2.3_live_news_decision_wiring_v1`
 
-After S3.1 is merged, run the bounded current CBR Macro source smoke for key rate and RUONIA. Prove causal timestamp normalization, current source access, explicit missing/failure status and no future/same-day RUONIA leakage. No DecisionInput wiring, scheduler, alert, broker or trading mutation is included.
+CBR Macro S3.1-S3.3 is complete and S3.4 remains governed-blocked. The next actionable integration gap is the existing `news_events=()` boundary in the live Decision runner. Compose only accepted factual NewsEvents through the bounded live News pipeline, preserve source failure visibility, keep source-bound facts deterministic, and do not change FUTOI governance, scheduler, alerting, broker, or trading authority in this task.
