@@ -51,7 +51,9 @@ def deterministic_neutral_news_classifier(payload: Mapping[str, object]) -> Mapp
     """
 
     history = payload.get("cluster_history")
-    has_history = isinstance(history, Sequence) and not isinstance(history, (str, bytes, bytearray)) and bool(history)
+    has_history = isinstance(history, Sequence) and not isinstance(
+        history, (str, bytes, bytearray)
+    ) and bool(history)
     return {
         "event_type": "OFFICIAL_COMMUNICATION",
         "entities": (),
@@ -82,6 +84,24 @@ def _restamp_live_acquisition(
     return RssBatchResult(tuple(stamped_results))
 
 
+def _filter_acquisition_by_ingestion(
+    acquisition: RssBatchResult,
+    *,
+    as_of: datetime,
+) -> RssBatchResult:
+    """Exclude records not yet ingested at an explicit historical PIT cutoff."""
+
+    filtered_results = []
+    for source_result in acquisition.source_results:
+        records = tuple(
+            record
+            for record in source_result.records
+            if record.ingested_at <= as_of
+        )
+        filtered_results.append(replace(source_result, records=records))
+    return RssBatchResult(tuple(filtered_results))
+
+
 def run_live_official_news_pipeline(
     *,
     classifier_agent: ClassifierAgent,
@@ -105,7 +125,9 @@ def run_live_official_news_pipeline(
     Acquisition failures remain visible while healthy records continue through
     the deterministic News Pipeline. For current-live use, successful source
     records are conservatively restamped at batch completion so HTTP latency can
-    never be represented as pre-response ingestion.
+    never be represented as pre-response ingestion. An explicit historical as-of
+    additionally excludes records whose conservative ingestion stamp is later
+    than that cutoff.
     """
 
     if not callable(classifier_agent):
@@ -137,6 +159,8 @@ def run_live_official_news_pipeline(
     as_of = completed_at if explicit_as_of is None else explicit_as_of
     if as_of > completed_at:
         raise ValueError("as_of_timestamp may not be later than acquisition completion")
+    if explicit_as_of is not None:
+        acquisition = _filter_acquisition_by_ingestion(acquisition, as_of=as_of)
 
     bounded_classifier = stage12b3_news_classifier(classifier_agent)
     news = process_news_batch(
