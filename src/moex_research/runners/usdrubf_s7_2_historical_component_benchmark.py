@@ -57,7 +57,10 @@ def _utc_now_iso() -> str:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Replay historical USDRUBF 5m data through the current deterministic input bridge and benchmark component signals.",
+        description=(
+            "Replay historical USDRUBF 5m data through the current deterministic "
+            "input bridge and benchmark component signals."
+        ),
     )
     parser.add_argument("--source-dataset-path", required=True)
     parser.add_argument("--output-dir", required=True)
@@ -118,7 +121,9 @@ def _parse_horizons(value: str) -> tuple[int, ...]:
     return tuple(sorted(horizons))
 
 
-def _validate_cli(args: argparse.Namespace) -> tuple[Path, Path, str, pd.Timestamp | None, pd.Timestamp | None, tuple[int, ...]]:
+def _validate_cli(
+    args: argparse.Namespace,
+) -> tuple[Path, Path, str, pd.Timestamp | None, pd.Timestamp | None, tuple[int, ...]]:
     raw_source = str(args.source_dataset_path).strip()
     if not raw_source:
         raise HistoricalComponentBenchmarkError("source_dataset_path must be non-empty")
@@ -129,13 +134,16 @@ def _validate_cli(args: argparse.Namespace) -> tuple[Path, Path, str, pd.Timesta
         )
     source = Path(raw_source).expanduser()
     if not source.exists() or not source.is_file() or source.is_symlink():
-        raise HistoricalComponentBenchmarkError("source_dataset_path must be an existing regular non-symlink file")
+        raise HistoricalComponentBenchmarkError(
+            "source_dataset_path must be an existing regular non-symlink file"
+        )
     if source.suffix.lower() != ".csv":
         raise HistoricalComponentBenchmarkError("source_dataset_path must be a CSV file")
 
-    output_dir = Path(str(args.output_dir).strip()).expanduser()
-    if not str(output_dir):
+    raw_output = str(args.output_dir).strip()
+    if not raw_output:
         raise HistoricalComponentBenchmarkError("output_dir must be non-empty")
+    output_dir = Path(raw_output).expanduser()
     if output_dir.exists() and (not output_dir.is_dir() or output_dir.is_symlink()):
         raise HistoricalComponentBenchmarkError("output_dir must be a regular directory")
 
@@ -174,45 +182,69 @@ def _json_safe(value: Any) -> Any:
 
 def _write_json(path: Path, payload: Mapping[str, object]) -> None:
     path.write_text(
-        json.dumps(_json_safe(dict(payload)), ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n",
+        json.dumps(
+            _json_safe(dict(payload)),
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            allow_nan=False,
+        )
+        + "\n",
         encoding="utf-8",
     )
 
 
 def _complete_daily_and_intraday(source: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     raw = pd.read_csv(source)
-    normalized = normalize_intraday_5m_frame(raw, instrument_id="usdrubf", timezone_name="Europe/Moscow")
+    normalized = normalize_intraday_5m_frame(
+        raw,
+        instrument_id="usdrubf",
+        timezone_name="Europe/Moscow",
+    )
     if "volume" not in normalized.columns:
-        raise HistoricalComponentBenchmarkError("historical replay requires volume in the 5m source dataset")
-    daily = build_d1_ohlc_from_5m_frame(normalized, instrument_id="usdrubf", timezone_name="Europe/Moscow")
+        raise HistoricalComponentBenchmarkError(
+            "historical replay requires volume in the 5m source dataset"
+        )
+    daily = build_d1_ohlc_from_5m_frame(
+        normalized,
+        instrument_id="usdrubf",
+        timezone_name="Europe/Moscow",
+    )
     normalized = normalized.copy()
     normalized["trade_date"] = normalized["end"].dt.normalize()
     complete_dates = set(pd.to_datetime(daily["end"]).dt.normalize())
-    normalized = normalized[normalized["trade_date"].isin(complete_dates)].reset_index(drop=True)
+    normalized = normalized[
+        normalized["trade_date"].isin(complete_dates)
+    ].reset_index(drop=True)
     return daily.reset_index(drop=True), normalized
 
 
-def _filter_dates(
-    daily: pd.DataFrame,
-    intraday: pd.DataFrame,
+def _filter_prediction_rows(
+    replay: pd.DataFrame,
     *,
     start: pd.Timestamp | None,
     end: pd.Timestamp | None,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    daily = daily.copy()
-    daily["trade_date"] = pd.to_datetime(daily["end"]).dt.normalize()
-    mask = pd.Series(True, index=daily.index)
-    if start is not None:
-        mask &= daily["trade_date"] >= start
-    if end is not None:
-        mask &= daily["trade_date"] <= end
-    selected_daily = daily[mask].reset_index(drop=True)
-    if selected_daily.empty:
-        raise HistoricalComponentBenchmarkError("date filter produced zero complete trading days")
+) -> pd.DataFrame:
+    """Filter frozen prediction rows after full-history replay and label join.
 
-    selected_dates = set(selected_daily["trade_date"])
-    selected_intraday = intraday[intraday["trade_date"].isin(selected_dates)].reset_index(drop=True)
-    return selected_daily, selected_intraday
+    The prior session before `start` remains available to build the first requested
+    day's causal Level/Structure context. Trading days after `end` remain available
+    only as post-hoc forward labels. They never enter prediction construction.
+    """
+
+    work = replay.copy()
+    trade_dates = pd.to_datetime(work["trade_date"], errors="coerce").dt.normalize()
+    if trade_dates.isna().any():
+        raise HistoricalComponentBenchmarkError("replay contains invalid trade_date values")
+    mask = pd.Series(True, index=work.index)
+    if start is not None:
+        mask &= trade_dates >= start
+    if end is not None:
+        mask &= trade_dates <= end
+    selected = work[mask].reset_index(drop=True)
+    if selected.empty:
+        raise HistoricalComponentBenchmarkError("date filter produced zero prediction rows")
+    return selected
 
 
 def _aware_bars(frame: pd.DataFrame) -> tuple[dict[str, object], ...]:
@@ -243,7 +275,9 @@ def _interaction_state(decision_input, level_type: str) -> tuple[str, float]:
     interactions = {item.level_id: item for item in decision_input.level_interactions}
     matching = [level for level in levels.values() if level.level_type == level_type]
     if len(matching) != 1:
-        raise HistoricalComponentBenchmarkError(f"expected exactly one {level_type} level")
+        raise HistoricalComponentBenchmarkError(
+            f"expected exactly one {level_type} level"
+        )
     interaction = interactions[matching[0].level_id]
     return interaction.state, float(interaction.structural_quality)
 
@@ -255,7 +289,9 @@ def build_historical_replay_rows(
     horizons: Sequence[int],
 ) -> pd.DataFrame:
     if len(daily) < 2:
-        raise HistoricalComponentBenchmarkError("at least two complete trading days are required")
+        raise HistoricalComponentBenchmarkError(
+            "at least two complete trading days are required"
+        )
 
     daily = daily.copy().reset_index(drop=True)
     daily["trade_date"] = pd.to_datetime(daily["end"]).dt.normalize()
@@ -271,7 +307,9 @@ def build_historical_replay_rows(
         current_frame = grouped.get(current_date)
         prior_frame = grouped.get(prior_date)
         if current_frame is None or prior_frame is None:
-            raise HistoricalComponentBenchmarkError("complete daily date is missing its intraday session")
+            raise HistoricalComponentBenchmarkError(
+                "complete daily date is missing its intraday session"
+            )
         current_bars = _aware_bars(current_frame)
         prior_bars = _aware_bars(prior_frame)
         wall_clock = current_bars[-1]["end"]
@@ -280,8 +318,12 @@ def build_historical_replay_rows(
             prior_session_bars=prior_bars,
             wall_clock_as_of=wall_clock,
         )
-        high_state, high_quality = _interaction_state(decision_input, "PREVIOUS_SESSION_HIGH")
-        low_state, low_quality = _interaction_state(decision_input, "PREVIOUS_SESSION_LOW")
+        high_state, high_quality = _interaction_state(
+            decision_input, "PREVIOUS_SESSION_HIGH"
+        )
+        low_state, low_quality = _interaction_state(
+            decision_input, "PREVIOUS_SESSION_LOW"
+        )
 
         row: dict[str, object] = {
             "trade_date": current_date.date().isoformat(),
@@ -301,15 +343,21 @@ def build_historical_replay_rows(
         for horizon in horizons:
             future_index = index + horizon
             row[f"future_price_h{horizon}"] = (
-                None if future_index >= len(daily) else float(daily.loc[future_index, "close"])
+                None
+                if future_index >= len(daily)
+                else float(daily.loc[future_index, "close"])
             )
         rows.append(row)
 
     replay = pd.DataFrame(rows)
     if replay.empty:
-        raise HistoricalComponentBenchmarkError("historical replay produced zero rows")
+        raise HistoricalComponentBenchmarkError(
+            "historical replay produced zero rows"
+        )
     if replay["as_of_timestamp"].duplicated().any():
-        raise HistoricalComponentBenchmarkError("historical replay produced duplicate as_of_timestamp values")
+        raise HistoricalComponentBenchmarkError(
+            "historical replay produced duplicate as_of_timestamp values"
+        )
     return replay
 
 
@@ -327,7 +375,11 @@ def _benchmark_observations(
             if value is not None and not pd.isna(value):
                 future_prices[horizon] = float(value)
         trend = str(raw.trend)
-        trade_state = "HOLD" if always_active and trend in {"BULLISH_USD", "BEARISH_USD"} else "WAIT"
+        trade_state = (
+            "HOLD"
+            if always_active and trend in {"BULLISH_USD", "BEARISH_USD"}
+            else "WAIT"
+        )
         observations.append(
             BenchmarkObservation(
                 as_of_timestamp=str(raw.as_of_timestamp),
@@ -357,14 +409,20 @@ def build_structure_forward_summary(
                 eligible = group[group[future_column].notna()].copy()
                 if eligible.empty:
                     continue
-                returns_bps = (eligible[future_column].astype(float) / eligible["price"].astype(float) - 1.0) * 10_000.0
+                returns_bps = (
+                    eligible[future_column].astype(float)
+                    / eligible["price"].astype(float)
+                    - 1.0
+                ) * 10_000.0
                 realized = [
                     realized_bias(
-                        start_price=float(start),
-                        future_price=float(future),
+                        start_price=float(start_price),
+                        future_price=float(future_price),
                         neutral_band_bps=neutral_band_bps,
                     )
-                    for start, future in zip(eligible["price"], eligible[future_column])
+                    for start_price, future_price in zip(
+                        eligible["price"], eligible[future_column]
+                    )
                 ]
                 rows.append(
                     {
@@ -388,11 +446,13 @@ def run(args: argparse.Namespace) -> Mapping[str, object]:
     root = output_dir.resolve()
     paths = {name: root / name for name in DECLARED_OUTPUTS}
     if any(path.resolve().parent != root for path in paths.values()):
-        raise HistoricalComponentBenchmarkError("declared output escaped output_dir")
+        raise HistoricalComponentBenchmarkError(
+            "declared output escaped output_dir"
+        )
 
-    daily_all, intraday_all = _complete_daily_and_intraday(source)
-    daily, intraday = _filter_dates(daily_all, intraday_all, start=start, end=end)
-    replay = build_historical_replay_rows(daily, intraday, horizons=horizons)
+    daily, intraday = _complete_daily_and_intraday(source)
+    full_replay = build_historical_replay_rows(daily, intraday, horizons=horizons)
+    replay = _filter_prediction_rows(full_replay, start=start, end=end)
 
     bias_only = evaluate_intelligence_quality(
         _benchmark_observations(replay, horizons=horizons, always_active=False),
@@ -432,7 +492,10 @@ def run(args: argparse.Namespace) -> Mapping[str, object]:
         "high_confidence_threshold": float(args.high_confidence_threshold),
         "declared_outputs": list(DECLARED_OUTPUTS),
         "full_decision_agent_evaluated": False,
-        "full_decision_agent_blocker": "operational scheduler is pinned to SAFE_WAIT; no frozen non-SAFE_WAIT production decision policy exists",
+        "full_decision_agent_blocker": (
+            "operational scheduler is pinned to SAFE_WAIT; no frozen non-SAFE_WAIT "
+            "production decision policy exists"
+        ),
     }
     _write_json(paths[OUTPUT_RUN_METADATA], run_metadata)
 
@@ -440,18 +503,21 @@ def run(args: argparse.Namespace) -> Mapping[str, object]:
         "project": PROJECT,
         "mode": MODE,
         "run_id": run_id,
-        "complete_daily_rows_before_filter": int(len(daily_all)),
-        "complete_daily_rows_after_filter": int(len(daily)),
-        "replay_rows": int(len(replay)),
-        "first_trade_date": str(replay.iloc[0]["trade_date"]),
-        "last_trade_date": str(replay.iloc[-1]["trade_date"]),
+        "complete_daily_rows": int(len(daily)),
+        "full_replay_rows_before_prediction_filter": int(len(full_replay)),
+        "prediction_rows_after_filter": int(len(replay)),
+        "first_prediction_trade_date": str(replay.iloc[0]["trade_date"]),
+        "last_prediction_trade_date": str(replay.iloc[-1]["trade_date"]),
+        "prior_context_preserved_before_start_date": True,
+        "post_end_rows_used_only_for_forward_labels": True,
         "future_labels_post_hoc_only": True,
         "decision_input_future_data_used": False,
         "futoi_authority": "BLOCKED/EXCLUDED",
         "news_authority": "EXCLUDED_FROM_HISTORICAL_COMPONENT_REPLAY",
         "macro_authority": "EXCLUDED_FROM_HISTORICAL_COMPONENT_REPLAY",
         "decision_agent": "NOT_EVALUATED",
-        "ema_component": "CURRENT_LIVE_BRIDGE_SEMANTICS_REPLAYED",
+        "ema_component": "CURRENT_LIVE_BRIDGE_15M_SEMANTICS_REPLAYED",
+        "ema_confidence_semantics": "CURRENT_BRIDGE_FIXED_1_0_WHEN_AVAILABLE",
         "structure_component": "CURRENT_PREVIOUS_SESSION_LEVEL_ENGINE_REPLAYED",
         "structure_directional_rule_invented": False,
         "server_runtime_modified": False,
