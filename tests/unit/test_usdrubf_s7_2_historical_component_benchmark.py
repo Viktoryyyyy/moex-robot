@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
+import json
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -10,6 +13,7 @@ from src.moex_research.runners.usdrubf_s7_2_historical_component_benchmark impor
     _benchmark_observations,
     _filter_prediction_rows,
     _parse_horizons,
+    _phase3_manifest_source,
     build_historical_replay_rows,
     build_structure_forward_summary,
 )
@@ -50,6 +54,57 @@ def _session(day: str, *, variant: str) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _phase3_partition(path: Path, day: str, base: float) -> None:
+    frame = pd.DataFrame(
+        [
+            {
+                "ts": pd.Timestamp(f"{day} 10:00:00"),
+                "instrument_id": "forts.usdrubf",
+                "secid": "USDRUBF",
+                "open": base,
+                "high": base + 0.2,
+                "low": base - 0.1,
+                "close": base + 0.1,
+                "volume": 100.0,
+            },
+            {
+                "ts": pd.Timestamp(f"{day} 18:50:00"),
+                "instrument_id": "forts.usdrubf",
+                "secid": "USDRUBF",
+                "open": base + 0.1,
+                "high": base + 0.4,
+                "low": base,
+                "close": base + 0.3,
+                "volume": 200.0,
+            },
+        ]
+    )
+    frame.to_parquet(path, index=False)
+
+
+def _phase3_manifest(tmp_path: Path, *, declared_count: int = 2) -> Path:
+    p0 = tmp_path / "part_2026-08-07.parquet"
+    p1 = tmp_path / "part_2026-08-10.parquet"
+    _phase3_partition(p0, "2026-08-07", 79.7)
+    _phase3_partition(p1, "2026-08-10", 80.0)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "panel_id": "usdrubf_phase2_d1_panel.v1",
+                "panel_schema_version": "usdrubf_phase2_d1_panel.v1",
+                "instrument_id": "forts.usdrubf",
+                "secid": "USDRUBF",
+                "run_id": "phase3_fixture_exact_history",
+                "input_partition_count": declared_count,
+                "input_partitions": [str(p0), str(p1)],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return manifest
+
+
 def test_replay_uses_previous_complete_session_and_current_bridge_semantics() -> None:
     daily = pd.DataFrame(
         [
@@ -79,6 +134,40 @@ def test_replay_uses_previous_complete_session_and_current_bridge_semantics() ->
     assert parsed.tzinfo is not None
     assert str(row["structure_signature"]).startswith("HIGH:")
     assert "|LOW:" in str(row["structure_signature"])
+
+
+def test_phase3_manifest_binds_exact_listed_partitions_without_scan(tmp_path: Path) -> None:
+    manifest = _phase3_manifest(tmp_path)
+
+    daily, intraday, provenance = _phase3_manifest_source(manifest)
+
+    assert len(daily) == 2
+    assert len(intraday) == 4
+    assert provenance["source_mode"] == "phase3_panel_manifest"
+    assert provenance["panel_run_id"] == "phase3_fixture_exact_history"
+    assert provenance["panel_instrument_id"] == "forts.usdrubf"
+    assert provenance["panel_secid"] == "USDRUBF"
+    assert provenance["input_partition_count"] == 2
+    assert provenance["input_partition_paths_recorded_in_manifest"] is True
+    assert provenance["directory_scan_used"] is False
+    expected_sha = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    assert provenance["panel_manifest_sha256"] == expected_sha
+
+
+def test_phase3_manifest_rejects_declared_partition_count_mismatch(tmp_path: Path) -> None:
+    manifest = _phase3_manifest(tmp_path, declared_count=3)
+    with pytest.raises(HistoricalComponentBenchmarkError, match="count mismatch"):
+        _phase3_manifest_source(manifest)
+
+
+def test_phase3_manifest_rejects_wrong_identity_before_replay(tmp_path: Path) -> None:
+    manifest = _phase3_manifest(tmp_path)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["instrument_id"] = "wrong.instrument"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(HistoricalComponentBenchmarkError, match="instrument_id mismatch"):
+        _phase3_manifest_source(manifest)
 
 
 def test_prediction_filter_preserves_labels_created_from_rows_after_end_date() -> None:

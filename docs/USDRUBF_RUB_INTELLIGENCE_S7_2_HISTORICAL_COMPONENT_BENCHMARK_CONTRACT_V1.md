@@ -79,7 +79,9 @@ This allows later stages to determine whether specific structural states carry m
 
 ## Historical Input Contract
 
-The runner accepts an explicit immutable CSV path through:
+The runner accepts exactly one explicit source mode.
+
+### Mode A — explicit immutable CSV
 
 ```text
 --source-dataset-path
@@ -95,7 +97,52 @@ Requirements:
 - volume required because the current live bridge bar contract includes volume;
 - timestamps strictly increasing and unique under the existing 5m normalizer.
 
-No server path is hard-coded or inferred by S7.2.
+### Mode B — exact accepted Phase-3 panel manifest provenance
+
+```text
+--source-panel-manifest-path
+```
+
+This mode exists for the empirical S7.2 run so that an already accepted Phase-3 research dataset can be reused without directory scanning, implicit file selection, or creation of a temporary historical CSV.
+
+The supplied JSON manifest must validate exactly as:
+
+```text
+panel_id=usdrubf_phase2_d1_panel.v1
+panel_schema_version=usdrubf_phase2_d1_panel.v1
+instrument_id=forts.usdrubf
+secid=USDRUBF
+run_id=nonempty
+input_partition_count=len(input_partitions)
+```
+
+Only the exact paths listed in `input_partitions` are read. Each must be an existing regular non-symlink `.parquet` file. Duplicate partition paths fail closed.
+
+Each listed raw partition must contain:
+
+```text
+ts or end
+open
+high
+low
+close
+volume
+```
+
+If `instrument_id` or `secid` is present in a raw partition, it must match the manifest identity exactly.
+
+The runner:
+
+1. reads the supplied manifest only;
+2. validates its identity and declared partition count;
+3. reads only the exact `input_partitions` recorded by that manifest;
+4. performs no directory scan and no `latest/current/autodetect` resolution;
+5. records the manifest SHA-256 and Phase-3 run identity in `run_metadata.json`;
+6. reconstructs current live-bridge EMA and Level/Structure semantics from those raw 5m partitions.
+
+The manifest mode does not treat the previously materialized D1 panel itself as the live-input feature source. The D1 panel manifest is used as provenance for the exact raw 5m inputs because S7.2 must replay current intraday 15m EMA and previous-session interaction semantics.
+
+No server path is hard-coded in the S7.2 code. The operator must supply the exact accepted manifest path.
 
 ## Complete Trading-Day Rule
 
@@ -182,6 +229,8 @@ quality_report.json
 
 `historical_replay_rows.csv` contains frozen prediction facts and post-hoc future prices in one research artifact. Future-price columns are labels only and must never be reused as prediction features.
 
+`run_metadata.json` records source provenance. In Phase-3 manifest mode this includes the exact supplied manifest path, manifest SHA-256, Phase-3 run ID, instrument identity, input partition count, and `directory_scan_used=false`.
+
 ## Structure Summary Semantics
 
 For each `market_regime` and exact structure signature, per horizon:
@@ -209,13 +258,16 @@ EMA_ALWAYS_ACTIVE_BASELINE=yes_research_only
 STRUCTURE_OUTCOME_GROUPING=yes
 STRUCTURE_DIRECTIONAL_RULE_INVENTED=no
 FULL_DECISION_AGENT_EVALUATED=no_blocked
+EXACT_PHASE3_MANIFEST_BINDING=yes
+PHASE3_DIRECTORY_SCAN=no
+PHASE3_MANIFEST_SHA256_RECORDED=yes
 UNIT_TESTS=pass
 FULL_REPOSITORY_CI=pass
 LIVE_RUNTIME_CHANGED=no
 BROKER_ORDER_EXECUTION=no
 ```
 
-Code acceptance alone does not complete empirical S7.2. A controlled run against the accepted canonical historical dataset must still produce and review the declared artifacts.
+Code acceptance alone does not complete empirical S7.2. A controlled run against the accepted Phase-3 manifest/raw-partition provenance must still produce and review the declared artifacts.
 
 ## Handoff
 

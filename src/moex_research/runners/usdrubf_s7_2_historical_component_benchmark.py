@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from datetime import datetime, timezone
@@ -30,6 +31,9 @@ EXPERIMENT_ID = "usdrubf_rub_intelligence_s7_2_historical_component_benchmark_v1
 DEFAULT_HORIZONS = (1, 3, 5, 10)
 SOURCE_PATH_ALIAS_TOKENS = ("latest", "current", "autodetect")
 _FILENAME_STEM_TOKEN_SPLIT_RE = re.compile(r"[^A-Za-z0-9]+")
+PHASE3_PANEL_ID = "usdrubf_phase2_d1_panel.v1"
+PHASE3_INSTRUMENT_ID = "forts.usdrubf"
+PHASE3_SECID = "USDRUBF"
 
 OUTPUT_RUN_METADATA = "run_metadata.json"
 OUTPUT_REPLAY_ROWS = "historical_replay_rows.csv"
@@ -62,7 +66,9 @@ def _parser() -> argparse.ArgumentParser:
             "input bridge and benchmark component signals."
         ),
     )
-    parser.add_argument("--source-dataset-path", required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--source-dataset-path")
+    source.add_argument("--source-panel-manifest-path")
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--start-date")
@@ -97,6 +103,25 @@ def _path_alias_tokens(path_value: str) -> list[str]:
     ]
 
 
+def _validate_source_path(raw_value: object, *, field: str, suffix: str) -> Path:
+    raw = str(raw_value or "").strip()
+    if not raw:
+        raise HistoricalComponentBenchmarkError(f"{field} must be non-empty")
+    aliases = _path_alias_tokens(raw)
+    if aliases:
+        raise HistoricalComponentBenchmarkError(
+            f"{field} must not use mutable alias token(s): " + ", ".join(aliases)
+        )
+    path = Path(raw).expanduser()
+    if not path.exists() or not path.is_file() or path.is_symlink():
+        raise HistoricalComponentBenchmarkError(
+            f"{field} must be an existing regular non-symlink file"
+        )
+    if path.suffix.lower() != suffix:
+        raise HistoricalComponentBenchmarkError(f"{field} must have {suffix} suffix")
+    return path.resolve()
+
+
 def _parse_date(value: str | None, field: str) -> pd.Timestamp | None:
     if value is None or not value.strip():
         return None
@@ -123,22 +148,27 @@ def _parse_horizons(value: str) -> tuple[int, ...]:
 
 def _validate_cli(
     args: argparse.Namespace,
-) -> tuple[Path, Path, str, pd.Timestamp | None, pd.Timestamp | None, tuple[int, ...]]:
-    raw_source = str(args.source_dataset_path).strip()
-    if not raw_source:
-        raise HistoricalComponentBenchmarkError("source_dataset_path must be non-empty")
-    aliases = _path_alias_tokens(raw_source)
-    if aliases:
+) -> tuple[str, Path, Path, str, pd.Timestamp | None, pd.Timestamp | None, tuple[int, ...]]:
+    csv_value = getattr(args, "source_dataset_path", None)
+    manifest_value = getattr(args, "source_panel_manifest_path", None)
+    if bool(csv_value) == bool(manifest_value):
         raise HistoricalComponentBenchmarkError(
-            "source_dataset_path must not use mutable alias token(s): " + ", ".join(aliases)
+            "exactly one source_dataset_path or source_panel_manifest_path is required"
         )
-    source = Path(raw_source).expanduser()
-    if not source.exists() or not source.is_file() or source.is_symlink():
-        raise HistoricalComponentBenchmarkError(
-            "source_dataset_path must be an existing regular non-symlink file"
+    if csv_value:
+        source_mode = "explicit_csv"
+        source = _validate_source_path(
+            csv_value,
+            field="source_dataset_path",
+            suffix=".csv",
         )
-    if source.suffix.lower() != ".csv":
-        raise HistoricalComponentBenchmarkError("source_dataset_path must be a CSV file")
+    else:
+        source_mode = "phase3_panel_manifest"
+        source = _validate_source_path(
+            manifest_value,
+            field="source_panel_manifest_path",
+            suffix=".json",
+        )
 
     raw_output = str(args.output_dir).strip()
     if not raw_output:
@@ -156,7 +186,7 @@ def _validate_cli(
     if start is not None and end is not None and start > end:
         raise HistoricalComponentBenchmarkError("start_date must not be after end_date")
     horizons = _parse_horizons(str(args.horizons))
-    return source, output_dir, run_id, start, end, horizons
+    return source_mode, source, output_dir, run_id, start, end, horizons
 
 
 def _json_safe(value: Any) -> Any:
@@ -194,8 +224,15 @@ def _write_json(path: Path, payload: Mapping[str, object]) -> None:
     )
 
 
-def _complete_daily_and_intraday(source: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
-    raw = pd.read_csv(source)
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _normalize_source_frame(raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     normalized = normalize_intraday_5m_frame(
         raw,
         instrument_id="usdrubf",
@@ -217,6 +254,141 @@ def _complete_daily_and_intraday(source: Path) -> tuple[pd.DataFrame, pd.DataFra
         normalized["trade_date"].isin(complete_dates)
     ].reset_index(drop=True)
     return daily.reset_index(drop=True), normalized
+
+
+def _complete_daily_and_intraday(source: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    return _normalize_source_frame(pd.read_csv(source))
+
+
+def _require_manifest_mapping(value: object, field: str) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise HistoricalComponentBenchmarkError(f"{field} must be a JSON object")
+    return value
+
+
+def _phase3_manifest_source(
+    manifest_path: Path,
+) -> tuple[pd.DataFrame, pd.DataFrame, Mapping[str, object]]:
+    try:
+        manifest = _require_manifest_mapping(
+            json.loads(manifest_path.read_text(encoding="utf-8")),
+            "phase3 panel manifest",
+        )
+    except json.JSONDecodeError as exc:
+        raise HistoricalComponentBenchmarkError("phase3 panel manifest is invalid JSON") from exc
+
+    if manifest.get("panel_id") != PHASE3_PANEL_ID:
+        raise HistoricalComponentBenchmarkError("phase3 panel manifest panel_id mismatch")
+    if manifest.get("panel_schema_version") != PHASE3_PANEL_ID:
+        raise HistoricalComponentBenchmarkError(
+            "phase3 panel manifest schema version mismatch"
+        )
+    if manifest.get("instrument_id") != PHASE3_INSTRUMENT_ID:
+        raise HistoricalComponentBenchmarkError(
+            "phase3 panel manifest instrument_id mismatch"
+        )
+    if manifest.get("secid") != PHASE3_SECID:
+        raise HistoricalComponentBenchmarkError("phase3 panel manifest secid mismatch")
+    run_id = str(manifest.get("run_id") or "").strip()
+    if not run_id:
+        raise HistoricalComponentBenchmarkError("phase3 panel manifest run_id missing")
+
+    raw_partitions = manifest.get("input_partitions")
+    if isinstance(raw_partitions, (str, bytes)) or not isinstance(raw_partitions, list):
+        raise HistoricalComponentBenchmarkError(
+            "phase3 panel manifest input_partitions must be a list"
+        )
+    if not raw_partitions:
+        raise HistoricalComponentBenchmarkError(
+            "phase3 panel manifest input_partitions must be non-empty"
+        )
+    declared_count = manifest.get("input_partition_count")
+    if isinstance(declared_count, bool) or not isinstance(declared_count, int):
+        raise HistoricalComponentBenchmarkError(
+            "phase3 panel manifest input_partition_count must be integer"
+        )
+    if declared_count != len(raw_partitions):
+        raise HistoricalComponentBenchmarkError(
+            "phase3 panel manifest input partition count mismatch"
+        )
+
+    partition_paths: list[Path] = []
+    seen: set[Path] = set()
+    for index, raw_path in enumerate(raw_partitions):
+        path = _validate_source_path(
+            raw_path,
+            field=f"input_partitions[{index}]",
+            suffix=".parquet",
+        )
+        if path in seen:
+            raise HistoricalComponentBenchmarkError(
+                "phase3 panel manifest contains duplicate input partition"
+            )
+        seen.add(path)
+        partition_paths.append(path)
+
+    frames: list[pd.DataFrame] = []
+    for path in partition_paths:
+        frame = pd.read_parquet(path)
+        if frame.empty:
+            raise HistoricalComponentBenchmarkError(
+                "phase3 raw 5m input partition is empty"
+            )
+        if "instrument_id" in frame.columns:
+            identity = set(frame["instrument_id"].astype(str).str.strip())
+            if identity != {PHASE3_INSTRUMENT_ID}:
+                raise HistoricalComponentBenchmarkError(
+                    "phase3 raw input instrument_id mismatch"
+                )
+        if "secid" in frame.columns:
+            identity = set(frame["secid"].astype(str).str.strip())
+            if identity != {PHASE3_SECID}:
+                raise HistoricalComponentBenchmarkError(
+                    "phase3 raw input secid mismatch"
+                )
+        if "end" in frame.columns:
+            timestamp_column = "end"
+        elif "ts" in frame.columns:
+            timestamp_column = "ts"
+        else:
+            raise HistoricalComponentBenchmarkError(
+                "phase3 raw input requires end or ts timestamp column"
+            )
+        required = [timestamp_column, "open", "high", "low", "close", "volume"]
+        missing = [column for column in required if column not in frame.columns]
+        if missing:
+            raise HistoricalComponentBenchmarkError(
+                "phase3 raw input missing required columns: " + ", ".join(missing)
+            )
+        selected = frame[required].copy().rename(columns={timestamp_column: "end"})
+        frames.append(selected)
+
+    raw = pd.concat(frames, ignore_index=True)
+    raw["end"] = pd.to_datetime(raw["end"], errors="coerce")
+    if raw["end"].isna().any():
+        raise HistoricalComponentBenchmarkError(
+            "phase3 raw input contains invalid timestamps"
+        )
+    raw = raw.sort_values("end", kind="stable").reset_index(drop=True)
+    if raw["end"].duplicated().any():
+        raise HistoricalComponentBenchmarkError(
+            "phase3 raw input contains duplicate timestamps"
+        )
+
+    daily, intraday = _normalize_source_frame(raw)
+    provenance = {
+        "source_mode": "phase3_panel_manifest",
+        "panel_manifest_path": str(manifest_path),
+        "panel_manifest_sha256": _sha256(manifest_path),
+        "panel_id": PHASE3_PANEL_ID,
+        "panel_run_id": run_id,
+        "panel_instrument_id": PHASE3_INSTRUMENT_ID,
+        "panel_secid": PHASE3_SECID,
+        "input_partition_count": len(partition_paths),
+        "input_partition_paths_recorded_in_manifest": True,
+        "directory_scan_used": False,
+    }
+    return daily, intraday, provenance
 
 
 def _filter_prediction_rows(
@@ -441,7 +613,7 @@ def build_structure_forward_summary(
 
 
 def run(args: argparse.Namespace) -> Mapping[str, object]:
-    source, output_dir, run_id, start, end, horizons = _validate_cli(args)
+    source_mode, source, output_dir, run_id, start, end, horizons = _validate_cli(args)
     output_dir.mkdir(parents=True, exist_ok=True)
     root = output_dir.resolve()
     paths = {name: root / name for name in DECLARED_OUTPUTS}
@@ -450,7 +622,17 @@ def run(args: argparse.Namespace) -> Mapping[str, object]:
             "declared output escaped output_dir"
         )
 
-    daily, intraday = _complete_daily_and_intraday(source)
+    if source_mode == "phase3_panel_manifest":
+        daily, intraday, provenance = _phase3_manifest_source(source)
+    else:
+        daily, intraday = _complete_daily_and_intraday(source)
+        provenance = {
+            "source_mode": "explicit_csv",
+            "source_dataset_path": str(source),
+            "source_dataset_sha256": _sha256(source),
+            "directory_scan_used": False,
+        }
+
     full_replay = build_historical_replay_rows(daily, intraday, horizons=horizons)
     replay = _filter_prediction_rows(full_replay, start=start, end=end)
 
@@ -483,7 +665,7 @@ def run(args: argparse.Namespace) -> Mapping[str, object]:
         "experiment_id": EXPERIMENT_ID,
         "run_id": run_id,
         "created_at": _utc_now_iso(),
-        "source_dataset_path": str(source.resolve()),
+        "source_provenance": dict(provenance),
         "output_dir": str(root),
         "start_date": None if start is None else start.date().isoformat(),
         "end_date": None if end is None else end.date().isoformat(),
@@ -503,6 +685,7 @@ def run(args: argparse.Namespace) -> Mapping[str, object]:
         "project": PROJECT,
         "mode": MODE,
         "run_id": run_id,
+        "source_mode": source_mode,
         "complete_daily_rows": int(len(daily)),
         "full_replay_rows_before_prediction_filter": int(len(full_replay)),
         "prediction_rows_after_filter": int(len(replay)),
@@ -530,6 +713,7 @@ def run(args: argparse.Namespace) -> Mapping[str, object]:
         "mode": MODE,
         "status": "COMPLETED",
         "run_id": run_id,
+        "source_mode": source_mode,
         "replay_rows": int(len(replay)),
         "structure_summary_rows": int(len(structure_summary)),
         "full_decision_agent_evaluated": False,
