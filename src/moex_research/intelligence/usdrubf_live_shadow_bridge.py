@@ -175,12 +175,12 @@ def _bucket_label_15m(value: datetime) -> datetime:
 
 
 def _is_expected_historical_forts_clearing_bucket(label: datetime) -> bool:
-    """Return True only for the documented pre-unified-session 14:00 FORTS gap."""
+    """Return True only for documented pre-unified-session FORTS clearing gaps."""
 
     moscow_label = label.astimezone(MOSCOW)
     return (
         moscow_label.date() < FORTS_UNIFIED_SESSION_START_DATE
-        and moscow_label.hour == 14
+        and moscow_label.hour in {14, 19}
         and moscow_label.minute == 0
     )
 
@@ -188,7 +188,7 @@ def _is_expected_historical_forts_clearing_bucket(label: datetime) -> bool:
 def build_closed_15m_bars(
     current_session_bars: Sequence[Mapping[str, object]],
 ) -> tuple[dict[str, object], ...]:
-    """Aggregate complete aligned 5m triples with the documented FORTS session gap."""
+    """Aggregate complete aligned 5m triples with documented FORTS session gaps."""
 
     if not current_session_bars:
         raise LiveShadowBridgeError("current session bars are required for 15m aggregation")
