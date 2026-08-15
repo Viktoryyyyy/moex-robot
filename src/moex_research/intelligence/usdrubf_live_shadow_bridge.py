@@ -24,6 +24,7 @@ from .usdrubf_news_macro import MacroState, NewsEvent
 
 MOSCOW = ZoneInfo("Europe/Moscow")
 SECID_KEY = "Si"
+FORTS_UNIFIED_SESSION_START_DATE = date(2026, 3, 23)
 
 
 class LiveShadowBridgeError(ValueError):
@@ -173,10 +174,21 @@ def _bucket_label_15m(value: datetime) -> datetime:
     return value.replace(minute=(value.minute // 15) * 15, second=0, microsecond=0)
 
 
+def _is_expected_historical_forts_clearing_bucket(label: datetime) -> bool:
+    """Return True only for the documented pre-unified-session 14:00 FORTS gap."""
+
+    moscow_label = label.astimezone(MOSCOW)
+    return (
+        moscow_label.date() < FORTS_UNIFIED_SESSION_START_DATE
+        and moscow_label.hour == 14
+        and moscow_label.minute == 0
+    )
+
+
 def build_closed_15m_bars(
     current_session_bars: Sequence[Mapping[str, object]],
 ) -> tuple[dict[str, object], ...]:
-    """Aggregate complete aligned 5m triples exactly like the established 15m runtime."""
+    """Aggregate complete aligned 5m triples with the documented FORTS session gap."""
 
     if not current_session_bars:
         raise LiveShadowBridgeError("current session bars are required for 15m aggregation")
@@ -200,6 +212,8 @@ def build_closed_15m_bars(
         if t2 != label + timedelta(minutes=10):
             continue
         if t0 != label or t1 != label + timedelta(minutes=5):
+            if _is_expected_historical_forts_clearing_bucket(label):
+                continue
             raise LiveShadowBridgeError(
                 "broken 15m bucket aligned to broker label " + label.isoformat()
             )
@@ -477,6 +491,7 @@ def safe_wait_decision_agent(payload: Mapping[str, object]) -> Mapping[str, obje
 
 
 __all__ = [
+    "FORTS_UNIFIED_SESSION_START_DATE",
     "LiveShadowBridgeError",
     "MOSCOW",
     "SECID_KEY",
