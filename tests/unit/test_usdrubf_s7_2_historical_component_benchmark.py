@@ -11,10 +11,12 @@ import pytest
 from src.moex_research.runners.usdrubf_s7_2_historical_component_benchmark import (
     HistoricalComponentBenchmarkError,
     _benchmark_observations,
+    _filter_exclusion_rows,
     _filter_prediction_rows,
     _parse_horizons,
     _phase3_manifest_source,
     build_historical_replay_rows,
+    build_historical_replay_with_exclusions,
     build_structure_forward_summary,
 )
 
@@ -52,6 +54,33 @@ def _session(day: str, *, variant: str) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def _broken_session(day: str) -> pd.DataFrame:
+    frame = _session(day, variant="current")
+    extra = pd.DataFrame(
+        [
+            {
+                "end": pd.Timestamp(f"{day} 14:05"),
+                "open": 80.2,
+                "high": 80.3,
+                "low": 80.1,
+                "close": 80.2,
+                "volume": 100.0,
+                "trade_date": pd.Timestamp(day),
+            },
+            {
+                "end": pd.Timestamp(f"{day} 14:10"),
+                "open": 80.2,
+                "high": 80.4,
+                "low": 80.2,
+                "close": 80.3,
+                "volume": 100.0,
+                "trade_date": pd.Timestamp(day),
+            },
+        ]
+    )
+    return pd.concat([frame, extra], ignore_index=True)
 
 
 def _phase3_partition(path: Path, day: str, base: float) -> None:
@@ -134,6 +163,77 @@ def test_replay_uses_previous_complete_session_and_current_bridge_semantics() ->
     assert parsed.tzinfo is not None
     assert str(row["structure_signature"]).startswith("HIGH:")
     assert "|LOW:" in str(row["structure_signature"])
+
+
+def test_broken_live_bridge_day_is_recorded_and_excluded_without_repair() -> None:
+    daily = pd.DataFrame(
+        [
+            {"end": pd.Timestamp("2026-08-07 18:50"), "close": 79.7},
+            {"end": pd.Timestamp("2026-08-10 18:50"), "close": 80.3},
+            {"end": pd.Timestamp("2026-08-11 18:50"), "close": 80.6},
+        ]
+    )
+    intraday = pd.concat(
+        [
+            _session("2026-08-07", variant="prior"),
+            _broken_session("2026-08-10"),
+            _session("2026-08-11", variant="current"),
+        ],
+        ignore_index=True,
+    )
+
+    replay, exclusions = build_historical_replay_with_exclusions(
+        daily,
+        intraday,
+        horizons=(1,),
+    )
+
+    assert replay["trade_date"].tolist() == ["2026-08-11"]
+    assert exclusions["trade_date"].tolist() == ["2026-08-10"]
+    excluded = exclusions.iloc[0]
+    assert excluded["error_type"] == "LiveShadowBridgeError"
+    assert "broken 15m bucket aligned to broker label" in excluded["reason"]
+    assert excluded["current_bar_count"] == 5
+    assert excluded["prior_bar_count"] == 3
+
+
+def test_prediction_wrapper_uses_same_fail_closed_exclusion_policy() -> None:
+    daily = pd.DataFrame(
+        [
+            {"end": pd.Timestamp("2026-08-07 18:50"), "close": 79.7},
+            {"end": pd.Timestamp("2026-08-10 18:50"), "close": 80.3},
+            {"end": pd.Timestamp("2026-08-11 18:50"), "close": 80.6},
+        ]
+    )
+    intraday = pd.concat(
+        [
+            _session("2026-08-07", variant="prior"),
+            _broken_session("2026-08-10"),
+            _session("2026-08-11", variant="current"),
+        ],
+        ignore_index=True,
+    )
+
+    replay = build_historical_replay_rows(daily, intraday, horizons=(1,))
+
+    assert replay["trade_date"].tolist() == ["2026-08-11"]
+
+
+def test_exclusion_filter_respects_prediction_window() -> None:
+    exclusions = pd.DataFrame(
+        [
+            {"trade_date": "2026-08-10", "reason": "a"},
+            {"trade_date": "2026-08-11", "reason": "b"},
+        ]
+    )
+
+    selected = _filter_exclusion_rows(
+        exclusions,
+        start=pd.Timestamp("2026-08-11"),
+        end=pd.Timestamp("2026-08-11"),
+    )
+
+    assert selected["trade_date"].tolist() == ["2026-08-11"]
 
 
 def test_phase3_manifest_binds_exact_listed_partitions_without_scan(tmp_path: Path) -> None:
