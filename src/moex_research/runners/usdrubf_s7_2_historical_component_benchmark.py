@@ -20,6 +20,7 @@ from src.moex_research.intelligence.usdrubf_intelligence_benchmark import (
     realized_bias,
 )
 from src.moex_research.intelligence.usdrubf_live_shadow_bridge import (
+    LiveShadowBridgeError,
     MOSCOW,
     build_live_decision_input,
 )
@@ -37,6 +38,7 @@ PHASE3_SECID = "USDRUBF"
 
 OUTPUT_RUN_METADATA = "run_metadata.json"
 OUTPUT_REPLAY_ROWS = "historical_replay_rows.csv"
+OUTPUT_REPLAY_EXCLUSIONS = "replay_exclusions.csv"
 OUTPUT_EMA_BIAS_ONLY = "ema_bias_only_metrics.json"
 OUTPUT_EMA_ALWAYS_ACTIVE = "ema_always_active_metrics.json"
 OUTPUT_STRUCTURE_SUMMARY = "structure_forward_summary.csv"
@@ -44,10 +46,19 @@ OUTPUT_QUALITY_REPORT = "quality_report.json"
 DECLARED_OUTPUTS = (
     OUTPUT_RUN_METADATA,
     OUTPUT_REPLAY_ROWS,
+    OUTPUT_REPLAY_EXCLUSIONS,
     OUTPUT_EMA_BIAS_ONLY,
     OUTPUT_EMA_ALWAYS_ACTIVE,
     OUTPUT_STRUCTURE_SUMMARY,
     OUTPUT_QUALITY_REPORT,
+)
+_EXCLUSION_COLUMNS = (
+    "trade_date",
+    "prior_trade_date",
+    "error_type",
+    "reason",
+    "current_bar_count",
+    "prior_bar_count",
 )
 
 
@@ -419,6 +430,25 @@ def _filter_prediction_rows(
     return selected
 
 
+def _filter_exclusion_rows(
+    exclusions: pd.DataFrame,
+    *,
+    start: pd.Timestamp | None,
+    end: pd.Timestamp | None,
+) -> pd.DataFrame:
+    if exclusions.empty:
+        return exclusions.copy().reset_index(drop=True)
+    trade_dates = pd.to_datetime(exclusions["trade_date"], errors="coerce").dt.normalize()
+    if trade_dates.isna().any():
+        raise HistoricalComponentBenchmarkError("exclusions contain invalid trade_date values")
+    mask = pd.Series(True, index=exclusions.index)
+    if start is not None:
+        mask &= trade_dates >= start
+    if end is not None:
+        mask &= trade_dates <= end
+    return exclusions[mask].reset_index(drop=True)
+
+
 def _aware_bars(frame: pd.DataFrame) -> tuple[dict[str, object], ...]:
     if frame.empty:
         raise HistoricalComponentBenchmarkError("cannot replay an empty session")
@@ -454,12 +484,19 @@ def _interaction_state(decision_input, level_type: str) -> tuple[str, float]:
     return interaction.state, float(interaction.structural_quality)
 
 
-def build_historical_replay_rows(
+def build_historical_replay_with_exclusions(
     daily: pd.DataFrame,
     intraday: pd.DataFrame,
     *,
     horizons: Sequence[int],
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Replay only days accepted by the unchanged live bridge.
+
+    Historical sessions that make the current live bridge fail closed are recorded
+    and excluded. No 5m bars are repaired, synthesized, shifted, or removed to make
+    an otherwise ineligible day pass the bridge.
+    """
+
     if len(daily) < 2:
         raise HistoricalComponentBenchmarkError(
             "at least two complete trading days are required"
@@ -473,6 +510,7 @@ def build_historical_replay_rows(
     }
 
     rows: list[dict[str, object]] = []
+    exclusion_rows: list[dict[str, object]] = []
     for index in range(1, len(daily)):
         current_date = pd.Timestamp(daily.loc[index, "trade_date"])
         prior_date = pd.Timestamp(daily.loc[index - 1, "trade_date"])
@@ -485,11 +523,25 @@ def build_historical_replay_rows(
         current_bars = _aware_bars(current_frame)
         prior_bars = _aware_bars(prior_frame)
         wall_clock = current_bars[-1]["end"]
-        decision_input = build_live_decision_input(
-            current_session_bars=current_bars,
-            prior_session_bars=prior_bars,
-            wall_clock_as_of=wall_clock,
-        )
+        try:
+            decision_input = build_live_decision_input(
+                current_session_bars=current_bars,
+                prior_session_bars=prior_bars,
+                wall_clock_as_of=wall_clock,
+            )
+        except LiveShadowBridgeError as exc:
+            exclusion_rows.append(
+                {
+                    "trade_date": current_date.date().isoformat(),
+                    "prior_trade_date": prior_date.date().isoformat(),
+                    "error_type": type(exc).__name__,
+                    "reason": str(exc),
+                    "current_bar_count": len(current_bars),
+                    "prior_bar_count": len(prior_bars),
+                }
+            )
+            continue
+
         high_state, high_quality = _interaction_state(
             decision_input, "PREVIOUS_SESSION_HIGH"
         )
@@ -522,14 +574,30 @@ def build_historical_replay_rows(
         rows.append(row)
 
     replay = pd.DataFrame(rows)
+    exclusions = pd.DataFrame(exclusion_rows, columns=_EXCLUSION_COLUMNS)
     if replay.empty:
         raise HistoricalComponentBenchmarkError(
-            "historical replay produced zero rows"
+            "historical replay produced zero live-bridge-eligible rows; "
+            f"excluded_days={len(exclusions)}"
         )
     if replay["as_of_timestamp"].duplicated().any():
         raise HistoricalComponentBenchmarkError(
             "historical replay produced duplicate as_of_timestamp values"
         )
+    return replay, exclusions
+
+
+def build_historical_replay_rows(
+    daily: pd.DataFrame,
+    intraday: pd.DataFrame,
+    *,
+    horizons: Sequence[int],
+) -> pd.DataFrame:
+    replay, _ = build_historical_replay_with_exclusions(
+        daily,
+        intraday,
+        horizons=horizons,
+    )
     return replay
 
 
@@ -633,8 +701,13 @@ def run(args: argparse.Namespace) -> Mapping[str, object]:
             "directory_scan_used": False,
         }
 
-    full_replay = build_historical_replay_rows(daily, intraday, horizons=horizons)
+    full_replay, full_exclusions = build_historical_replay_with_exclusions(
+        daily,
+        intraday,
+        horizons=horizons,
+    )
     replay = _filter_prediction_rows(full_replay, start=start, end=end)
+    exclusions = _filter_exclusion_rows(full_exclusions, start=start, end=end)
 
     bias_only = evaluate_intelligence_quality(
         _benchmark_observations(replay, horizons=horizons, always_active=False),
@@ -655,9 +728,23 @@ def run(args: argparse.Namespace) -> Mapping[str, object]:
     )
 
     replay.to_csv(paths[OUTPUT_REPLAY_ROWS], index=False)
+    exclusions.to_csv(paths[OUTPUT_REPLAY_EXCLUSIONS], index=False)
     structure_summary.to_csv(paths[OUTPUT_STRUCTURE_SUMMARY], index=False)
     _write_json(paths[OUTPUT_EMA_BIAS_ONLY], bias_only)
     _write_json(paths[OUTPUT_EMA_ALWAYS_ACTIVE], always_active)
+
+    candidate_days = max(int(len(daily)) - 1, 0)
+    live_bridge_coverage = (
+        None if candidate_days == 0 else float(len(full_replay) / candidate_days)
+    )
+    exclusion_reasons = (
+        {}
+        if full_exclusions.empty
+        else {
+            str(key): int(value)
+            for key, value in full_exclusions["reason"].value_counts().items()
+        }
+    )
 
     run_metadata = {
         "project": PROJECT,
@@ -673,6 +760,7 @@ def run(args: argparse.Namespace) -> Mapping[str, object]:
         "neutral_band_bps": float(args.neutral_band_bps),
         "high_confidence_threshold": float(args.high_confidence_threshold),
         "declared_outputs": list(DECLARED_OUTPUTS),
+        "historical_live_bridge_exclusion_policy": "FAIL_CLOSED_EXCLUDE_DAY_NO_REPAIR",
         "full_decision_agent_evaluated": False,
         "full_decision_agent_blocker": (
             "operational scheduler is pinned to SAFE_WAIT; no frozen non-SAFE_WAIT "
@@ -687,6 +775,12 @@ def run(args: argparse.Namespace) -> Mapping[str, object]:
         "run_id": run_id,
         "source_mode": source_mode,
         "complete_daily_rows": int(len(daily)),
+        "candidate_prediction_days": candidate_days,
+        "live_bridge_eligible_prediction_days": int(len(full_replay)),
+        "live_bridge_excluded_prediction_days": int(len(full_exclusions)),
+        "live_bridge_coverage": live_bridge_coverage,
+        "live_bridge_exclusion_reasons": exclusion_reasons,
+        "prediction_window_excluded_days": int(len(exclusions)),
         "full_replay_rows_before_prediction_filter": int(len(full_replay)),
         "prediction_rows_after_filter": int(len(replay)),
         "first_prediction_trade_date": str(replay.iloc[0]["trade_date"]),
@@ -695,6 +789,9 @@ def run(args: argparse.Namespace) -> Mapping[str, object]:
         "post_end_rows_used_only_for_forward_labels": True,
         "future_labels_post_hoc_only": True,
         "decision_input_future_data_used": False,
+        "historical_session_gaps_repaired": False,
+        "historical_bars_synthesized": False,
+        "live_bridge_runtime_semantics_relaxed": False,
         "futoi_authority": "BLOCKED/EXCLUDED",
         "news_authority": "EXCLUDED_FROM_HISTORICAL_COMPONENT_REPLAY",
         "macro_authority": "EXCLUDED_FROM_HISTORICAL_COMPONENT_REPLAY",
@@ -715,6 +812,8 @@ def run(args: argparse.Namespace) -> Mapping[str, object]:
         "run_id": run_id,
         "source_mode": source_mode,
         "replay_rows": int(len(replay)),
+        "excluded_rows": int(len(exclusions)),
+        "live_bridge_coverage": live_bridge_coverage,
         "structure_summary_rows": int(len(structure_summary)),
         "full_decision_agent_evaluated": False,
         "output_dir": str(root),
