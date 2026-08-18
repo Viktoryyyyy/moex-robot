@@ -1,0 +1,49 @@
+contract_id: futures_futoi_quality_report.v1
+dataset_id: futures_futoi_quality_report
+artifact_class: external_pattern
+producer: moex_data.futures.materialize_futoi_instrument
+consumers:
+  - moex_data.futures.futoi_acceptance
+format: json
+schema_version: futures_futoi_quality_report.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/state/quality/dataset_id=futures_futoi_raw/run_date={YYYY-MM-DD}/run_id={RUN_ID}/quality_report.json"
+grain: futoi_refresh_quality
+identity_model:
+  canonical_identity_field: instrument_id
+  source_identity_fields:
+    - source_id
+    - secid
+    - board
+    - market
+    - engine
+required_fields:
+  - run_id
+  - dataset_id
+  - instrument_id
+  - source_id
+  - secid
+  - futoi_ticker
+  - trade_date
+  - quality_status
+  - row_count
+  - duplicate_key_count
+  - null_required_count
+  - invalid_position_count
+  - availability_status
+  - probe_status
+allowed_quality_status:
+  - pass
+  - fail
+hard_checks:
+  - row_count_positive
+  - duplicate_key_count_zero
+  - null_required_count_zero
+  - invalid_position_count_zero
+  - availability_status_available
+  - probe_status_completed
+fail_blocks_pointer_update: true
+path_rules:
+  storage_root: env_contract
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
