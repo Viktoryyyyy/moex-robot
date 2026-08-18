@@ -11,7 +11,7 @@ scope:
   source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
   registry_ref: configs/instruments/forts_instrument_registry.v1.yaml
 problem_statement:
-  current_registry_scope: USDRUBF_CNYRUBF_SiU6_CRU6_pilots_passed_controlled_backfill_ready
+  current_registry_scope: historical_quote_core_USDRUBF_CNYRUBF_current_reference_SiU6_CRU6_futoi_all_four
   previous_pointer_shape: artifact_id_plus_instrument_id_plus_secid
   previous_pointer_collision_risk: true
   pointer_runner_scope_validation: pointer_scope_must_equal_exactly_one_instrument_id
@@ -19,12 +19,16 @@ problem_statement:
 current_stage2_registry_scope:
   - instrument_id: usdrubf_futures_family
     secid: USDRUBF
+    quote_role: historical_core
   - instrument_id: cnyrubf_futures_family
     secid: CNYRUBF
+    quote_role: historical_core
   - instrument_id: si_futures_family
     secid: SiU6
+    quote_role: current_reference
   - instrument_id: cr_futures_family
     secid: CRU6
+    quote_role: current_reference
 identity_rules:
   canonical_identity_field: instrument_id
   explicit_source_id_required: true
@@ -81,9 +85,31 @@ controlled_backfill_authorization:
   required_registry_evidence_status: pilot_passed
   global_runtime_enablement_required: false
   global_runtime_enablement_must_remain_false: true
+  historical_quote_backfill_instrument_ids:
+    - usdrubf_futures_family
+    - cnyrubf_futures_family
+  current_reference_quote_instrument_ids:
+    - si_futures_family
+    - cr_futures_family
+  current_reference_full_historical_backfill_required: false
   controlled_quote_backfill_producer: moex_data.futures.backfill_stage2_forts_raw_5m_instrument
   controlled_futoi_backfill_producer: moex_data.futures.backfill_futoi_instrument
   accepted_pointer_creation_allowed_only_after_full_backfill_pass: true
+current_reference_quote_policy:
+  instrument_ids:
+    - si_futures_family
+    - cr_futures_family
+  secids:
+    - SiU6
+    - CRU6
+  purpose: current_market_reference_basis_liquidity_expiry
+  multi_year_historical_backfill_required: false
+  stage2_completion_blocking: false
+  current_contract_pilot_required: true
+  current_contract_pilot_status: passed
+  automatic_roll_selection_allowed: false
+  continuous_history_required_in_stage2: false
+  future_continuous_history_requires_separate_roll_chain_workstream: true
 new_instrument_onboarding_sequence:
   - step_id: add_registry_entry
     required: true
@@ -123,9 +149,11 @@ new_instrument_onboarding_sequence:
       - global runtime and generic materialization flags remain false
   - step_id: run_full_backfill
     required: true
-    instruction: Run controlled full backfill only after pilot_passed evidence and Stage 2 backfill_ready are both proven.
+    scope: historical_core_only
+    instruction: Run controlled full backfill only for quote_role=historical_core after pilot_passed evidence and Stage 2 backfill_ready are both proven. Current-reference SiU6/CRU6 are explicitly excluded from multi-year historical backfill in Stage 2.
     producer: moex_data.futures.backfill_stage2_forts_raw_5m_instrument
     exit_criteria:
+      - instrument_id is in historical_quote_backfill_instrument_ids
       - requested range is explicit and source-proven
       - all written partitions use canonical market/raw path
       - source/network/schema failures fail closed
@@ -134,7 +162,8 @@ new_instrument_onboarding_sequence:
       - generic runtime enablement remains false
   - step_id: create_per_instrument_accepted_pointer
     required: true
-    instruction: Create accepted pointer only at the canonical accepted_pointer_path_contract after full backfill PASS.
+    scope: historical_core_only
+    instruction: Create accepted pointer only at the canonical accepted_pointer_path_contract after full backfill PASS for historical-core quote instruments.
     exit_criteria:
       - refresh_status is succeeded
       - quality_status is pass
@@ -143,7 +172,7 @@ new_instrument_onboarding_sequence:
       - pointer points to the passed full backfill manifest
   - step_id: run_observed_source_refresh_check
     required: true
-    instruction: Run refresh check with --incremental-mode observed-source.
+    instruction: Run refresh check with --incremental-mode observed-source for production-eligible lanes.
     exit_criteria:
       - incremental mode is observed-source
       - MOEX calendar endpoint is not required for production refresh
@@ -152,7 +181,7 @@ new_instrument_onboarding_sequence:
       - passed quality atomically advances only the per-instrument pointer
   - step_id: enable_scheduler_only_after_refresh_check_passed
     required: true
-    instruction: Enable scheduler only after all prior steps pass.
+    instruction: Enable scheduler only after all prior applicable steps pass.
     exit_criteria:
       - production scheduler uses --incremental-mode observed-source
       - scheduler references explicit instrument_id and source_id
