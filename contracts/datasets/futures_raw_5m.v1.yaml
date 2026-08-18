@@ -1,7 +1,7 @@
 contract_id: futures_raw_5m.v1
 dataset_id: futures_raw_5m
 artifact_class: external_pattern
-producer: moex_data.futures.raw_5m_loader
+producer: moex_data.futures.materialize_raw_5m
 consumers:
   - moex_data.futures.resampler
   - moex_data.futures.quality_report_builder
@@ -22,6 +22,7 @@ identity_model:
     - board
     - market
     - engine
+    - source_id
   optional_source_grouping_fields:
     - family
   family_as_canonical_identity_allowed: false
@@ -49,11 +50,14 @@ required_columns:
   - source
   - ingest_ts
 native_5m_materialization:
-  producer: moex_data.futures.materialize_raw_5m
+  producer: moex_data.futures.materialize_forts_raw_5m_instrument
+  source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+  source_id: moex_algopack_fo_tradestats_5m
   source_selection: explicit_source_id
   instrument_selection: explicit_instrument_id
   date_selection: explicit_date_or_approved_range
   fallback_source_allowed: false
+  authentication_env: MOEX_API_KEY
   query_params:
     date: "{YYYY-MM-DD}"
     from: "{YYYY-MM-DD}"
@@ -64,6 +68,7 @@ native_5m_materialization:
     iss.only: tradestats
   required_contract_inputs:
     - MOEX_DATA_ROOT
+    - MOEX_API_KEY
     - instrument_id
     - source_id
     - secid
@@ -75,6 +80,7 @@ native_5m_materialization:
     - raw_manifest_ref
     - raw_quality_report_ref
   failure_semantics:
+    unauthorized: fail_closed
     empty_response: fail_closed
     schema_mismatch: fail_closed
     missing_required_contract_input: fail_closed
