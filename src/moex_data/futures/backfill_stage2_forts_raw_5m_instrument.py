@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 from typing import Final, Sequence
 
@@ -103,6 +104,39 @@ def _authorize(
         raise Stage2QuotesBackfillError("instrument/source pilot evidence is not eligible for controlled Stage 2 backfill")
 
 
+def _emit_progress(
+    *,
+    instrument_id: str,
+    secid: str,
+    processed_dates: int,
+    total_dates: int,
+    trade_date: str | None,
+    partition_count: int,
+    skipped_count: int,
+    failure_count: int,
+    event: str = "progress",
+) -> None:
+    print(
+        json.dumps(
+            {
+                "event": event,
+                "instrument_id": instrument_id,
+                "secid": secid,
+                "processed_dates": processed_dates,
+                "total_dates": total_dates,
+                "trade_date": trade_date,
+                "partition_count": partition_count,
+                "skipped_empty_source_dates": skipped_count,
+                "failure_count": failure_count,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def backfill_range(
     *,
     date_start: str,
@@ -117,11 +151,14 @@ def backfill_range(
     apim_base_url: str | None = None,
     max_dates: int | None = None,
     create_accepted_pointer: bool = False,
+    progress_every: int = 0,
 ) -> base.BackfillSummary:
     checked_instrument = base._require_token(instrument_id, "instrument_id")
     checked_secid = base._require_token(secid, "secid")
     checked_source = base._require_token(source_id, "source_id")
     checked_version = base._require_token(artifact_version, "artifact_version")
+    if progress_every < 0:
+        raise Stage2QuotesBackfillError("progress_every must be >= 0")
     _authorize(
         registry_path=registry_path,
         data_lake_path=data_lake_path,
@@ -142,7 +179,20 @@ def backfill_range(
     failures: list[dict[str, str]] = []
     quality_rows: list[dict[str, object]] = []
 
-    for trade_date in requested_dates:
+    if progress_every:
+        _emit_progress(
+            instrument_id=checked_instrument,
+            secid=checked_secid,
+            processed_dates=0,
+            total_dates=len(requested_dates),
+            trade_date=None,
+            partition_count=0,
+            skipped_count=0,
+            failure_count=0,
+            event="start",
+        )
+
+    for index, trade_date in enumerate(requested_dates, start=1):
         partition_version = base._partition_version(checked_version, trade_date, checked_instrument, checked_secid)
         try:
             result = materializer.materialize_instrument_partition(
@@ -163,6 +213,17 @@ def backfill_range(
                 skipped_empty_dates.append(trade_date)
             else:
                 failures.append({"trade_date": trade_date, "error": message})
+        if progress_every and (index % progress_every == 0 or index == len(requested_dates)):
+            _emit_progress(
+                instrument_id=checked_instrument,
+                secid=checked_secid,
+                processed_dates=index,
+                total_dates=len(requested_dates),
+                trade_date=trade_date,
+                partition_count=len(successes),
+                skipped_count=len(skipped_empty_dates),
+                failure_count=len(failures),
+            )
 
     if quality_rows:
         validate_quality_report_rows(quality_rows)
@@ -261,6 +322,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--apim-base-url", default=None)
     parser.add_argument("--max-dates", type=int, default=None)
+    parser.add_argument("--progress-every", type=int, default=25)
     parser.add_argument("--create-accepted-pointer", action="store_true")
     return parser.parse_args(argv)
 
@@ -282,6 +344,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             apim_base_url=args.apim_base_url,
             max_dates=args.max_dates,
             create_accepted_pointer=args.create_accepted_pointer,
+            progress_every=args.progress_every,
         )
     except Exception as exc:
         print(json.dumps({"status": "failed", "dataset_id": DATASET_ID, "error": str(exc), "latest_autodetect_used": False}, ensure_ascii=False, sort_keys=True))
