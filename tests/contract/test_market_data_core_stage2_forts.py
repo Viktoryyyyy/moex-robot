@@ -141,6 +141,6 @@ def test_stage2_onboarding_uses_canonical_pointer_and_separate_futoi_lane() -> N
     assert "dataset_id: futures_futoi_raw" in onboarding
     assert "quote_partition_embedding_allowed: false" in onboarding
     assert "independent_quality_manifest_pointer_required: true" in onboarding
-    assert "current_status: pilot_passed" in onboarding
+    assert "status: pilot_passed" in onboarding
     assert "backfill_producer: moex_data.futures.backfill_futoi_instrument" in onboarding
     assert "controlled_quote_backfill_producer: moex_data.futures.backfill_stage2_forts_raw_5m_instrument" in onboarding
