@@ -50,6 +50,19 @@ instrument_scope:
     - 30m
     - 1h
     - 4h
+market_data_storage_policy:
+  status: architecture_fixed_migration_pending
+  canonical_new_write_root: "${MOEX_DATA_ROOT}/market"
+  raw_quotes_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
+  futoi_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
+  quotes_and_futoi_share_partition_file_allowed: false
+  new_instrument_onboarding_to_legacy_roots_allowed: false
+  new_dataset_creation_to_legacy_roots_allowed: false
+  legacy_roots:
+    - "${MOEX_DATA_ROOT}/forts"
+    - "${MOEX_DATA_ROOT}/futures"
+  legacy_root_status: compatibility_only_migration_required
+  physical_data_migration_status: pending_separate_migration
 phase2_6_source_bindings:
   status: design_config_binding_only
   readiness_flags:
