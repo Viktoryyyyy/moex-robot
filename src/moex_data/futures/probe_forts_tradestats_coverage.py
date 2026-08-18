@@ -13,7 +13,8 @@ from . import materialize_raw_5m as core
 
 DEFAULT_START_DATE: Final[str] = "2020-01-01"
 DEFAULT_END_DATE: Final[str] = "2026-08-17"
-MATERIALIZATION_ENDPOINT: Final[str] = core.SOURCE_ENDPOINT_APIM_FO_TRADESTATS
+SOURCE_ENDPOINT: Final[str] = core.SOURCE_ENDPOINT_APIM_FO_TRADESTATS
+MATERIALIZATION_ENDPOINT: Final[str] = SOURCE_ENDPOINT
 AVAILABILITY_PROBE_ENDPOINT_PATTERN: Final[str] = "/iss/datashop/algopack/fo/tradestats/{SECID}.json"
 MAX_WINDOW_PAGES: Final[int] = 100
 
