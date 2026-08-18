@@ -18,6 +18,7 @@ SOURCE_ID: Final[str] = "moex_algopack_fo_tradestats_5m"
 SOURCE_CONTRACT_REF: Final[str] = "contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml"
 SOURCE_CANDIDATE: Final[str] = core.SOURCE_CANDIDATE_APIM_TRADESTATS
 SOURCE_ENDPOINT: Final[str] = core.SOURCE_ENDPOINT_APIM_FO_TRADESTATS
+_BASE_AUTH_HEADERS = core._auth_headers
 STORAGE_PATTERN: Final[str] = (
     "${MOEX_DATA_ROOT}/market/raw/timeframe=5m/"
     "instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet"
@@ -57,7 +58,7 @@ def load_env_file(path: str | None) -> None:
 
 def _auth_headers_with_bearer(env: Mapping[str, str] | None) -> dict[str, str]:
     active_env = os.environ if env is None else env
-    headers = dict(core._auth_headers(env))
+    headers = dict(_BASE_AUTH_HEADERS(env))
     token = str(active_env.get("MOEX_API_KEY", "")).strip()
     if not token:
         raise ValueError("MOEX_API_KEY is required for canonical FORTS AlgoPack source")
