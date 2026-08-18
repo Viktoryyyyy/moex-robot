@@ -441,11 +441,31 @@ def rows_stats(frame: pd.DataFrame) -> Dict[str, Any]:
     return {"rows": int(len(frame)), "min_ts": values.min(), "max_ts": values.max()}
 
 
+def _futoi_schema_error(frame: pd.DataFrame) -> str:
+    if frame.empty:
+        return "empty_response"
+    columns = {str(c).strip().lower() for c in frame.columns}
+    if "error_message" in columns:
+        return "ERROR_MESSAGE payload"
+    required = {"clgroup", "pos", "pos_long", "pos_short", "pos_long_num", "pos_short_num"}
+    if not required.issubset(columns):
+        return "missing_required_futoi_columns"
+    if "moment" not in columns and not {"tradedate", "tradetime"}.issubset(columns):
+        return "missing_futoi_timestamp_columns"
+    return ""
+
+
 def probe_one_path(base_url: str, path: str, params: Dict[str, Any], timeout: float, use_apim: bool) -> Tuple[str, pd.DataFrame, str, str, str]:
     url = url_join(base_url, path)
     try:
         data = request_json(base_url, path, params, timeout, use_apim)
-        frame = block_to_frame(data, ["data", "securities", "tradestats", "obstats", "hi2"])
+        is_futoi = "/analyticalproducts/futoi/" in path
+        preferred = ["futoi"] if is_futoi else ["data", "securities", "tradestats", "obstats", "hi2"]
+        frame = block_to_frame(data, preferred)
+        if is_futoi:
+            error = _futoi_schema_error(frame)
+            if error:
+                return "unavailable", pd.DataFrame(), url, "futoi_schema_invalid", error
         status = "available" if not frame.empty else "unavailable"
         return status, frame, url, "", ""
     except Exception as exc:
@@ -469,12 +489,11 @@ def endpoint_probe_candidates(endpoint_id: str, secid: str, family: str, config_
             (config_path, {"secid": secid}, True),
         ]
     if endpoint_id == "moex_futoi":
-        ticker = family or secid
+        ticker = str(family or secid).strip().lower()
+        if not ticker:
+            return []
         return [
-            ("/iss/analyticalproducts/futoi/securities/" + ticker.lower() + ".json", {}, False),
-            ("/iss/analyticalproducts/futoi/securities/" + secid.lower() + ".json", {}, False),
-            (config_path, {"ticker": ticker}, False),
-            (config_path, {"secid": secid}, False),
+            ("/iss/analyticalproducts/futoi/securities/" + ticker + ".json", {"latest": 1}, True),
         ]
     return [(config_path, {"secid": secid}, True)]
 
@@ -514,8 +533,8 @@ def probe_endpoint_for_instrument(
         if status == "unavailable" and best_status != "available":
             best_status = "unavailable"
             best_frame = frame
-            error_code = ""
-            error_message = ""
+            error_code = code
+            error_message = msg
         elif status == "error" and best_status == "error":
             error_code = code
             error_message = msg
