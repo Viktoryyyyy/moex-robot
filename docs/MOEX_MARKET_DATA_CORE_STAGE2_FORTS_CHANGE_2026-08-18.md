@@ -42,7 +42,8 @@ A later server coverage probe using the per-SECID availability route with a broa
 Therefore:
 
 - Quotes pilot status: passed;
-- Quotes backfill materialization: enabled after pilot acceptance;
+- Stage 2 controlled Quotes backfill readiness: true;
+- global `enabled_for_raw_5m_materialization`: false;
 - Quotes historical first-available date: pending canonical exact-route reprobe;
 - the invalid broad per-SECID coverage result must not be used as evidence of absent history.
 
@@ -50,7 +51,11 @@ Canonical coverage probe:
 
 `moex_data.futures.probe_forts_tradestats_coverage`
 
-It uses the same generic APIM tradestats endpoint and explicit request fields as the canonical writer and fails closed on `ERROR_MESSAGE` payloads.
+Controlled backfill producer:
+
+`moex_data.futures.backfill_stage2_forts_raw_5m_instrument`
+
+It requires `evidence_status=pilot_passed` plus Stage 2 `backfill_ready=true` while the generic runtime/materialization flag remains false.
 
 ## FUTOI — public ISS invalidated, APIM accepted
 
@@ -68,7 +73,7 @@ Canonical FUTOI source:
 - public ISS fallback: forbidden;
 - `ERROR_MESSAGE` payload: fail closed.
 
-Authenticated APIM revalidation on 2026-08-18 proved the required FUTOI schema for `usdrubf`, `cnyrubf`, `si`, and `cr`. The one-date canonical materialization pilot for `2026-08-17` then passed for all four identities with `quality_status=pass`, 2 rows each, no hardcoded path, no latest autodetect, and separate canonical supplementary partitions.
+Authenticated APIM revalidation on 2026-08-18 proved the required FUTOI schema for `usdrubf`, `cnyrubf`, `si`, and `cr`. The one-date canonical materialization pilot for `2026-08-17` passed for all four identities with `quality_status=pass`, 2 rows each, no hardcoded path, no latest autodetect, and separate canonical supplementary partitions.
 
 Canonical FUTOI storage:
 
@@ -87,14 +92,17 @@ Server APIM coverage evidence through `2026-08-17`:
 - `usdrubf`: `2022-12-30` → `2026-08-17`;
 - `cnyrubf`: `2022-12-30` → `2026-08-17`.
 
-Canonical full-range runner:
+Canonical controlled full-range runner:
 
 `moex_data.futures.backfill_futoi_instrument`
 
 Rules:
 
 - explicit `date_start`, `date_end`, `instrument_id`, and `run_id` only;
-- registry FUTOI materialization must be enabled;
+- registry `evidence_status` must be `pilot_passed`;
+- FUTOI availability/probe evidence must be `available/completed`;
+- Stage 2 `backfill_ready` must be true;
+- global FUTOI materialization flag remains false;
 - non-trading empty dates may be skipped;
 - network/schema/`ERROR_MESSAGE` failures fail the run;
 - accepted pointer may be written only when aggregate quality is `pass` and refresh status is `succeeded`.
@@ -103,15 +111,17 @@ Rules:
 
 After pilot acceptance:
 
-- Quotes raw materialization: enabled for controlled backfill;
-- FUTOI materialization: enabled for controlled backfill;
-- backfill readiness: true;
+- global Quotes raw materialization flag: false;
+- global FUTOI materialization flag: false;
+- Stage 2 controlled backfill readiness: true;
 - accepted pointer readiness: false until full-range validation;
 - observed-source refresh readiness: false;
 - scheduler: disabled;
 - D1/W1 derivation: disabled;
 - research: disabled;
 - automatic Si/CR roll: disabled.
+
+This separation is intentional: controlled Stage 2 historical materialization must not authorize the older EMA Phase 2.6 ingestion/materialization/runtime gate.
 
 ## Next acceptance sequence
 
