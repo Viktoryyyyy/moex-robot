@@ -11,7 +11,7 @@ scope:
   source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
   registry_ref: configs/instruments/forts_instrument_registry.v1.yaml
 problem_statement:
-  current_registry_scope: USDRUBF_CNYRUBF_SiU6_CRU6_source_identity_bound
+  current_registry_scope: USDRUBF_CNYRUBF_SiU6_CRU6_pilots_passed_backfill_materialization_enabled
   previous_pointer_shape: artifact_id_plus_instrument_id_plus_secid
   previous_pointer_collision_risk: true
   pointer_runner_scope_validation: pointer_scope_must_equal_exactly_one_instrument_id
@@ -164,12 +164,18 @@ futoi_lane:
   independent_quality_manifest_pointer_required: true
   pilot_producer: moex_data.futures.materialize_futoi_instrument
   availability_gate:
-    current_status: apim_revalidation_required
+    current_status: pilot_passed
     availability_status_required: available
     probe_status_required: completed
-    current_registry_availability_status: not_checked
-    current_registry_probe_status: not_checked
+    current_registry_availability_status: available
+    current_registry_probe_status: completed
     pilot_before_apim_revalidation_allowed: false
+  pilot_acceptance:
+    trade_date: "2026-08-17"
+    instruments_passed: 4
+    quality_status_required: pass
+    latest_autodetect_used_required: false
+  backfill_producer: moex_data.futures.backfill_futoi_instrument
   stage2_ticker_bindings:
     usdrubf_futures_family: usdrubf
     cnyrubf_futures_family: cnyrubf
