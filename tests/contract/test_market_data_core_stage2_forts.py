@@ -90,9 +90,10 @@ def test_stage2_futoi_is_apim_only_registry_bound_and_fail_closed() -> None:
     assert '/ ("dataset_id=" + DATASET_ID)' in writer
     assert 'SOURCE_ID: Final[str] = "moex_algopack_futoi"' in writer
     assert 'source_id: moex_algopack_futoi' in registry
-    assert registry.count("availability_status: not_checked") == 4
-    assert registry.count("probe_status: not_checked") == 4
-    assert "futoi_pilot_ready: false" in data_lake
+    assert registry.count("availability_status: available") == 4
+    assert registry.count("probe_status: completed") == 4
+    assert "futoi_pilot_ready: true" in data_lake
+    assert "apim_revalidation_required: false" in data_lake
     for ticker in ("usdrubf", "cnyrubf", "si", "cr"):
         assert f"ticker: {ticker}" in registry
     assert '/ "futures" / "futoi_raw"' not in writer
@@ -104,6 +105,7 @@ def test_stage2_scheduler_and_research_remain_fail_closed() -> None:
     assert registry.count("enabled_for_update: false") == 4
     assert registry.count("enabled_for_d1_derivation: false") == 4
     assert registry.count("enabled_for_research: false") == 4
+    assert "backfill_ready: false" in data_lake
     assert "observed_source_refresh_ready: false" in data_lake
     assert "scheduler_ready: false" in data_lake
     assert "research_ready: false" in data_lake

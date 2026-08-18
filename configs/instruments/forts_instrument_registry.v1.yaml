@@ -1,6 +1,6 @@
 registry_id: forts_instrument_registry.v1
 schema_version: instrument_registry.v1
-status: stage2_futoi_apim_revalidation_required
+status: stage2_source_identity_bound
 activation_status: repo_only
 architecture_contract_ref: contracts/architecture/moex_data_access_canon_v1.yaml
 scope_policy:
@@ -45,8 +45,8 @@ instruments:
       futures_futoi_raw:
         source_id: moex_algopack_futoi
         ticker: usdrubf
-        availability_status: not_checked
-        probe_status: not_checked
+        availability_status: available
+        probe_status: completed
         evidence_date: "2026-08-18"
         enabled_for_materialization: false
     phase2_6_binding:
@@ -102,8 +102,8 @@ instruments:
       futures_futoi_raw:
         source_id: moex_algopack_futoi
         ticker: cnyrubf
-        availability_status: not_checked
-        probe_status: not_checked
+        availability_status: available
+        probe_status: completed
         evidence_date: "2026-08-18"
         enabled_for_materialization: false
   - instrument_id: si_futures_family
@@ -138,8 +138,8 @@ instruments:
       futures_futoi_raw:
         source_id: moex_algopack_futoi
         ticker: si
-        availability_status: not_checked
-        probe_status: not_checked
+        availability_status: available
+        probe_status: completed
         evidence_date: "2026-08-18"
         enabled_for_materialization: false
     phase2_6_binding:
@@ -196,8 +196,8 @@ instruments:
       futures_futoi_raw:
         source_id: moex_algopack_futoi
         ticker: cr
-        availability_status: not_checked
-        probe_status: not_checked
+        availability_status: available
+        probe_status: completed
         evidence_date: "2026-08-18"
         enabled_for_materialization: false
 rules:
