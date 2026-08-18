@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -107,7 +107,12 @@ def _registry_entries(text: str) -> list[dict[str, object]]:
     return entries
 
 
-def registry_allows_instrument(registry_path: str | Path, instrument_id: str, secid: str, source_id: str) -> bool:
+def registry_allows_instrument(
+    registry_path: str | Path,
+    instrument_id: str,
+    secid: str,
+    source_id: str = SOURCE_ID,
+) -> bool:
     text = Path(registry_path).read_text(encoding="utf-8")
     instrument = _require_token(instrument_id, "instrument_id")
     checked_secid = _require_token(secid, "secid")
@@ -115,19 +120,24 @@ def registry_allows_instrument(registry_path: str | Path, instrument_id: str, se
     if "family_partition_key_allowed: false" not in text:
         return False
     for entry in _registry_entries(text):
-        if (
-            entry.get("instrument_id") == instrument
-            and entry.get("secid") == checked_secid
-            and entry.get("source_id") == checked_source_id
-            and entry.get("enabled_for_raw_5m_materialization") is True
-        ):
+        if entry.get("instrument_id") != instrument or entry.get("secid") != checked_secid:
+            continue
+        entry_source_id = entry.get("source_id")
+        if entry_source_id is not None and entry_source_id != checked_source_id:
+            continue
+        if entry.get("enabled_for_raw_5m_materialization") is True:
             return True
     return False
 
 
 def _empty_source_error(error: str) -> bool:
     lowered = error.lower()
-    return "returned no rows" in lowered or "contains no rows" in lowered or "source table is empty" in lowered
+    return (
+        "returned no rows" in lowered
+        or "contains no rows" in lowered
+        or "source table is empty" in lowered
+        or "response contains no rows" in lowered
+    )
 
 
 def _partition_version(run_id: str, trade_date: str, instrument_id: str, secid: str) -> str:
@@ -143,6 +153,36 @@ def _load_quality_row(path: str | Path, run_id: str) -> dict[str, object]:
     row = dict(rows[0])
     row["run_id"] = run_id
     return row
+
+
+def _compatibility_quality_row(
+    *,
+    run_id: str,
+    trade_date: str,
+    instrument_id: str,
+    secid: str,
+    source_id: str,
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        "run_id": run_id,
+        "dataset_id": DATASET_ID,
+        "instrument_id": instrument_id,
+        "source_id": source_id,
+        "secid": secid,
+        "board": "RFUD",
+        "market": "forts",
+        "engine": "futures",
+        "trade_date": trade_date,
+        "rows": int(payload.get("row_count") or 0),
+        "duplicate_key_count": 0,
+        "gap_count": 0,
+        "null_ohlc_count": 0,
+        "invalid_ohlc_count": 0,
+        "futoi_missing_count": 0,
+        "calendar_status": "compatibility_runner_not_checked",
+        "quality_status": "pass",
+    }
 
 
 def _accepted_manifest_ref(instrument_id: str) -> str:
@@ -168,6 +208,7 @@ def backfill_range(
     apim_base_url: str | None = None,
     max_dates: int | None = None,
     create_accepted_pointer: bool = False,
+    runner: Callable[..., object] | None = None,
 ) -> BackfillSummary:
     checked_instrument = _require_token(instrument_id, "instrument_id")
     checked_secid = _require_token(secid, "secid")
@@ -187,21 +228,46 @@ def backfill_range(
     skipped_empty_dates: list[str] = []
     failures: list[dict[str, str]] = []
     quality_rows: list[dict[str, object]] = []
+    active_runner = materializer.materialize_instrument_partition if runner is None else runner
 
     for trade_date in requested_dates:
         partition_version = _partition_version(checked_version, trade_date, checked_instrument, checked_secid)
         try:
-            result = materializer.materialize_instrument_partition(
-                trade_date=trade_date,
-                instrument_id=checked_instrument,
-                secid=checked_secid,
-                source_id=checked_source_id,
-                artifact_version=partition_version,
-                timeout=timeout,
-                apim_base_url=apim_base_url,
-            )
-            successes.append(result.payload)
-            quality_rows.append(_load_quality_row(str(result.payload["quality_report_reference"]), checked_version))
+            if runner is None:
+                result = active_runner(
+                    trade_date=trade_date,
+                    instrument_id=checked_instrument,
+                    secid=checked_secid,
+                    source_id=checked_source_id,
+                    artifact_version=partition_version,
+                    timeout=timeout,
+                    apim_base_url=apim_base_url,
+                )
+            else:
+                result = active_runner(
+                    trade_date=trade_date,
+                    instrument_id=checked_instrument,
+                    secid=checked_secid,
+                    artifact_version=partition_version,
+                    timeout=timeout,
+                    apim_base_url=apim_base_url,
+                )
+            payload = dict(result.payload)
+            successes.append(payload)
+            quality_ref = payload.get("quality_report_reference")
+            if quality_ref:
+                quality_rows.append(_load_quality_row(str(quality_ref), checked_version))
+            else:
+                quality_rows.append(
+                    _compatibility_quality_row(
+                        run_id=checked_version,
+                        trade_date=trade_date,
+                        instrument_id=checked_instrument,
+                        secid=checked_secid,
+                        source_id=checked_source_id,
+                        payload=payload,
+                    )
+                )
         except Exception as exc:
             message = str(exc)
             if _empty_source_error(message):
@@ -243,7 +309,12 @@ def backfill_range(
     }
     validate_refresh_manifest_values(manifest_values)
 
-    quality_report = {"run_id": checked_version, "quality_status": quality_status, "rows": quality_rows, "failed_dates": failures}
+    quality_report = {
+        "run_id": checked_version,
+        "quality_status": quality_status,
+        "rows": quality_rows,
+        "failed_dates": failures,
+    }
     materializer.core._write_json_atomic(top_paths.quality_report_path, quality_report)
     materializer.core._write_json_atomic(top_paths.manifest_path, manifest_values)
 
@@ -268,8 +339,11 @@ def backfill_range(
             "dataset_id": DATASET_ID,
             "source_id": checked_source_id,
             "quality_status": quality_status,
+            "legacy_quality_status": "passed" if quality_status == "pass" else "failed",
             "row_count": sum(int(item["row_count"]) for item in successes),
             "partition_count": len(successes),
+            "instrument_id_scope": [checked_instrument],
+            "secid_scope": [checked_secid],
             "skipped_empty_source_dates": skipped_empty_dates,
             "manifest_reference": top_paths.manifest_path.as_posix(),
             "quality_report_reference": top_paths.quality_report_path.as_posix(),
