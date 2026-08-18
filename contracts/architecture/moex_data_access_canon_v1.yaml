@@ -49,6 +49,55 @@ storage_model:
       - trade_date
       - source_id
 
+market_data_lane_model:
+  quote_lane:
+    storage_class: raw_quotes
+    canonical_identity_field: instrument_id
+    supplementary_payload_embedding_allowed: false
+  supplementary_lane:
+    storage_class: supplementary
+    separate_dataset_required: true
+    same_identity_model_as_quotes_required: true
+    independent_quality_manifest_pointer_required: true
+  futoi:
+    lane: supplementary
+    separate_from_quote_partitions_required: true
+    independent_quality_manifest_pointer_required: true
+
+storage_transition_policy:
+  status: architecture_fixed_migration_pending
+  canonical_new_write_root: "${MOEX_DATA_ROOT}/market"
+  new_materialization_to_legacy_roots_allowed: false
+  new_dataset_creation_to_legacy_roots_allowed: false
+  new_instrument_onboarding_to_legacy_roots_allowed: false
+  legacy_read_compatibility_allowed: true
+  legacy_write_extension_allowed: false
+  physical_legacy_data_move_required_in_this_contract: false
+  physical_legacy_data_move_status: pending_separate_migration
+  known_legacy_raw_write_patterns:
+    - path_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
+      producer_ref: src/moex_data/futures/materialize_forts_raw_5m_tradestats.py
+      status: compatibility_only_migration_required
+    - path_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/trade_date={YYYY-MM-DD}/instrument_id={INSTRUMENT_ID}/secid={SECID}/part.parquet"
+      producer_ref: src/moex_data/futures/materialize_forts_raw_5m_instrument.py
+      status: compatibility_only_migration_required
+    - path_pattern: "${MOEX_DATA_ROOT}/futures/raw_5m/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
+      producer_ref: src/moex_data/futures/raw_5m_loader.py
+      status: compatibility_only_migration_required
+    - path_pattern: "${MOEX_DATA_ROOT}/futures/futoi_raw/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
+      producer_ref: src/moex_data/futures/futoi_raw_loader.py
+      status: compatibility_only_migration_required
+  canonical_pointer_model:
+    partition_keys:
+      - dataset_id
+      - instrument_id
+    secid_partition_allowed: false
+    new_instrument_legacy_pointer_fallback_allowed: false
+  known_legacy_pointer_pattern:
+    path_pattern: "${MOEX_DATA_ROOT}/state/datasets/artifact_id={ARTIFACT_ID}/instrument_id={INSTRUMENT_ID}/secid={SECID}/current_accepted_manifest.json"
+    producer_ref: src/moex_data/futures/refresh_forts_raw_5m_incremental_pointer.py
+    status: compatibility_only_migration_required
+
 registry_model:
   registry_required: true
   registry_entry_required_for_materialization: true
@@ -101,6 +150,7 @@ supplementary_data_model:
   rules:
     supplementary_data_cannot_redefine_canonical_identity: true
     supplementary_data_cannot_use_family_as_storage_canon: true
+    supplementary_data_cannot_be_embedded_in_quote_partition: true
 
 legacy_policy:
   legacy_csv_status: compatibility_only
