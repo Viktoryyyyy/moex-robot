@@ -11,6 +11,7 @@ from . import materialize_futoi_instrument as materializer
 DATASET_ID: Final[str] = materializer.DATASET_ID
 SOURCE_ID: Final[str] = materializer.SOURCE_ID
 REGISTRY_PATH: Final[str] = materializer.REGISTRY_PATH
+DATA_LAKE_PATH: Final[str] = "configs/datasets/futures_data_lake.v1.yaml"
 PRODUCER_ID: Final[str] = "moex_data.futures.backfill_futoi_instrument.v1"
 
 
@@ -39,6 +40,33 @@ def _date_range(start: date, end: date) -> list[date]:
         result.append(current)
         current += timedelta(days=1)
     return result
+
+
+def _section(text: str, header: str) -> str:
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.strip() != header:
+            continue
+        base_indent = len(line) - len(line.lstrip(" "))
+        collected = [line]
+        for candidate in lines[index + 1 :]:
+            if candidate.strip() and len(candidate) - len(candidate.lstrip(" ")) <= base_indent:
+                break
+            collected.append(candidate)
+        return "\n".join(collected)
+    raise FutoiBackfillError("required config section missing: " + header)
+
+
+def _stage2_backfill_ready(data_lake_path: str | Path = DATA_LAKE_PATH) -> bool:
+    text = Path(data_lake_path).read_text(encoding="utf-8")
+    section = _section(text, "stage2_forts_source_bindings:")
+    return (
+        "status: all_pilots_passed_backfill_ready" in section
+        and "backfill_ready: true" in section
+        and "accepted_pointer_ready: false" in section
+        and "scheduler_ready: false" in section
+        and "research_ready: false" in section
+    )
 
 
 def _empty_source_error(message: str) -> bool:
@@ -93,6 +121,19 @@ def _write_pointer(instrument_id: str, run_id: str, manifest_path: Path, quality
     return pointer_path
 
 
+def _authorize(binding: dict[str, object], data_lake_path: str | Path) -> None:
+    if not _stage2_backfill_ready(data_lake_path):
+        raise FutoiBackfillError("Stage 2 controlled backfill readiness is not enabled")
+    if str(binding.get("evidence_status")) != "pilot_passed":
+        raise FutoiBackfillError("registry instrument pilot evidence is not passed")
+    if binding.get("futoi.enabled_for_materialization") is not False:
+        raise FutoiBackfillError("global FUTOI materialization flag must remain false for controlled Stage 2 backfill")
+    if str(binding.get("futoi.source_id")) != SOURCE_ID:
+        raise FutoiBackfillError("registry FUTOI source_id does not match canonical source")
+    if str(binding.get("futoi.availability_status")) != "available" or str(binding.get("futoi.probe_status")) != "completed":
+        raise FutoiBackfillError("registry FUTOI APIM evidence is not available/completed")
+
+
 def backfill_range(
     *,
     date_start: str,
@@ -100,6 +141,7 @@ def backfill_range(
     instrument_id: str,
     run_id: str,
     registry_path: str | Path = REGISTRY_PATH,
+    data_lake_path: str | Path = DATA_LAKE_PATH,
     timeout: float = 60.0,
     apim_base_url: str | None = None,
     create_accepted_pointer: bool = False,
@@ -111,12 +153,7 @@ def backfill_range(
     checked_instrument = _require_token(instrument_id, "instrument_id")
     checked_run_id = _require_token(run_id, "run_id")
     binding = materializer._registry_binding(registry_path, checked_instrument)
-    if binding["futoi.enabled_for_materialization"] is not True:
-        raise FutoiBackfillError("registry FUTOI materialization is not enabled")
-    if str(binding["futoi.source_id"]) != SOURCE_ID:
-        raise FutoiBackfillError("registry FUTOI source_id does not match canonical source")
-    if str(binding["futoi.availability_status"]) != "available" or str(binding["futoi.probe_status"]) != "completed":
-        raise FutoiBackfillError("registry FUTOI APIM evidence is not available/completed")
+    _authorize(binding, data_lake_path)
 
     successes: list[dict[str, object]] = []
     skipped: list[str] = []
@@ -135,7 +172,7 @@ def backfill_range(
                 registry_path=registry_path,
                 timeout=timeout,
                 apim_base_url=apim_base_url,
-                require_enabled=True,
+                require_enabled=False,
             )
             successes.append(payload)
             quality = json.loads(Path(str(payload["quality_report_reference"])).read_text(encoding="utf-8"))
@@ -198,6 +235,7 @@ def backfill_range(
         "latest_autodetect_used": False,
         "hardcoded_server_path_used": False,
         "producer": PRODUCER_ID,
+        "stage2_controlled_backfill": True,
     }
     materializer._write_json_atomic(quality_path, quality_values)
     materializer._write_json_atomic(manifest_path, manifest_values)
@@ -225,16 +263,18 @@ def backfill_range(
         "accepted_manifest_pointer_reference": pointer_reference,
         "latest_autodetect_used": False,
         "hardcoded_server_path_used": False,
+        "stage2_controlled_backfill": True,
     }
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Backfill canonical FUTOI supplementary data for one explicit registry instrument.")
+    parser = argparse.ArgumentParser(description="Controlled Stage 2 backfill for canonical FUTOI supplementary data after pilot acceptance.")
     parser.add_argument("--date-start", required=True)
     parser.add_argument("--date-end", required=True)
     parser.add_argument("--instrument-id", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--registry-path", default=REGISTRY_PATH)
+    parser.add_argument("--data-lake-path", default=DATA_LAKE_PATH)
     parser.add_argument("--env-file", default=None)
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--apim-base-url", default=None)
@@ -252,6 +292,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             instrument_id=args.instrument_id,
             run_id=args.run_id,
             registry_path=args.registry_path,
+            data_lake_path=args.data_lake_path,
             timeout=args.timeout,
             apim_base_url=args.apim_base_url,
             create_accepted_pointer=args.create_accepted_pointer,
