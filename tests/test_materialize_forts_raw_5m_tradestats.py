@@ -13,15 +13,16 @@ def test_target_paths_use_instrument_id_partition(tmp_path, monkeypatch):
 
     assert paths.partition_path == (
         tmp_path
-        / "forts"
-        / "raw_5m"
-        / "tradestats"
-        / "trade_date=2026-06-02"
+        / "market"
+        / "raw"
+        / "timeframe=5m"
         / "instrument_id=forts.usdrubf"
-        / "secid=USDRUBF"
+        / "trade_date=2026-06-02"
+        / "source=moex_algopack_fo_tradestats_5m"
         / "part.parquet"
     )
     assert "family=" not in paths.partition_path.as_posix()
+    assert "secid=" not in paths.partition_path.as_posix()
 
 
 def test_result_payload_has_instrument_scope_and_no_latest_flags(tmp_path):

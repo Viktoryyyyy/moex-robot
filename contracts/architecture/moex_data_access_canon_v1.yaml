@@ -65,7 +65,7 @@ market_data_lane_model:
     independent_quality_manifest_pointer_required: true
 
 storage_transition_policy:
-  status: architecture_fixed_migration_pending
+  status: stage2_forts_quote_writer_migrated_futoi_pilot_writer_added
   canonical_new_write_root: "${MOEX_DATA_ROOT}/market"
   new_materialization_to_legacy_roots_allowed: false
   new_dataset_creation_to_legacy_roots_allowed: false
@@ -80,13 +80,15 @@ storage_transition_policy:
       status: compatibility_only_migration_required
     - path_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/trade_date={YYYY-MM-DD}/instrument_id={INSTRUMENT_ID}/secid={SECID}/part.parquet"
       producer_ref: src/moex_data/futures/materialize_forts_raw_5m_instrument.py
-      status: compatibility_only_migration_required
+      status: historical_pattern_writer_migrated_stage2
+      canonical_replacement_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
     - path_pattern: "${MOEX_DATA_ROOT}/futures/raw_5m/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
       producer_ref: src/moex_data/futures/raw_5m_loader.py
       status: compatibility_only_migration_required
     - path_pattern: "${MOEX_DATA_ROOT}/futures/futoi_raw/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
       producer_ref: src/moex_data/futures/futoi_raw_loader.py
       status: compatibility_only_migration_required
+      canonical_stage2_writer_ref: src/moex_data/futures/materialize_futoi_instrument.py
   canonical_pointer_model:
     partition_keys:
       - dataset_id
@@ -114,6 +116,9 @@ registry_model:
     - enabled_for_update
     - enabled_for_retrieval
   generic_registry_default_entries_allowed: false
+  stage2_source_contract_refs:
+    quotes: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+    futoi: contracts/sources/futures/moex_iss_futoi.v1.yaml
 
 loading_model:
   source_selection: explicit_source_id
