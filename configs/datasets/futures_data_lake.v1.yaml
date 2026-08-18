@@ -14,6 +14,8 @@ storage_backend:
 dataset_contract_refs:
   - contracts/datasets/futures_raw_5m.v1.yaml
   - contracts/datasets/futures_futoi_raw.v1.yaml
+  - contracts/datasets/futures_futoi_quality_report.v1.yaml
+  - contracts/datasets/futures_futoi_refresh_manifest.v1.yaml
   - contracts/datasets/futures_derived_d1.v1.yaml
   - contracts/datasets/futures_derived_w1.v1.yaml
   - contracts/datasets/futures_data_refresh_manifest.v1.yaml
@@ -22,6 +24,8 @@ dataset_contract_refs:
 artifact_class_index:
   futures_raw_5m.v1: external_pattern
   futures_futoi_raw.v1: external_pattern
+  futures_futoi_quality_report.v1: external_pattern
+  futures_futoi_refresh_manifest.v1: external_pattern
   futures_derived_d1.v1: external_pattern
   futures_derived_w1.v1: external_pattern
   futures_data_refresh_manifest.v1: external_pattern
@@ -29,13 +33,18 @@ artifact_class_index:
   futures_continuous_5m.v1: external_pattern
   moex_data_root: env_contract
   futures_data_lake.v1: repo_relative
+source_contract_refs:
+  quotes: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+  futoi: contracts/sources/futures/moex_iss_futoi.v1.yaml
 instrument_registry_ref:
   registry_id: forts_instrument_registry.v1
   repo_path: configs/instruments/forts_instrument_registry.v1.yaml
 instrument_scope:
-  default_instrument_ids:
+  stage2_instrument_ids:
     - usdrubf_futures_family
+    - cnyrubf_futures_family
     - si_futures_family
+    - cr_futures_family
   explicit_instrument_id_required: true
   explicit_source_id_required: true
   explicit_secid_required: true
@@ -51,7 +60,7 @@ instrument_scope:
     - 1h
     - 4h
 market_data_storage_policy:
-  status: architecture_fixed_migration_pending
+  status: stage2_canonical_writers_introduced_pilot_pending
   canonical_new_write_root: "${MOEX_DATA_ROOT}/market"
   raw_quotes_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
   futoi_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
@@ -63,16 +72,38 @@ market_data_storage_policy:
     - "${MOEX_DATA_ROOT}/futures"
   legacy_root_status: compatibility_only_migration_required
   physical_data_migration_status: pending_separate_migration
-phase2_6_source_bindings:
-  status: design_config_binding_only
+stage2_forts_source_bindings:
+  status: source_identity_bound_pilot_pending
+  evidence_date: "2026-08-18"
+  quote_source:
+    source_id: moex_algopack_fo_tradestats_5m
+    source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+    authentication_env: MOEX_API_KEY
+    availability_status: proven
+    proven_secids:
+      - USDRUBF
+      - CNYRUBF
+      - SiU6
+      - CRU6
+  futoi_source:
+    source_id: moex_iss_futoi
+    source_contract_ref: contracts/sources/futures/moex_iss_futoi.v1.yaml
+    availability_status: proven
+    proven_tickers:
+      - usdrubf
+      - cnyrubf
+      - si
+      - cr
   readiness_flags:
-    design_binding_created: true
-    ingestion_ready: false
-    runtime_ready: false
-    loader_ready: false
-    materialization_ready: false
-    feature_computation_ready: false
-    modeling_ready: false
+    source_identity_ready: true
+    quote_pilot_ready: true
+    futoi_pilot_ready: true
+    backfill_ready: false
+    accepted_pointer_ready: false
+    observed_source_refresh_ready: false
+    scheduler_ready: false
+    d1_materialization_ready: false
+    research_ready: false
   forecast_anchor:
     local_anchor: "06:00 Europe/Moscow"
     timezone: UTC
@@ -80,29 +111,12 @@ phase2_6_source_bindings:
     availability_ts_utc_required: true
     eligibility_rule: availability_ts_utc <= forecast_anchor_ts
     unknown_availability_ts_utc_rule: exclude_or_shift_by_at_least_one_trading_day
-  approved_source_contract_refs:
-    - contracts/sources/internal/usdrubf_d1_ohlc_from_5m.v1.yaml
-    - contracts/sources/internal/usdrubf_d1_ema_3_19_cross_context.v1.yaml
-    - contracts/sources/internal/usdrubf_d1_classical_indicators.v1.yaml
-    - contracts/sources/futures/roll_expiry_mapping.v1.yaml
-    - contracts/calendars/rates/cbr_key_rate_calendar.v1.yaml
-    - contracts/calendars/calendar/ru_tax_periods.v1.yaml
-    - contracts/calendars/calendar/ru_us_holidays.v1.yaml
-  blocked_source_refs:
-    - contracts/sources/futoi/participant_positioning.v1.yaml
-    - contracts/sources/oil/**
-    - contracts/sources/dollar_index/**
-    - contracts/sources/currency/**
-    - news_events.raw_ingestion
-    - news_events.llm_classification
   explicit_non_authorizations:
-    - no external provider ingestion
-    - no generated data path
-    - no runtime loader
-    - no materialization job
-    - no feature computation
-    - no model fitting
-    - no prediction
+    - no scheduler before observed-source refresh pass
+    - no automatic Si or CR roll selection in Stage 2
+    - no D1/W1 derivation before raw acceptance
+    - no research enablement before accepted pointer
+    - no server apply in Stage 2 change action
 blocked_contracts:
   - futures_continuous_5m.v1
 path_rules:
