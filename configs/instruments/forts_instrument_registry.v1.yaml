@@ -25,10 +25,10 @@ instruments:
     engine: futures
     source_artifact_id: external.apim.fo.tradestats.v1
     raw_5m_artifact_id: futures_raw_5m.v1
-    enabled_for_loading: true
+    enabled_for_loading: false
     enabled_for_update: false
     enabled_for_retrieval: false
-    enabled_for_raw_5m_materialization: true
+    enabled_for_raw_5m_materialization: false
     enabled_for_d1_derivation: false
     enabled_for_research: false
     storage_partition_values:
@@ -50,10 +50,10 @@ instruments:
         evidence_date: "2026-08-18"
         enabled_for_materialization: false
     phase2_6_binding:
-      status: source_identity_bound_pilot_required
-      data_availability_status: proven
-      ingestion_status: pilot_ready
-      materialization_status: pilot_required
+      status: design_config_binding_only
+      data_availability_status: not_proven
+      ingestion_status: not_ready
+      materialization_status: not_ready
       modeling_status: blocked
       runtime_status: not_ready
       timezone_policy:
@@ -61,14 +61,16 @@ instruments:
         forecast_anchor_local_time: "06:00 Europe/Moscow"
         forecast_anchor_timezone: UTC
       source_contract_refs:
-        - contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
-        - contracts/sources/futures/moex_iss_futoi.v1.yaml
+        - contracts/sources/internal/usdrubf_d1_ohlc_from_5m.v1.yaml
+        - contracts/sources/internal/usdrubf_d1_ema_3_19_cross_context.v1.yaml
+        - contracts/sources/internal/usdrubf_d1_classical_indicators.v1.yaml
       roll_expiry_mapping_ref: contracts/sources/futures/roll_expiry_mapping.v1.yaml
       explicit_non_authorizations:
-        - no scheduler enablement before observed-source refresh pass
-        - no d1 derivation before raw acceptance
-        - no research enablement before accepted pointer
-        - no server apply in Stage 2 change action
+        - no current contract month selection automation
+        - no continuous contract runtime selection
+        - no loader readiness
+        - no materialization readiness
+        - no modeling readiness
   - instrument_id: cnyrubf_futures_family
     canonical_symbol: CNYRUBF
     display_name: CNYRUBF perpetual futures
@@ -80,10 +82,10 @@ instruments:
     engine: futures
     source_artifact_id: external.apim.fo.tradestats.v1
     raw_5m_artifact_id: futures_raw_5m.v1
-    enabled_for_loading: true
+    enabled_for_loading: false
     enabled_for_update: false
     enabled_for_retrieval: false
-    enabled_for_raw_5m_materialization: true
+    enabled_for_raw_5m_materialization: false
     enabled_for_d1_derivation: false
     enabled_for_research: false
     storage_partition_values:
@@ -104,26 +106,6 @@ instruments:
         probe_status: completed
         evidence_date: "2026-08-18"
         enabled_for_materialization: false
-    phase2_6_binding:
-      status: source_identity_bound_pilot_required
-      data_availability_status: proven
-      ingestion_status: pilot_ready
-      materialization_status: pilot_required
-      modeling_status: blocked
-      runtime_status: not_ready
-      timezone_policy:
-        market_timezone: Europe/Moscow
-        forecast_anchor_local_time: "06:00 Europe/Moscow"
-        forecast_anchor_timezone: UTC
-      source_contract_refs:
-        - contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
-        - contracts/sources/futures/moex_iss_futoi.v1.yaml
-      roll_expiry_mapping_ref: contracts/sources/futures/roll_expiry_mapping.v1.yaml
-      explicit_non_authorizations:
-        - no scheduler enablement before observed-source refresh pass
-        - no d1 derivation before raw acceptance
-        - no research enablement before accepted pointer
-        - no server apply in Stage 2 change action
   - instrument_id: si_futures_family
     canonical_symbol: Si
     display_name: Si futures family current explicit contract
@@ -135,10 +117,10 @@ instruments:
     engine: futures
     source_artifact_id: external.apim.fo.tradestats.v1
     raw_5m_artifact_id: futures_raw_5m.v1
-    enabled_for_loading: true
+    enabled_for_loading: false
     enabled_for_update: false
     enabled_for_retrieval: false
-    enabled_for_raw_5m_materialization: true
+    enabled_for_raw_5m_materialization: false
     enabled_for_d1_derivation: false
     enabled_for_research: false
     storage_partition_values:
@@ -161,10 +143,10 @@ instruments:
         evidence_date: "2026-08-18"
         enabled_for_materialization: false
     phase2_6_binding:
-      status: source_identity_bound_pilot_required
-      data_availability_status: proven
-      ingestion_status: pilot_ready
-      materialization_status: pilot_required
+      status: design_config_binding_only
+      data_availability_status: not_proven
+      ingestion_status: not_ready
+      materialization_status: not_ready
       modeling_status: blocked
       runtime_status: not_ready
       timezone_policy:
@@ -172,15 +154,16 @@ instruments:
         forecast_anchor_local_time: "06:00 Europe/Moscow"
         forecast_anchor_timezone: UTC
       source_contract_refs:
-        - contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
-        - contracts/sources/futures/moex_iss_futoi.v1.yaml
+        - contracts/sources/internal/usdrubf_d1_ohlc_from_5m.v1.yaml
+        - contracts/sources/internal/usdrubf_d1_ema_3_19_cross_context.v1.yaml
+        - contracts/sources/internal/usdrubf_d1_classical_indicators.v1.yaml
       roll_expiry_mapping_ref: contracts/sources/futures/roll_expiry_mapping.v1.yaml
       explicit_non_authorizations:
-        - no automatic contract roll selection
-        - no scheduler enablement before observed-source refresh pass
-        - no d1 derivation before raw acceptance
-        - no research enablement before accepted pointer
-        - no server apply in Stage 2 change action
+        - no current contract month selection automation
+        - no continuous contract runtime selection
+        - no loader readiness
+        - no materialization readiness
+        - no modeling readiness
   - instrument_id: cr_futures_family
     canonical_symbol: CR
     display_name: CR CNY futures family current explicit contract
@@ -192,10 +175,10 @@ instruments:
     engine: futures
     source_artifact_id: external.apim.fo.tradestats.v1
     raw_5m_artifact_id: futures_raw_5m.v1
-    enabled_for_loading: true
+    enabled_for_loading: false
     enabled_for_update: false
     enabled_for_retrieval: false
-    enabled_for_raw_5m_materialization: true
+    enabled_for_raw_5m_materialization: false
     enabled_for_d1_derivation: false
     enabled_for_research: false
     storage_partition_values:
@@ -217,27 +200,6 @@ instruments:
         probe_status: completed
         evidence_date: "2026-08-18"
         enabled_for_materialization: false
-    phase2_6_binding:
-      status: source_identity_bound_pilot_required
-      data_availability_status: proven
-      ingestion_status: pilot_ready
-      materialization_status: pilot_required
-      modeling_status: blocked
-      runtime_status: not_ready
-      timezone_policy:
-        market_timezone: Europe/Moscow
-        forecast_anchor_local_time: "06:00 Europe/Moscow"
-        forecast_anchor_timezone: UTC
-      source_contract_refs:
-        - contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
-        - contracts/sources/futures/moex_iss_futoi.v1.yaml
-      roll_expiry_mapping_ref: contracts/sources/futures/roll_expiry_mapping.v1.yaml
-      explicit_non_authorizations:
-        - no automatic contract roll selection
-        - no scheduler enablement before observed-source refresh pass
-        - no d1 derivation before raw acceptance
-        - no research enablement before accepted pointer
-        - no server apply in Stage 2 change action
 rules:
   storage_partition_key: instrument_id
   source_partition_key: source_id
