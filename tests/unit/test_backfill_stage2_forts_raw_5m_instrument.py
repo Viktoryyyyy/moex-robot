@@ -38,7 +38,7 @@ def _data_lake(path: Path, *, ready: bool = True) -> Path:
                 "    historical_backfill_instrument_ids:",
                 "      - usdrubf_futures_family",
                 "      - cnyrubf_futures_family",
-                "    current_reference_instrument_ids:",
+                "    reference_instrument_ids:",
                 "      - si_futures_family",
                 "      - cr_futures_family",
                 "  readiness_flags:",
@@ -87,7 +87,7 @@ def test_stage2_quote_authorization_requires_pilot_passed_with_global_flag_false
         )
 
 
-def test_stage2_quote_authorization_rejects_current_reference_contracts(tmp_path) -> None:
+def test_stage2_quote_authorization_rejects_reference_contracts(tmp_path) -> None:
     data_lake = _data_lake(tmp_path / "data_lake.yaml")
     registry = _registry(
         tmp_path / "registry.yaml",
