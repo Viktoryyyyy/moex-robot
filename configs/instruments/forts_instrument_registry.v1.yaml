@@ -1,6 +1,6 @@
 registry_id: forts_instrument_registry.v1
 schema_version: instrument_registry.v1
-status: generic_registry_contract
+status: stage2_source_identity_bound
 activation_status: repo_only
 architecture_contract_ref: contracts/architecture/moex_data_access_canon_v1.yaml
 scope_policy:
@@ -11,33 +11,49 @@ scope_policy:
   latest_autodetect_allowed: false
   implicit_contract_selection_allowed: false
   unresolved_instrument_blocks_materialization: true
+quote_source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+futoi_source_contract_ref: contracts/sources/futures/moex_iss_futoi.v1.yaml
 instruments:
   - instrument_id: usdrubf_futures_family
     canonical_symbol: USDRUBF
-    display_name: USDRUBF futures family design binding
-    source_system: moex_iss_forts
-    source_id: moex_forts_usdrubf_design_placeholder
+    display_name: USDRUBF perpetual futures
+    source_system: moex_algopack
+    source_id: moex_algopack_fo_tradestats_5m
     secid: USDRUBF
     board: RFUD
     market: forts
     engine: futures
-    source_artifact_id: internal.usdrubf_d1_ohlc_from_5m.v1
+    source_artifact_id: external.apim.fo.tradestats.v1
     raw_5m_artifact_id: futures_raw_5m.v1
-    enabled_for_loading: false
+    enabled_for_loading: true
     enabled_for_update: false
     enabled_for_retrieval: false
-    enabled_for_raw_5m_materialization: false
+    enabled_for_raw_5m_materialization: true
     enabled_for_d1_derivation: false
     enabled_for_research: false
     storage_partition_values:
       instrument_id: usdrubf_futures_family
       secid: USDRUBF
     evidence_status: pilot_required
+    contract_binding:
+      type: perpetual
+      observed_secid: USDRUBF
+      observed_expiration_date: "2100-01-01"
+      observed_last_trade_date: "2100-01-01"
+      evidence_date: "2026-08-18"
+    supplementary_sources:
+      futures_futoi_raw:
+        source_id: moex_iss_futoi
+        ticker: usdrubf
+        availability_status: available
+        probe_status: completed
+        evidence_date: "2026-08-18"
+        enabled_for_materialization: false
     phase2_6_binding:
-      status: design_config_binding_only
-      data_availability_status: not_proven
-      ingestion_status: not_ready
-      materialization_status: not_ready
+      status: source_identity_bound_pilot_required
+      data_availability_status: proven
+      ingestion_status: pilot_ready
+      materialization_status: pilot_required
       modeling_status: blocked
       runtime_status: not_ready
       timezone_policy:
@@ -45,42 +61,110 @@ instruments:
         forecast_anchor_local_time: "06:00 Europe/Moscow"
         forecast_anchor_timezone: UTC
       source_contract_refs:
-        - contracts/sources/internal/usdrubf_d1_ohlc_from_5m.v1.yaml
-        - contracts/sources/internal/usdrubf_d1_ema_3_19_cross_context.v1.yaml
-        - contracts/sources/internal/usdrubf_d1_classical_indicators.v1.yaml
+        - contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+        - contracts/sources/futures/moex_iss_futoi.v1.yaml
       roll_expiry_mapping_ref: contracts/sources/futures/roll_expiry_mapping.v1.yaml
       explicit_non_authorizations:
-        - no current contract month selection automation
-        - no continuous contract runtime selection
-        - no loader readiness
-        - no materialization readiness
-        - no modeling readiness
-  - instrument_id: si_futures_family
-    canonical_symbol: Si
-    display_name: Si futures family design binding
-    source_system: moex_iss_forts
-    source_id: moex_forts_si_design_placeholder
-    secid: Si
+        - no scheduler enablement before observed-source refresh pass
+        - no d1 derivation before raw acceptance
+        - no research enablement before accepted pointer
+        - no server apply in Stage 2 change action
+  - instrument_id: cnyrubf_futures_family
+    canonical_symbol: CNYRUBF
+    display_name: CNYRUBF perpetual futures
+    source_system: moex_algopack
+    source_id: moex_algopack_fo_tradestats_5m
+    secid: CNYRUBF
     board: RFUD
     market: forts
     engine: futures
-    source_artifact_id: internal.usdrubf_d1_ohlc_from_5m.v1
+    source_artifact_id: external.apim.fo.tradestats.v1
     raw_5m_artifact_id: futures_raw_5m.v1
-    enabled_for_loading: false
+    enabled_for_loading: true
     enabled_for_update: false
     enabled_for_retrieval: false
-    enabled_for_raw_5m_materialization: false
+    enabled_for_raw_5m_materialization: true
+    enabled_for_d1_derivation: false
+    enabled_for_research: false
+    storage_partition_values:
+      instrument_id: cnyrubf_futures_family
+      secid: CNYRUBF
+    evidence_status: pilot_required
+    contract_binding:
+      type: perpetual
+      observed_secid: CNYRUBF
+      observed_expiration_date: "2100-01-01"
+      observed_last_trade_date: "2100-01-01"
+      evidence_date: "2026-08-18"
+    supplementary_sources:
+      futures_futoi_raw:
+        source_id: moex_iss_futoi
+        ticker: cnyrubf
+        availability_status: available
+        probe_status: completed
+        evidence_date: "2026-08-18"
+        enabled_for_materialization: false
+    phase2_6_binding:
+      status: source_identity_bound_pilot_required
+      data_availability_status: proven
+      ingestion_status: pilot_ready
+      materialization_status: pilot_required
+      modeling_status: blocked
+      runtime_status: not_ready
+      timezone_policy:
+        market_timezone: Europe/Moscow
+        forecast_anchor_local_time: "06:00 Europe/Moscow"
+        forecast_anchor_timezone: UTC
+      source_contract_refs:
+        - contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+        - contracts/sources/futures/moex_iss_futoi.v1.yaml
+      roll_expiry_mapping_ref: contracts/sources/futures/roll_expiry_mapping.v1.yaml
+      explicit_non_authorizations:
+        - no scheduler enablement before observed-source refresh pass
+        - no d1 derivation before raw acceptance
+        - no research enablement before accepted pointer
+        - no server apply in Stage 2 change action
+  - instrument_id: si_futures_family
+    canonical_symbol: Si
+    display_name: Si futures family current explicit contract
+    source_system: moex_algopack
+    source_id: moex_algopack_fo_tradestats_5m
+    secid: SiU6
+    board: RFUD
+    market: forts
+    engine: futures
+    source_artifact_id: external.apim.fo.tradestats.v1
+    raw_5m_artifact_id: futures_raw_5m.v1
+    enabled_for_loading: true
+    enabled_for_update: false
+    enabled_for_retrieval: false
+    enabled_for_raw_5m_materialization: true
     enabled_for_d1_derivation: false
     enabled_for_research: false
     storage_partition_values:
       instrument_id: si_futures_family
-      secid: Si
+      secid: SiU6
     evidence_status: pilot_required
+    contract_binding:
+      type: expiring_current_explicit
+      observed_secid: SiU6
+      observed_expiration_date: "2026-09-17"
+      observed_last_trade_date: "2026-09-17"
+      evidence_date: "2026-08-18"
+      automatic_roll_selection_allowed: false
+    supplementary_sources:
+      futures_futoi_raw:
+        source_id: moex_iss_futoi
+        ticker: si
+        availability_status: available
+        probe_status: completed
+        evidence_date: "2026-08-18"
+        enabled_for_materialization: false
     phase2_6_binding:
-      status: design_config_binding_only
-      data_availability_status: not_proven
-      ingestion_status: not_ready
-      materialization_status: not_ready
+      status: source_identity_bound_pilot_required
+      data_availability_status: proven
+      ingestion_status: pilot_ready
+      materialization_status: pilot_required
       modeling_status: blocked
       runtime_status: not_ready
       timezone_policy:
@@ -88,16 +172,72 @@ instruments:
         forecast_anchor_local_time: "06:00 Europe/Moscow"
         forecast_anchor_timezone: UTC
       source_contract_refs:
-        - contracts/sources/internal/usdrubf_d1_ohlc_from_5m.v1.yaml
-        - contracts/sources/internal/usdrubf_d1_ema_3_19_cross_context.v1.yaml
-        - contracts/sources/internal/usdrubf_d1_classical_indicators.v1.yaml
+        - contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+        - contracts/sources/futures/moex_iss_futoi.v1.yaml
       roll_expiry_mapping_ref: contracts/sources/futures/roll_expiry_mapping.v1.yaml
       explicit_non_authorizations:
-        - no current contract month selection automation
-        - no continuous contract runtime selection
-        - no loader readiness
-        - no materialization readiness
-        - no modeling readiness
+        - no automatic contract roll selection
+        - no scheduler enablement before observed-source refresh pass
+        - no d1 derivation before raw acceptance
+        - no research enablement before accepted pointer
+        - no server apply in Stage 2 change action
+  - instrument_id: cr_futures_family
+    canonical_symbol: CR
+    display_name: CR CNY futures family current explicit contract
+    source_system: moex_algopack
+    source_id: moex_algopack_fo_tradestats_5m
+    secid: CRU6
+    board: RFUD
+    market: forts
+    engine: futures
+    source_artifact_id: external.apim.fo.tradestats.v1
+    raw_5m_artifact_id: futures_raw_5m.v1
+    enabled_for_loading: true
+    enabled_for_update: false
+    enabled_for_retrieval: false
+    enabled_for_raw_5m_materialization: true
+    enabled_for_d1_derivation: false
+    enabled_for_research: false
+    storage_partition_values:
+      instrument_id: cr_futures_family
+      secid: CRU6
+    evidence_status: pilot_required
+    contract_binding:
+      type: expiring_current_explicit
+      observed_secid: CRU6
+      observed_expiration_date: "2026-09-17"
+      observed_last_trade_date: "2026-09-17"
+      evidence_date: "2026-08-18"
+      automatic_roll_selection_allowed: false
+    supplementary_sources:
+      futures_futoi_raw:
+        source_id: moex_iss_futoi
+        ticker: cr
+        availability_status: available
+        probe_status: completed
+        evidence_date: "2026-08-18"
+        enabled_for_materialization: false
+    phase2_6_binding:
+      status: source_identity_bound_pilot_required
+      data_availability_status: proven
+      ingestion_status: pilot_ready
+      materialization_status: pilot_required
+      modeling_status: blocked
+      runtime_status: not_ready
+      timezone_policy:
+        market_timezone: Europe/Moscow
+        forecast_anchor_local_time: "06:00 Europe/Moscow"
+        forecast_anchor_timezone: UTC
+      source_contract_refs:
+        - contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+        - contracts/sources/futures/moex_iss_futoi.v1.yaml
+      roll_expiry_mapping_ref: contracts/sources/futures/roll_expiry_mapping.v1.yaml
+      explicit_non_authorizations:
+        - no automatic contract roll selection
+        - no scheduler enablement before observed-source refresh pass
+        - no d1 derivation before raw acceptance
+        - no research enablement before accepted pointer
+        - no server apply in Stage 2 change action
 rules:
   storage_partition_key: instrument_id
   source_partition_key: source_id
@@ -129,6 +269,12 @@ rules:
     - storage_partition_values.instrument_id
     - storage_partition_values.secid
     - evidence_status
+  stage2_futoi_binding_fields:
+    - supplementary_sources.futures_futoi_raw.source_id
+    - supplementary_sources.futures_futoi_raw.ticker
+    - supplementary_sources.futures_futoi_raw.availability_status
+    - supplementary_sources.futures_futoi_raw.probe_status
+    - supplementary_sources.futures_futoi_raw.enabled_for_materialization
   raw_5m_onboarding_required_steps:
     - add_registry_entry
     - run_one_date_pilot_materialization
