@@ -15,8 +15,8 @@ from . import algopack_availability_probe as availability
 from . import futoi_raw_loader as legacy
 
 DATASET_ID: Final[str] = "futures_futoi_raw"
-SOURCE_ID: Final[str] = "moex_iss_futoi"
-SOURCE_CONTRACT_REF: Final[str] = "contracts/sources/futures/moex_iss_futoi.v1.yaml"
+SOURCE_ID: Final[str] = "moex_algopack_futoi"
+SOURCE_CONTRACT_REF: Final[str] = "contracts/sources/futures/moex_algopack_futoi.v1.yaml"
 RAW_CONTRACT_REF: Final[str] = "contracts/datasets/futures_futoi_raw.v1.yaml"
 QUALITY_CONTRACT_REF: Final[str] = "contracts/datasets/futures_futoi_quality_report.v1.yaml"
 MANIFEST_CONTRACT_REF: Final[str] = "contracts/datasets/futures_futoi_refresh_manifest.v1.yaml"
@@ -185,14 +185,31 @@ def _write_parquet_atomic(path: Path, frame: pd.DataFrame, run_id: str) -> None:
             temp_path.unlink()
 
 
-def _fetch_exact(ticker: str, trade_date: str, timeout: float, iss_base_url: str | None) -> tuple[pd.DataFrame, str]:
-    base_url = str(iss_base_url or os.environ.get("MOEX_ISS_BASE_URL", availability.DEFAULT_ISS_BASE_URL)).strip().rstrip("/")
+def _fetch_exact(ticker: str, trade_date: str, timeout: float, apim_base_url: str | None) -> tuple[pd.DataFrame, str]:
+    token = str(os.environ.get("MOEX_API_KEY", "")).strip()
+    if not token:
+        _fail("MOEX_API_KEY is required for FUTOI APIM")
+    base_url = str(apim_base_url or os.environ.get("MOEX_API_URL", availability.DEFAULT_APIM_BASE_URL)).strip().rstrip("/")
     if not base_url:
-        _fail("MOEX_ISS_BASE_URL is required")
+        _fail("MOEX_API_URL is required")
     path = "/iss/analyticalproducts/futoi/securities/" + ticker.lower() + ".json"
-    frame = availability.fetch_paged_frame(base_url, path, {"from": trade_date, "till": trade_date}, "futoi", timeout, False)
+    frame = availability.fetch_paged_frame(
+        base_url,
+        path,
+        {"from": trade_date, "till": trade_date, "latest": 1},
+        "futoi",
+        timeout,
+        True,
+    )
     if frame.empty:
-        _fail("FUTOI exact source returned no rows")
+        _fail("FUTOI APIM exact source returned no rows")
+    columns = {str(column).strip().lower() for column in frame.columns}
+    if "error_message" in columns:
+        _fail("FUTOI APIM returned ERROR_MESSAGE instead of data")
+    required = {"clgroup", "pos", "pos_long", "pos_short", "pos_long_num", "pos_short_num"}
+    timestamp_ok = "moment" in columns or {"tradedate", "tradetime"}.issubset(columns)
+    if not required.issubset(columns) or not timestamp_ok:
+        _fail("FUTOI APIM schema mismatch")
     return frame, availability.url_join(base_url, path)
 
 
@@ -241,7 +258,7 @@ def materialize_futoi_partition(
     run_id: str,
     registry_path: str | Path = REGISTRY_PATH,
     timeout: float = 60.0,
-    iss_base_url: str | None = None,
+    apim_base_url: str | None = None,
     require_enabled: bool = False,
 ) -> dict[str, object]:
     checked_date = _require_date(trade_date, "trade_date")
@@ -255,10 +272,10 @@ def materialize_futoi_partition(
     if require_enabled and binding["futoi.enabled_for_materialization"] is not True:
         _fail("registry FUTOI materialization is not enabled")
     if str(binding["futoi.availability_status"]) != "available" or str(binding["futoi.probe_status"]) != "completed":
-        _fail("registry FUTOI availability evidence is not completed/available")
+        _fail("registry FUTOI APIM availability evidence is not completed/available")
 
     ingest_ts = _utc_now()
-    source_frame, source_url = _fetch_exact(ticker, checked_date, timeout, iss_base_url)
+    source_frame, source_url = _fetch_exact(ticker, checked_date, timeout, apim_base_url)
     normalized, meta = legacy.normalize_futoi(
         source_frame,
         str(binding["secid"]),
@@ -306,6 +323,7 @@ def materialize_futoi_partition(
             "raw_contract_ref": RAW_CONTRACT_REF,
             "futoi_ticker": ticker,
             "source_endpoint_url": source_url,
+            "transport": "authenticated_apim",
         },
         "producer": PRODUCER_ID,
         "latest_autodetect_used": False,
@@ -348,7 +366,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--registry-path", default=REGISTRY_PATH)
     parser.add_argument("--env-file", default=None)
     parser.add_argument("--timeout", type=float, default=60.0)
-    parser.add_argument("--iss-base-url", default=None)
+    parser.add_argument("--apim-base-url", default=None)
     parser.add_argument("--require-enabled", action="store_true")
     return parser.parse_args(argv)
 
@@ -363,7 +381,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_id=args.run_id,
             registry_path=args.registry_path,
             timeout=args.timeout,
-            iss_base_url=args.iss_base_url,
+            apim_base_url=args.apim_base_url,
             require_enabled=args.require_enabled,
         )
     except Exception as exc:

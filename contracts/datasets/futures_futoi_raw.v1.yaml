@@ -49,10 +49,11 @@ availability:
   availability_timestamp_field: availability_ts_utc
   source_id_required: true
 source_contract:
-  source_id: moex_iss_futoi
-  source_contract_ref: contracts/sources/futures/moex_iss_futoi.v1.yaml
+  source_id: moex_algopack_futoi
+  source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v1.yaml
   exact_registry_ticker_binding_required: true
   fallback_endpoint_allowed: false
+  public_iss_transport_allowed: false
 quality_contract_ref: contracts/datasets/futures_futoi_quality_report.v1.yaml
 refresh_manifest_contract_ref: contracts/datasets/futures_futoi_refresh_manifest.v1.yaml
 accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_futoi_raw/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"

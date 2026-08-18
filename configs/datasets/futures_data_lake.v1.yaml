@@ -34,7 +34,7 @@ supplementary_state_contract_refs:
   futoi_refresh_manifest: contracts/datasets/futures_futoi_refresh_manifest.v1.yaml
 source_contract_refs:
   quotes: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
-  futoi: contracts/sources/futures/moex_iss_futoi.v1.yaml
+  futoi: contracts/sources/futures/moex_algopack_futoi.v1.yaml
 instrument_registry_ref:
   registry_id: forts_instrument_registry.v1
   repo_path: configs/instruments/forts_instrument_registry.v1.yaml
@@ -62,7 +62,7 @@ instrument_scope:
     - 1h
     - 4h
 market_data_storage_policy:
-  status: stage2_canonical_writers_introduced_pilot_pending
+  status: stage2_quotes_pilot_passed_futoi_apim_revalidation_required
   canonical_new_write_root: "${MOEX_DATA_ROOT}/market"
   raw_quotes_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
   futoi_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
@@ -115,31 +115,30 @@ phase2_6_source_bindings:
     - no model fitting
     - no prediction
 stage2_forts_source_bindings:
-  status: source_identity_bound_pilot_pending
+  status: quotes_pilot_passed_futoi_apim_revalidation_required
   evidence_date: "2026-08-18"
   quote_source:
     source_id: moex_algopack_fo_tradestats_5m
     source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
     authentication_env: MOEX_API_KEY
     availability_status: proven
+    pilot_status: passed
     proven_secids:
       - USDRUBF
       - CNYRUBF
       - SiU6
       - CRU6
   futoi_source:
-    source_id: moex_iss_futoi
-    source_contract_ref: contracts/sources/futures/moex_iss_futoi.v1.yaml
-    availability_status: proven
-    proven_tickers:
-      - usdrubf
-      - cnyrubf
-      - si
-      - cr
+    source_id: moex_algopack_futoi
+    source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v1.yaml
+    authentication_env: MOEX_API_KEY
+    availability_status: not_checked
+    public_iss_evidence_status: invalidated
+    apim_revalidation_required: true
   readiness_flags:
     source_identity_ready: true
     quote_pilot_ready: true
-    futoi_pilot_ready: true
+    futoi_pilot_ready: false
     backfill_ready: false
     accepted_pointer_ready: false
     observed_source_refresh_ready: false
@@ -154,11 +153,12 @@ stage2_forts_source_bindings:
     eligibility_rule: availability_ts_utc <= forecast_anchor_ts
     unknown_availability_ts_utc_rule: exclude_or_shift_by_at_least_one_trading_day
   explicit_non_authorizations:
+    - no FUTOI public ISS transport or fallback
+    - no FUTOI pilot before APIM source revalidation
     - no scheduler before observed-source refresh pass
     - no automatic Si or CR roll selection in Stage 2
     - no D1/W1 derivation before raw acceptance
     - no research enablement before accepted pointer
-    - no server apply in Stage 2 change action
 blocked_contracts:
   - futures_continuous_5m.v1
 path_rules:

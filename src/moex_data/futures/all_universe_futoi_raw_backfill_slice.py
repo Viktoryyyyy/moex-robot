@@ -200,9 +200,7 @@ def selected_dates(row):
         data = json.loads(raw)
     except Exception:
         return []
-    if not isinstance(data, list):
-        return []
-    return [str(x) for x in data if str(x)]
+    return [str(x) for x in data if str(x)] if isinstance(data, list) else []
 
 
 def date_bounds(row, from_override, till_override):
@@ -222,56 +220,32 @@ def date_bounds(row, from_override, till_override):
     return start, end
 
 
-def fetch_futoi_exact_contract(secid, date_from, date_till, timeout, apim_base_url, iss_base_url):
+def fetch_futoi_exact_contract(secid, date_from, date_till, timeout, apim_base_url):
     ticker = str(secid or "").strip().lower()
     if not ticker:
         raise RuntimeError("Exact FUTOI fetch requires secid")
     path = "/iss/analyticalproducts/futoi/securities/" + ticker + ".json"
-    last_url = ""
-    last_error = ""
-    for base_url, use_apim in [(apim_base_url, True), (iss_base_url, False)]:
-        params = {"from": date_from, "till": date_till}
-        last_url = base.url_join(base_url, path)
-        try:
-            frame = base.fetch_paged_frame(base_url, path, params, "data", timeout, use_apim)
-            if not frame.empty:
-                return frame, last_url, "completed", "", ticker
-        except Exception as exc:
-            last_error = exc.__class__.__name__ + ": " + str(exc)[:500]
-    return pd.DataFrame(), last_url, "failed", last_error or "empty_response", ticker
+    token = str(os.getenv("MOEX_API_KEY", "")).strip()
+    if not token:
+        return pd.DataFrame(), "", "failed", "MOEX_API_KEY is required for FUTOI APIM", ticker
+    params = {"from": date_from, "till": date_till, "latest": 1}
+    source_url = base.url_join(apim_base_url, path)
+    try:
+        frame = base.fetch_paged_frame(apim_base_url, path, params, "futoi", timeout, True)
+    except Exception as exc:
+        return pd.DataFrame(), source_url, "failed", exc.__class__.__name__ + ": " + str(exc)[:500], ticker
+    if frame.empty:
+        return pd.DataFrame(), source_url, "failed", "empty_response", ticker
+    columns = {str(c).strip().lower() for c in frame.columns}
+    if "error_message" in columns:
+        return pd.DataFrame(), source_url, "failed", "ERROR_MESSAGE payload", ticker
+    return frame, source_url, "completed", "", ticker
 
 
 def quality_row(run_id, chunk_id, erow, date_from, date_till, raw, fetch_status, failure, partitions, calendar_status):
     counts = futoi.quality_counts(raw, None)
     status = "pass" if not failure and int(counts.get("rows") or 0) > 0 else "fail"
-    return {
-        "run_id": run_id,
-        "chunk_id": chunk_id,
-        "eligibility_snapshot_id": str(erow.get("eligibility_snapshot_id", "")),
-        "registry_snapshot_id": str(erow.get("registry_snapshot_id", "")),
-        "dataset_stage": DATASET_STAGE,
-        "family_code": str(erow.get("family_code")),
-        "secid": str(erow.get("secid")),
-        "date_from": date_from,
-        "date_till": date_till,
-        "rows_written": int(counts.get("rows") or 0) if status == "pass" else 0,
-        "trade_dates": counts.get("trade_dates"),
-        "min_ts": counts.get("min_ts"),
-        "max_ts": counts.get("max_ts"),
-        "duplicate_key_count": counts.get("duplicate_key_count"),
-        "null_required_count": counts.get("null_required_count"),
-        "invalid_position_count": counts.get("invalid_position_count"),
-        "calendar_status": calendar_status,
-        "source_payload_status": fetch_status,
-        "partition_status": "written" if status == "pass" else "not_written",
-        "quality_status": status,
-        "failure_reason": failure,
-        "futoi_availability_status": str(erow.get("futoi_availability_status", "")),
-        "futoi_probe_status": str(erow.get("futoi_probe_status", "")),
-        "selection_model": "eligibility_snapshot_driven_futoi_eligible_true",
-        "output_partitions_json": json.dumps(partitions, sort_keys=True),
-        "schema_version": SCHEMA_QUALITY,
-    }
+    return {"run_id": run_id, "chunk_id": chunk_id, "eligibility_snapshot_id": str(erow.get("eligibility_snapshot_id", "")), "registry_snapshot_id": str(erow.get("registry_snapshot_id", "")), "dataset_stage": DATASET_STAGE, "family_code": str(erow.get("family_code")), "secid": str(erow.get("secid")), "date_from": date_from, "date_till": date_till, "rows_written": int(counts.get("rows") or 0) if status == "pass" else 0, "trade_dates": counts.get("trade_dates"), "min_ts": counts.get("min_ts"), "max_ts": counts.get("max_ts"), "duplicate_key_count": counts.get("duplicate_key_count"), "null_required_count": counts.get("null_required_count"), "invalid_position_count": counts.get("invalid_position_count"), "calendar_status": calendar_status, "source_payload_status": fetch_status, "partition_status": "written" if status == "pass" else "not_written", "quality_status": status, "failure_reason": failure, "futoi_availability_status": str(erow.get("futoi_availability_status", "")), "futoi_probe_status": str(erow.get("futoi_probe_status", "")), "selection_model": "eligibility_snapshot_driven_futoi_eligible_true", "output_partitions_json": json.dumps(partitions, sort_keys=True), "schema_version": SCHEMA_QUALITY}
 
 
 def run_instrument(args, root, row, run_id, chunk_id, expected_calendar, calendar_status):
@@ -280,15 +254,15 @@ def run_instrument(args, root, row, run_id, chunk_id, expected_calendar, calenda
     board = str(row.get("board", "RFUD") or "RFUD")
     date_from, date_till = date_bounds(row, str(args.from_date or ""), str(args.till or ""))
     if bool(args.exact_contract_only):
-        source_frame, source_url, fetch_status, fetch_error, source_ticker = fetch_futoi_exact_contract(secid, date_from, date_till, float(args.timeout), str(args.apim_base_url), str(args.iss_base_url))
+        source_frame, source_url, fetch_status, fetch_error, source_ticker = fetch_futoi_exact_contract(secid, date_from, date_till, float(args.timeout), str(args.apim_base_url))
     else:
-        source_frame, source_url, fetch_status, fetch_error, source_ticker = futoi.fetch_futoi(secid, family_code, date_from, date_till, float(args.timeout), str(args.apim_base_url), str(args.iss_base_url))
+        source_frame, source_url, fetch_status, fetch_error, source_ticker = futoi.fetch_futoi(secid, family_code, date_from, date_till, float(args.timeout), str(args.apim_base_url))
     raw = pd.DataFrame()
     failure = ""
     partitions = []
     try:
         raw, meta = futoi.normalize_futoi(source_frame, secid, family_code, board, source_url, source_ticker, now_utc(), False, calendar_status)
-        raw, calendar_filter = futoi.filter_calendar_rows(raw, expected_calendar)
+        raw, _calendar_filter = futoi.filter_calendar_rows(raw, expected_calendar)
         counts = futoi.quality_counts(raw, expected_calendar)
         qstatus, notes = futoi.status_from_counts(counts, fetch_status, calendar_status, str(row.get("futoi_availability_status", "")), str(row.get("futoi_probe_status", "")))
         if qstatus == "fail":
@@ -309,7 +283,7 @@ def run_chunk(args, root, selected, run_id, chunk_id):
         ends.append(end)
     calendar_from = min(starts)
     calendar_till = max(ends)
-    expected_calendar, calendar_status = apim_calendar.fetch_futures_calendar(calendar_from, calendar_till, float(args.timeout), str(args.iss_base_url))
+    expected_calendar, calendar_status = apim_calendar.fetch_futures_calendar(calendar_from, calendar_till, float(args.timeout), "")
     if expected_calendar is None or calendar_status != "canonical_apim_futures_xml":
         raise RuntimeError("APIM futures calendar validation failed: " + str(calendar_status))
     quality_rows = []
@@ -323,40 +297,12 @@ def run_chunk(args, root, selected, run_id, chunk_id):
             failed.append(str(row.get("secid")))
     quality = pd.DataFrame(quality_rows)
     status = "succeeded" if not failed else ("partial_failed" if len(failed) < len(selected) else "failed")
-    manifest = {
-        "schema_version": SCHEMA_MANIFEST,
-        "chunk_id": chunk_id,
-        "dataset_stage": DATASET_STAGE,
-        "selection_model": "eligibility_snapshot_driven_futoi_eligible_true",
-        "secid_list": selected["secid"].astype(str).tolist(),
-        "family_count": int(selected["family_code"].nunique()),
-        "date_from": calendar_from,
-        "date_till": calendar_till,
-        "status": status,
-        "started_at": run_id,
-        "finished_at": now_utc(),
-        "failed_secid": failed,
-        "output_partitions": partitions,
-        "quality_summary": {str(k): int(v) for k, v in quality["quality_status"].astype(str).value_counts(dropna=False).to_dict().items()} if not quality.empty else {},
-        "calendar_validation_summary": {"calendar_denominator_status": calendar_status, "calendar_from": calendar_from, "calendar_till": calendar_till, "expected_trading_days": len(expected_calendar)},
-        "no_futoi_prejoin_into_ohlcv": True,
-        "exact_contract_only": bool(args.exact_contract_only),
-    }
+    manifest = {"schema_version": SCHEMA_MANIFEST, "chunk_id": chunk_id, "dataset_stage": DATASET_STAGE, "selection_model": "eligibility_snapshot_driven_futoi_eligible_true", "secid_list": selected["secid"].astype(str).tolist(), "family_count": int(selected["family_code"].nunique()), "date_from": calendar_from, "date_till": calendar_till, "status": status, "started_at": run_id, "finished_at": now_utc(), "failed_secid": failed, "output_partitions": partitions, "quality_summary": {str(k): int(v) for k, v in quality["quality_status"].astype(str).value_counts(dropna=False).to_dict().items()} if not quality.empty else {}, "calendar_validation_summary": {"calendar_denominator_status": calendar_status, "calendar_from": calendar_from, "calendar_till": calendar_till, "expected_trading_days": len(expected_calendar)}, "no_futoi_prejoin_into_ohlcv": True, "exact_contract_only": bool(args.exact_contract_only)}
     return manifest, quality
 
 
 def aggregate(eligibility, futoi_eligibility, selected, manifest):
-    return {
-        "candidate_universe_count": int(len(eligibility)),
-        "included_count": int((eligibility["classification_status"].astype(str) == "included").sum()),
-        "deferred_count": int((eligibility["classification_status"].astype(str) == "deferred").sum()),
-        "excluded_count": int((eligibility["classification_status"].astype(str) == "excluded").sum()),
-        "futoi_eligible_count": int((futoi_eligibility["futoi_eligible"] == True).sum()),
-        "selected_futoi_secid_count": int(len(selected)),
-        "failed_secid_count": int(len(manifest.get("failed_secid") or [])),
-        "chunk_status": manifest.get("status"),
-        "classification_visibility_preserved": True,
-    }
+    return {"candidate_universe_count": int(len(eligibility)), "included_count": int((eligibility["classification_status"].astype(str) == "included").sum()), "deferred_count": int((eligibility["classification_status"].astype(str) == "deferred").sum()), "excluded_count": int((eligibility["classification_status"].astype(str) == "excluded").sum()), "futoi_eligible_count": int((futoi_eligibility["futoi_eligible"] == True).sum()), "selected_futoi_secid_count": int(len(selected)), "failed_secid_count": int(len(manifest.get("failed_secid") or [])), "chunk_status": manifest.get("status"), "classification_visibility_preserved": True}
 
 
 def main():
@@ -372,7 +318,6 @@ def main():
     parser.add_argument("--family", default="")
     parser.add_argument("--secid", default="")
     parser.add_argument("--exact-contract-only", action="store_true")
-    parser.add_argument("--iss-base-url", default=os.getenv("MOEX_ISS_BASE_URL", base.DEFAULT_ISS_BASE_URL))
     parser.add_argument("--apim-base-url", default=os.getenv("MOEX_API_URL", base.DEFAULT_APIM_BASE_URL))
     parser.add_argument("--timeout", type=float, default=60.0)
     args = parser.parse_args()

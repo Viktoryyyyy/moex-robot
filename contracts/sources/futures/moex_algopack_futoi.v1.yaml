@@ -1,0 +1,61 @@
+contract_id: moex_algopack_futoi.v1
+schema_version: source_contract.v1
+status: active_stage2_revalidation_required
+source_id: moex_algopack_futoi
+source_system: moex_algopack
+source_kind: supplementary_futoi
+engine: futures
+market: forts
+board: RFUD
+endpoint_id: algopack_futoi
+endpoint_pattern: /iss/analyticalproducts/futoi/securities/{TICKER}.json
+base_url_env: MOEX_API_URL
+default_base_url: https://apim.moex.com
+auth:
+  type: bearer
+  token_env: MOEX_API_KEY
+  token_required_for_apim: true
+request_contract:
+  explicit_fields:
+    from: "{YYYY-MM-DD}"
+    till: "{YYYY-MM-DD}"
+    latest: "1"
+  response_block: futoi
+  latest_autodetect_allowed: false
+  fallback_endpoint_allowed: false
+  public_iss_transport_allowed: false
+response_contract:
+  canonical_dataset_ref: contracts/datasets/futures_futoi_raw.v1.yaml
+  availability_report_ref: contracts/datasets/futures_futoi_availability_report_contract.md
+  required_columns:
+    - clgroup
+    - pos
+    - pos_long
+    - pos_short
+    - pos_long_num
+    - pos_short_num
+  timestamp_requirement: moment_or_tradedate_plus_tradetime
+identity_policy:
+  canonical_identity_field: instrument_id
+  source_identity_fields:
+    - source_id
+    - secid
+    - board
+    - market
+    - engine
+  source_id_is_instrument_specific: false
+  source_id_scope: shared_by_algopack_futoi_source
+  ticker_must_be_explicit_registry_binding: true
+failure_semantics:
+  unauthorized: fail_closed
+  empty_response: fail_closed
+  error_message_payload: fail_closed
+  schema_mismatch: fail_closed
+  implicit_ticker_fallback: forbidden
+  public_iss_fallback: forbidden
+evidence:
+  repository_apim_reference: src/moex_research/runners/usdrubf_phase8_7a_futoi_si_source_validation.py
+  server_revalidation_date: "2026-08-18"
+  server_revalidation_status: required
+  public_iss_evidence_status: invalidated
+  public_iss_invalidation_reason: futoi_block_returned_ERROR_MESSAGE_not_data

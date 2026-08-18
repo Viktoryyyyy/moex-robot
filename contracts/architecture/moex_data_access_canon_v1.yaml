@@ -63,9 +63,12 @@ market_data_lane_model:
     lane: supplementary
     separate_from_quote_partitions_required: true
     independent_quality_manifest_pointer_required: true
+    transport: authenticated_apim_only
+    public_iss_transport_allowed: false
+    public_iss_fallback_allowed: false
 
 storage_transition_policy:
-  status: stage2_forts_quote_writer_migrated_futoi_pilot_writer_added
+  status: stage2_forts_quote_writer_migrated_futoi_apim_revalidation_required
   canonical_new_write_root: "${MOEX_DATA_ROOT}/market"
   new_materialization_to_legacy_roots_allowed: false
   new_dataset_creation_to_legacy_roots_allowed: false
@@ -118,7 +121,7 @@ registry_model:
   generic_registry_default_entries_allowed: false
   stage2_source_contract_refs:
     quotes: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
-    futoi: contracts/sources/futures/moex_iss_futoi.v1.yaml
+    futoi: contracts/sources/futures/moex_algopack_futoi.v1.yaml
 
 loading_model:
   source_selection: explicit_source_id

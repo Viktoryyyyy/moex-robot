@@ -14,6 +14,10 @@
       "endpoint_id": "moex_futoi",
       "dataset_contract": "contracts/datasets/futures_futoi_availability_report_contract.md",
       "endpoint_path": "/iss/analyticalproducts/futoi/securities.json",
+      "transport": "authenticated_apim",
+      "base_url_env": "MOEX_API_URL",
+      "auth_env": "MOEX_API_KEY",
+      "public_iss_allowed": false,
       "required_for_slice1": true
     },
     {

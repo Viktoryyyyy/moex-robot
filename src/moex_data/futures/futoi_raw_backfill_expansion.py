@@ -107,11 +107,7 @@ def load_eligibility(data_root, snapshot_date, explicit_path):
 
 def selected_from_eligibility(eligibility, target_board):
     board = eligibility["board"].astype(str).str.upper()
-    selected = eligibility.loc[
-        (board == str(target_board).upper())
-        & (eligibility["classification_status"].astype(str) == "included")
-        & (eligibility["futoi_eligible"] == True)
-    ].copy()
+    selected = eligibility.loc[(board == str(target_board).upper()) & (eligibility["classification_status"].astype(str) == "included") & (eligibility["futoi_eligible"] == True)].copy()
     return selected.sort_values(["family_code", "secid"]).reset_index(drop=True)
 
 
@@ -131,25 +127,12 @@ def visibility_rows_from_eligibility(eligibility, target_board):
         else:
             status = str(row.get("classification_status"))
             explicit_status = reason or "not_selected"
-        rows.append({
-            "secid": str(row.get("secid")),
-            "family_code": str(row.get("family_code")),
-            "board": str(row.get("board")),
-            "classification_status": str(row.get("classification_status")),
-            "futoi_eligible": bool(row.get("futoi_eligible")),
-            "backfill_selection_status": status,
-            "backfill_selection_reason": explicit_status,
-            "eligibility_snapshot_id": str(row.get("eligibility_snapshot_id")),
-            "registry_snapshot_id": str(row.get("registry_snapshot_id")),
-        })
+        rows.append({"secid": str(row.get("secid")), "family_code": str(row.get("family_code")), "board": str(row.get("board")), "classification_status": str(row.get("classification_status")), "futoi_eligible": bool(row.get("futoi_eligible")), "backfill_selection_status": status, "backfill_selection_reason": explicit_status, "eligibility_snapshot_id": str(row.get("eligibility_snapshot_id")), "registry_snapshot_id": str(row.get("registry_snapshot_id"))})
     return rows
 
 
 def chunk_groups(selected):
-    groups = []
-    for family_code, frame in selected.groupby("family_code", sort=True):
-        groups.append((str(family_code), frame.sort_values("secid").reset_index(drop=True)))
-    return groups
+    return [(str(family_code), frame.sort_values("secid").reset_index(drop=True)) for family_code, frame in selected.groupby("family_code", sort=True)]
 
 
 def dates_for_row(row, from_override, till_override):
@@ -170,107 +153,11 @@ def dates_for_row(row, from_override, till_override):
 
 
 def quality_row(run_id, chunk_id, row, run_date, snapshot_date, date_from, date_till, source_url, fetch_status, fetch_error, meta, counts, calendar_status, quality_status, notes, paths, source_ticker, source_scope, short_history_flag):
-    return {
-        "quality_report_id": stable_id([run_id, chunk_id, row.get("secid")]),
-        "run_id": run_id,
-        "run_date": run_date,
-        "snapshot_date": snapshot_date,
-        "board": str(row.get("board", "RFUD") or "RFUD"),
-        "secid": str(row.get("secid")),
-        "family_code": str(row.get("family_code")),
-        "source_ticker": str(source_ticker or "").upper(),
-        "source_scope": source_scope,
-        "dataset_id": "futures_futoi_5m_raw",
-        "dataset_stage": DATASET_STAGE,
-        "schema_version": SCHEMA_QUALITY,
-        "requested_from": date_from,
-        "requested_till": date_till,
-        "source_endpoint_url": source_url,
-        "fetch_status": fetch_status,
-        "fetch_error": fetch_error or None,
-        "normalization_error": meta.get("error") or None,
-        "rows": counts.get("rows"),
-        "trade_dates": counts.get("trade_dates"),
-        "min_ts": counts.get("min_ts"),
-        "max_ts": counts.get("max_ts"),
-        "clgroups_json": json.dumps(counts.get("clgroups") or [], ensure_ascii=False, sort_keys=True),
-        "duplicate_key_count": counts.get("duplicate_key_count"),
-        "null_required_count": counts.get("null_required_count"),
-        "invalid_position_count": counts.get("invalid_position_count"),
-        "off_calendar_date_count": counts.get("off_calendar_date_count"),
-        "missing_expected_trading_days": counts.get("missing_expected_trading_days"),
-        "partition_count": len(paths),
-        "calendar_denominator_status": calendar_status,
-        "futoi_availability_status": "selected_by_eligibility_snapshot" if bool(row.get("futoi_eligible")) else "not_selected_by_eligibility_snapshot",
-        "futoi_probe_status": str(row.get("futoi_check_status") or "eligibility_snapshot_flag"),
-        "history_depth_status": str(row.get("history_depth_check_status") or "not_required_for_futoi_raw"),
-        "liquidity_status": str(row.get("liquidity_check_status") or "not_required_for_futoi_raw"),
-        "short_history_flag": bool(short_history_flag),
-        "data_gap_status": base_loader.data_gap_status(counts),
-        "quality_status": quality_status,
-        "failure_reason": "" if quality_status == "pass" else notes,
-        "deferred_reason": "",
-        "review_notes": notes,
-        "eligibility_snapshot_id": str(row.get("eligibility_snapshot_id")),
-        "registry_snapshot_id": str(row.get("registry_snapshot_id")),
-        "backfill_selection_status": "selected",
-        "backfill_selection_reason": "futoi_eligible_true",
-        "mapped_columns_json": json.dumps(meta.get("mapped_columns") or {}, ensure_ascii=False, sort_keys=True),
-        "observed_columns_json": json.dumps(meta.get("columns") or [], ensure_ascii=False, sort_keys=True),
-        "output_partitions_json": json.dumps(paths, ensure_ascii=False, sort_keys=True),
-    }
+    return {"quality_report_id": stable_id([run_id, chunk_id, row.get("secid")]), "run_id": run_id, "run_date": run_date, "snapshot_date": snapshot_date, "board": str(row.get("board", "RFUD") or "RFUD"), "secid": str(row.get("secid")), "family_code": str(row.get("family_code")), "source_ticker": str(source_ticker or "").upper(), "source_scope": source_scope, "dataset_id": "futures_futoi_5m_raw", "dataset_stage": DATASET_STAGE, "schema_version": SCHEMA_QUALITY, "requested_from": date_from, "requested_till": date_till, "source_endpoint_url": source_url, "fetch_status": fetch_status, "fetch_error": fetch_error or None, "normalization_error": meta.get("error") or None, "rows": counts.get("rows"), "trade_dates": counts.get("trade_dates"), "min_ts": counts.get("min_ts"), "max_ts": counts.get("max_ts"), "clgroups_json": json.dumps(counts.get("clgroups") or [], ensure_ascii=False, sort_keys=True), "duplicate_key_count": counts.get("duplicate_key_count"), "null_required_count": counts.get("null_required_count"), "invalid_position_count": counts.get("invalid_position_count"), "off_calendar_date_count": counts.get("off_calendar_date_count"), "missing_expected_trading_days": counts.get("missing_expected_trading_days"), "partition_count": len(paths), "calendar_denominator_status": calendar_status, "futoi_availability_status": "selected_by_eligibility_snapshot" if bool(row.get("futoi_eligible")) else "not_selected_by_eligibility_snapshot", "futoi_probe_status": str(row.get("futoi_check_status") or "eligibility_snapshot_flag"), "history_depth_status": str(row.get("history_depth_check_status") or "not_required_for_futoi_raw"), "liquidity_status": str(row.get("liquidity_check_status") or "not_required_for_futoi_raw"), "short_history_flag": bool(short_history_flag), "data_gap_status": base_loader.data_gap_status(counts), "quality_status": quality_status, "failure_reason": "" if quality_status == "pass" else notes, "deferred_reason": "", "review_notes": notes, "eligibility_snapshot_id": str(row.get("eligibility_snapshot_id")), "registry_snapshot_id": str(row.get("registry_snapshot_id")), "backfill_selection_status": "selected", "backfill_selection_reason": "futoi_eligible_true", "mapped_columns_json": json.dumps(meta.get("mapped_columns") or {}, ensure_ascii=False, sort_keys=True), "observed_columns_json": json.dumps(meta.get("columns") or [], ensure_ascii=False, sort_keys=True), "output_partitions_json": json.dumps(paths, ensure_ascii=False, sort_keys=True)}
 
 
 def deferred_quality_row(run_id, chunk_id, run_date, snapshot_date, visibility):
-    return {
-        "quality_report_id": stable_id([run_id, chunk_id, visibility.get("secid"), "not_selected"]),
-        "run_id": run_id,
-        "run_date": run_date,
-        "snapshot_date": snapshot_date,
-        "board": visibility.get("board"),
-        "secid": visibility.get("secid"),
-        "family_code": visibility.get("family_code"),
-        "source_ticker": "",
-        "source_scope": "",
-        "dataset_id": "futures_futoi_5m_raw",
-        "dataset_stage": DATASET_STAGE,
-        "schema_version": SCHEMA_QUALITY,
-        "requested_from": None,
-        "requested_till": None,
-        "source_endpoint_url": None,
-        "fetch_status": "not_attempted",
-        "fetch_error": None,
-        "normalization_error": None,
-        "rows": 0,
-        "trade_dates": 0,
-        "min_ts": None,
-        "max_ts": None,
-        "clgroups_json": "[]",
-        "duplicate_key_count": 0,
-        "null_required_count": 0,
-        "invalid_position_count": 0,
-        "off_calendar_date_count": None,
-        "missing_expected_trading_days": None,
-        "partition_count": 0,
-        "calendar_denominator_status": "not_attempted",
-        "futoi_availability_status": "not_selected_by_eligibility_snapshot",
-        "futoi_probe_status": visibility.get("backfill_selection_reason"),
-        "history_depth_status": "not_required_for_futoi_raw",
-        "liquidity_status": "not_required_for_futoi_raw",
-        "short_history_flag": False,
-        "data_gap_status": "not_computed",
-        "quality_status": visibility.get("backfill_selection_status"),
-        "failure_reason": "",
-        "deferred_reason": visibility.get("backfill_selection_reason"),
-        "review_notes": "FUTOI raw not loaded because instrument is not futoi_eligible=true in eligibility snapshot",
-        "eligibility_snapshot_id": visibility.get("eligibility_snapshot_id"),
-        "registry_snapshot_id": visibility.get("registry_snapshot_id"),
-        "backfill_selection_status": visibility.get("backfill_selection_status"),
-        "backfill_selection_reason": visibility.get("backfill_selection_reason"),
-        "mapped_columns_json": "{}",
-        "observed_columns_json": "[]",
-        "output_partitions_json": "[]",
-    }
+    return {"quality_report_id": stable_id([run_id, chunk_id, visibility.get("secid"), "not_selected"]), "run_id": run_id, "run_date": run_date, "snapshot_date": snapshot_date, "board": visibility.get("board"), "secid": visibility.get("secid"), "family_code": visibility.get("family_code"), "source_ticker": "", "source_scope": "", "dataset_id": "futures_futoi_5m_raw", "dataset_stage": DATASET_STAGE, "schema_version": SCHEMA_QUALITY, "requested_from": None, "requested_till": None, "source_endpoint_url": None, "fetch_status": "not_attempted", "fetch_error": None, "normalization_error": None, "rows": 0, "trade_dates": 0, "min_ts": None, "max_ts": None, "clgroups_json": "[]", "duplicate_key_count": 0, "null_required_count": 0, "invalid_position_count": 0, "off_calendar_date_count": None, "missing_expected_trading_days": None, "partition_count": 0, "calendar_denominator_status": "not_attempted", "futoi_availability_status": "not_selected_by_eligibility_snapshot", "futoi_probe_status": visibility.get("backfill_selection_reason"), "history_depth_status": "not_required_for_futoi_raw", "liquidity_status": "not_required_for_futoi_raw", "short_history_flag": False, "data_gap_status": "not_computed", "quality_status": visibility.get("backfill_selection_status"), "failure_reason": "", "deferred_reason": visibility.get("backfill_selection_reason"), "review_notes": "FUTOI raw not loaded because instrument is not futoi_eligible=true in eligibility snapshot", "eligibility_snapshot_id": visibility.get("eligibility_snapshot_id"), "registry_snapshot_id": visibility.get("registry_snapshot_id"), "backfill_selection_status": visibility.get("backfill_selection_status"), "backfill_selection_reason": visibility.get("backfill_selection_reason"), "mapped_columns_json": "{}", "observed_columns_json": "[]", "output_partitions_json": "[]"}
 
 
 def run_family_chunk(args, data_root, selected, visibility_rows, expected_calendar, calendar_status, run_id, snapshot_date, run_date, chunk_id):
@@ -285,7 +172,7 @@ def run_family_chunk(args, data_root, selected, visibility_rows, expected_calend
         family_code = str(row.get("family_code"))
         board = str(row.get("board", "RFUD") or "RFUD")
         date_from, date_till = dates_for_row(row, str(args.from_date or ""), str(args.till or ""))
-        source_frame, source_url, fetch_status, fetch_error, source_ticker = base_loader.fetch_futoi(secid, family_code, date_from, date_till, float(args.timeout), str(args.apim_base_url), str(args.iss_base_url))
+        source_frame, source_url, fetch_status, fetch_error, source_ticker = base_loader.fetch_futoi(secid, family_code, date_from, date_till, float(args.timeout), str(args.apim_base_url))
         raw, meta = base_loader.normalize_futoi(source_frame, secid, family_code, board, source_url, source_ticker, utc_now_iso(), False, calendar_status)
         raw, calendar_filter = base_loader.filter_calendar_rows(raw, expected_calendar)
         counts = base_loader.quality_counts(raw, expected_calendar)
@@ -306,53 +193,13 @@ def run_family_chunk(args, data_root, selected, visibility_rows, expected_calend
     write_parquet(outputs["quality_report"], quality)
     quality_status_counts = {str(k): int(v) for k, v in quality["quality_status"].astype(str).value_counts(dropna=False).to_dict().items()}
     status = "succeeded" if not failed else ("partial_failed" if len(failed) < len(selected_ids) else "failed")
-    manifest = {
-        "schema_version": SCHEMA_MANIFEST,
-        "run_id": run_id,
-        "chunk_id": chunk_id,
-        "run_date": run_date,
-        "snapshot_date": snapshot_date,
-        "ingest_ts": utc_now_iso(),
-        "dataset_stage": DATASET_STAGE,
-        "selection_mode": MODE_RFUD,
-        "eligibility_snapshot_id": str(selected["eligibility_snapshot_id"].iloc[0]) if not selected.empty else "",
-        "registry_snapshot_id": str(selected["registry_snapshot_id"].iloc[0]) if not selected.empty else "",
-        "family_code": str(selected["family_code"].iloc[0]) if not selected.empty else "",
-        "secid_list": sorted(selected_ids),
-        "failed_secid": failed,
-        "deferred_or_excluded_visible": [x for x in visibility_rows if x.get("secid") not in selected_ids],
-        "input_artifacts": {"eligibility_snapshot": str(args.eligibility_snapshot_path or eligibility_snapshot_path(data_root, snapshot_date, ""))},
-        "output_artifacts": outputs,
-        "partition_paths_created": partition_paths,
-        "instrument_summaries": summaries,
-        "quality_status_counts": quality_status_counts,
-        "calendar_validation_summary": {"calendar_denominator_status": calendar_status, "expected_trading_days": len(expected_calendar) if expected_calendar is not None else 0},
-        "futoi_source_scope_note": {"by_instrument": source_scope_values, "no_prejoin_with_raw_5m": True},
-        "short_history_handling": {},
-        "loader_whitelist_applied": [],
-        "excluded_instruments_confirmed": DEFAULT_EXCLUDED,
-        "backfill_selection_status": "eligibility_snapshot_driven",
-        "backfill_selection_reason": "board=RFUD classification_status=included futoi_eligible=true dataset_stage=futoi_raw",
-        "chunk_dimensions": ["family_code", "date_range", "dataset_stage"],
-        "retry_child_chunk_dimensions": ["secid", "date_range", "dataset_stage"],
-        "status": status,
-        "loader_result_verdict": "pass" if status in ["succeeded", "partial_failed"] else "fail",
-    }
+    manifest = {"schema_version": SCHEMA_MANIFEST, "run_id": run_id, "chunk_id": chunk_id, "run_date": run_date, "snapshot_date": snapshot_date, "ingest_ts": utc_now_iso(), "dataset_stage": DATASET_STAGE, "selection_mode": MODE_RFUD, "eligibility_snapshot_id": str(selected["eligibility_snapshot_id"].iloc[0]) if not selected.empty else "", "registry_snapshot_id": str(selected["registry_snapshot_id"].iloc[0]) if not selected.empty else "", "family_code": str(selected["family_code"].iloc[0]) if not selected.empty else "", "secid_list": sorted(selected_ids), "failed_secid": failed, "deferred_or_excluded_visible": [x for x in visibility_rows if x.get("secid") not in selected_ids], "input_artifacts": {"eligibility_snapshot": str(args.eligibility_snapshot_path or eligibility_snapshot_path(data_root, snapshot_date, ""))}, "output_artifacts": outputs, "partition_paths_created": partition_paths, "instrument_summaries": summaries, "quality_status_counts": quality_status_counts, "calendar_validation_summary": {"calendar_denominator_status": calendar_status, "expected_trading_days": len(expected_calendar) if expected_calendar is not None else 0}, "futoi_source_scope_note": {"by_instrument": source_scope_values, "no_prejoin_with_raw_5m": True}, "short_history_handling": {}, "loader_whitelist_applied": [], "excluded_instruments_confirmed": DEFAULT_EXCLUDED, "backfill_selection_status": "eligibility_snapshot_driven", "backfill_selection_reason": "board=RFUD classification_status=included futoi_eligible=true dataset_stage=futoi_raw", "chunk_dimensions": ["family_code", "date_range", "dataset_stage"], "retry_child_chunk_dimensions": ["secid", "date_range", "dataset_stage"], "status": status, "loader_result_verdict": "pass" if status in ["succeeded", "partial_failed"] else "fail"}
     dump_json(outputs["manifest"], manifest)
     return manifest, quality, outputs
 
 
 def run_whitelist_compat(args):
-    forwarded = [
-        "--snapshot-date", str(args.snapshot_date),
-        "--run-date", str(args.run_date),
-        "--data-root", str(args.data_root or ""),
-        "--iss-base-url", str(args.iss_base_url),
-        "--apim-base-url", str(args.apim_base_url),
-        "--timeout", str(args.timeout),
-        "--whitelist", str(args.whitelist),
-        "--excluded", str(args.excluded),
-    ]
+    forwarded = ["--snapshot-date", str(args.snapshot_date), "--run-date", str(args.run_date), "--data-root", str(args.data_root or ""), "--apim-base-url", str(args.apim_base_url), "--timeout", str(args.timeout), "--whitelist", str(args.whitelist), "--excluded", str(args.excluded)]
     if args.from_date:
         forwarded.extend(["--from", str(args.from_date)])
     if args.till:
@@ -377,7 +224,6 @@ def main():
     parser.add_argument("--eligibility-snapshot-path", default="")
     parser.add_argument("--selection-mode", choices=[MODE_WHITELIST, MODE_RFUD], default="")
     parser.add_argument("--config", default=CONFIG_PATH)
-    parser.add_argument("--iss-base-url", default=os.getenv("MOEX_ISS_BASE_URL", base.DEFAULT_ISS_BASE_URL))
     parser.add_argument("--apim-base-url", default=os.getenv("MOEX_API_URL", base.DEFAULT_APIM_BASE_URL))
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--whitelist", default=",".join(DEFAULT_WHITELIST))
@@ -406,7 +252,7 @@ def main():
         ends.append(date_till)
     calendar_from = min(starts)
     calendar_till = max(ends)
-    expected_calendar, calendar_status = apim_calendar.fetch_futures_calendar(calendar_from, calendar_till, float(args.timeout), str(args.iss_base_url))
+    expected_calendar, calendar_status = apim_calendar.fetch_futures_calendar(calendar_from, calendar_till, float(args.timeout), "")
     if expected_calendar is None or calendar_status != "canonical_apim_futures_xml":
         raise RuntimeError("APIM futures calendar validation failed: " + str(calendar_status))
     run_id = "futures_futoi_raw_backfill_" + run_date + "_" + stable_id([snapshot_date, eligibility_path, utc_now_iso(), DATASET_STAGE])
@@ -419,16 +265,7 @@ def main():
         manifests.append(manifest)
         outputs.append(out)
     aggregate_status = "partial_failed" if any(x.get("status") in ["partial_failed", "failed"] for x in manifests) else "succeeded"
-    print(json.dumps({
-        "selection_mode": MODE_RFUD,
-        "dataset_stage": DATASET_STAGE,
-        "eligibility_snapshot": eligibility_path,
-        "selected_universe": {"family_count": len(chunk_groups(selected)), "secid_count": int(len(selected)), "secids": selected["secid"].astype(str).tolist()},
-        "chunk_status": aggregate_status,
-        "chunk_manifests": [x.get("output_artifacts", {}).get("manifest") for x in manifests],
-        "quality_reports": [x.get("output_artifacts", {}).get("quality_report") for x in manifests],
-        "forbidden_scope_checks": {"raw_5m_prejoin": False, "raw_d1_derivation": False, "continuous_build": False, "w1_build": False},
-    }, ensure_ascii=False, sort_keys=True, default=str))
+    print(json.dumps({"selection_mode": MODE_RFUD, "dataset_stage": DATASET_STAGE, "eligibility_snapshot": eligibility_path, "selected_universe": {"family_count": len(chunk_groups(selected)), "secid_count": int(len(selected)), "secids": selected["secid"].astype(str).tolist()}, "chunk_status": aggregate_status, "chunk_manifests": [x.get("output_artifacts", {}).get("manifest") for x in manifests], "quality_reports": [x.get("output_artifacts", {}).get("quality_report") for x in manifests], "forbidden_scope_checks": {"raw_5m_prejoin": False, "raw_d1_derivation": False, "continuous_build": False, "w1_build": False}}, ensure_ascii=False, sort_keys=True, default=str))
     return 0 if aggregate_status in ["succeeded", "partial_failed"] else 1
 
 

@@ -149,19 +149,27 @@ quote_onboarding_sequence:
   canonical_sequence_ref: new_instrument_onboarding_sequence
 futoi_lane:
   dataset_id: futures_futoi_raw
-  source_id: moex_iss_futoi
-  source_contract_ref: contracts/sources/futures/moex_iss_futoi.v1.yaml
+  source_id: moex_algopack_futoi
+  source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v1.yaml
   raw_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
   quality_contract_ref: contracts/datasets/futures_futoi_quality_report.v1.yaml
   manifest_contract_ref: contracts/datasets/futures_futoi_refresh_manifest.v1.yaml
+  transport: authenticated_apim_only
+  authentication_env: MOEX_API_KEY
+  public_iss_transport_allowed: false
+  public_iss_fallback_allowed: false
   storage_path_contract: "${MOEX_DATA_ROOT}/market/supplementary/dataset_id=futures_futoi_raw/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet"
   accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_futoi_raw/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
   quote_partition_embedding_allowed: false
   independent_quality_manifest_pointer_required: true
   pilot_producer: moex_data.futures.materialize_futoi_instrument
   availability_gate:
+    current_status: apim_revalidation_required
     availability_status_required: available
     probe_status_required: completed
+    current_registry_availability_status: not_checked
+    current_registry_probe_status: not_checked
+    pilot_before_apim_revalidation_allowed: false
   stage2_ticker_bindings:
     usdrubf_futures_family: usdrubf
     cnyrubf_futures_family: cnyrubf
