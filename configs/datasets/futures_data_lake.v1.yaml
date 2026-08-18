@@ -62,7 +62,7 @@ instrument_scope:
     - 1h
     - 4h
 market_data_storage_policy:
-  status: stage2_quotes_pilot_passed_futoi_apim_revalidation_required
+  status: stage2_quotes_pilot_passed_futoi_apim_available
   canonical_new_write_root: "${MOEX_DATA_ROOT}/market"
   raw_quotes_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
   futoi_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
@@ -115,7 +115,7 @@ phase2_6_source_bindings:
     - no model fitting
     - no prediction
 stage2_forts_source_bindings:
-  status: quotes_pilot_passed_futoi_apim_revalidation_required
+  status: quotes_pilot_passed_futoi_apim_available
   evidence_date: "2026-08-18"
   quote_source:
     source_id: moex_algopack_fo_tradestats_5m
@@ -132,13 +132,13 @@ stage2_forts_source_bindings:
     source_id: moex_algopack_futoi
     source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v1.yaml
     authentication_env: MOEX_API_KEY
-    availability_status: not_checked
+    availability_status: proven
     public_iss_evidence_status: invalidated
-    apim_revalidation_required: true
+    apim_revalidation_required: false
   readiness_flags:
     source_identity_ready: true
     quote_pilot_ready: true
-    futoi_pilot_ready: false
+    futoi_pilot_ready: true
     backfill_ready: false
     accepted_pointer_ready: false
     observed_source_refresh_ready: false
@@ -154,7 +154,6 @@ stage2_forts_source_bindings:
     unknown_availability_ts_utc_rule: exclude_or_shift_by_at_least_one_trading_day
   explicit_non_authorizations:
     - no FUTOI public ISS transport or fallback
-    - no FUTOI pilot before APIM source revalidation
     - no scheduler before observed-source refresh pass
     - no automatic Si or CR roll selection in Stage 2
     - no D1/W1 derivation before raw acceptance
