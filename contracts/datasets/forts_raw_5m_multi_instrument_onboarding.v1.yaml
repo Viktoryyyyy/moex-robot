@@ -11,12 +11,12 @@ scope:
   source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
   registry_ref: configs/instruments/forts_instrument_registry.v1.yaml
 problem_statement:
-  current_registry_scope: historical_quote_core_USDRUBF_CNYRUBF_current_reference_SiU6_CRU6_futoi_all_four
+  registry_scope: historical_quote_core_USDRUBF_CNYRUBF_reference_SiU6_CRU6_futoi_all_four
   previous_pointer_shape: artifact_id_plus_instrument_id_plus_secid
   previous_pointer_collision_risk: true
   pointer_runner_scope_validation: pointer_scope_must_equal_exactly_one_instrument_id
   onboarding_by_instruction_alone_safe: false
-current_stage2_registry_scope:
+stage2_registry_scope:
   - instrument_id: usdrubf_futures_family
     secid: USDRUBF
     quote_role: historical_core
@@ -25,10 +25,10 @@ current_stage2_registry_scope:
     quote_role: historical_core
   - instrument_id: si_futures_family
     secid: SiU6
-    quote_role: current_reference
+    quote_role: reference
   - instrument_id: cr_futures_family
     secid: CRU6
-    quote_role: current_reference
+    quote_role: reference
 identity_rules:
   canonical_identity_field: instrument_id
   explicit_source_id_required: true
@@ -88,25 +88,25 @@ controlled_backfill_authorization:
   historical_quote_backfill_instrument_ids:
     - usdrubf_futures_family
     - cnyrubf_futures_family
-  current_reference_quote_instrument_ids:
+  reference_quote_instrument_ids:
     - si_futures_family
     - cr_futures_family
-  current_reference_full_historical_backfill_required: false
+  reference_full_historical_backfill_required: false
   controlled_quote_backfill_producer: moex_data.futures.backfill_stage2_forts_raw_5m_instrument
   controlled_futoi_backfill_producer: moex_data.futures.backfill_futoi_instrument
   accepted_pointer_creation_allowed_only_after_full_backfill_pass: true
-current_reference_quote_policy:
+reference_quote_policy:
   instrument_ids:
     - si_futures_family
     - cr_futures_family
   secids:
     - SiU6
     - CRU6
-  purpose: current_market_reference_basis_liquidity_expiry
+  purpose: market_reference_basis_liquidity_expiry
   multi_year_historical_backfill_required: false
   stage2_completion_blocking: false
-  current_contract_pilot_required: true
-  current_contract_pilot_status: passed
+  reference_contract_pilot_required: true
+  reference_contract_pilot_status: passed
   automatic_roll_selection_allowed: false
   continuous_history_required_in_stage2: false
   future_continuous_history_requires_separate_roll_chain_workstream: true
@@ -150,7 +150,7 @@ new_instrument_onboarding_sequence:
   - step_id: run_full_backfill
     required: true
     scope: historical_core_only
-    instruction: Run controlled full backfill only for quote_role=historical_core after pilot_passed evidence and Stage 2 backfill_ready are both proven. Current-reference SiU6/CRU6 are explicitly excluded from multi-year historical backfill in Stage 2.
+    instruction: Run controlled full backfill only for quote_role=historical_core after pilot_passed evidence and Stage 2 backfill_ready are both proven. Reference SiU6/CRU6 are explicitly excluded from multi-year historical backfill in Stage 2.
     producer: moex_data.futures.backfill_stage2_forts_raw_5m_instrument
     exit_criteria:
       - instrument_id is in historical_quote_backfill_instrument_ids
@@ -205,11 +205,11 @@ futoi_lane:
   independent_quality_manifest_pointer_required: true
   pilot_producer: moex_data.futures.materialize_futoi_instrument
   availability_gate:
-    current_status: pilot_passed
+    status: pilot_passed
     availability_status_required: available
     probe_status_required: completed
-    current_registry_availability_status: available
-    current_registry_probe_status: completed
+    registry_availability_status: available
+    registry_probe_status: completed
     pilot_before_apim_revalidation_allowed: false
   pilot_acceptance:
     trade_date: "2026-08-17"
