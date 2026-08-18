@@ -50,7 +50,7 @@ instrument_scope:
   stage2_historical_quote_instrument_ids:
     - usdrubf_futures_family
     - cnyrubf_futures_family
-  stage2_current_reference_quote_instrument_ids:
+  stage2_reference_quote_instrument_ids:
     - si_futures_family
     - cr_futures_family
   stage2_futoi_instrument_ids:
@@ -137,10 +137,10 @@ stage2_forts_source_bindings:
     historical_backfill_instrument_ids:
       - usdrubf_futures_family
       - cnyrubf_futures_family
-    current_reference_instrument_ids:
+    reference_instrument_ids:
       - si_futures_family
       - cr_futures_family
-    current_reference_full_historical_backfill_required: false
+    reference_full_historical_backfill_required: false
     proven_coverage:
       usdrubf_futures_family:
         secid: USDRUBF
@@ -154,12 +154,12 @@ stage2_forts_source_bindings:
         secid: SiU6
         first_available: "2024-09-18"
         last_available: "2026-08-17"
-        stage2_role: current_reference
+        stage2_role: reference
       cr_futures_family:
         secid: CRU6
         first_available: "2025-03-07"
         last_available: "2026-08-17"
-        stage2_role: current_reference
+        stage2_role: reference
     proven_secids:
       - USDRUBF
       - CNYRUBF
@@ -185,7 +185,7 @@ stage2_forts_source_bindings:
     backfill_ready: true
     historical_quotes_backfill_ready: true
     futoi_backfill_ready: true
-    current_reference_full_historical_backfill_required: false
+    reference_full_historical_backfill_required: false
     accepted_pointer_ready: false
     observed_source_refresh_ready: false
     scheduler_ready: false
