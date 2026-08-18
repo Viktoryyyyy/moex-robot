@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -79,17 +79,52 @@ def test_stage2_quote_authorization_requires_pilot_passed_with_global_flag_false
         )
 
 
-def test_stage2_quote_backfill_delegates_only_after_controlled_authorization(tmp_path, monkeypatch) -> None:
+def test_stage2_quote_backfill_executes_directly_after_controlled_authorization(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "data"
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(root))
     registry = _registry(tmp_path / "registry.yaml")
     data_lake = _data_lake(tmp_path / "data_lake.yaml")
-    captured = {}
 
-    def fake_backfill_range(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(payload={"status": "succeeded"})
+    def fake_materialize(*, trade_date, instrument_id, secid, source_id, artifact_version, timeout, apim_base_url):
+        quality_path = root / "partition_quality.json"
+        quality_path.parent.mkdir(parents=True, exist_ok=True)
+        quality_path.write_text(
+            json.dumps(
+                {
+                    "rows": [
+                        {
+                            "run_id": artifact_version,
+                            "dataset_id": "futures_raw_5m",
+                            "instrument_id": instrument_id,
+                            "source_id": source_id,
+                            "secid": secid,
+                            "board": "RFUD",
+                            "market": "forts",
+                            "engine": "futures",
+                            "trade_date": trade_date,
+                            "rows": 203,
+                            "duplicate_key_count": 0,
+                            "gap_count": 0,
+                            "null_ohlc_count": 0,
+                            "invalid_ohlc_count": 0,
+                            "futoi_missing_count": 0,
+                            "calendar_status": "not_required",
+                            "quality_status": "pass",
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        return stage2.materializer.InstrumentResult(
+            payload={
+                "storage_partition_path": str(root / "market" / "raw" / "part.parquet"),
+                "quality_report_reference": str(quality_path),
+                "row_count": 203,
+            }
+        )
 
-    original_checker = stage2.base.registry_allows_instrument
-    monkeypatch.setattr(stage2.base, "backfill_range", fake_backfill_range)
+    monkeypatch.setattr(stage2.materializer, "materialize_instrument_partition", fake_materialize)
     result = stage2.backfill_range(
         date_start="2026-08-17",
         date_end="2026-08-17",
@@ -100,9 +135,12 @@ def test_stage2_quote_backfill_delegates_only_after_controlled_authorization(tmp
         data_lake_path=data_lake,
     )
     assert result.payload["status"] == "succeeded"
-    assert captured["instrument_id"] == "usdrubf_futures_family"
-    assert captured["secid"] == "USDRUBF"
-    assert stage2.base.registry_allows_instrument is original_checker
+    assert result.payload["quality_status"] == "pass"
+    assert result.payload["row_count"] == 203
+    assert result.payload["partition_count"] == 1
+    assert result.payload["stage2_controlled_backfill"] is True
+    assert Path(result.payload["manifest_reference"]).exists()
+    assert Path(result.payload["quality_report_reference"]).exists()
 
 
 def test_stage2_quote_backfill_blocks_when_stage2_readiness_false(tmp_path) -> None:
