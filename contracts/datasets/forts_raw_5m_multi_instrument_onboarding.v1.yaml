@@ -11,7 +11,7 @@ scope:
   source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
   registry_ref: configs/instruments/forts_instrument_registry.v1.yaml
 problem_statement:
-  current_registry_scope: USDRUBF_CNYRUBF_SiU6_CRU6_pilots_passed_backfill_materialization_enabled
+  current_registry_scope: USDRUBF_CNYRUBF_SiU6_CRU6_pilots_passed_controlled_backfill_ready
   previous_pointer_shape: artifact_id_plus_instrument_id_plus_secid
   previous_pointer_collision_risk: true
   pointer_runner_scope_validation: pointer_scope_must_equal_exactly_one_instrument_id
@@ -75,6 +75,15 @@ required_registry_fields:
   - storage_partition_values.instrument_id
   - storage_partition_values.secid
   - evidence_status
+controlled_backfill_authorization:
+  stage2_readiness_ref: configs/datasets/futures_data_lake.v1.yaml#stage2_forts_source_bindings.readiness_flags.backfill_ready
+  required_stage2_backfill_ready: true
+  required_registry_evidence_status: pilot_passed
+  global_runtime_enablement_required: false
+  global_runtime_enablement_must_remain_false: true
+  controlled_quote_backfill_producer: moex_data.futures.backfill_stage2_forts_raw_5m_instrument
+  controlled_futoi_backfill_producer: moex_data.futures.backfill_futoi_instrument
+  accepted_pointer_creation_allowed_only_after_full_backfill_pass: true
 new_instrument_onboarding_sequence:
   - step_id: add_registry_entry
     required: true
@@ -84,7 +93,7 @@ new_instrument_onboarding_sequence:
       - storage_partition_values.instrument_id equals instrument_id
       - storage_partition_values.secid equals secid
       - source_id equals the approved source contract
-      - enabled_for_raw_5m_materialization remains false before pilot acceptance
+      - enabled_for_raw_5m_materialization remains false
   - step_id: source_identity_and_availability_proven
     required: true
     exit_criteria:
@@ -104,25 +113,28 @@ new_instrument_onboarding_sequence:
       - latest/glob/autodetect was not used
   - step_id: validate_manifest_and_quality
     required: true
-    instruction: Validate pilot manifest and quality report before enabling backfill.
+    instruction: Validate pilot manifest and quality report before controlled backfill readiness is promoted.
     exit_criteria:
       - quality_status is pass
       - latest_autodetect_used is false
       - implicit_path_selection_used is false
       - no unrelated instrument partition is included
+      - evidence_status is promoted to pilot_passed
+      - global runtime and generic materialization flags remain false
   - step_id: run_full_backfill
     required: true
-    instruction: Run full backfill only after registry activation following pilot acceptance.
-    producer: moex_data.futures.backfill_forts_raw_5m_instrument
+    instruction: Run controlled full backfill only after pilot_passed evidence and Stage 2 backfill_ready are both proven.
+    producer: moex_data.futures.backfill_stage2_forts_raw_5m_instrument
     exit_criteria:
-      - requested range is explicit
+      - requested range is explicit and source-proven
       - all written partitions use canonical market/raw path
       - source/network/schema failures fail closed
       - empty non-trading dates may be recorded as skipped_empty_source_dates
       - manifest covers approved range
+      - generic runtime enablement remains false
   - step_id: create_per_instrument_accepted_pointer
     required: true
-    instruction: Create accepted pointer only at the canonical accepted_pointer_path_contract.
+    instruction: Create accepted pointer only at the canonical accepted_pointer_path_contract after full backfill PASS.
     exit_criteria:
       - refresh_status is succeeded
       - quality_status is pass
