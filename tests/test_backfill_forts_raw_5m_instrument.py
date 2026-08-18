@@ -76,7 +76,8 @@ def test_backfill_writes_rollup_manifest_and_quality(tmp_path, monkeypatch):
     )
 
     assert summary.payload["status"] == "succeeded"
-    assert summary.payload["quality_status"] == "passed"
+    assert summary.payload["quality_status"] == "pass"
+    assert summary.payload["legacy_quality_status"] == "passed"
     assert summary.payload["instrument_id_scope"] == ["forts.usdrubf"]
     assert summary.payload["secid_scope"] == ["USDRUBF"]
     assert summary.payload["row_count"] == 179
