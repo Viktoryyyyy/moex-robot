@@ -8,14 +8,14 @@ import pytest
 from moex_data.futures import backfill_stage2_forts_raw_5m_instrument as stage2
 
 
-def _registry(path: Path, *, evidence: str = "pilot_passed", enabled: bool = False) -> Path:
+def _registry(path: Path, *, evidence: str = "pilot_passed", enabled: bool = False, instrument_id: str = "usdrubf_futures_family", secid: str = "USDRUBF") -> Path:
     path.write_text(
         "\n".join(
             [
                 "instruments:",
-                "  - instrument_id: usdrubf_futures_family",
+                "  - instrument_id: " + instrument_id,
                 "    source_id: moex_algopack_fo_tradestats_5m",
-                "    secid: USDRUBF",
+                "    secid: " + secid,
                 "    enabled_for_raw_5m_materialization: " + ("true" if enabled else "false"),
                 "    evidence_status: " + evidence,
                 "rules:",
@@ -34,8 +34,16 @@ def _data_lake(path: Path, *, ready: bool = True) -> Path:
             [
                 "stage2_forts_source_bindings:",
                 "  status: " + ("all_pilots_passed_backfill_ready" if ready else "pilot_pending"),
+                "  quote_source:",
+                "    historical_backfill_instrument_ids:",
+                "      - usdrubf_futures_family",
+                "      - cnyrubf_futures_family",
+                "    current_reference_instrument_ids:",
+                "      - si_futures_family",
+                "      - cr_futures_family",
                 "  readiness_flags:",
                 "    backfill_ready: " + ("true" if ready else "false"),
+                "    historical_quotes_backfill_ready: " + ("true" if ready else "false"),
                 "    accepted_pointer_ready: false",
                 "    scheduler_ready: false",
                 "    research_ready: false",
@@ -75,6 +83,23 @@ def test_stage2_quote_authorization_requires_pilot_passed_with_global_flag_false
             data_lake_path=data_lake,
             instrument_id="usdrubf_futures_family",
             secid="USDRUBF",
+            source_id=stage2.SOURCE_ID,
+        )
+
+
+def test_stage2_quote_authorization_rejects_current_reference_contracts(tmp_path) -> None:
+    data_lake = _data_lake(tmp_path / "data_lake.yaml")
+    registry = _registry(
+        tmp_path / "registry.yaml",
+        instrument_id="si_futures_family",
+        secid="SiU6",
+    )
+    with pytest.raises(stage2.Stage2QuotesBackfillError, match="current-reference only"):
+        stage2._authorize(
+            registry_path=registry,
+            data_lake_path=data_lake,
+            instrument_id="si_futures_family",
+            secid="SiU6",
             source_id=stage2.SOURCE_ID,
         )
 
