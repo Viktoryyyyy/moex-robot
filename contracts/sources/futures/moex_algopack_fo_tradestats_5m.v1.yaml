@@ -52,6 +52,34 @@ evidence:
   repository_materializer_ref: src/moex_data/futures/materialize_raw_5m.py
   server_probe_date: 2026-08-18
   server_probe_status: available
+  historical_coverage_probe:
+    status: proven
+    probe_date: 2026-08-18
+    requested_from: "2020-01-01"
+    requested_till: "2026-08-17"
+    identity_filter: SECID+TRADEDATE
+    transport: authenticated_apim
+    ranges:
+      USDRUBF:
+        first_available: "2022-04-26"
+        last_available: "2026-08-17"
+      CNYRUBF:
+        first_available: "2022-04-26"
+        last_available: "2026-08-17"
+      SiU6:
+        first_available: "2024-09-18"
+        last_available: "2026-08-17"
+      CRU6:
+        first_available: "2025-03-07"
+        last_available: "2026-08-17"
+  stage2_quote_roles:
+    historical_core_secids:
+      - USDRUBF
+      - CNYRUBF
+    current_reference_secids:
+      - SiU6
+      - CRU6
+    current_reference_full_historical_backfill_required: false
   proven_secids:
     - USDRUBF
     - CNYRUBF
