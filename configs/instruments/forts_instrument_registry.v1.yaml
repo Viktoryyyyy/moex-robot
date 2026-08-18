@@ -1,6 +1,6 @@
 registry_id: forts_instrument_registry.v1
 schema_version: instrument_registry.v1
-status: stage2_source_identity_bound
+status: stage2_pilots_passed_backfill_materialization_enabled
 activation_status: repo_only
 architecture_contract_ref: contracts/architecture/moex_data_access_canon_v1.yaml
 scope_policy:
@@ -28,13 +28,13 @@ instruments:
     enabled_for_loading: false
     enabled_for_update: false
     enabled_for_retrieval: false
-    enabled_for_raw_5m_materialization: false
+    enabled_for_raw_5m_materialization: true
     enabled_for_d1_derivation: false
     enabled_for_research: false
     storage_partition_values:
       instrument_id: usdrubf_futures_family
       secid: USDRUBF
-    evidence_status: pilot_required
+    evidence_status: pilot_passed
     contract_binding:
       type: perpetual
       observed_secid: USDRUBF
@@ -48,7 +48,7 @@ instruments:
         availability_status: available
         probe_status: completed
         evidence_date: "2026-08-18"
-        enabled_for_materialization: false
+        enabled_for_materialization: true
     phase2_6_binding:
       status: design_config_binding_only
       data_availability_status: not_proven
@@ -85,13 +85,13 @@ instruments:
     enabled_for_loading: false
     enabled_for_update: false
     enabled_for_retrieval: false
-    enabled_for_raw_5m_materialization: false
+    enabled_for_raw_5m_materialization: true
     enabled_for_d1_derivation: false
     enabled_for_research: false
     storage_partition_values:
       instrument_id: cnyrubf_futures_family
       secid: CNYRUBF
-    evidence_status: pilot_required
+    evidence_status: pilot_passed
     contract_binding:
       type: perpetual
       observed_secid: CNYRUBF
@@ -105,7 +105,7 @@ instruments:
         availability_status: available
         probe_status: completed
         evidence_date: "2026-08-18"
-        enabled_for_materialization: false
+        enabled_for_materialization: true
   - instrument_id: si_futures_family
     canonical_symbol: Si
     display_name: Si futures family current explicit contract
@@ -120,13 +120,13 @@ instruments:
     enabled_for_loading: false
     enabled_for_update: false
     enabled_for_retrieval: false
-    enabled_for_raw_5m_materialization: false
+    enabled_for_raw_5m_materialization: true
     enabled_for_d1_derivation: false
     enabled_for_research: false
     storage_partition_values:
       instrument_id: si_futures_family
       secid: SiU6
-    evidence_status: pilot_required
+    evidence_status: pilot_passed
     contract_binding:
       type: expiring_current_explicit
       observed_secid: SiU6
@@ -141,7 +141,7 @@ instruments:
         availability_status: available
         probe_status: completed
         evidence_date: "2026-08-18"
-        enabled_for_materialization: false
+        enabled_for_materialization: true
     phase2_6_binding:
       status: design_config_binding_only
       data_availability_status: not_proven
@@ -178,13 +178,13 @@ instruments:
     enabled_for_loading: false
     enabled_for_update: false
     enabled_for_retrieval: false
-    enabled_for_raw_5m_materialization: false
+    enabled_for_raw_5m_materialization: true
     enabled_for_d1_derivation: false
     enabled_for_research: false
     storage_partition_values:
       instrument_id: cr_futures_family
       secid: CRU6
-    evidence_status: pilot_required
+    evidence_status: pilot_passed
     contract_binding:
       type: expiring_current_explicit
       observed_secid: CRU6
@@ -199,7 +199,7 @@ instruments:
         availability_status: available
         probe_status: completed
         evidence_date: "2026-08-18"
-        enabled_for_materialization: false
+        enabled_for_materialization: true
 rules:
   storage_partition_key: instrument_id
   source_partition_key: source_id
