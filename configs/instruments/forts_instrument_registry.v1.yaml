@@ -1,6 +1,6 @@
 registry_id: forts_instrument_registry.v1
 schema_version: instrument_registry.v1
-status: stage2_source_identity_bound
+status: stage2_pilots_passed_controlled_backfill_ready
 activation_status: repo_only
 architecture_contract_ref: contracts/architecture/moex_data_access_canon_v1.yaml
 scope_policy:
@@ -34,7 +34,7 @@ instruments:
     storage_partition_values:
       instrument_id: usdrubf_futures_family
       secid: USDRUBF
-    evidence_status: pilot_required
+    evidence_status: pilot_passed
     contract_binding:
       type: perpetual
       observed_secid: USDRUBF
@@ -91,7 +91,7 @@ instruments:
     storage_partition_values:
       instrument_id: cnyrubf_futures_family
       secid: CNYRUBF
-    evidence_status: pilot_required
+    evidence_status: pilot_passed
     contract_binding:
       type: perpetual
       observed_secid: CNYRUBF
@@ -126,7 +126,7 @@ instruments:
     storage_partition_values:
       instrument_id: si_futures_family
       secid: SiU6
-    evidence_status: pilot_required
+    evidence_status: pilot_passed
     contract_binding:
       type: expiring_current_explicit
       observed_secid: SiU6
@@ -184,7 +184,7 @@ instruments:
     storage_partition_values:
       instrument_id: cr_futures_family
       secid: CRU6
-    evidence_status: pilot_required
+    evidence_status: pilot_passed
     contract_binding:
       type: expiring_current_explicit
       observed_secid: CRU6

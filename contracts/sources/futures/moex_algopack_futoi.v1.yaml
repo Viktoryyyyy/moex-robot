@@ -1,6 +1,6 @@
 contract_id: moex_algopack_futoi.v1
 schema_version: source_contract.v1
-status: active_stage2_revalidation_required
+status: active_stage2_proven
 source_id: moex_algopack_futoi
 source_system: moex_algopack
 source_kind: supplementary_futoi
@@ -56,6 +56,26 @@ failure_semantics:
 evidence:
   repository_apim_reference: src/moex_research/runners/usdrubf_phase8_7a_futoi_si_source_validation.py
   server_revalidation_date: "2026-08-18"
-  server_revalidation_status: required
+  server_revalidation_status: proven
   public_iss_evidence_status: invalidated
   public_iss_invalidation_reason: futoi_block_returned_ERROR_MESSAGE_not_data
+  proven_tickers:
+    - usdrubf
+    - cnyrubf
+    - si
+    - cr
+  pilot_trade_date: "2026-08-17"
+  pilot_quality_status: pass
+  historical_coverage:
+    si:
+      first_available: "2020-01-03"
+      last_available: "2026-08-17"
+    cr:
+      first_available: "2022-04-21"
+      last_available: "2026-08-17"
+    usdrubf:
+      first_available: "2022-12-30"
+      last_available: "2026-08-17"
+    cnyrubf:
+      first_available: "2022-12-30"
+      last_available: "2026-08-17"
