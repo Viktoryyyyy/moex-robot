@@ -12,6 +12,7 @@ FORBIDDEN_FUTOI_FILE_TOKENS = (
     "--iss-" + "base-url",
 )
 OLD_SOURCE_ID = "moex_" + "iss_futoi"
+OLD_SOURCE_FILE = "moex_" + "iss_futoi" + ".v1.yaml"
 
 
 def _futoi_specific_files():
@@ -65,4 +66,4 @@ def test_canonical_futoi_source_contract_is_apim_only() -> None:
     assert "default_base_url: https://apim.moex.com" in source
     assert "token_env: MOEX_API_KEY" in source
     assert "public_iss_transport_allowed: false" in source
-    assert not (ROOT / "contracts/sources/futures/moex_iss_futoi.v1.yaml").exists()
+    assert not (ROOT / "contracts/sources/futures" / OLD_SOURCE_FILE).exists()
