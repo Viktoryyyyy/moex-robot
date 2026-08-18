@@ -45,10 +45,22 @@ def _stage2_backfill_ready(data_lake_path: str | Path = DATA_LAKE_PATH) -> bool:
     return (
         "status: all_pilots_passed_backfill_ready" in section
         and "backfill_ready: true" in section
+        and "historical_quotes_backfill_ready: true" in section
         and "accepted_pointer_ready: false" in section
         and "scheduler_ready: false" in section
         and "research_ready: false" in section
     )
+
+
+def _stage2_historical_quote_backfill_allows(
+    data_lake_path: str | Path,
+    instrument_id: str,
+) -> bool:
+    text = Path(data_lake_path).read_text(encoding="utf-8")
+    stage2 = _section(text, "stage2_forts_source_bindings:")
+    quote_source = _section(stage2, "quote_source:")
+    historical_scope = _section(quote_source, "historical_backfill_instrument_ids:")
+    return ("- " + instrument_id) in historical_scope
 
 
 def _stage2_registry_allows(
@@ -85,6 +97,8 @@ def _authorize(
         raise Stage2QuotesBackfillError("source_id does not match canonical Stage 2 Quotes source")
     if not _stage2_backfill_ready(data_lake_path):
         raise Stage2QuotesBackfillError("Stage 2 controlled backfill readiness is not enabled")
+    if not _stage2_historical_quote_backfill_allows(data_lake_path, instrument_id):
+        raise Stage2QuotesBackfillError("instrument is current-reference only and is not authorized for Stage 2 full historical quote backfill")
     if not _stage2_registry_allows(registry_path, instrument_id, secid, source_id):
         raise Stage2QuotesBackfillError("instrument/source pilot evidence is not eligible for controlled Stage 2 backfill")
 
