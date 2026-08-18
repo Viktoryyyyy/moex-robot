@@ -76,10 +76,10 @@ evidence:
     historical_core_secids:
       - USDRUBF
       - CNYRUBF
-    current_reference_secids:
+    reference_secids:
       - SiU6
       - CRU6
-    current_reference_full_historical_backfill_required: false
+    reference_full_historical_backfill_required: false
   proven_secids:
     - USDRUBF
     - CNYRUBF
