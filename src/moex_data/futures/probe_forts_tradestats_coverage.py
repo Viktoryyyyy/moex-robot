@@ -72,17 +72,14 @@ def _headers() -> dict[str, str]:
 def _rows(payload: object) -> tuple[list[str], list[list[object]]]:
     if not isinstance(payload, dict):
         raise TradestatsCoverageError("tradestats response root is not an object")
-    block = payload.get("tradestats")
-    if not isinstance(block, dict):
-        raise TradestatsCoverageError("tradestats block is missing")
-    columns = block.get("columns") or []
-    rows = block.get("data") or []
-    if not isinstance(columns, list) or not isinstance(rows, list):
-        raise TradestatsCoverageError("tradestats block schema is invalid")
-    lowered = [str(column).strip().lower() for column in columns]
+    frame = core._block_to_frame(payload)
+    columns = [str(column) for column in frame.columns]
+    if not columns:
+        raise TradestatsCoverageError("tradestats compatible data block is missing")
+    lowered = [column.strip().lower() for column in columns]
     if "error_message" in lowered:
         raise TradestatsCoverageError("tradestats returned ERROR_MESSAGE payload")
-    return [str(column) for column in columns], rows
+    return columns, frame.values.tolist()
 
 
 def _request(session: requests.Session, base_url: str, params: dict[str, object], timeout: float) -> tuple[list[str], list[list[object]]]:
