@@ -1,0 +1,61 @@
+contract_id: moex_algopack_fo_tradestats_5m.v1
+schema_version: source_contract.v1
+status: active_stage2
+source_id: moex_algopack_fo_tradestats_5m
+source_system: moex_algopack
+source_kind: native_5m_quotes
+engine: futures
+market: forts
+board: RFUD
+endpoint_id: algopack_fo_tradestats
+endpoint_path: /iss/datashop/algopack/fo/tradestats.json
+availability_probe_endpoint_pattern: /iss/datashop/algopack/fo/tradestats/{SECID}.json
+base_url_env: MOEX_API_URL
+default_base_url: https://apim.moex.com
+auth:
+  type: bearer
+  token_env: MOEX_API_KEY
+  token_required_for_apim: true
+request_contract:
+  explicit_fields:
+    date: "{YYYY-MM-DD}"
+    from: "{YYYY-MM-DD}"
+    till: "{YYYY-MM-DD}"
+    secid: "{SECID}"
+    start: "0"
+    iss.meta: "off"
+    iss.only: tradestats
+  pagination_field: start
+  latest_autodetect_allowed: false
+  implicit_secid_selection_allowed: false
+response_contract:
+  preferred_block: tradestats
+  required_identity_field: SECID
+  canonical_dataset_ref: contracts/datasets/futures_raw_5m.v1.yaml
+identity_policy:
+  canonical_identity_field: instrument_id
+  source_identity_fields:
+    - source_id
+    - secid
+    - board
+    - market
+    - engine
+  source_id_is_instrument_specific: false
+  source_id_scope: shared_by_forts_tradestats_source
+failure_semantics:
+  unauthorized: fail_closed
+  empty_response: fail_closed
+  schema_mismatch: fail_closed
+  implicit_fallback: forbidden
+evidence:
+  repository_endpoint_config_ref: configs/datasets/futures_algopack_availability_sources_config.json
+  repository_materializer_ref: src/moex_data/futures/materialize_raw_5m.py
+  server_probe_date: 2026-08-18
+  server_probe_status: available
+  proven_secids:
+    - USDRUBF
+    - CNYRUBF
+    - SiU6
+    - CRU6
+  historical_research_source_id_noncanonical:
+    CNYRUBF: moex_algopack_cnyrubf_fo_tradestats_5m
