@@ -29,7 +29,7 @@ class _Session:
 
 
 def test_exact_probe_uses_generic_stage2_endpoint_and_exact_date_params() -> None:
-    session = _Session({"tradestats": {"columns": ["secid"], "data": [["USDRUBF"]]}})
+    session = _Session({"data": {"columns": ["secid"], "data": [["USDRUBF"]]}})
     assert coverage._exact_has_data(session, "https://apim.moex.com", "USDRUBF", date(2026, 8, 17), 30.0) is True
     assert len(session.calls) == 1
     url, params, timeout = session.calls[0]
@@ -46,9 +46,20 @@ def test_exact_probe_uses_generic_stage2_endpoint_and_exact_date_params() -> Non
     assert timeout == 30.0
 
 
+def test_probe_parser_accepts_same_data_and_tradestats_blocks_as_writer() -> None:
+    expected = (["secid", "tradedate"], [["USDRUBF", "2026-08-17"]])
+    assert coverage._rows({"data": {"columns": expected[0], "data": expected[1]}}) == expected
+    assert coverage._rows({"tradestats": {"columns": expected[0], "data": expected[1]}}) == expected
+
+
 def test_tradestats_error_message_payload_fails_closed() -> None:
     with pytest.raises(coverage.TradestatsCoverageError, match="ERROR_MESSAGE"):
-        coverage._rows({"tradestats": {"columns": ["ERROR_MESSAGE"], "data": [["bad request"]]}})
+        coverage._rows({"data": {"columns": ["ERROR_MESSAGE"], "data": [["bad request"]]}})
+
+
+def test_missing_compatible_data_block_fails_closed() -> None:
+    with pytest.raises(coverage.TradestatsCoverageError, match="compatible data block is missing"):
+        coverage._rows({"history.cursor": {"columns": [], "data": []}})
 
 
 def test_probe_coverage_reports_explicit_first_and_last_dates(monkeypatch) -> None:
