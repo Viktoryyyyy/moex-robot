@@ -1,5 +1,9 @@
 from pathlib import Path
 
+import pytest
+
+from moex_data.futures import materialize_forts_raw_5m_instrument as quote_writer
+
 
 ROOT = Path(__file__).resolve().parents[2]
 REGISTRY = ROOT / "configs" / "instruments" / "forts_instrument_registry.v1.yaml"
@@ -26,6 +30,25 @@ def test_stage2_quote_source_identity_is_generic_and_authenticated() -> None:
     assert 'SOURCE_ID: Final[str] = "moex_algopack_fo_tradestats_5m"' in writer
     assert 'headers["Authorization"] = "Bearer " + token' in writer
     assert "MOEX_API_KEY is required" in writer
+
+
+def test_stage2_bearer_auth_path_does_not_recurse_when_core_helper_is_patched() -> None:
+    original = quote_writer.core._auth_headers
+    try:
+        quote_writer.core._auth_headers = quote_writer._auth_headers_with_bearer
+        headers = quote_writer._auth_headers_with_bearer(
+            {"MOEX_API_KEY": "test-token", "MOEX_UA": "stage2-regression-test"}
+        )
+    finally:
+        quote_writer.core._auth_headers = original
+
+    assert headers["Authorization"] == "Bearer test-token"
+    assert headers["User-Agent"] == "stage2-regression-test"
+
+
+def test_stage2_bearer_auth_path_fails_closed_without_token() -> None:
+    with pytest.raises(ValueError, match="MOEX_API_KEY is required"):
+        quote_writer._auth_headers_with_bearer({"MOEX_UA": "stage2-regression-test"})
 
 
 def test_stage2_registry_has_all_four_explicit_forts_bindings() -> None:
