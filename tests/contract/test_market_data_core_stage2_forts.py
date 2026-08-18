@@ -76,7 +76,7 @@ def test_stage2_quote_writer_and_backfill_do_not_write_legacy_roots() -> None:
     assert 'root / "manifests" /' not in backfill
     assert 'root / "quality_reports" /' not in backfill
     assert "accepted_manifest.write_accepted_manifest_pointer" in backfill
-    assert 'dataset_id=" + DATASET_ID' in backfill
+    assert '"${MOEX_DATA_ROOT}/state/datasets/dataset_id="' in backfill
 
 
 def test_stage2_futoi_is_registry_bound_and_canonical_supplementary() -> None:
