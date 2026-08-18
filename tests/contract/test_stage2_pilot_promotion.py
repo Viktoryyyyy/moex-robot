@@ -36,11 +36,11 @@ def test_stage2_pilot_promotion_authorizes_controlled_backfill_only() -> None:
     assert "backfill_ready: true" in data_lake
     assert "historical_quotes_backfill_ready: true" in data_lake
     assert "futoi_backfill_ready: true" in data_lake
-    assert "current_reference_full_historical_backfill_required: false" in data_lake
+    assert "reference_full_historical_backfill_required: false" in data_lake
     assert "stage2_historical_quote_instrument_ids:" in data_lake
-    assert "stage2_current_reference_quote_instrument_ids:" in data_lake
+    assert "stage2_reference_quote_instrument_ids:" in data_lake
     assert "historical_backfill_instrument_ids:" in data_lake
-    assert "current_reference_instrument_ids:" in data_lake
+    assert "reference_instrument_ids:" in data_lake
     assert "accepted_pointer_ready: false" in data_lake
     assert "observed_source_refresh_ready: false" in data_lake
     assert "scheduler_ready: false" in data_lake
@@ -54,17 +54,17 @@ def test_stage2_pilot_promotion_authorizes_controlled_backfill_only() -> None:
     assert 'binding.get("futoi.enabled_for_materialization") is not False' in futoi_backfill
 
     assert "quote_role: historical_core" in onboarding
-    assert "quote_role: current_reference" in onboarding
+    assert "quote_role: reference" in onboarding
     assert "scope: historical_core_only" in onboarding
     assert "multi_year_historical_backfill_required: false" in onboarding
     assert "stage2_completion_blocking: false" in onboarding
-    assert "current_status: pilot_passed" in onboarding
+    assert "status: pilot_passed" in onboarding
     assert "backfill_producer: moex_data.futures.backfill_futoi_instrument" in onboarding
 
     assert "historical_coverage_probe:" in quote_source
     assert "identity_filter: SECID+TRADEDATE" in quote_source
     assert "historical_core_secids:" in quote_source
-    assert "current_reference_secids:" in quote_source
+    assert "reference_secids:" in quote_source
     assert "first_available: \"2022-04-26\"" in quote_source
     assert "first_available: \"2024-09-18\"" in quote_source
     assert "first_available: \"2025-03-07\"" in quote_source
