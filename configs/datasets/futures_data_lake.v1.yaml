@@ -14,8 +14,6 @@ storage_backend:
 dataset_contract_refs:
   - contracts/datasets/futures_raw_5m.v1.yaml
   - contracts/datasets/futures_futoi_raw.v1.yaml
-  - contracts/datasets/futures_futoi_quality_report.v1.yaml
-  - contracts/datasets/futures_futoi_refresh_manifest.v1.yaml
   - contracts/datasets/futures_derived_d1.v1.yaml
   - contracts/datasets/futures_derived_w1.v1.yaml
   - contracts/datasets/futures_data_refresh_manifest.v1.yaml
@@ -24,8 +22,6 @@ dataset_contract_refs:
 artifact_class_index:
   futures_raw_5m.v1: external_pattern
   futures_futoi_raw.v1: external_pattern
-  futures_futoi_quality_report.v1: external_pattern
-  futures_futoi_refresh_manifest.v1: external_pattern
   futures_derived_d1.v1: external_pattern
   futures_derived_w1.v1: external_pattern
   futures_data_refresh_manifest.v1: external_pattern
@@ -33,6 +29,9 @@ artifact_class_index:
   futures_continuous_5m.v1: external_pattern
   moex_data_root: env_contract
   futures_data_lake.v1: repo_relative
+supplementary_state_contract_refs:
+  futoi_quality: contracts/datasets/futures_futoi_quality_report.v1.yaml
+  futoi_refresh_manifest: contracts/datasets/futures_futoi_refresh_manifest.v1.yaml
 source_contract_refs:
   quotes: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
   futoi: contracts/sources/futures/moex_iss_futoi.v1.yaml
