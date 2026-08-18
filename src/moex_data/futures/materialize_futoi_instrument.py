@@ -190,7 +190,7 @@ def _fetch_exact(ticker: str, trade_date: str, timeout: float, iss_base_url: str
     if not base_url:
         _fail("MOEX_ISS_BASE_URL is required")
     path = "/iss/analyticalproducts/futoi/securities/" + ticker.lower() + ".json"
-    frame = availability.fetch_paged_frame(base_url, path, {"from": trade_date, "till": trade_date}, "data", timeout, False)
+    frame = availability.fetch_paged_frame(base_url, path, {"from": trade_date, "till": trade_date}, "futoi", timeout, False)
     if frame.empty:
         _fail("FUTOI exact source returned no rows")
     return frame, availability.url_join(base_url, path)
