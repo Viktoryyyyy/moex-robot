@@ -12,6 +12,7 @@ def _rows(pos_fiz: int = 422417) -> pd.DataFrame:
             {
                 "trade_date": "2021-03-02",
                 "ts": pd.Timestamp("2021-03-02 18:44:59"),
+                "moment": pd.Timestamp("2021-03-02 18:44:50"),
                 "secid": "SiU6",
                 "clgroup": "FIZ",
                 "sess_id": 6239,
@@ -26,6 +27,7 @@ def _rows(pos_fiz: int = 422417) -> pd.DataFrame:
             {
                 "trade_date": "2021-03-02",
                 "ts": pd.Timestamp("2021-03-02 18:44:59"),
+                "moment": pd.Timestamp("2021-03-02 18:44:50"),
                 "secid": "SiU6",
                 "clgroup": "FIZ",
                 "sess_id": 6239,
@@ -40,6 +42,7 @@ def _rows(pos_fiz: int = 422417) -> pd.DataFrame:
             {
                 "trade_date": "2021-03-02",
                 "ts": pd.Timestamp("2021-03-02 18:44:59"),
+                "moment": pd.Timestamp("2021-03-02 18:44:50"),
                 "secid": "SiU6",
                 "clgroup": "YUR",
                 "sess_id": 6239,
@@ -54,6 +57,7 @@ def _rows(pos_fiz: int = 422417) -> pd.DataFrame:
             {
                 "trade_date": "2021-03-02",
                 "ts": pd.Timestamp("2021-03-02 18:44:59"),
+                "moment": pd.Timestamp("2021-03-02 18:44:50"),
                 "secid": "SiU6",
                 "clgroup": "YUR",
                 "sess_id": 6239,
@@ -81,6 +85,14 @@ def test_exact_source_duplicates_are_collapsed_to_latest_seqnum() -> None:
 def test_conflicting_duplicate_canonical_key_fails_closed() -> None:
     frame = _rows().iloc[:2].copy()
     frame.loc[frame.index[1], "pos"] = 422418
+
+    with pytest.raises(target.FutoiMaterializationError, match="conflicting duplicate canonical FUTOI key"):
+        target._deduplicate_exact_source_duplicates(frame)
+
+
+def test_conflicting_moment_at_same_publication_key_fails_closed() -> None:
+    frame = _rows().iloc[:2].copy()
+    frame.loc[frame.index[1], "moment"] = pd.Timestamp("2021-03-02 18:44:55")
 
     with pytest.raises(target.FutoiMaterializationError, match="conflicting duplicate canonical FUTOI key"):
         target._deduplicate_exact_source_duplicates(frame)
