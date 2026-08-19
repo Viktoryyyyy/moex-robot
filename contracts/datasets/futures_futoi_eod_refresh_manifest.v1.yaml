@@ -1,0 +1,33 @@
+contract_id: futures_futoi_eod_refresh_manifest.v1
+dataset_id: futures_futoi_eod_refresh_manifest
+artifact_class: state_manifest
+format: json
+schema_version: futures_futoi_eod_refresh_manifest.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/state/refresh/dataset_id=futures_futoi_eod/run_date={YYYY-MM-DD}/run_id={RUN_ID}/manifest.json"
+required_fields:
+  - run_id
+  - run_date
+  - dataset_id
+  - instrument_scope
+  - source_scope
+  - requested_from
+  - requested_till
+  - raw_dataset_id
+  - raw_manifest_reference
+  - raw_partition_count
+  - partitions_written
+  - failed_dates
+  - quality_report_ref
+  - refresh_status
+  - producer
+  - derivation_id
+  - hardcoded_server_path_used
+  - dynamic_scan_used
+  - direct_source_refetch_used
+rules:
+  raw_manifest_must_be_explicit: true
+  dynamic_scan_allowed: false
+  direct_source_refetch_allowed: false
+  accepted_pointer_creation_allowed: false
+  refresh_status_succeeded_requires_quality_pass: true
