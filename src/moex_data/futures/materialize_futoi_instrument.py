@@ -246,6 +246,11 @@ def _deduplicate_exact_source_duplicates(frame: pd.DataFrame) -> tuple[pd.DataFr
     for _, group in duplicate_rows.groupby(list(CANONICAL_KEY_FIELDS), dropna=False, sort=False):
         if len(group) < 2:
             continue
+        if "seqnum" not in group.columns:
+            _fail("duplicate canonical FUTOI key missing usable seqnum")
+        seqnums = pd.to_numeric(group["seqnum"], errors="coerce")
+        if bool(seqnums.isna().any()):
+            _fail("duplicate canonical FUTOI key missing usable seqnum")
         for field in comparison_fields:
             first = group[field].iloc[0]
             equal = group[field].isna() if pd.isna(first) else group[field].eq(first)
