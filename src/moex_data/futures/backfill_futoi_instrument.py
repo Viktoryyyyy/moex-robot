@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Final, Sequence
@@ -134,6 +135,10 @@ def _authorize(binding: dict[str, object], data_lake_path: str | Path) -> None:
         raise FutoiBackfillError("registry FUTOI APIM evidence is not available/completed")
 
 
+def _emit_progress(payload: dict[str, object]) -> None:
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True), file=sys.stderr, flush=True)
+
+
 def backfill_range(
     *,
     date_start: str,
@@ -145,11 +150,14 @@ def backfill_range(
     timeout: float = 60.0,
     apim_base_url: str | None = None,
     create_accepted_pointer: bool = False,
+    progress_every: int = 25,
 ) -> dict[str, object]:
     start = _require_date(date_start, "date_start")
     end = _require_date(date_end, "date_end")
     if start > end:
         raise FutoiBackfillError("date_start must be <= date_end")
+    if progress_every <= 0:
+        raise FutoiBackfillError("progress_every must be > 0")
     checked_instrument = _require_token(instrument_id, "instrument_id")
     checked_run_id = _require_token(run_id, "run_id")
     binding = materializer._registry_binding(registry_path, checked_instrument)
@@ -161,8 +169,20 @@ def backfill_range(
     duplicate_total = 0
     null_total = 0
     invalid_total = 0
+    dates = _date_range(start, end)
 
-    for current in _date_range(start, end):
+    _emit_progress(
+        {
+            "event": "start",
+            "instrument_id": checked_instrument,
+            "secid": str(binding["secid"]),
+            "futoi_ticker": str(binding["futoi.ticker"]),
+            "processed_dates": 0,
+            "total_dates": len(dates),
+        }
+    )
+
+    for processed_dates, current in enumerate(dates, start=1):
         trade_date = current.isoformat()
         try:
             payload = materializer.materialize_futoi_partition(
@@ -185,6 +205,22 @@ def backfill_range(
                 skipped.append(trade_date)
             else:
                 failures.append({"trade_date": trade_date, "error": message})
+
+        if processed_dates % progress_every == 0 or processed_dates == len(dates):
+            _emit_progress(
+                {
+                    "event": "progress",
+                    "instrument_id": checked_instrument,
+                    "secid": str(binding["secid"]),
+                    "futoi_ticker": str(binding["futoi.ticker"]),
+                    "processed_dates": processed_dates,
+                    "total_dates": len(dates),
+                    "partition_count": len(successes),
+                    "skipped_empty_source_dates": len(skipped),
+                    "failure_count": len(failures),
+                    "trade_date": trade_date,
+                }
+            )
 
     row_count = sum(int(item.get("row_count") or 0) for item in successes)
     quality_status = "pass" if successes and not failures and duplicate_total == 0 and null_total == 0 and invalid_total == 0 else "fail"
@@ -278,6 +314,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--env-file", default=None)
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--apim-base-url", default=None)
+    parser.add_argument("--progress-every", type=int, default=25)
     parser.add_argument("--create-accepted-pointer", action="store_true")
     return parser.parse_args(argv)
 
@@ -296,6 +333,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             timeout=args.timeout,
             apim_base_url=args.apim_base_url,
             create_accepted_pointer=args.create_accepted_pointer,
+            progress_every=args.progress_every,
         )
     except Exception as exc:
         print(json.dumps({"status": "failed", "dataset_id": DATASET_ID, "error": str(exc), "latest_autodetect_used": False}, ensure_ascii=False, sort_keys=True))
