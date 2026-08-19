@@ -201,6 +201,16 @@ def test_required_source_identifiers_accept_numeric_values() -> None:
 
 
 @pytest.mark.parametrize("field", ["sess_id", "seqnum"])
+def test_large_integer_source_identifier_preserves_exact_precision(field: str) -> None:
+    frame = _normalized_rows().iloc[:1].copy()
+    frame[field] = ["9007199254740993"]
+
+    result = target._validate_required_source_identifiers(frame)
+
+    assert result.loc[result.index[0], field] == 9007199254740993
+
+
+@pytest.mark.parametrize("field", ["sess_id", "seqnum"])
 def test_missing_required_source_identifier_fails_closed(field: str) -> None:
     frame = _normalized_rows().drop(columns=[field])
 
