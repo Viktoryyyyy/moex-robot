@@ -40,6 +40,7 @@ derivation:
     - select maximum canonical raw ts within each clgroup for the trade_date
     - require one sess_id at the selected maximum ts within each clgroup
     - if multiple source revisions exist at that maximum ts within the same sess_id select the greatest exact-integer seqnum
+    - require selected FIZ and YUR rows to share the same ts sess_id and seqnum source snapshot
     - preserve the selected raw source record and provenance
   ambiguity_policy: fail_closed
   expected_clgroups:
@@ -50,7 +51,13 @@ canonical_key_fields:
   - trade_date
   - secid
   - clgroup
+availability:
+  availability_timestamp_required: true
+  availability_timestamp_field: availability_ts_utc
+  derived_availability_semantics: derived_ingest_time
+  selected_raw_availability_field: raw_availability_ts_utc
 required_columns:
+  - schema_version
   - instrument_id
   - trade_date
   - ts
@@ -74,8 +81,11 @@ required_columns:
   - ingest_ts
   - derivation_id
   - raw_dataset_id
+  - raw_run_id
   - raw_manifest_reference
   - raw_partition_reference
+  - raw_availability_ts_utc
+  - raw_ingest_ts
   - raw_source_record_count
   - max_ts_revision_count
   - derived_ingest_ts
