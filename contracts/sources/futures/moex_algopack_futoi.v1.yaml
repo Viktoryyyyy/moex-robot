@@ -64,24 +64,28 @@ response_contract:
       - FIZ
       - YUR
   timestamp_semantics:
-    canonical_ts_source_field: systime
-    canonical_ts_meaning: publication_time
-    source_reference_time_fields: tradedate_plus_tradetime
-    source_reference_time_meaning: last_trade_included_in_calculation
-    seqnum_meaning: technical_data_package_number
-    publication_may_follow_trade_date: true
-    publication_must_not_precede_source_reference_time: true
+    canonical_ts_source_fields:
+      - tradedate
+      - tradetime
+    canonical_ts_meaning: time_of_last_trade_included_in_calculation
+    source_publication_field: systime
+    source_publication_meaning: moex_source_publication_metadata
+    historical_systime_identity_allowed: false
+    historical_systime_note: archival APIM history may carry a common later systime across many historical source records
     source_reference_date_must_equal_trade_date: true
+    publication_must_not_precede_source_reference_time: true
+    seqnum_meaning: technical_data_package_number
   duplicate_policy:
-    canonical_key_fields:
+    source_record_key_fields:
       - trade_date
-      - ts
+      - sess_id
+      - seqnum
       - secid
       - clgroup
-    exact_payload_duplicate: keep_highest_seqnum
-    duplicate_seqnum_requirement: all_duplicate_rows_numeric
-    missing_or_invalid_duplicate_seqnum: fail_closed
-    conflicting_payload_duplicate: fail_closed
+    exact_duplicate_same_source_record: keep_one
+    conflicting_same_source_record: fail_closed
+    same_moment_different_source_record: preserve_all
+    analytical_revision_resolution: separate_derived_layer_required
 identity_policy:
   canonical_identity_field: instrument_id
   source_identity_fields:
@@ -107,8 +111,7 @@ failure_semantics:
   missing_or_invalid_source_identifier: fail_closed
   source_reference_date_mismatch: fail_closed
   publication_before_source_reference_time: fail_closed
-  conflicting_duplicate_payload: fail_closed
-  duplicate_without_usable_seqnum: fail_closed
+  conflicting_same_source_record: fail_closed
   implicit_ticker_fallback: forbidden
   public_iss_fallback: forbidden
 evidence:
@@ -118,6 +121,11 @@ evidence:
   public_iss_evidence_status: invalidated
   public_iss_invalidation_reason: futoi_block_returned_ERROR_MESSAGE_not_data
   official_metric_semantics_reference: https://moexalgo.github.io/docs/description/futoi
+  historical_timestamp_revalidation:
+    trade_date: "2021-04-06"
+    observed_common_systime: "2025-06-21 16:22:46"
+    observed_distinct_moment_and_seqnum_records: true
+    conclusion: systime_not_usable_as_historical_raw_event_identity
   proven_tickers:
     - usdrubf
     - cnyrubf
