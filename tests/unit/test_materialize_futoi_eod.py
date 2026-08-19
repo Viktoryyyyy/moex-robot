@@ -101,15 +101,13 @@ def test_eod_selects_latest_ts_then_highest_seqnum_revision() -> None:
 
 
 def test_eod_seqnum_selection_preserves_integer_precision_above_2_pow_53() -> None:
-    lower = "9007199254740992"
-    higher = "9007199254740993"
     result = _derive(
         pd.DataFrame(
             [
-                _row("FIZ", "2021-04-06 18:44:59", lower),
-                _row("YUR", "2021-04-06 18:44:59", lower),
-                _row("FIZ", "2021-04-06 18:44:59", higher),
-                _row("YUR", "2021-04-06 18:44:59", higher),
+                _row("FIZ", "2021-04-06 18:44:59", "9007199254740992"),
+                _row("YUR", "2021-04-06 18:44:59", "9007199254740992"),
+                _row("FIZ", "2021-04-06 18:44:59", "9007199254740993"),
+                _row("YUR", "2021-04-06 18:44:59", "9007199254740993"),
             ]
         )
     )
@@ -117,7 +115,10 @@ def test_eod_seqnum_selection_preserves_integer_precision_above_2_pow_53() -> No
 
 
 def test_eod_fails_when_max_ts_contains_multiple_sessions_for_group() -> None:
-    raw = pd.concat([_raw_rows(), pd.DataFrame([_row("FIZ", "2021-04-06 18:44:59", 1, sess_id=6264, pos=50000)])], ignore_index=True)
+    raw = pd.concat(
+        [_raw_rows(), pd.DataFrame([_row("FIZ", "2021-04-06 18:44:59", 1, sess_id=6264, pos=50000)])],
+        ignore_index=True,
+    )
     with pytest.raises(target.FutoiEodError, match="ambiguous EOD session"):
         _derive(raw)
 
@@ -225,7 +226,7 @@ def _patch_root(monkeypatch, root: Path) -> None:
     )
 
 
-def _make_pin(monkeypatch, tmp_path: Path) -> tuple[dict[str, object], Path]:
+def _make_pin(monkeypatch, tmp_path: Path) -> tuple[dict[str, object], Path, Path]:
     manifest_path, raw_partition = _write_raw_state(tmp_path)
     _patch_root(monkeypatch, tmp_path)
     pin = target.raw_pin.create_content_pin(
@@ -233,11 +234,25 @@ def _make_pin(monkeypatch, tmp_path: Path) -> tuple[dict[str, object], Path]:
         run_id="raw_pin_run",
         raw_manifest_path=manifest_path,
     )
-    return pin, raw_partition
+    return pin, raw_partition, manifest_path
+
+
+def _eod_output_path(root: Path, run_id: str = "eod_run") -> Path:
+    return (
+        root
+        / "market"
+        / "supplementary"
+        / "dataset_id=futures_futoi_eod"
+        / ("run_id=" + run_id)
+        / "instrument_id=si_futures_family"
+        / "trade_date=2021-04-06"
+        / ("source=" + target.SOURCE_ID)
+        / "part.parquet"
+    )
 
 
 def test_full_eod_materialization_requires_verified_content_pin(monkeypatch, tmp_path: Path) -> None:
-    pin, _ = _make_pin(monkeypatch, tmp_path)
+    pin, _, _ = _make_pin(monkeypatch, tmp_path)
     result = target.materialize_futoi_eod(
         instrument_id="si_futures_family",
         run_id="eod_run",
@@ -253,21 +268,14 @@ def test_full_eod_materialization_requires_verified_content_pin(monkeypatch, tmp
     assert result["failure_count"] == 0
     assert result["ambiguity_count"] == 0
     assert result["raw_content_pin_sha256"] == pin["content_pin_sha256"]
+    assert result["output_version_mode"] == "run_id"
+    assert result["immutable_output_run_reserved"] is True
+    assert "run_id=eod_run" in result["immutable_output_run_root"]
     assert result["dynamic_scan_used"] is False
     assert result["direct_source_refetch_used"] is False
     assert result["accepted_manifest_pointer_reference"] is None
 
-    output_path = (
-        tmp_path
-        / "market"
-        / "supplementary"
-        / "dataset_id=futures_futoi_eod"
-        / "instrument_id=si_futures_family"
-        / "trade_date=2021-04-06"
-        / ("source=" + target.SOURCE_ID)
-        / "part.parquet"
-    )
-    output = pd.read_parquet(output_path)
+    output = pd.read_parquet(_eod_output_path(tmp_path))
     assert len(output) == 2
     assert set(output["seqnum"].astype(int).tolist()) == {220}
     assert output["raw_manifest_reference"].str.startswith("${MOEX_DATA_ROOT}/").all()
@@ -277,9 +285,33 @@ def test_full_eod_materialization_requires_verified_content_pin(monkeypatch, tmp
     assert output["availability_ts_utc"].eq(output["derived_ingest_ts"]).all()
     assert output["raw_availability_ts_utc"].ne(output["availability_ts_utc"]).all()
 
+    manifest = json.loads(Path(result["manifest_reference"]).read_text(encoding="utf-8"))
+    assert manifest["output_version_mode"] == "run_id"
+    assert manifest["immutable_output_run_reserved"] is True
+    assert len(manifest["partitions_written"]) == 1
+    assert "/run_id=eod_run/" in manifest["partitions_written"][0]
+
+
+def test_eod_same_run_id_cannot_overwrite_prior_success(monkeypatch, tmp_path: Path) -> None:
+    pin, _, _ = _make_pin(monkeypatch, tmp_path)
+    kwargs = {
+        "instrument_id": "si_futures_family",
+        "run_id": "eod_run",
+        "raw_pin_path": str(pin["content_pin_reference"]),
+        "raw_pin_sha256": str(pin["content_pin_sha256"]),
+    }
+    target.materialize_futoi_eod(**kwargs)
+    output_path = _eod_output_path(tmp_path)
+    before = output_path.read_bytes()
+
+    with pytest.raises(target.FutoiEodError, match="immutable output run already exists"):
+        target.materialize_futoi_eod(**kwargs)
+
+    assert output_path.read_bytes() == before
+
 
 def test_raw_partition_mutation_after_pin_fails_closed(monkeypatch, tmp_path: Path) -> None:
-    pin, raw_partition = _make_pin(monkeypatch, tmp_path)
+    pin, raw_partition, _ = _make_pin(monkeypatch, tmp_path)
     mutated = _raw_rows()
     mutated.loc[mutated.index[-1], "pos"] = -999999
     mutated.to_parquet(raw_partition, index=False)
@@ -294,7 +326,7 @@ def test_raw_partition_mutation_after_pin_fails_closed(monkeypatch, tmp_path: Pa
 
 
 def test_wrong_explicit_pin_digest_fails_closed(monkeypatch, tmp_path: Path) -> None:
-    pin, _ = _make_pin(monkeypatch, tmp_path)
+    pin, _, _ = _make_pin(monkeypatch, tmp_path)
     with pytest.raises(target.raw_pin.FutoiRawContentPinError, match="content pin SHA-256 mismatch"):
         target.materialize_futoi_eod(
             instrument_id="si_futures_family",
@@ -302,6 +334,32 @@ def test_wrong_explicit_pin_digest_fails_closed(monkeypatch, tmp_path: Path) -> 
             raw_pin_path=str(pin["content_pin_reference"]),
             raw_pin_sha256=ZERO_SHA,
         )
+
+
+def test_second_content_pin_same_run_id_cannot_overwrite(monkeypatch, tmp_path: Path) -> None:
+    pin, _, manifest_path = _make_pin(monkeypatch, tmp_path)
+    pin_path = Path(str(pin["content_pin_reference"]))
+    before = pin_path.read_bytes()
+
+    with pytest.raises(target.raw_pin.FutoiRawContentPinError, match="overwrite is forbidden"):
+        target.raw_pin.create_content_pin(
+            instrument_id="si_futures_family",
+            run_id="raw_pin_run",
+            raw_manifest_path=manifest_path,
+        )
+
+    assert pin_path.read_bytes() == before
+
+
+def test_raw_manifest_rejects_skipped_date_outside_requested_range(monkeypatch, tmp_path: Path) -> None:
+    manifest_path, _ = _write_raw_state(tmp_path)
+    values = json.loads(manifest_path.read_text(encoding="utf-8"))
+    values["partitions_skipped"] = ["2021-04-07"]
+    manifest_path.write_text(json.dumps(values), encoding="utf-8")
+    monkeypatch.setattr(target.raw_pin, "_data_root", lambda: tmp_path.resolve())
+
+    with pytest.raises(target.raw_pin.FutoiRawContentPinError, match="outside requested range"):
+        target.raw_pin.validate_raw_manifest(manifest_path, "si_futures_family")
 
 
 def test_raw_manifest_content_identity_must_match_canonical_path(monkeypatch, tmp_path: Path) -> None:
