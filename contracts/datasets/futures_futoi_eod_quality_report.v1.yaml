@@ -28,11 +28,13 @@ required_fields:
   - ambiguity_count
   - failed_dates
   - derivation_id
+  - pair_key_fields
   - output_version_mode
   - immutable_output_run_root
   - immutable_output_run_reserved
 hard_checks:
   - raw_content_pin_digest_matches_explicit_input
+  - content_pin_uses_selected_raw_run_writer_hashes
   - aggregate_raw_manifest_digest_matches_content_pin
   - every_raw_partition_digest_matches_content_pin
   - raw_manifest_and_quality_identity_valid
@@ -46,7 +48,10 @@ hard_checks:
   - ambiguity_count_zero
   - failed_dates_empty
   - every_partition_contains_exactly_FIZ_and_YUR
-  - selected_FIZ_and_YUR_share_one_source_snapshot
+  - selected_FIZ_and_YUR_share_latest_common_trade_date_moment_sess_id_pair
+  - selected_group_seqnum_may_differ
+  - selected_rows_pos_identity_holds
+  - selected_pair_pos_is_zero_sum
   - output_version_mode_is_run_id
   - immutable_output_run_reserved_before_write
   - versioned_output_paths_match_current_run_id
