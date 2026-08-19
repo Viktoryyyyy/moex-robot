@@ -57,6 +57,7 @@ response_contract:
       - sess_id
       - seqnum
     source_identifier_semantics: finite_integral_non_boolean
+    exact_integer_precision_required: true
     supported_clgroups:
       - FIZ
       - YUR
