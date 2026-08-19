@@ -68,6 +68,7 @@ def test_missing_publication_systime_fails_closed() -> None:
 
 def test_invalid_publication_systime_fails_closed() -> None:
     frame = _normalized_rows()
+    frame["systime"] = frame["systime"].astype(object)
     frame.loc[frame.index[0], "systime"] = "not-a-timestamp"
 
     with pytest.raises(target.FutoiMaterializationError, match="invalid systime publication timestamp"):
