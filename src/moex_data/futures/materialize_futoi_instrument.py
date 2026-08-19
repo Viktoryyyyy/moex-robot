@@ -269,7 +269,7 @@ def _deduplicate_exact_source_duplicates(frame: pd.DataFrame) -> tuple[pd.DataFr
         return frame.copy().reset_index(drop=True), 0
 
     duplicate_rows = frame.loc[duplicate_mask].copy()
-    comparison_fields = [field for field in ("sess_id", "source_ticker", *POSITION_FIELDS) if field in duplicate_rows.columns]
+    comparison_fields = [field for field in ("sess_id", "source_ticker", "moment", *POSITION_FIELDS) if field in duplicate_rows.columns]
     for _, group in duplicate_rows.groupby(list(CANONICAL_KEY_FIELDS), dropna=False, sort=False):
         if len(group) < 2:
             continue
