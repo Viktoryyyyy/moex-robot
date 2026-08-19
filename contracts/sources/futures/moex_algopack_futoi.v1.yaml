@@ -51,6 +51,8 @@ response_contract:
       - secid
       - clgroup
     exact_payload_duplicate: keep_highest_seqnum
+    duplicate_seqnum_requirement: all_duplicate_rows_numeric
+    missing_or_invalid_duplicate_seqnum: fail_closed
     conflicting_payload_duplicate: fail_closed
 identity_policy:
   canonical_identity_field: instrument_id
@@ -69,6 +71,7 @@ failure_semantics:
   error_message_payload: fail_closed
   schema_mismatch: fail_closed
   conflicting_duplicate_payload: fail_closed
+  duplicate_without_usable_seqnum: fail_closed
   implicit_ticker_fallback: forbidden
   public_iss_fallback: forbidden
 evidence:
