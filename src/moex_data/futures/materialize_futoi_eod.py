@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 from collections.abc import Mapping, Sequence
-from datetime import date
 from pathlib import Path
 from typing import Final
 
 import pandas as pd
 
 from . import materialize_futoi_instrument as raw_materializer
+from . import materialize_futoi_raw_content_pin as raw_pin
 
 DATASET_ID: Final[str] = "futures_futoi_eod"
 RAW_DATASET_ID: Final[str] = raw_materializer.DATASET_ID
@@ -65,32 +66,15 @@ def _require_token(value: object, field_name: str) -> str:
 
 
 def _require_date(value: object, field_name: str) -> str:
-    text = str(value or "").strip()
-    try:
-        return date.fromisoformat(text).isoformat()
-    except ValueError as exc:
-        raise FutoiEodError(field_name + " must be YYYY-MM-DD") from exc
+    return raw_pin._require_date(value, field_name)
+
+
+def _require_sha256(value: object, field_name: str) -> str:
+    return raw_pin._require_sha256(value, field_name)
 
 
 def _data_root() -> Path:
     return raw_materializer._data_root().resolve()
-
-
-def _resolve_root_reference(value: object, field_name: str) -> Path:
-    text = str(value or "").strip()
-    if not text:
-        _fail(field_name + " is required")
-    root = _data_root()
-    prefix = "${MOEX_DATA_ROOT}/"
-    if text.startswith(prefix):
-        candidate = (root / text[len(prefix) :]).resolve()
-    else:
-        candidate = Path(text).expanduser().resolve()
-    try:
-        candidate.relative_to(root)
-    except ValueError:
-        _fail(field_name + " must resolve inside MOEX_DATA_ROOT")
-    return candidate
 
 
 def _portable_ref(path: Path) -> str:
@@ -138,160 +122,6 @@ def _manifest_path(run_date: str, run_id: str) -> Path:
         / ("run_id=" + run_id)
         / "manifest.json"
     )
-
-
-def _load_json(path: Path, name: str) -> dict[str, object]:
-    if not path.exists() or not path.is_file():
-        _fail(name + " does not exist")
-    try:
-        values = json.loads(path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        raise FutoiEodError(name + " is not valid JSON") from exc
-    if not isinstance(values, dict):
-        _fail(name + " root must be an object")
-    return values
-
-
-def _canonical_raw_partition_path(reference: object, instrument_id: str) -> tuple[str, Path]:
-    path = _resolve_root_reference(reference, "raw partition reference")
-    base = (
-        _data_root()
-        / "market"
-        / "supplementary"
-        / ("dataset_id=" + RAW_DATASET_ID)
-        / ("instrument_id=" + instrument_id)
-    ).resolve()
-    try:
-        relative = path.relative_to(base)
-    except ValueError:
-        _fail("raw partition is outside canonical raw instrument root")
-    parts = relative.parts
-    if len(parts) != 3 or not parts[0].startswith("trade_date=") or parts[1] != "source=" + SOURCE_ID or parts[2] != "part.parquet":
-        _fail("raw partition path does not match canonical FUTOI raw pattern")
-    trade_date = _require_date(parts[0].split("=", 1)[1], "raw partition trade_date")
-    expected = (base / ("trade_date=" + trade_date) / ("source=" + SOURCE_ID) / "part.parquet").resolve()
-    if path != expected:
-        _fail("raw partition path is not canonical")
-    if not path.exists() or not path.is_file():
-        _fail("raw partition does not exist: " + trade_date)
-    return trade_date, path
-
-
-def _validate_raw_manifest(
-    raw_manifest_path: str | Path,
-    instrument_id: str,
-) -> tuple[dict[str, object], Path, list[tuple[str, Path]], dict[str, object]]:
-    manifest_path = _resolve_root_reference(raw_manifest_path, "raw_manifest_path")
-    expected_manifest_root = (_data_root() / "state" / "refresh" / ("dataset_id=" + RAW_DATASET_ID)).resolve()
-    try:
-        manifest_relative = manifest_path.relative_to(expected_manifest_root)
-    except ValueError:
-        _fail("raw manifest is outside canonical raw refresh root")
-    if (
-        len(manifest_relative.parts) != 3
-        or not manifest_relative.parts[0].startswith("run_date=")
-        or not manifest_relative.parts[1].startswith("run_id=")
-        or manifest_relative.parts[2] != "manifest.json"
-    ):
-        _fail("raw manifest path does not match canonical raw refresh pattern")
-
-    manifest = _load_json(manifest_path, "raw manifest")
-    if str(manifest.get("dataset_id")) != RAW_DATASET_ID:
-        _fail("raw manifest dataset_id mismatch")
-    if list(manifest.get("instrument_scope") or []) != [instrument_id]:
-        _fail("raw manifest instrument_scope mismatch")
-    if list(manifest.get("source_scope") or []) != [SOURCE_ID]:
-        _fail("raw manifest source_scope mismatch")
-    if str(manifest.get("refresh_status")) != "succeeded":
-        _fail("raw manifest refresh_status is not succeeded")
-    if list(manifest.get("failed_dates") or []):
-        _fail("raw manifest contains failed_dates")
-
-    raw_run_id = _require_token(manifest.get("run_id"), "raw manifest run_id")
-    requested_from = _require_date(manifest.get("requested_from"), "raw manifest requested_from")
-    requested_till = _require_date(manifest.get("requested_till"), "raw manifest requested_till")
-    run_date = _require_date(manifest.get("run_date"), "raw manifest run_date")
-    if requested_from > requested_till:
-        _fail("raw manifest requested_from exceeds requested_till")
-    if run_date != requested_till:
-        _fail("raw manifest run_date must equal requested_till")
-
-    path_run_date = _require_date(manifest_relative.parts[0].split("=", 1)[1], "raw manifest path run_date")
-    path_run_id = _require_token(manifest_relative.parts[1].split("=", 1)[1], "raw manifest path run_id")
-    if path_run_date != run_date or path_run_id != raw_run_id:
-        _fail("raw manifest path identity does not match manifest content")
-    expected_manifest_path = (
-        expected_manifest_root
-        / ("run_date=" + run_date)
-        / ("run_id=" + raw_run_id)
-        / "manifest.json"
-    ).resolve()
-    if manifest_path != expected_manifest_path:
-        _fail("raw manifest path is not canonical")
-
-    written = manifest.get("partitions_written")
-    if not isinstance(written, list) or not written:
-        _fail("raw manifest partitions_written must be a non-empty list")
-    partition_pairs = [_canonical_raw_partition_path(item, instrument_id) for item in written]
-    trade_dates = [item[0] for item in partition_pairs]
-    if len(trade_dates) != len(set(trade_dates)):
-        _fail("raw manifest contains duplicate trade_date partition references")
-    if any(value < requested_from or value > requested_till for value in trade_dates):
-        _fail("raw manifest partition date is outside requested range")
-
-    skipped_values = manifest.get("partitions_skipped") or []
-    if not isinstance(skipped_values, list):
-        _fail("raw manifest partitions_skipped must be a list")
-    skipped = [_require_date(item, "raw manifest skipped trade_date") for item in skipped_values]
-    if len(skipped) != len(set(skipped)):
-        _fail("raw manifest contains duplicate skipped dates")
-    if set(skipped) & set(trade_dates):
-        _fail("raw manifest written and skipped dates overlap")
-    calendar_days = (date.fromisoformat(requested_till) - date.fromisoformat(requested_from)).days + 1
-    if len(trade_dates) + len(skipped) != calendar_days:
-        _fail("raw manifest written plus skipped dates do not reconcile to requested calendar range")
-
-    quality_path = _resolve_root_reference(manifest.get("quality_report_ref"), "raw quality_report_ref")
-    expected_quality_path = (
-        _data_root()
-        / "state"
-        / "quality"
-        / ("dataset_id=" + RAW_DATASET_ID)
-        / ("run_date=" + run_date)
-        / ("run_id=" + raw_run_id)
-        / "quality_report.json"
-    ).resolve()
-    if quality_path != expected_quality_path:
-        _fail("raw quality report path does not match raw manifest identity")
-    raw_quality = _load_json(quality_path, "raw quality report")
-    if str(raw_quality.get("dataset_id")) != RAW_DATASET_ID:
-        _fail("raw quality dataset_id mismatch")
-    if str(raw_quality.get("run_id")) != raw_run_id:
-        _fail("raw quality run_id mismatch")
-    if str(raw_quality.get("instrument_id")) != instrument_id:
-        _fail("raw quality instrument_id mismatch")
-    if str(raw_quality.get("source_id")) != SOURCE_ID:
-        _fail("raw quality source_id mismatch")
-    if _require_date(raw_quality.get("requested_from"), "raw quality requested_from") != requested_from:
-        _fail("raw quality requested_from mismatch")
-    if _require_date(raw_quality.get("requested_till"), "raw quality requested_till") != requested_till:
-        _fail("raw quality requested_till mismatch")
-    if str(raw_quality.get("quality_status")) != "pass":
-        _fail("raw quality_status is not pass")
-    if int(raw_quality.get("partition_count") or 0) != len(partition_pairs):
-        _fail("raw quality partition_count does not match manifest")
-    if int(raw_quality.get("row_count") or 0) <= 0:
-        _fail("raw quality row_count is not positive")
-    if list(raw_quality.get("failed_dates") or []):
-        _fail("raw quality report contains failed_dates")
-    quality_skipped = set(str(item) for item in (raw_quality.get("skipped_empty_source_dates") or []))
-    if quality_skipped != set(skipped):
-        _fail("raw quality skipped dates do not match manifest")
-    for field in ("duplicate_key_count", "null_required_count", "invalid_position_count"):
-        if int(raw_quality.get(field) or 0) != 0:
-            _fail("raw quality " + field + " is nonzero")
-
-    return manifest, manifest_path, sorted(partition_pairs), raw_quality
 
 
 def _validate_raw_partition(
@@ -366,7 +196,10 @@ def _derive_partition(
     instrument_id: str,
     raw_run_id: str,
     raw_manifest_ref: str,
+    raw_content_pin_ref: str,
+    raw_content_pin_sha256: str,
     raw_partition_ref: str,
+    raw_partition_sha256: str,
     derived_ingest_ts: str,
 ) -> pd.DataFrame:
     selected_rows: list[pd.Series] = []
@@ -409,7 +242,10 @@ def _derive_partition(
     out["raw_dataset_id"] = RAW_DATASET_ID
     out["raw_run_id"] = raw_run_id
     out["raw_manifest_reference"] = raw_manifest_ref
+    out["raw_content_pin_reference"] = raw_content_pin_ref
+    out["raw_content_pin_sha256"] = raw_content_pin_sha256
     out["raw_partition_reference"] = raw_partition_ref
+    out["raw_partition_sha256"] = raw_partition_sha256
     out["raw_availability_ts_utc"] = out["availability_ts_utc"]
     out["raw_ingest_ts"] = out["ingest_ts"]
     out["derived_ingest_ts"] = derived_ingest_ts
@@ -449,7 +285,10 @@ def _quality_counts(frames: Sequence[pd.DataFrame]) -> dict[str, int]:
         "raw_dataset_id",
         "raw_run_id",
         "raw_manifest_reference",
+        "raw_content_pin_reference",
+        "raw_content_pin_sha256",
         "raw_partition_reference",
+        "raw_partition_sha256",
         "raw_availability_ts_utc",
         "raw_ingest_ts",
         "derived_ingest_ts",
@@ -474,17 +313,20 @@ def materialize_futoi_eod(
     *,
     instrument_id: str,
     run_id: str,
-    raw_manifest_path: str | Path,
+    raw_pin_path: str | Path,
+    raw_pin_sha256: str,
     registry_path: str | Path = REGISTRY_PATH,
 ) -> dict[str, object]:
     checked_instrument = _require_token(instrument_id, "instrument_id")
     checked_run_id = _require_token(run_id, "run_id")
+    checked_pin_sha256 = _require_sha256(raw_pin_sha256, "raw_pin_sha256")
     binding = raw_materializer._registry_binding(registry_path, checked_instrument)
     if str(binding["futoi.source_id"]) != SOURCE_ID:
         _fail("registry FUTOI source_id does not match canonical source")
 
-    raw_manifest, raw_manifest_file, raw_partitions, _ = _validate_raw_manifest(
-        raw_manifest_path,
+    pin, pin_file, raw_manifest, raw_manifest_file, raw_entries = raw_pin.load_and_verify_content_pin(
+        raw_pin_path,
+        checked_pin_sha256,
         checked_instrument,
     )
     raw_run_id = _require_token(raw_manifest.get("run_id"), "raw manifest run_id")
@@ -492,12 +334,16 @@ def materialize_futoi_eod(
     requested_till = _require_date(raw_manifest.get("requested_till"), "requested_till")
     derived_ingest_ts = raw_materializer._utc_now()
     portable_manifest_ref = _portable_ref(raw_manifest_file)
+    portable_pin_ref = _portable_ref(pin_file)
 
     derived: list[tuple[str, Path, pd.DataFrame]] = []
     failures: list[dict[str, str]] = []
-    for trade_date, raw_path in raw_partitions:
+    for entry in raw_entries:
+        trade_date = str(entry["trade_date"])
+        raw_path = Path(str(entry["path"]))
         try:
-            raw = pd.read_parquet(raw_path)
+            raw_bytes = raw_pin.read_verified_partition_bytes(entry)
+            raw = pd.read_parquet(io.BytesIO(raw_bytes))
             raw = _validate_raw_partition(raw, trade_date, checked_instrument, binding)
             output = _derive_partition(
                 raw,
@@ -505,7 +351,10 @@ def materialize_futoi_eod(
                 instrument_id=checked_instrument,
                 raw_run_id=raw_run_id,
                 raw_manifest_ref=portable_manifest_ref,
+                raw_content_pin_ref=portable_pin_ref,
+                raw_content_pin_sha256=checked_pin_sha256,
                 raw_partition_ref=_portable_ref(raw_path),
+                raw_partition_sha256=str(entry["sha256"]),
                 derived_ingest_ts=derived_ingest_ts,
             )
             derived.append((trade_date, _eod_partition_path(trade_date, checked_instrument), output))
@@ -514,7 +363,7 @@ def materialize_futoi_eod(
 
     frames = [item[2] for item in derived]
     counts = _quality_counts(frames)
-    raw_partition_count = len(raw_partitions)
+    raw_partition_count = len(raw_entries)
     partition_count = len(derived)
     expected_rows = 2 * raw_partition_count
     failure_count = len(failures)
@@ -546,6 +395,8 @@ def materialize_futoi_eod(
         "source_id": SOURCE_ID,
         "raw_dataset_id": RAW_DATASET_ID,
         "raw_manifest_reference": portable_manifest_ref,
+        "raw_content_pin_reference": portable_pin_ref,
+        "raw_content_pin_sha256": checked_pin_sha256,
         "requested_from": requested_from,
         "requested_till": requested_till,
         "quality_status": quality_status,
@@ -559,6 +410,7 @@ def materialize_futoi_eod(
         "ambiguity_count": ambiguity_count,
         "failed_dates": failures,
         "derivation_id": DERIVATION_ID,
+        "content_pin_status": str(pin.get("pin_status")),
         "quality_contract_ref": QUALITY_CONTRACT_REF,
     }
 
@@ -579,6 +431,8 @@ def materialize_futoi_eod(
         "raw_dataset_id": RAW_DATASET_ID,
         "raw_manifest_reference": portable_manifest_ref,
         "raw_run_id": raw_run_id,
+        "raw_content_pin_reference": portable_pin_ref,
+        "raw_content_pin_sha256": checked_pin_sha256,
         "raw_partition_count": raw_partition_count,
         "partitions_written": partitions_written,
         "failed_dates": failures,
@@ -608,6 +462,8 @@ def materialize_futoi_eod(
         "raw_dataset_id": RAW_DATASET_ID,
         "raw_run_id": raw_run_id,
         "raw_manifest_reference": portable_manifest_ref,
+        "raw_content_pin_reference": portable_pin_ref,
+        "raw_content_pin_sha256": checked_pin_sha256,
         "requested_from": requested_from,
         "requested_till": requested_till,
         "raw_partition_count": raw_partition_count,
@@ -628,11 +484,12 @@ def materialize_futoi_eod(
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Derive canonical FUTOI EOD snapshots from an explicit pinned canonical raw backfill manifest."
+        description="Derive canonical FUTOI EOD snapshots from an explicit immutable SHA-256 raw content pin."
     )
     parser.add_argument("--instrument-id", required=True)
     parser.add_argument("--run-id", required=True)
-    parser.add_argument("--raw-manifest-path", required=True)
+    parser.add_argument("--raw-pin-path", required=True)
+    parser.add_argument("--raw-pin-sha256", required=True)
     parser.add_argument("--registry-path", default=REGISTRY_PATH)
     parser.add_argument("--env-file", default=None)
     return parser.parse_args(argv)
@@ -645,7 +502,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         payload = materialize_futoi_eod(
             instrument_id=args.instrument_id,
             run_id=args.run_id,
-            raw_manifest_path=args.raw_manifest_path,
+            raw_pin_path=args.raw_pin_path,
+            raw_pin_sha256=args.raw_pin_sha256,
             registry_path=args.registry_path,
         )
     except Exception as exc:
