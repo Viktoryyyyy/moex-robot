@@ -291,16 +291,16 @@ def _validate_raw_source_rows(frame: pd.DataFrame, trade_date: str, ticker: str)
 
 def _coerce_source_identifier(value: object, field: str) -> int:
     if value is None or isinstance(value, bool) or value.__class__.__name__ == "bool_" or pd.isna(value):
-        _fail("normalized FUTOI source contains invalid required source identifier: " + field)
+        _fail("FUTOI source contains invalid required source identifier: " + field)
     text = str(value).strip()
     if not text:
-        _fail("normalized FUTOI source contains invalid required source identifier: " + field)
+        _fail("FUTOI source contains invalid required source identifier: " + field)
     try:
         number = Decimal(text)
     except (InvalidOperation, ValueError):
-        _fail("normalized FUTOI source contains invalid required source identifier: " + field)
+        _fail("FUTOI source contains invalid required source identifier: " + field)
     if not number.is_finite() or number != number.to_integral_value():
-        _fail("normalized FUTOI source contains invalid required source identifier: " + field)
+        _fail("FUTOI source contains invalid required source identifier: " + field)
     return int(number)
 
 
@@ -308,7 +308,7 @@ def _validate_required_source_identifiers(frame: pd.DataFrame) -> pd.DataFrame:
     result = frame.copy()
     for field in ("sess_id", "seqnum"):
         if field not in result.columns:
-            _fail("normalized FUTOI source missing required source identifier: " + field)
+            _fail("FUTOI source missing required source identifier: " + field)
         result[field] = [_coerce_source_identifier(value, field) for value in result[field].tolist()]
     return result.reset_index(drop=True)
 
@@ -350,8 +350,11 @@ def _deduplicate_exact_source_duplicates(frame: pd.DataFrame) -> tuple[pd.DataFr
             continue
         if "seqnum" not in group.columns:
             _fail("duplicate canonical FUTOI key missing usable seqnum")
-        seqnums = pd.to_numeric(group["seqnum"], errors="coerce")
-        if bool(seqnums.isna().any()):
+        try:
+            seqnums = [_coerce_source_identifier(value, "seqnum") for value in group["seqnum"].tolist()]
+        except FutoiMaterializationError:
+            _fail("duplicate canonical FUTOI key missing usable seqnum")
+        if len(seqnums) != len(group):
             _fail("duplicate canonical FUTOI key missing usable seqnum")
         for field in comparison_fields:
             first = group[field].iloc[0]
@@ -362,7 +365,7 @@ def _deduplicate_exact_source_duplicates(frame: pd.DataFrame) -> tuple[pd.DataFr
     work = frame.copy()
     sort_fields = list(CANONICAL_KEY_FIELDS)
     if "seqnum" in work.columns:
-        work["_seqnum_sort"] = pd.to_numeric(work["seqnum"], errors="coerce")
+        work["_seqnum_sort"] = [_coerce_source_identifier(value, "seqnum") for value in work["seqnum"].tolist()]
         sort_fields.append("_seqnum_sort")
     work = work.sort_values(sort_fields, kind="stable", na_position="first")
     before = len(work)
@@ -437,6 +440,7 @@ def materialize_futoi_partition(
 
     ingest_ts = _utc_now()
     source_frame, source_url = _fetch_exact(ticker, checked_date, timeout, apim_base_url)
+    source_frame = _validate_required_source_identifiers(source_frame)
     source_frame = _validate_raw_source_rows(source_frame, checked_date, ticker)
     normalized, meta = legacy.normalize_futoi(
         source_frame,
