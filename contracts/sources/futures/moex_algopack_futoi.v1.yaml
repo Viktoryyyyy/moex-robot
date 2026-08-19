@@ -55,6 +55,9 @@ response_contract:
     source_reference_time_fields: tradedate_plus_tradetime
     source_reference_time_meaning: last_trade_included_in_calculation
     seqnum_meaning: technical_data_package_number
+    publication_may_follow_trade_date: true
+    publication_must_not_precede_source_reference_time: true
+    source_reference_date_must_equal_trade_date: true
   duplicate_policy:
     canonical_key_fields:
       - trade_date
@@ -82,7 +85,9 @@ failure_semantics:
   error_message_payload: fail_closed
   schema_mismatch: fail_closed
   missing_or_invalid_systime: fail_closed
-  publication_date_mismatch: fail_closed
+  missing_or_invalid_source_identifier: fail_closed
+  source_reference_date_mismatch: fail_closed
+  publication_before_source_reference_time: fail_closed
   conflicting_duplicate_payload: fail_closed
   duplicate_without_usable_seqnum: fail_closed
   implicit_ticker_fallback: forbidden
