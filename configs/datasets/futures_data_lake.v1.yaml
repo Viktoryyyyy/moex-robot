@@ -34,6 +34,7 @@ supplementary_dataset_contract_refs:
 supplementary_state_contract_refs:
   futoi_quality: contracts/datasets/futures_futoi_quality_report.v1.yaml
   futoi_refresh_manifest: contracts/datasets/futures_futoi_refresh_manifest.v1.yaml
+  futoi_raw_content_pin: contracts/datasets/futures_futoi_raw_content_pin.v1.yaml
   futoi_eod_quality: contracts/datasets/futures_futoi_eod_quality_report.v1.yaml
   futoi_eod_refresh_manifest: contracts/datasets/futures_futoi_eod_refresh_manifest.v1.yaml
 source_contract_refs:
@@ -81,6 +82,7 @@ market_data_storage_policy:
   canonical_new_write_root: "${MOEX_DATA_ROOT}/market"
   raw_quotes_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
   futoi_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
+  futoi_raw_content_pin_contract_ref: contracts/datasets/futures_futoi_raw_content_pin.v1.yaml
   futoi_eod_contract_ref: contracts/datasets/futures_futoi_eod.v1.yaml
   quotes_and_futoi_share_partition_file_allowed: false
   new_instrument_onboarding_to_legacy_roots_allowed: false
@@ -183,9 +185,10 @@ stage2_forts_source_bindings:
       - cr_futures_family
     public_iss_evidence_status: invalidated
     apim_revalidation_required: false
+    raw_content_pin_contract_ref: contracts/datasets/futures_futoi_raw_content_pin.v1.yaml
     eod_dataset_id: futures_futoi_eod
     eod_contract_ref: contracts/datasets/futures_futoi_eod.v1.yaml
-    eod_input_mode: explicit_pinned_raw_backfill_manifest
+    eod_input_mode: explicit_immutable_sha256_content_pin
     eod_dynamic_scan_allowed: false
     eod_direct_source_refetch_allowed: false
   readiness_flags:
@@ -195,6 +198,7 @@ stage2_forts_source_bindings:
     backfill_ready: true
     historical_quotes_backfill_ready: true
     futoi_backfill_ready: true
+    futoi_raw_content_pin_ready: true
     futoi_eod_contract_ready: true
     reference_full_historical_backfill_required: false
     accepted_pointer_ready: false
@@ -211,6 +215,7 @@ stage2_forts_source_bindings:
     unknown_availability_ts_utc_rule: exclude_or_shift_by_at_least_one_trading_day
   explicit_non_authorizations:
     - no FUTOI public ISS transport or fallback
+    - no FUTOI EOD derivation without explicit raw content pin SHA-256
     - no FUTOI EOD direct source refetch or dynamic scan
     - no multi-year historical quote backfill for SiU6 or CRU6 in Stage 2
     - no scheduler before observed-source refresh pass
