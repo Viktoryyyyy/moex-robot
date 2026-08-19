@@ -51,6 +51,7 @@ response_contract:
     - systime
   raw_validation:
     before_normalization_required: true
+    duplicate_case_normalized_columns_forbidden: true
     exact_requested_trade_date_required: true
     exact_registry_ticker_required: true
     source_identifier_fields:
@@ -96,6 +97,7 @@ failure_semantics:
   empty_response: fail_closed
   error_message_payload: fail_closed
   schema_mismatch: fail_closed
+  duplicate_case_normalized_source_column: fail_closed
   invalid_raw_tradedate_or_tradetime: fail_closed
   raw_row_outside_explicit_trade_date: fail_closed
   raw_ticker_identity_mismatch: fail_closed
