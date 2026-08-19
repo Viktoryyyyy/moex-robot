@@ -1,0 +1,55 @@
+contract_id: futures_futoi_eod_refresh_manifest.v1
+dataset_id: futures_futoi_eod_refresh_manifest
+artifact_class: state_manifest
+format: json
+schema_version: futures_futoi_eod_refresh_manifest.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/state/refresh/dataset_id=futures_futoi_eod/run_date={YYYY-MM-DD}/run_id={RUN_ID}/manifest.json"
+required_fields:
+  - run_id
+  - run_date
+  - dataset_id
+  - instrument_scope
+  - source_scope
+  - requested_from
+  - requested_till
+  - raw_dataset_id
+  - raw_manifest_reference
+  - raw_run_id
+  - raw_content_pin_reference
+  - raw_content_pin_sha256
+  - raw_partition_count
+  - partitions_written
+  - failed_dates
+  - quality_report_ref
+  - quality_status
+  - refresh_status
+  - producer
+  - derivation_id
+  - pair_key_fields
+  - output_version_mode
+  - immutable_output_run_root
+  - immutable_output_run_reserved
+  - hardcoded_server_path_used
+  - dynamic_scan_used
+  - direct_source_refetch_used
+  - accepted_manifest_pointer_reference
+rules:
+  raw_content_pin_must_be_explicit: true
+  raw_content_pin_digest_must_match_explicit_input: true
+  raw_content_pin_must_use_selected_raw_run_writer_hashes: true
+  raw_manifest_digest_must_match_content_pin: true
+  every_raw_partition_digest_must_match_content_pin: true
+  raw_manifest_identity_must_match_canonical_state_path: true
+  raw_quality_identity_must_match_raw_manifest: true
+  pair_key_fields_must_equal_trade_date_moment_sess_id: true
+  cross_group_seqnum_equality_required: false
+  output_version_mode_must_be_run_id: true
+  immutable_output_run_root_required: true
+  immutable_output_run_root_exclusive_reservation_required: true
+  partitions_written_must_reference_current_run_id: true
+  overwrite_existing_output_run_allowed: false
+  dynamic_scan_allowed: false
+  direct_source_refetch_allowed: false
+  accepted_pointer_creation_allowed: false
+  refresh_status_succeeded_requires_quality_pass: true

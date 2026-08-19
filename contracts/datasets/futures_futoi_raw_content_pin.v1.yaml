@@ -1,0 +1,64 @@
+contract_id: futures_futoi_raw_content_pin.v1
+dataset_id: futures_futoi_raw_content_pin
+artifact_class: state_manifest
+format: json
+schema_version: futures_futoi_raw_content_pin.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/state/refresh/dataset_id=futures_futoi_raw_content_pin/run_date={YYYY-MM-DD}/run_id={RUN_ID}/manifest.json"
+producer: moex_data.futures.materialize_futoi_raw_content_pin
+upstream:
+  dataset_id: futures_futoi_raw
+  aggregate_manifest_contract_ref: contracts/datasets/futures_futoi_refresh_manifest.v1.yaml
+  raw_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
+pinning:
+  manifest_digest_algorithm: sha256
+  partition_digest_algorithm: sha256
+  aggregate_manifest_digest_required: true
+  raw_run_issued_partition_hash_required: true
+  post_hoc_partition_hash_as_provenance_allowed: false
+  every_written_partition_digest_required: true
+  immutable_run_path_required: true
+  exclusive_destination_reservation_required: true
+  overwrite_existing_pin_allowed: false
+  explicit_aggregate_manifest_required: true
+  exact_requested_date_set_reconciliation_required: true
+  dynamic_scan_allowed: false
+  direct_source_refetch_allowed: false
+required_fields:
+  - schema_version
+  - run_id
+  - run_date
+  - dataset_id
+  - raw_dataset_id
+  - instrument_id
+  - source_id
+  - raw_run_id
+  - raw_manifest_reference
+  - raw_manifest_sha256
+  - requested_from
+  - requested_till
+  - partition_count
+  - skipped_empty_source_dates
+  - partitions
+  - pin_status
+  - created_at_utc
+  - raw_partition_hash_source
+  - hardcoded_server_path_used
+  - dynamic_scan_used
+  - direct_source_refetch_used
+partition_entry_required_fields:
+  - trade_date
+  - raw_partition_reference
+  - sha256
+  - size_bytes
+  - raw_hash_issued_by_run_id
+verification_policy:
+  pin_file_digest_must_match_explicit_expected_digest: true
+  raw_manifest_digest_must_match: true
+  aggregate_manifest_must_carry_raw_run_issued_hash_for_every_partition: true
+  content_pin_partition_digest_must_equal_raw_run_issued_digest: true
+  every_partition_digest_must_match_before_consumption: true
+  raw_manifest_and_quality_identity_must_pass: true
+  written_plus_skipped_must_equal_exact_requested_date_set: true
+failure_policy: fail_closed
+accepted_pointer_creation_allowed: false

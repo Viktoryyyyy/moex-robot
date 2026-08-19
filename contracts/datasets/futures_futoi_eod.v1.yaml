@@ -1,0 +1,130 @@
+contract_id: futures_futoi_eod.v1
+dataset_id: futures_futoi_eod
+artifact_class: external_pattern
+producer: moex_data.futures.materialize_futoi_eod
+consumers:
+  - moex_data.futures.validation
+format: parquet
+schema_version: futures_futoi_eod.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/market/supplementary/dataset_id=futures_futoi_eod/run_id={RUN_ID}/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet"
+partitioning:
+  - dataset_id
+  - run_id
+  - instrument_id
+  - trade_date
+  - source_id
+output_versioning:
+  mode: run_id
+  immutable_run_output_required: true
+  exclusive_run_root_reservation_required: true
+  overwrite_existing_run_allowed: false
+  manifest_must_reference_versioned_partitions: true
+grain: one_eod_snapshot_per_trade_date_and_clgroup
+identity_model:
+  canonical_identity_field: instrument_id
+  source_identity_fields:
+    - secid
+    - board
+    - market
+    - engine
+    - source_id
+  family_as_canonical_identity_allowed: false
+upstream:
+  dataset_id: futures_futoi_raw
+  contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
+  content_pin_contract_ref: contracts/datasets/futures_futoi_raw_content_pin.v1.yaml
+  selection_mode: explicit_immutable_sha256_content_pin_authenticated_by_raw_run_writer
+  raw_run_issued_partition_hash_required: true
+  aggregate_manifest_digest_required: true
+  every_partition_digest_required: true
+  explicit_content_pin_digest_required: true
+  dynamic_scan_allowed: false
+  direct_source_refetch_allowed: false
+  historical_source_refetch_allowed: false
+derivation:
+  derivation_id: futoi_eod_last_observation_v1
+  group_fields:
+    - trade_date
+    - secid
+    - clgroup
+  candidate_pair_key_fields:
+    - trade_date
+    - moment
+    - sess_id
+  source_revision_field: seqnum
+  steps:
+    - verify explicit raw content pin digest
+    - verify raw-run-issued partition hashes through the content pin
+    - verify aggregate raw manifest digest from the content pin
+    - verify every raw partition digest immediately before consumption
+    - build common FIZ and YUR candidate pair keys using trade_date moment and sess_id
+    - select the latest common pair by moment and fail closed if multiple sess_id values remain at that latest moment
+    - within the selected common pair select the greatest exact-integer seqnum independently for FIZ and YUR
+    - do not require FIZ and YUR seqnum values to be equal
+    - require each selected row pos to equal pos_long plus pos_short
+    - require selected FIZ pos plus selected YUR pos to equal zero
+    - preserve selected raw record and content-digest provenance
+  ambiguity_policy: fail_closed
+  expected_clgroups:
+    - FIZ
+    - YUR
+  expected_rows_per_partition: 2
+canonical_key_fields:
+  - trade_date
+  - secid
+  - clgroup
+availability:
+  availability_timestamp_required: true
+  availability_timestamp_field: availability_ts_utc
+  derived_availability_semantics: derived_ingest_time
+  selected_raw_availability_field: raw_availability_ts_utc
+required_columns:
+  - schema_version
+  - instrument_id
+  - trade_date
+  - ts
+  - moment
+  - systime
+  - sess_id
+  - seqnum
+  - secid
+  - board
+  - market
+  - engine
+  - source_id
+  - source_ticker
+  - clgroup
+  - pos
+  - pos_long
+  - pos_short
+  - pos_long_num
+  - pos_short_num
+  - availability_ts_utc
+  - ingest_ts
+  - derivation_id
+  - raw_dataset_id
+  - raw_run_id
+  - raw_manifest_reference
+  - raw_content_pin_reference
+  - raw_content_pin_sha256
+  - raw_partition_reference
+  - raw_partition_sha256
+  - raw_availability_ts_utc
+  - raw_ingest_ts
+  - raw_source_record_count
+  - max_ts_revision_count
+  - derived_ingest_ts
+source_contract:
+  source_id: moex_algopack_futoi
+  source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v1.yaml
+  source_id_meaning: provenance_of_selected_raw_records
+quality_contract_ref: contracts/datasets/futures_futoi_eod_quality_report.v1.yaml
+refresh_manifest_contract_ref: contracts/datasets/futures_futoi_eod_refresh_manifest.v1.yaml
+accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_futoi_eod/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+path_rules:
+  storage_root: env_contract
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+  dynamic_scan_allowed: false
+retention_policy: keep_all_valid_run_versioned_partitions

@@ -34,6 +34,13 @@ def _require_token(value: str, field_name: str) -> str:
     return text
 
 
+def _require_sha256(value: object, field_name: str) -> str:
+    text = str(value or "").strip().lower()
+    if len(text) != 64 or any(ch not in "0123456789abcdef" for ch in text):
+        raise FutoiBackfillError(field_name + " must be a SHA-256 hex digest")
+    return text
+
+
 def _date_range(start: date, end: date) -> list[date]:
     result: list[date] = []
     current = start
@@ -135,6 +142,25 @@ def _authorize(binding: dict[str, object], data_lake_path: str | Path) -> None:
         raise FutoiBackfillError("registry FUTOI APIM evidence is not available/completed")
 
 
+def _content_pin_from_success(item: dict[str, object]) -> dict[str, object]:
+    trade_date = str(item.get("trade_date") or "")
+    _require_date(trade_date, "success trade_date")
+    path = str(item.get("storage_partition_path") or "").strip()
+    if not path:
+        raise FutoiBackfillError("successful partition is missing storage_partition_path")
+    digest = _require_sha256(item.get("storage_partition_sha256"), "storage_partition_sha256")
+    size = int(item.get("storage_partition_size_bytes") or 0)
+    if size <= 0:
+        raise FutoiBackfillError("storage_partition_size_bytes must be positive")
+    return {
+        "trade_date": trade_date,
+        "partition_reference": path,
+        "sha256": digest,
+        "size_bytes": size,
+        "issued_by_run_id": _subrun_id(str(item.get("aggregate_run_id") or ""), trade_date) if item.get("aggregate_run_id") else None,
+    }
+
+
 def _emit_progress(
     *,
     instrument_id: str,
@@ -228,6 +254,8 @@ def backfill_range(
                 apim_base_url=apim_base_url,
                 require_enabled=False,
             )
+            payload["aggregate_run_id"] = checked_run_id
+            _content_pin_from_success(payload)
             successes.append(payload)
             quality = json.loads(Path(str(payload["quality_report_reference"])).read_text(encoding="utf-8"))
             duplicate_total += int(quality.get("duplicate_key_count") or 0)
@@ -254,7 +282,9 @@ def backfill_range(
             )
 
     row_count = sum(int(item.get("row_count") or 0) for item in successes)
-    quality_status = "pass" if successes and not failures and duplicate_total == 0 and null_total == 0 and invalid_total == 0 else "fail"
+    partition_content_pins = [_content_pin_from_success(item) for item in successes]
+    pins_complete = len(partition_content_pins) == len(successes) and all(item.get("issued_by_run_id") for item in partition_content_pins)
+    quality_status = "pass" if successes and not failures and duplicate_total == 0 and null_total == 0 and invalid_total == 0 and pins_complete else "fail"
     refresh_status = "succeeded" if quality_status == "pass" else ("partial" if successes else "failed")
     quality_path = _aggregate_quality_path(end.isoformat(), checked_run_id)
     manifest_path = _aggregate_manifest_path(end.isoformat(), checked_run_id)
@@ -276,6 +306,9 @@ def backfill_range(
         "availability_status": str(binding["futoi.availability_status"]),
         "probe_status": str(binding["futoi.probe_status"]),
         "partition_count": len(successes),
+        "partition_content_pin_count": len(partition_content_pins),
+        "partition_content_pins_complete": pins_complete,
+        "content_digest_algorithm": "sha256",
         "skipped_empty_source_dates": skipped,
         "failed_dates": failures,
     }
@@ -289,6 +322,9 @@ def backfill_range(
         "requested_till": end.isoformat(),
         "partitions_written": [str(item["storage_partition_path"]) for item in successes],
         "partitions_skipped": skipped,
+        "partition_content_pins": partition_content_pins,
+        "content_digest_algorithm": "sha256",
+        "partition_hashes_issued_by_raw_run": pins_complete,
         "quality_report_ref": quality_path.as_posix(),
         "accepted_manifest_ref": _accepted_ref(checked_instrument),
         "refresh_status": refresh_status,
@@ -323,6 +359,9 @@ def backfill_range(
         "quality_status": quality_status,
         "row_count": row_count,
         "partition_count": len(successes),
+        "partition_content_pin_count": len(partition_content_pins),
+        "partition_content_pins_complete": pins_complete,
+        "content_digest_algorithm": "sha256",
         "skipped_empty_source_dates": skipped,
         "failed_dates": failures,
         "quality_report_reference": quality_path.as_posix(),

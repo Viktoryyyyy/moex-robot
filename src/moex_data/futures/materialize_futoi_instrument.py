@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import tempfile
@@ -192,12 +193,18 @@ def _write_json_atomic(path: Path, values: Mapping[str, object]) -> None:
     Path(temporary_name).replace(path)
 
 
-def _write_parquet_atomic(path: Path, frame: pd.DataFrame, run_id: str) -> None:
+def _write_parquet_atomic(path: Path, frame: pd.DataFrame, run_id: str) -> dict[str, object]:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_name("." + path.name + "." + run_id + ".tmp")
     try:
         frame.to_parquet(temp_path, index=False)
+        data = temp_path.read_bytes()
+        content_pin = {
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "size_bytes": len(data),
+        }
         temp_path.replace(path)
+        return content_pin
     finally:
         if temp_path.exists():
             temp_path.unlink()
@@ -527,6 +534,8 @@ def materialize_futoi_partition(
         "requested_till": checked_date,
         "partitions_written": [partition_path.as_posix()] if quality["quality_status"] == "pass" else [],
         "partitions_skipped": [],
+        "partition_content_pins": [],
+        "content_digest_algorithm": "sha256",
         "quality_report_ref": quality_path.as_posix(),
         "accepted_manifest_ref": "${MOEX_DATA_ROOT}/state/datasets/dataset_id=" + DATASET_ID + "/instrument_id=" + checked_instrument + "/current_accepted_manifest.json",
         "refresh_status": "succeeded" if quality["quality_status"] == "pass" else "failed",
@@ -551,7 +560,19 @@ def materialize_futoi_partition(
         _write_json_atomic(quality_path, quality)
         _write_json_atomic(manifest_path, manifest)
         _fail("FUTOI quality failed: " + ",".join(quality["failure_reasons"]))
-    _write_parquet_atomic(partition_path, normalized, checked_run_id)
+
+    content_pin = _write_parquet_atomic(partition_path, normalized, checked_run_id)
+    manifest["partition_content_pins"] = [
+        {
+            "trade_date": checked_date,
+            "partition_reference": partition_path.as_posix(),
+            "sha256": str(content_pin["sha256"]),
+            "size_bytes": int(content_pin["size_bytes"]),
+            "issued_by_run_id": checked_run_id,
+        }
+    ]
+    quality["storage_partition_sha256"] = str(content_pin["sha256"])
+    quality["storage_partition_size_bytes"] = int(content_pin["size_bytes"])
     _write_json_atomic(quality_path, quality)
     _write_json_atomic(manifest_path, manifest)
     return {
@@ -565,6 +586,8 @@ def materialize_futoi_partition(
         "row_count": int(quality["row_count"]),
         "quality_status": quality["quality_status"],
         "storage_partition_path": partition_path.as_posix(),
+        "storage_partition_sha256": str(content_pin["sha256"]),
+        "storage_partition_size_bytes": int(content_pin["size_bytes"]),
         "quality_report_reference": quality_path.as_posix(),
         "manifest_reference": manifest_path.as_posix(),
         "accepted_manifest_pointer_reference": None,
