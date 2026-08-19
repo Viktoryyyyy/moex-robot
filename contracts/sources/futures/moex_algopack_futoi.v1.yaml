@@ -24,6 +24,15 @@ request_contract:
   latest_autodetect_allowed: false
   fallback_endpoint_allowed: false
   public_iss_transport_allowed: false
+  retry_policy:
+    max_attempts: 3
+    retry_http_status:
+      - 401
+      - 429
+      - 500
+      - 502
+      - 503
+      - 504
 response_contract:
   canonical_dataset_ref: contracts/datasets/futures_futoi_raw.v1.yaml
   availability_report_ref: contracts/datasets/futures_futoi_availability_report_contract.md
@@ -35,6 +44,14 @@ response_contract:
     - pos_long_num
     - pos_short_num
   timestamp_requirement: moment_or_tradedate_plus_tradetime
+  duplicate_policy:
+    canonical_key_fields:
+      - trade_date
+      - ts
+      - secid
+      - clgroup
+    exact_payload_duplicate: keep_highest_seqnum
+    conflicting_payload_duplicate: fail_closed
 identity_policy:
   canonical_identity_field: instrument_id
   source_identity_fields:
@@ -47,10 +64,11 @@ identity_policy:
   source_id_scope: shared_by_algopack_futoi_source
   ticker_must_be_explicit_registry_binding: true
 failure_semantics:
-  unauthorized: fail_closed
+  unauthorized_after_retry: fail_closed
   empty_response: fail_closed
   error_message_payload: fail_closed
   schema_mismatch: fail_closed
+  conflicting_duplicate_payload: fail_closed
   implicit_ticker_fallback: forbidden
   public_iss_fallback: forbidden
 evidence:
