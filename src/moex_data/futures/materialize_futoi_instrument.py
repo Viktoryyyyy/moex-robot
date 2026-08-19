@@ -7,6 +7,7 @@ import tempfile
 import time
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Final
 
@@ -288,23 +289,27 @@ def _validate_raw_source_rows(frame: pd.DataFrame, trade_date: str, ticker: str)
     return result.reset_index(drop=True)
 
 
+def _coerce_source_identifier(value: object, field: str) -> int:
+    if value is None or isinstance(value, bool) or value.__class__.__name__ == "bool_" or pd.isna(value):
+        _fail("normalized FUTOI source contains invalid required source identifier: " + field)
+    text = str(value).strip()
+    if not text:
+        _fail("normalized FUTOI source contains invalid required source identifier: " + field)
+    try:
+        number = Decimal(text)
+    except (InvalidOperation, ValueError):
+        _fail("normalized FUTOI source contains invalid required source identifier: " + field)
+    if not number.is_finite() or number != number.to_integral_value():
+        _fail("normalized FUTOI source contains invalid required source identifier: " + field)
+    return int(number)
+
+
 def _validate_required_source_identifiers(frame: pd.DataFrame) -> pd.DataFrame:
     result = frame.copy()
     for field in ("sess_id", "seqnum"):
         if field not in result.columns:
             _fail("normalized FUTOI source missing required source identifier: " + field)
-        raw_values = result[field].tolist()
-        if any(isinstance(value, bool) or value.__class__.__name__ == "bool_" for value in raw_values):
-            _fail("normalized FUTOI source contains invalid required source identifier: " + field)
-        numeric = pd.to_numeric(result[field], errors="coerce")
-        if bool(numeric.isna().any()):
-            _fail("normalized FUTOI source contains invalid required source identifier: " + field)
-        valid_numeric = numeric.map(
-            lambda value: float("-inf") < float(value) < float("inf") and float(value).is_integer()
-        )
-        if not bool(valid_numeric.all()):
-            _fail("normalized FUTOI source contains invalid required source identifier: " + field)
-        result[field] = [int(float(value)) for value in numeric.tolist()]
+        result[field] = [_coerce_source_identifier(value, field) for value in result[field].tolist()]
     return result.reset_index(drop=True)
 
 
