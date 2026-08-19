@@ -196,7 +196,7 @@ def _fetch_exact(ticker: str, trade_date: str, timeout: float, apim_base_url: st
     frame = availability.fetch_paged_frame(
         base_url,
         path,
-        {"from": trade_date, "till": trade_date, "latest": 1},
+        {"from": trade_date, "till": trade_date, "latest": 0},
         "futoi",
         timeout,
         True,
