@@ -12,7 +12,6 @@ ALLOWED_EXTERNAL_ROOT_ARTIFACT_CLASSES: Final[frozenset[str]] = frozenset({"env_
 EXPECTED_DATASET_CONTRACT_IDS: Final[tuple[str, ...]] = (
     "futures_raw_5m.v1",
     "futures_futoi_raw.v1",
-    "futures_futoi_eod.v1",
     "futures_derived_d1.v1",
     "futures_derived_w1.v1",
     "futures_data_refresh_manifest.v1",
@@ -22,7 +21,6 @@ EXPECTED_DATASET_CONTRACT_IDS: Final[tuple[str, ...]] = (
 EXPECTED_DATASET_CONTRACT_PATHS: Final[tuple[str, ...]] = (
     "contracts/datasets/futures_raw_5m.v1.yaml",
     "contracts/datasets/futures_futoi_raw.v1.yaml",
-    "contracts/datasets/futures_futoi_eod.v1.yaml",
     "contracts/datasets/futures_derived_d1.v1.yaml",
     "contracts/datasets/futures_derived_w1.v1.yaml",
     "contracts/datasets/futures_data_refresh_manifest.v1.yaml",
