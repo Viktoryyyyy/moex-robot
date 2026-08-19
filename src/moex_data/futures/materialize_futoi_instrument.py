@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import tempfile
+import time
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -22,6 +23,16 @@ QUALITY_CONTRACT_REF: Final[str] = "contracts/datasets/futures_futoi_quality_rep
 MANIFEST_CONTRACT_REF: Final[str] = "contracts/datasets/futures_futoi_refresh_manifest.v1.yaml"
 REGISTRY_PATH: Final[str] = "configs/instruments/forts_instrument_registry.v1.yaml"
 PRODUCER_ID: Final[str] = "moex_data.futures.materialize_futoi_instrument.v1"
+CANONICAL_KEY_FIELDS: Final[tuple[str, ...]] = ("trade_date", "ts", "secid", "clgroup")
+POSITION_FIELDS: Final[tuple[str, ...]] = (
+    "pos",
+    "pos_long",
+    "pos_short",
+    "pos_long_num",
+    "pos_short_num",
+)
+RETRYABLE_HTTP_STATUS: Final[frozenset[int]] = frozenset({401, 429, 500, 502, 503, 504})
+MAX_FETCH_ATTEMPTS: Final[int] = 3
 
 
 class FutoiMaterializationError(ValueError):
@@ -193,15 +204,25 @@ def _fetch_exact(ticker: str, trade_date: str, timeout: float, apim_base_url: st
     if not base_url:
         _fail("MOEX_API_URL is required")
     path = "/iss/analyticalproducts/futoi/securities/" + ticker.lower() + ".json"
-    frame = availability.fetch_paged_frame(
-        base_url,
-        path,
-        {"from": trade_date, "till": trade_date, "latest": 0},
-        "futoi",
-        timeout,
-        True,
-    )
-    if frame.empty:
+    frame: pd.DataFrame | None = None
+    for attempt in range(MAX_FETCH_ATTEMPTS):
+        try:
+            frame = availability.fetch_paged_frame(
+                base_url,
+                path,
+                {"from": trade_date, "till": trade_date, "latest": 0},
+                "futoi",
+                timeout,
+                True,
+            )
+            break
+        except Exception as exc:
+            response = getattr(exc, "response", None)
+            status_code = getattr(response, "status_code", None)
+            if status_code not in RETRYABLE_HTTP_STATUS or attempt + 1 >= MAX_FETCH_ATTEMPTS:
+                raise
+            time.sleep(0.5 * (attempt + 1))
+    if frame is None or frame.empty:
         _fail("FUTOI APIM exact source returned no rows")
     columns = {str(column).strip().lower() for column in frame.columns}
     if "error_message" in columns:
@@ -211,6 +232,43 @@ def _fetch_exact(ticker: str, trade_date: str, timeout: float, apim_base_url: st
     if not required.issubset(columns) or not timestamp_ok:
         _fail("FUTOI APIM schema mismatch")
     return frame, availability.url_join(base_url, path)
+
+
+def _deduplicate_exact_source_duplicates(frame: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    if frame.empty:
+        return frame.copy(), 0
+    duplicate_mask = frame.duplicated(subset=list(CANONICAL_KEY_FIELDS), keep=False)
+    if not bool(duplicate_mask.any()):
+        return frame.copy().reset_index(drop=True), 0
+
+    duplicate_rows = frame.loc[duplicate_mask].copy()
+    comparison_fields = [field for field in ("sess_id", "source_ticker", *POSITION_FIELDS) if field in duplicate_rows.columns]
+    for _, group in duplicate_rows.groupby(list(CANONICAL_KEY_FIELDS), dropna=False, sort=False):
+        if len(group) < 2:
+            continue
+        if "seqnum" not in group.columns:
+            _fail("duplicate canonical FUTOI key missing usable seqnum")
+        seqnums = pd.to_numeric(group["seqnum"], errors="coerce")
+        if bool(seqnums.isna().any()):
+            _fail("duplicate canonical FUTOI key missing usable seqnum")
+        for field in comparison_fields:
+            first = group[field].iloc[0]
+            equal = group[field].isna() if pd.isna(first) else group[field].eq(first)
+            if not bool(equal.all()):
+                _fail("conflicting duplicate canonical FUTOI key")
+
+    work = frame.copy()
+    sort_fields = list(CANONICAL_KEY_FIELDS)
+    if "seqnum" in work.columns:
+        work["_seqnum_sort"] = pd.to_numeric(work["seqnum"], errors="coerce")
+        sort_fields.append("_seqnum_sort")
+    work = work.sort_values(sort_fields, kind="stable", na_position="first")
+    before = len(work)
+    work = work.drop_duplicates(subset=list(CANONICAL_KEY_FIELDS), keep="last")
+    dropped = before - len(work)
+    if "_seqnum_sort" in work.columns:
+        work = work.drop(columns=["_seqnum_sort"])
+    return work.reset_index(drop=True), int(dropped)
 
 
 def _quality(frame: pd.DataFrame, binding: Mapping[str, object], trade_date: str, run_id: str) -> dict[str, object]:
@@ -297,9 +355,11 @@ def materialize_futoi_partition(
     normalized["market"] = str(binding["market"])
     normalized["engine"] = str(binding["engine"])
     normalized["availability_ts_utc"] = ingest_ts
+    normalized, exact_duplicate_rows_dropped = _deduplicate_exact_source_duplicates(normalized)
     normalized = normalized.sort_values(["ts", "clgroup"]).reset_index(drop=True)
 
     quality = _quality(normalized, binding, checked_date, checked_run_id)
+    quality["exact_duplicate_rows_dropped"] = exact_duplicate_rows_dropped
     partition_path = _partition_path(checked_date, checked_instrument, source_id)
     quality_path = _quality_path(checked_date, checked_run_id)
     manifest_path = _manifest_path(checked_date, checked_run_id)
@@ -329,6 +389,7 @@ def materialize_futoi_partition(
         "latest_autodetect_used": False,
         "hardcoded_server_path_used": False,
         "accepted_pointer_path_preview": pointer_path.as_posix(),
+        "exact_duplicate_rows_dropped": exact_duplicate_rows_dropped,
     }
 
     if quality["quality_status"] != "pass":
@@ -355,6 +416,7 @@ def materialize_futoi_partition(
         "source_contract_ref": SOURCE_CONTRACT_REF,
         "latest_autodetect_used": False,
         "hardcoded_server_path_used": False,
+        "exact_duplicate_rows_dropped": exact_duplicate_rows_dropped,
     }
 
 
