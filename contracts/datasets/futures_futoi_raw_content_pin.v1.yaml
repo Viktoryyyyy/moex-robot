@@ -16,8 +16,10 @@ pinning:
   aggregate_manifest_digest_required: true
   every_written_partition_digest_required: true
   immutable_run_path_required: true
+  exclusive_destination_reservation_required: true
   overwrite_existing_pin_allowed: false
   explicit_aggregate_manifest_required: true
+  exact_requested_date_set_reconciliation_required: true
   dynamic_scan_allowed: false
   direct_source_refetch_allowed: false
 required_fields:
@@ -51,5 +53,6 @@ verification_policy:
   raw_manifest_digest_must_match: true
   every_partition_digest_must_match_before_consumption: true
   raw_manifest_and_quality_identity_must_pass: true
+  written_plus_skipped_must_equal_exact_requested_date_set: true
 failure_policy: fail_closed
 accepted_pointer_creation_allowed: false
