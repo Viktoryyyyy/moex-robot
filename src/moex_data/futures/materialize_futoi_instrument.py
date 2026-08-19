@@ -227,11 +227,38 @@ def _fetch_exact(ticker: str, trade_date: str, timeout: float, apim_base_url: st
     columns = {str(column).strip().lower() for column in frame.columns}
     if "error_message" in columns:
         _fail("FUTOI APIM returned ERROR_MESSAGE instead of data")
-    required = {"clgroup", "pos", "pos_long", "pos_short", "pos_long_num", "pos_short_num"}
-    timestamp_ok = "moment" in columns or {"tradedate", "tradetime"}.issubset(columns)
-    if not required.issubset(columns) or not timestamp_ok:
+    required = {
+        "sess_id",
+        "seqnum",
+        "tradedate",
+        "tradetime",
+        "ticker",
+        "clgroup",
+        "pos",
+        "pos_long",
+        "pos_short",
+        "pos_long_num",
+        "pos_short_num",
+        "systime",
+    }
+    if not required.issubset(columns):
         _fail("FUTOI APIM schema mismatch")
     return frame, availability.url_join(base_url, path)
+
+
+def _enforce_publication_timestamp(frame: pd.DataFrame) -> pd.DataFrame:
+    if "systime" not in frame.columns:
+        _fail("normalized FUTOI source missing systime publication timestamp")
+    publication_ts = pd.to_datetime(frame["systime"], errors="coerce")
+    if bool(publication_ts.isna().any()):
+        _fail("normalized FUTOI source contains invalid systime publication timestamp")
+    result = frame.copy()
+    result["ts"] = publication_ts
+    trade_dates = result["trade_date"].astype(str)
+    publication_dates = publication_ts.dt.date.astype(str)
+    if not bool(trade_dates.eq(publication_dates).all()):
+        _fail("FUTOI publication systime date does not match trade_date")
+    return result.reset_index(drop=True)
 
 
 def _deduplicate_exact_source_duplicates(frame: pd.DataFrame) -> tuple[pd.DataFrame, int]:
@@ -304,6 +331,7 @@ def _quality(frame: pd.DataFrame, binding: Mapping[str, object], trade_date: str
         "invalid_position_count": int(counts.get("invalid_position_count") or 0),
         "availability_status": availability_status,
         "probe_status": probe_status,
+        "timestamp_semantics": "moex_systime_publication",
         "failure_reasons": failures,
         "quality_contract_ref": QUALITY_CONTRACT_REF,
     }
@@ -355,6 +383,7 @@ def materialize_futoi_partition(
     normalized["market"] = str(binding["market"])
     normalized["engine"] = str(binding["engine"])
     normalized["availability_ts_utc"] = ingest_ts
+    normalized = _enforce_publication_timestamp(normalized)
     normalized, exact_duplicate_rows_dropped = _deduplicate_exact_source_duplicates(normalized)
     normalized = normalized.sort_values(["ts", "clgroup"]).reset_index(drop=True)
 
@@ -384,6 +413,7 @@ def materialize_futoi_partition(
             "futoi_ticker": ticker,
             "source_endpoint_url": source_url,
             "transport": "authenticated_apim",
+            "timestamp_semantics": "ts=moex_systime_publication;moment=last_trade_included",
         },
         "producer": PRODUCER_ID,
         "latest_autodetect_used": False,
@@ -416,6 +446,7 @@ def materialize_futoi_partition(
         "source_contract_ref": SOURCE_CONTRACT_REF,
         "latest_autodetect_used": False,
         "hardcoded_server_path_used": False,
+        "timestamp_semantics": "moex_systime_publication",
         "exact_duplicate_rows_dropped": exact_duplicate_rows_dropped,
     }
 
