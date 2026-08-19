@@ -75,12 +75,63 @@ def test_invalid_publication_systime_fails_closed() -> None:
         target._enforce_publication_timestamp(frame)
 
 
-def test_publication_date_mismatch_fails_closed() -> None:
-    frame = _normalized_rows()
+def test_publication_after_midnight_is_allowed_for_same_source_trade_date() -> None:
+    frame = _normalized_rows().iloc[:1].copy()
+    frame.loc[frame.index[0], "moment"] = pd.Timestamp("2021-04-06 23:59:55")
     frame.loc[frame.index[0], "systime"] = pd.Timestamp("2021-04-07 00:00:05")
 
-    with pytest.raises(target.FutoiMaterializationError, match="publication systime date does not match trade_date"):
+    result = target._enforce_publication_timestamp(frame)
+
+    assert result.loc[result.index[0], "trade_date"] == "2021-04-06"
+    assert result.loc[result.index[0], "moment"] == pd.Timestamp("2021-04-06 23:59:55")
+    assert result.loc[result.index[0], "ts"] == pd.Timestamp("2021-04-07 00:00:05")
+
+
+def test_source_reference_date_mismatch_fails_closed() -> None:
+    frame = _normalized_rows().iloc[:1].copy()
+    frame.loc[frame.index[0], "moment"] = pd.Timestamp("2021-04-07 00:00:00")
+    frame.loc[frame.index[0], "systime"] = pd.Timestamp("2021-04-07 00:00:05")
+
+    with pytest.raises(target.FutoiMaterializationError, match="source reference moment date does not match trade_date"):
         target._enforce_publication_timestamp(frame)
+
+
+def test_publication_before_source_reference_time_fails_closed() -> None:
+    frame = _normalized_rows().iloc[:1].copy()
+    frame.loc[frame.index[0], "moment"] = pd.Timestamp("2021-04-06 18:30:05")
+    frame.loc[frame.index[0], "systime"] = pd.Timestamp("2021-04-06 18:30:00")
+
+    with pytest.raises(target.FutoiMaterializationError, match="publication systime precedes source reference moment"):
+        target._enforce_publication_timestamp(frame)
+
+
+def test_required_source_identifiers_accept_numeric_values() -> None:
+    frame = _normalized_rows().copy()
+    frame["sess_id"] = frame["sess_id"].astype(str)
+    frame["seqnum"] = frame["seqnum"].astype(str)
+
+    result = target._validate_required_source_identifiers(frame)
+
+    assert result["sess_id"].notna().all()
+    assert result["seqnum"].notna().all()
+
+
+@pytest.mark.parametrize("field", ["sess_id", "seqnum"])
+def test_missing_required_source_identifier_fails_closed(field: str) -> None:
+    frame = _normalized_rows().drop(columns=[field])
+
+    with pytest.raises(target.FutoiMaterializationError, match="missing required source identifier"):
+        target._validate_required_source_identifiers(frame)
+
+
+@pytest.mark.parametrize("field", ["sess_id", "seqnum"])
+def test_invalid_required_source_identifier_fails_closed(field: str) -> None:
+    frame = _normalized_rows()
+    frame[field] = frame[field].astype(object)
+    frame.loc[frame.index[0], field] = "not-a-number"
+
+    with pytest.raises(target.FutoiMaterializationError, match="invalid required source identifier"):
+        target._validate_required_source_identifiers(frame)
 
 
 def test_fetch_exact_requires_official_publication_fields(monkeypatch) -> None:
