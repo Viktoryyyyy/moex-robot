@@ -110,14 +110,18 @@ def test_fetch_exact_retries_transient_401_then_succeeds(monkeypatch) -> None:
         return pd.DataFrame(
             [
                 {
+                    "sess_id": 1,
+                    "seqnum": 1,
                     "tradedate": "2026-08-17",
                     "tradetime": "07:05:00",
+                    "ticker": "SI",
                     "clgroup": "FIZ",
                     "pos": 1,
                     "pos_long": 2,
                     "pos_short": -1,
                     "pos_long_num": 2,
                     "pos_short_num": 1,
+                    "systime": "2026-08-17 07:05:05",
                 }
             ]
         )
