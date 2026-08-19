@@ -21,6 +21,7 @@ EOD_CONTRACT_REF: Final[str] = "contracts/datasets/futures_futoi_eod.v1.yaml"
 QUALITY_CONTRACT_REF: Final[str] = "contracts/datasets/futures_futoi_eod_quality_report.v1.yaml"
 MANIFEST_CONTRACT_REF: Final[str] = "contracts/datasets/futures_futoi_eod_refresh_manifest.v1.yaml"
 PRODUCER_ID: Final[str] = "moex_data.futures.materialize_futoi_eod.v1"
+OUTPUT_VERSION_MODE: Final[str] = "run_id"
 EOD_KEY_FIELDS: Final[tuple[str, ...]] = ("trade_date", "secid", "clgroup")
 EXPECTED_CLGROUPS: Final[frozenset[str]] = frozenset({"FIZ", "YUR"})
 RAW_REQUIRED_COLUMNS: Final[tuple[str, ...]] = (
@@ -87,17 +88,34 @@ def _portable_ref(path: Path) -> str:
     return "${MOEX_DATA_ROOT}/" + relative.as_posix()
 
 
-def _eod_partition_path(trade_date: str, instrument_id: str) -> Path:
+def _eod_run_root(run_id: str, instrument_id: str) -> Path:
     return (
         _data_root()
         / "market"
         / "supplementary"
         / ("dataset_id=" + DATASET_ID)
+        / ("run_id=" + run_id)
         / ("instrument_id=" + instrument_id)
+    )
+
+
+def _eod_partition_path(trade_date: str, instrument_id: str, run_id: str) -> Path:
+    return (
+        _eod_run_root(run_id, instrument_id)
         / ("trade_date=" + trade_date)
         / ("source=" + SOURCE_ID)
         / "part.parquet"
     )
+
+
+def _reserve_output_run_root(run_id: str, instrument_id: str) -> Path:
+    root = _eod_run_root(run_id, instrument_id)
+    root.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        root.mkdir(exist_ok=False)
+    except FileExistsError:
+        _fail("FUTOI EOD immutable output run already exists")
+    return root
 
 
 def _quality_path(run_date: str, run_id: str) -> Path:
@@ -132,11 +150,11 @@ def _validate_raw_partition(
 ) -> pd.DataFrame:
     if frame.empty:
         _fail("raw partition is empty: " + trade_date)
-    normalized_names = [str(column).strip().lower() for column in frame.columns]
-    if len(normalized_names) != len(set(normalized_names)):
+    names = [str(column).strip().lower() for column in frame.columns]
+    if len(names) != len(set(names)):
         _fail("raw partition has duplicate columns after case normalization: " + trade_date)
     result = frame.copy()
-    result.columns = normalized_names
+    result.columns = names
     missing = [field for field in RAW_REQUIRED_COLUMNS if field not in result.columns]
     if missing:
         _fail("raw partition missing required columns on " + trade_date + ": " + ",".join(missing))
@@ -232,9 +250,7 @@ def _derive_partition(
         _fail("derived EOD partition has duplicate canonical key: " + trade_date)
     if not out["instrument_id"].astype(str).eq(instrument_id).all():
         _fail("derived EOD instrument_id mismatch: " + trade_date)
-
-    coherence = out[["ts", "sess_id", "seqnum"]].drop_duplicates()
-    if len(coherence) != 1:
+    if len(out[["ts", "sess_id", "seqnum"]].drop_duplicates()) != 1:
         _fail("FIZ and YUR EOD selections are not the same source snapshot: " + trade_date)
 
     out["schema_version"] = "futures_futoi_eod.v1"
@@ -335,6 +351,7 @@ def materialize_futoi_eod(
     derived_ingest_ts = raw_materializer._utc_now()
     portable_manifest_ref = _portable_ref(raw_manifest_file)
     portable_pin_ref = _portable_ref(pin_file)
+    planned_output_root = _eod_run_root(checked_run_id, checked_instrument)
 
     derived: list[tuple[str, Path, pd.DataFrame]] = []
     failures: list[dict[str, str]] = []
@@ -357,7 +374,13 @@ def materialize_futoi_eod(
                 raw_partition_sha256=str(entry["sha256"]),
                 derived_ingest_ts=derived_ingest_ts,
             )
-            derived.append((trade_date, _eod_partition_path(trade_date, checked_instrument), output))
+            derived.append(
+                (
+                    trade_date,
+                    _eod_partition_path(trade_date, checked_instrument, checked_run_id),
+                    output,
+                )
+            )
         except Exception as exc:
             failures.append({"trade_date": trade_date, "error": str(exc)})
 
@@ -365,7 +388,6 @@ def materialize_futoi_eod(
     counts = _quality_counts(frames)
     raw_partition_count = len(raw_entries)
     partition_count = len(derived)
-    expected_rows = 2 * raw_partition_count
     failure_count = len(failures)
     ambiguity_count = sum(
         1
@@ -377,7 +399,7 @@ def materialize_futoi_eod(
         failure_count != 0
         or raw_partition_count <= 0
         or partition_count != raw_partition_count
-        or counts["row_count"] != expected_rows
+        or counts["row_count"] != 2 * raw_partition_count
         or counts["duplicate_key_count"] != 0
         or counts["null_required_count"] != 0
         or counts["invalid_position_count"] != 0
@@ -385,9 +407,21 @@ def materialize_futoi_eod(
     ):
         quality_status = "fail"
 
+    output_reserved = False
+    partitions_written: list[str] = []
+    if quality_status == "pass":
+        _reserve_output_run_root(checked_run_id, checked_instrument)
+        output_reserved = True
+        for _, output_path, frame in derived:
+            if output_path.exists():
+                _fail("FUTOI EOD versioned partition already exists")
+            raw_materializer._write_parquet_atomic(output_path, frame, checked_run_id)
+            partitions_written.append(output_path.as_posix())
+
     run_date = requested_till
     quality_path = _quality_path(run_date, checked_run_id)
     manifest_path = _manifest_path(run_date, checked_run_id)
+    output_root_text = planned_output_root.as_posix()
     quality = {
         "run_id": checked_run_id,
         "dataset_id": DATASET_ID,
@@ -397,6 +431,7 @@ def materialize_futoi_eod(
         "raw_manifest_reference": portable_manifest_ref,
         "raw_content_pin_reference": portable_pin_ref,
         "raw_content_pin_sha256": checked_pin_sha256,
+        "content_pin_status": str(pin.get("pin_status")),
         "requested_from": requested_from,
         "requested_till": requested_till,
         "quality_status": quality_status,
@@ -410,16 +445,11 @@ def materialize_futoi_eod(
         "ambiguity_count": ambiguity_count,
         "failed_dates": failures,
         "derivation_id": DERIVATION_ID,
-        "content_pin_status": str(pin.get("pin_status")),
+        "output_version_mode": OUTPUT_VERSION_MODE,
+        "immutable_output_run_root": output_root_text,
+        "immutable_output_run_reserved": output_reserved,
         "quality_contract_ref": QUALITY_CONTRACT_REF,
     }
-
-    partitions_written: list[str] = []
-    if quality_status == "pass":
-        for _, output_path, frame in derived:
-            raw_materializer._write_parquet_atomic(output_path, frame, checked_run_id)
-            partitions_written.append(output_path.as_posix())
-
     manifest = {
         "run_id": checked_run_id,
         "run_date": run_date,
@@ -441,6 +471,9 @@ def materialize_futoi_eod(
         "refresh_status": "succeeded" if quality_status == "pass" else "failed",
         "producer": PRODUCER_ID,
         "derivation_id": DERIVATION_ID,
+        "output_version_mode": OUTPUT_VERSION_MODE,
+        "immutable_output_run_root": output_root_text,
+        "immutable_output_run_reserved": output_reserved,
         "eod_contract_ref": EOD_CONTRACT_REF,
         "quality_contract_ref": QUALITY_CONTRACT_REF,
         "manifest_contract_ref": MANIFEST_CONTRACT_REF,
@@ -473,6 +506,9 @@ def materialize_futoi_eod(
         "failure_count": failure_count,
         "ambiguity_count": ambiguity_count,
         "derivation_id": DERIVATION_ID,
+        "output_version_mode": OUTPUT_VERSION_MODE,
+        "immutable_output_run_root": output_root_text,
+        "immutable_output_run_reserved": output_reserved,
         "quality_report_reference": quality_path.as_posix(),
         "manifest_reference": manifest_path.as_posix(),
         "accepted_manifest_pointer_reference": None,
@@ -484,7 +520,7 @@ def materialize_futoi_eod(
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Derive canonical FUTOI EOD snapshots from an explicit immutable SHA-256 raw content pin."
+        description="Derive immutable run-versioned canonical FUTOI EOD snapshots from an explicit SHA-256 raw content pin."
     )
     parser.add_argument("--instrument-id", required=True)
     parser.add_argument("--run-id", required=True)
