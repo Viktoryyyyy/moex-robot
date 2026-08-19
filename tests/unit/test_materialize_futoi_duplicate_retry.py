@@ -86,6 +86,14 @@ def test_conflicting_duplicate_canonical_key_fails_closed() -> None:
         target._deduplicate_exact_source_duplicates(frame)
 
 
+def test_duplicate_without_usable_seqnum_fails_closed() -> None:
+    frame = _rows().iloc[:2].copy()
+    frame["seqnum"] = [None, "not-a-number"]
+
+    with pytest.raises(target.FutoiMaterializationError, match="missing usable seqnum"):
+        target._deduplicate_exact_source_duplicates(frame)
+
+
 def test_fetch_exact_retries_transient_401_then_succeeds(monkeypatch) -> None:
     calls = []
 
