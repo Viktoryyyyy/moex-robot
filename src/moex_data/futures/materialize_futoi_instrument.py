@@ -246,6 +246,48 @@ def _fetch_exact(ticker: str, trade_date: str, timeout: float, apim_base_url: st
     return frame, availability.url_join(base_url, path)
 
 
+def _validate_raw_source_rows(frame: pd.DataFrame, trade_date: str, ticker: str) -> pd.DataFrame:
+    column_by_name = {str(column).strip().lower(): column for column in frame.columns}
+    required = ("tradedate", "tradetime", "ticker", "clgroup", "systime")
+    missing = [field for field in required if field not in column_by_name]
+    if missing:
+        _fail("FUTOI raw source missing required fields: " + ",".join(missing))
+
+    result = frame.copy()
+    source_trade_dates = result[column_by_name["tradedate"]].astype("string").str.strip()
+    parsed_trade_dates = pd.to_datetime(source_trade_dates, errors="coerce")
+    if bool(parsed_trade_dates.isna().any()):
+        _fail("FUTOI raw source contains invalid tradedate")
+    exact_trade_dates = parsed_trade_dates.dt.date.astype(str)
+    if not bool(exact_trade_dates.eq(trade_date).all()):
+        _fail("FUTOI raw source contains rows outside explicit trade_date")
+
+    source_trade_times = result[column_by_name["tradetime"]].astype("string").str.strip()
+    reference_ts = pd.to_datetime(source_trade_dates + " " + source_trade_times, errors="coerce")
+    if bool(reference_ts.isna().any()):
+        _fail("FUTOI raw source contains invalid tradedate/tradetime reference timestamp")
+
+    publication_ts = pd.to_datetime(result[column_by_name["systime"]], errors="coerce")
+    if bool(publication_ts.isna().any()):
+        _fail("FUTOI raw source contains invalid systime publication timestamp")
+    if bool((publication_ts < reference_ts).any()):
+        _fail("FUTOI raw source publication systime precedes reference timestamp")
+
+    source_tickers = result[column_by_name["ticker"]].astype("string").str.strip()
+    if bool(source_tickers.isna().any()) or bool(source_tickers.eq("").any()):
+        _fail("FUTOI raw source contains missing ticker identity")
+    if not bool(source_tickers.str.lower().eq(ticker.lower()).all()):
+        _fail("FUTOI raw source ticker does not match explicit registry ticker")
+
+    source_groups = result[column_by_name["clgroup"]].astype("string").str.upper().str.strip()
+    if bool(source_groups.isna().any()) or bool(source_groups.eq("").any()):
+        _fail("FUTOI raw source contains missing clgroup")
+    if not bool(source_groups.isin({"FIZ", "YUR"}).all()):
+        _fail("FUTOI raw source contains unsupported clgroup")
+
+    return result.reset_index(drop=True)
+
+
 def _validate_required_source_identifiers(frame: pd.DataFrame) -> pd.DataFrame:
     result = frame.copy()
     for field in ("sess_id", "seqnum"):
@@ -382,6 +424,7 @@ def materialize_futoi_partition(
 
     ingest_ts = _utc_now()
     source_frame, source_url = _fetch_exact(ticker, checked_date, timeout, apim_base_url)
+    source_frame = _validate_raw_source_rows(source_frame, checked_date, ticker)
     normalized, meta = legacy.normalize_futoi(
         source_frame,
         str(binding["secid"]),
