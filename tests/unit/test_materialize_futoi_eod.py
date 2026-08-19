@@ -25,7 +25,7 @@ def _binding() -> dict[str, object]:
     }
 
 
-def _row(clgroup: str, ts: str, seqnum: int, *, sess_id: int = 6263, pos: int | None = None) -> dict[str, object]:
+def _row(clgroup: str, ts: str, seqnum: object, *, sess_id: object = 6263, pos: int | None = None) -> dict[str, object]:
     fiz = clgroup == "FIZ"
     position = pos if pos is not None else (52872 if fiz else -52872)
     return {
@@ -67,11 +67,10 @@ def _raw_rows() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def test_eod_selects_latest_ts_then_highest_seqnum_revision() -> None:
-    raw = target._validate_raw_partition(_raw_rows(), "2021-04-06", "si_futures_family", _binding())
-
-    result = target._derive_partition(
-        raw,
+def _derive(raw: pd.DataFrame) -> pd.DataFrame:
+    validated = target._validate_raw_partition(raw, "2021-04-06", "si_futures_family", _binding())
+    return target._derive_partition(
+        validated,
         trade_date="2021-04-06",
         instrument_id="si_futures_family",
         raw_run_id="raw_run",
@@ -79,6 +78,10 @@ def test_eod_selects_latest_ts_then_highest_seqnum_revision() -> None:
         raw_partition_ref="${MOEX_DATA_ROOT}/market/raw_partition.parquet",
         derived_ingest_ts="2026-08-19T14:00:00+00:00",
     )
+
+
+def test_eod_selects_latest_ts_then_highest_seqnum_revision() -> None:
+    result = _derive(_raw_rows())
 
     assert len(result) == 2
     assert set(result["clgroup"].tolist()) == {"FIZ", "YUR"}
@@ -90,40 +93,37 @@ def test_eod_selects_latest_ts_then_highest_seqnum_revision() -> None:
     assert not result.duplicated(subset=list(target.EOD_KEY_FIELDS)).any()
 
 
+def test_eod_seqnum_selection_preserves_integer_precision_above_2_pow_53() -> None:
+    lower = "9007199254740992"
+    higher = "9007199254740993"
+    rows = [
+        _row("FIZ", "2021-04-06 18:44:59", lower),
+        _row("YUR", "2021-04-06 18:44:59", lower),
+        _row("FIZ", "2021-04-06 18:44:59", higher),
+        _row("YUR", "2021-04-06 18:44:59", higher),
+    ]
+
+    result = _derive(pd.DataFrame(rows))
+
+    assert set(result["seqnum"].tolist()) == {9007199254740993}
+
+
 def test_eod_fails_when_max_ts_contains_multiple_sessions_for_group() -> None:
     raw = _raw_rows()
     extra = _row("FIZ", "2021-04-06 18:44:59", 1, sess_id=6264, pos=50000)
     raw = pd.concat([raw, pd.DataFrame([extra])], ignore_index=True)
-    raw = target._validate_raw_partition(raw, "2021-04-06", "si_futures_family", _binding())
 
     with pytest.raises(target.FutoiEodError, match="ambiguous EOD session"):
-        target._derive_partition(
-            raw,
-            trade_date="2021-04-06",
-            instrument_id="si_futures_family",
-            raw_run_id="raw_run",
-            raw_manifest_ref="${MOEX_DATA_ROOT}/state/raw_manifest.json",
-            raw_partition_ref="${MOEX_DATA_ROOT}/market/raw_partition.parquet",
-            derived_ingest_ts="2026-08-19T14:00:00+00:00",
-        )
+        _derive(raw)
 
 
 def test_eod_fails_when_fiz_and_yur_latest_snapshot_is_not_coherent() -> None:
     raw = _raw_rows()
     mask = (raw["clgroup"] == "YUR") & (raw["seqnum"] == 220)
     raw.loc[mask, "seqnum"] = 221
-    raw = target._validate_raw_partition(raw, "2021-04-06", "si_futures_family", _binding())
 
     with pytest.raises(target.FutoiEodError, match="not the same source snapshot"):
-        target._derive_partition(
-            raw,
-            trade_date="2021-04-06",
-            instrument_id="si_futures_family",
-            raw_run_id="raw_run",
-            raw_manifest_ref="${MOEX_DATA_ROOT}/state/raw_manifest.json",
-            raw_partition_ref="${MOEX_DATA_ROOT}/market/raw_partition.parquet",
-            derived_ingest_ts="2026-08-19T14:00:00+00:00",
-        )
+        _derive(raw)
 
 
 def test_raw_partition_rejects_source_record_duplicates() -> None:
@@ -164,7 +164,10 @@ def _write_pinned_raw_state(root: Path) -> Path:
                 "dataset_id": "futures_futoi_raw",
                 "instrument_id": "si_futures_family",
                 "source_id": target.SOURCE_ID,
+                "requested_from": "2021-04-06",
+                "requested_till": "2021-04-06",
                 "quality_status": "pass",
+                "row_count": 8,
                 "partition_count": 1,
                 "duplicate_key_count": 0,
                 "null_required_count": 0,
@@ -190,6 +193,7 @@ def _write_pinned_raw_state(root: Path) -> Path:
         json.dumps(
             {
                 "run_id": "raw_run",
+                "run_date": "2021-04-06",
                 "dataset_id": "futures_futoi_raw",
                 "instrument_scope": ["si_futures_family"],
                 "source_scope": [target.SOURCE_ID],
@@ -211,6 +215,11 @@ def test_full_eod_materialization_uses_only_pinned_manifest(monkeypatch, tmp_pat
     manifest_path = _write_pinned_raw_state(tmp_path)
     monkeypatch.setattr(target, "_data_root", lambda: tmp_path.resolve())
     monkeypatch.setattr(target.raw_materializer, "_registry_binding", lambda *_: _binding())
+    monkeypatch.setattr(
+        target.raw_materializer,
+        "_fetch_exact",
+        lambda *_: (_ for _ in ()).throw(AssertionError("EOD derivation must not refetch source")),
+    )
 
     result = target.materialize_futoi_eod(
         instrument_id="si_futures_family",
@@ -223,6 +232,8 @@ def test_full_eod_materialization_uses_only_pinned_manifest(monkeypatch, tmp_pat
     assert result["raw_partition_count"] == 1
     assert result["partition_count"] == 1
     assert result["row_count"] == 2
+    assert result["failure_count"] == 0
+    assert result["ambiguity_count"] == 0
     assert result["dynamic_scan_used"] is False
     assert result["direct_source_refetch_used"] is False
     assert result["accepted_manifest_pointer_reference"] is None
@@ -241,6 +252,20 @@ def test_full_eod_materialization_uses_only_pinned_manifest(monkeypatch, tmp_pat
     assert len(output) == 2
     assert set(output["seqnum"].astype(int).tolist()) == {220}
     assert output["raw_manifest_reference"].str.startswith("${MOEX_DATA_ROOT}/").all()
+    assert output["raw_partition_reference"].str.startswith("${MOEX_DATA_ROOT}/").all()
+    assert output["availability_ts_utc"].eq(output["derived_ingest_ts"]).all()
+    assert output["raw_availability_ts_utc"].ne(output["availability_ts_utc"]).all()
+
+
+def test_raw_manifest_content_identity_must_match_canonical_path(monkeypatch, tmp_path: Path) -> None:
+    manifest_path = _write_pinned_raw_state(tmp_path)
+    values = json.loads(manifest_path.read_text(encoding="utf-8"))
+    values["run_id"] = "different_run"
+    manifest_path.write_text(json.dumps(values), encoding="utf-8")
+    monkeypatch.setattr(target, "_data_root", lambda: tmp_path.resolve())
+
+    with pytest.raises(target.FutoiEodError, match="path identity"):
+        target._validate_raw_manifest(manifest_path, "si_futures_family")
 
 
 def test_raw_manifest_outside_data_root_is_rejected(monkeypatch, tmp_path: Path) -> None:
