@@ -246,18 +246,38 @@ def _fetch_exact(ticker: str, trade_date: str, timeout: float, apim_base_url: st
     return frame, availability.url_join(base_url, path)
 
 
+def _validate_required_source_identifiers(frame: pd.DataFrame) -> pd.DataFrame:
+    result = frame.copy()
+    for field in ("sess_id", "seqnum"):
+        if field not in result.columns:
+            _fail("normalized FUTOI source missing required source identifier: " + field)
+        numeric = pd.to_numeric(result[field], errors="coerce")
+        if bool(numeric.isna().any()):
+            _fail("normalized FUTOI source contains invalid required source identifier: " + field)
+        result[field] = numeric
+    return result.reset_index(drop=True)
+
+
 def _enforce_publication_timestamp(frame: pd.DataFrame) -> pd.DataFrame:
     if "systime" not in frame.columns:
         _fail("normalized FUTOI source missing systime publication timestamp")
+    if "moment" not in frame.columns:
+        _fail("normalized FUTOI source missing source reference moment")
     publication_ts = pd.to_datetime(frame["systime"], errors="coerce")
+    reference_ts = pd.to_datetime(frame["moment"], errors="coerce")
     if bool(publication_ts.isna().any()):
         _fail("normalized FUTOI source contains invalid systime publication timestamp")
+    if bool(reference_ts.isna().any()):
+        _fail("normalized FUTOI source contains invalid source reference moment")
     result = frame.copy()
     result["ts"] = publication_ts
+    result["moment"] = reference_ts
     trade_dates = result["trade_date"].astype(str)
-    publication_dates = publication_ts.dt.date.astype(str)
-    if not bool(trade_dates.eq(publication_dates).all()):
-        _fail("FUTOI publication systime date does not match trade_date")
+    reference_dates = reference_ts.dt.date.astype(str)
+    if not bool(trade_dates.eq(reference_dates).all()):
+        _fail("FUTOI source reference moment date does not match trade_date")
+    if bool((publication_ts < reference_ts).any()):
+        _fail("FUTOI publication systime precedes source reference moment")
     return result.reset_index(drop=True)
 
 
@@ -383,6 +403,7 @@ def materialize_futoi_partition(
     normalized["market"] = str(binding["market"])
     normalized["engine"] = str(binding["engine"])
     normalized["availability_ts_utc"] = ingest_ts
+    normalized = _validate_required_source_identifiers(normalized)
     normalized = _enforce_publication_timestamp(normalized)
     normalized, exact_duplicate_rows_dropped = _deduplicate_exact_source_duplicates(normalized)
     normalized = normalized.sort_values(["ts", "clgroup"]).reset_index(drop=True)
