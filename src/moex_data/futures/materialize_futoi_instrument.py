@@ -24,7 +24,13 @@ QUALITY_CONTRACT_REF: Final[str] = "contracts/datasets/futures_futoi_quality_rep
 MANIFEST_CONTRACT_REF: Final[str] = "contracts/datasets/futures_futoi_refresh_manifest.v1.yaml"
 REGISTRY_PATH: Final[str] = "configs/instruments/forts_instrument_registry.v1.yaml"
 PRODUCER_ID: Final[str] = "moex_data.futures.materialize_futoi_instrument.v1"
-CANONICAL_KEY_FIELDS: Final[tuple[str, ...]] = ("trade_date", "ts", "secid", "clgroup")
+SOURCE_RECORD_KEY_FIELDS: Final[tuple[str, ...]] = (
+    "trade_date",
+    "sess_id",
+    "seqnum",
+    "secid",
+    "clgroup",
+)
 POSITION_FIELDS: Final[tuple[str, ...]] = (
     "pos",
     "pos_long",
@@ -330,8 +336,9 @@ def _enforce_publication_timestamp(frame: pd.DataFrame) -> pd.DataFrame:
     if bool(reference_ts.isna().any()):
         _fail("normalized FUTOI source contains invalid source reference moment")
     result = frame.copy()
-    result["ts"] = publication_ts
+    result["ts"] = reference_ts
     result["moment"] = reference_ts
+    result["systime"] = publication_ts
     trade_dates = result["trade_date"].astype(str)
     reference_dates = reference_ts.dt.date.astype(str)
     if not bool(trade_dates.eq(reference_dates).all()):
@@ -344,45 +351,75 @@ def _enforce_publication_timestamp(frame: pd.DataFrame) -> pd.DataFrame:
 def _deduplicate_exact_source_duplicates(frame: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     if frame.empty:
         return frame.copy(), 0
-    duplicate_mask = frame.duplicated(subset=list(CANONICAL_KEY_FIELDS), keep=False)
+    missing_key = [field for field in SOURCE_RECORD_KEY_FIELDS if field not in frame.columns]
+    if missing_key:
+        _fail("FUTOI source record key missing fields: " + ",".join(missing_key))
+    duplicate_mask = frame.duplicated(subset=list(SOURCE_RECORD_KEY_FIELDS), keep=False)
     if not bool(duplicate_mask.any()):
         return frame.copy().reset_index(drop=True), 0
 
     duplicate_rows = frame.loc[duplicate_mask].copy()
-    comparison_fields = [field for field in ("sess_id", "source_ticker", "moment", *POSITION_FIELDS) if field in duplicate_rows.columns]
-    for _, group in duplicate_rows.groupby(list(CANONICAL_KEY_FIELDS), dropna=False, sort=False):
+    comparison_fields = [
+        field
+        for field in ("source_ticker", "moment", "systime", *POSITION_FIELDS)
+        if field in duplicate_rows.columns
+    ]
+    for _, group in duplicate_rows.groupby(list(SOURCE_RECORD_KEY_FIELDS), dropna=False, sort=False):
         if len(group) < 2:
             continue
-        if "seqnum" not in group.columns:
-            _fail("duplicate canonical FUTOI key missing usable seqnum")
-        try:
-            seqnums = [_coerce_source_identifier(value, "seqnum") for value in group["seqnum"].tolist()]
-        except FutoiMaterializationError:
-            _fail("duplicate canonical FUTOI key missing usable seqnum")
-        if len(seqnums) != len(group):
-            _fail("duplicate canonical FUTOI key missing usable seqnum")
         for field in comparison_fields:
             first = group[field].iloc[0]
             equal = group[field].isna() if pd.isna(first) else group[field].eq(first)
             if not bool(equal.all()):
-                _fail("conflicting duplicate canonical FUTOI key")
+                _fail("conflicting duplicate FUTOI source record")
 
     work = frame.copy()
-    sort_fields = list(CANONICAL_KEY_FIELDS)
-    if "seqnum" in work.columns:
-        work["_seqnum_sort"] = [_coerce_source_identifier(value, "seqnum") for value in work["seqnum"].tolist()]
-        sort_fields.append("_seqnum_sort")
-    work = work.sort_values(sort_fields, kind="stable", na_position="first")
     before = len(work)
-    work = work.drop_duplicates(subset=list(CANONICAL_KEY_FIELDS), keep="last")
+    work = work.drop_duplicates(subset=list(SOURCE_RECORD_KEY_FIELDS), keep="last")
     dropped = before - len(work)
-    if "_seqnum_sort" in work.columns:
-        work = work.drop(columns=["_seqnum_sort"])
     return work.reset_index(drop=True), int(dropped)
 
 
+def _quality_counts(frame: pd.DataFrame) -> dict[str, int]:
+    if frame.empty:
+        return {
+            "rows": 0,
+            "duplicate_key_count": 0,
+            "null_required_count": 0,
+            "invalid_position_count": 0,
+        }
+    required = [
+        "trade_date",
+        "ts",
+        "moment",
+        "systime",
+        "sess_id",
+        "seqnum",
+        "secid",
+        "clgroup",
+        *POSITION_FIELDS,
+    ]
+    missing = [field for field in required if field not in frame.columns]
+    if missing:
+        _fail("normalized FUTOI source missing quality fields: " + ",".join(missing))
+    duplicates = int(frame.duplicated(subset=list(SOURCE_RECORD_KEY_FIELDS)).sum())
+    null_required = int(frame[required].isna().any(axis=1).sum())
+    invalid = (
+        (frame["pos_long"] < 0)
+        | (frame["pos_short"] > 0)
+        | (frame["pos_long_num"] < 0)
+        | (frame["pos_short_num"] < 0)
+    )
+    return {
+        "rows": int(len(frame)),
+        "duplicate_key_count": duplicates,
+        "null_required_count": null_required,
+        "invalid_position_count": int(invalid.fillna(True).sum()),
+    }
+
+
 def _quality(frame: pd.DataFrame, binding: Mapping[str, object], trade_date: str, run_id: str) -> dict[str, object]:
-    counts = legacy.quality_counts(frame, None)
+    counts = _quality_counts(frame)
     availability_status = str(binding["futoi.availability_status"])
     probe_status = str(binding["futoi.probe_status"])
     failures: list[str] = []
@@ -414,7 +451,8 @@ def _quality(frame: pd.DataFrame, binding: Mapping[str, object], trade_date: str
         "invalid_position_count": int(counts.get("invalid_position_count") or 0),
         "availability_status": availability_status,
         "probe_status": probe_status,
-        "timestamp_semantics": "moex_systime_publication",
+        "timestamp_semantics": "ts=source_reference_moment;systime=source_publication_metadata",
+        "source_record_key_fields": list(SOURCE_RECORD_KEY_FIELDS),
         "failure_reasons": failures,
         "quality_contract_ref": QUALITY_CONTRACT_REF,
     }
@@ -471,7 +509,7 @@ def materialize_futoi_partition(
     normalized = _validate_required_source_identifiers(normalized)
     normalized = _enforce_publication_timestamp(normalized)
     normalized, exact_duplicate_rows_dropped = _deduplicate_exact_source_duplicates(normalized)
-    normalized = normalized.sort_values(["ts", "clgroup"]).reset_index(drop=True)
+    normalized = normalized.sort_values(["ts", "sess_id", "seqnum", "clgroup"]).reset_index(drop=True)
 
     quality = _quality(normalized, binding, checked_date, checked_run_id)
     quality["exact_duplicate_rows_dropped"] = exact_duplicate_rows_dropped
@@ -499,7 +537,8 @@ def materialize_futoi_partition(
             "futoi_ticker": ticker,
             "source_endpoint_url": source_url,
             "transport": "authenticated_apim",
-            "timestamp_semantics": "ts=moex_systime_publication;moment=last_trade_included",
+            "timestamp_semantics": "ts=source_reference_moment;systime=source_publication_metadata",
+            "source_record_key_fields": list(SOURCE_RECORD_KEY_FIELDS),
         },
         "producer": PRODUCER_ID,
         "latest_autodetect_used": False,
@@ -532,7 +571,8 @@ def materialize_futoi_partition(
         "source_contract_ref": SOURCE_CONTRACT_REF,
         "latest_autodetect_used": False,
         "hardcoded_server_path_used": False,
-        "timestamp_semantics": "moex_systime_publication",
+        "timestamp_semantics": "source_reference_moment",
+        "source_record_key_fields": list(SOURCE_RECORD_KEY_FIELDS),
         "exact_duplicate_rows_dropped": exact_duplicate_rows_dropped,
     }
 

@@ -11,8 +11,9 @@ def _rows(pos_fiz: int = 422417) -> pd.DataFrame:
         [
             {
                 "trade_date": "2021-03-02",
-                "ts": pd.Timestamp("2021-03-02 18:44:59"),
+                "ts": pd.Timestamp("2021-03-02 18:44:50"),
                 "moment": pd.Timestamp("2021-03-02 18:44:50"),
+                "systime": pd.Timestamp("2025-06-21 16:22:46"),
                 "secid": "SiU6",
                 "clgroup": "FIZ",
                 "sess_id": 6239,
@@ -26,8 +27,9 @@ def _rows(pos_fiz: int = 422417) -> pd.DataFrame:
             },
             {
                 "trade_date": "2021-03-02",
-                "ts": pd.Timestamp("2021-03-02 18:44:59"),
+                "ts": pd.Timestamp("2021-03-02 18:44:50"),
                 "moment": pd.Timestamp("2021-03-02 18:44:50"),
+                "systime": pd.Timestamp("2025-06-21 16:22:46"),
                 "secid": "SiU6",
                 "clgroup": "FIZ",
                 "sess_id": 6239,
@@ -41,8 +43,9 @@ def _rows(pos_fiz: int = 422417) -> pd.DataFrame:
             },
             {
                 "trade_date": "2021-03-02",
-                "ts": pd.Timestamp("2021-03-02 18:44:59"),
+                "ts": pd.Timestamp("2021-03-02 18:44:50"),
                 "moment": pd.Timestamp("2021-03-02 18:44:50"),
+                "systime": pd.Timestamp("2025-06-21 16:22:46"),
                 "secid": "SiU6",
                 "clgroup": "YUR",
                 "sess_id": 6239,
@@ -56,8 +59,9 @@ def _rows(pos_fiz: int = 422417) -> pd.DataFrame:
             },
             {
                 "trade_date": "2021-03-02",
-                "ts": pd.Timestamp("2021-03-02 18:44:59"),
+                "ts": pd.Timestamp("2021-03-02 18:44:50"),
                 "moment": pd.Timestamp("2021-03-02 18:44:50"),
+                "systime": pd.Timestamp("2025-06-21 16:22:46"),
                 "secid": "SiU6",
                 "clgroup": "YUR",
                 "sess_id": 6239,
@@ -73,36 +77,32 @@ def _rows(pos_fiz: int = 422417) -> pd.DataFrame:
     )
 
 
-def test_exact_source_duplicates_are_collapsed_to_latest_seqnum() -> None:
+def test_same_moment_different_seqnum_source_records_are_preserved() -> None:
     cleaned, dropped = target._deduplicate_exact_source_duplicates(_rows())
 
-    assert dropped == 2
-    assert len(cleaned) == 2
-    assert set(cleaned["seqnum"].astype(int)) == {218}
-    assert not cleaned.duplicated(subset=list(target.CANONICAL_KEY_FIELDS)).any()
+    assert dropped == 0
+    assert len(cleaned) == 4
+    assert set(cleaned["seqnum"].astype(int)) == {217, 218}
+    assert not cleaned.duplicated(subset=list(target.SOURCE_RECORD_KEY_FIELDS)).any()
 
 
-def test_conflicting_duplicate_canonical_key_fails_closed() -> None:
-    frame = _rows().iloc[:2].copy()
-    frame.loc[frame.index[1], "pos"] = 422418
+def test_exact_duplicate_same_source_record_is_collapsed() -> None:
+    row = _rows().iloc[[0]].copy()
+    frame = pd.concat([row, row], ignore_index=True)
 
-    with pytest.raises(target.FutoiMaterializationError, match="conflicting duplicate canonical FUTOI key"):
-        target._deduplicate_exact_source_duplicates(frame)
+    cleaned, dropped = target._deduplicate_exact_source_duplicates(frame)
 
-
-def test_conflicting_moment_at_same_publication_key_fails_closed() -> None:
-    frame = _rows().iloc[:2].copy()
-    frame.loc[frame.index[1], "moment"] = pd.Timestamp("2021-03-02 18:44:55")
-
-    with pytest.raises(target.FutoiMaterializationError, match="conflicting duplicate canonical FUTOI key"):
-        target._deduplicate_exact_source_duplicates(frame)
+    assert dropped == 1
+    assert len(cleaned) == 1
 
 
-def test_duplicate_without_usable_seqnum_fails_closed() -> None:
-    frame = _rows().iloc[:2].copy()
-    frame["seqnum"] = [None, "not-a-number"]
+def test_conflicting_same_source_record_fails_closed() -> None:
+    row = _rows().iloc[[0]].copy()
+    conflict = row.copy()
+    conflict.loc[conflict.index[0], "pos"] = 422418
+    frame = pd.concat([row, conflict], ignore_index=True)
 
-    with pytest.raises(target.FutoiMaterializationError, match="missing usable seqnum"):
+    with pytest.raises(target.FutoiMaterializationError, match="conflicting duplicate FUTOI source record"):
         target._deduplicate_exact_source_duplicates(frame)
 
 
