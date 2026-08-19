@@ -26,6 +26,9 @@ required_fields:
   - refresh_status
   - producer
   - derivation_id
+  - output_version_mode
+  - immutable_output_run_root
+  - immutable_output_run_reserved
   - hardcoded_server_path_used
   - dynamic_scan_used
   - direct_source_refetch_used
@@ -37,6 +40,11 @@ rules:
   every_raw_partition_digest_must_match_content_pin: true
   raw_manifest_identity_must_match_canonical_state_path: true
   raw_quality_identity_must_match_raw_manifest: true
+  output_version_mode_must_be_run_id: true
+  immutable_output_run_root_required: true
+  immutable_output_run_root_exclusive_reservation_required: true
+  partitions_written_must_reference_current_run_id: true
+  overwrite_existing_output_run_allowed: false
   dynamic_scan_allowed: false
   direct_source_refetch_allowed: false
   accepted_pointer_creation_allowed: false
