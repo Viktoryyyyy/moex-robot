@@ -12,6 +12,9 @@ required_fields:
   - source_id
   - raw_dataset_id
   - raw_manifest_reference
+  - raw_content_pin_reference
+  - raw_content_pin_sha256
+  - content_pin_status
   - requested_from
   - requested_till
   - quality_status
@@ -26,7 +29,10 @@ required_fields:
   - failed_dates
   - derivation_id
 hard_checks:
-  - raw_manifest_is_explicit_and_valid
+  - raw_content_pin_digest_matches_explicit_input
+  - aggregate_raw_manifest_digest_matches_content_pin
+  - every_raw_partition_digest_matches_content_pin
+  - raw_manifest_and_quality_identity_valid
   - raw_partition_count_positive
   - partition_count_equals_raw_partition_count
   - row_count_equals_two_times_partition_count
