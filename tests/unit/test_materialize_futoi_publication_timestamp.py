@@ -6,6 +6,41 @@ import pytest
 from moex_data.futures import materialize_futoi_instrument as target
 
 
+def _raw_rows() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "sess_id": 6263,
+                "seqnum": 195,
+                "tradedate": "2021-04-06",
+                "tradetime": "18:30:00",
+                "ticker": "Si",
+                "clgroup": "FIZ",
+                "pos": 53870,
+                "pos_long": 668969,
+                "pos_short": -615099,
+                "pos_long_num": 14657,
+                "pos_short_num": 9598,
+                "systime": "2021-04-06 18:30:05",
+            },
+            {
+                "sess_id": 6263,
+                "seqnum": 195,
+                "tradedate": "2021-04-06",
+                "tradetime": "18:30:00",
+                "ticker": "Si",
+                "clgroup": "YUR",
+                "pos": -53870,
+                "pos_long": 814948,
+                "pos_short": -868818,
+                "pos_long_num": 267,
+                "pos_short_num": 138,
+                "systime": "2021-04-06 18:30:05",
+            },
+        ]
+    )
+
+
 def _normalized_rows() -> pd.DataFrame:
     return pd.DataFrame(
         [
@@ -43,6 +78,55 @@ def _normalized_rows() -> pd.DataFrame:
             },
         ]
     )
+
+
+def test_raw_source_validation_accepts_exact_rows() -> None:
+    result = target._validate_raw_source_rows(_raw_rows(), "2021-04-06", "si")
+
+    assert len(result) == 2
+
+
+def test_raw_source_validation_rejects_malformed_tradetime_before_normalization() -> None:
+    frame = _raw_rows()
+    frame.loc[frame.index[0], "tradetime"] = "not-a-time"
+
+    with pytest.raises(target.FutoiMaterializationError, match="invalid tradedate/tradetime reference timestamp"):
+        target._validate_raw_source_rows(frame, "2021-04-06", "si")
+
+
+def test_raw_source_validation_rejects_rows_outside_explicit_trade_date() -> None:
+    frame = _raw_rows()
+    frame.loc[frame.index[0], "tradedate"] = "2021-04-05"
+    frame.loc[frame.index[0], "systime"] = "2021-04-05 18:30:05"
+
+    with pytest.raises(target.FutoiMaterializationError, match="rows outside explicit trade_date"):
+        target._validate_raw_source_rows(frame, "2021-04-06", "si")
+
+
+def test_raw_source_validation_rejects_wrong_ticker() -> None:
+    frame = _raw_rows()
+    frame.loc[frame.index[0], "ticker"] = "CR"
+
+    with pytest.raises(target.FutoiMaterializationError, match="ticker does not match explicit registry ticker"):
+        target._validate_raw_source_rows(frame, "2021-04-06", "si")
+
+
+def test_raw_source_validation_rejects_unsupported_clgroup() -> None:
+    frame = _raw_rows()
+    frame.loc[frame.index[0], "clgroup"] = "OTHER"
+
+    with pytest.raises(target.FutoiMaterializationError, match="unsupported clgroup"):
+        target._validate_raw_source_rows(frame, "2021-04-06", "si")
+
+
+def test_raw_source_validation_allows_publication_after_midnight() -> None:
+    frame = _raw_rows().iloc[:1].copy()
+    frame.loc[frame.index[0], "tradetime"] = "23:59:55"
+    frame.loc[frame.index[0], "systime"] = "2021-04-07 00:00:05"
+
+    result = target._validate_raw_source_rows(frame, "2021-04-06", "si")
+
+    assert len(result) == 1
 
 
 def test_publication_systime_becomes_canonical_ts_and_preserves_distinct_snapshots() -> None:
