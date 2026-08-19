@@ -297,6 +297,49 @@ def test_fetch_exact_rejects_case_normalized_duplicate_columns(monkeypatch) -> N
         target._fetch_exact("si", "2021-04-06", 5.0, "https://apim.moex.com")
 
 
+def test_fetch_exact_canonicalizes_unique_uppercase_source_columns(monkeypatch) -> None:
+    frame = pd.DataFrame(
+        [[6263, 195, "2021-04-06", "18:30:00", "Si", "FIZ", 1, 2, -1, 2, 1, "2021-04-06 18:30:05"]],
+        columns=[
+            "SESS_ID",
+            "SEQNUM",
+            "TRADEDATE",
+            "TRADETIME",
+            "TICKER",
+            "CLGROUP",
+            "POS",
+            "POS_LONG",
+            "POS_SHORT",
+            "POS_LONG_NUM",
+            "POS_SHORT_NUM",
+            "SYSTIME",
+        ],
+    )
+
+    monkeypatch.setenv("MOEX_API_KEY", "test-token")
+    monkeypatch.setattr(target.availability, "fetch_paged_frame", lambda *args, **kwargs: frame)
+
+    result, _ = target._fetch_exact("si", "2021-04-06", 5.0, "https://apim.moex.com")
+    validated = target._validate_required_source_identifiers(result)
+
+    assert list(result.columns) == [
+        "sess_id",
+        "seqnum",
+        "tradedate",
+        "tradetime",
+        "ticker",
+        "clgroup",
+        "pos",
+        "pos_long",
+        "pos_short",
+        "pos_long_num",
+        "pos_short_num",
+        "systime",
+    ]
+    assert validated.loc[validated.index[0], "sess_id"] == 6263
+    assert validated.loc[validated.index[0], "seqnum"] == 195
+
+
 def test_fetch_exact_requires_official_publication_fields(monkeypatch) -> None:
     def fake_fetch(*args, **kwargs):
         return pd.DataFrame(
