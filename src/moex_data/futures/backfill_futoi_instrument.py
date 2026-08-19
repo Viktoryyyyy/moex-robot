@@ -135,8 +135,39 @@ def _authorize(binding: dict[str, object], data_lake_path: str | Path) -> None:
         raise FutoiBackfillError("registry FUTOI APIM evidence is not available/completed")
 
 
-def _emit_progress(payload: dict[str, object]) -> None:
-    print(json.dumps(payload, ensure_ascii=False, sort_keys=True), file=sys.stderr, flush=True)
+def _emit_progress(
+    *,
+    instrument_id: str,
+    secid: str,
+    futoi_ticker: str,
+    processed_dates: int,
+    total_dates: int,
+    trade_date: str | None,
+    partition_count: int,
+    skipped_count: int,
+    failure_count: int,
+    event: str = "progress",
+) -> None:
+    print(
+        json.dumps(
+            {
+                "event": event,
+                "instrument_id": instrument_id,
+                "secid": secid,
+                "futoi_ticker": futoi_ticker,
+                "processed_dates": processed_dates,
+                "total_dates": total_dates,
+                "trade_date": trade_date,
+                "partition_count": partition_count,
+                "skipped_empty_source_dates": skipped_count,
+                "failure_count": failure_count,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def backfill_range(
@@ -150,14 +181,14 @@ def backfill_range(
     timeout: float = 60.0,
     apim_base_url: str | None = None,
     create_accepted_pointer: bool = False,
-    progress_every: int = 25,
+    progress_every: int = 0,
 ) -> dict[str, object]:
     start = _require_date(date_start, "date_start")
     end = _require_date(date_end, "date_end")
     if start > end:
         raise FutoiBackfillError("date_start must be <= date_end")
-    if progress_every <= 0:
-        raise FutoiBackfillError("progress_every must be > 0")
+    if progress_every < 0:
+        raise FutoiBackfillError("progress_every must be >= 0")
     checked_instrument = _require_token(instrument_id, "instrument_id")
     checked_run_id = _require_token(run_id, "run_id")
     binding = materializer._registry_binding(registry_path, checked_instrument)
@@ -171,16 +202,19 @@ def backfill_range(
     invalid_total = 0
     dates = _date_range(start, end)
 
-    _emit_progress(
-        {
-            "event": "start",
-            "instrument_id": checked_instrument,
-            "secid": str(binding["secid"]),
-            "futoi_ticker": str(binding["futoi.ticker"]),
-            "processed_dates": 0,
-            "total_dates": len(dates),
-        }
-    )
+    if progress_every:
+        _emit_progress(
+            instrument_id=checked_instrument,
+            secid=str(binding["secid"]),
+            futoi_ticker=str(binding["futoi.ticker"]),
+            processed_dates=0,
+            total_dates=len(dates),
+            trade_date=None,
+            partition_count=0,
+            skipped_count=0,
+            failure_count=0,
+            event="start",
+        )
 
     for processed_dates, current in enumerate(dates, start=1):
         trade_date = current.isoformat()
@@ -206,20 +240,17 @@ def backfill_range(
             else:
                 failures.append({"trade_date": trade_date, "error": message})
 
-        if processed_dates % progress_every == 0 or processed_dates == len(dates):
+        if progress_every and (processed_dates % progress_every == 0 or processed_dates == len(dates)):
             _emit_progress(
-                {
-                    "event": "progress",
-                    "instrument_id": checked_instrument,
-                    "secid": str(binding["secid"]),
-                    "futoi_ticker": str(binding["futoi.ticker"]),
-                    "processed_dates": processed_dates,
-                    "total_dates": len(dates),
-                    "partition_count": len(successes),
-                    "skipped_empty_source_dates": len(skipped),
-                    "failure_count": len(failures),
-                    "trade_date": trade_date,
-                }
+                instrument_id=checked_instrument,
+                secid=str(binding["secid"]),
+                futoi_ticker=str(binding["futoi.ticker"]),
+                processed_dates=processed_dates,
+                total_dates=len(dates),
+                trade_date=trade_date,
+                partition_count=len(successes),
+                skipped_count=len(skipped),
+                failure_count=len(failures),
             )
 
     row_count = sum(int(item.get("row_count") or 0) for item in successes)
