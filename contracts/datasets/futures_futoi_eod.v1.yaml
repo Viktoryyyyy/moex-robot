@@ -29,7 +29,7 @@ upstream:
   selection_mode: explicit_pinned_raw_backfill_manifest
   dynamic_scan_allowed: false
   direct_source_refetch_allowed: false
-  legacy_latest_1_input_allowed: false
+  historical_source_refetch_allowed: false
 derivation:
   derivation_id: futoi_eod_last_observation_v1
   group_fields:
