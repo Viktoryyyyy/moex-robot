@@ -225,7 +225,10 @@ def _fetch_exact(ticker: str, trade_date: str, timeout: float, apim_base_url: st
             time.sleep(0.5 * (attempt + 1))
     if frame is None or frame.empty:
         _fail("FUTOI APIM exact source returned no rows")
-    columns = {str(column).strip().lower() for column in frame.columns}
+    normalized_columns = [str(column).strip().lower() for column in frame.columns]
+    if len(normalized_columns) != len(set(normalized_columns)):
+        _fail("FUTOI APIM schema contains duplicate columns after case normalization")
+    columns = set(normalized_columns)
     if "error_message" in columns:
         _fail("FUTOI APIM returned ERROR_MESSAGE instead of data")
     required = {
