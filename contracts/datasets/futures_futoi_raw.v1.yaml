@@ -13,7 +13,7 @@ partitioning:
   - instrument_id
   - trade_date
   - source_id
-grain: futoi_publication_snapshot_by_clgroup
+grain: futoi_source_record_by_clgroup
 identity_model:
   canonical_identity_field: instrument_id
   source_identity_fields:
@@ -28,15 +28,27 @@ identity_model:
   family_as_canonical_identity_allowed: false
 timestamp_semantics:
   canonical_ts_field: ts
-  canonical_ts_source_field: systime
-  canonical_ts_meaning: moex_publication_time
+  canonical_ts_source_fields:
+    - tradedate
+    - tradetime
+  canonical_ts_meaning: last_trade_included_in_calculation
   source_reference_ts_field: moment
-  source_reference_ts_meaning: last_trade_included_in_calculation
+  source_reference_ts_meaning: same_as_canonical_ts
+  source_publication_ts_field: systime
+  source_publication_ts_meaning: moex_source_publication_metadata
+  historical_systime_note: historical APIM rows may share a later archival/republication systime and therefore systime is not a raw event-time identity key
   canonical_key_fields:
+    - trade_date
+    - sess_id
+    - seqnum
+    - secid
+    - clgroup
+  analytical_revision_key_fields:
     - trade_date
     - ts
     - secid
     - clgroup
+  revision_policy: raw_preserve_all_source_records; resolve revisions only in a separate derived analytical layer
 required_columns:
   - instrument_id
   - trade_date
@@ -77,4 +89,4 @@ path_rules:
   hardcoded_server_path_allowed: false
   implicit_file_selection_allowed: false
   dynamic_scan_allowed: false
-retention_policy: keep_all_valid_partitions
+retention_policy: keep_all_valid_source_records
