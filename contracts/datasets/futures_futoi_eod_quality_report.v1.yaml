@@ -21,6 +21,7 @@ required_fields:
   - duplicate_key_count
   - null_required_count
   - invalid_position_count
+  - failure_count
   - ambiguity_count
   - failed_dates
   - derivation_id
@@ -32,8 +33,10 @@ hard_checks:
   - duplicate_key_count_zero
   - null_required_count_zero
   - invalid_position_count_zero
+  - failure_count_zero
   - ambiguity_count_zero
   - failed_dates_empty
   - every_partition_contains_exactly_FIZ_and_YUR
+  - selected_FIZ_and_YUR_share_one_source_snapshot
 failure_policy: fail_closed
 accepted_pointer_update_allowed: false
