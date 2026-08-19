@@ -49,6 +49,13 @@ response_contract:
     - pos_long_num
     - pos_short_num
     - systime
+  raw_validation:
+    before_normalization_required: true
+    exact_requested_trade_date_required: true
+    exact_registry_ticker_required: true
+    supported_clgroups:
+      - FIZ
+      - YUR
   timestamp_semantics:
     canonical_ts_source_field: systime
     canonical_ts_meaning: publication_time
@@ -84,6 +91,10 @@ failure_semantics:
   empty_response: fail_closed
   error_message_payload: fail_closed
   schema_mismatch: fail_closed
+  invalid_raw_tradedate_or_tradetime: fail_closed
+  raw_row_outside_explicit_trade_date: fail_closed
+  raw_ticker_identity_mismatch: fail_closed
+  missing_or_unsupported_clgroup: fail_closed
   missing_or_invalid_systime: fail_closed
   missing_or_invalid_source_identifier: fail_closed
   source_reference_date_mismatch: fail_closed
