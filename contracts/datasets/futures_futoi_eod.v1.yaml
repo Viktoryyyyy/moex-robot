@@ -1,0 +1,94 @@
+contract_id: futures_futoi_eod.v1
+dataset_id: futures_futoi_eod
+artifact_class: external_pattern
+producer: moex_data.futures.materialize_futoi_eod
+consumers:
+  - moex_data.futures.validation
+format: parquet
+schema_version: futures_futoi_eod.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/market/supplementary/dataset_id=futures_futoi_eod/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet"
+partitioning:
+  - dataset_id
+  - instrument_id
+  - trade_date
+  - source_id
+grain: one_eod_snapshot_per_trade_date_and_clgroup
+identity_model:
+  canonical_identity_field: instrument_id
+  source_identity_fields:
+    - secid
+    - board
+    - market
+    - engine
+    - source_id
+  family_as_canonical_identity_allowed: false
+upstream:
+  dataset_id: futures_futoi_raw
+  contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
+  selection_mode: explicit_pinned_raw_backfill_manifest
+  dynamic_scan_allowed: false
+  direct_source_refetch_allowed: false
+  legacy_latest_1_input_allowed: false
+derivation:
+  derivation_id: futoi_eod_last_observation_v1
+  group_fields:
+    - trade_date
+    - secid
+    - clgroup
+  steps:
+    - select maximum canonical raw ts within each clgroup for the trade_date
+    - require one sess_id at the selected maximum ts within each clgroup
+    - if multiple source revisions exist at that maximum ts within the same sess_id select the greatest exact-integer seqnum
+    - preserve the selected raw source record and provenance
+  ambiguity_policy: fail_closed
+  expected_clgroups:
+    - FIZ
+    - YUR
+  expected_rows_per_partition: 2
+canonical_key_fields:
+  - trade_date
+  - secid
+  - clgroup
+required_columns:
+  - instrument_id
+  - trade_date
+  - ts
+  - moment
+  - systime
+  - sess_id
+  - seqnum
+  - secid
+  - board
+  - market
+  - engine
+  - source_id
+  - source_ticker
+  - clgroup
+  - pos
+  - pos_long
+  - pos_short
+  - pos_long_num
+  - pos_short_num
+  - availability_ts_utc
+  - ingest_ts
+  - derivation_id
+  - raw_dataset_id
+  - raw_manifest_reference
+  - raw_partition_reference
+  - raw_source_record_count
+  - max_ts_revision_count
+  - derived_ingest_ts
+source_contract:
+  source_id: moex_algopack_futoi
+  source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v1.yaml
+  source_id_meaning: provenance_of_selected_raw_records
+quality_contract_ref: contracts/datasets/futures_futoi_eod_quality_report.v1.yaml
+refresh_manifest_contract_ref: contracts/datasets/futures_futoi_eod_refresh_manifest.v1.yaml
+accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_futoi_eod/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+path_rules:
+  storage_root: env_contract
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+  dynamic_scan_allowed: false
+retention_policy: keep_all_valid_trade_date_partitions
