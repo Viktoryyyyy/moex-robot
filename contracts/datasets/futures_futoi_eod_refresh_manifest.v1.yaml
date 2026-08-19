@@ -16,6 +16,8 @@ required_fields:
   - raw_dataset_id
   - raw_manifest_reference
   - raw_run_id
+  - raw_content_pin_reference
+  - raw_content_pin_sha256
   - raw_partition_count
   - partitions_written
   - failed_dates
@@ -29,7 +31,10 @@ required_fields:
   - direct_source_refetch_used
   - accepted_manifest_pointer_reference
 rules:
-  raw_manifest_must_be_explicit: true
+  raw_content_pin_must_be_explicit: true
+  raw_content_pin_digest_must_match_explicit_input: true
+  raw_manifest_digest_must_match_content_pin: true
+  every_raw_partition_digest_must_match_content_pin: true
   raw_manifest_identity_must_match_canonical_state_path: true
   raw_quality_identity_must_match_raw_manifest: true
   dynamic_scan_allowed: false
