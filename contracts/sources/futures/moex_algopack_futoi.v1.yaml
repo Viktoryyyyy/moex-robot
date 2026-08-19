@@ -19,7 +19,7 @@ request_contract:
   explicit_fields:
     from: "{YYYY-MM-DD}"
     till: "{YYYY-MM-DD}"
-    latest: "1"
+    latest: "0"
   response_block: futoi
   latest_autodetect_allowed: false
   fallback_endpoint_allowed: false
