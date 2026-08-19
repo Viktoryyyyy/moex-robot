@@ -293,10 +293,18 @@ def _validate_required_source_identifiers(frame: pd.DataFrame) -> pd.DataFrame:
     for field in ("sess_id", "seqnum"):
         if field not in result.columns:
             _fail("normalized FUTOI source missing required source identifier: " + field)
+        raw_values = result[field].tolist()
+        if any(isinstance(value, bool) or value.__class__.__name__ == "bool_" for value in raw_values):
+            _fail("normalized FUTOI source contains invalid required source identifier: " + field)
         numeric = pd.to_numeric(result[field], errors="coerce")
         if bool(numeric.isna().any()):
             _fail("normalized FUTOI source contains invalid required source identifier: " + field)
-        result[field] = numeric
+        valid_numeric = numeric.map(
+            lambda value: float("-inf") < float(value) < float("inf") and float(value).is_integer()
+        )
+        if not bool(valid_numeric.all()):
+            _fail("normalized FUTOI source contains invalid required source identifier: " + field)
+        result[field] = [int(float(value)) for value in numeric.tolist()]
     return result.reset_index(drop=True)
 
 
