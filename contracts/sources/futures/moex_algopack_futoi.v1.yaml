@@ -53,6 +53,10 @@ response_contract:
     before_normalization_required: true
     exact_requested_trade_date_required: true
     exact_registry_ticker_required: true
+    source_identifier_fields:
+      - sess_id
+      - seqnum
+    source_identifier_semantics: finite_integral_non_boolean
     supported_clgroups:
       - FIZ
       - YUR
