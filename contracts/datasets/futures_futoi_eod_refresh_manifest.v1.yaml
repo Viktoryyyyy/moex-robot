@@ -15,18 +15,23 @@ required_fields:
   - requested_till
   - raw_dataset_id
   - raw_manifest_reference
+  - raw_run_id
   - raw_partition_count
   - partitions_written
   - failed_dates
   - quality_report_ref
+  - quality_status
   - refresh_status
   - producer
   - derivation_id
   - hardcoded_server_path_used
   - dynamic_scan_used
   - direct_source_refetch_used
+  - accepted_manifest_pointer_reference
 rules:
   raw_manifest_must_be_explicit: true
+  raw_manifest_identity_must_match_canonical_state_path: true
+  raw_quality_identity_must_match_raw_manifest: true
   dynamic_scan_allowed: false
   direct_source_refetch_allowed: false
   accepted_pointer_creation_allowed: false
