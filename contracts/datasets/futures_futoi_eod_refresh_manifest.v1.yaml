@@ -26,6 +26,7 @@ required_fields:
   - refresh_status
   - producer
   - derivation_id
+  - pair_key_fields
   - output_version_mode
   - immutable_output_run_root
   - immutable_output_run_reserved
@@ -36,10 +37,13 @@ required_fields:
 rules:
   raw_content_pin_must_be_explicit: true
   raw_content_pin_digest_must_match_explicit_input: true
+  raw_content_pin_must_use_selected_raw_run_writer_hashes: true
   raw_manifest_digest_must_match_content_pin: true
   every_raw_partition_digest_must_match_content_pin: true
   raw_manifest_identity_must_match_canonical_state_path: true
   raw_quality_identity_must_match_raw_manifest: true
+  pair_key_fields_must_equal_trade_date_moment_sess_id: true
+  cross_group_seqnum_equality_required: false
   output_version_mode_must_be_run_id: true
   immutable_output_run_root_required: true
   immutable_output_run_root_exclusive_reservation_required: true
