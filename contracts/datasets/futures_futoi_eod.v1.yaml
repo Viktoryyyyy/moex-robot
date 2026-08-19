@@ -26,7 +26,11 @@ identity_model:
 upstream:
   dataset_id: futures_futoi_raw
   contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
-  selection_mode: explicit_pinned_raw_backfill_manifest
+  content_pin_contract_ref: contracts/datasets/futures_futoi_raw_content_pin.v1.yaml
+  selection_mode: explicit_immutable_sha256_content_pin
+  aggregate_manifest_digest_required: true
+  every_partition_digest_required: true
+  explicit_content_pin_digest_required: true
   dynamic_scan_allowed: false
   direct_source_refetch_allowed: false
   historical_source_refetch_allowed: false
@@ -37,11 +41,14 @@ derivation:
     - secid
     - clgroup
   steps:
+    - verify explicit raw content pin digest
+    - verify aggregate raw manifest digest from the content pin
+    - verify every raw partition digest before consumption
     - select maximum canonical raw ts within each clgroup for the trade_date
     - require one sess_id at the selected maximum ts within each clgroup
     - if multiple source revisions exist at that maximum ts within the same sess_id select the greatest exact-integer seqnum
     - require selected FIZ and YUR rows to share the same ts sess_id and seqnum source snapshot
-    - preserve the selected raw source record and provenance
+    - preserve selected raw record and content-digest provenance
   ambiguity_policy: fail_closed
   expected_clgroups:
     - FIZ
@@ -83,7 +90,10 @@ required_columns:
   - raw_dataset_id
   - raw_run_id
   - raw_manifest_reference
+  - raw_content_pin_reference
+  - raw_content_pin_sha256
   - raw_partition_reference
+  - raw_partition_sha256
   - raw_availability_ts_utc
   - raw_ingest_ts
   - raw_source_record_count
