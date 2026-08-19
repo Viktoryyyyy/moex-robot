@@ -13,7 +13,7 @@ partitioning:
   - instrument_id
   - trade_date
   - source_id
-grain: futoi_observation
+grain: futoi_publication_snapshot_by_clgroup
 identity_model:
   canonical_identity_field: instrument_id
   source_identity_fields:
@@ -26,10 +26,25 @@ identity_model:
     - family_code
     - source_ticker
   family_as_canonical_identity_allowed: false
+timestamp_semantics:
+  canonical_ts_field: ts
+  canonical_ts_source_field: systime
+  canonical_ts_meaning: moex_publication_time
+  source_reference_ts_field: moment
+  source_reference_ts_meaning: last_trade_included_in_calculation
+  canonical_key_fields:
+    - trade_date
+    - ts
+    - secid
+    - clgroup
 required_columns:
   - instrument_id
   - trade_date
   - ts
+  - moment
+  - systime
+  - sess_id
+  - seqnum
   - secid
   - board
   - market

@@ -7,6 +7,7 @@ import tempfile
 import time
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Final
 
@@ -224,14 +225,120 @@ def _fetch_exact(ticker: str, trade_date: str, timeout: float, apim_base_url: st
             time.sleep(0.5 * (attempt + 1))
     if frame is None or frame.empty:
         _fail("FUTOI APIM exact source returned no rows")
-    columns = {str(column).strip().lower() for column in frame.columns}
+    normalized_columns = [str(column).strip().lower() for column in frame.columns]
+    if len(normalized_columns) != len(set(normalized_columns)):
+        _fail("FUTOI APIM schema contains duplicate columns after case normalization")
+    frame = frame.copy()
+    frame.columns = normalized_columns
+    columns = set(normalized_columns)
     if "error_message" in columns:
         _fail("FUTOI APIM returned ERROR_MESSAGE instead of data")
-    required = {"clgroup", "pos", "pos_long", "pos_short", "pos_long_num", "pos_short_num"}
-    timestamp_ok = "moment" in columns or {"tradedate", "tradetime"}.issubset(columns)
-    if not required.issubset(columns) or not timestamp_ok:
+    required = {
+        "sess_id",
+        "seqnum",
+        "tradedate",
+        "tradetime",
+        "ticker",
+        "clgroup",
+        "pos",
+        "pos_long",
+        "pos_short",
+        "pos_long_num",
+        "pos_short_num",
+        "systime",
+    }
+    if not required.issubset(columns):
         _fail("FUTOI APIM schema mismatch")
     return frame, availability.url_join(base_url, path)
+
+
+def _validate_raw_source_rows(frame: pd.DataFrame, trade_date: str, ticker: str) -> pd.DataFrame:
+    column_by_name = {str(column).strip().lower(): column for column in frame.columns}
+    required = ("tradedate", "tradetime", "ticker", "clgroup", "systime")
+    missing = [field for field in required if field not in column_by_name]
+    if missing:
+        _fail("FUTOI raw source missing required fields: " + ",".join(missing))
+
+    result = frame.copy()
+    source_trade_dates = result[column_by_name["tradedate"]].astype("string").str.strip()
+    parsed_trade_dates = pd.to_datetime(source_trade_dates, errors="coerce")
+    if bool(parsed_trade_dates.isna().any()):
+        _fail("FUTOI raw source contains invalid tradedate")
+    exact_trade_dates = parsed_trade_dates.dt.date.astype(str)
+    if not bool(exact_trade_dates.eq(trade_date).all()):
+        _fail("FUTOI raw source contains rows outside explicit trade_date")
+
+    source_trade_times = result[column_by_name["tradetime"]].astype("string").str.strip()
+    reference_ts = pd.to_datetime(source_trade_dates + " " + source_trade_times, errors="coerce")
+    if bool(reference_ts.isna().any()):
+        _fail("FUTOI raw source contains invalid tradedate/tradetime reference timestamp")
+
+    publication_ts = pd.to_datetime(result[column_by_name["systime"]], errors="coerce")
+    if bool(publication_ts.isna().any()):
+        _fail("FUTOI raw source contains invalid systime publication timestamp")
+    if bool((publication_ts < reference_ts).any()):
+        _fail("FUTOI raw source publication systime precedes reference timestamp")
+
+    source_tickers = result[column_by_name["ticker"]].astype("string").str.strip()
+    if bool(source_tickers.isna().any()) or bool(source_tickers.eq("").any()):
+        _fail("FUTOI raw source contains missing ticker identity")
+    if not bool(source_tickers.str.lower().eq(ticker.lower()).all()):
+        _fail("FUTOI raw source ticker does not match explicit registry ticker")
+
+    source_groups = result[column_by_name["clgroup"]].astype("string").str.upper().str.strip()
+    if bool(source_groups.isna().any()) or bool(source_groups.eq("").any()):
+        _fail("FUTOI raw source contains missing clgroup")
+    if not bool(source_groups.isin({"FIZ", "YUR"}).all()):
+        _fail("FUTOI raw source contains unsupported clgroup")
+
+    return result.reset_index(drop=True)
+
+
+def _coerce_source_identifier(value: object, field: str) -> int:
+    if value is None or isinstance(value, bool) or value.__class__.__name__ == "bool_" or pd.isna(value):
+        _fail("FUTOI source contains invalid required source identifier: " + field)
+    text = str(value).strip()
+    if not text:
+        _fail("FUTOI source contains invalid required source identifier: " + field)
+    try:
+        number = Decimal(text)
+    except (InvalidOperation, ValueError):
+        _fail("FUTOI source contains invalid required source identifier: " + field)
+    if not number.is_finite() or number != number.to_integral_value():
+        _fail("FUTOI source contains invalid required source identifier: " + field)
+    return int(number)
+
+
+def _validate_required_source_identifiers(frame: pd.DataFrame) -> pd.DataFrame:
+    result = frame.copy()
+    for field in ("sess_id", "seqnum"):
+        if field not in result.columns:
+            _fail("FUTOI source missing required source identifier: " + field)
+        result[field] = [_coerce_source_identifier(value, field) for value in result[field].tolist()]
+    return result.reset_index(drop=True)
+
+
+def _enforce_publication_timestamp(frame: pd.DataFrame) -> pd.DataFrame:
+    if "systime" not in frame.columns:
+        _fail("normalized FUTOI source missing systime publication timestamp")
+    if "moment" not in frame.columns:
+        _fail("normalized FUTOI source missing source reference moment")
+    publication_ts = pd.to_datetime(frame["systime"], errors="coerce")
+    reference_ts = pd.to_datetime(frame["moment"], errors="coerce")
+    if bool(publication_ts.isna().any()):
+        _fail("normalized FUTOI source contains invalid systime publication timestamp")
+    if bool(reference_ts.isna().any()):
+        _fail("normalized FUTOI source contains invalid source reference moment")
+    result = frame.copy()
+    result["ts"] = publication_ts
+    result["moment"] = reference_ts
+    trade_dates = result["trade_date"].astype(str)
+    reference_dates = reference_ts.dt.date.astype(str)
+    if not bool(trade_dates.eq(reference_dates).all()):
+        _fail("FUTOI source reference moment date does not match trade_date")
+    if bool((publication_ts < reference_ts).any()):
+        _fail("FUTOI publication systime precedes source reference moment")
+    return result.reset_index(drop=True)
 
 
 def _deduplicate_exact_source_duplicates(frame: pd.DataFrame) -> tuple[pd.DataFrame, int]:
@@ -242,14 +349,17 @@ def _deduplicate_exact_source_duplicates(frame: pd.DataFrame) -> tuple[pd.DataFr
         return frame.copy().reset_index(drop=True), 0
 
     duplicate_rows = frame.loc[duplicate_mask].copy()
-    comparison_fields = [field for field in ("sess_id", "source_ticker", *POSITION_FIELDS) if field in duplicate_rows.columns]
+    comparison_fields = [field for field in ("sess_id", "source_ticker", "moment", *POSITION_FIELDS) if field in duplicate_rows.columns]
     for _, group in duplicate_rows.groupby(list(CANONICAL_KEY_FIELDS), dropna=False, sort=False):
         if len(group) < 2:
             continue
         if "seqnum" not in group.columns:
             _fail("duplicate canonical FUTOI key missing usable seqnum")
-        seqnums = pd.to_numeric(group["seqnum"], errors="coerce")
-        if bool(seqnums.isna().any()):
+        try:
+            seqnums = [_coerce_source_identifier(value, "seqnum") for value in group["seqnum"].tolist()]
+        except FutoiMaterializationError:
+            _fail("duplicate canonical FUTOI key missing usable seqnum")
+        if len(seqnums) != len(group):
             _fail("duplicate canonical FUTOI key missing usable seqnum")
         for field in comparison_fields:
             first = group[field].iloc[0]
@@ -260,7 +370,7 @@ def _deduplicate_exact_source_duplicates(frame: pd.DataFrame) -> tuple[pd.DataFr
     work = frame.copy()
     sort_fields = list(CANONICAL_KEY_FIELDS)
     if "seqnum" in work.columns:
-        work["_seqnum_sort"] = pd.to_numeric(work["seqnum"], errors="coerce")
+        work["_seqnum_sort"] = [_coerce_source_identifier(value, "seqnum") for value in work["seqnum"].tolist()]
         sort_fields.append("_seqnum_sort")
     work = work.sort_values(sort_fields, kind="stable", na_position="first")
     before = len(work)
@@ -304,6 +414,7 @@ def _quality(frame: pd.DataFrame, binding: Mapping[str, object], trade_date: str
         "invalid_position_count": int(counts.get("invalid_position_count") or 0),
         "availability_status": availability_status,
         "probe_status": probe_status,
+        "timestamp_semantics": "moex_systime_publication",
         "failure_reasons": failures,
         "quality_contract_ref": QUALITY_CONTRACT_REF,
     }
@@ -334,6 +445,8 @@ def materialize_futoi_partition(
 
     ingest_ts = _utc_now()
     source_frame, source_url = _fetch_exact(ticker, checked_date, timeout, apim_base_url)
+    source_frame = _validate_required_source_identifiers(source_frame)
+    source_frame = _validate_raw_source_rows(source_frame, checked_date, ticker)
     normalized, meta = legacy.normalize_futoi(
         source_frame,
         str(binding["secid"]),
@@ -355,6 +468,8 @@ def materialize_futoi_partition(
     normalized["market"] = str(binding["market"])
     normalized["engine"] = str(binding["engine"])
     normalized["availability_ts_utc"] = ingest_ts
+    normalized = _validate_required_source_identifiers(normalized)
+    normalized = _enforce_publication_timestamp(normalized)
     normalized, exact_duplicate_rows_dropped = _deduplicate_exact_source_duplicates(normalized)
     normalized = normalized.sort_values(["ts", "clgroup"]).reset_index(drop=True)
 
@@ -384,6 +499,7 @@ def materialize_futoi_partition(
             "futoi_ticker": ticker,
             "source_endpoint_url": source_url,
             "transport": "authenticated_apim",
+            "timestamp_semantics": "ts=moex_systime_publication;moment=last_trade_included",
         },
         "producer": PRODUCER_ID,
         "latest_autodetect_used": False,
@@ -416,6 +532,7 @@ def materialize_futoi_partition(
         "source_contract_ref": SOURCE_CONTRACT_REF,
         "latest_autodetect_used": False,
         "hardcoded_server_path_used": False,
+        "timestamp_semantics": "moex_systime_publication",
         "exact_duplicate_rows_dropped": exact_duplicate_rows_dropped,
     }
 

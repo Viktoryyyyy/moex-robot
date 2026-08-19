@@ -12,6 +12,7 @@ def _rows(pos_fiz: int = 422417) -> pd.DataFrame:
             {
                 "trade_date": "2021-03-02",
                 "ts": pd.Timestamp("2021-03-02 18:44:59"),
+                "moment": pd.Timestamp("2021-03-02 18:44:50"),
                 "secid": "SiU6",
                 "clgroup": "FIZ",
                 "sess_id": 6239,
@@ -26,6 +27,7 @@ def _rows(pos_fiz: int = 422417) -> pd.DataFrame:
             {
                 "trade_date": "2021-03-02",
                 "ts": pd.Timestamp("2021-03-02 18:44:59"),
+                "moment": pd.Timestamp("2021-03-02 18:44:50"),
                 "secid": "SiU6",
                 "clgroup": "FIZ",
                 "sess_id": 6239,
@@ -40,6 +42,7 @@ def _rows(pos_fiz: int = 422417) -> pd.DataFrame:
             {
                 "trade_date": "2021-03-02",
                 "ts": pd.Timestamp("2021-03-02 18:44:59"),
+                "moment": pd.Timestamp("2021-03-02 18:44:50"),
                 "secid": "SiU6",
                 "clgroup": "YUR",
                 "sess_id": 6239,
@@ -54,6 +57,7 @@ def _rows(pos_fiz: int = 422417) -> pd.DataFrame:
             {
                 "trade_date": "2021-03-02",
                 "ts": pd.Timestamp("2021-03-02 18:44:59"),
+                "moment": pd.Timestamp("2021-03-02 18:44:50"),
                 "secid": "SiU6",
                 "clgroup": "YUR",
                 "sess_id": 6239,
@@ -86,6 +90,14 @@ def test_conflicting_duplicate_canonical_key_fails_closed() -> None:
         target._deduplicate_exact_source_duplicates(frame)
 
 
+def test_conflicting_moment_at_same_publication_key_fails_closed() -> None:
+    frame = _rows().iloc[:2].copy()
+    frame.loc[frame.index[1], "moment"] = pd.Timestamp("2021-03-02 18:44:55")
+
+    with pytest.raises(target.FutoiMaterializationError, match="conflicting duplicate canonical FUTOI key"):
+        target._deduplicate_exact_source_duplicates(frame)
+
+
 def test_duplicate_without_usable_seqnum_fails_closed() -> None:
     frame = _rows().iloc[:2].copy()
     frame["seqnum"] = [None, "not-a-number"]
@@ -110,14 +122,18 @@ def test_fetch_exact_retries_transient_401_then_succeeds(monkeypatch) -> None:
         return pd.DataFrame(
             [
                 {
+                    "sess_id": 1,
+                    "seqnum": 1,
                     "tradedate": "2026-08-17",
                     "tradetime": "07:05:00",
+                    "ticker": "SI",
                     "clgroup": "FIZ",
                     "pos": 1,
                     "pos_long": 2,
                     "pos_short": -1,
                     "pos_long_num": 2,
                     "pos_short_num": 1,
+                    "systime": "2026-08-17 07:05:05",
                 }
             ]
         )
