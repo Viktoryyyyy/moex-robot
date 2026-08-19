@@ -196,8 +196,8 @@ def test_required_source_identifiers_accept_numeric_values() -> None:
 
     result = target._validate_required_source_identifiers(frame)
 
-    assert result["sess_id"].notna().all()
-    assert result["seqnum"].notna().all()
+    assert result["sess_id"].tolist() == [6263, 6263]
+    assert result["seqnum"].tolist() == [195, 215]
 
 
 @pytest.mark.parametrize("field", ["sess_id", "seqnum"])
@@ -209,10 +209,11 @@ def test_missing_required_source_identifier_fails_closed(field: str) -> None:
 
 
 @pytest.mark.parametrize("field", ["sess_id", "seqnum"])
-def test_invalid_required_source_identifier_fails_closed(field: str) -> None:
+@pytest.mark.parametrize("invalid_value", [True, 1.5, float("inf"), float("-inf"), "not-a-number"])
+def test_invalid_required_source_identifier_fails_closed(field: str, invalid_value: object) -> None:
     frame = _normalized_rows()
     frame[field] = frame[field].astype(object)
-    frame.loc[frame.index[0], field] = "not-a-number"
+    frame.loc[frame.index[0], field] = invalid_value
 
     with pytest.raises(target.FutoiMaterializationError, match="invalid required source identifier"):
         target._validate_required_source_identifiers(frame)
