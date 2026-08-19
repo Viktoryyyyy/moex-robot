@@ -3,7 +3,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from datetime import date
+import os
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Final, Sequence
 
@@ -119,6 +120,17 @@ def _canonical_raw_partition_path(reference: object, instrument_id: str) -> tupl
     return trade_date, path
 
 
+def _expected_dates(requested_from: str, requested_till: str) -> set[str]:
+    start = date.fromisoformat(requested_from)
+    end = date.fromisoformat(requested_till)
+    result: set[str] = set()
+    current = start
+    while current <= end:
+        result.add(current.isoformat())
+        current += timedelta(days=1)
+    return result
+
+
 def validate_raw_manifest(
     raw_manifest_path: str | Path,
     instrument_id: str,
@@ -167,11 +179,12 @@ def validate_raw_manifest(
     if not isinstance(skipped_values, list):
         _fail("raw manifest partitions_skipped must be a list")
     skipped = [_require_date(item, "raw manifest skipped trade_date") for item in skipped_values]
-    if len(skipped) != len(set(skipped)) or set(skipped) & set(trade_dates):
-        _fail("raw manifest skipped dates are invalid")
-    calendar_days = (date.fromisoformat(requested_till) - date.fromisoformat(requested_from)).days + 1
-    if len(trade_dates) + len(skipped) != calendar_days:
-        _fail("raw manifest written plus skipped dates do not reconcile to requested range")
+    if len(skipped) != len(set(skipped)) or any(value < requested_from or value > requested_till for value in skipped):
+        _fail("raw manifest skipped dates are invalid or outside requested range")
+    if set(skipped) & set(trade_dates):
+        _fail("raw manifest written and skipped dates overlap")
+    if set(trade_dates) | set(skipped) != _expected_dates(requested_from, requested_till):
+        _fail("raw manifest written plus skipped dates do not exactly reconcile to requested range")
 
     quality_path = _resolve_root_reference(manifest.get("quality_report_ref"), "raw quality_report_ref")
     expected_quality_path = (
@@ -217,6 +230,20 @@ def _pin_path(run_date: str, run_id: str) -> Path:
     )
 
 
+def _write_json_exclusive(path: Path, values: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        _fail("content pin run path already exists; overwrite is forbidden")
+    else:
+        os.close(fd)
+    try:
+        raw_materializer._write_json_atomic(path, values)
+    except Exception:
+        raise
+
+
 def create_content_pin(
     *,
     instrument_id: str,
@@ -249,8 +276,6 @@ def create_content_pin(
         )
 
     pin_path = _pin_path(requested_till, checked_run_id)
-    if pin_path.exists():
-        _fail("content pin run path already exists; overwrite is forbidden")
     pin = {
         "schema_version": SCHEMA_VERSION,
         "run_id": checked_run_id,
@@ -277,7 +302,7 @@ def create_content_pin(
         "direct_source_refetch_used": False,
         "accepted_manifest_pointer_reference": None,
     }
-    raw_materializer._write_json_atomic(pin_path, pin)
+    _write_json_exclusive(pin_path, pin)
     pin_bytes, pin_sha256 = _read_bytes_with_sha256(pin_path)
     _load_json_bytes(pin_bytes, "content pin")
     return {
