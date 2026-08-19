@@ -14,6 +14,8 @@ pinning:
   manifest_digest_algorithm: sha256
   partition_digest_algorithm: sha256
   aggregate_manifest_digest_required: true
+  raw_run_issued_partition_hash_required: true
+  post_hoc_partition_hash_as_provenance_allowed: false
   every_written_partition_digest_required: true
   immutable_run_path_required: true
   exclusive_destination_reservation_required: true
@@ -40,6 +42,7 @@ required_fields:
   - partitions
   - pin_status
   - created_at_utc
+  - raw_partition_hash_source
   - hardcoded_server_path_used
   - dynamic_scan_used
   - direct_source_refetch_used
@@ -48,9 +51,12 @@ partition_entry_required_fields:
   - raw_partition_reference
   - sha256
   - size_bytes
+  - raw_hash_issued_by_run_id
 verification_policy:
   pin_file_digest_must_match_explicit_expected_digest: true
   raw_manifest_digest_must_match: true
+  aggregate_manifest_must_carry_raw_run_issued_hash_for_every_partition: true
+  content_pin_partition_digest_must_equal_raw_run_issued_digest: true
   every_partition_digest_must_match_before_consumption: true
   raw_manifest_and_quality_identity_must_pass: true
   written_plus_skipped_must_equal_exact_requested_date_set: true
