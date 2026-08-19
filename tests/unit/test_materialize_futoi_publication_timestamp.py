@@ -80,6 +80,22 @@ def _normalized_rows() -> pd.DataFrame:
     )
 
 
+def _binding() -> dict[str, object]:
+    return {
+        "instrument_id": "si_futures_family",
+        "canonical_symbol": "Si",
+        "secid": "SiU6",
+        "board": "RFUD",
+        "market": "forts",
+        "engine": "futures",
+        "futoi.source_id": target.SOURCE_ID,
+        "futoi.ticker": "si",
+        "futoi.availability_status": "available",
+        "futoi.probe_status": "completed",
+        "futoi.enabled_for_materialization": False,
+    }
+
+
 def test_raw_source_validation_accepts_exact_rows() -> None:
     result = target._validate_raw_source_rows(_raw_rows(), "2021-04-06", "si")
 
@@ -227,6 +243,31 @@ def test_invalid_required_source_identifier_fails_closed(field: str, invalid_val
 
     with pytest.raises(target.FutoiMaterializationError, match="invalid required source identifier"):
         target._validate_required_source_identifiers(frame)
+
+
+def test_materializer_rejects_boolean_identifier_before_legacy_normalization(monkeypatch) -> None:
+    frame = _raw_rows()
+    frame["sess_id"] = frame["sess_id"].astype(object)
+    frame.loc[frame.index[0], "sess_id"] = True
+    normalize_called = False
+
+    def fake_normalize(*args, **kwargs):
+        nonlocal normalize_called
+        normalize_called = True
+        raise AssertionError("legacy normalization must not see invalid raw identifiers")
+
+    monkeypatch.setattr(target, "_registry_binding", lambda *_: _binding())
+    monkeypatch.setattr(target, "_fetch_exact", lambda *_: (frame, "https://apim.moex.com/futoi"))
+    monkeypatch.setattr(target.legacy, "normalize_futoi", fake_normalize)
+
+    with pytest.raises(target.FutoiMaterializationError, match="invalid required source identifier"):
+        target.materialize_futoi_partition(
+            trade_date="2021-04-06",
+            instrument_id="si_futures_family",
+            run_id="raw_identifier_pre_normalization_test",
+        )
+
+    assert normalize_called is False
 
 
 def test_fetch_exact_requires_official_publication_fields(monkeypatch) -> None:
