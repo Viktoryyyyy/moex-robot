@@ -270,6 +270,33 @@ def test_materializer_rejects_boolean_identifier_before_legacy_normalization(mon
     assert normalize_called is False
 
 
+def test_fetch_exact_rejects_case_normalized_duplicate_columns(monkeypatch) -> None:
+    frame = pd.DataFrame(
+        [[6263, True, 195, "2021-04-06", "18:30:00", "Si", "FIZ", 1, 2, -1, 2, 1, "2021-04-06 18:30:05"]],
+        columns=[
+            "sess_id",
+            "SESS_ID",
+            "seqnum",
+            "tradedate",
+            "tradetime",
+            "ticker",
+            "clgroup",
+            "pos",
+            "pos_long",
+            "pos_short",
+            "pos_long_num",
+            "pos_short_num",
+            "systime",
+        ],
+    )
+
+    monkeypatch.setenv("MOEX_API_KEY", "test-token")
+    monkeypatch.setattr(target.availability, "fetch_paged_frame", lambda *args, **kwargs: frame)
+
+    with pytest.raises(target.FutoiMaterializationError, match="duplicate columns after case normalization"):
+        target._fetch_exact("si", "2021-04-06", 5.0, "https://apim.moex.com")
+
+
 def test_fetch_exact_requires_official_publication_fields(monkeypatch) -> None:
     def fake_fetch(*args, **kwargs):
         return pd.DataFrame(
