@@ -23,6 +23,7 @@ MANIFEST_CONTRACT_REF: Final[str] = "contracts/datasets/futures_futoi_eod_refres
 PRODUCER_ID: Final[str] = "moex_data.futures.materialize_futoi_eod.v1"
 OUTPUT_VERSION_MODE: Final[str] = "run_id"
 EOD_KEY_FIELDS: Final[tuple[str, ...]] = ("trade_date", "secid", "clgroup")
+PAIR_KEY_FIELDS: Final[tuple[str, ...]] = ("trade_date", "moment", "sess_id")
 EXPECTED_CLGROUPS: Final[frozenset[str]] = frozenset({"FIZ", "YUR"})
 RAW_REQUIRED_COLUMNS: Final[tuple[str, ...]] = (
     "instrument_id",
@@ -207,6 +208,24 @@ def _validate_raw_partition(
     return result.reset_index(drop=True)
 
 
+def _latest_common_pair(raw: pd.DataFrame, trade_date: str) -> tuple[pd.Timestamp, int]:
+    pairs_by_group: dict[str, set[tuple[pd.Timestamp, int]]] = {}
+    for clgroup in EXPECTED_CLGROUPS:
+        group = raw.loc[raw["clgroup"] == clgroup]
+        pairs_by_group[clgroup] = {
+            (pd.Timestamp(moment), int(sess_id))
+            for moment, sess_id in zip(group["moment"].tolist(), group["sess_id"].tolist())
+        }
+    common = pairs_by_group["FIZ"] & pairs_by_group["YUR"]
+    if not common:
+        _fail("no common FIZ/YUR FUTOI pair for trade_date: " + trade_date)
+    latest_moment = max(pair[0] for pair in common)
+    candidates = sorted(pair for pair in common if pair[0] == latest_moment)
+    if len(candidates) != 1:
+        _fail("ambiguous latest common FUTOI pair: " + trade_date)
+    return candidates[0]
+
+
 def _derive_partition(
     raw: pd.DataFrame,
     *,
@@ -220,16 +239,16 @@ def _derive_partition(
     raw_partition_sha256: str,
     derived_ingest_ts: str,
 ) -> pd.DataFrame:
+    pair_moment, pair_sess_id = _latest_common_pair(raw, trade_date)
     selected_rows: list[pd.Series] = []
     for clgroup in sorted(EXPECTED_CLGROUPS):
-        group = raw.loc[raw["clgroup"].astype(str) == clgroup].copy()
-        if group.empty:
-            _fail("raw partition missing clgroup " + clgroup + ": " + trade_date)
-        max_ts = group["ts"].max()
-        candidates = group.loc[group["ts"] == max_ts].copy()
-        sess_ids = sorted(set(int(value) for value in candidates["sess_id"].tolist()))
-        if len(sess_ids) != 1:
-            _fail("ambiguous EOD session at maximum ts for " + clgroup + ": " + trade_date)
+        candidates = raw.loc[
+            (raw["clgroup"] == clgroup)
+            & (raw["moment"] == pair_moment)
+            & (raw["sess_id"].astype(object) == pair_sess_id)
+        ].copy()
+        if candidates.empty:
+            _fail("selected common pair missing clgroup " + clgroup + ": " + trade_date)
         candidates["seqnum"] = [
             raw_materializer._coerce_source_identifier(value, "seqnum")
             for value in candidates["seqnum"].tolist()
@@ -237,8 +256,10 @@ def _derive_partition(
         max_seqnum = max(int(value) for value in candidates["seqnum"].tolist())
         winner = candidates.loc[candidates["seqnum"] == max_seqnum].copy()
         if len(winner) != 1:
-            _fail("ambiguous EOD source revision for " + clgroup + ": " + trade_date)
+            _fail("ambiguous source revision within selected common pair for " + clgroup + ": " + trade_date)
         row = winner.iloc[0].copy()
+        if int(row["pos"]) != int(row["pos_long"]) + int(row["pos_short"]):
+            _fail("selected FUTOI row violates pos identity for " + clgroup + ": " + trade_date)
         row["raw_source_record_count"] = int(len(raw))
         row["max_ts_revision_count"] = int(len(candidates))
         selected_rows.append(row)
@@ -250,8 +271,12 @@ def _derive_partition(
         _fail("derived EOD partition has duplicate canonical key: " + trade_date)
     if not out["instrument_id"].astype(str).eq(instrument_id).all():
         _fail("derived EOD instrument_id mismatch: " + trade_date)
-    if len(out[["ts", "sess_id", "seqnum"]].drop_duplicates()) != 1:
-        _fail("FIZ and YUR EOD selections are not the same source snapshot: " + trade_date)
+    if len(out[["moment", "sess_id"]].drop_duplicates()) != 1:
+        _fail("FIZ and YUR EOD selections do not share the latest common pair: " + trade_date)
+    fiz_pos = int(out.loc[out["clgroup"] == "FIZ", "pos"].iloc[0])
+    yur_pos = int(out.loc[out["clgroup"] == "YUR", "pos"].iloc[0])
+    if fiz_pos + yur_pos != 0:
+        _fail("selected FIZ/YUR FUTOI pair is not zero-sum: " + trade_date)
 
     out["schema_version"] = "futures_futoi_eod.v1"
     out["derivation_id"] = DERIVATION_ID
@@ -392,7 +417,7 @@ def materialize_futoi_eod(
     ambiguity_count = sum(
         1
         for item in failures
-        if "ambiguous" in item["error"].lower() or "same source snapshot" in item["error"].lower()
+        if "ambiguous" in item["error"].lower() or "common pair" in item["error"].lower()
     )
     quality_status = "pass"
     if (
@@ -445,6 +470,7 @@ def materialize_futoi_eod(
         "ambiguity_count": ambiguity_count,
         "failed_dates": failures,
         "derivation_id": DERIVATION_ID,
+        "pair_key_fields": list(PAIR_KEY_FIELDS),
         "output_version_mode": OUTPUT_VERSION_MODE,
         "immutable_output_run_root": output_root_text,
         "immutable_output_run_reserved": output_reserved,
@@ -471,6 +497,7 @@ def materialize_futoi_eod(
         "refresh_status": "succeeded" if quality_status == "pass" else "failed",
         "producer": PRODUCER_ID,
         "derivation_id": DERIVATION_ID,
+        "pair_key_fields": list(PAIR_KEY_FIELDS),
         "output_version_mode": OUTPUT_VERSION_MODE,
         "immutable_output_run_root": output_root_text,
         "immutable_output_run_reserved": output_reserved,
@@ -506,6 +533,7 @@ def materialize_futoi_eod(
         "failure_count": failure_count,
         "ambiguity_count": ambiguity_count,
         "derivation_id": DERIVATION_ID,
+        "pair_key_fields": list(PAIR_KEY_FIELDS),
         "output_version_mode": OUTPUT_VERSION_MODE,
         "immutable_output_run_root": output_root_text,
         "immutable_output_run_reserved": output_reserved,
