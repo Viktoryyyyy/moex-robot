@@ -52,6 +52,7 @@ response_contract:
   raw_validation:
     before_normalization_required: true
     duplicate_case_normalized_columns_forbidden: true
+    canonicalize_unique_source_columns_to_lowercase: true
     exact_requested_trade_date_required: true
     exact_registry_ticker_required: true
     source_identifier_fields:
