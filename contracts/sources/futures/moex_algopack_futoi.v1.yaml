@@ -37,13 +37,24 @@ response_contract:
   canonical_dataset_ref: contracts/datasets/futures_futoi_raw.v1.yaml
   availability_report_ref: contracts/datasets/futures_futoi_availability_report_contract.md
   required_columns:
+    - sess_id
+    - seqnum
+    - tradedate
+    - tradetime
+    - ticker
     - clgroup
     - pos
     - pos_long
     - pos_short
     - pos_long_num
     - pos_short_num
-  timestamp_requirement: moment_or_tradedate_plus_tradetime
+    - systime
+  timestamp_semantics:
+    canonical_ts_source_field: systime
+    canonical_ts_meaning: publication_time
+    source_reference_time_fields: tradedate_plus_tradetime
+    source_reference_time_meaning: last_trade_included_in_calculation
+    seqnum_meaning: technical_data_package_number
   duplicate_policy:
     canonical_key_fields:
       - trade_date
@@ -70,6 +81,8 @@ failure_semantics:
   empty_response: fail_closed
   error_message_payload: fail_closed
   schema_mismatch: fail_closed
+  missing_or_invalid_systime: fail_closed
+  publication_date_mismatch: fail_closed
   conflicting_duplicate_payload: fail_closed
   duplicate_without_usable_seqnum: fail_closed
   implicit_ticker_fallback: forbidden
@@ -80,6 +93,7 @@ evidence:
   server_revalidation_status: proven
   public_iss_evidence_status: invalidated
   public_iss_invalidation_reason: futoi_block_returned_ERROR_MESSAGE_not_data
+  official_metric_semantics_reference: https://moexalgo.github.io/docs/description/futoi
   proven_tickers:
     - usdrubf
     - cnyrubf
