@@ -9,6 +9,9 @@ import pytest
 from moex_data.futures import materialize_futoi_eod as target
 
 
+ZERO_SHA = "0" * 64
+
+
 def _binding() -> dict[str, object]:
     return {
         "instrument_id": "si_futures_family",
@@ -54,17 +57,18 @@ def _row(clgroup: str, ts: str, seqnum: object, *, sess_id: object = 6263, pos: 
 
 
 def _raw_rows() -> pd.DataFrame:
-    rows = [
-        _row("FIZ", "2021-04-06 18:30:00", 195, pos=53870),
-        _row("YUR", "2021-04-06 18:30:00", 195, pos=-53870),
-        _row("FIZ", "2021-04-06 18:30:00", 215, pos=53415),
-        _row("YUR", "2021-04-06 18:30:00", 215, pos=-53415),
-        _row("FIZ", "2021-04-06 18:44:59", 219),
-        _row("YUR", "2021-04-06 18:44:59", 219),
-        _row("FIZ", "2021-04-06 18:44:59", 220),
-        _row("YUR", "2021-04-06 18:44:59", 220),
-    ]
-    return pd.DataFrame(rows)
+    return pd.DataFrame(
+        [
+            _row("FIZ", "2021-04-06 18:30:00", 195, pos=53870),
+            _row("YUR", "2021-04-06 18:30:00", 195, pos=-53870),
+            _row("FIZ", "2021-04-06 18:30:00", 215, pos=53415),
+            _row("YUR", "2021-04-06 18:30:00", 215, pos=-53415),
+            _row("FIZ", "2021-04-06 18:44:59", 219),
+            _row("YUR", "2021-04-06 18:44:59", 219),
+            _row("FIZ", "2021-04-06 18:44:59", 220),
+            _row("YUR", "2021-04-06 18:44:59", 220),
+        ]
+    )
 
 
 def _derive(raw: pd.DataFrame) -> pd.DataFrame:
@@ -75,14 +79,16 @@ def _derive(raw: pd.DataFrame) -> pd.DataFrame:
         instrument_id="si_futures_family",
         raw_run_id="raw_run",
         raw_manifest_ref="${MOEX_DATA_ROOT}/state/raw_manifest.json",
+        raw_content_pin_ref="${MOEX_DATA_ROOT}/state/raw_pin.json",
+        raw_content_pin_sha256=ZERO_SHA,
         raw_partition_ref="${MOEX_DATA_ROOT}/market/raw_partition.parquet",
+        raw_partition_sha256=ZERO_SHA,
         derived_ingest_ts="2026-08-19T14:00:00+00:00",
     )
 
 
 def test_eod_selects_latest_ts_then_highest_seqnum_revision() -> None:
     result = _derive(_raw_rows())
-
     assert len(result) == 2
     assert set(result["clgroup"].tolist()) == {"FIZ", "YUR"}
     assert set(result["seqnum"].astype(int).tolist()) == {220}
@@ -90,29 +96,28 @@ def test_eod_selects_latest_ts_then_highest_seqnum_revision() -> None:
     assert set(result["ts"].tolist()) == {pd.Timestamp("2021-04-06 18:44:59")}
     assert set(result["max_ts_revision_count"].astype(int).tolist()) == {2}
     assert set(result["raw_source_record_count"].astype(int).tolist()) == {8}
+    assert set(result["raw_content_pin_sha256"].tolist()) == {ZERO_SHA}
     assert not result.duplicated(subset=list(target.EOD_KEY_FIELDS)).any()
 
 
 def test_eod_seqnum_selection_preserves_integer_precision_above_2_pow_53() -> None:
     lower = "9007199254740992"
     higher = "9007199254740993"
-    rows = [
-        _row("FIZ", "2021-04-06 18:44:59", lower),
-        _row("YUR", "2021-04-06 18:44:59", lower),
-        _row("FIZ", "2021-04-06 18:44:59", higher),
-        _row("YUR", "2021-04-06 18:44:59", higher),
-    ]
-
-    result = _derive(pd.DataFrame(rows))
-
+    result = _derive(
+        pd.DataFrame(
+            [
+                _row("FIZ", "2021-04-06 18:44:59", lower),
+                _row("YUR", "2021-04-06 18:44:59", lower),
+                _row("FIZ", "2021-04-06 18:44:59", higher),
+                _row("YUR", "2021-04-06 18:44:59", higher),
+            ]
+        )
+    )
     assert set(result["seqnum"].tolist()) == {9007199254740993}
 
 
 def test_eod_fails_when_max_ts_contains_multiple_sessions_for_group() -> None:
-    raw = _raw_rows()
-    extra = _row("FIZ", "2021-04-06 18:44:59", 1, sess_id=6264, pos=50000)
-    raw = pd.concat([raw, pd.DataFrame([extra])], ignore_index=True)
-
+    raw = pd.concat([_raw_rows(), pd.DataFrame([_row("FIZ", "2021-04-06 18:44:59", 1, sess_id=6264, pos=50000)])], ignore_index=True)
     with pytest.raises(target.FutoiEodError, match="ambiguous EOD session"):
         _derive(raw)
 
@@ -121,19 +126,17 @@ def test_eod_fails_when_fiz_and_yur_latest_snapshot_is_not_coherent() -> None:
     raw = _raw_rows()
     mask = (raw["clgroup"] == "YUR") & (raw["seqnum"] == 220)
     raw.loc[mask, "seqnum"] = 221
-
     with pytest.raises(target.FutoiEodError, match="not the same source snapshot"):
         _derive(raw)
 
 
 def test_raw_partition_rejects_source_record_duplicates() -> None:
     frame = pd.concat([_raw_rows(), _raw_rows().iloc[[0]]], ignore_index=True)
-
     with pytest.raises(target.FutoiEodError, match="duplicate source-record key"):
         target._validate_raw_partition(frame, "2021-04-06", "si_futures_family", _binding())
 
 
-def _write_pinned_raw_state(root: Path) -> Path:
+def _write_raw_state(root: Path) -> tuple[Path, Path]:
     raw_partition = (
         root
         / "market"
@@ -208,12 +211,12 @@ def _write_pinned_raw_state(root: Path) -> Path:
         ),
         encoding="utf-8",
     )
-    return manifest_path
+    return manifest_path, raw_partition
 
 
-def test_full_eod_materialization_uses_only_pinned_manifest(monkeypatch, tmp_path: Path) -> None:
-    manifest_path = _write_pinned_raw_state(tmp_path)
-    monkeypatch.setattr(target, "_data_root", lambda: tmp_path.resolve())
+def _patch_root(monkeypatch, root: Path) -> None:
+    monkeypatch.setattr(target, "_data_root", lambda: root.resolve())
+    monkeypatch.setattr(target.raw_pin, "_data_root", lambda: root.resolve())
     monkeypatch.setattr(target.raw_materializer, "_registry_binding", lambda *_: _binding())
     monkeypatch.setattr(
         target.raw_materializer,
@@ -221,10 +224,25 @@ def test_full_eod_materialization_uses_only_pinned_manifest(monkeypatch, tmp_pat
         lambda *_: (_ for _ in ()).throw(AssertionError("EOD derivation must not refetch source")),
     )
 
+
+def _make_pin(monkeypatch, tmp_path: Path) -> tuple[dict[str, object], Path]:
+    manifest_path, raw_partition = _write_raw_state(tmp_path)
+    _patch_root(monkeypatch, tmp_path)
+    pin = target.raw_pin.create_content_pin(
+        instrument_id="si_futures_family",
+        run_id="raw_pin_run",
+        raw_manifest_path=manifest_path,
+    )
+    return pin, raw_partition
+
+
+def test_full_eod_materialization_requires_verified_content_pin(monkeypatch, tmp_path: Path) -> None:
+    pin, _ = _make_pin(monkeypatch, tmp_path)
     result = target.materialize_futoi_eod(
         instrument_id="si_futures_family",
         run_id="eod_run",
-        raw_manifest_path=manifest_path,
+        raw_pin_path=str(pin["content_pin_reference"]),
+        raw_pin_sha256=str(pin["content_pin_sha256"]),
     )
 
     assert result["status"] == "succeeded"
@@ -234,6 +252,7 @@ def test_full_eod_materialization_uses_only_pinned_manifest(monkeypatch, tmp_pat
     assert result["row_count"] == 2
     assert result["failure_count"] == 0
     assert result["ambiguity_count"] == 0
+    assert result["raw_content_pin_sha256"] == pin["content_pin_sha256"]
     assert result["dynamic_scan_used"] is False
     assert result["direct_source_refetch_used"] is False
     assert result["accepted_manifest_pointer_reference"] is None
@@ -252,20 +271,47 @@ def test_full_eod_materialization_uses_only_pinned_manifest(monkeypatch, tmp_pat
     assert len(output) == 2
     assert set(output["seqnum"].astype(int).tolist()) == {220}
     assert output["raw_manifest_reference"].str.startswith("${MOEX_DATA_ROOT}/").all()
+    assert output["raw_content_pin_reference"].str.startswith("${MOEX_DATA_ROOT}/").all()
     assert output["raw_partition_reference"].str.startswith("${MOEX_DATA_ROOT}/").all()
+    assert output["raw_content_pin_sha256"].eq(pin["content_pin_sha256"]).all()
     assert output["availability_ts_utc"].eq(output["derived_ingest_ts"]).all()
     assert output["raw_availability_ts_utc"].ne(output["availability_ts_utc"]).all()
 
 
+def test_raw_partition_mutation_after_pin_fails_closed(monkeypatch, tmp_path: Path) -> None:
+    pin, raw_partition = _make_pin(monkeypatch, tmp_path)
+    mutated = _raw_rows()
+    mutated.loc[mutated.index[-1], "pos"] = -999999
+    mutated.to_parquet(raw_partition, index=False)
+
+    with pytest.raises(target.raw_pin.FutoiRawContentPinError, match="content changed after pin creation"):
+        target.materialize_futoi_eod(
+            instrument_id="si_futures_family",
+            run_id="eod_run_after_mutation",
+            raw_pin_path=str(pin["content_pin_reference"]),
+            raw_pin_sha256=str(pin["content_pin_sha256"]),
+        )
+
+
+def test_wrong_explicit_pin_digest_fails_closed(monkeypatch, tmp_path: Path) -> None:
+    pin, _ = _make_pin(monkeypatch, tmp_path)
+    with pytest.raises(target.raw_pin.FutoiRawContentPinError, match="content pin SHA-256 mismatch"):
+        target.materialize_futoi_eod(
+            instrument_id="si_futures_family",
+            run_id="eod_run_wrong_pin_digest",
+            raw_pin_path=str(pin["content_pin_reference"]),
+            raw_pin_sha256=ZERO_SHA,
+        )
+
+
 def test_raw_manifest_content_identity_must_match_canonical_path(monkeypatch, tmp_path: Path) -> None:
-    manifest_path = _write_pinned_raw_state(tmp_path)
+    manifest_path, _ = _write_raw_state(tmp_path)
     values = json.loads(manifest_path.read_text(encoding="utf-8"))
     values["run_id"] = "different_run"
     manifest_path.write_text(json.dumps(values), encoding="utf-8")
-    monkeypatch.setattr(target, "_data_root", lambda: tmp_path.resolve())
-
-    with pytest.raises(target.FutoiEodError, match="path identity"):
-        target._validate_raw_manifest(manifest_path, "si_futures_family")
+    monkeypatch.setattr(target.raw_pin, "_data_root", lambda: tmp_path.resolve())
+    with pytest.raises(target.raw_pin.FutoiRawContentPinError, match="path identity"):
+        target.raw_pin.validate_raw_manifest(manifest_path, "si_futures_family")
 
 
 def test_raw_manifest_outside_data_root_is_rejected(monkeypatch, tmp_path: Path) -> None:
@@ -273,7 +319,6 @@ def test_raw_manifest_outside_data_root_is_rejected(monkeypatch, tmp_path: Path)
     root.mkdir()
     outside = tmp_path / "outside.json"
     outside.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(target, "_data_root", lambda: root.resolve())
-
-    with pytest.raises(target.FutoiEodError, match="inside MOEX_DATA_ROOT"):
-        target._validate_raw_manifest(outside, "si_futures_family")
+    monkeypatch.setattr(target.raw_pin, "_data_root", lambda: root.resolve())
+    with pytest.raises(target.raw_pin.FutoiRawContentPinError, match="inside MOEX_DATA_ROOT"):
+        target.raw_pin.validate_raw_manifest(outside, "si_futures_family")
