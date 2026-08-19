@@ -22,10 +22,20 @@ required_fields:
   - requested_till
   - partitions_written
   - partitions_skipped
+  - partition_content_pins
+  - content_digest_algorithm
   - quality_report_ref
   - accepted_manifest_ref
   - refresh_status
   - source_contract
+partition_content_pin_policy:
+  digest_algorithm: sha256
+  hash_issued_by_raw_writer_required: true
+  every_written_partition_must_have_pin: true
+  pin_trade_date_must_match_partition_path: true
+  pin_partition_reference_must_match_partitions_written: true
+  pin_size_bytes_positive_required: true
+  aggregate_backfill_must_preserve_subrun_issued_hash: true
 allowed_refresh_status:
   - succeeded
   - failed
