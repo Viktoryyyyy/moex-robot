@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import argparse
-import json
 import os
 import tempfile
 from collections.abc import Mapping, Sequence
@@ -12,7 +10,6 @@ from typing import Final
 
 import pandas as pd
 
-from . import materialize_forts_raw_5m_instrument as quote_materializer
 from . import materialize_futoi_instrument as futoi_materializer
 from . import materialize_raw_5m as quote_core
 from .contract_io import expand_contract_path, load_simple_yaml_mapping
@@ -265,6 +262,8 @@ def acceptance_report_path(
 
 
 def _write_json_immutable(path: Path, values: Mapping[str, object]) -> None:
+    import json
+
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
         "w", encoding="utf-8", dir=path.parent, delete=False, suffix=".tmp"
@@ -290,10 +289,7 @@ def _require_stored_identity(
     values = frame[field].astype("string").str.strip()
     if bool(values.isna().any()) or bool(values.eq("").any()):
         _fail("partition contains missing stored identity: " + field)
-    if casefold:
-        matches = values.str.casefold().eq(expected.casefold())
-    else:
-        matches = values.eq(expected)
+    matches = values.str.casefold().eq(expected.casefold()) if casefold else values.eq(expected)
     if not bool(matches.all()):
         _fail("partition stored identity mismatch: " + field)
 
@@ -324,6 +320,21 @@ def _validate_quote_partition(
         ("engine", EXPECTED_ENGINE, True),
     ):
         _require_stored_identity(frame, field, expected, casefold=casefold)
+
+    for field in ("trade_date", "session_date", "ts"):
+        if field not in frame.columns:
+            _fail("quote partition missing temporal field: " + field)
+    stored_trade_date = pd.to_datetime(frame["trade_date"], errors="coerce")
+    stored_session_date = pd.to_datetime(frame["session_date"], errors="coerce")
+    timestamps = pd.to_datetime(frame["ts"], errors="coerce")
+    if bool(stored_trade_date.isna().any()) or bool(stored_session_date.isna().any()) or bool(timestamps.isna().any()):
+        _fail("quote partition contains invalid temporal identity")
+    if not bool(stored_trade_date.dt.date.astype(str).eq(trade_date).all()):
+        _fail("quote partition trade_date mismatch")
+    if not bool(stored_session_date.dt.date.astype(str).eq(trade_date).all()):
+        _fail("quote partition session_date mismatch")
+    if not bool(timestamps.dt.date.astype(str).eq(trade_date).all()):
+        _fail("quote partition ts date mismatch")
 
     request = quote_core.build_materialization_request(
         repo_root=repo_root,
@@ -388,8 +399,6 @@ def _validate_futoi_partition(
     ts = pd.to_datetime(frame["ts"], errors="coerce")
     moment = pd.to_datetime(frame["moment"], errors="coerce")
     systime = pd.to_datetime(frame["systime"], errors="coerce")
-    availability_ts = pd.to_datetime(frame["availability_ts_utc"], errors="coerce")
-    ingest_ts = pd.to_datetime(frame["ingest_ts"], errors="coerce")
     if bool(ts.isna().any()) or bool(moment.isna().any()):
         _fail("FUTOI partition contains invalid ts/moment")
     if not bool(ts.eq(moment).all()):
@@ -398,8 +407,16 @@ def _validate_futoi_partition(
         _fail("FUTOI partition source-reference date mismatch")
     if bool(systime.isna().any()) or bool((systime < moment).any()):
         _fail("FUTOI partition contains invalid publication systime")
-    if bool(availability_ts.isna().any()) or bool(ingest_ts.isna().any()):
-        _fail("FUTOI partition contains invalid availability/ingest timestamp")
+
+    publication_utc = pd.to_datetime(frame["systime"], errors="coerce", utc=True)
+    availability_utc = pd.to_datetime(frame["availability_ts_utc"], errors="coerce", utc=True)
+    ingest_utc = pd.to_datetime(frame["ingest_ts"], errors="coerce", utc=True)
+    if bool(publication_utc.isna().any()) or bool(availability_utc.isna().any()) or bool(ingest_utc.isna().any()):
+        _fail("FUTOI partition contains invalid publication/availability/ingest timestamp")
+    if bool((availability_utc < publication_utc).any()):
+        _fail("FUTOI availability timestamp precedes source publication timestamp")
+    if bool((ingest_utc < availability_utc).any()):
+        _fail("FUTOI ingest timestamp precedes availability timestamp")
 
     normalized = futoi_materializer._validate_required_source_identifiers(frame)
     counts = futoi_materializer._quality_counts(normalized)
@@ -511,50 +528,3 @@ def audit_history(
         "acceptance_report_reference": output_path.as_posix(),
         "evidence_written": False,
     }
-
-
-def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Internal validator for existing Stage 2 canonical raw history."
-    )
-    parser.add_argument("--target-dataset-id", required=True, choices=(QUOTE_DATASET_ID, FUTOI_DATASET_ID))
-    parser.add_argument("--instrument-id", required=True)
-    parser.add_argument("--run-id", required=True)
-    parser.add_argument("--repo-root", default=Path.cwd().as_posix())
-    parser.add_argument("--env-file", default=None)
-    return parser.parse_args(argv)
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(argv)
-    try:
-        quote_materializer.load_env_file(args.env_file)
-        payload = audit_history(
-            repo_root=args.repo_root,
-            target_dataset_id=args.target_dataset_id,
-            instrument_id=args.instrument_id,
-            run_id=args.run_id,
-        )
-    except Exception as exc:
-        print(
-            json.dumps(
-                {
-                    "status": "failed",
-                    "dataset_id": ACCEPTANCE_DATASET_ID,
-                    "error": str(exc),
-                    "network_access_used": False,
-                    "historical_backfill_used": False,
-                    "accepted_pointer_written": False,
-                    "evidence_written": False,
-                },
-                ensure_ascii=False,
-                sort_keys=True,
-            )
-        )
-        return 1
-    print(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str))
-    return 0 if payload["acceptance_status"] == "pass" else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
