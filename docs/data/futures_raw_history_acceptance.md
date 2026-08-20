@@ -6,11 +6,15 @@ This gate validates already materialized canonical Stage 2 raw histories before 
 
 It does not fetch MOEX data, rerun historical backfills, discover partitions dynamically, select latest files, or write `current_accepted_manifest.json`.
 
+A pre-existing canonical accepted pointer is a hard failure. Pointer promotion is a separate later step.
+
 ## Canonical implementation
 
 Contract: `contracts/datasets/futures_raw_history_acceptance.v1.yaml`
 
-Runner: `src/moex_data/futures/stage2_raw_history_acceptance.py`
+Canonical gate runner: `src/moex_data/futures/stage2_raw_history_acceptance_gate.py`
+
+Physical-history validator: `src/moex_data/futures/stage2_raw_history_acceptance.py`
 
 Repository evidence and expected coverage: `configs/datasets/futures_data_lake.v1.yaml`
 
@@ -31,6 +35,8 @@ FUTOI historical priority:
 Fixed current-expiry `Si` and `CR` quote contracts are reference-only and are not valid multi-year historical quote acceptance targets.
 
 ## Hard checks
+
+Before reading history, the canonical gate expands the target dataset's explicit `accepted_pointer_path_contract` and requires that pointer to be absent.
 
 Every existing canonical partition in the bounded GitHub-declared coverage range is read from its exact contract-expanded path.
 
@@ -59,9 +65,9 @@ The runner writes one immutable acceptance report under:
 
 ## CLI
 
-Use the implemented module interface only:
+Use the implemented canonical gate interface only:
 
-`python -m moex_data.futures.stage2_raw_history_acceptance --target-dataset-id <futures_raw_5m|futures_futoi_raw> --instrument-id <explicit_instrument_id> --run-id <explicit_run_id>`
+`python -m moex_data.futures.stage2_raw_history_acceptance_gate --target-dataset-id <futures_raw_5m|futures_futoi_raw> --instrument-id <explicit_instrument_id> --run-id <explicit_run_id>`
 
 Optional `--env-file` may be supplied when the caller has an explicit environment-file path. Do not guess an environment-file path.
 
