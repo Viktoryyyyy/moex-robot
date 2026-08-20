@@ -26,7 +26,8 @@ def _accepted_pointer_ref(repo_root: Path, contract_path: str, instrument_id: st
             "target dataset contract must declare exactly one accepted_pointer_path_contract"
         )
     pointer_ref = values[0].replace("{INSTRUMENT_ID}", instrument_id)
-    if "{" in pointer_ref.removeprefix("${MOEX_DATA_ROOT}/") or "}" in pointer_ref.removeprefix("${MOEX_DATA_ROOT}/"):
+    unresolved = pointer_ref.removeprefix("${MOEX_DATA_ROOT}/")
+    if "{" in unresolved or "}" in unresolved:
         raise acceptance.RawHistoryAcceptanceError(
             "accepted pointer contract contains unresolved placeholders"
         )
@@ -61,21 +62,39 @@ def run_gate(
     root = Path(repo_root)
     checked_dataset = acceptance._require_token(target_dataset_id, "target_dataset_id")
     checked_instrument = acceptance._require_token(instrument_id, "instrument_id")
+    checked_run_id = acceptance._require_token(run_id, "run_id")
+
     pointer = _pointer_path(root, checked_dataset, checked_instrument)
     if pointer.exists():
         raise acceptance.RawHistoryAcceptanceError(
             "preexisting canonical accepted pointer must be absent before raw history acceptance"
         )
+
+    report_path = acceptance.acceptance_report_path(
+        repo_root=root,
+        target_dataset_id=checked_dataset,
+        instrument_id=checked_instrument,
+        run_id=checked_run_id,
+    )
+    if report_path.exists():
+        raise acceptance.RawHistoryAcceptanceError(
+            "acceptance report already exists for explicit run_id"
+        )
+
     result = acceptance.audit_history(
         repo_root=root,
         target_dataset_id=checked_dataset,
         instrument_id=checked_instrument,
-        run_id=run_id,
+        run_id=checked_run_id,
     )
+    if Path(str(result["acceptance_report_reference"])) != report_path:
+        raise acceptance.RawHistoryAcceptanceError(
+            "acceptance report path changed during deterministic gate evaluation"
+        )
     result["preexisting_accepted_pointer_present"] = False
     result["accepted_pointer_path_checked"] = pointer.as_posix()
-    report_path = Path(str(result["acceptance_report_reference"]))
-    acceptance._write_json_atomic(report_path, result)
+    result["evidence_written"] = True
+    acceptance._write_json_immutable(report_path, result)
     return result
 
 
@@ -115,6 +134,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "network_access_used": False,
                     "historical_backfill_used": False,
                     "accepted_pointer_written": False,
+                    "evidence_written": False,
                 },
                 ensure_ascii=False,
                 sort_keys=True,
