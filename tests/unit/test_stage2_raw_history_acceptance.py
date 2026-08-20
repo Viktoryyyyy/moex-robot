@@ -154,15 +154,27 @@ def _futoi_frame() -> pd.DataFrame:
     )
 
 
-def test_quote_existing_history_passes_without_pointer_or_network(tmp_path, monkeypatch) -> None:
-    repo = _repo(tmp_path)
-    data_root = tmp_path / "data"
-    monkeypatch.setenv("MOEX_DATA_ROOT", str(data_root))
-    path = (
+def _quote_path(data_root: Path) -> Path:
+    return (
         data_root
         / "market/raw/timeframe=5m/instrument_id=usdrubf_futures_family"
         / "trade_date=2026-08-17/source=moex_algopack_fo_tradestats_5m/part.parquet"
     )
+
+
+def _futoi_path(data_root: Path) -> Path:
+    return (
+        data_root
+        / "market/supplementary/dataset_id=futures_futoi_raw/instrument_id=si_futures_family"
+        / "trade_date=2026-08-17/source=moex_algopack_futoi/part.parquet"
+    )
+
+
+def test_quote_existing_history_passes_without_pointer_or_network(tmp_path, monkeypatch) -> None:
+    repo = _repo(tmp_path)
+    data_root = tmp_path / "data"
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(data_root))
+    path = _quote_path(data_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     _quote_frame().to_parquet(path, index=False)
 
@@ -179,7 +191,8 @@ def test_quote_existing_history_passes_without_pointer_or_network(tmp_path, monk
     assert result["accepted_pointer_written"] is False
     assert result["network_access_used"] is False
     assert result["historical_backfill_used"] is False
-    assert Path(str(result["acceptance_report_reference"])).exists()
+    assert result["evidence_written"] is False
+    assert not Path(str(result["acceptance_report_reference"])).exists()
     assert not (data_root / "state/datasets").exists()
 
 
@@ -187,11 +200,7 @@ def test_futoi_existing_history_passes_source_record_key_and_timestamp_semantics
     repo = _repo(tmp_path)
     data_root = tmp_path / "data"
     monkeypatch.setenv("MOEX_DATA_ROOT", str(data_root))
-    path = (
-        data_root
-        / "market/supplementary/dataset_id=futures_futoi_raw/instrument_id=si_futures_family"
-        / "trade_date=2026-08-17/source=moex_algopack_futoi/part.parquet"
-    )
+    path = _futoi_path(data_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     _futoi_frame().to_parquet(path, index=False)
 
@@ -209,15 +218,11 @@ def test_futoi_existing_history_passes_source_record_key_and_timestamp_semantics
     assert result["accepted_pointer_written"] is False
 
 
-def test_row_count_mismatch_fails_closed_and_still_writes_evidence(tmp_path, monkeypatch) -> None:
+def test_row_count_mismatch_fails_closed_without_writing_canonical_evidence(tmp_path, monkeypatch) -> None:
     repo = _repo(tmp_path)
     data_root = tmp_path / "data"
     monkeypatch.setenv("MOEX_DATA_ROOT", str(data_root))
-    path = (
-        data_root
-        / "market/raw/timeframe=5m/instrument_id=usdrubf_futures_family"
-        / "trade_date=2026-08-17/source=moex_algopack_fo_tradestats_5m/part.parquet"
-    )
+    path = _quote_path(data_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     _quote_frame(rows=1).to_parquet(path, index=False)
 
@@ -230,8 +235,52 @@ def test_row_count_mismatch_fails_closed_and_still_writes_evidence(tmp_path, mon
 
     assert result["acceptance_status"] == "fail"
     assert "expected_row_count_mismatch" in result["hard_check_failures"]
-    assert Path(str(result["acceptance_report_reference"])).exists()
-    assert not (data_root / "state/datasets").exists()
+    assert result["evidence_written"] is False
+    assert not Path(str(result["acceptance_report_reference"])).exists()
+
+
+def test_quote_missing_stored_identity_is_not_synthesized(tmp_path, monkeypatch) -> None:
+    repo = _repo(tmp_path)
+    data_root = tmp_path / "data"
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(data_root))
+    path = _quote_path(data_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame = _quote_frame()
+    frame["instrument_id"] = pd.NA
+    frame.to_parquet(path, index=False)
+
+    result = acceptance.audit_history(
+        repo_root=repo,
+        target_dataset_id="futures_raw_5m",
+        instrument_id="usdrubf_futures_family",
+        run_id="quote_identity_fail",
+    )
+
+    assert result["acceptance_status"] == "fail"
+    assert "failed_partition_dates_nonempty" in result["hard_check_failures"]
+    assert "missing stored identity: instrument_id" in result["failed_partition_dates"][0]["error"]
+
+
+def test_futoi_wrong_market_identity_fails_closed(tmp_path, monkeypatch) -> None:
+    repo = _repo(tmp_path)
+    data_root = tmp_path / "data"
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(data_root))
+    path = _futoi_path(data_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame = _futoi_frame()
+    frame["market"] = "wrong-market"
+    frame.to_parquet(path, index=False)
+
+    result = acceptance.audit_history(
+        repo_root=repo,
+        target_dataset_id="futures_futoi_raw",
+        instrument_id="si_futures_family",
+        run_id="futoi_identity_fail",
+    )
+
+    assert result["acceptance_status"] == "fail"
+    assert "failed_partition_dates_nonempty" in result["hard_check_failures"]
+    assert "stored identity mismatch: market" in result["failed_partition_dates"][0]["error"]
 
 
 def test_reference_expiry_quotes_are_outside_historical_acceptance_scope(tmp_path, monkeypatch) -> None:
