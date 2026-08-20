@@ -136,7 +136,6 @@ stage2_forts_source_bindings:
     status: all_pilots_passed_backfill_ready
     purpose: controlled_repair_or_extension_of_validated_history
     historical_quotes_backfill_ready: true
-    priority_futoi_raw_backfill_ready: true
   quote_source:
     source_id: moex_algopack_fo_tradestats_5m
     source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
