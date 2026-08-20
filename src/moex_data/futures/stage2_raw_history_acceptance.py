@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Final
 
+import numpy as np
 import pandas as pd
 
 from . import materialize_futoi_instrument as futoi_materializer
@@ -316,10 +317,25 @@ def _require_stored_identity(
         _fail("partition stored identity mismatch: " + field)
 
 
-def _non_negative(frame: pd.DataFrame, columns: Sequence[str]) -> None:
+def _numeric_series(frame: pd.DataFrame, column: str) -> pd.Series:
+    if column not in frame.columns:
+        _fail("partition missing numeric field: " + column)
+    return pd.to_numeric(frame[column], errors="coerce")
+
+
+def _require_finite_numeric(frame: pd.DataFrame, columns: Sequence[str]) -> None:
     for column in columns:
-        values = pd.to_numeric(frame[column], errors="coerce")
+        values = _numeric_series(frame, column)
+        if bool(values.isna().any()) or not bool(np.isfinite(values.to_numpy(dtype="float64")).all()):
+            _fail("partition contains invalid or non-finite numeric value: " + column)
+
+
+def _require_optional_finite_nonnegative(frame: pd.DataFrame, columns: Sequence[str]) -> None:
+    for column in columns:
+        values = _numeric_series(frame, column)
         present = values.dropna()
+        if not bool(np.isfinite(present.to_numpy(dtype="float64")).all()):
+            _fail("quote partition contains non-finite " + column)
         if bool((present < 0).any()):
             _fail("quote partition contains negative " + column)
 
@@ -358,6 +374,9 @@ def _validate_quote_partition(
     if not bool(timestamps.dt.date.astype(str).eq(trade_date).all()):
         _fail("quote partition ts date mismatch")
 
+    _require_finite_numeric(frame, ("open", "high", "low", "close", "volume"))
+    _require_optional_finite_nonnegative(frame, ("volume", "value", "num_trades"))
+
     request = quote_core.build_materialization_request(
         repo_root=repo_root,
         dataset_id=QUOTE_DATASET_ID,
@@ -377,7 +396,6 @@ def _validate_quote_partition(
         granularity="5m",
     )
     validated, _ = quote_core._validate_source_table(frame, request)
-    _non_negative(validated, ("volume", "value", "num_trades"))
     secids = tuple(sorted(set(validated["secid"].astype(str).tolist())))
     return int(len(validated)), secids
 
@@ -443,12 +461,9 @@ def _validate_futoi_partition(
     if bool((ingest_utc < availability_utc).any()):
         _fail("FUTOI ingest timestamp precedes availability timestamp")
 
-    position_values = {
-        field: pd.to_numeric(frame[field], errors="coerce")
-        for field in ("pos", "pos_long", "pos_short")
-    }
-    if any(bool(values.isna().any()) for values in position_values.values()):
-        _fail("FUTOI partition contains invalid numeric position values")
+    position_fields = ("pos", "pos_long", "pos_short", "pos_long_num", "pos_short_num")
+    _require_finite_numeric(frame, position_fields)
+    position_values = {field: _numeric_series(frame, field) for field in position_fields}
     if not bool(
         position_values["pos"].eq(
             position_values["pos_long"] + position_values["pos_short"]
