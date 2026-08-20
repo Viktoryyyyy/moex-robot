@@ -34,9 +34,11 @@ required_fields:
   - hard_check_failures
   - acceptance_status
   - preexisting_accepted_pointer_present
+  - accepted_pointer_path_checked
   - accepted_pointer_written
   - network_access_used
   - historical_backfill_used
+  - evidence_written
 hard_gate:
   expected_partition_count_match: true
   expected_row_count_match: true
@@ -46,6 +48,7 @@ hard_gate:
   accepted_pointer_written: false
   network_access_used: false
   historical_backfill_used: false
+  evidence_written: true
 lane_rules:
   quotes:
     target_dataset_id: futures_raw_5m
@@ -69,7 +72,7 @@ lane_rules:
       - clgroup
     systime_as_raw_identity_allowed: false
 pointer_policy:
-  this_gate_writes_current_accepted_manifest: false
+  this_gate_writes_accepted_pointer: false
   pointer_promotion_is_separate_step: true
   pointer_promotion_requires_acceptance_status: pass
 execution_boundary:
@@ -77,7 +80,7 @@ execution_boundary:
   network_access_allowed: false
   historical_backfill_allowed: false
   implicit_partition_discovery_allowed: false
-  latest_autodetect_allowed: false
+  automatic_date_selection_allowed: false
 path_rules:
   storage_root: env_contract
   hardcoded_server_path_allowed: false
