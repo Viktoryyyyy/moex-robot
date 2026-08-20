@@ -132,6 +132,11 @@ phase2_6_source_bindings:
 stage2_forts_source_bindings:
   status: raw_historical_backfills_completed_acceptance_pending
   evidence_date: "2026-08-20"
+  backfill_authorization:
+    status: all_pilots_passed_backfill_ready
+    purpose: controlled_repair_or_extension_of_validated_history
+    historical_quotes_backfill_ready: true
+    priority_futoi_raw_backfill_ready: true
   quote_source:
     source_id: moex_algopack_fo_tradestats_5m
     source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
