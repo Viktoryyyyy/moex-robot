@@ -7,14 +7,15 @@ consumers:
 format: json
 schema_version: futures_raw_history_acceptance.v1
 storage_root_ref: MOEX_DATA_ROOT
-path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/dataset_id={DATASET_ID}/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}/acceptance_report.json"
-grain: full_history_acceptance_by_dataset_and_instrument
+path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/target_dataset_id={TARGET_DATASET_ID}/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}/acceptance_report.json"
+grain: full_history_acceptance_by_target_dataset_and_instrument
 status_values:
   - pass
   - fail
 required_fields:
   - run_id
   - dataset_id
+  - target_dataset_id
   - instrument_id
   - source_id
   - secid
@@ -41,13 +42,13 @@ hard_gate:
   historical_backfill_used: false
 lane_rules:
   quotes:
-    dataset_id: futures_raw_5m
+    target_dataset_id: futures_raw_5m
     source_id: moex_algopack_fo_tradestats_5m
     allowed_instrument_ids:
       - usdrubf_futures_family
       - cnyrubf_futures_family
   futoi:
-    dataset_id: futures_futoi_raw
+    target_dataset_id: futures_futoi_raw
     source_id: moex_algopack_futoi
     transport: authenticated_apim_source_history_already_materialized
     public_iss_transport_allowed: false
