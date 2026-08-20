@@ -52,12 +52,15 @@ required_columns:
 native_5m_materialization:
   producer: moex_data.futures.materialize_forts_raw_5m_instrument
   producer_ref: src/moex_data/futures/materialize_forts_raw_5m_instrument.py
+  controlled_range_producer_ref: src/moex_data/futures/backfill_stage2_forts_raw_5m_instrument.py
   source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
   source_id: moex_algopack_fo_tradestats_5m
   source_selection: explicit_source_id
-  instrument_selection: explicit_instrument_id
-  secid_selection: explicit_registry_binding
-  date_selection: explicit_date_or_approved_range
+  instrument_selection: explicit_caller_value_after_registry_lookup
+  secid_selection: explicit_caller_value_after_registry_lookup
+  registry_lookup_required_by_runbook: true
+  registry_validation_enforced_by_single_date_producer: false
+  date_selection: explicit_single_date_or_controlled_range_producer
   fallback_source_allowed: false
   authentication_env: MOEX_API_KEY
   query_params:
