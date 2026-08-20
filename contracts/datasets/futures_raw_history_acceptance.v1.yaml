@@ -18,7 +18,7 @@ required_fields:
   - target_dataset_id
   - instrument_id
   - source_id
-  - secid
+  - secid_scope
   - requested_from
   - requested_till
   - expected_partition_count
