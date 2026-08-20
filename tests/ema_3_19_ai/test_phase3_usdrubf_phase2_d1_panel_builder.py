@@ -99,22 +99,23 @@ def test_contract_uses_moex_data_root_and_no_hardcoded_server_path() -> None:
     assert "hardcoded_server_path_allowed: false" in text
 
 
-def test_contract_references_forts_raw_5m_tradestats_source_contract() -> None:
+def test_contract_marks_legacy_builder_compatibility_and_references_canonical_raw_5m() -> None:
     contract_path = ROOT / "contracts/datasets/usdrubf_phase2_d1_panel.v1.yaml"
-    source_contract_path = ROOT / "contracts/datasets/forts_raw_5m_tradestats.v1.yaml"
+    raw_contract_path = ROOT / "contracts/datasets/futures_raw_5m.v1.yaml"
+    source_contract_path = ROOT / "contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml"
 
     contract = contract_path.read_text(encoding="utf-8")
+    raw_contract = raw_contract_path.read_text(encoding="utf-8")
     source_contract = source_contract_path.read_text(encoding="utf-8")
 
-    assert "dataset_id: dataset.forts.raw_5m.tradestats.v1" in contract
-    assert "contract_path: contracts/datasets/forts_raw_5m_tradestats.v1.yaml" in contract
-    assert "contract_id: futures_raw_5m.v1" not in contract
-    assert 'default_input_raw_5m_root_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats"' in contract
-    assert (
-        'path_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/'
-        'trade_date={YYYY-MM-DD}/instrument_id={INSTRUMENT_ID}/secid={SECID}/part.parquet"'
-        in source_contract
-    )
+    assert "status: legacy_research_compatibility" in contract
+    assert "ingestion_source_of_truth: false" in contract
+    assert "dataset_id: futures_raw_5m" in contract
+    assert "contract_path: contracts/datasets/futures_raw_5m.v1.yaml" in contract
+    assert "source_contract_path: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml" in contract
+    assert "implementation_compatibility_only_not_architecture" in contract
+    assert "contract_id: futures_raw_5m.v1" in raw_contract
+    assert "source_id: moex_algopack_fo_tradestats_5m" in source_contract
 
 
 def test_builder_cli_parser_requires_explicit_date_range_and_no_overwrite() -> None:

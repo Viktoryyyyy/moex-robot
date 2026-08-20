@@ -1,84 +1,25 @@
 # futures_futoi_5m_raw_contract
 
-status: implemented_contract
+status: legacy_research_compatibility_pending_migration
 project: MOEX Bot
-artifact_class: external_pattern
-format: parquet
-schema_version: futures_futoi_5m_raw.v1
+architecture_proof_allowed: false
+new_legacy_writes_authorized: false
+canonical_replacement: contracts/datasets/futures_futoi_raw.v1.yaml
+canonical_quality_replacement: contracts/datasets/futures_futoi_quality_report.v1.yaml
+canonical_manifest_replacement: contracts/datasets/futures_futoi_refresh_manifest.v1.yaml
+canonical_ingestion_runbook: docs/data/futures_data_ingestion_runbook.md
 
-purpose: Canonical raw 5-minute MOEX FUTOI open-interest rows loaded from MOEX analyticalproducts/futoi for the accepted Slice 1 whitelist, stored separately from raw OHLCV bars.
-producer: src/moex_data/futures/futoi_raw_loader.py
-consumer:
-- futures_futoi_5m_raw_quality_report
-- futures_data_lake_pm_review
-- later_futures_data_access_layer
-- later_futoi_joined_derived_views
+purpose: Compatibility-only reference retained for the pending phase8.7A FUTOI experiment contract. It is not the canonical FUTOI dataset contract and must be migrated to the canonical YAML contract before that experiment is implemented or executed.
 
-path_pattern: ${MOEX_DATA_ROOT}/futures/futoi_raw/trade_date={trade_date}/family={family_code}/secid={secid}/part.parquet
-partitioning:
-- trade_date
-- family_code
-- secid
-primary_key:
-- trade_date
-- ts
-- secid
-- clgroup
+legacy_consumer:
+- contracts/experiments/usdrubf_phase8_7a_futoi_si_source_and_feature_contract_v1.json
 
-required_fields:
-- trade_date
-- ts
-- moment
-- board
-- secid
-- family_code
-- source_ticker
-- source_scope
-- clgroup
-- pos
-- pos_long
-- pos_short
-- pos_long_num
-- pos_short_num
-- source
-- source_endpoint_url
-- ingest_ts
-- schema_version
-- short_history_flag
-- calendar_denominator_status
+legacy_path_pattern: ${MOEX_DATA_ROOT}/futures/futoi_raw/trade_date={trade_date}/family={family_code}/secid={secid}/part.parquet
 
-nullable_fields:
-- systime
-- sess_id
-- seqnum
-
-status_fields:
-- source_scope
-- short_history_flag
-- calendar_denominator_status
-
-validation_rules:
-- primary_key must be unique inside each written partition and across repeated idempotent loads for the same trade_date/secid/clgroup.
-- schema_version must equal futures_futoi_5m_raw.v1.
-- source must equal MOEX_FUTOI.
-- calendar_denominator_status must equal canonical_apim_futures_xml for accepted Slice 1 loader runs.
-- clgroup must be non-null.
-- pos, pos_long, pos_short, pos_long_num, and pos_short_num must be non-null.
-- pos_long and pos_long_num must be greater than or equal to zero.
-- pos_short must be less than or equal to zero.
-- pos_short_num must be greater than or equal to zero.
-- trade_date must match the trade_date partition value.
-- secid must match the secid partition value.
-- family_code must match the family partition value.
-- FUTOI storage must remain separate from futures_raw_5m OHLCV storage.
-- Slice 1 FUTOI loader must write only the accepted whitelist: SiM6, SiU6, SiU7, SiZ6, USDRUBF.
-- SiU7 may have short_history_flag=true; all other accepted Slice 1 instruments must have short_history_flag=false.
-- For ordinary expiring futures where MOEX FUTOI is exposed by ticker/family rather than concrete contract, source_scope must preserve that fact as family_aggregate_futoi.
-
-blocking_conditions:
-- missing required field.
-- duplicate primary key.
-- invalid position sign or participant count.
-- non-canonical calendar_denominator_status.
-- partition created for excluded instruments SiH7 or SiM7.
-- zero rows for an accepted whitelist instrument without explicit failed loader status in the run manifest.
+canonical_requirements:
+- canonical dataset identity and storage are defined only by contracts/datasets/futures_futoi_raw.v1.yaml.
+- canonical FUTOI transport is authenticated APIM only; public ISS and public ISS fallback are forbidden.
+- canonical raw source-record identity preserves trade_date, sess_id, seqnum, secid, and clgroup.
+- systime is publication/archive metadata and is not the canonical historical raw event timestamp.
+- this compatibility file authorizes no materialization, accepted pointer, scheduler, D1/W1 derivation, or research consumption.
+- phase8.7A implementation is blocked until its experiment contract is explicitly migrated to the canonical FUTOI dataset contract.

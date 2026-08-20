@@ -2,6 +2,7 @@ canon_id: moex_data_access_canon_v1
 status: architecture_contract
 scope: generic_moex_data_access
 activation_status: repo_only
+operational_runbook_ref: docs/data/futures_data_ingestion_runbook.md
 
 purpose:
   - define one instrument-independent canon for MOEX quote loading
@@ -25,6 +26,7 @@ identity_model:
     family_as_canonical_identity_allowed: false
     latest_autodetect_allowed: false
     implicit_contract_selection_allowed: false
+    implicit_path_selection_allowed: false
 
 storage_model:
   external_storage_root:
@@ -66,9 +68,18 @@ market_data_lane_model:
     transport: authenticated_apim_only
     public_iss_transport_allowed: false
     public_iss_fallback_allowed: false
+    canonical_raw_timestamp: tradedate_plus_tradetime
+    source_publication_metadata_field: systime
+    canonical_source_record_key_fields:
+      - trade_date
+      - sess_id
+      - seqnum
+      - secid
+      - clgroup
+    same_moment_source_revisions_preserved_in_raw: true
 
 storage_transition_policy:
-  status: stage2_forts_quote_writer_migrated_futoi_apim_revalidation_required
+  status: stage2_canonical_writers_active_raw_backfills_completed_acceptance_pending
   canonical_new_write_root: "${MOEX_DATA_ROOT}/market"
   new_materialization_to_legacy_roots_allowed: false
   new_dataset_creation_to_legacy_roots_allowed: false
@@ -76,21 +87,21 @@ storage_transition_policy:
   legacy_read_compatibility_allowed: true
   legacy_write_extension_allowed: false
   physical_legacy_data_move_required_in_this_contract: false
-  physical_legacy_data_move_status: pending_separate_migration
+  physical_legacy_data_move_status: not_required_for_stage2_acceptance
   known_legacy_raw_write_patterns:
     - path_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
       producer_ref: src/moex_data/futures/materialize_forts_raw_5m_tradestats.py
-      status: compatibility_only_migration_required
+      status: compatibility_only_no_new_writes
     - path_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/trade_date={YYYY-MM-DD}/instrument_id={INSTRUMENT_ID}/secid={SECID}/part.parquet"
       producer_ref: src/moex_data/futures/materialize_forts_raw_5m_instrument.py
-      status: historical_pattern_writer_migrated_stage2
+      status: historical_pattern_retired
       canonical_replacement_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
     - path_pattern: "${MOEX_DATA_ROOT}/futures/raw_5m/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
       producer_ref: src/moex_data/futures/raw_5m_loader.py
-      status: compatibility_only_migration_required
+      status: compatibility_only_no_new_writes
     - path_pattern: "${MOEX_DATA_ROOT}/futures/futoi_raw/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
       producer_ref: src/moex_data/futures/futoi_raw_loader.py
-      status: compatibility_only_migration_required
+      status: compatibility_only_no_new_writes
       canonical_stage2_writer_ref: src/moex_data/futures/materialize_futoi_instrument.py
   canonical_pointer_model:
     partition_keys:
@@ -101,11 +112,13 @@ storage_transition_policy:
   known_legacy_pointer_pattern:
     path_pattern: "${MOEX_DATA_ROOT}/state/datasets/artifact_id={ARTIFACT_ID}/instrument_id={INSTRUMENT_ID}/secid={SECID}/current_accepted_manifest.json"
     producer_ref: src/moex_data/futures/refresh_forts_raw_5m_incremental_pointer.py
-    status: compatibility_only_migration_required
+    status: compatibility_only_no_new_writes
 
 registry_model:
   registry_required: true
   registry_entry_required_for_materialization: true
+  active_instrument_registry_ref: configs/instruments/forts_instrument_registry.v1.yaml
+  active_data_lake_config_ref: configs/datasets/futures_data_lake.v1.yaml
   registry_entry_required_fields:
     - instrument_id
     - canonical_symbol
@@ -131,6 +144,9 @@ loading_model:
   empty_response_policy: fail_closed
   schema_mismatch_policy: fail_closed
   partial_response_policy: manifest_with_quality_status
+  producer_cli_must_be_read_from_github: true
+  invent_cli_arguments_allowed: false
+  invent_source_fields_allowed: false
 
 update_model:
   update_mode:
@@ -164,6 +180,9 @@ legacy_policy:
   legacy_csv_status: compatibility_only
   legacy_csv_extension_allowed: false
   legacy_contract_as_architecture_proof_allowed: false
+  obsolete_ingestion_markdown_contracts_allowed_in_canonical_contract_tree: false
+  canonical_ingestion_contract_format: yaml
+  canonical_ingestion_documentation_ref: docs/data/futures_data_ingestion_runbook.md
 
 server_boundary:
   github_is_source_of_truth: true

@@ -1,19 +1,25 @@
 contract_id: usdrubf_phase2_d1_panel.v1
 dataset_id: usdrubf_phase2_d1_panel
 schema_version: usdrubf_phase2_d1_panel.v1
-status: controlled_builder_contract
+status: legacy_research_compatibility
 lane: ema_3_19_ai
 storage_root_ref: MOEX_DATA_ROOT
 artifact_class: derived_research_dataset
 format: parquet
 producer: moex_data.futures.usdrubf_phase2_d1_panel_builder
+ingestion_source_of_truth: false
+canonical_ingestion_runbook_ref: docs/data/futures_data_ingestion_runbook.md
 default_instrument_id: forts.usdrubf
 default_secid: USDRUBF
 source_dataset:
-  dataset_id: dataset.forts.raw_5m.tradestats.v1
-  contract_path: contracts/datasets/forts_raw_5m_tradestats.v1.yaml
-  default_input_raw_5m_root_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats"
-  raw_5m_partition_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/trade_date={YYYY-MM-DD}/instrument_id=forts.usdrubf/secid=USDRUBF/part.parquet"
+  dataset_id: futures_raw_5m
+  contract_path: contracts/datasets/futures_raw_5m.v1.yaml
+  source_contract_path: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+  canonical_partition_pattern: "${MOEX_DATA_ROOT}/market/raw/timeframe=5m/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet"
+legacy_builder_input_compatibility:
+  status: implementation_compatibility_only_not_architecture
+  implementation_ref: src/moex_data/futures/usdrubf_phase2_d1_panel_builder.py
+  note: historical builder defaults still read a retired FORTS raw path; do not use this contract to load or onboard market data
 artifacts:
   panel:
     path_pattern: "${MOEX_DATA_ROOT}/research/ema_3_19_ai/usdrubf_phase2_d1_panel.v1/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}/part.parquet"
