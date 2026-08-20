@@ -116,6 +116,8 @@ failure_semantics:
   public_iss_fallback: forbidden
 evidence:
   repository_apim_reference: src/moex_research/runners/usdrubf_phase8_7a_futoi_si_source_validation.py
+  canonical_materializer_ref: src/moex_data/futures/materialize_futoi_instrument.py
+  controlled_backfill_ref: src/moex_data/futures/backfill_futoi_instrument.py
   server_revalidation_date: "2026-08-18"
   server_revalidation_status: proven
   public_iss_evidence_status: invalidated
@@ -146,3 +148,24 @@ evidence:
     cnyrubf:
       first_available: "2022-12-30"
       last_available: "2026-08-17"
+  historical_priority_backfill:
+    status: completed_and_physically_validated
+    validation_date: "2026-08-20"
+    si_futures_family:
+      ticker: si
+      requested_from: "2020-01-03"
+      requested_till: "2026-08-17"
+      partitions: 1757
+      rows: 597650
+      skipped_empty_source_dates: 662
+      bad_partitions: 0
+      physical_quality_status: pass
+    cr_futures_family:
+      ticker: cr
+      requested_from: "2022-04-21"
+      requested_till: "2026-08-17"
+      partitions: 1177
+      rows: 390474
+      skipped_empty_source_dates: 403
+      bad_partitions: 0
+      physical_quality_status: pass
