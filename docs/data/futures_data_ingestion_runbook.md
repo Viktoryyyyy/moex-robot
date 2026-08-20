@@ -37,7 +37,9 @@ Contract: `contracts/datasets/futures_raw_5m.v1.yaml`
 
 Source contract: `contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml`
 
-Producer: `src/moex_data/futures/materialize_forts_raw_5m_instrument.py`
+Single-date producer: `src/moex_data/futures/materialize_forts_raw_5m_instrument.py`
+
+Controlled range backfill producer: `src/moex_data/futures/backfill_stage2_forts_raw_5m_instrument.py`
 
 Canonical source id: `moex_algopack_fo_tradestats_5m`
 
@@ -87,6 +89,8 @@ Required loader inputs:
 - explicit run/artifact id required by producer CLI
 
 Source selection, SECID selection, and latest-date autodetection are not implicit.
+
+The single-date producer accepts caller-supplied explicit `instrument_id` and `secid`; it does not independently resolve that pair from the registry. The operator must copy the exact binding from `configs/instruments/forts_instrument_registry.v1.yaml` before invoking it. The controlled range producer applies the Stage 2 authorization checks around the approved historical scope.
 
 ### `futures_futoi_raw`
 
@@ -167,9 +171,9 @@ If a required binding is not in GitHub, stop and obtain explicit source evidence
 2. Read `moex_algopack_fo_tradestats_5m.v1.yaml`.
 3. Read exact instrument binding from `forts_instrument_registry.v1.yaml`.
 4. Use the producer CLI exactly as implemented in GitHub; do not invent CLI arguments.
-5. Load one explicit date first when onboarding or changing semantics.
+5. Load one explicit date first with `materialize_forts_raw_5m_instrument.py` when onboarding or changing semantics.
 6. Validate status, quality status, row count, identity, and resulting partition.
-7. Only then run the approved historical range.
+7. Only then run the approved historical range with `backfill_stage2_forts_raw_5m_instrument.py`; read its implemented `--date-start` / `--date-end` CLI from GitHub before execution.
 8. Audit physical partitions against the aggregate manifest before acceptance.
 
 ### FUTOI
