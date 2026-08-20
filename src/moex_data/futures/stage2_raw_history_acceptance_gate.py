@@ -5,8 +5,32 @@ import json
 from pathlib import Path
 from typing import Sequence
 
+from . import accepted_manifest
 from . import stage2_raw_history_acceptance as acceptance
-from .contract_io import expand_contract_path, load_simple_yaml_mapping
+
+
+def _accepted_pointer_ref(repo_root: Path, contract_path: str, instrument_id: str) -> str:
+    path = repo_root / contract_path
+    if not path.exists() or not path.is_file():
+        raise acceptance.RawHistoryAcceptanceError("target dataset contract does not exist")
+    values: list[str] = []
+    prefix = "accepted_pointer_path_contract:"
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if line.startswith(prefix):
+            value = line[len(prefix) :].strip().strip('"').strip("'")
+            if value:
+                values.append(value)
+    if len(values) != 1:
+        raise acceptance.RawHistoryAcceptanceError(
+            "target dataset contract must declare exactly one accepted_pointer_path_contract"
+        )
+    pointer_ref = values[0].replace("{INSTRUMENT_ID}", instrument_id)
+    if "{" in pointer_ref.removeprefix("${MOEX_DATA_ROOT}/") or "}" in pointer_ref.removeprefix("${MOEX_DATA_ROOT}/"):
+        raise acceptance.RawHistoryAcceptanceError(
+            "accepted pointer contract contains unresolved placeholders"
+        )
+    return pointer_ref
 
 
 def _pointer_path(repo_root: Path, target_dataset_id: str, instrument_id: str) -> Path:
@@ -15,18 +39,15 @@ def _pointer_path(repo_root: Path, target_dataset_id: str, instrument_id: str) -
     elif target_dataset_id == acceptance.FUTOI_DATASET_ID:
         contract_path = acceptance.FUTOI_CONTRACT_PATH
     else:
-        raise acceptance.RawHistoryAcceptanceError("target_dataset_id is not part of Stage 2 raw history acceptance scope")
-    values = load_simple_yaml_mapping(repo_root, contract_path)
-    pattern = acceptance._require_text(
-        values.get("accepted_pointer_path_contract"), "accepted_pointer_path_contract"
-    )
-    try:
-        return expand_contract_path(
-            pattern,
-            acceptance._data_root(),
-            {"DATASET_ID": target_dataset_id, "INSTRUMENT_ID": instrument_id},
+        raise acceptance.RawHistoryAcceptanceError(
+            "target_dataset_id is not part of Stage 2 raw history acceptance scope"
         )
-    except Exception as exc:
+    pointer_ref = _accepted_pointer_ref(repo_root, contract_path, instrument_id)
+    try:
+        return accepted_manifest._pointer_path(
+            None, pointer_ref, target_dataset_id, instrument_id
+        )
+    except accepted_manifest.FuturesAcceptedManifestError as exc:
         raise acceptance.RawHistoryAcceptanceError(str(exc)) from exc
 
 
