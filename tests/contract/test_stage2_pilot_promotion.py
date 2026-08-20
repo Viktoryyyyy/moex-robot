@@ -67,7 +67,8 @@ def test_stage2_pilot_promotion_records_completed_backfills_but_keeps_runtime_cl
     assert "first_available: \"2022-04-26\"" in quote_source
     assert "first_available: \"2024-09-18\"" in quote_source
     assert "first_available: \"2025-03-07\"" in quote_source
-    assert "historical_backfill_status: completed_and_physically_validated" in quote_source
+    assert "status: completed_and_physically_validated" in quote_source
+    assert "physical_quality_status: pass" in quote_source
 
     assert "status: active_stage2_proven" in source
     assert "server_revalidation_status: proven" in source
