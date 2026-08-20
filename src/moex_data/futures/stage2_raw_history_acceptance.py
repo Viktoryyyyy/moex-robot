@@ -27,6 +27,9 @@ QUOTE_DATASET_ID: Final[str] = "futures_raw_5m"
 FUTOI_DATASET_ID: Final[str] = "futures_futoi_raw"
 QUOTE_SOURCE_ID: Final[str] = "moex_algopack_fo_tradestats_5m"
 FUTOI_SOURCE_ID: Final[str] = "moex_algopack_futoi"
+EXPECTED_BOARD: Final[str] = "RFUD"
+EXPECTED_MARKET: Final[str] = "forts"
+EXPECTED_ENGINE: Final[str] = "futures"
 
 _ALLOWED_QUOTES: Final[frozenset[str]] = frozenset(
     {"usdrubf_futures_family", "cnyrubf_futures_family"}
@@ -249,7 +252,19 @@ def _acceptance_path(repo_root: Path, expectation: HistoryExpectation, run_id: s
         raise RawHistoryAcceptanceError(str(exc)) from exc
 
 
-def _write_json_atomic(path: Path, values: Mapping[str, object]) -> None:
+def acceptance_report_path(
+    *, repo_root: str | Path, target_dataset_id: str, instrument_id: str, run_id: str
+) -> Path:
+    root = Path(repo_root)
+    expectation = _expectation(
+        root,
+        _require_token(target_dataset_id, "target_dataset_id"),
+        _require_token(instrument_id, "instrument_id"),
+    )
+    return _acceptance_path(root, expectation, _require_token(run_id, "run_id"))
+
+
+def _write_json_immutable(path: Path, values: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
         "w", encoding="utf-8", dir=path.parent, delete=False, suffix=".tmp"
@@ -257,7 +272,30 @@ def _write_json_atomic(path: Path, values: Mapping[str, object]) -> None:
         json.dump(values, handle, ensure_ascii=False, indent=2, sort_keys=True, default=str)
         handle.write("\n")
         temporary_name = handle.name
-    Path(temporary_name).replace(path)
+    try:
+        os.link(temporary_name, path)
+    except FileExistsError as exc:
+        raise RawHistoryAcceptanceError(
+            "acceptance report already exists for explicit run_id"
+        ) from exc
+    finally:
+        Path(temporary_name).unlink(missing_ok=True)
+
+
+def _require_stored_identity(
+    frame: pd.DataFrame, field: str, expected: str, *, casefold: bool = False
+) -> None:
+    if field not in frame.columns:
+        _fail("partition missing stored identity field: " + field)
+    values = frame[field].astype("string").str.strip()
+    if bool(values.isna().any()) or bool(values.eq("").any()):
+        _fail("partition contains missing stored identity: " + field)
+    if casefold:
+        matches = values.str.casefold().eq(expected.casefold())
+    else:
+        matches = values.eq(expected)
+    if not bool(matches.all()):
+        _fail("partition stored identity mismatch: " + field)
 
 
 def _non_negative(frame: pd.DataFrame, columns: Sequence[str]) -> None:
@@ -275,6 +313,18 @@ def _validate_quote_partition(
     trade_date: str,
     run_id: str,
 ) -> tuple[int, tuple[str, ...]]:
+    if expectation.expected_secid is None:
+        _fail("quote expected secid is missing")
+    for field, expected, casefold in (
+        ("instrument_id", expectation.instrument_id, False),
+        ("source_id", expectation.source_id, False),
+        ("secid", expectation.expected_secid, False),
+        ("board", EXPECTED_BOARD, True),
+        ("market", EXPECTED_MARKET, True),
+        ("engine", EXPECTED_ENGINE, True),
+    ):
+        _require_stored_identity(frame, field, expected, casefold=casefold)
+
     request = quote_core.build_materialization_request(
         repo_root=repo_root,
         dataset_id=QUOTE_DATASET_ID,
@@ -287,9 +337,9 @@ def _validate_quote_partition(
         source_id=expectation.source_id,
         source_candidate=quote_core.SOURCE_CANDIDATE_APIM_TRADESTATS,
         source_endpoint=quote_core.SOURCE_ENDPOINT_APIM_FO_TRADESTATS,
-        market="FORTS",
-        board="RFUD",
-        engine="futures",
+        market=quote_core.TARGET_MARKET,
+        board=quote_core.TARGET_BOARD,
+        engine=EXPECTED_ENGINE,
         series_type="native",
         granularity="5m",
     )
@@ -305,45 +355,32 @@ def _validate_futoi_partition(
     trade_date: str,
 ) -> tuple[int, tuple[str, ...]]:
     contract_required = (
-        "instrument_id",
-        "trade_date",
-        "ts",
-        "moment",
-        "systime",
-        "sess_id",
-        "seqnum",
-        "secid",
-        "board",
-        "market",
-        "engine",
-        "source_id",
-        "source_ticker",
-        "clgroup",
-        "pos",
-        "pos_long",
-        "pos_short",
-        "pos_long_num",
-        "pos_short_num",
-        "availability_ts_utc",
-        "ingest_ts",
+        "instrument_id", "trade_date", "ts", "moment", "systime", "sess_id", "seqnum",
+        "secid", "board", "market", "engine", "source_id", "source_ticker", "clgroup",
+        "pos", "pos_long", "pos_short", "pos_long_num", "pos_short_num",
+        "availability_ts_utc", "ingest_ts",
     )
     missing = [column for column in contract_required if column not in frame.columns]
     if missing:
         _fail("FUTOI partition missing required columns: " + ",".join(missing))
     if frame.empty:
         _fail("FUTOI partition is empty")
-    if not bool(frame["instrument_id"].astype(str).eq(expectation.instrument_id).all()):
-        _fail("FUTOI partition instrument_id mismatch")
-    if not bool(frame["source_id"].astype(str).eq(expectation.source_id).all()):
-        _fail("FUTOI partition source_id mismatch")
+
+    for field, expected, casefold in (
+        ("instrument_id", expectation.instrument_id, False),
+        ("source_id", expectation.source_id, False),
+        ("board", EXPECTED_BOARD, True),
+        ("market", EXPECTED_MARKET, True),
+        ("engine", EXPECTED_ENGINE, True),
+    ):
+        _require_stored_identity(frame, field, expected, casefold=casefold)
     if not bool(frame["trade_date"].astype(str).eq(trade_date).all()):
         _fail("FUTOI partition trade_date mismatch")
     if expectation.expected_source_ticker is None:
         _fail("FUTOI expected source ticker is missing")
-    if not bool(
-        frame["source_ticker"].astype(str).str.lower().eq(expectation.expected_source_ticker.lower()).all()
-    ):
-        _fail("FUTOI partition source_ticker mismatch")
+    _require_stored_identity(
+        frame, "source_ticker", expectation.expected_source_ticker, casefold=True
+    )
     groups = frame["clgroup"].astype("string").str.upper().str.strip()
     if bool(groups.isna().any()) or not bool(groups.isin({"FIZ", "YUR"}).all()):
         _fail("FUTOI partition clgroup is invalid")
@@ -404,16 +441,15 @@ def audit_history(
 
     for trade_date in dates:
         path = _partition_path(
-            repo_root=root,
-            pattern=pattern,
-            expectation=expectation,
-            trade_date=trade_date,
+            repo_root=root, pattern=pattern, expectation=expectation, trade_date=trade_date
         )
         if not path.exists():
             missing_dates.append(trade_date)
             continue
         if not path.is_file():
-            failed_dates.append({"trade_date": trade_date, "error": "canonical partition path is not a file"})
+            failed_dates.append(
+                {"trade_date": trade_date, "error": "canonical partition path is not a file"}
+            )
             continue
         actual_partitions += 1
         try:
@@ -444,8 +480,9 @@ def audit_history(
         if expectation.expected_secid is None or secid_scope != {expectation.expected_secid}:
             hard_failures.append("quote_secid_scope_mismatch")
 
+    output_path = _acceptance_path(root, expectation, checked_run_id)
     status = "pass" if not hard_failures else "fail"
-    report: dict[str, object] = {
+    return {
         "run_id": checked_run_id,
         "dataset_id": ACCEPTANCE_DATASET_ID,
         "target_dataset_id": checked_dataset,
@@ -469,18 +506,16 @@ def audit_history(
         "historical_backfill_used": False,
         "implicit_partition_discovery_used": False,
         "latest_autodetect_used": False,
-        "producer": "moex_data.futures.stage2_raw_history_acceptance.v1",
+        "producer": "moex_data.futures.stage2_raw_history_acceptance_gate.v1",
         "acceptance_contract_ref": ACCEPTANCE_CONTRACT_PATH,
+        "acceptance_report_reference": output_path.as_posix(),
+        "evidence_written": False,
     }
-    output_path = _acceptance_path(root, expectation, checked_run_id)
-    _write_json_atomic(output_path, report)
-    report["acceptance_report_reference"] = output_path.as_posix()
-    return report
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Validate an existing Stage 2 canonical raw history without network access or historical backfill."
+        description="Internal validator for existing Stage 2 canonical raw history."
     )
     parser.add_argument("--target-dataset-id", required=True, choices=(QUOTE_DATASET_ID, FUTOI_DATASET_ID))
     parser.add_argument("--instrument-id", required=True)
@@ -510,6 +545,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "network_access_used": False,
                     "historical_backfill_used": False,
                     "accepted_pointer_written": False,
+                    "evidence_written": False,
                 },
                 ensure_ascii=False,
                 sort_keys=True,
