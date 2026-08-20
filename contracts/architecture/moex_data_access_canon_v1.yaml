@@ -26,6 +26,7 @@ identity_model:
     family_as_canonical_identity_allowed: false
     latest_autodetect_allowed: false
     implicit_contract_selection_allowed: false
+    implicit_path_selection_allowed: false
 
 storage_model:
   external_storage_root:
