@@ -1,6 +1,6 @@
 contract_id: moex_algopack_fo_tradestats_5m.v1
 schema_version: source_contract.v1
-status: active_stage2
+status: active_stage2_proven
 source_id: moex_algopack_fo_tradestats_5m
 source_system: moex_algopack
 source_kind: native_5m_quotes
@@ -49,12 +49,12 @@ failure_semantics:
   implicit_fallback: forbidden
 evidence:
   repository_endpoint_config_ref: configs/datasets/futures_algopack_availability_sources_config.json
-  repository_materializer_ref: src/moex_data/futures/materialize_raw_5m.py
-  server_probe_date: 2026-08-18
+  repository_materializer_ref: src/moex_data/futures/materialize_forts_raw_5m_instrument.py
+  server_probe_date: "2026-08-18"
   server_probe_status: available
   historical_coverage_probe:
     status: proven
-    probe_date: 2026-08-18
+    probe_date: "2026-08-18"
     requested_from: "2020-01-01"
     requested_till: "2026-08-17"
     identity_filter: SECID+TRADEDATE
@@ -80,6 +80,22 @@ evidence:
       - SiU6
       - CRU6
     reference_full_historical_backfill_required: false
+  stage2_historical_backfill:
+    status: completed_and_physically_validated
+    validation_date: "2026-08-20"
+    instruments:
+      usdrubf_futures_family:
+        secid: USDRUBF
+        partitions: 1100
+        rows: 181139
+        physical_quality_status: pass
+        market_spotcheck_status: pass
+      cnyrubf_futures_family:
+        secid: CNYRUBF
+        partitions: 1100
+        rows: 174825
+        physical_quality_status: pass
+        market_spotcheck_status: pass
   proven_secids:
     - USDRUBF
     - CNYRUBF
