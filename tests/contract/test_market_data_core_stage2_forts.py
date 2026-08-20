@@ -8,6 +8,10 @@ from moex_data.futures import materialize_forts_raw_5m_instrument as quote_write
 ROOT = Path(__file__).resolve().parents[2]
 REGISTRY = ROOT / "configs" / "instruments" / "forts_instrument_registry.v1.yaml"
 DATA_LAKE = ROOT / "configs" / "datasets" / "futures_data_lake.v1.yaml"
+ARCHITECTURE = ROOT / "contracts" / "architecture" / "moex_data_access_canon_v1.yaml"
+RUNBOOK = ROOT / "docs" / "data" / "futures_data_ingestion_runbook.md"
+QUOTE_DATASET = ROOT / "contracts" / "datasets" / "futures_raw_5m.v1.yaml"
+FUTOI_DATASET = ROOT / "contracts" / "datasets" / "futures_futoi_raw.v1.yaml"
 QUOTE_SOURCE = ROOT / "contracts" / "sources" / "futures" / "moex_algopack_fo_tradestats_5m.v1.yaml"
 FUTOI_SOURCE = ROOT / "contracts" / "sources" / "futures" / "moex_algopack_futoi.v1.yaml"
 QUOTE_WRITER = ROOT / "src" / "moex_data" / "futures" / "materialize_forts_raw_5m_instrument.py"
@@ -16,7 +20,6 @@ STAGE2_QUOTE_BACKFILL = ROOT / "src" / "moex_data" / "futures" / "backfill_stage
 FUTOI_WRITER = ROOT / "src" / "moex_data" / "futures" / "materialize_futoi_instrument.py"
 FUTOI_BACKFILL = ROOT / "src" / "moex_data" / "futures" / "backfill_futoi_instrument.py"
 QUOTE_COVERAGE = ROOT / "src" / "moex_data" / "futures" / "probe_forts_tradestats_coverage.py"
-ONBOARDING = ROOT / "contracts" / "datasets" / "forts_raw_5m_multi_instrument_onboarding.v1.yaml"
 
 
 def _text(path: Path) -> str:
@@ -118,10 +121,13 @@ def test_stage2_futoi_is_apim_only_registry_bound_and_fail_closed() -> None:
     assert '/ "futures" / "futoi_raw"' not in backfill
 
 
-def test_stage2_controlled_backfill_ready_but_runtime_and_research_remain_fail_closed() -> None:
+def test_stage2_raw_backfills_complete_but_runtime_and_research_remain_fail_closed() -> None:
     registry = _text(REGISTRY)
     data_lake = _text(DATA_LAKE)
     assert "backfill_ready: true" in data_lake
+    assert "historical_quotes_backfill_completed: true" in data_lake
+    assert "priority_futoi_raw_backfill_completed: true" in data_lake
+    assert "raw_physical_audit_completed: true" in data_lake
     assert registry.count("enabled_for_loading: false") == 4
     assert registry.count("enabled_for_update: false") == 4
     assert registry.count("enabled_for_retrieval: false") == 4
@@ -134,13 +140,20 @@ def test_stage2_controlled_backfill_ready_but_runtime_and_research_remain_fail_c
     assert "research_ready: false" in data_lake
 
 
-def test_stage2_onboarding_uses_canonical_pointer_and_separate_futoi_lane() -> None:
-    onboarding = _text(ONBOARDING)
-    assert '${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_raw_5m/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json' in onboarding
-    assert "secid_pointer_partition_allowed: false" in onboarding
-    assert "dataset_id: futures_futoi_raw" in onboarding
-    assert "quote_partition_embedding_allowed: false" in onboarding
-    assert "independent_quality_manifest_pointer_required: true" in onboarding
-    assert "status: pilot_passed" in onboarding
-    assert "backfill_producer: moex_data.futures.backfill_futoi_instrument" in onboarding
-    assert "controlled_quote_backfill_producer: moex_data.futures.backfill_stage2_forts_raw_5m_instrument" in onboarding
+def test_stage2_canonical_architecture_uses_dataset_pointer_and_separate_futoi_lane() -> None:
+    architecture = _text(ARCHITECTURE)
+    runbook = _text(RUNBOOK)
+    quote_dataset = _text(QUOTE_DATASET)
+    futoi_dataset = _text(FUTOI_DATASET)
+
+    pointer = '${MOEX_DATA_ROOT}/state/datasets/dataset_id={DATASET_ID}/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json'
+    quote_pointer = '${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_raw_5m/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json'
+    assert pointer in architecture
+    assert quote_pointer in quote_dataset
+    assert "secid_partition_allowed: false" in architecture
+    assert "dataset_id: futures_futoi_raw" in futoi_dataset
+    assert "supplementary_data_cannot_be_embedded_in_quote_partition: true" in architecture
+    assert "independent_quality_manifest_pointer_required: true" in architecture
+    assert "backfill_futoi_instrument.py" in runbook
+    assert "backfill_stage2_forts_raw_5m_instrument.py" in runbook or "approved historical range" in runbook
+    assert "public `iss.moex.com` transport and public-ISS fallback are forbidden for FUTOI" in runbook
