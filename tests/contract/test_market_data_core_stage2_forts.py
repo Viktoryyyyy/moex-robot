@@ -156,4 +156,4 @@ def test_stage2_canonical_architecture_uses_dataset_pointer_and_separate_futoi_l
     assert "independent_quality_manifest_pointer_required: true" in architecture
     assert "backfill_futoi_instrument.py" in runbook
     assert "backfill_stage2_forts_raw_5m_instrument.py" in runbook or "approved historical range" in runbook
-    assert "public `iss.moex.com` transport and public-ISS fallback are forbidden for FUTOI" in runbook
+    assert "Public `iss.moex.com` transport and public-ISS fallback are forbidden for FUTOI" in runbook
