@@ -1,9 +1,13 @@
 contract_id: futures_raw_history_acceptance.v1
 dataset_id: futures_raw_history_acceptance
 artifact_class: external_pattern
-producer: moex_data.futures.stage2_raw_history_acceptance
+producer: moex_data.futures.stage2_raw_history_acceptance_gate
+producer_impl_ref: src/moex_data/futures/stage2_raw_history_acceptance_gate.py
+validator_impl_ref: src/moex_data/futures/stage2_raw_history_acceptance.py
+operational_runbook_ref: docs/data/futures_raw_history_acceptance.md
 consumers:
-  - moex_data.futures.accepted_manifest_promotion
+  - controlled_pointer_promotion_step
+consumer_implementation_status: pending_separate_step
 format: json
 schema_version: futures_raw_history_acceptance.v1
 storage_root_ref: MOEX_DATA_ROOT
@@ -29,6 +33,7 @@ required_fields:
   - failed_partition_dates
   - hard_check_failures
   - acceptance_status
+  - preexisting_accepted_pointer_present
   - accepted_pointer_written
   - network_access_used
   - historical_backfill_used
@@ -37,6 +42,7 @@ hard_gate:
   expected_row_count_match: true
   failed_partition_dates_empty: true
   hard_check_failures_empty: true
+  preexisting_accepted_pointer_absent: true
   accepted_pointer_written: false
   network_access_used: false
   historical_backfill_used: false
