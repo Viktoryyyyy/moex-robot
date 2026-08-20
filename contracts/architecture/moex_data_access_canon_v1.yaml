@@ -2,12 +2,17 @@ canon_id: moex_data_access_canon_v1
 status: architecture_contract
 scope: generic_moex_data_access
 activation_status: repo_only
+canonical_ingestion_entrypoint: docs/data/moex_market_data_ingestion_runbook.v1.md
+management_canon_ref: docs/MOEX_BOT_MANAGEMENT_CANON.md
+data_lake_config_ref: configs/datasets/futures_data_lake.v1.yaml
+forts_instrument_registry_ref: configs/instruments/forts_instrument_registry.v1.yaml
 
 purpose:
   - define one instrument-independent canon for MOEX quote loading
   - define one instrument-independent canon for quote updating
   - define one instrument-independent canon for quote retrieval
   - define one instrument-independent canon for supplementary MOEX datasets
+  - make ingestion reproducible from GitHub contracts without chat-memory or server-path reconstruction
 
 identity_model:
   canonical_identity_field: instrument_id
@@ -17,14 +22,36 @@ identity_model:
     - board
     - market
     - engine
+    - source_id
   optional_source_grouping_fields:
     - family
+    - source_ticker
   rules:
     concrete_instrument_in_generic_contract_allowed: false
     default_instrument_in_generic_contract_allowed: false
     family_as_canonical_identity_allowed: false
     latest_autodetect_allowed: false
     implicit_contract_selection_allowed: false
+
+canonical_dataset_catalog:
+  quotes_raw_5m:
+    dataset_id: futures_raw_5m
+    dataset_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
+    source_id: moex_algopack_fo_tradestats_5m
+    source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+    partition_producer: moex_data.futures.materialize_forts_raw_5m_instrument
+    controlled_backfill_producer: moex_data.futures.backfill_stage2_forts_raw_5m_instrument
+    quality_contract_ref: contracts/datasets/futures_quality_report.v1.yaml
+    refresh_manifest_contract_ref: contracts/datasets/futures_data_refresh_manifest.v1.yaml
+  futoi_raw:
+    dataset_id: futures_futoi_raw
+    dataset_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
+    source_id: moex_algopack_futoi
+    source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v1.yaml
+    partition_producer: moex_data.futures.materialize_futoi_instrument
+    controlled_backfill_producer: moex_data.futures.backfill_futoi_instrument
+    quality_contract_ref: contracts/datasets/futures_futoi_quality_report.v1.yaml
+    refresh_manifest_contract_ref: contracts/datasets/futures_futoi_refresh_manifest.v1.yaml
 
 storage_model:
   external_storage_root:
@@ -49,6 +76,15 @@ storage_model:
       - trade_date
       - source_id
 
+state_model:
+  architecture_role: execution_evidence_only
+  server_state_is_architecture_proof: false
+  quotes_refresh_manifest_pattern: "${MOEX_DATA_ROOT}/state/refresh/run_date={YYYY-MM-DD}/run_id={RUN_ID}/manifest.json"
+  quotes_quality_report_pattern: "${MOEX_DATA_ROOT}/state/quality/run_date={YYYY-MM-DD}/run_id={RUN_ID}/quality_report.json"
+  futoi_refresh_manifest_pattern: "${MOEX_DATA_ROOT}/state/refresh/dataset_id=futures_futoi_raw/run_date={YYYY-MM-DD}/run_id={RUN_ID}/manifest.json"
+  futoi_quality_report_pattern: "${MOEX_DATA_ROOT}/state/quality/dataset_id=futures_futoi_raw/run_date={YYYY-MM-DD}/run_id={RUN_ID}/quality_report.json"
+  accepted_pointer_rule: only_after_explicit_acceptance_and_quality_pass
+
 market_data_lane_model:
   quote_lane:
     storage_class: raw_quotes
@@ -66,9 +102,19 @@ market_data_lane_model:
     transport: authenticated_apim_only
     public_iss_transport_allowed: false
     public_iss_fallback_allowed: false
+    canonical_event_time_source: tradedate_plus_tradetime
+    source_publication_metadata_field: systime
+    historical_systime_as_event_identity_allowed: false
+    source_record_key_fields:
+      - trade_date
+      - sess_id
+      - seqnum
+      - secid
+      - clgroup
+    same_moment_different_source_record_policy: preserve_all_raw
 
 storage_transition_policy:
-  status: stage2_forts_quote_writer_migrated_futoi_apim_revalidation_required
+  status: stage2_canonical_writers_migrated_core_backfills_validated_acceptance_pending
   canonical_new_write_root: "${MOEX_DATA_ROOT}/market"
   new_materialization_to_legacy_roots_allowed: false
   new_dataset_creation_to_legacy_roots_allowed: false
@@ -76,35 +122,36 @@ storage_transition_policy:
   legacy_read_compatibility_allowed: true
   legacy_write_extension_allowed: false
   physical_legacy_data_move_required_in_this_contract: false
-  physical_legacy_data_move_status: pending_separate_migration
+  physical_legacy_data_move_status: separate_cleanup_workstream_not_architecture_dependency
   known_legacy_raw_write_patterns:
-    - path_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
+    - path_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/..."
       producer_ref: src/moex_data/futures/materialize_forts_raw_5m_tradestats.py
-      status: compatibility_only_migration_required
-    - path_pattern: "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/trade_date={YYYY-MM-DD}/instrument_id={INSTRUMENT_ID}/secid={SECID}/part.parquet"
-      producer_ref: src/moex_data/futures/materialize_forts_raw_5m_instrument.py
-      status: historical_pattern_writer_migrated_stage2
+      status: deprecated_compatibility_only_no_new_ingestion
       canonical_replacement_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
-    - path_pattern: "${MOEX_DATA_ROOT}/futures/raw_5m/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
+    - path_pattern: "${MOEX_DATA_ROOT}/futures/raw_5m/..."
       producer_ref: src/moex_data/futures/raw_5m_loader.py
-      status: compatibility_only_migration_required
-    - path_pattern: "${MOEX_DATA_ROOT}/futures/futoi_raw/trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
+      status: deprecated_compatibility_only_no_new_ingestion
+      canonical_replacement_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
+    - path_pattern: "${MOEX_DATA_ROOT}/futures/futoi_raw/..."
       producer_ref: src/moex_data/futures/futoi_raw_loader.py
-      status: compatibility_only_migration_required
-      canonical_stage2_writer_ref: src/moex_data/futures/materialize_futoi_instrument.py
+      status: deprecated_compatibility_only_no_new_ingestion
+      canonical_replacement_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
   canonical_pointer_model:
     partition_keys:
       - dataset_id
       - instrument_id
     secid_partition_allowed: false
+    artifact_id_partition_allowed: false
     new_instrument_legacy_pointer_fallback_allowed: false
   known_legacy_pointer_pattern:
-    path_pattern: "${MOEX_DATA_ROOT}/state/datasets/artifact_id={ARTIFACT_ID}/instrument_id={INSTRUMENT_ID}/secid={SECID}/current_accepted_manifest.json"
+    path_pattern: "${MOEX_DATA_ROOT}/state/datasets/artifact_id={ARTIFACT_ID}/..."
     producer_ref: src/moex_data/futures/refresh_forts_raw_5m_incremental_pointer.py
-    status: compatibility_only_migration_required
+    status: deprecated_compatibility_only_no_new_ingestion
 
 registry_model:
   registry_required: true
+  data_lake_config_ref: configs/datasets/futures_data_lake.v1.yaml
+  instrument_registry_ref: configs/instruments/forts_instrument_registry.v1.yaml
   registry_entry_required_for_materialization: true
   registry_entry_required_fields:
     - instrument_id
@@ -127,10 +174,13 @@ loading_model:
   source_selection: explicit_source_id
   instrument_selection: explicit_instrument_id
   date_selection: explicit_date_or_approved_range
+  source_field_names_must_come_from_contract_or_current_producer: true
+  cli_arguments_must_come_from_current_producer: true
   fallback_source_allowed: false
   empty_response_policy: fail_closed
   schema_mismatch_policy: fail_closed
   partial_response_policy: manifest_with_quality_status
+  server_fact_collection_policy: one_explicit_comprehensive_probe_when_practical
 
 update_model:
   update_mode:
@@ -164,6 +214,8 @@ legacy_policy:
   legacy_csv_status: compatibility_only
   legacy_csv_extension_allowed: false
   legacy_contract_as_architecture_proof_allowed: false
+  deprecated_contract_historical_schema_as_ingestion_instruction_allowed: false
+  deprecated_contracts_must_point_to_canonical_replacement: true
 
 server_boundary:
   github_is_source_of_truth: true

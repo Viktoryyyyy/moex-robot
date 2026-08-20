@@ -1,24 +1,10 @@
 contract_id: futures_ohlcv_5m.v1
-dataset_id: futures_ohlcv_5m
-artifact_class: external_pattern
-producer: moex_data.futures.raw_ohlcv_5m
-consumers:
-  - moex_data.futures.resampling
-format: parquet
-schema_version: futures_ohlcv_5m.v1
-storage_root_ref: MOEX_DATA_ROOT
-path_pattern: ${MOEX_DATA_ROOT}/futures/ohlcv_5m/family={FAMILY}/secid={SECID}/board={BOARD}/market={MARKET}/series_type={SERIES_TYPE}/trade_date={TRADE_DATE}/part.parquet
-partitioning:
-  - FAMILY
-  - SECID
-  - BOARD
-  - MARKET
-  - SERIES_TYPE
-  - TRADE_DATE
-timeframe: 5m
-required_identifier_fields:
-  - FAMILY
-  - SECID
-  - BOARD
-  - MARKET
-  - SERIES_TYPE
+status: deprecated_compatibility_tombstone
+deprecated_for_new_ingestion: true
+canonical_replacement_contract: contracts/datasets/futures_raw_5m.v1.yaml
+canonical_source_contract: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+canonical_runbook: docs/data/moex_market_data_ingestion_runbook.v1.md
+rules:
+  - legacy_family_secid_storage_pattern_is_forbidden_for_new_ingestion
+  - do_not_use_as_current_raw_5m_schema
+  - use_futures_raw_5m_v1_for_canonical_quote_materialization

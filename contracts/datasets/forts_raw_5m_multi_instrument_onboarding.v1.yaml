@@ -1,64 +1,51 @@
 contract_id: forts_raw_5m_multi_instrument_onboarding.v1
 schema_version: data_asset_onboarding_contract.v1
-status: active_stage2
+status: active_stage2_canonical
+canonical_runbook_ref: docs/data/moex_market_data_ingestion_runbook.v1.md
+architecture_contract_ref: contracts/architecture/moex_data_access_canon_v1.yaml
+data_lake_config_ref: configs/datasets/futures_data_lake.v1.yaml
+instrument_registry_ref: configs/instruments/forts_instrument_registry.v1.yaml
 scope:
-  asset: dataset.forts.raw_5m.tradestats.v1
-  dataset_id: futures_raw_5m
-  market: FORTS
-  grain: 5m
-  source_artifact_id: external.apim.fo.tradestats.v1
-  source_id: moex_algopack_fo_tradestats_5m
-  source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
-  registry_ref: configs/instruments/forts_instrument_registry.v1.yaml
-problem_statement:
-  registry_scope: historical_quote_core_USDRUBF_CNYRUBF_reference_SiU6_CRU6_futoi_all_four
-  previous_pointer_shape: artifact_id_plus_instrument_id_plus_secid
-  previous_pointer_collision_risk: true
-  pointer_runner_scope_validation: pointer_scope_must_equal_exactly_one_instrument_id
-  onboarding_by_instruction_alone_safe: false
-stage2_registry_scope:
-  - instrument_id: usdrubf_futures_family
-    secid: USDRUBF
-    quote_role: historical_core
-  - instrument_id: cnyrubf_futures_family
-    secid: CNYRUBF
-    quote_role: historical_core
-  - instrument_id: si_futures_family
-    secid: SiU6
-    quote_role: reference
-  - instrument_id: cr_futures_family
-    secid: CRU6
-    quote_role: reference
+  quotes_dataset_id: futures_raw_5m
+  quotes_dataset_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
+  quotes_source_id: moex_algopack_fo_tradestats_5m
+  quotes_source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+  futoi_dataset_id: futures_futoi_raw
+  futoi_dataset_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
+  futoi_source_id: moex_algopack_futoi
+  futoi_source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v1.yaml
 identity_rules:
   canonical_identity_field: instrument_id
   explicit_source_id_required: true
-  explicit_secid_required: true
+  explicit_secid_required_for_quotes: true
+  exact_registry_ticker_required_for_futoi: true
   family_as_storage_identity_allowed: false
   latest_autodetect_allowed: false
   implicit_contract_selection_allowed: false
   automatic_roll_selection_allowed_in_stage2: false
-pointer_strategy:
-  selected_strategy: per_instrument
-  intentionally_single_instrument_only: false
-  accepted_pointer_artifact_id: state.dataset.futures_raw_5m.current_accepted_manifest.v1
-  accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_raw_5m/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+canonical_storage:
+  quotes_path: "${MOEX_DATA_ROOT}/market/raw/timeframe=5m/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet"
+  futoi_path: "${MOEX_DATA_ROOT}/market/supplementary/dataset_id=futures_futoi_raw/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet"
+  accepted_pointer_path: "${MOEX_DATA_ROOT}/state/datasets/dataset_id={DATASET_ID}/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
   secid_pointer_partition_allowed: false
-  legacy_per_instrument_pointer_path: "${MOEX_DATA_ROOT}/state/datasets/artifact_id=dataset.forts.raw_5m.tradestats.v1/instrument_id={INSTRUMENT_ID}/secid={SECID}/current_accepted_manifest.json"
-  legacy_artifact_level_pointer_path: "${MOEX_DATA_ROOT}/state/datasets/artifact_id=dataset.forts.raw_5m.tradestats.v1/current_accepted_manifest.json"
-  legacy_artifact_level_pointer_status: existing_usdrubf_legacy_only_not_allowed_for_new_instrument_onboarding_or_scheduler
-  legacy_artifact_level_pointer_compatibility_rule: fallback_allowed_only_for_existing_usdrubf_when_per_instrument_pointer_is_absent
-  legacy_artifact_level_pointer_migration_rule: no_silent_migration_runner_reads_existing_usdrubf_legacy_pointer_until_operator_creates_per_instrument_pointer
-  new_instrument_legacy_pointer_fallback_allowed: false
-  legacy_artifact_pointer_fallback_allowed_for_new_instruments: false
-  legacy_pointer_status: compatibility_only_migration_required
-  path_contract_type: external_pattern
-  storage_root_ref: MOEX_DATA_ROOT
-  path_rules:
-    latest_file_autodetect_allowed: false
-    glob_discovery_allowed: false
-    implicit_path_selection_allowed: false
-    hardcoded_server_path_allowed: false
-    one_pointer_per_instrument_id_required: true
+  artifact_id_pointer_partition_allowed: false
+stage2_registry_scope:
+  - instrument_id: usdrubf_futures_family
+    quotes_secid: USDRUBF
+    quote_role: historical_core
+    futoi_ticker: usdrubf
+  - instrument_id: cnyrubf_futures_family
+    quotes_secid: CNYRUBF
+    quote_role: historical_core
+    futoi_ticker: cnyrubf
+  - instrument_id: si_futures_family
+    quotes_secid: SiU6
+    quote_role: reference
+    futoi_ticker: si
+  - instrument_id: cr_futures_family
+    quotes_secid: CRU6
+    quote_role: reference
+    futoi_ticker: cr
 required_registry_fields:
   - instrument_id
   - canonical_symbol
@@ -73,28 +60,65 @@ required_registry_fields:
   - raw_5m_artifact_id
   - enabled_for_loading
   - enabled_for_update
+  - enabled_for_retrieval
   - enabled_for_raw_5m_materialization
   - enabled_for_d1_derivation
   - enabled_for_research
   - storage_partition_values.instrument_id
   - storage_partition_values.secid
   - evidence_status
-controlled_backfill_authorization:
-  stage2_readiness_ref: configs/datasets/futures_data_lake.v1.yaml#stage2_forts_source_bindings.readiness_flags.backfill_ready
-  required_stage2_backfill_ready: true
-  required_registry_evidence_status: pilot_passed
-  global_runtime_enablement_required: false
-  global_runtime_enablement_must_remain_false: true
-  historical_quote_backfill_instrument_ids:
-    - usdrubf_futures_family
-    - cnyrubf_futures_family
-  reference_quote_instrument_ids:
-    - si_futures_family
-    - cr_futures_family
-  reference_full_historical_backfill_required: false
-  controlled_quote_backfill_producer: moex_data.futures.backfill_stage2_forts_raw_5m_instrument
-  controlled_futoi_backfill_producer: moex_data.futures.backfill_futoi_instrument
-  accepted_pointer_creation_allowed_only_after_full_backfill_pass: true
+quotes_producers:
+  one_date: moex_data.futures.materialize_forts_raw_5m_instrument
+  controlled_historical_range: moex_data.futures.backfill_stage2_forts_raw_5m_instrument
+futoi_producers:
+  one_date: moex_data.futures.materialize_futoi_instrument
+  controlled_historical_range: moex_data.futures.backfill_futoi_instrument
+new_instrument_onboarding_sequence:
+  - step_id: prove_source_identity_and_availability
+    required: true
+    exit_criteria:
+      - exact source identity proven
+      - exact SECID or FUTOI ticker proven
+      - approved source contract applies
+  - step_id: add_registry_entry
+    required: true
+    instruction: Add explicit source-proven registry binding while all generic execution flags remain false.
+  - step_id: run_one_date_canonical_pilot
+    required: true
+    exit_criteria:
+      - canonical market path used
+      - partition schema matches dataset contract
+      - manifest exists
+      - quality report exists and passes
+      - latest_autodetect_used is false
+  - step_id: validate_pilot_and_promote_evidence
+    required: true
+    exit_criteria:
+      - identity and metadata match registry/contracts
+      - global runtime enablement remains false
+  - step_id: run_authorized_historical_backfill
+    required_when_scope_authorized: true
+    scope_authority_ref: configs/datasets/futures_data_lake.v1.yaml
+    exit_criteria:
+      - range explicit and source-proven
+      - source/network/schema failures fail closed
+      - non-trading empty-source dates explicitly reconciled
+      - all writes use canonical market path
+  - step_id: run_full_physical_acceptance_audit
+    required_when_backfilled: true
+    exit_criteria:
+      - no bad partitions
+      - duplicate/null/sign/OHLC checks pass as applicable
+      - requested range reconciles to written plus explicit skipped dates
+  - step_id: create_accepted_pointer
+    required_after_explicit_acceptance_authority: true
+    exit_criteria:
+      - aggregate refresh succeeded
+      - quality passed
+      - pointer uses dataset_id plus instrument_id only
+  - step_id: observed_source_refresh_and_scheduler
+    separate_later_workstream: true
+    required_incremental_mode: observed-source
 reference_quote_policy:
   instrument_ids:
     - si_futures_family
@@ -102,143 +126,29 @@ reference_quote_policy:
   secids:
     - SiU6
     - CRU6
-  purpose: market_reference_basis_liquidity_expiry
-  multi_year_historical_backfill_required: false
-  stage2_completion_blocking: false
-  reference_contract_pilot_required: true
-  reference_contract_pilot_status: passed
+  multi_year_fixed_contract_backfill_required: false
   automatic_roll_selection_allowed: false
-  continuous_history_required_in_stage2: false
-  future_continuous_history_requires_separate_roll_chain_workstream: true
-new_instrument_onboarding_sequence:
-  - step_id: add_registry_entry
-    required: true
-    instruction: Add an explicit source-proven instrument row to configs/instruments/forts_instrument_registry.v1.yaml while execution flags remain false.
-    exit_criteria:
-      - all required_registry_fields are present
-      - storage_partition_values.instrument_id equals instrument_id
-      - storage_partition_values.secid equals secid
-      - source_id equals the approved source contract
-      - enabled_for_raw_5m_materialization remains false
-  - step_id: source_identity_and_availability_proven
-    required: true
-    exit_criteria:
-      - source_id equals moex_algopack_fo_tradestats_5m
-      - APIM availability probe is available for explicit secid
-      - MOEX_API_KEY authentication is proven without exposing token
-  - step_id: run_one_date_pilot_materialization
-    required: true
-    instruction: Run one explicit trade_date pilot materialization for the instrument.
-    producer: moex_data.futures.materialize_forts_raw_5m_instrument
-    exit_criteria:
-      - parquet partition exists for exactly one requested trade_date and instrument_id
-      - partition uses canonical market/raw path
-      - required canonical identity columns are present
-      - pilot manifest exists under state/refresh
-      - pilot quality report exists under state/quality
-      - latest/glob/autodetect was not used
-  - step_id: validate_manifest_and_quality
-    required: true
-    instruction: Validate pilot manifest and quality report before controlled backfill readiness is promoted.
-    exit_criteria:
-      - quality_status is pass
-      - latest_autodetect_used is false
-      - implicit_path_selection_used is false
-      - no unrelated instrument partition is included
-      - evidence_status is promoted to pilot_passed
-      - global runtime and generic materialization flags remain false
-  - step_id: run_full_backfill
-    required: true
-    scope: historical_core_only
-    instruction: Run controlled full backfill only for quote_role=historical_core after pilot_passed evidence and Stage 2 backfill_ready are both proven. Reference SiU6/CRU6 are explicitly excluded from multi-year historical backfill in Stage 2.
-    producer: moex_data.futures.backfill_stage2_forts_raw_5m_instrument
-    exit_criteria:
-      - instrument_id is in historical_quote_backfill_instrument_ids
-      - requested range is explicit and source-proven
-      - all written partitions use canonical market/raw path
-      - source/network/schema failures fail closed
-      - empty non-trading dates may be recorded as skipped_empty_source_dates
-      - manifest covers approved range
-      - generic runtime enablement remains false
-  - step_id: create_per_instrument_accepted_pointer
-    required: true
-    scope: historical_core_only
-    instruction: Create accepted pointer only at the canonical accepted_pointer_path_contract after full backfill PASS for historical-core quote instruments.
-    exit_criteria:
-      - refresh_status is succeeded
-      - quality_status is pass
-      - pointer uses dataset_id plus instrument_id only
-      - secid is not a pointer partition
-      - pointer points to the passed full backfill manifest
-  - step_id: run_observed_source_refresh_check
-    required: true
-    instruction: Run refresh check with --incremental-mode observed-source for production-eligible lanes.
-    exit_criteria:
-      - incremental mode is observed-source
-      - MOEX calendar endpoint is not required for production refresh
-      - empty observed source dates are recorded as skipped_empty_source_dates
-      - source/network/schema failures do not advance pointer
-      - passed quality atomically advances only the per-instrument pointer
-  - step_id: enable_scheduler_only_after_refresh_check_passed
-    required: true
-    instruction: Enable scheduler only after all prior applicable steps pass.
-    exit_criteria:
-      - production scheduler uses --incremental-mode observed-source
-      - scheduler references explicit instrument_id and source_id
-      - scheduler references the canonical per-instrument pointer path
-quote_onboarding_sequence:
-  canonical_sequence_ref: new_instrument_onboarding_sequence
-futoi_lane:
-  dataset_id: futures_futoi_raw
-  source_id: moex_algopack_futoi
-  source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v1.yaml
-  raw_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
-  quality_contract_ref: contracts/datasets/futures_futoi_quality_report.v1.yaml
-  manifest_contract_ref: contracts/datasets/futures_futoi_refresh_manifest.v1.yaml
+  continuous_history_requires_separate_roll_chain_workstream: true
+futoi_policy:
   transport: authenticated_apim_only
-  authentication_env: MOEX_API_KEY
   public_iss_transport_allowed: false
   public_iss_fallback_allowed: false
-  storage_path_contract: "${MOEX_DATA_ROOT}/market/supplementary/dataset_id=futures_futoi_raw/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet"
-  accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_futoi_raw/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
-  quote_partition_embedding_allowed: false
-  independent_quality_manifest_pointer_required: true
-  pilot_producer: moex_data.futures.materialize_futoi_instrument
-  availability_gate:
-    status: pilot_passed
-    availability_status_required: available
-    probe_status_required: completed
-    registry_availability_status: available
-    registry_probe_status: completed
-    pilot_before_apim_revalidation_allowed: false
-  pilot_acceptance:
-    trade_date: "2026-08-17"
-    instruments_passed: 4
-    quality_status_required: pass
-    latest_autodetect_used_required: false
-  backfill_producer: moex_data.futures.backfill_futoi_instrument
-  stage2_ticker_bindings:
-    usdrubf_futures_family: usdrubf
-    cnyrubf_futures_family: cnyrubf
-    si_futures_family: si
-    cr_futures_family: cr
-production_scheduler_policy:
-  required_incremental_mode: observed-source
-  required_cli_argument: --incremental-mode observed-source
-  calendar_mode_allowed_for_server_cron: false
-  calendar_mode_blocked_until: moex_calendar_endpoint_contract_resolved
-  calendar_endpoint_status: unresolved_for_server_scheduler
-  calendar_endpoint_unresolved_note: MOEX calendar endpoint contract is unresolved for server cron; observed-source mode is the only allowed production scheduler mode until this is fixed.
-  cron_or_systemd_change_in_this_patch_allowed: false
-  server_apply_in_this_patch_allowed: false
-  d1_enablement_in_this_patch_allowed: false
-  server_apply_in_this_contract_allowed: false
+  latest_for_raw_history: 0
+  canonical_ts: source_reference_moment
+  source_publication_metadata: systime
+  raw_source_record_key_fields:
+    - trade_date
+    - sess_id
+    - seqnum
+    - secid
+    - clgroup
+  final_eod_refetch_with_latest_1_allowed: false
+  final_eod_derivation_rule: derive_from_canonical_raw_source_record_history_under_separate_contract
 acceptance_guards:
-  future_subchat_can_onboard_new_instrument_from_contract: true
-  registry_required_fields_documented: true
-  pointer_path_strategy_explicit: true
-  production_scheduler_mode_explicit: observed-source
+  future_chat_can_onboard_from_contract: true
+  canonical_runbook_required: true
+  latest_glob_autodetect_allowed: false
   new_write_to_legacy_forts_root_allowed: false
   new_write_to_legacy_futures_root_allowed: false
   quotes_and_futoi_share_partition_file_allowed: false
-  latest_glob_autodetect_allowed: false
+  server_filesystem_as_architecture_proof_allowed: false

@@ -1,39 +1,71 @@
 # MOEX Bot — Project Hub
 
-## Роли чатов
-- **MOEX Bot — основной проект**: данные, пайплайн (`fetch_*`, `merge_5m.py`, `run_today.py`, бэктесты MR-1).
-- **MOEX Bot — Telegram сигналы**: realtime-сигналы, бот, алерты, политика авто-пуша.
+status: current_navigation_hub
+repository: `Viktoryyyyy/moex-robot`
 
-## Каноничные параметры стратегии (MR-1)
-- Порог: `k = 1.15`
-- Вход: по open бара t+1 после сигнала на t; выход — по close t+1
-- Фильтр ликвидности: `liq_smooth < 0.5`
-- Комиссия: `2 ₽` за сторону (в расчётах заложено `4 ₽` на round-trip)
-- Фичи: `ret1 = pct_change(close, 1)`, `vol20 = std(ret1, 20)`
-- Временное окно торговли: TODO (по умолчанию вся сессия, исключая клиринг)
+## Authority
 
-## Файлы-источники (истина)
-- Дневные CSV: `si_5m_<YYYY-MM-DD>.csv`
-- Склейки: `si_5m_<start>_<end>.csv`
-- Фичи: `*_features.csv`
-- Бэктесты/эквити: `bt_*.csv`
+GitHub repository is Source of Truth. Server filesystem is Applied State only.
 
-## Скрипты
-- Сбор/слияние: `fetch_*.py`, `merge_5m.py`, `run_today.py`, `run_backfill.py`
-- Сигналы/онлайн: `signal_mr1.py`, `loop_signal_mr1.py`
-- Обслуживание: `clean_moex_bot.sh`
+Management canon:
 
-## Telegram-бот (общие настройки)
-- Переменные: `BOT_TOKEN`, `CHAT_ID` в `.env`
-- Команды: `/signal`, `/auto_on`, `/auto_off`, `/status`, `/setk 1.15`, `/setliq 0.5`
-- Режим пуша: по закрытию 5-минутки, выравнивание hh:mm:01 (МСК)
+`docs/MOEX_BOT_MANAGEMENT_CANON.md`
 
-## Процессы и ответственность
-- Основной чат: изменения пайплайна/стратегии → обновить этот HUB и README
-- Чат Telegram: только интеграция бота; если меняются параметры — ссылаться на HUB
+Browser project context:
 
-## To-Do (актуально)
-- [ ] Добавить time-filter (рабочие часы)
-- [ ] API-driven сбор баров (trades/orderbook) для online без файлов
-- [ ] Бот: webhook + автопуш
-- [ ] Мониторинг: журнал сигналов/сделок, дашборд
+`docs/BROWSER_PROJECT_CONTEXT.md`
+
+## Market-data architecture
+
+Canonical data-access architecture:
+
+`contracts/architecture/moex_data_access_canon_v1.yaml`
+
+Canonical data-lake config:
+
+`configs/datasets/futures_data_lake.v1.yaml`
+
+Canonical FORTS instrument registry:
+
+`configs/instruments/forts_instrument_registry.v1.yaml`
+
+Operational ingestion entrypoint for any chat/agent:
+
+`docs/data/moex_market_data_ingestion_runbook.v1.md`
+
+Current Stage2 evidence/status note:
+
+`docs/MOEX_MARKET_DATA_CORE_STAGE2_FORTS_CHANGE_2026-08-18.md`
+
+## Canonical raw datasets
+
+Quotes:
+
+- dataset contract: `contracts/datasets/futures_raw_5m.v1.yaml`
+- source contract: `contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml`
+
+FUTOI:
+
+- dataset contract: `contracts/datasets/futures_futoi_raw.v1.yaml`
+- source contract: `contracts/sources/futures/moex_algopack_futoi.v1.yaml`
+
+## Data-path rule
+
+Canonical new writes use `${MOEX_DATA_ROOT}/market` only.
+
+Legacy `${MOEX_DATA_ROOT}/forts`, `${MOEX_DATA_ROOT}/futures/raw_5m`, `${MOEX_DATA_ROOT}/futures/futoi_raw`, old CSV master files and strategy-local files are not architecture proof and are not authorized for new ingestion.
+
+## Server context
+
+```text
+HOME=/home/trader
+repo_path=/home/trader/moex_bot/moex-robot
+shell_path=~/moex_bot/moex-robot
+command_prefix=cd ~/moex_bot && source venv/bin/activate && cd moex-robot
+```
+
+Forbidden deprecated repository path uses underscore (`moex_robot`) instead of hyphen (`moex-robot`).
+
+## Working rule
+
+When a task concerns market-data loading, updating, backfill, fields, metadata, storage, quality or accepted pointers, start from `docs/data/moex_market_data_ingestion_runbook.v1.md` and follow its referenced current GitHub contracts. Do not reconstruct ingestion from historical chat memory or old contract files.

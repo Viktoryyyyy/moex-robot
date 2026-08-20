@@ -1,7 +1,7 @@
 contract_id: futures_raw_5m.v1
 dataset_id: futures_raw_5m
 artifact_class: external_pattern
-producer: moex_data.futures.materialize_raw_5m
+producer: moex_data.futures.materialize_forts_raw_5m_instrument
 consumers:
   - moex_data.futures.resampler
   - moex_data.futures.quality_report_builder
@@ -49,50 +49,71 @@ required_columns:
   - num_trades
   - source
   - ingest_ts
-native_5m_materialization:
-  producer: moex_data.futures.materialize_forts_raw_5m_instrument
-  source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+source_contract:
   source_id: moex_algopack_fo_tradestats_5m
+  source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+  exact_registry_secid_binding_required: true
+  fallback_endpoint_allowed: false
+materialization:
+  partition_producer: moex_data.futures.materialize_forts_raw_5m_instrument
+  controlled_backfill_producer: moex_data.futures.backfill_stage2_forts_raw_5m_instrument
+  instrument_registry_ref: configs/instruments/forts_instrument_registry.v1.yaml
+  data_lake_config_ref: configs/datasets/futures_data_lake.v1.yaml
+  authentication_env: MOEX_API_KEY
   source_selection: explicit_source_id
   instrument_selection: explicit_instrument_id
+  secid_selection: explicit_secid
   date_selection: explicit_date_or_approved_range
   fallback_source_allowed: false
-  authentication_env: MOEX_API_KEY
-  query_params:
-    date: "{YYYY-MM-DD}"
-    from: "{YYYY-MM-DD}"
-    till: "{YYYY-MM-DD}"
-    secid: "{SECID}"
-    start: "0"
-    iss.meta: "off"
-    iss.only: tradestats
-  required_contract_inputs:
-    - MOEX_DATA_ROOT
-    - MOEX_API_KEY
-    - instrument_id
-    - source_id
-    - secid
-    - board
-    - market
-    - engine
+  latest_autodetect_allowed: false
+  single_partition_cli_required_fields:
     - trade_date
-    - timeframe
-    - raw_manifest_ref
-    - raw_quality_report_ref
-  failure_semantics:
-    unauthorized: fail_closed
-    empty_response: fail_closed
-    schema_mismatch: fail_closed
-    missing_required_contract_input: fail_closed
-    implicit_fallback: forbidden
+    - instrument_id
+    - secid
+    - artifact_version
+  backfill_cli_required_fields:
+    - date_start
+    - date_end
+    - instrument_id
+    - secid
+    - artifact_version
+state_contracts:
+  quality_contract_ref: contracts/datasets/futures_quality_report.v1.yaml
+  refresh_manifest_contract_ref: contracts/datasets/futures_data_refresh_manifest.v1.yaml
+  accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_raw_5m/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+execution_result_metadata_fields:
+  - status
+  - dataset_id
+  - source_id
+  - source_contract_ref
+  - storage_partition_path
+  - manifest_reference
+  - quality_report_reference
+  - quality_status
+  - row_count
+  - instrument_id_scope
+  - secid_scope
+  - storage_pattern
+  - latest_autodetect_used
+  - hardcoded_server_path_used
 quality_checks:
   - non_null_ohlc
   - high_ge_low
   - open_high_low_close_inside_range
   - duplicate_instrument_ts_source_count
   - monotonic_ts_by_instrument_id_and_source_id
+  - non_negative_volume
+  - non_negative_value_when_present
+  - non_negative_num_trades_when_present
+failure_semantics:
+  unauthorized: fail_closed
+  empty_response: fail_closed
+  schema_mismatch: fail_closed
+  missing_required_contract_input: fail_closed
+  implicit_fallback: forbidden
 path_rules:
   storage_root: env_contract
   hardcoded_server_path_allowed: false
   implicit_file_selection_allowed: false
+  dynamic_scan_allowed: false
 retention_policy: keep_all_valid_partitions
