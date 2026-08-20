@@ -1,37 +1,27 @@
 from pathlib import Path
 
 
-CONTRACT_PATH = Path("contracts/datasets/forts_raw_5m_multi_instrument_onboarding.v1.yaml")
+ARCHITECTURE_PATH = Path("contracts/architecture/moex_data_access_canon_v1.yaml")
+DATA_LAKE_PATH = Path("configs/datasets/futures_data_lake.v1.yaml")
 REGISTRY_PATH = Path("configs/instruments/forts_instrument_registry.v1.yaml")
-DOC_PATH = Path("docs/data/forts_raw_5m_multi_instrument_onboarding.md")
+RUNBOOK_PATH = Path("docs/data/futures_data_ingestion_runbook.md")
+QUOTE_DATASET_PATH = Path("contracts/datasets/futures_raw_5m.v1.yaml")
 
 
 REQUIRED_REGISTRY_FIELDS = [
     "instrument_id",
     "canonical_symbol",
-    "display_name",
     "market",
     "board",
     "secid",
-    "source_artifact_id",
-    "raw_5m_artifact_id",
+    "source_id",
+    "enabled_for_loading",
+    "enabled_for_update",
+    "enabled_for_retrieval",
     "enabled_for_raw_5m_materialization",
     "enabled_for_d1_derivation",
     "enabled_for_research",
-    "storage_partition_values.instrument_id",
-    "storage_partition_values.secid",
     "evidence_status",
-]
-
-
-REQUIRED_ONBOARDING_STEPS = [
-    "add_registry_entry",
-    "run_one_date_pilot_materialization",
-    "run_full_backfill",
-    "validate_manifest_and_quality",
-    "create_per_instrument_accepted_pointer",
-    "run_observed_source_refresh_check",
-    "enable_scheduler_only_after_refresh_check_passed",
 ]
 
 
@@ -39,60 +29,67 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_multi_instrument_onboarding_contract_exists_and_declares_per_instrument_pointer():
-    contract_text = _read(CONTRACT_PATH)
+def test_canonical_onboarding_declares_per_dataset_per_instrument_pointer():
+    architecture = _read(ARCHITECTURE_PATH)
+    quote_dataset = _read(QUOTE_DATASET_PATH)
     pointer_contract = (
-        "${MOEX_DATA_ROOT}/state/datasets/artifact_id=dataset.forts.raw_5m.tradestats.v1/"
-        "instrument_id={INSTRUMENT_ID}/secid={SECID}/current_accepted_manifest.json"
+        "${MOEX_DATA_ROOT}/state/datasets/dataset_id={DATASET_ID}/"
+        "instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
     )
-    assert "selected_strategy: per_instrument" in contract_text
-    assert "intentionally_single_instrument_only: false" in contract_text
-    assert pointer_contract in contract_text
-    assert "legacy_artifact_level_pointer_status: existing_usdrubf_legacy_only_not_allowed_for_new_instrument_onboarding_or_scheduler" in contract_text
-    assert "legacy_artifact_level_pointer_compatibility_rule: fallback_allowed_only_for_existing_usdrubf_when_per_instrument_pointer_is_absent" in contract_text
-    assert "legacy_artifact_level_pointer_migration_rule: no_silent_migration_runner_reads_existing_usdrubf_legacy_pointer_until_operator_creates_per_instrument_pointer" in contract_text
-    assert "new_instrument_legacy_pointer_fallback_allowed: false" in contract_text
-    assert "latest_file_autodetect_allowed: false" in contract_text
-    assert "glob_discovery_allowed: false" in contract_text
-    assert "implicit_path_selection_allowed: false" in contract_text
+    quote_pointer = (
+        "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_raw_5m/"
+        "instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+    )
+    assert pointer_contract in architecture
+    assert quote_pointer in quote_dataset
+    assert "secid_partition_allowed: false" in architecture
+    assert "new_instrument_legacy_pointer_fallback_allowed: false" in architecture
+    assert "latest_autodetect_allowed: false" in architecture
+    assert "direct_dynamic_scan_allowed: false" in architecture
+    assert "implicit_path_selection_allowed: false" in architecture
 
 
-def test_registry_required_fields_are_documented_in_contract_and_registry():
-    contract_text = _read(CONTRACT_PATH)
-    registry_text = _read(REGISTRY_PATH)
+def test_registry_required_fields_are_documented_in_architecture_and_registry():
+    architecture = _read(ARCHITECTURE_PATH)
+    registry = _read(REGISTRY_PATH)
     for field in REQUIRED_REGISTRY_FIELDS:
-        assert field in contract_text
-        assert field in registry_text
+        assert field in architecture or field in registry
+        assert field in registry
 
 
-def test_onboarding_sequence_is_explicit_in_contract_registry_and_docs():
-    contract_text = _read(CONTRACT_PATH)
-    registry_text = _read(REGISTRY_PATH)
-    docs_text = _read(DOC_PATH)
-    for step in REQUIRED_ONBOARDING_STEPS:
-        assert step in contract_text
-        assert step in registry_text
-    assert "Run one-date pilot materialization" in docs_text
-    assert "Run full backfill" in docs_text
-    assert "Create the per-instrument accepted pointer" in docs_text
-    assert "Run observed-source refresh check" in docs_text
-    assert "Backward compatibility" in docs_text
-    assert "forts.usdrubf" in docs_text
-    assert "does not silently migrate pointer state" in docs_text
+def test_onboarding_sequence_is_explicit_in_canonical_runbook():
+    runbook = _read(RUNBOOK_PATH)
+    assert "Read exact instrument binding" in runbook
+    assert "Load one explicit date first" in runbook
+    assert "Only then run the approved historical range" in runbook
+    assert "Audit physical partitions against the aggregate manifest before acceptance" in runbook
+    assert "Run one explicit-date materialization" in runbook
+    assert "Reconcile `partitions_written + partitions_skipped`" in runbook
+    assert "Do not create or update an accepted pointer unless the active acceptance gate explicitly authorizes it" in runbook
+    assert "GitHub/repository is Source of Truth" in runbook
+    assert "Server filesystem is Applied State only" in runbook
 
 
-def test_production_scheduler_policy_requires_observed_source_and_blocks_calendar_cron():
-    contract_text = _read(CONTRACT_PATH)
-    registry_text = _read(REGISTRY_PATH)
-    docs_text = _read(DOC_PATH)
-    assert "required_incremental_mode: observed-source" in contract_text
-    assert "required_cli_argument: --incremental-mode observed-source" in contract_text
-    assert "calendar_mode_allowed_for_server_cron: false" in contract_text
-    assert "calendar_mode_blocked_until: moex_calendar_endpoint_contract_resolved" in contract_text
-    assert "cron_or_systemd_change_in_this_patch_allowed: false" in contract_text
-    assert "server_apply_in_this_patch_allowed: false" in contract_text
-    assert "d1_enablement_in_this_patch_allowed: false" in contract_text
-    assert "required_incremental_mode: observed-source" in registry_text
-    assert "calendar_mode_allowed_for_server_cron: false" in registry_text
-    assert "--incremental-mode observed-source" in docs_text
-    assert "Calendar mode is not allowed for server cron" in docs_text
+def test_scheduler_and_runtime_remain_blocked_after_raw_backfill_completion():
+    architecture = _read(ARCHITECTURE_PATH)
+    data_lake = _read(DATA_LAKE_PATH)
+    runbook = _read(RUNBOOK_PATH)
+    assert "historical_quotes_backfill_completed: true" in data_lake
+    assert "priority_futoi_raw_backfill_completed: true" in data_lake
+    assert "observed_source_refresh_ready: false" in data_lake
+    assert "scheduler_ready: false" in data_lake
+    assert "d1_materialization_ready: false" in data_lake
+    assert "research_ready: false" in data_lake
+    assert "accepted_pointer_ready: false" in data_lake
+    assert "server_apply_requires_merged_github_contract: true" in architecture
+    assert "accepted pointer remains absent until the architecture gate enables it" in runbook
+
+
+def test_legacy_ingestion_contracts_are_not_architecture_proof():
+    architecture = _read(ARCHITECTURE_PATH)
+    runbook = _read(RUNBOOK_PATH)
+    assert "legacy_contract_as_architecture_proof_allowed: false" in architecture
+    assert "obsolete_ingestion_markdown_contracts_allowed_in_canonical_contract_tree: false" in architecture
+    assert "`${MOEX_DATA_ROOT}/futures/raw_5m/...`" in runbook
+    assert "`${MOEX_DATA_ROOT}/futures/futoi_raw/...`" in runbook
+    assert "`${MOEX_DATA_ROOT}/forts/raw_5m/...` for new writes" in runbook
