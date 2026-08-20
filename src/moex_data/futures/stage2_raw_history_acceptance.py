@@ -188,6 +188,27 @@ def _expectation(repo_root: Path, target_dataset_id: str, instrument_id: str) ->
             _fail("repository FUTOI physical quality evidence is not pass")
         if _require_int(item.get("bad_partitions"), "bad_partitions") != 0:
             _fail("repository FUTOI bad_partitions must be zero")
+
+        binding = futoi_materializer._registry_binding(
+            repo_root / futoi_materializer.REGISTRY_PATH, instrument_id
+        )
+        if str(binding.get("futoi.source_id")) != FUTOI_SOURCE_ID:
+            _fail("registry FUTOI source_id does not match canonical source")
+        if str(binding.get("futoi.availability_status")) != "available":
+            _fail("registry FUTOI availability_status is not available")
+        if str(binding.get("futoi.probe_status")) != "completed":
+            _fail("registry FUTOI probe_status is not completed")
+        if str(binding.get("board")).casefold() != EXPECTED_BOARD.casefold():
+            _fail("registry FUTOI board identity mismatch")
+        if str(binding.get("market")).casefold() != EXPECTED_MARKET.casefold():
+            _fail("registry FUTOI market identity mismatch")
+        if str(binding.get("engine")).casefold() != EXPECTED_ENGINE.casefold():
+            _fail("registry FUTOI engine identity mismatch")
+        registry_ticker = _require_token(binding.get("futoi.ticker"), "registry.futoi.ticker")
+        configured_ticker = _require_token(item.get("ticker"), "ticker")
+        if registry_ticker.casefold() != configured_ticker.casefold():
+            _fail("repository FUTOI ticker evidence does not match registry binding")
+
         return HistoryExpectation(
             target_dataset_id=FUTOI_DATASET_ID,
             instrument_id=instrument_id,
@@ -196,7 +217,8 @@ def _expectation(repo_root: Path, target_dataset_id: str, instrument_id: str) ->
             date_end=_require_date(item.get("last_available"), "last_available"),
             expected_partitions=_require_int(item.get("partitions"), "partitions"),
             expected_rows=_require_int(item.get("rows"), "rows"),
-            expected_source_ticker=_require_token(item.get("ticker"), "ticker"),
+            expected_secid=_require_token(binding.get("secid"), "registry.secid"),
+            expected_source_ticker=registry_ticker,
             expected_missing_dates=_require_int(item.get("skipped_empty_source_dates"), "skipped_empty_source_dates"),
         )
 
@@ -385,6 +407,9 @@ def _validate_futoi_partition(
         ("engine", EXPECTED_ENGINE, True),
     ):
         _require_stored_identity(frame, field, expected, casefold=casefold)
+    if expectation.expected_secid is None:
+        _fail("FUTOI expected secid is missing from registry binding")
+    _require_stored_identity(frame, "secid", expectation.expected_secid, casefold=True)
     if not bool(frame["trade_date"].astype(str).eq(trade_date).all()):
         _fail("FUTOI partition trade_date mismatch")
     if expectation.expected_source_ticker is None:
@@ -418,6 +443,19 @@ def _validate_futoi_partition(
     if bool((ingest_utc < availability_utc).any()):
         _fail("FUTOI ingest timestamp precedes availability timestamp")
 
+    position_values = {
+        field: pd.to_numeric(frame[field], errors="coerce")
+        for field in ("pos", "pos_long", "pos_short")
+    }
+    if any(bool(values.isna().any()) for values in position_values.values()):
+        _fail("FUTOI partition contains invalid numeric position values")
+    if not bool(
+        position_values["pos"].eq(
+            position_values["pos_long"] + position_values["pos_short"]
+        ).all()
+    ):
+        _fail("FUTOI net position must equal pos_long plus pos_short")
+
     normalized = futoi_materializer._validate_required_source_identifiers(frame)
     counts = futoi_materializer._quality_counts(normalized)
     if int(counts["duplicate_key_count"]) != 0:
@@ -428,8 +466,6 @@ def _validate_futoi_partition(
         _fail("FUTOI partition contains invalid position values")
 
     secid_text = frame["secid"].astype("string").str.strip()
-    if bool(secid_text.isna().any()) or bool(secid_text.eq("").any()):
-        _fail("FUTOI partition contains missing secid")
     secids = tuple(sorted(set(secid_text.astype(str).tolist())))
     return int(len(frame)), secids
 
@@ -493,9 +529,8 @@ def audit_history(
         hard_failures.append("recorded_source_empty_date_count_mismatch")
     if failed_dates:
         hard_failures.append("failed_partition_dates_nonempty")
-    if checked_dataset == QUOTE_DATASET_ID:
-        if expectation.expected_secid is None or secid_scope != {expectation.expected_secid}:
-            hard_failures.append("quote_secid_scope_mismatch")
+    if expectation.expected_secid is not None and secid_scope != {expectation.expected_secid}:
+        hard_failures.append("secid_scope_mismatch")
 
     output_path = _acceptance_path(root, expectation, checked_run_id)
     status = "pass" if not hard_failures else "fail"
