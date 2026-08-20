@@ -1,0 +1,78 @@
+contract_id: futures_raw_history_acceptance.v1
+dataset_id: futures_raw_history_acceptance
+artifact_class: external_pattern
+producer: moex_data.futures.stage2_raw_history_acceptance
+consumers:
+  - moex_data.futures.accepted_manifest_promotion
+format: json
+schema_version: futures_raw_history_acceptance.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/dataset_id={DATASET_ID}/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}/acceptance_report.json"
+grain: full_history_acceptance_by_dataset_and_instrument
+status_values:
+  - pass
+  - fail
+required_fields:
+  - run_id
+  - dataset_id
+  - instrument_id
+  - source_id
+  - secid
+  - requested_from
+  - requested_till
+  - expected_partition_count
+  - actual_partition_count
+  - expected_row_count
+  - actual_row_count
+  - missing_partition_dates
+  - failed_partition_dates
+  - hard_check_failures
+  - acceptance_status
+  - accepted_pointer_written
+  - network_access_used
+  - historical_backfill_used
+hard_gate:
+  expected_partition_count_match: true
+  expected_row_count_match: true
+  failed_partition_dates_empty: true
+  hard_check_failures_empty: true
+  accepted_pointer_written: false
+  network_access_used: false
+  historical_backfill_used: false
+lane_rules:
+  quotes:
+    dataset_id: futures_raw_5m
+    source_id: moex_algopack_fo_tradestats_5m
+    allowed_instrument_ids:
+      - usdrubf_futures_family
+      - cnyrubf_futures_family
+  futoi:
+    dataset_id: futures_futoi_raw
+    source_id: moex_algopack_futoi
+    transport: authenticated_apim_source_history_already_materialized
+    public_iss_transport_allowed: false
+    allowed_instrument_ids:
+      - si_futures_family
+      - cr_futures_family
+    raw_source_record_key_fields:
+      - trade_date
+      - sess_id
+      - seqnum
+      - secid
+      - clgroup
+    systime_as_raw_identity_allowed: false
+pointer_policy:
+  this_gate_writes_current_accepted_manifest: false
+  pointer_promotion_is_separate_step: true
+  pointer_promotion_requires_acceptance_status: pass
+execution_boundary:
+  reads_existing_canonical_parquet_only: true
+  network_access_allowed: false
+  historical_backfill_allowed: false
+  implicit_partition_discovery_allowed: false
+  latest_autodetect_allowed: false
+path_rules:
+  storage_root: env_contract
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+retention_policy: keep_all_acceptance_reports
