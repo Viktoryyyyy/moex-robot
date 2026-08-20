@@ -45,8 +45,11 @@ def test_raw_history_acceptance_is_registered_and_fail_closed() -> None:
     assert "materialize_instrument_partition(" not in validator
     assert "materialize_futoi_partition(" not in validator
     assert "requests." not in validator
+    assert "def main(" not in validator
     assert "partition contains missing stored identity" in validator
     assert "partition stored identity mismatch" in validator
+    assert "quote partition ts date mismatch" in validator
+    assert "FUTOI availability timestamp precedes source publication timestamp" in validator
 
     assert "accepted_pointer_ready: false" in config
     assert "scheduler_ready: false" in config
