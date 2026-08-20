@@ -2,6 +2,7 @@ config_id: futures_data_lake.v1
 artifact_class: repo_relative
 repo_path: configs/datasets/futures_data_lake.v1.yaml
 architecture_contract_ref: contracts/architecture/moex_data_access_canon_v1.yaml
+ingestion_runbook_ref: docs/data/futures_data_ingestion_runbook.md
 external_storage_root:
   artifact_id: moex_data_root
   artifact_class: env_contract
@@ -58,6 +59,9 @@ instrument_scope:
     - cnyrubf_futures_family
     - si_futures_family
     - cr_futures_family
+  stage2_priority_futoi_historical_instrument_ids:
+    - si_futures_family
+    - cr_futures_family
   explicit_instrument_id_required: true
   explicit_source_id_required: true
   explicit_secid_required: true
@@ -73,7 +77,7 @@ instrument_scope:
     - 1h
     - 4h
 market_data_storage_policy:
-  status: stage2_all_pilots_passed_backfill_ready
+  status: stage2_raw_historical_backfills_completed_acceptance_pending
   canonical_new_write_root: "${MOEX_DATA_ROOT}/market"
   raw_quotes_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
   futoi_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
@@ -83,8 +87,8 @@ market_data_storage_policy:
   legacy_roots:
     - "${MOEX_DATA_ROOT}/forts"
     - "${MOEX_DATA_ROOT}/futures"
-  legacy_root_status: compatibility_only_migration_required
-  physical_data_migration_status: pending_separate_migration
+  legacy_root_status: compatibility_only_no_new_writes
+  physical_data_migration_status: not_required_for_stage2_acceptance
 phase2_6_source_bindings:
   status: design_config_binding_only
   readiness_flags:
@@ -126,14 +130,17 @@ phase2_6_source_bindings:
     - no model fitting
     - no prediction
 stage2_forts_source_bindings:
-  status: all_pilots_passed_backfill_ready
-  evidence_date: "2026-08-18"
+  status: raw_historical_backfills_completed_acceptance_pending
+  evidence_date: "2026-08-20"
   quote_source:
     source_id: moex_algopack_fo_tradestats_5m
     source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+    dataset_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
+    producer_ref: src/moex_data/futures/materialize_forts_raw_5m_instrument.py
     authentication_env: MOEX_API_KEY
     availability_status: proven
     pilot_status: passed
+    historical_backfill_status: completed_and_physically_validated
     historical_backfill_instrument_ids:
       - usdrubf_futures_family
       - cnyrubf_futures_family
@@ -146,10 +153,18 @@ stage2_forts_source_bindings:
         secid: USDRUBF
         first_available: "2022-04-26"
         last_available: "2026-08-17"
+        partitions: 1100
+        rows: 181139
+        physical_quality_status: pass
+        market_spotcheck_status: pass
       cnyrubf_futures_family:
         secid: CNYRUBF
         first_available: "2022-04-26"
         last_available: "2026-08-17"
+        partitions: 1100
+        rows: 174825
+        physical_quality_status: pass
+        market_spotcheck_status: pass
       si_futures_family:
         secid: SiU6
         first_available: "2024-09-18"
@@ -168,23 +183,54 @@ stage2_forts_source_bindings:
   futoi_source:
     source_id: moex_algopack_futoi
     source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v1.yaml
+    dataset_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
+    producer_ref: src/moex_data/futures/materialize_futoi_instrument.py
+    backfill_producer_ref: src/moex_data/futures/backfill_futoi_instrument.py
     authentication_env: MOEX_API_KEY
     availability_status: proven
     pilot_status: passed
-    stage2_instrument_ids:
-      - usdrubf_futures_family
-      - cnyrubf_futures_family
-      - si_futures_family
-      - cr_futures_family
     public_iss_evidence_status: invalidated
     apim_revalidation_required: false
+    raw_timestamp_semantics: source_reference_moment
+    raw_source_record_key_fields:
+      - trade_date
+      - sess_id
+      - seqnum
+      - secid
+      - clgroup
+    historical_priority_backfill_status: completed_and_physically_validated
+    historical_priority_backfills:
+      si_futures_family:
+        ticker: si
+        first_available: "2020-01-03"
+        last_available: "2026-08-17"
+        partitions: 1757
+        rows: 597650
+        skipped_empty_source_dates: 662
+        bad_partitions: 0
+        physical_quality_status: pass
+      cr_futures_family:
+        ticker: cr
+        first_available: "2022-04-21"
+        last_available: "2026-08-17"
+        partitions: 1177
+        rows: 390474
+        skipped_empty_source_dates: 403
+        bad_partitions: 0
+        physical_quality_status: pass
+    available_stage2_tickers:
+      usdrubf_futures_family: usdrubf
+      cnyrubf_futures_family: cnyrubf
+      si_futures_family: si
+      cr_futures_family: cr
   readiness_flags:
     source_identity_ready: true
     quote_pilot_ready: true
     futoi_pilot_ready: true
     backfill_ready: true
-    historical_quotes_backfill_ready: true
-    futoi_backfill_ready: true
+    historical_quotes_backfill_completed: true
+    priority_futoi_raw_backfill_completed: true
+    raw_physical_audit_completed: true
     reference_full_historical_backfill_required: false
     accepted_pointer_ready: false
     observed_source_refresh_ready: false
@@ -200,7 +246,7 @@ stage2_forts_source_bindings:
     unknown_availability_ts_utc_rule: exclude_or_shift_by_at_least_one_trading_day
   explicit_non_authorizations:
     - no FUTOI public ISS transport or fallback
-    - no multi-year historical quote backfill for SiU6 or CRU6 in Stage 2
+    - no multi-year historical quote backfill for one fixed Si or CR expiry in Stage 2
     - no scheduler before observed-source refresh pass
     - no automatic Si or CR roll selection in Stage 2
     - no D1/W1 derivation before raw acceptance
