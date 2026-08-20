@@ -75,6 +75,25 @@ def _repo(tmp_path: Path) -> Path:
 """,
     )
     _write(
+        root / "configs/instruments/forts_instrument_registry.v1.yaml",
+        """registry_id: forts_instrument_registry.v1
+instruments:
+  - instrument_id: si_futures_family
+    canonical_symbol: Si
+    secid: SiU6
+    board: RFUD
+    market: forts
+    engine: futures
+    supplementary_sources:
+      futures_futoi_raw:
+        source_id: moex_algopack_futoi
+        ticker: si
+        availability_status: available
+        probe_status: completed
+        enabled_for_materialization: false
+""",
+    )
+    _write(
         root / "contracts/datasets/futures_raw_5m.v1.yaml",
         """dataset_id: futures_raw_5m
 path_pattern: "${MOEX_DATA_ROOT}/market/raw/timeframe=5m/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet"
