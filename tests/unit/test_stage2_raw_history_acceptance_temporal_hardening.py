@@ -55,6 +55,7 @@ def _futoi_expectation() -> acceptance.HistoryExpectation:
         date_end="2026-08-17",
         expected_partitions=1,
         expected_rows=2,
+        expected_secid="SiU6",
         expected_source_ticker="si",
         expected_missing_dates=0,
     )
@@ -126,4 +127,18 @@ def test_futoi_ingest_cannot_precede_availability() -> None:
         ["2026-08-17T10:01:30Z", "2026-08-17T10:01:30Z"]
     )
     with pytest.raises(acceptance.RawHistoryAcceptanceError, match="precedes availability"):
+        acceptance._validate_futoi_partition(frame, _futoi_expectation(), "2026-08-17")
+
+
+def test_futoi_secid_must_match_registry_expectation() -> None:
+    frame = _futoi_frame()
+    frame["secid"] = "CRU6"
+    with pytest.raises(acceptance.RawHistoryAcceptanceError, match="stored identity mismatch: secid"):
+        acceptance._validate_futoi_partition(frame, _futoi_expectation(), "2026-08-17")
+
+
+def test_futoi_net_position_must_equal_long_plus_short() -> None:
+    frame = _futoi_frame()
+    frame.loc[0, "pos"] = 999
+    with pytest.raises(acceptance.RawHistoryAcceptanceError, match="net position must equal"):
         acceptance._validate_futoi_partition(frame, _futoi_expectation(), "2026-08-17")
