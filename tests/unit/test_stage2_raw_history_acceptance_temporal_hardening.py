@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -112,6 +113,28 @@ def test_quote_session_date_must_match_partition_trade_date() -> None:
         )
 
 
+def test_quote_required_numeric_cannot_be_infinite() -> None:
+    frame = _quote_frame()
+    frame["volume"] = np.inf
+    with pytest.raises(acceptance.RawHistoryAcceptanceError, match="non-finite numeric value: volume"):
+        acceptance._validate_quote_partition(
+            Path("."), frame, _quote_expectation(), "2026-08-17", "test_run"
+        )
+
+
+def test_quote_optional_numeric_may_be_null_but_not_infinite() -> None:
+    frame = _quote_frame()
+    frame["value"] = np.nan
+    acceptance._validate_quote_partition(
+        Path("."), frame, _quote_expectation(), "2026-08-17", "test_run"
+    )
+    frame["value"] = np.inf
+    with pytest.raises(acceptance.RawHistoryAcceptanceError, match="non-finite value"):
+        acceptance._validate_quote_partition(
+            Path("."), frame, _quote_expectation(), "2026-08-17", "test_run"
+        )
+
+
 def test_futoi_availability_cannot_precede_publication() -> None:
     frame = _futoi_frame()
     frame["availability_ts_utc"] = pd.to_datetime(
@@ -141,4 +164,11 @@ def test_futoi_net_position_must_equal_long_plus_short() -> None:
     frame = _futoi_frame()
     frame.loc[0, "pos"] = 999
     with pytest.raises(acceptance.RawHistoryAcceptanceError, match="net position must equal"):
+        acceptance._validate_futoi_partition(frame, _futoi_expectation(), "2026-08-17")
+
+
+def test_futoi_position_fields_must_be_finite() -> None:
+    frame = _futoi_frame()
+    frame.loc[0, "pos_long_num"] = np.inf
+    with pytest.raises(acceptance.RawHistoryAcceptanceError, match="non-finite numeric value: pos_long_num"):
         acceptance._validate_futoi_partition(frame, _futoi_expectation(), "2026-08-17")
