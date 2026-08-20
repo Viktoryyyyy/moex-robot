@@ -1,0 +1,27 @@
+contract_id: forts_raw_5m_tradestats.v1
+status: deprecated_runtime_compatibility_only
+ingestion_source_of_truth: false
+canonical_dataset_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
+canonical_source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+canonical_architecture_ref: contracts/architecture/moex_data_access_canon_v1.yaml
+canonical_runbook_ref: docs/data/futures_data_ingestion_runbook.md
+
+legacy_incremental_calendar_compatibility:
+  consumer_ref: src/moex_data/futures/refresh_forts_raw_5m_incremental_pointer.py
+  calendar_source_artifact_id: external.moex.iss.futures_calendar.v1
+  calendar_base_url_env: MOEX_CALENDAR_BASE_URL
+  calendar_cli_argument: --calendar-base-url
+  moex_api_url_calendar_base_assumption_allowed: false
+  fail_closed_errors:
+    - calendar_fetch_non_json_response
+    - calendar_response_missing_off_days_table
+  calendar_binding_status: observed_source_calendar_fallback
+  scheduler_status_note: MOEX calendar endpoint unresolved for server scheduler
+  production_incremental_mode: --incremental-mode observed-source
+  skipped_empty_source_dates_recorded: true
+
+rules:
+  use_for_new_data_loading: false
+  use_for_new_instrument_onboarding: false
+  use_as_architecture_proof: false
+  legacy_runtime_code_removal_required_before_contract_deletion: true
