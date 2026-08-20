@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Sequence
 
 from . import accepted_manifest
+from . import materialize_forts_raw_5m_instrument as quote_materializer
 from . import stage2_raw_history_acceptance as acceptance
 
 
@@ -117,7 +118,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        acceptance.quote_materializer.load_env_file(args.env_file)
+        quote_materializer.load_env_file(args.env_file)
         payload = run_gate(
             repo_root=args.repo_root,
             target_dataset_id=args.target_dataset_id,
