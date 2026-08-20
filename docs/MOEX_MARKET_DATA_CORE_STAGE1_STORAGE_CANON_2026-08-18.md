@@ -1,46 +1,60 @@
 # MOEX Market Data Core — Stage 1 Storage Canon
 
-status: architecture_fixed_migration_pending
-task_id: market_data_core_stage1_storage_canon_20260818
+status: canonical_storage_architecture_applied
+updated_at: 2026-08-20
 source_of_truth: GitHub repository `Viktoryyyyy/moex-robot`
 architecture_contract: `contracts/architecture/moex_data_access_canon_v1.yaml`
+canonical_ingestion_runbook: `docs/data/moex_market_data_ingestion_runbook.v1.md`
 
 ## Result
 
-Stage 1 fixes one architecture for future MOEX market-data materialization without moving existing server data.
+The canonical market-data storage architecture is now implemented by the active Stage2 Quotes and FUTOI producers.
 
-Canonical writes use `${MOEX_DATA_ROOT}/market`. Quotes use the raw lane. FUTOI uses the supplementary lane. FUTOI is never embedded into quote partitions and has its own quality result, manifest and accepted pointer.
+Canonical new writes use `${MOEX_DATA_ROOT}/market`:
 
-New instrument onboarding and new dataset creation must not extend the existing `${MOEX_DATA_ROOT}/forts` or `${MOEX_DATA_ROOT}/futures` storage roots.
+- Quotes → `${MOEX_DATA_ROOT}/market/raw/...`
+- FUTOI → `${MOEX_DATA_ROOT}/market/supplementary/...`
+
+Accepted pointers use `dataset_id + instrument_id`:
+
+`${MOEX_DATA_ROOT}/state/datasets/dataset_id={DATASET_ID}/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json`
+
+Server filesystem remains Applied State only. `MOEX_DATA_ROOT` is an environment contract and no server-specific data-root value is architectural canon.
 
 ## Canonical contracts
 
-Quotes are defined by `contracts/datasets/futures_raw_5m.v1.yaml`.
+Quotes:
 
-FUTOI is defined by `contracts/datasets/futures_futoi_raw.v1.yaml`.
+- `contracts/datasets/futures_raw_5m.v1.yaml`
+- `contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml`
 
-Accepted pointers use the canonical `dataset_id + instrument_id` model defined by `contracts/architecture/moex_data_access_canon_v1.yaml` and implemented by `src/moex_data/futures/accepted_manifest.py`.
+FUTOI:
 
-## Known storage drift
+- `contracts/datasets/futures_futoi_raw.v1.yaml`
+- `contracts/sources/futures/moex_algopack_futoi.v1.yaml`
 
-Compatibility-only migration targets identified from repository code:
+Instrument bindings:
 
-- `src/moex_data/futures/materialize_forts_raw_5m_tradestats.py` uses the legacy `forts/raw_5m/tradestats` root.
-- `src/moex_data/futures/materialize_forts_raw_5m_instrument.py` uses the legacy `forts/raw_5m/tradestats` root.
-- `src/moex_data/futures/raw_5m_loader.py` uses the legacy `futures/raw_5m` root.
-- `src/moex_data/futures/futoi_raw_loader.py` uses the legacy `futures/futoi_raw` root.
-- `src/moex_data/futures/refresh_forts_raw_5m_incremental_pointer.py` uses a legacy pointer structure based on `artifact_id` and `secid`.
+- `configs/instruments/forts_instrument_registry.v1.yaml`
 
-These implementations remain compatibility-only until migrated. They are not authorized for onboarding new instruments.
+Data-lake scope/readiness:
 
-## Stage 1 boundaries
+- `configs/datasets/futures_data_lake.v1.yaml`
 
-Stage 1 does not move or delete server data, enable registry entries, change schedulers, invent source identities, or declare FUTOI availability without source evidence.
+## Legacy storage
 
-Server filesystem remains Applied State only and is not architecture proof.
+The following are compatibility-only and forbidden for new ingestion:
 
-## Stage 2 entry gate
+- `${MOEX_DATA_ROOT}/forts/...`
+- `${MOEX_DATA_ROOT}/futures/raw_5m/...`
+- `${MOEX_DATA_ROOT}/futures/futoi_raw/...`
+- artifact_id/SECID accepted-pointer partitioning
+- family as canonical storage identity
 
-Before a FORTS instrument is enabled, Stage 2 must establish its exact registry and source identity from GitHub evidence. If GitHub does not contain the required fact, use an explicit server/source probe and do not invent request-field names.
+Legacy compatibility modules may remain until a separate removal task proves they have no required consumers. Their contracts are not architecture proof.
 
-Stage 2 then migrates the active FORTS Quotes and FUTOI producers to the canonical `market` paths and canonical accepted-pointer model before enabling new instruments.
+## Current boundary
+
+Storage architecture and canonical writers are applied. Raw-history validation for Stage2 core lanes is recorded in `configs/datasets/futures_data_lake.v1.yaml` and the Stage2 status note.
+
+Accepted-pointer creation, observed-source refresh, scheduler, D1/W1 and research enablement remain separate later gates.

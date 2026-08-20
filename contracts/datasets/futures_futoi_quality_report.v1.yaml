@@ -24,6 +24,9 @@ required_fields:
   - source_id
   - secid
   - futoi_ticker
+  - board
+  - market
+  - engine
   - trade_date
   - quality_status
   - row_count
@@ -32,9 +35,21 @@ required_fields:
   - invalid_position_count
   - availability_status
   - probe_status
+  - timestamp_semantics
+  - source_record_key_fields
+  - exact_duplicate_rows_dropped
+  - failure_reasons
+  - quality_contract_ref
 allowed_quality_status:
   - pass
   - fail
+expected_timestamp_semantics: "ts=source_reference_moment;systime=source_publication_metadata"
+expected_source_record_key_fields:
+  - trade_date
+  - sess_id
+  - seqnum
+  - secid
+  - clgroup
 hard_checks:
   - row_count_positive
   - duplicate_key_count_zero
@@ -42,6 +57,8 @@ hard_checks:
   - invalid_position_count_zero
   - availability_status_available
   - probe_status_completed
+  - timestamp_semantics_match
+  - source_record_key_match
 fail_blocks_pointer_update: true
 path_rules:
   storage_root: env_contract

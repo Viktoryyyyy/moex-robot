@@ -1,135 +1,140 @@
 # MOEX Market Data Core — Stage 2 FORTS Change
 
-Date: 2026-08-18
-Status: all_pilots_passed_backfill_ready
+Date: 2026-08-20
+Status: raw_history_validated_acceptance_pending
+Source of Truth: GitHub repository `Viktoryyyyy/moex-robot`
+Canonical ingestion runbook: `docs/data/moex_market_data_ingestion_runbook.v1.md`
 
 ## Scope
 
-Stage 2 canonical FORTS lanes:
+Stage2 bindings remain explicit:
 
-- `usdrubf_futures_family` → Quotes `USDRUBF`, FUTOI `usdrubf`;
-- `cnyrubf_futures_family` → Quotes `CNYRUBF`, FUTOI `cnyrubf`;
-- `si_futures_family` → Quotes explicit current contract `SiU6`, FUTOI family ticker `si`;
-- `cr_futures_family` → Quotes explicit current contract `CRU6`, FUTOI family ticker `cr`.
+- `usdrubf_futures_family` → Quotes `USDRUBF`, FUTOI ticker `usdrubf`;
+- `cnyrubf_futures_family` → Quotes `CNYRUBF`, FUTOI ticker `cnyrubf`;
+- `si_futures_family` → Quotes current explicit reference `SiU6`, FUTOI ticker `si`;
+- `cr_futures_family` → Quotes current explicit reference `CRU6`, FUTOI ticker `cr`.
 
-For `SiU6` and `CRU6`, observed expiration and last-trade date is `2026-09-17`. Automatic roll selection is not enabled.
+`SiU6` and `CRU6` expire/last-trade on `2026-09-17`. Automatic roll selection remains disabled.
 
-## Quotes — pilot accepted
+## Quotes
 
 Canonical source:
 
-- source_id: `moex_algopack_fo_tradestats_5m`;
-- contract: `contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml`;
-- host: `apim.moex.com`;
-- authentication: Bearer `MOEX_API_KEY`;
-- canonical fetch route: `/iss/datashop/algopack/fo/tradestats.json`;
-- exact partition request uses the explicit `date`, `from`, `till`, `secid`, `start`, `iss.meta`, and `iss.only` fields defined by the source contract.
+- `source_id=moex_algopack_fo_tradestats_5m`
+- contract `contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml`
+- APIM host `apim.moex.com`
+- Bearer `MOEX_API_KEY`
+- endpoint `/iss/datashop/algopack/fo/tradestats.json`
 
-The one-date server pilot for `2026-08-17` passed for all four identities with 203 rows per instrument and zero duplicate, gap, null-OHLC, or invalid-OHLC counts.
+Canonical dataset:
 
-Canonical Quotes storage:
+- `contracts/datasets/futures_raw_5m.v1.yaml`
+- `${MOEX_DATA_ROOT}/market/raw/timeframe=5m/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet`
 
-`${MOEX_DATA_ROOT}/market/raw/timeframe=5m/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet`
+Validated historical core:
 
-Canonical Quotes pointer:
+| instrument_id | range | partitions | rows | status |
+|---|---|---:|---:|---|
+| `usdrubf_futures_family` | 2022-04-26 → 2026-08-17 | 1100 | 181139 | PASS |
+| `cnyrubf_futures_family` | 2022-04-26 → 2026-08-17 | 1100 | 174825 | PASS |
 
-`${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_raw_5m/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json`
+Physical history audits found zero bad partitions. Market spot-checks against official MOEX delayed snapshots passed.
 
-### Quotes coverage status
+`SiU6` and `CRU6` remain reference SECIDs only in Stage2; multi-year fixed-contract Quotes backfill is not required.
 
-A later server coverage probe using the per-SECID availability route with a broad interval returned `null` for all four Quotes identities. This result is not accepted as history evidence because it did not reproduce the canonical materializer request shape. The canonical writer uses the generic `/tradestats.json` route with an explicit date partition request.
+## FUTOI
 
-Therefore:
+Canonical source:
 
-- Quotes pilot status: passed;
-- Stage 2 controlled Quotes backfill readiness: true;
-- global `enabled_for_raw_5m_materialization`: false;
-- Quotes historical first-available date: pending canonical exact-route reprobe;
-- the invalid broad per-SECID coverage result must not be used as evidence of absent history.
+- `source_id=moex_algopack_futoi`
+- contract `contracts/sources/futures/moex_algopack_futoi.v1.yaml`
+- APIM host `apim.moex.com`
+- Bearer `MOEX_API_KEY`
+- endpoint namespace `/iss/analyticalproducts/futoi/securities/{TICKER}.json`
+- public `iss.moex.com` transport/fallback forbidden
+- `latest=0`
 
-Canonical coverage probe:
+Canonical dataset:
 
-`moex_data.futures.probe_forts_tradestats_coverage`
+- `contracts/datasets/futures_futoi_raw.v1.yaml`
+- `${MOEX_DATA_ROOT}/market/supplementary/dataset_id=futures_futoi_raw/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet`
 
-Controlled backfill producer:
+### Corrected time and revision semantics
+
+Official/source revalidation established:
+
+- `tradetime` is the last-trade time included in the calculation;
+- canonical raw `ts = moment = tradedate + tradetime`;
+- `systime` is source publication metadata;
+- historical APIM rows can share a later archival/republication `systime`, so `systime` is not the historical event identity;
+- `seqnum` is a technical source package number.
+
+Canonical raw source-record key:
+
+`trade_date + sess_id + seqnum + secid + clgroup`
+
+Same `moment` with a different source-record identity is preserved in raw. Revision resolution is deferred to a separate derived analytical layer.
+
+### Validated FUTOI histories
+
+| instrument_id | range | partitions | rows | source-empty dates | status |
+|---|---|---:|---:|---:|---|
+| `si_futures_family` | 2020-01-03 → 2026-08-17 | 1757 | 597650 | 662 | PASS |
+| `cr_futures_family` | 2022-04-21 → 2026-08-17 | 1177 | 390474 | 403 | PASS |
+
+Both physical audits found:
+
+- `BAD_PARTITIONS=0`;
+- source-record duplicates `0`;
+- FIZ/YUR identity valid;
+- requested calendar range fully reconciled as written partitions + explicit source-empty dates.
+
+The only 2-row partition, `2025-01-02`, was explicitly validated as one FIZ and one YUR source record.
+
+FUTOI availability is also proven for `usdrubf` and `cnyrubf`, but their full corrected raw-history materialization is not asserted by this Stage2 validated-history baseline.
+
+## Canonical producers
+
+Quotes single partition:
+
+`moex_data.futures.materialize_forts_raw_5m_instrument`
+
+Quotes controlled historical backfill:
 
 `moex_data.futures.backfill_stage2_forts_raw_5m_instrument`
 
-It requires `evidence_status=pilot_passed` plus Stage 2 `backfill_ready=true` while the generic runtime/materialization flag remains false.
+FUTOI single partition:
 
-## FUTOI — public ISS invalidated, APIM accepted
+`moex_data.futures.materialize_futoi_instrument`
 
-The original public `iss.moex.com` FUTOI availability conclusion was invalid because a one-row `ERROR_MESSAGE` payload had been interpreted as data availability. Public ISS transport and fallback are now forbidden for FUTOI by repository guard.
-
-Canonical FUTOI source:
-
-- source_id: `moex_algopack_futoi`;
-- contract: `contracts/sources/futures/moex_algopack_futoi.v1.yaml`;
-- host: `apim.moex.com`;
-- authentication: Bearer `MOEX_API_KEY`;
-- route namespace: `/iss/analyticalproducts/futoi/securities/{TICKER}.json` on the APIM host;
-- response block: `futoi`;
-- public ISS transport: forbidden;
-- public ISS fallback: forbidden;
-- `ERROR_MESSAGE` payload: fail closed.
-
-Authenticated APIM revalidation on 2026-08-18 proved the required FUTOI schema for `usdrubf`, `cnyrubf`, `si`, and `cr`. The one-date canonical materialization pilot for `2026-08-17` passed for all four identities with `quality_status=pass`, 2 rows each, no hardcoded path, no latest autodetect, and separate canonical supplementary partitions.
-
-Canonical FUTOI storage:
-
-`${MOEX_DATA_ROOT}/market/supplementary/dataset_id=futures_futoi_raw/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet`
-
-Canonical FUTOI pointer:
-
-`${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_futoi_raw/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json`
-
-### Proven FUTOI historical coverage
-
-Server APIM coverage evidence through `2026-08-17`:
-
-- `si`: `2020-01-03` → `2026-08-17`;
-- `cr`: `2022-04-21` → `2026-08-17`;
-- `usdrubf`: `2022-12-30` → `2026-08-17`;
-- `cnyrubf`: `2022-12-30` → `2026-08-17`.
-
-Canonical controlled full-range runner:
+FUTOI controlled historical backfill:
 
 `moex_data.futures.backfill_futoi_instrument`
 
-Rules:
-
-- explicit `date_start`, `date_end`, `instrument_id`, and `run_id` only;
-- registry `evidence_status` must be `pilot_passed`;
-- FUTOI availability/probe evidence must be `available/completed`;
-- Stage 2 `backfill_ready` must be true;
-- global FUTOI materialization flag remains false;
-- non-trading empty dates may be skipped;
-- network/schema/`ERROR_MESSAGE` failures fail the run;
-- accepted pointer may be written only when aggregate quality is `pass` and refresh status is `succeeded`.
+Exact current CLI and field definitions are maintained in `docs/data/moex_market_data_ingestion_runbook.v1.md` and the referenced source/dataset contracts.
 
 ## Current fail-closed state
 
-After pilot acceptance:
+The internal `stage2_forts_source_bindings.status=all_pilots_passed_backfill_ready` string is retained in `configs/datasets/futures_data_lake.v1.yaml` because current controlled backfill runners use it as an authorization gate. It must not be interpreted as the current evidence summary; validated-history evidence is recorded separately.
 
-- global Quotes raw materialization flag: false;
-- global FUTOI materialization flag: false;
-- Stage 2 controlled backfill readiness: true;
-- accepted pointer readiness: false until full-range validation;
+Current gates:
+
+- raw-history validation: PASS for USDRUBF Quotes, CNYRUBF Quotes, Si FUTOI, CR FUTOI;
+- accepted pointer readiness: false;
 - observed-source refresh readiness: false;
 - scheduler: disabled;
 - D1/W1 derivation: disabled;
 - research: disabled;
 - automatic Si/CR roll: disabled.
 
-This separation is intentional: controlled Stage 2 historical materialization must not authorize the older EMA Phase 2.6 ingestion/materialization/runtime gate.
+## EOD policy
+
+Final FUTOI EOD must be derived deterministically from canonical corrected raw source-record history. Do not refetch final EOD using `latest=1`.
 
 ## Next acceptance sequence
 
-1. merge the pilot-promotion/backfill tooling after CI PASS;
-2. apply exact merged SHA on the server;
-3. determine Quotes historical coverage with the canonical exact-route coverage probe;
-4. run controlled full backfill for Quotes and FUTOI over proven ranges;
-5. validate aggregate quality/manifests;
-6. create per-instrument accepted pointers only after PASS;
-7. run observed-source refresh checks;
-8. only then consider scheduler, D1/W1, and research enablement.
+1. reconcile canonical raw dataset manifests/quality evidence;
+2. implement/validate any missing aggregate acceptance layer without manually crafting pointers;
+3. create per-instrument accepted pointers only after explicit acceptance authority and PASS;
+4. run observed-source refresh checks;
+5. only then consider scheduler, D1/W1 derivation and research enablement.

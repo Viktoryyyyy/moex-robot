@@ -1,6 +1,6 @@
 contract_id: moex_algopack_fo_tradestats_5m.v1
 schema_version: source_contract.v1
-status: active_stage2
+status: active_stage2_proven
 source_id: moex_algopack_fo_tradestats_5m
 source_system: moex_algopack
 source_kind: native_5m_quotes
@@ -22,7 +22,7 @@ request_contract:
     from: "{YYYY-MM-DD}"
     till: "{YYYY-MM-DD}"
     secid: "{SECID}"
-    start: "0"
+    start: "{PAGINATION_OFFSET}"
     iss.meta: "off"
     iss.only: tradestats
   pagination_field: start
@@ -30,8 +30,58 @@ request_contract:
   implicit_secid_selection_allowed: false
 response_contract:
   preferred_block: tradestats
-  required_identity_field: SECID
   canonical_dataset_ref: contracts/datasets/futures_raw_5m.v1.yaml
+  required_source_values:
+    - trade_date
+    - secid
+    - open
+    - high
+    - low
+    - close
+    - volume
+  optional_source_values:
+    - value
+    - num_trades
+  source_column_aliases:
+    trade_date:
+      - tradedate
+      - date
+    trade_time:
+      - tradetime
+      - time
+      - moment
+    secid:
+      - secid
+    open:
+      - pr_open
+      - open
+    high:
+      - pr_high
+      - high
+    low:
+      - pr_low
+      - low
+    close:
+      - pr_close
+      - close
+    volume:
+      - vol
+      - volume
+      - qty
+    value:
+      - val
+      - value
+      - turnover
+    num_trades:
+      - trades
+      - num_trades
+      - numtrades
+  normalization_rules:
+    exact_requested_secid_required: true
+    exact_requested_trade_date_required: true
+    timestamp_source: trade_date_plus_trade_time_when_present
+    missing_value_allowed: true
+    missing_num_trades_allowed: true
 identity_policy:
   canonical_identity_field: instrument_id
   source_identity_fields:
@@ -45,16 +95,18 @@ identity_policy:
 failure_semantics:
   unauthorized: fail_closed
   empty_response: fail_closed
+  requested_secid_absent: fail_closed
+  requested_trade_date_absent: fail_closed
   schema_mismatch: fail_closed
   implicit_fallback: forbidden
 evidence:
-  repository_endpoint_config_ref: configs/datasets/futures_algopack_availability_sources_config.json
-  repository_materializer_ref: src/moex_data/futures/materialize_raw_5m.py
-  server_probe_date: 2026-08-18
+  repository_materializer_ref: src/moex_data/futures/materialize_forts_raw_5m_instrument.py
+  repository_normalizer_ref: src/moex_data/futures/materialize_raw_5m.py
+  server_probe_date: "2026-08-18"
   server_probe_status: available
   historical_coverage_probe:
     status: proven
-    probe_date: 2026-08-18
+    probe_date: "2026-08-18"
     requested_from: "2020-01-01"
     requested_till: "2026-08-17"
     identity_filter: SECID+TRADEDATE
@@ -80,6 +132,19 @@ evidence:
       - SiU6
       - CRU6
     reference_full_historical_backfill_required: false
+  validated_history:
+    USDRUBF:
+      first_materialized: "2022-04-26"
+      last_materialized: "2026-08-17"
+      partition_count: 1100
+      row_count: 181139
+      physical_audit_status: pass
+    CNYRUBF:
+      first_materialized: "2022-04-26"
+      last_materialized: "2026-08-17"
+      partition_count: 1100
+      row_count: 174825
+      physical_audit_status: pass
   proven_secids:
     - USDRUBF
     - CNYRUBF

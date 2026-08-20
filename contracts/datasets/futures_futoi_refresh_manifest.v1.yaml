@@ -26,6 +26,29 @@ required_fields:
   - accepted_manifest_ref
   - refresh_status
   - source_contract
+  - producer
+  - latest_autodetect_used
+  - hardcoded_server_path_used
+  - exact_duplicate_rows_dropped
+source_contract_required_fields:
+  - source_id
+  - source_contract_ref
+  - raw_contract_ref
+  - futoi_ticker
+  - source_endpoint_url
+  - transport
+  - timestamp_semantics
+  - source_record_key_fields
+expected_source_contract_values:
+  source_id: moex_algopack_futoi
+  transport: authenticated_apim
+  timestamp_semantics: "ts=source_reference_moment;systime=source_publication_metadata"
+  source_record_key_fields:
+    - trade_date
+    - sess_id
+    - seqnum
+    - secid
+    - clgroup
 allowed_refresh_status:
   - succeeded
   - failed
@@ -35,6 +58,7 @@ accepted_pointer_policy:
   update_requires_quality_status: pass
   update_requires_refresh_status: succeeded
   single_instrument_scope_required: true
+  secid_pointer_partition_allowed: false
 path_rules:
   storage_root: env_contract
   hardcoded_server_path_allowed: false

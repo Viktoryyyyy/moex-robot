@@ -20,6 +20,7 @@ request_contract:
     from: "{YYYY-MM-DD}"
     till: "{YYYY-MM-DD}"
     latest: "0"
+  pagination_field: start
   response_block: futoi
   latest_autodetect_allowed: false
   fallback_endpoint_allowed: false
@@ -35,7 +36,7 @@ request_contract:
       - 504
 response_contract:
   canonical_dataset_ref: contracts/datasets/futures_futoi_raw.v1.yaml
-  availability_report_ref: contracts/datasets/futures_futoi_availability_report_contract.md
+  availability_evidence_ref: configs/instruments/forts_instrument_registry.v1.yaml
   required_columns:
     - sess_id
     - seqnum
@@ -115,7 +116,9 @@ failure_semantics:
   implicit_ticker_fallback: forbidden
   public_iss_fallback: forbidden
 evidence:
-  repository_apim_reference: src/moex_research/runners/usdrubf_phase8_7a_futoi_si_source_validation.py
+  repository_materializer_ref: src/moex_data/futures/materialize_futoi_instrument.py
+  repository_backfill_ref: src/moex_data/futures/backfill_futoi_instrument.py
+  registry_evidence_ref: configs/instruments/forts_instrument_registry.v1.yaml
   server_revalidation_date: "2026-08-18"
   server_revalidation_status: proven
   public_iss_evidence_status: invalidated
@@ -133,7 +136,7 @@ evidence:
     - cr
   pilot_trade_date: "2026-08-17"
   pilot_quality_status: pass
-  historical_coverage:
+  source_coverage:
     si:
       first_available: "2020-01-03"
       last_available: "2026-08-17"
@@ -146,3 +149,18 @@ evidence:
     cnyrubf:
       first_available: "2022-12-30"
       last_available: "2026-08-17"
+  validated_materialized_history:
+    si:
+      first_materialized: "2020-01-03"
+      last_materialized: "2026-08-17"
+      partition_count: 1757
+      row_count: 597650
+      skipped_empty_source_dates: 662
+      physical_audit_status: pass
+    cr:
+      first_materialized: "2022-04-21"
+      last_materialized: "2026-08-17"
+      partition_count: 1177
+      row_count: 390474
+      skipped_empty_source_dates: 403
+      physical_audit_status: pass
