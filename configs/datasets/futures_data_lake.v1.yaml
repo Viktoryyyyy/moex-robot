@@ -142,6 +142,7 @@ stage2_forts_source_bindings:
     source_contract_ref: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
     dataset_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
     producer_ref: src/moex_data/futures/materialize_forts_raw_5m_instrument.py
+    backfill_producer_ref: src/moex_data/futures/backfill_stage2_forts_raw_5m_instrument.py
     authentication_env: MOEX_API_KEY
     availability_status: proven
     pilot_status: passed
