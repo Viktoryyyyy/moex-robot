@@ -96,6 +96,8 @@ def _read_json_object_and_sha256(
 
 
 def _sha256_file(path: Path) -> str:
+    if path.is_symlink() or not path.exists() or not path.is_file():
+        _fail("acceptance report must remain an existing regular file")
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
@@ -184,6 +186,81 @@ def _rooted_ref(path: Path) -> str:
     return _ROOT_PREFIX + relative.as_posix()
 
 
+def _validate_repository_expectation(
+    *,
+    values: Mapping[str, object],
+    expectation: acceptance.HistoryExpectation,
+    repository_partition_dates_sha256: str,
+    repository_missing_dates_sha256: str,
+) -> None:
+    _require_equal(
+        values.get("target_dataset_id"),
+        expectation.target_dataset_id,
+        "repository target_dataset_id",
+    )
+    _require_equal(
+        values.get("instrument_id"), expectation.instrument_id, "repository instrument_id"
+    )
+    _require_equal(values.get("source_id"), expectation.source_id, "repository source_id")
+    _require_equal(
+        values.get("requested_from"), expectation.date_start, "repository requested_from"
+    )
+    _require_equal(
+        values.get("requested_till"), expectation.date_end, "repository requested_till"
+    )
+    for field_name in ("expected_partition_count", "actual_partition_count"):
+        _require_equal(
+            values.get(field_name), expectation.expected_partitions, "repository " + field_name
+        )
+    for field_name in ("expected_row_count", "actual_row_count"):
+        _require_equal(
+            values.get(field_name), expectation.expected_rows, "repository " + field_name
+        )
+    _require_equal(
+        values.get("expected_partition_dates_sha256"),
+        repository_partition_dates_sha256,
+        "repository expected_partition_dates_sha256",
+    )
+    _require_equal(
+        values.get("actual_partition_dates_sha256"),
+        repository_partition_dates_sha256,
+        "repository actual_partition_dates_sha256",
+    )
+    _require_equal(
+        values.get("expected_missing_dates_sha256"),
+        repository_missing_dates_sha256,
+        "repository expected_missing_dates_sha256",
+    )
+    _require_equal(
+        values.get("actual_missing_dates_sha256"),
+        repository_missing_dates_sha256,
+        "repository actual_missing_dates_sha256",
+    )
+    authoritative_calendar_dates = acceptance._date_range(
+        expectation.date_start, expectation.date_end
+    )
+    authoritative_missing_count = len(authoritative_calendar_dates) - expectation.expected_partitions
+    for field_name in (
+        "expected_calendar_missing_partition_count",
+        "actual_calendar_missing_partition_count",
+    ):
+        _require_equal(
+            values.get(field_name), authoritative_missing_count, "repository " + field_name
+        )
+    if expectation.expected_missing_dates is not None:
+        _require_equal(
+            authoritative_missing_count,
+            expectation.expected_missing_dates,
+            "repository expected_missing_dates",
+        )
+    if expectation.expected_secid is not None:
+        _require_equal(
+            values.get("secid_scope"),
+            [expectation.expected_secid],
+            "repository secid_scope",
+        )
+
+
 def _validate_acceptance_report(
     *,
     values: Mapping[str, object],
@@ -192,6 +269,9 @@ def _validate_acceptance_report(
     acceptance_run_id: str,
     report_path: Path,
     pointer_path: Path,
+    expectation: acceptance.HistoryExpectation,
+    repository_partition_dates_sha256: str,
+    repository_missing_dates_sha256: str,
 ) -> None:
     _require_equal(
         values.get("dataset_id"),
@@ -295,8 +375,7 @@ def _validate_acceptance_report(
     if not isinstance(missing_dates, list):
         _fail("missing_partition_dates must be a list")
     checked_missing_dates = [
-        acceptance._require_date(value, "missing_partition_dates")
-        for value in missing_dates
+        acceptance._require_date(value, "missing_partition_dates") for value in missing_dates
     ]
     if checked_missing_dates != missing_dates:
         _fail("missing_partition_dates must use canonical ISO dates")
@@ -326,6 +405,13 @@ def _validate_acceptance_report(
     if observed_missing_digest != values.get("actual_missing_dates_sha256"):
         _fail("missing date digest does not match missing_partition_dates")
 
+    _validate_repository_expectation(
+        values=values,
+        expectation=expectation,
+        repository_partition_dates_sha256=repository_partition_dates_sha256,
+        repository_missing_dates_sha256=repository_missing_dates_sha256,
+    )
+
 
 def _json_bytes(values: Mapping[str, object]) -> bytes:
     return (
@@ -352,11 +438,7 @@ def _write_json_create_only(
     if path.is_symlink():
         _fail("target artifact must not be a symlink: " + path.as_posix())
     if path.exists():
-        if (
-            allow_identical_existing
-            and path.is_file()
-            and path.read_bytes() == payload
-        ):
+        if allow_identical_existing and path.is_file() and path.read_bytes() == payload:
             return
         _fail("target artifact already exists with conflicting content: " + path.as_posix())
 
@@ -402,11 +484,21 @@ def promote_history(
     )
     target_contract_ref = _target_dataset_contract_ref(checked_dataset)
 
-    pointer_path = acceptance_gate._pointer_path(
-        root, checked_dataset, checked_instrument
-    )
+    pointer_path = acceptance_gate._pointer_path(root, checked_dataset, checked_instrument)
     if pointer_path.exists() or pointer_path.is_symlink():
         _fail("canonical accepted pointer already exists")
+
+    try:
+        expectation = acceptance._expectation(root, checked_dataset, checked_instrument)
+        repository_partition_dates_sha256, repository_missing_dates_sha256 = (
+            acceptance_gate._expected_date_set_evidence(
+                root, checked_dataset, checked_instrument
+            )
+        )
+    except Exception as exc:
+        raise RawHistoryPromotionError(
+            "repository Stage 2 expectation validation failed: " + str(exc)
+        ) from exc
 
     report_path = _acceptance_report_path(
         repo_root=root,
@@ -414,9 +506,7 @@ def promote_history(
         instrument_id=checked_instrument,
         acceptance_run_id=checked_acceptance_run,
     )
-    report, report_sha256 = _read_json_object_and_sha256(
-        report_path, "acceptance report"
-    )
+    report, report_sha256 = _read_json_object_and_sha256(report_path, "acceptance report")
     _validate_acceptance_report(
         values=report,
         target_dataset_id=checked_dataset,
@@ -424,6 +514,9 @@ def promote_history(
         acceptance_run_id=checked_acceptance_run,
         report_path=report_path,
         pointer_path=pointer_path,
+        expectation=expectation,
+        repository_partition_dates_sha256=repository_partition_dates_sha256,
+        repository_missing_dates_sha256=repository_missing_dates_sha256,
     )
 
     report_ref = _rooted_ref(report_path)
@@ -462,14 +555,18 @@ def promote_history(
         "network_access_used": False,
         "historical_backfill_used": False,
     }
+
+    if _sha256_file(report_path) != report_sha256:
+        _fail("acceptance report changed before accepted manifest publication")
+    if pointer_path.exists() or pointer_path.is_symlink():
+        _fail("canonical accepted pointer appeared during promotion")
+
     _write_json_create_only(
         manifest_path,
         manifest_values,
         allow_identical_existing=True,
     )
 
-    if _sha256_file(report_path) != report_sha256:
-        _fail("acceptance report changed during promotion")
     if pointer_path.exists() or pointer_path.is_symlink():
         _fail("canonical accepted pointer appeared during promotion")
 
