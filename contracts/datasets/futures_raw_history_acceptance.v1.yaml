@@ -1,0 +1,99 @@
+contract_id: futures_raw_history_acceptance.v1
+dataset_id: futures_raw_history_acceptance
+artifact_class: external_pattern
+producer: moex_data.futures.stage2_raw_history_acceptance_gate
+producer_impl_ref: src/moex_data/futures/stage2_raw_history_acceptance_gate.py
+validator_impl_ref: src/moex_data/futures/stage2_raw_history_acceptance.py
+operational_runbook_ref: docs/data/futures_raw_history_acceptance.md
+consumers:
+  - controlled_pointer_promotion_step
+consumer_implementation_status: pending_separate_step
+format: json
+schema_version: futures_raw_history_acceptance.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/target_dataset_id={TARGET_DATASET_ID}/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}/acceptance_report.json"
+grain: full_history_acceptance_by_target_dataset_and_instrument
+status_values:
+  - pass
+  - fail
+required_fields:
+  - run_id
+  - dataset_id
+  - target_dataset_id
+  - instrument_id
+  - source_id
+  - secid_scope
+  - requested_from
+  - requested_till
+  - expected_partition_count
+  - actual_partition_count
+  - expected_row_count
+  - actual_row_count
+  - expected_partition_dates_sha256
+  - actual_partition_dates_sha256
+  - expected_missing_dates_sha256
+  - actual_missing_dates_sha256
+  - missing_partition_dates
+  - failed_partition_dates
+  - hard_check_failures
+  - acceptance_status
+  - preexisting_accepted_pointer_present
+  - accepted_pointer_path_checked
+  - accepted_pointer_written
+  - network_access_used
+  - historical_backfill_used
+  - evidence_written
+hard_gate:
+  expected_partition_count_match: true
+  expected_row_count_match: true
+  exact_partition_date_set_match: true
+  exact_missing_date_set_match: true
+  failed_partition_dates_empty: true
+  hard_check_failures_empty: true
+  preexisting_accepted_pointer_absent: true
+  accepted_pointer_written: false
+  network_access_used: false
+  historical_backfill_used: false
+  evidence_written: true
+exact_date_set_policy:
+  evidence_source: configs/datasets/futures_data_lake.v1.yaml
+  digest_algorithm: sha256
+  serialization: sorted_iso_dates_one_per_line_trailing_newline
+  count_only_acceptance_allowed: false
+lane_rules:
+  quotes:
+    target_dataset_id: futures_raw_5m
+    source_id: moex_algopack_fo_tradestats_5m
+    allowed_instrument_ids:
+      - usdrubf_futures_family
+      - cnyrubf_futures_family
+  futoi:
+    target_dataset_id: futures_futoi_raw
+    source_id: moex_algopack_futoi
+    transport: authenticated_apim_source_history_already_materialized
+    public_iss_transport_allowed: false
+    allowed_instrument_ids:
+      - si_futures_family
+      - cr_futures_family
+    raw_source_record_key_fields:
+      - trade_date
+      - sess_id
+      - seqnum
+      - secid
+      - clgroup
+    systime_as_raw_identity_allowed: false
+pointer_policy:
+  this_gate_writes_accepted_pointer: false
+  pointer_promotion_is_separate_step: true
+  pointer_promotion_requires_acceptance_status: pass
+execution_boundary:
+  reads_existing_canonical_parquet_only: true
+  network_access_allowed: false
+  historical_backfill_allowed: false
+  implicit_partition_discovery_allowed: false
+  automatic_date_selection_allowed: false
+path_rules:
+  storage_root: env_contract
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+retention_policy: keep_all_acceptance_reports

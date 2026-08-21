@@ -33,6 +33,7 @@ artifact_class_index:
 supplementary_state_contract_refs:
   futoi_quality: contracts/datasets/futures_futoi_quality_report.v1.yaml
   futoi_refresh_manifest: contracts/datasets/futures_futoi_refresh_manifest.v1.yaml
+  raw_history_acceptance: contracts/datasets/futures_raw_history_acceptance.v1.yaml
 source_contract_refs:
   quotes: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
   futoi: contracts/sources/futures/moex_algopack_futoi.v1.yaml
@@ -131,7 +132,7 @@ phase2_6_source_bindings:
     - no prediction
 stage2_forts_source_bindings:
   status: raw_historical_backfills_completed_acceptance_pending
-  evidence_date: "2026-08-20"
+  evidence_date: "2026-08-21"
   backfill_authorization:
     status: all_pilots_passed_backfill_ready
     purpose: controlled_repair_or_extension_of_validated_history
@@ -160,6 +161,10 @@ stage2_forts_source_bindings:
         last_available: "2026-08-17"
         partitions: 1100
         rows: 181139
+        partition_dates_sha256: b0b8265323664684243ac918b31b7abc4c5f97cb96c458f993e2c9a5d8f5e990
+        missing_dates_count: 475
+        missing_dates_sha256: 2cb5ef8b969c54c44276f709c869e0c6e50b9e7d250dac0f4325b4d26b6ef6db
+        date_set_evidence_status: pass
         physical_quality_status: pass
         market_spotcheck_status: pass
       cnyrubf_futures_family:
@@ -168,6 +173,10 @@ stage2_forts_source_bindings:
         last_available: "2026-08-17"
         partitions: 1100
         rows: 174825
+        partition_dates_sha256: b0b8265323664684243ac918b31b7abc4c5f97cb96c458f993e2c9a5d8f5e990
+        missing_dates_count: 475
+        missing_dates_sha256: 2cb5ef8b969c54c44276f709c869e0c6e50b9e7d250dac0f4325b4d26b6ef6db
+        date_set_evidence_status: pass
         physical_quality_status: pass
         market_spotcheck_status: pass
       si_futures_family:
@@ -212,6 +221,9 @@ stage2_forts_source_bindings:
         partitions: 1757
         rows: 597650
         skipped_empty_source_dates: 662
+        partition_dates_sha256: 514091ea2230cd9d6f4dc50ba03f67cdcd8a031d158fa7a9e99f25f47e011fee
+        missing_dates_sha256: 8a936f58e7679dc9d5fff1c13217fc081244095516a87cd0dce5b03f4bc5eaec
+        date_set_evidence_status: pass
         bad_partitions: 0
         physical_quality_status: pass
       cr_futures_family:
@@ -221,6 +233,9 @@ stage2_forts_source_bindings:
         partitions: 1177
         rows: 390474
         skipped_empty_source_dates: 403
+        partition_dates_sha256: 844158e2ea113be9e91290aa4b9ca72c86380726e7c17a5fdc8980007c2e71fa
+        missing_dates_sha256: 67b8a027df3046077f6367b5d9ee92fba75ff48f0ec534f46ecfc324624d9b81
+        date_set_evidence_status: pass
         bad_partitions: 0
         physical_quality_status: pass
     available_stage2_tickers:
