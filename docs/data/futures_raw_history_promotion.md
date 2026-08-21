@@ -30,9 +30,10 @@ Promotion fails closed unless the acceptance report:
 - records no network access, historical backfill, implicit partition discovery, or automatic date selection;
 - has empty failed-partition and hard-failure lists;
 - has exact expected/actual equality for partition count, row count, present-date digest, missing-date digest, and calendar-missing count;
-- contains a sorted, duplicate-free missing-partition-date list matching the declared missing count.
+- contains a sorted, duplicate-free missing-partition-date list matching the declared missing count;
+- exactly matches the GitHub Source-of-Truth Stage 2 expectation for target dataset, instrument, source, secid scope, first/last date, partition count, row count, calendar-missing count, and both exact date-set SHA-256 values.
 
-The report is parsed and SHA-256 hashed from the same bytes. Its digest is pinned in the immutable accepted manifest and rechecked before pointer creation.
+The report is parsed and SHA-256 hashed from the same bytes. The exact date-set digests are independently reconstructed from the declared range and missing-date list, then compared with the GitHub Source-of-Truth digests. Immediately before an immutable accepted manifest is published, the report file is rehashed and promotion fails without publishing the manifest if its bytes changed.
 
 ## Outputs
 
