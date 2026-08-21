@@ -4,8 +4,10 @@ import argparse
 import hashlib
 import json
 import os
+import stat
 import tempfile
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
@@ -30,6 +32,17 @@ _ROOT_PREFIX: Final[str] = "${MOEX_DATA_ROOT}/"
 
 class RawHistoryPromotionError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class AcceptanceReportSnapshot:
+    values: dict[str, object]
+    raw_bytes: bytes
+    sha256: str
+    device: int
+    inode: int
+    size: int
+    mtime_ns: int
 
 
 def _fail(message: str) -> None:
@@ -78,42 +91,85 @@ def _date_set_sha256(values: Sequence[str]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _read_json_object_and_sha256(
-    path: Path, field_name: str
-) -> tuple[dict[str, object], str]:
-    if path.is_symlink() or not path.exists() or not path.is_file():
-        _fail(field_name + " must be an existing regular file")
+def _snapshot_identity(file_stat: os.stat_result) -> tuple[int, int, int, int]:
+    return (
+        int(file_stat.st_dev),
+        int(file_stat.st_ino),
+        int(file_stat.st_size),
+        int(file_stat.st_mtime_ns),
+    )
+
+
+def _read_acceptance_report_snapshot(path: Path) -> AcceptanceReportSnapshot:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
-        raw = path.read_bytes()
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise RawHistoryPromotionError(
+            "acceptance report must be an existing regular non-symlink file: " + str(exc)
+        ) from exc
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            _fail("acceptance report must be a regular file")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            raw = handle.read()
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    if _snapshot_identity(before) != _snapshot_identity(after):
+        _fail("acceptance report changed while validated snapshot was read")
+    if len(raw) != before.st_size:
+        _fail("acceptance report size changed while validated snapshot was read")
+    try:
         values = json.loads(raw.decode("utf-8"))
     except Exception as exc:
         raise RawHistoryPromotionError(
-            field_name + " is not valid UTF-8 JSON: " + str(exc)
+            "acceptance report is not valid UTF-8 JSON: " + str(exc)
         ) from exc
     if not isinstance(values, dict):
-        _fail(field_name + " must be a JSON object")
-    return values, hashlib.sha256(raw).hexdigest()
+        _fail("acceptance report must be a JSON object")
+    return AcceptanceReportSnapshot(
+        values=values,
+        raw_bytes=raw,
+        sha256=hashlib.sha256(raw).hexdigest(),
+        device=int(before.st_dev),
+        inode=int(before.st_ino),
+        size=int(before.st_size),
+        mtime_ns=int(before.st_mtime_ns),
+    )
 
 
-def _sha256_file(path: Path) -> str:
-    if path.is_symlink() or not path.exists() or not path.is_file():
-        _fail("acceptance report must remain an existing regular file")
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _verify_report_path_identity(path: Path, snapshot: AcceptanceReportSnapshot) -> None:
+    try:
+        current = os.stat(path, follow_symlinks=False)
+    except OSError as exc:
+        raise RawHistoryPromotionError(
+            "acceptance report pathname no longer identifies validated snapshot: " + str(exc)
+        ) from exc
+    if not stat.S_ISREG(current.st_mode):
+        _fail("acceptance report pathname no longer identifies a regular file")
+    expected = (snapshot.device, snapshot.inode, snapshot.size, snapshot.mtime_ns)
+    if _snapshot_identity(current) != expected:
+        _fail("acceptance report pathname no longer identifies validated snapshot")
 
 
-def _contract_path_pattern(repo_root: Path) -> str:
+def _promotion_contract_patterns(repo_root: Path) -> tuple[str, str]:
     values = load_simple_yaml_mapping(repo_root, PROMOTION_CONTRACT_PATH)
     if values.get("dataset_id") != PROMOTION_DATASET_ID:
         _fail("promotion contract dataset_id mismatch")
     if values.get("schema_version") != PROMOTION_SCHEMA_VERSION:
         _fail("promotion contract schema_version mismatch")
-    return _require_text(
+    manifest_pattern = _require_text(
         values.get("path_pattern"), "promotion contract path_pattern"
     )
+    snapshot_pattern = _require_text(
+        values.get("report_snapshot_path_pattern"),
+        "promotion contract report_snapshot_path_pattern",
+    )
+    return manifest_pattern, snapshot_pattern
 
 
 def _target_dataset_contract_ref(target_dataset_id: str) -> str:
@@ -122,6 +178,28 @@ def _target_dataset_contract_ref(target_dataset_id: str) -> str:
     if target_dataset_id == acceptance.FUTOI_DATASET_ID:
         return acceptance.FUTOI_CONTRACT_PATH
     _fail("target_dataset_id is outside Stage 2 promotion scope")
+
+
+def _expand_promotion_path(
+    *,
+    repo_root: Path,
+    pattern: str,
+    target_dataset_id: str,
+    instrument_id: str,
+    acceptance_run_id: str,
+) -> Path:
+    try:
+        return expand_contract_path(
+            pattern,
+            _env_root(),
+            {
+                "TARGET_DATASET_ID": target_dataset_id,
+                "INSTRUMENT_ID": instrument_id,
+                "ACCEPTANCE_RUN_ID": acceptance_run_id,
+            },
+        )
+    except Exception as exc:
+        raise RawHistoryPromotionError(str(exc)) from exc
 
 
 def accepted_manifest_path(
@@ -135,19 +213,35 @@ def accepted_manifest_path(
     checked_instrument = acceptance._require_token(instrument_id, "instrument_id")
     checked_run = acceptance._require_token(acceptance_run_id, "acceptance_run_id")
     _target_dataset_contract_ref(checked_dataset)
-    pattern = _contract_path_pattern(Path(repo_root))
-    try:
-        return expand_contract_path(
-            pattern,
-            _env_root(),
-            {
-                "TARGET_DATASET_ID": checked_dataset,
-                "INSTRUMENT_ID": checked_instrument,
-                "ACCEPTANCE_RUN_ID": checked_run,
-            },
-        )
-    except Exception as exc:
-        raise RawHistoryPromotionError(str(exc)) from exc
+    manifest_pattern, _ = _promotion_contract_patterns(Path(repo_root))
+    return _expand_promotion_path(
+        repo_root=Path(repo_root),
+        pattern=manifest_pattern,
+        target_dataset_id=checked_dataset,
+        instrument_id=checked_instrument,
+        acceptance_run_id=checked_run,
+    )
+
+
+def acceptance_report_snapshot_path(
+    *,
+    repo_root: str | Path,
+    target_dataset_id: str,
+    instrument_id: str,
+    acceptance_run_id: str,
+) -> Path:
+    checked_dataset = acceptance._require_token(target_dataset_id, "target_dataset_id")
+    checked_instrument = acceptance._require_token(instrument_id, "instrument_id")
+    checked_run = acceptance._require_token(acceptance_run_id, "acceptance_run_id")
+    _target_dataset_contract_ref(checked_dataset)
+    _, snapshot_pattern = _promotion_contract_patterns(Path(repo_root))
+    return _expand_promotion_path(
+        repo_root=Path(repo_root),
+        pattern=snapshot_pattern,
+        target_dataset_id=checked_dataset,
+        instrument_id=checked_instrument,
+        acceptance_run_id=checked_run,
+    )
 
 
 def _acceptance_report_path(
@@ -413,28 +507,13 @@ def _validate_acceptance_report(
     )
 
 
-def _json_bytes(values: Mapping[str, object]) -> bytes:
-    return (
-        json.dumps(
-            values,
-            ensure_ascii=False,
-            indent=2,
-            sort_keys=True,
-            separators=(",", ": "),
-        )
-        + "\n"
-    ).encode("utf-8")
-
-
-def _write_json_create_only(
+def _write_bytes_create_only(
     path: Path,
-    values: Mapping[str, object],
+    payload: bytes,
     *,
     allow_identical_existing: bool,
 ) -> None:
-    payload = _json_bytes(values)
     path.parent.mkdir(parents=True, exist_ok=True)
-
     if path.is_symlink():
         _fail("target artifact must not be a symlink: " + path.as_posix())
     if path.exists():
@@ -469,6 +548,32 @@ def _write_json_create_only(
             temporary_path.unlink(missing_ok=True)
 
 
+def _json_bytes(values: Mapping[str, object]) -> bytes:
+    return (
+        json.dumps(
+            values,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+            separators=(",", ": "),
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def _write_json_create_only(
+    path: Path,
+    values: Mapping[str, object],
+    *,
+    allow_identical_existing: bool,
+) -> None:
+    _write_bytes_create_only(
+        path,
+        _json_bytes(values),
+        allow_identical_existing=allow_identical_existing,
+    )
+
+
 def promote_history(
     *,
     repo_root: str | Path,
@@ -500,33 +605,41 @@ def promote_history(
             "repository Stage 2 expectation validation failed: " + str(exc)
         ) from exc
 
-    report_path = _acceptance_report_path(
+    source_report_path = _acceptance_report_path(
         repo_root=root,
         target_dataset_id=checked_dataset,
         instrument_id=checked_instrument,
         acceptance_run_id=checked_acceptance_run,
     )
-    report, report_sha256 = _read_json_object_and_sha256(report_path, "acceptance report")
+    report_snapshot = _read_acceptance_report_snapshot(source_report_path)
+    report = report_snapshot.values
     _validate_acceptance_report(
         values=report,
         target_dataset_id=checked_dataset,
         instrument_id=checked_instrument,
         acceptance_run_id=checked_acceptance_run,
-        report_path=report_path,
+        report_path=source_report_path,
         pointer_path=pointer_path,
         expectation=expectation,
         repository_partition_dates_sha256=repository_partition_dates_sha256,
         repository_missing_dates_sha256=repository_missing_dates_sha256,
     )
 
-    report_ref = _rooted_ref(report_path)
     manifest_path = accepted_manifest_path(
         repo_root=root,
         target_dataset_id=checked_dataset,
         instrument_id=checked_instrument,
         acceptance_run_id=checked_acceptance_run,
     )
+    evidence_snapshot_path = acceptance_report_snapshot_path(
+        repo_root=root,
+        target_dataset_id=checked_dataset,
+        instrument_id=checked_instrument,
+        acceptance_run_id=checked_acceptance_run,
+    )
     manifest_ref = _rooted_ref(manifest_path)
+    source_report_ref = _rooted_ref(source_report_path)
+    evidence_snapshot_ref = _rooted_ref(evidence_snapshot_path)
 
     manifest_values: dict[str, object] = {
         "schema_version": PROMOTION_SCHEMA_VERSION,
@@ -537,8 +650,9 @@ def promote_history(
         "instrument_id": checked_instrument,
         "acceptance_run_id": checked_acceptance_run,
         "acceptance_contract_ref": acceptance.ACCEPTANCE_CONTRACT_PATH,
-        "acceptance_report_ref": report_ref,
-        "acceptance_report_sha256": report_sha256,
+        "source_acceptance_report_ref": source_report_ref,
+        "acceptance_report_ref": evidence_snapshot_ref,
+        "acceptance_report_sha256": report_snapshot.sha256,
         "source_id": report["source_id"],
         "secid_scope": report["secid_scope"],
         "requested_from": report["requested_from"],
@@ -556,11 +670,15 @@ def promote_history(
         "historical_backfill_used": False,
     }
 
-    if _sha256_file(report_path) != report_sha256:
-        _fail("acceptance report changed before accepted manifest publication")
+    _verify_report_path_identity(source_report_path, report_snapshot)
     if pointer_path.exists() or pointer_path.is_symlink():
         _fail("canonical accepted pointer appeared during promotion")
 
+    _write_bytes_create_only(
+        evidence_snapshot_path,
+        report_snapshot.raw_bytes,
+        allow_identical_existing=True,
+    )
     _write_json_create_only(
         manifest_path,
         manifest_values,
@@ -575,8 +693,9 @@ def promote_history(
         "instrument_id": checked_instrument,
         "run_id": checked_acceptance_run,
         "manifest_ref": manifest_ref,
-        "quality_report_ref": report_ref,
-        "acceptance_report_ref": report_ref,
+        "quality_report_ref": evidence_snapshot_ref,
+        "acceptance_report_ref": evidence_snapshot_ref,
+        "source_acceptance_report_ref": source_report_ref,
         "quality_status": "pass",
         "acceptance_status": "pass",
         "promotion_basis": "raw_history_acceptance",
@@ -592,8 +711,9 @@ def promote_history(
         "dataset_id": checked_dataset,
         "instrument_id": checked_instrument,
         "acceptance_run_id": checked_acceptance_run,
-        "acceptance_report_ref": report_ref,
-        "acceptance_report_sha256": report_sha256,
+        "source_acceptance_report_ref": source_report_ref,
+        "acceptance_report_ref": evidence_snapshot_ref,
+        "acceptance_report_sha256": report_snapshot.sha256,
         "accepted_manifest_ref": manifest_ref,
         "accepted_pointer_path": pointer_path.as_posix(),
         "accepted_pointer_written": True,
