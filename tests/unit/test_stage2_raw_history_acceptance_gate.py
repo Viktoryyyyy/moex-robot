@@ -196,6 +196,37 @@ def test_quote_ingest_ts_cannot_precede_bar_ts(tmp_path, monkeypatch) -> None:
     assert "ingest_ts precedes ts" in failures[0]["error"]
 
 
+def test_exact_date_set_rejects_same_count_substituted_missing_date() -> None:
+    expectation = acceptance.HistoryExpectation(
+        target_dataset_id=acceptance.QUOTE_DATASET_ID,
+        instrument_id="usdrubf_futures_family",
+        source_id=acceptance.QUOTE_SOURCE_ID,
+        date_start="2026-08-16",
+        date_end="2026-08-17",
+        expected_partitions=1,
+        expected_rows=1,
+        expected_secid="USDRUBF",
+    )
+    expected_missing = ("2026-08-16",)
+    expected_present = ("2026-08-17",)
+    result = {
+        "missing_partition_dates": ["2026-08-17"],
+        "hard_check_failures": [],
+        "acceptance_status": "pass",
+    }
+
+    gate._apply_exact_date_set_evidence(
+        result,
+        expectation,
+        gate._date_set_sha256(expected_present),
+        gate._date_set_sha256(expected_missing),
+    )
+
+    assert result["acceptance_status"] == "fail"
+    assert "partition_date_set_sha256_mismatch" in result["hard_check_failures"]
+    assert "missing_date_set_sha256_mismatch" in result["hard_check_failures"]
+
+
 def test_futoi_clgroup_rejects_noncanonical_stored_spelling(tmp_path, monkeypatch) -> None:
     path = tmp_path / "part.parquet"
     pd.DataFrame({"clgroup": ["FIZ", " fiz "]}).to_parquet(path, index=False)
@@ -226,6 +257,14 @@ def test_pointer_created_during_audit_blocks_before_evidence_write(tmp_path, mon
         "_require_quote_registry_binding",
         lambda *args, **kwargs: _quote_expectation(),
     )
+    monkeypatch.setattr(
+        gate,
+        "_expected_date_set_evidence",
+        lambda *args, **kwargs: (
+            gate._date_set_sha256(("2026-08-17",)),
+            gate._date_set_sha256(()),
+        ),
+    )
     monkeypatch.setattr(gate, "_quote_grid_failures", lambda *args, **kwargs: ())
 
     def audit_and_promote(**kwargs):
@@ -234,6 +273,7 @@ def test_pointer_created_during_audit_blocks_before_evidence_write(tmp_path, mon
         return {
             "acceptance_report_reference": report.as_posix(),
             "acceptance_status": "pass",
+            "missing_partition_dates": [],
             "failed_partition_dates": [],
             "hard_check_failures": [],
         }
