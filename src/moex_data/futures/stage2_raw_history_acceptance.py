@@ -28,6 +28,7 @@ FUTOI_SOURCE_ID: Final[str] = "moex_algopack_futoi"
 EXPECTED_BOARD: Final[str] = "RFUD"
 EXPECTED_MARKET: Final[str] = "forts"
 EXPECTED_ENGINE: Final[str] = "futures"
+MOEX_SOURCE_TIMEZONE: Final[str] = "Europe/Moscow"
 
 _ALLOWED_QUOTES: Final[frozenset[str]] = frozenset(
     {"usdrubf_futures_family", "cnyrubf_futures_family"}
@@ -340,6 +341,22 @@ def _require_optional_finite_nonnegative(frame: pd.DataFrame, columns: Sequence[
             _fail("quote partition contains negative " + column)
 
 
+def _moex_publication_utc(values: pd.Series) -> pd.Series:
+    parsed = pd.to_datetime(values, errors="coerce")
+    if bool(parsed.isna().any()):
+        _fail("FUTOI partition contains invalid publication systime")
+    try:
+        if parsed.dt.tz is None:
+            return parsed.dt.tz_localize(
+                MOEX_SOURCE_TIMEZONE, ambiguous="raise", nonexistent="raise"
+            ).dt.tz_convert("UTC")
+        return parsed.dt.tz_convert("UTC")
+    except Exception as exc:
+        raise RawHistoryAcceptanceError(
+            "FUTOI publication systime timezone normalization failed: " + str(exc)
+        ) from exc
+
+
 def _validate_quote_partition(
     repo_root: Path,
     frame: pd.DataFrame,
@@ -356,6 +373,7 @@ def _validate_quote_partition(
         ("board", EXPECTED_BOARD, True),
         ("market", EXPECTED_MARKET, True),
         ("engine", EXPECTED_ENGINE, True),
+        ("source", quote_core.SOURCE_CANDIDATE_APIM_TRADESTATS, False),
     ):
         _require_stored_identity(frame, field, expected, casefold=casefold)
 
@@ -451,7 +469,7 @@ def _validate_futoi_partition(
     if bool(systime.isna().any()) or bool((systime < moment).any()):
         _fail("FUTOI partition contains invalid publication systime")
 
-    publication_utc = pd.to_datetime(frame["systime"], errors="coerce", utc=True)
+    publication_utc = _moex_publication_utc(frame["systime"])
     availability_utc = pd.to_datetime(frame["availability_ts_utc"], errors="coerce", utc=True)
     ingest_utc = pd.to_datetime(frame["ingest_ts"], errors="coerce", utc=True)
     if bool(publication_utc.isna().any()) or bool(availability_utc.isna().any()) or bool(ingest_utc.isna().any()):
