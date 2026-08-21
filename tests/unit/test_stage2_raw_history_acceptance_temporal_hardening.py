@@ -169,6 +169,7 @@ def test_futoi_net_position_must_equal_long_plus_short() -> None:
 
 def test_futoi_position_fields_must_be_finite() -> None:
     frame = _futoi_frame()
+    frame["pos_long_num"] = frame["pos_long_num"].astype(float)
     frame.loc[0, "pos_long_num"] = np.inf
     with pytest.raises(acceptance.RawHistoryAcceptanceError, match="non-finite numeric value: pos_long_num"):
         acceptance._validate_futoi_partition(frame, _futoi_expectation(), "2026-08-17")
