@@ -496,6 +496,8 @@ def _validate_futoi_partition(
         _fail("FUTOI net position must equal pos_long plus pos_short")
 
     normalized = futoi_materializer._validate_required_source_identifiers(frame)
+    if bool((normalized["seqnum"] < 0).any()):
+        _fail("FUTOI seqnum must be non-negative")
     counts = futoi_materializer._quality_counts(normalized)
     if int(counts["duplicate_key_count"]) != 0:
         _fail("FUTOI partition contains duplicate canonical source-record keys")
