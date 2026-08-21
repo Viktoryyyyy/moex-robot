@@ -17,9 +17,13 @@ from .contract_io import expand_contract_path, load_simple_yaml_mapping
 PROMOTION_CONTRACT_PATH: Final[str] = (
     "contracts/datasets/futures_raw_history_accepted_manifest.v1.yaml"
 )
+PROMOTION_DATASET_ID: Final[str] = "futures_raw_history_accepted_manifest"
 PROMOTION_SCHEMA_VERSION: Final[str] = "futures_raw_history_accepted_manifest.v1"
 PROMOTION_PRODUCER: Final[str] = (
     "moex_data.futures.stage2_raw_history_promotion.v1"
+)
+ACCEPTANCE_PRODUCER: Final[str] = (
+    "moex_data.futures.stage2_raw_history_acceptance_gate.v1"
 )
 _ROOT_PREFIX: Final[str] = "${MOEX_DATA_ROOT}/"
 
@@ -39,12 +43,6 @@ def _env_root() -> str:
     return root
 
 
-def _mapping(value: object, field_name: str) -> Mapping[str, object]:
-    if not isinstance(value, Mapping):
-        _fail(field_name + " must be a mapping")
-    return value
-
-
 def _require_text(value: object, field_name: str) -> str:
     text = str(value or "").strip()
     if not text:
@@ -62,16 +60,34 @@ def _require_equal(left: object, right: object, field_name: str) -> None:
         _fail(field_name + " mismatch")
 
 
-def _read_json_object(path: Path, field_name: str) -> dict[str, object]:
-    if not path.exists() or not path.is_file():
-        _fail(field_name + " does not exist")
+def _require_nonnegative_int(value: object, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        _fail(field_name + " must be a nonnegative integer")
+    return value
+
+
+def _require_sha256(value: object, field_name: str) -> str:
+    text = _require_text(value, field_name).lower()
+    if len(text) != 64 or any(char not in "0123456789abcdef" for char in text):
+        _fail(field_name + " must be a 64-character SHA-256 hex digest")
+    return text
+
+
+def _read_json_object_and_sha256(
+    path: Path, field_name: str
+) -> tuple[dict[str, object], str]:
+    if path.is_symlink() or not path.exists() or not path.is_file():
+        _fail(field_name + " must be an existing regular file")
     try:
-        values = json.loads(path.read_text(encoding="utf-8"))
+        raw = path.read_bytes()
+        values = json.loads(raw.decode("utf-8"))
     except Exception as exc:
-        raise RawHistoryPromotionError(field_name + " is not valid JSON: " + str(exc)) from exc
+        raise RawHistoryPromotionError(
+            field_name + " is not valid UTF-8 JSON: " + str(exc)
+        ) from exc
     if not isinstance(values, dict):
         _fail(field_name + " must be a JSON object")
-    return values
+    return values, hashlib.sha256(raw).hexdigest()
 
 
 def _sha256_file(path: Path) -> str:
@@ -84,10 +100,21 @@ def _sha256_file(path: Path) -> str:
 
 def _contract_path_pattern(repo_root: Path) -> str:
     values = load_simple_yaml_mapping(repo_root, PROMOTION_CONTRACT_PATH)
+    if values.get("dataset_id") != PROMOTION_DATASET_ID:
+        _fail("promotion contract dataset_id mismatch")
     if values.get("schema_version") != PROMOTION_SCHEMA_VERSION:
         _fail("promotion contract schema_version mismatch")
-    pattern = _require_text(values.get("path_pattern"), "promotion contract path_pattern")
-    return pattern
+    return _require_text(
+        values.get("path_pattern"), "promotion contract path_pattern"
+    )
+
+
+def _target_dataset_contract_ref(target_dataset_id: str) -> str:
+    if target_dataset_id == acceptance.QUOTE_DATASET_ID:
+        return acceptance.QUOTE_CONTRACT_PATH
+    if target_dataset_id == acceptance.FUTOI_DATASET_ID:
+        return acceptance.FUTOI_CONTRACT_PATH
+    _fail("target_dataset_id is outside Stage 2 promotion scope")
 
 
 def accepted_manifest_path(
@@ -100,8 +127,7 @@ def accepted_manifest_path(
     checked_dataset = acceptance._require_token(target_dataset_id, "target_dataset_id")
     checked_instrument = acceptance._require_token(instrument_id, "instrument_id")
     checked_run = acceptance._require_token(acceptance_run_id, "acceptance_run_id")
-    if checked_dataset not in (acceptance.QUOTE_DATASET_ID, acceptance.FUTOI_DATASET_ID):
-        _fail("target_dataset_id is outside Stage 2 promotion scope")
+    _target_dataset_contract_ref(checked_dataset)
     pattern = _contract_path_pattern(Path(repo_root))
     try:
         return expand_contract_path(
@@ -159,6 +185,8 @@ def _validate_acceptance_report(
     target_dataset_id: str,
     instrument_id: str,
     acceptance_run_id: str,
+    report_path: Path,
+    pointer_path: Path,
 ) -> None:
     _require_equal(
         values.get("dataset_id"),
@@ -172,6 +200,22 @@ def _validate_acceptance_report(
     )
     _require_equal(values.get("instrument_id"), instrument_id, "acceptance instrument_id")
     _require_equal(values.get("run_id"), acceptance_run_id, "acceptance run_id")
+    _require_equal(values.get("producer"), ACCEPTANCE_PRODUCER, "acceptance producer")
+    _require_equal(
+        values.get("acceptance_contract_ref"),
+        acceptance.ACCEPTANCE_CONTRACT_PATH,
+        "acceptance contract ref",
+    )
+    _require_equal(
+        values.get("acceptance_report_reference"),
+        report_path.as_posix(),
+        "acceptance report reference",
+    )
+    _require_equal(
+        values.get("accepted_pointer_path_checked"),
+        pointer_path.as_posix(),
+        "accepted pointer path checked",
+    )
     _require_equal(values.get("acceptance_status"), "pass", "acceptance_status")
     _require_bool(values.get("evidence_written"), "evidence_written", True)
     _require_bool(values.get("accepted_pointer_written"), "accepted_pointer_written", False)
@@ -214,16 +258,43 @@ def _validate_acceptance_report(
             expected_field + "/" + actual_field,
         )
 
+    for field_name in (
+        "expected_partition_count",
+        "actual_partition_count",
+        "expected_row_count",
+        "actual_row_count",
+        "expected_calendar_missing_partition_count",
+        "actual_calendar_missing_partition_count",
+    ):
+        _require_nonnegative_int(values.get(field_name), field_name)
+
+    for field_name in (
+        "expected_partition_dates_sha256",
+        "actual_partition_dates_sha256",
+        "expected_missing_dates_sha256",
+        "actual_missing_dates_sha256",
+    ):
+        _require_sha256(values.get(field_name), field_name)
+
     _require_text(values.get("source_id"), "source_id")
     _require_text(values.get("requested_from"), "requested_from")
     _require_text(values.get("requested_till"), "requested_till")
-    _require_text(values.get("actual_partition_dates_sha256"), "partition date digest")
-    _require_text(values.get("actual_missing_dates_sha256"), "missing date digest")
+
     secid_scope = values.get("secid_scope")
     if not isinstance(secid_scope, list) or not secid_scope:
         _fail("secid_scope must be a non-empty list")
     if any(not str(value or "").strip() for value in secid_scope):
         _fail("secid_scope contains blank value")
+
+    missing_dates = values.get("missing_partition_dates")
+    if not isinstance(missing_dates, list):
+        _fail("missing_partition_dates must be a list")
+    if len(missing_dates) != values.get("actual_calendar_missing_partition_count"):
+        _fail("missing_partition_dates count mismatch")
+    if len(set(missing_dates)) != len(missing_dates):
+        _fail("missing_partition_dates must not contain duplicates")
+    if missing_dates != sorted(missing_dates):
+        _fail("missing_partition_dates must be sorted")
 
 
 def _json_bytes(values: Mapping[str, object]) -> bytes:
@@ -248,6 +319,8 @@ def _write_json_create_only(
     payload = _json_bytes(values)
     path.parent.mkdir(parents=True, exist_ok=True)
 
+    if path.is_symlink():
+        _fail("target artifact must not be a symlink: " + path.as_posix())
     if path.exists():
         if (
             allow_identical_existing
@@ -271,6 +344,7 @@ def _write_json_create_only(
         except FileExistsError as exc:
             if (
                 allow_identical_existing
+                and not path.is_symlink()
                 and path.is_file()
                 and path.read_bytes() == payload
             ):
@@ -296,11 +370,12 @@ def promote_history(
     checked_acceptance_run = acceptance._require_token(
         acceptance_run_id, "acceptance_run_id"
     )
+    target_contract_ref = _target_dataset_contract_ref(checked_dataset)
 
     pointer_path = acceptance_gate._pointer_path(
         root, checked_dataset, checked_instrument
     )
-    if pointer_path.exists():
+    if pointer_path.exists() or pointer_path.is_symlink():
         _fail("canonical accepted pointer already exists")
 
     report_path = _acceptance_report_path(
@@ -309,16 +384,19 @@ def promote_history(
         instrument_id=checked_instrument,
         acceptance_run_id=checked_acceptance_run,
     )
-    report = _read_json_object(report_path, "acceptance report")
+    report, report_sha256 = _read_json_object_and_sha256(
+        report_path, "acceptance report"
+    )
     _validate_acceptance_report(
         values=report,
         target_dataset_id=checked_dataset,
         instrument_id=checked_instrument,
         acceptance_run_id=checked_acceptance_run,
+        report_path=report_path,
+        pointer_path=pointer_path,
     )
 
     report_ref = _rooted_ref(report_path)
-    report_sha256 = _sha256_file(report_path)
     manifest_path = accepted_manifest_path(
         repo_root=root,
         target_dataset_id=checked_dataset,
@@ -330,9 +408,12 @@ def promote_history(
     manifest_values: dict[str, object] = {
         "schema_version": PROMOTION_SCHEMA_VERSION,
         "producer": PROMOTION_PRODUCER,
-        "dataset_id": checked_dataset,
+        "dataset_id": PROMOTION_DATASET_ID,
+        "target_dataset_id": checked_dataset,
+        "target_dataset_contract_ref": target_contract_ref,
         "instrument_id": checked_instrument,
         "acceptance_run_id": checked_acceptance_run,
+        "acceptance_contract_ref": acceptance.ACCEPTANCE_CONTRACT_PATH,
         "acceptance_report_ref": report_ref,
         "acceptance_report_sha256": report_sha256,
         "source_id": report["source_id"],
@@ -342,6 +423,7 @@ def promote_history(
         "partition_count": report["actual_partition_count"],
         "row_count": report["actual_row_count"],
         "partition_dates_sha256": report["actual_partition_dates_sha256"],
+        "missing_partition_dates": report["missing_partition_dates"],
         "missing_dates_sha256": report["actual_missing_dates_sha256"],
         "calendar_missing_partition_count": report[
             "actual_calendar_missing_partition_count"
@@ -356,7 +438,9 @@ def promote_history(
         allow_identical_existing=True,
     )
 
-    if pointer_path.exists():
+    if _sha256_file(report_path) != report_sha256:
+        _fail("acceptance report changed during promotion")
+    if pointer_path.exists() or pointer_path.is_symlink():
         _fail("canonical accepted pointer appeared during promotion")
 
     pointer_values: dict[str, object] = {
@@ -365,6 +449,7 @@ def promote_history(
         "run_id": checked_acceptance_run,
         "manifest_ref": manifest_ref,
         "quality_report_ref": report_ref,
+        "acceptance_report_ref": report_ref,
         "quality_status": "pass",
         "acceptance_status": "pass",
         "promotion_basis": "raw_history_acceptance",
