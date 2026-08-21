@@ -13,8 +13,11 @@ required_fields:
   - schema_version
   - producer
   - dataset_id
+  - target_dataset_id
+  - target_dataset_contract_ref
   - instrument_id
   - acceptance_run_id
+  - acceptance_contract_ref
   - acceptance_report_ref
   - acceptance_report_sha256
   - source_id
@@ -24,6 +27,7 @@ required_fields:
   - partition_count
   - row_count
   - partition_dates_sha256
+  - missing_partition_dates
   - missing_dates_sha256
   - calendar_missing_partition_count
   - acceptance_status
@@ -33,8 +37,11 @@ promotion_policy:
   acceptance_status_required: pass
   acceptance_evidence_written_required: true
   acceptance_report_digest_pinned: true
+  acceptance_report_path_binding_required: true
+  accepted_pointer_path_binding_required: true
   exact_partition_date_digest_match_required: true
   exact_missing_date_digest_match_required: true
+  missing_partition_dates_pinned: true
   failed_partition_dates_empty_required: true
   hard_check_failures_empty_required: true
   pointer_absent_before_write_required: true
@@ -48,6 +55,7 @@ pointer_policy:
     - dataset_id
     - instrument_id
   manifest_ref_required: true
+  acceptance_report_ref_required: true
   quality_report_ref_maps_to_acceptance_report: true
   quality_status_required: pass
   promotion_basis: raw_history_acceptance
