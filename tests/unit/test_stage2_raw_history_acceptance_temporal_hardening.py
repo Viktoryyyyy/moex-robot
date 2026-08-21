@@ -113,6 +113,28 @@ def test_quote_session_date_must_match_partition_trade_date() -> None:
         )
 
 
+def test_quote_source_marker_must_be_canonical() -> None:
+    frame = _quote_frame()
+    frame["source"] = "WRONG_SOURCE"
+    with pytest.raises(
+        acceptance.RawHistoryAcceptanceError, match="stored identity mismatch: source"
+    ):
+        acceptance._validate_quote_partition(
+            Path("."), frame, _quote_expectation(), "2026-08-17", "test_run"
+        )
+
+
+def test_quote_source_marker_cannot_be_null() -> None:
+    frame = _quote_frame()
+    frame["source"] = pd.NA
+    with pytest.raises(
+        acceptance.RawHistoryAcceptanceError, match="missing stored identity: source"
+    ):
+        acceptance._validate_quote_partition(
+            Path("."), frame, _quote_expectation(), "2026-08-17", "test_run"
+        )
+
+
 def test_quote_required_numeric_cannot_be_infinite() -> None:
     frame = _quote_frame()
     frame["volume"] = np.inf
@@ -135,10 +157,33 @@ def test_quote_optional_numeric_may_be_null_but_not_infinite() -> None:
         )
 
 
+def test_futoi_naive_publication_systime_is_moscow_local() -> None:
+    frame = _futoi_frame()
+    frame["systime"] = pd.to_datetime(
+        ["2026-08-17 12:00:00", "2026-08-17 12:00:00"]
+    )
+    frame["availability_ts_utc"] = pd.to_datetime(
+        ["2026-08-17T09:05:00Z", "2026-08-17T09:05:00Z"]
+    )
+    frame["ingest_ts"] = pd.to_datetime(
+        ["2026-08-17T09:06:00Z", "2026-08-17T09:06:00Z"]
+    )
+
+    rows, secids = acceptance._validate_futoi_partition(
+        frame, _futoi_expectation(), "2026-08-17"
+    )
+
+    assert rows == 2
+    assert secids == ("SiU6",)
+
+
 def test_futoi_availability_cannot_precede_publication() -> None:
     frame = _futoi_frame()
+    frame["systime"] = pd.to_datetime(
+        ["2026-08-17 12:00:00", "2026-08-17 12:00:00"]
+    )
     frame["availability_ts_utc"] = pd.to_datetime(
-        ["2026-08-17T09:59:00Z", "2026-08-17T09:59:00Z"]
+        ["2026-08-17T08:59:00Z", "2026-08-17T08:59:00Z"]
     )
     with pytest.raises(acceptance.RawHistoryAcceptanceError, match="precedes source publication"):
         acceptance._validate_futoi_partition(frame, _futoi_expectation(), "2026-08-17")
