@@ -50,6 +50,23 @@ def _futoi_expectation() -> acceptance.HistoryExpectation:
     )
 
 
+def _quote_scan_frame(ts: str = "2026-08-17 10:15:00", ingest_ts: str = "2026-08-17T10:20:00Z") -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "ts": pd.to_datetime([ts]),
+            "ingest_ts": [ingest_ts],
+            "value": [800.0],
+            "num_trades": [5],
+        }
+    )
+
+
+def _wire_single_quote_partition(monkeypatch, path: Path) -> None:
+    monkeypatch.setattr(gate.acceptance, "_contract_path", lambda *args: "unused")
+    monkeypatch.setattr(gate.acceptance, "_date_range", lambda *args: ("2026-08-17",))
+    monkeypatch.setattr(gate.acceptance, "_partition_path", lambda **kwargs: path)
+
+
 def test_preexisting_accepted_pointer_blocks_before_history_audit(tmp_path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     _quote_pointer_contract(repo)
@@ -133,16 +150,8 @@ rules:
 
 def test_quote_grid_rejects_off_grid_timestamp(tmp_path, monkeypatch) -> None:
     path = tmp_path / "part.parquet"
-    pd.DataFrame(
-        {
-            "ts": pd.to_datetime(["2026-08-17 10:14:00"]),
-            "value": [800.0],
-            "num_trades": [5],
-        }
-    ).to_parquet(path, index=False)
-    monkeypatch.setattr(gate.acceptance, "_contract_path", lambda *args: "unused")
-    monkeypatch.setattr(gate.acceptance, "_date_range", lambda *args: ("2026-08-17",))
-    monkeypatch.setattr(gate.acceptance, "_partition_path", lambda **kwargs: path)
+    _quote_scan_frame(ts="2026-08-17 10:14:00").to_parquet(path, index=False)
+    _wire_single_quote_partition(monkeypatch, path)
 
     failures = gate._quote_grid_failures(Path("."), _quote_expectation())
 
@@ -152,21 +161,39 @@ def test_quote_grid_rejects_off_grid_timestamp(tmp_path, monkeypatch) -> None:
 
 def test_quote_optional_activity_rejects_nonnumeric_stored_value(tmp_path, monkeypatch) -> None:
     path = tmp_path / "part.parquet"
-    pd.DataFrame(
-        {
-            "ts": pd.to_datetime(["2026-08-17 10:15:00"]),
-            "value": ["corrupt"],
-            "num_trades": [5],
-        }
-    ).to_parquet(path, index=False)
-    monkeypatch.setattr(gate.acceptance, "_contract_path", lambda *args: "unused")
-    monkeypatch.setattr(gate.acceptance, "_date_range", lambda *args: ("2026-08-17",))
-    monkeypatch.setattr(gate.acceptance, "_partition_path", lambda **kwargs: path)
+    frame = _quote_scan_frame()
+    frame["value"] = "corrupt"
+    frame.to_parquet(path, index=False)
+    _wire_single_quote_partition(monkeypatch, path)
 
     failures = gate._quote_grid_failures(Path("."), _quote_expectation())
 
     assert len(failures) == 1
     assert "nonnumeric optional activity: value" in failures[0]["error"]
+
+
+def test_quote_ingest_ts_must_be_parseable(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "part.parquet"
+    _quote_scan_frame(ingest_ts="not-a-timestamp").to_parquet(path, index=False)
+    _wire_single_quote_partition(monkeypatch, path)
+
+    failures = gate._quote_grid_failures(Path("."), _quote_expectation())
+
+    assert len(failures) == 1
+    assert "invalid ts or ingest_ts" in failures[0]["error"]
+
+
+def test_quote_ingest_ts_cannot_precede_bar_ts(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "part.parquet"
+    _quote_scan_frame(
+        ts="2026-08-17 10:15:00", ingest_ts="2026-08-17T07:14:59Z"
+    ).to_parquet(path, index=False)
+    _wire_single_quote_partition(monkeypatch, path)
+
+    failures = gate._quote_grid_failures(Path("."), _quote_expectation())
+
+    assert len(failures) == 1
+    assert "ingest_ts precedes ts" in failures[0]["error"]
 
 
 def test_futoi_clgroup_rejects_noncanonical_stored_spelling(tmp_path, monkeypatch) -> None:
