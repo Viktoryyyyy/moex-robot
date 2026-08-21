@@ -482,6 +482,12 @@ def _validate_futoi_partition(
     position_fields = ("pos", "pos_long", "pos_short", "pos_long_num", "pos_short_num")
     _require_finite_numeric(frame, position_fields)
     position_values = {field: _numeric_series(frame, field) for field in position_fields}
+    for field in ("pos_long_num", "pos_short_num"):
+        participant_counts = position_values[field].to_numpy(dtype="float64")
+        if bool((participant_counts < 0).any()) or not bool(
+            np.equal(participant_counts, np.floor(participant_counts)).all()
+        ):
+            _fail("FUTOI participant counts must be non-negative integers")
     if not bool(
         position_values["pos"].eq(
             position_values["pos_long"] + position_values["pos_short"]
