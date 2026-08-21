@@ -41,6 +41,7 @@ def _repo(tmp_path: Path) -> Path:
                 "dataset_id: futures_raw_history_accepted_manifest",
                 "schema_version: futures_raw_history_accepted_manifest.v1",
                 'path_pattern: "${MOEX_DATA_ROOT}/state/accepted_manifests/target_dataset_id={TARGET_DATASET_ID}/instrument_id={INSTRUMENT_ID}/acceptance_run_id={ACCEPTANCE_RUN_ID}/accepted_manifest.json"',
+                'report_snapshot_path_pattern: "${MOEX_DATA_ROOT}/state/accepted_manifests/target_dataset_id={TARGET_DATASET_ID}/instrument_id={INSTRUMENT_ID}/acceptance_run_id={ACCEPTANCE_RUN_ID}/acceptance_report_snapshot.json"',
                 "",
             )
         ),
@@ -173,11 +174,12 @@ def _pointer_ref() -> str:
     )
 
 
-def test_pass_acceptance_promotes_immutable_manifest_and_pointer(tmp_path, monkeypatch) -> None:
+def test_pass_acceptance_promotes_immutable_manifest_snapshot_and_pointer(tmp_path, monkeypatch) -> None:
     repo = _repo(tmp_path)
     data_root = tmp_path / "data"
     monkeypatch.setenv("MOEX_DATA_ROOT", str(data_root))
     report_path = _write_report(data_root, _report_values())
+    source_bytes = report_path.read_bytes()
 
     result = promotion.promote_history(
         repo_root=repo,
@@ -188,9 +190,15 @@ def test_pass_acceptance_promotes_immutable_manifest_and_pointer(tmp_path, monke
 
     assert result["status"] == "promoted"
     assert result["accepted_pointer_written"] is True
-    assert result["acceptance_report_sha256"] == hashlib.sha256(
-        report_path.read_bytes()
-    ).hexdigest()
+    assert result["acceptance_report_sha256"] == hashlib.sha256(source_bytes).hexdigest()
+
+    snapshot_path = promotion.acceptance_report_snapshot_path(
+        repo_root=repo,
+        target_dataset_id=DATASET_ID,
+        instrument_id=INSTRUMENT_ID,
+        acceptance_run_id=RUN_ID,
+    )
+    assert snapshot_path.read_bytes() == source_bytes
 
     manifest_path = promotion.accepted_manifest_path(
         repo_root=repo,
@@ -208,11 +216,14 @@ def test_pass_acceptance_promotes_immutable_manifest_and_pointer(tmp_path, monke
     assert manifest["partition_dates_sha256"] == PARTITION_DATES_SHA256
     assert manifest["missing_dates_sha256"] == MISSING_DATES_SHA256
     assert manifest["acceptance_report_sha256"] == result["acceptance_report_sha256"]
+    assert manifest["acceptance_report_ref"] == result["acceptance_report_ref"]
+    assert manifest["source_acceptance_report_ref"] == result["source_acceptance_report_ref"]
 
     pointer = json.loads(_pointer_path(data_root).read_text(encoding="utf-8"))
     assert pointer["promotion_basis"] == "raw_history_acceptance"
     assert pointer["quality_report_ref"] == manifest["acceptance_report_ref"]
     assert pointer["acceptance_report_ref"] == manifest["acceptance_report_ref"]
+    assert pointer["source_acceptance_report_ref"] == manifest["source_acceptance_report_ref"]
     assert pointer["manifest_ref"] == result["accepted_manifest_ref"]
 
     compatible = accepted_manifest.read_accepted_manifest_pointer(
@@ -317,20 +328,37 @@ def test_consistent_shorter_report_cannot_override_repository_expectation(tmp_pa
     assert not _pointer_path(data_root).exists()
 
 
-def test_report_change_recheck_happens_before_manifest_publication(tmp_path, monkeypatch) -> None:
+def test_atomic_report_replacement_is_rejected_before_snapshot_publication(tmp_path, monkeypatch) -> None:
     repo = _repo(tmp_path)
     data_root = tmp_path / "data"
     monkeypatch.setenv("MOEX_DATA_ROOT", str(data_root))
-    _write_report(data_root, _report_values())
+    report_path = _write_report(data_root, _report_values())
+    snapshot_path = promotion.acceptance_report_snapshot_path(
+        repo_root=repo,
+        target_dataset_id=DATASET_ID,
+        instrument_id=INSTRUMENT_ID,
+        acceptance_run_id=RUN_ID,
+    )
     manifest_path = promotion.accepted_manifest_path(
         repo_root=repo,
         target_dataset_id=DATASET_ID,
         instrument_id=INSTRUMENT_ID,
         acceptance_run_id=RUN_ID,
     )
-    monkeypatch.setattr(promotion, "_sha256_file", lambda path: "0" * 64)
+    original_verify = promotion._verify_report_path_identity
 
-    with pytest.raises(promotion.RawHistoryPromotionError, match="before accepted manifest publication"):
+    def replace_then_verify(path, snapshot):
+        replacement = path.with_name("replacement.json")
+        replacement.write_bytes(snapshot.raw_bytes)
+        replacement.replace(path)
+        original_verify(path, snapshot)
+
+    monkeypatch.setattr(promotion, "_verify_report_path_identity", replace_then_verify)
+
+    with pytest.raises(
+        promotion.RawHistoryPromotionError,
+        match="pathname no longer identifies validated snapshot",
+    ):
         promotion.promote_history(
             repo_root=repo,
             target_dataset_id=DATASET_ID,
@@ -338,6 +366,8 @@ def test_report_change_recheck_happens_before_manifest_publication(tmp_path, mon
             acceptance_run_id=RUN_ID,
         )
 
+    assert report_path.is_file()
+    assert not snapshot_path.exists()
     assert not manifest_path.exists()
     assert not _pointer_path(data_root).exists()
 
@@ -385,7 +415,7 @@ def test_conflicting_precreated_manifest_fails_without_pointer(tmp_path, monkeyp
     assert not _pointer_path(data_root).exists()
 
 
-def test_identical_manifest_allows_recovery_before_pointer_creation(tmp_path, monkeypatch) -> None:
+def test_identical_artifacts_allow_recovery_before_pointer_creation(tmp_path, monkeypatch) -> None:
     repo = _repo(tmp_path)
     data_root = tmp_path / "data"
     monkeypatch.setenv("MOEX_DATA_ROOT", str(data_root))
