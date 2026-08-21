@@ -36,6 +36,7 @@ def _repo(tmp_path: Path) -> Path:
         repo / "contracts/datasets/futures_raw_history_accepted_manifest.v1.yaml",
         "\n".join(
             (
+                "dataset_id: futures_raw_history_accepted_manifest",
                 "schema_version: futures_raw_history_accepted_manifest.v1",
                 'path_pattern: "${MOEX_DATA_ROOT}/state/accepted_manifests/target_dataset_id={TARGET_DATASET_ID}/instrument_id={INSTRUMENT_ID}/acceptance_run_id={ACCEPTANCE_RUN_ID}/accepted_manifest.json"',
                 "",
@@ -71,20 +72,21 @@ def _report_values(**overrides: object) -> dict[str, object]:
         "latest_autodetect_used": False,
         "failed_partition_dates": [],
         "hard_check_failures": [],
-        "expected_partition_count": 1100,
-        "actual_partition_count": 1100,
-        "expected_row_count": 181139,
-        "actual_row_count": 181139,
+        "expected_partition_count": 2,
+        "actual_partition_count": 2,
+        "expected_row_count": 3,
+        "actual_row_count": 3,
         "expected_partition_dates_sha256": "a" * 64,
         "actual_partition_dates_sha256": "a" * 64,
         "expected_missing_dates_sha256": "b" * 64,
         "actual_missing_dates_sha256": "b" * 64,
-        "expected_calendar_missing_partition_count": 475,
-        "actual_calendar_missing_partition_count": 475,
+        "expected_calendar_missing_partition_count": 1,
+        "actual_calendar_missing_partition_count": 1,
+        "missing_partition_dates": ["2022-04-30"],
         "source_id": "moex_algopack_fo_tradestats_5m",
         "secid_scope": ["USDRUBF"],
         "requested_from": "2022-04-26",
-        "requested_till": "2026-08-17",
+        "requested_till": "2022-04-30",
     }
     values.update(overrides)
     return values
@@ -101,16 +103,6 @@ def _report_path(data_root: Path) -> Path:
     )
 
 
-def _write_report(data_root: Path, values: dict[str, object]) -> Path:
-    path = _report_path(data_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(values, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    return path
-
-
 def _pointer_path(data_root: Path) -> Path:
     return (
         data_root
@@ -119,6 +111,23 @@ def _pointer_path(data_root: Path) -> Path:
         / ("instrument_id=" + INSTRUMENT_ID)
         / "current_accepted_manifest.json"
     )
+
+
+def _write_report(data_root: Path, values: dict[str, object]) -> Path:
+    path = _report_path(data_root)
+    values = dict(values)
+    values["producer"] = promotion.ACCEPTANCE_PRODUCER
+    values["acceptance_contract_ref"] = (
+        "contracts/datasets/futures_raw_history_acceptance.v1.yaml"
+    )
+    values["acceptance_report_reference"] = path.as_posix()
+    values["accepted_pointer_path_checked"] = _pointer_path(data_root).as_posix()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(values, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 def _pointer_ref() -> str:
@@ -157,14 +166,18 @@ def test_pass_acceptance_promotes_immutable_manifest_and_pointer(tmp_path, monke
         acceptance_run_id=RUN_ID,
     )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["dataset_id"] == promotion.PROMOTION_DATASET_ID
+    assert manifest["target_dataset_id"] == DATASET_ID
     assert manifest["acceptance_status"] == "pass"
-    assert manifest["partition_count"] == 1100
-    assert manifest["row_count"] == 181139
+    assert manifest["partition_count"] == 2
+    assert manifest["row_count"] == 3
+    assert manifest["missing_partition_dates"] == ["2022-04-30"]
     assert manifest["acceptance_report_sha256"] == result["acceptance_report_sha256"]
 
     pointer = json.loads(_pointer_path(data_root).read_text(encoding="utf-8"))
     assert pointer["promotion_basis"] == "raw_history_acceptance"
     assert pointer["quality_report_ref"] == manifest["acceptance_report_ref"]
+    assert pointer["acceptance_report_ref"] == manifest["acceptance_report_ref"]
     assert pointer["manifest_ref"] == result["accepted_manifest_ref"]
 
     compatible = accepted_manifest.read_accepted_manifest_pointer(
@@ -198,7 +211,7 @@ def test_digest_or_count_mismatch_cannot_be_promoted(tmp_path, monkeypatch) -> N
     repo = _repo(tmp_path)
     data_root = tmp_path / "data"
     monkeypatch.setenv("MOEX_DATA_ROOT", str(data_root))
-    _write_report(data_root, _report_values(actual_partition_count=1099))
+    _write_report(data_root, _report_values(actual_partition_count=1))
 
     with pytest.raises(promotion.RawHistoryPromotionError, match="partition_count"):
         promotion.promote_history(
@@ -292,3 +305,23 @@ def test_identical_manifest_allows_recovery_before_pointer_creation(tmp_path, mo
     )
     assert result["status"] == "promoted"
     assert _pointer_path(data_root).is_file()
+
+
+def test_report_pointer_binding_mismatch_fails_closed(tmp_path, monkeypatch) -> None:
+    repo = _repo(tmp_path)
+    data_root = tmp_path / "data"
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(data_root))
+    values = _report_values()
+    path = _write_report(data_root, values)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["accepted_pointer_path_checked"] = (data_root / "wrong.json").as_posix()
+    path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+
+    with pytest.raises(promotion.RawHistoryPromotionError, match="pointer path checked"):
+        promotion.promote_history(
+            repo_root=repo,
+            target_dataset_id=DATASET_ID,
+            instrument_id=INSTRUMENT_ID,
+            acceptance_run_id=RUN_ID,
+        )
+    assert not _pointer_path(data_root).exists()
