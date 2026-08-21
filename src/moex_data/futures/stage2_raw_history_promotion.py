@@ -73,6 +73,11 @@ def _require_sha256(value: object, field_name: str) -> str:
     return text
 
 
+def _date_set_sha256(values: Sequence[str]) -> str:
+    payload = (("\n".join(values) + "\n") if values else "").encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _read_json_object_and_sha256(
     path: Path, field_name: str
 ) -> tuple[dict[str, object], str]:
@@ -199,7 +204,7 @@ def _validate_acceptance_report(
         "acceptance target_dataset_id",
     )
     _require_equal(values.get("instrument_id"), instrument_id, "acceptance instrument_id")
-    _require_equal(values.get("run_id"), acceptance_run_id, "acceptance run_id")
+    _require_equal(values.get("run_id"), acceptance_run_id, "acceptance run id")
     _require_equal(values.get("producer"), ACCEPTANCE_PRODUCER, "acceptance producer")
     _require_equal(
         values.get("acceptance_contract_ref"),
@@ -277,8 +282,8 @@ def _validate_acceptance_report(
         _require_sha256(values.get(field_name), field_name)
 
     _require_text(values.get("source_id"), "source_id")
-    _require_text(values.get("requested_from"), "requested_from")
-    _require_text(values.get("requested_till"), "requested_till")
+    requested_from = _require_text(values.get("requested_from"), "requested_from")
+    requested_till = _require_text(values.get("requested_till"), "requested_till")
 
     secid_scope = values.get("secid_scope")
     if not isinstance(secid_scope, list) or not secid_scope:
@@ -289,12 +294,37 @@ def _validate_acceptance_report(
     missing_dates = values.get("missing_partition_dates")
     if not isinstance(missing_dates, list):
         _fail("missing_partition_dates must be a list")
+    checked_missing_dates = [
+        acceptance._require_date(value, "missing_partition_dates")
+        for value in missing_dates
+    ]
+    if checked_missing_dates != missing_dates:
+        _fail("missing_partition_dates must use canonical ISO dates")
     if len(missing_dates) != values.get("actual_calendar_missing_partition_count"):
         _fail("missing_partition_dates count mismatch")
     if len(set(missing_dates)) != len(missing_dates):
         _fail("missing_partition_dates must not contain duplicates")
     if missing_dates != sorted(missing_dates):
         _fail("missing_partition_dates must be sorted")
+
+    try:
+        all_dates = list(acceptance._date_range(requested_from, requested_till))
+    except Exception as exc:
+        raise RawHistoryPromotionError("requested date range is invalid: " + str(exc)) from exc
+    all_date_set = set(all_dates)
+    missing_date_set = set(missing_dates)
+    if not missing_date_set.issubset(all_date_set):
+        _fail("missing_partition_dates contains date outside requested range")
+    present_dates = [value for value in all_dates if value not in missing_date_set]
+    if len(present_dates) != values.get("actual_partition_count"):
+        _fail("partition count does not match requested range minus missing dates")
+
+    observed_partition_digest = _date_set_sha256(present_dates)
+    observed_missing_digest = _date_set_sha256(missing_dates)
+    if observed_partition_digest != values.get("actual_partition_dates_sha256"):
+        _fail("partition date digest does not match requested range and missing dates")
+    if observed_missing_digest != values.get("actual_missing_dates_sha256"):
+        _fail("missing date digest does not match missing_partition_dates")
 
 
 def _json_bytes(values: Mapping[str, object]) -> bytes:
