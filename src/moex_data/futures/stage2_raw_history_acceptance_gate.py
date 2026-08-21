@@ -91,17 +91,33 @@ def _quote_grid_failures(
         if not path.is_file():
             continue
         try:
-            frame = pd.read_parquet(path, columns=["ts"])
+            frame = pd.read_parquet(path, columns=["ts", "value", "num_trades"])
             timestamps = pd.to_datetime(frame["ts"], errors="coerce")
             aligned = (
                 not bool(timestamps.isna().any())
                 and bool(timestamps.eq(timestamps.dt.floor("5min")).all())
             )
+            corrupt_optional = None
+            for column in ("value", "num_trades"):
+                raw = frame[column]
+                numeric = pd.to_numeric(raw, errors="coerce")
+                if bool((raw.notna() & numeric.isna()).any()):
+                    corrupt_optional = column
+                    break
         except Exception as exc:
             failures.append(
                 {
                     "trade_date": trade_date,
-                    "error": "quote 5-minute grid validation failed: " + str(exc),
+                    "error": "quote 5-minute grid/activity validation failed: " + str(exc),
+                }
+            )
+            continue
+        if corrupt_optional is not None:
+            failures.append(
+                {
+                    "trade_date": trade_date,
+                    "error": "quote partition contains nonnumeric optional activity: "
+                    + corrupt_optional,
                 }
             )
             continue
