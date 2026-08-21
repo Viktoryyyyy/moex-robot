@@ -40,26 +40,39 @@ Before reading history, the canonical gate expands the target dataset's explicit
 
 Every existing canonical partition in the bounded GitHub-declared coverage range is read from its exact contract-expanded path.
 
-Quotes reuse the canonical raw 5-minute materializer validation semantics and additionally reject negative `volume`, `value`, or `num_trades` when present.
+Acceptance requires both declared totals and exact date-set identity. `configs/datasets/futures_data_lake.v1.yaml` pins SHA-256 for the complete present partition-date set and the complete missing-date set for each scoped history. Digests are computed from sorted ISO dates, one date per line with a trailing newline. Count-only acceptance is forbidden.
+
+Quotes reuse the canonical raw 5-minute materializer validation semantics and additionally require:
+
+- stored source identities to match the registry binding;
+- trade/session/timestamp dates to match the partition date;
+- timestamps to lie on the five-minute grid;
+- finite OHLC/volume and finite nonnegative optional activity when present;
+- nonnumeric stored optional activity to fail closed;
+- `ingest_ts` to parse and not precede the source bar timestamp.
 
 FUTOI requires:
 
 - required canonical columns;
-- explicit `instrument_id`, `source_id`, trade date, and source ticker identity;
-- `clgroup` in `FIZ/YUR`;
+- explicit `instrument_id`, `source_id`, trade date, `secid`, and source ticker identity;
+- canonical stored `clgroup` exactly `FIZ` or `YUR`;
 - `ts = moment`;
 - `systime >= moment` while `systime` remains publication/archive metadata only;
+- `systime <= availability_ts_utc <= ingest_ts`;
 - valid `sess_id` and `seqnum`;
 - zero duplicates under `trade_date + sess_id + seqnum + secid + clgroup`;
+- finite position fields and `pos = pos_long + pos_short`;
 - zero null-required and invalid-position counts.
 
-Final acceptance also requires exact GitHub-declared partition and row totals. FUTOI missing calendar dates must equal the recorded source-empty count.
+Final acceptance requires exact GitHub-declared partition count, row count, partition-date digest, and missing-date digest. FUTOI missing calendar counts must also equal the recorded source-empty count.
 
 ## Output
 
 The runner writes one immutable acceptance report under:
 
 `${MOEX_DATA_ROOT}/state/acceptance/target_dataset_id={TARGET_DATASET_ID}/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}/acceptance_report.json`
+
+The report records expected and actual SHA-256 values for both present and missing date sets.
 
 `acceptance_status=pass` is evidence for the separate accepted-pointer promotion step. This runner never writes that pointer itself.
 
