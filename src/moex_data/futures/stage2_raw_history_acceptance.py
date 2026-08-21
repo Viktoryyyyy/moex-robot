@@ -533,6 +533,7 @@ def audit_history(
             missing_dates.append(trade_date)
             continue
         if not path.is_file():
+            missing_dates.append(trade_date)
             failed_dates.append(
                 {"trade_date": trade_date, "error": "canonical partition path is not a file"}
             )
