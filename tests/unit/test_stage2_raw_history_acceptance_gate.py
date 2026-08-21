@@ -133,9 +133,13 @@ rules:
 
 def test_quote_grid_rejects_off_grid_timestamp(tmp_path, monkeypatch) -> None:
     path = tmp_path / "part.parquet"
-    pd.DataFrame({"ts": pd.to_datetime(["2026-08-17 10:14:00"])}).to_parquet(
-        path, index=False
-    )
+    pd.DataFrame(
+        {
+            "ts": pd.to_datetime(["2026-08-17 10:14:00"]),
+            "value": [800.0],
+            "num_trades": [5],
+        }
+    ).to_parquet(path, index=False)
     monkeypatch.setattr(gate.acceptance, "_contract_path", lambda *args: "unused")
     monkeypatch.setattr(gate.acceptance, "_date_range", lambda *args: ("2026-08-17",))
     monkeypatch.setattr(gate.acceptance, "_partition_path", lambda **kwargs: path)
@@ -144,6 +148,25 @@ def test_quote_grid_rejects_off_grid_timestamp(tmp_path, monkeypatch) -> None:
 
     assert len(failures) == 1
     assert "not aligned to 5-minute grid" in failures[0]["error"]
+
+
+def test_quote_optional_activity_rejects_nonnumeric_stored_value(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "part.parquet"
+    pd.DataFrame(
+        {
+            "ts": pd.to_datetime(["2026-08-17 10:15:00"]),
+            "value": ["corrupt"],
+            "num_trades": [5],
+        }
+    ).to_parquet(path, index=False)
+    monkeypatch.setattr(gate.acceptance, "_contract_path", lambda *args: "unused")
+    monkeypatch.setattr(gate.acceptance, "_date_range", lambda *args: ("2026-08-17",))
+    monkeypatch.setattr(gate.acceptance, "_partition_path", lambda **kwargs: path)
+
+    failures = gate._quote_grid_failures(Path("."), _quote_expectation())
+
+    assert len(failures) == 1
+    assert "nonnumeric optional activity: value" in failures[0]["error"]
 
 
 def test_futoi_clgroup_rejects_noncanonical_stored_spelling(tmp_path, monkeypatch) -> None:
