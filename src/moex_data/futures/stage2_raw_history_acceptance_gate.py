@@ -347,7 +347,7 @@ def run_gate(
             "acceptance report path changed during deterministic gate evaluation"
         )
 
-    if expectation is not None and result.get("acceptance_status") == "pass":
+    if expectation is not None:
         _apply_exact_date_set_evidence(
             result,
             expectation,
