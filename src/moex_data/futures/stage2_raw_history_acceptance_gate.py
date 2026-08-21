@@ -13,6 +13,9 @@ from . import materialize_forts_raw_5m_instrument as quote_materializer
 from . import stage2_raw_history_acceptance as acceptance
 
 
+QUOTE_TS_TIMEZONE = "Europe/Moscow"
+
+
 def _accepted_pointer_ref(repo_root: Path, contract_path: str, instrument_id: str) -> str:
     path = repo_root / contract_path
     if not path.exists() or not path.is_file():
@@ -91,12 +94,40 @@ def _quote_grid_failures(
         if not path.is_file():
             continue
         try:
-            frame = pd.read_parquet(path, columns=["ts", "value", "num_trades"])
-            timestamps = pd.to_datetime(frame["ts"], errors="coerce")
-            aligned = (
-                not bool(timestamps.isna().any())
-                and bool(timestamps.eq(timestamps.dt.floor("5min")).all())
+            frame = pd.read_parquet(
+                path, columns=["ts", "ingest_ts", "value", "num_trades"]
             )
+            timestamps = pd.to_datetime(frame["ts"], errors="coerce")
+            ingest_utc = pd.to_datetime(frame["ingest_ts"], errors="coerce", utc=True)
+            if bool(timestamps.isna().any()) or bool(ingest_utc.isna().any()):
+                failures.append(
+                    {
+                        "trade_date": trade_date,
+                        "error": "quote partition contains invalid ts or ingest_ts",
+                    }
+                )
+                continue
+            try:
+                timestamps_utc = timestamps.dt.tz_localize(
+                    QUOTE_TS_TIMEZONE, ambiguous="raise", nonexistent="raise"
+                ).dt.tz_convert("UTC")
+            except Exception as exc:
+                failures.append(
+                    {
+                        "trade_date": trade_date,
+                        "error": "quote timestamp timezone normalization failed: " + str(exc),
+                    }
+                )
+                continue
+            if bool((ingest_utc < timestamps_utc).any()):
+                failures.append(
+                    {
+                        "trade_date": trade_date,
+                        "error": "quote partition ingest_ts precedes ts",
+                    }
+                )
+                continue
+            aligned = bool(timestamps.eq(timestamps.dt.floor("5min")).all())
             corrupt_optional = None
             for column in ("value", "num_trades"):
                 raw = frame[column]
