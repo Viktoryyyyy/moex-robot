@@ -8,6 +8,7 @@ format: json
 schema_version: futures_raw_history_accepted_manifest.v1
 storage_root_ref: MOEX_DATA_ROOT
 path_pattern: "${MOEX_DATA_ROOT}/state/accepted_manifests/target_dataset_id={TARGET_DATASET_ID}/instrument_id={INSTRUMENT_ID}/acceptance_run_id={ACCEPTANCE_RUN_ID}/accepted_manifest.json"
+report_snapshot_path_pattern: "${MOEX_DATA_ROOT}/state/accepted_manifests/target_dataset_id={TARGET_DATASET_ID}/instrument_id={INSTRUMENT_ID}/acceptance_run_id={ACCEPTANCE_RUN_ID}/acceptance_report_snapshot.json"
 grain: accepted_history_manifest_by_target_dataset_instrument_and_acceptance_run
 required_fields:
   - schema_version
@@ -18,6 +19,7 @@ required_fields:
   - instrument_id
   - acceptance_run_id
   - acceptance_contract_ref
+  - source_acceptance_report_ref
   - acceptance_report_ref
   - acceptance_report_sha256
   - source_id
@@ -36,8 +38,10 @@ required_fields:
 promotion_policy:
   acceptance_status_required: pass
   acceptance_evidence_written_required: true
+  source_acceptance_report_path_binding_required: true
+  source_acceptance_report_inode_binding_required_before_snapshot_publication: true
+  validated_report_bytes_snapshotted_immutably: true
   acceptance_report_digest_pinned: true
-  acceptance_report_path_binding_required: true
   accepted_pointer_path_binding_required: true
   repository_stage2_expectation_binding_required: true
   repository_range_binding_required: true
@@ -49,10 +53,10 @@ promotion_policy:
   missing_partition_dates_pinned: true
   failed_partition_dates_empty_required: true
   hard_check_failures_empty_required: true
-  report_unchanged_before_manifest_publication_required: true
   pointer_absent_before_write_required: true
   pointer_create_only_required: true
   manifest_immutable_required: true
+  report_snapshot_immutable_required: true
   network_access_allowed: false
   historical_backfill_allowed: false
 pointer_policy:
@@ -62,7 +66,8 @@ pointer_policy:
     - instrument_id
   manifest_ref_required: true
   acceptance_report_ref_required: true
-  quality_report_ref_maps_to_acceptance_report: true
+  source_acceptance_report_ref_required: true
+  quality_report_ref_maps_to_immutable_acceptance_snapshot: true
   quality_status_required: pass
   promotion_basis: raw_history_acceptance
 execution_boundary:
@@ -73,4 +78,4 @@ execution_boundary:
   dynamic_partition_scan_allowed: false
   network_access_allowed: false
   historical_backfill_allowed: false
-retention_policy: keep_all_accepted_history_manifests
+retention_policy: keep_all_accepted_history_manifests_and_report_snapshots
