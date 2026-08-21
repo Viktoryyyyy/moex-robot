@@ -58,6 +58,37 @@ def _repo(tmp_path: Path) -> Path:
     return repo
 
 
+def _repository_expectation() -> promotion.acceptance.HistoryExpectation:
+    return promotion.acceptance.HistoryExpectation(
+        target_dataset_id=DATASET_ID,
+        instrument_id=INSTRUMENT_ID,
+        source_id="moex_algopack_fo_tradestats_5m",
+        date_start="2022-04-26",
+        date_end="2022-04-30",
+        expected_partitions=4,
+        expected_rows=3,
+        expected_secid="USDRUBF",
+    )
+
+
+@pytest.fixture(autouse=True)
+def _pin_repository_expectation(monkeypatch) -> None:
+    expectation = _repository_expectation()
+    monkeypatch.setattr(
+        promotion.acceptance,
+        "_expectation",
+        lambda repo_root, target_dataset_id, instrument_id: expectation,
+    )
+    monkeypatch.setattr(
+        promotion.acceptance_gate,
+        "_expected_date_set_evidence",
+        lambda repo_root, target_dataset_id, instrument_id: (
+            PARTITION_DATES_SHA256,
+            MISSING_DATES_SHA256,
+        ),
+    )
+
+
 def _report_values(**overrides: object) -> dict[str, object]:
     values: dict[str, object] = {
         "dataset_id": "futures_raw_history_acceptance",
@@ -251,6 +282,63 @@ def test_consistently_forged_date_digests_cannot_be_promoted(tmp_path, monkeypat
             acceptance_run_id=RUN_ID,
         )
 
+    assert not _pointer_path(data_root).exists()
+
+
+def test_consistent_shorter_report_cannot_override_repository_expectation(tmp_path, monkeypatch) -> None:
+    repo = _repo(tmp_path)
+    data_root = tmp_path / "data"
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(data_root))
+    present = ["2022-04-27", "2022-04-28", "2022-04-29"]
+    missing = ["2022-04-30"]
+    partition_digest = promotion._date_set_sha256(present)
+    missing_digest = promotion._date_set_sha256(missing)
+    _write_report(
+        data_root,
+        _report_values(
+            requested_from="2022-04-27",
+            expected_partition_count=3,
+            actual_partition_count=3,
+            expected_partition_dates_sha256=partition_digest,
+            actual_partition_dates_sha256=partition_digest,
+            expected_missing_dates_sha256=missing_digest,
+            actual_missing_dates_sha256=missing_digest,
+        ),
+    )
+
+    with pytest.raises(promotion.RawHistoryPromotionError, match="repository requested_from"):
+        promotion.promote_history(
+            repo_root=repo,
+            target_dataset_id=DATASET_ID,
+            instrument_id=INSTRUMENT_ID,
+            acceptance_run_id=RUN_ID,
+        )
+
+    assert not _pointer_path(data_root).exists()
+
+
+def test_report_change_recheck_happens_before_manifest_publication(tmp_path, monkeypatch) -> None:
+    repo = _repo(tmp_path)
+    data_root = tmp_path / "data"
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(data_root))
+    _write_report(data_root, _report_values())
+    manifest_path = promotion.accepted_manifest_path(
+        repo_root=repo,
+        target_dataset_id=DATASET_ID,
+        instrument_id=INSTRUMENT_ID,
+        acceptance_run_id=RUN_ID,
+    )
+    monkeypatch.setattr(promotion, "_sha256_file", lambda path: "0" * 64)
+
+    with pytest.raises(promotion.RawHistoryPromotionError, match="before accepted manifest publication"):
+        promotion.promote_history(
+            repo_root=repo,
+            target_dataset_id=DATASET_ID,
+            instrument_id=INSTRUMENT_ID,
+            acceptance_run_id=RUN_ID,
+        )
+
+    assert not manifest_path.exists()
     assert not _pointer_path(data_root).exists()
 
 
