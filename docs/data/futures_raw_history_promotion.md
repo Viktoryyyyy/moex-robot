@@ -14,13 +14,13 @@ The operator must provide all three identities explicitly:
 - instrument id;
 - acceptance run id.
 
-The promotion runner expands the acceptance-report path only from the repository acceptance contract and `MOEX_DATA_ROOT`.
+The promotion runner expands the source acceptance-report path only from the repository acceptance contract and `MOEX_DATA_ROOT`.
 
 ## Hard preconditions
 
-Promotion fails closed unless the acceptance report:
+Promotion fails closed unless the source acceptance report:
 
-- is a regular JSON file at the exact contract-expanded path;
+- is a regular non-symlink JSON file at the exact contract-expanded path;
 - belongs to the explicit target dataset, instrument, and acceptance run;
 - identifies the canonical Stage 2 acceptance producer and contract;
 - records the same canonical pointer path that promotion will write;
@@ -33,7 +33,13 @@ Promotion fails closed unless the acceptance report:
 - contains a sorted, duplicate-free missing-partition-date list matching the declared missing count;
 - exactly matches the GitHub Source-of-Truth Stage 2 expectation for target dataset, instrument, source, secid scope, first/last date, partition count, row count, calendar-missing count, and both exact date-set SHA-256 values.
 
-The report is parsed and SHA-256 hashed from the same bytes. The exact date-set digests are independently reconstructed from the declared range and missing-date list, then compared with the GitHub Source-of-Truth digests. Immediately before an immutable accepted manifest is published, the report file is rehashed and promotion fails without publishing the manifest if its bytes changed.
+The source report is opened once, read through a file descriptor, and parsed and SHA-256 hashed from the same bytes. Device, inode, size, and modification time are captured from that validated file descriptor. Before evidence publication, the source pathname must still identify that exact validated snapshot.
+
+The validated bytes are then written create-only to an immutable promotion evidence snapshot:
+
+`${MOEX_DATA_ROOT}/state/accepted_manifests/target_dataset_id={TARGET_DATASET_ID}/instrument_id={INSTRUMENT_ID}/acceptance_run_id={ACCEPTANCE_RUN_ID}/acceptance_report_snapshot.json`
+
+The accepted manifest and canonical pointer reference this immutable snapshot, not the mutable source pathname. The original source acceptance-report reference is retained separately as provenance.
 
 ## Outputs
 
@@ -41,15 +47,15 @@ Immutable accepted manifest:
 
 `${MOEX_DATA_ROOT}/state/accepted_manifests/target_dataset_id={TARGET_DATASET_ID}/instrument_id={INSTRUMENT_ID}/acceptance_run_id={ACCEPTANCE_RUN_ID}/accepted_manifest.json`
 
-The manifest pins the target dataset contract, exact acceptance-report reference and SHA-256, range, counts, present-date digest, missing-date list, and missing-date digest. This allows later readers to resolve a pinned history without filesystem discovery.
+The manifest pins the target dataset contract, original source acceptance-report reference, immutable acceptance snapshot reference and SHA-256, range, counts, present-date digest, missing-date list, and missing-date digest. This allows later readers to resolve a pinned history without filesystem discovery.
 
 Canonical pointer:
 
 `${MOEX_DATA_ROOT}/state/datasets/dataset_id={DATASET_ID}/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json`
 
-The pointer keeps the established envelope fields `dataset_id`, `instrument_id`, `run_id`, `manifest_ref`, and `quality_report_ref`, and also records `acceptance_report_ref`. For history promotion, both evidence references point to the immutable raw-history acceptance report, `quality_status=pass`, and `promotion_basis=raw_history_acceptance`.
+The pointer keeps the established envelope fields `dataset_id`, `instrument_id`, `run_id`, `manifest_ref`, and `quality_report_ref`, and also records `acceptance_report_ref` and `source_acceptance_report_ref`. For history promotion, `quality_report_ref` and `acceptance_report_ref` point to the immutable promotion snapshot, `quality_status=pass`, and `promotion_basis=raw_history_acceptance`.
 
-The pointer is create-only. A pre-existing pointer or a pointer that appears concurrently blocks promotion. The accepted manifest is immutable; an identical pre-created manifest may be reused only to recover from an interruption before pointer creation.
+The pointer is create-only. A pre-existing pointer or a pointer that appears concurrently blocks promotion. The evidence snapshot and accepted manifest are immutable; byte-identical pre-created artifacts may be reused only to recover from an interruption before pointer creation.
 
 ## CLI
 
