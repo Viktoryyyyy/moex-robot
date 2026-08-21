@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Sequence
@@ -11,6 +12,7 @@ from . import accepted_manifest
 from . import backfill_stage2_forts_raw_5m_instrument as quote_stage2_backfill
 from . import materialize_forts_raw_5m_instrument as quote_materializer
 from . import stage2_raw_history_acceptance as acceptance
+from .contract_io import load_simple_yaml_mapping
 
 
 QUOTE_TS_TIMEZONE = "Europe/Moscow"
@@ -201,6 +203,85 @@ def _futoi_clgroup_failures(
     return tuple(failures)
 
 
+def _date_set_sha256(values: Sequence[str]) -> str:
+    payload = ("\n".join(values) + "\n") if values else ""
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _require_sha256(value: object, field_name: str) -> str:
+    text = str(value or "").strip().lower()
+    if len(text) != 64:
+        raise acceptance.RawHistoryAcceptanceError(field_name + " must be sha256 hex")
+    try:
+        int(text, 16)
+    except ValueError as exc:
+        raise acceptance.RawHistoryAcceptanceError(
+            field_name + " must be sha256 hex"
+        ) from exc
+    return text
+
+
+def _expected_date_set_evidence(
+    repo_root: Path, target_dataset_id: str, instrument_id: str
+) -> tuple[str, str]:
+    values = load_simple_yaml_mapping(repo_root, acceptance.DATA_LAKE_PATH)
+    stage2 = acceptance._stage2(values)
+    if target_dataset_id == acceptance.QUOTE_DATASET_ID:
+        source = acceptance._mapping(stage2.get("quote_source"), "quote_source")
+        collection = acceptance._mapping(source.get("proven_coverage"), "quote_source.proven_coverage")
+        item = acceptance._mapping(
+            collection.get(instrument_id), "quote_source.proven_coverage." + instrument_id
+        )
+    elif target_dataset_id == acceptance.FUTOI_DATASET_ID:
+        source = acceptance._mapping(stage2.get("futoi_source"), "futoi_source")
+        collection = acceptance._mapping(
+            source.get("historical_priority_backfills"),
+            "futoi_source.historical_priority_backfills",
+        )
+        item = acceptance._mapping(
+            collection.get(instrument_id),
+            "futoi_source.historical_priority_backfills." + instrument_id,
+        )
+    else:
+        raise acceptance.RawHistoryAcceptanceError(
+            "target_dataset_id is not part of Stage 2 raw history acceptance scope"
+        )
+    if str(item.get("date_set_evidence_status")) != "pass":
+        raise acceptance.RawHistoryAcceptanceError(
+            "repository exact date-set evidence is not pass"
+        )
+    return (
+        _require_sha256(item.get("partition_dates_sha256"), "partition_dates_sha256"),
+        _require_sha256(item.get("missing_dates_sha256"), "missing_dates_sha256"),
+    )
+
+
+def _apply_exact_date_set_evidence(
+    result: dict[str, object],
+    expectation: acceptance.HistoryExpectation,
+    expected_partition_sha256: str,
+    expected_missing_sha256: str,
+) -> None:
+    dates = acceptance._date_range(expectation.date_start, expectation.date_end)
+    missing = tuple(str(value) for value in (result.get("missing_partition_dates") or []))
+    missing_set = set(missing)
+    present = tuple(value for value in dates if value not in missing_set)
+    actual_partition_sha256 = _date_set_sha256(present)
+    actual_missing_sha256 = _date_set_sha256(missing)
+    result["expected_partition_dates_sha256"] = expected_partition_sha256
+    result["actual_partition_dates_sha256"] = actual_partition_sha256
+    result["expected_missing_dates_sha256"] = expected_missing_sha256
+    result["actual_missing_dates_sha256"] = actual_missing_sha256
+    hard_failures = list(result.get("hard_check_failures") or [])
+    if actual_partition_sha256 != expected_partition_sha256:
+        hard_failures.append("partition_date_set_sha256_mismatch")
+    if actual_missing_sha256 != expected_missing_sha256:
+        hard_failures.append("missing_date_set_sha256_mismatch")
+    if hard_failures != list(result.get("hard_check_failures") or []):
+        result["hard_check_failures"] = hard_failures
+        result["acceptance_status"] = "fail"
+
+
 def _apply_partition_failures(
     result: dict[str, object], failures: Sequence[dict[str, str]]
 ) -> None:
@@ -251,6 +332,10 @@ def run_gate(
     elif checked_dataset == acceptance.FUTOI_DATASET_ID:
         expectation = acceptance._expectation(root, checked_dataset, checked_instrument)
 
+    expected_partition_sha256, expected_missing_sha256 = _expected_date_set_evidence(
+        root, checked_dataset, checked_instrument
+    )
+
     result = acceptance.audit_history(
         repo_root=root,
         target_dataset_id=checked_dataset,
@@ -263,10 +348,17 @@ def run_gate(
         )
 
     if expectation is not None and result.get("acceptance_status") == "pass":
-        if checked_dataset == acceptance.QUOTE_DATASET_ID:
-            _apply_partition_failures(result, _quote_grid_failures(root, expectation))
-        else:
-            _apply_partition_failures(result, _futoi_clgroup_failures(root, expectation))
+        _apply_exact_date_set_evidence(
+            result,
+            expectation,
+            expected_partition_sha256,
+            expected_missing_sha256,
+        )
+        if result.get("acceptance_status") == "pass":
+            if checked_dataset == acceptance.QUOTE_DATASET_ID:
+                _apply_partition_failures(result, _quote_grid_failures(root, expectation))
+            else:
+                _apply_partition_failures(result, _futoi_clgroup_failures(root, expectation))
 
     if pointer.exists():
         raise acceptance.RawHistoryAcceptanceError(
