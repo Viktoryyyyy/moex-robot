@@ -39,11 +39,17 @@ promotion_policy:
   acceptance_report_digest_pinned: true
   acceptance_report_path_binding_required: true
   accepted_pointer_path_binding_required: true
+  repository_stage2_expectation_binding_required: true
+  repository_range_binding_required: true
+  repository_partition_and_row_count_binding_required: true
+  repository_source_and_secid_binding_required: true
+  repository_date_set_digest_binding_required: true
   exact_partition_date_digest_match_required: true
   exact_missing_date_digest_match_required: true
   missing_partition_dates_pinned: true
   failed_partition_dates_empty_required: true
   hard_check_failures_empty_required: true
+  report_unchanged_before_manifest_publication_required: true
   pointer_absent_before_write_required: true
   pointer_create_only_required: true
   manifest_immutable_required: true
