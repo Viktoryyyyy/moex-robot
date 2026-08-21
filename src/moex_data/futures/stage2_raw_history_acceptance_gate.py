@@ -115,7 +115,46 @@ def _quote_grid_failures(
     return tuple(failures)
 
 
-def _apply_quote_grid_failures(
+def _futoi_clgroup_failures(
+    repo_root: Path, expectation: acceptance.HistoryExpectation
+) -> tuple[dict[str, str], ...]:
+    pattern = acceptance._contract_path(repo_root, acceptance.FUTOI_DATASET_ID)
+    failures: list[dict[str, str]] = []
+    for trade_date in acceptance._date_range(expectation.date_start, expectation.date_end):
+        path = acceptance._partition_path(
+            repo_root=repo_root,
+            pattern=pattern,
+            expectation=expectation,
+            trade_date=trade_date,
+        )
+        if not path.is_file():
+            continue
+        try:
+            frame = pd.read_parquet(path, columns=["clgroup"])
+            groups = frame["clgroup"].astype("string")
+            canonical = (
+                not bool(groups.isna().any())
+                and bool(groups.isin(("FIZ", "YUR")).all())
+            )
+        except Exception as exc:
+            failures.append(
+                {
+                    "trade_date": trade_date,
+                    "error": "FUTOI clgroup canonicalization validation failed: " + str(exc),
+                }
+            )
+            continue
+        if not canonical:
+            failures.append(
+                {
+                    "trade_date": trade_date,
+                    "error": "FUTOI partition clgroup must use canonical stored values FIZ or YUR",
+                }
+            )
+    return tuple(failures)
+
+
+def _apply_partition_failures(
     result: dict[str, object], failures: Sequence[dict[str, str]]
 ) -> None:
     if not failures:
@@ -159,9 +198,11 @@ def run_gate(
             "acceptance report already exists for explicit run_id"
         )
 
-    quote_expectation = None
+    expectation = None
     if checked_dataset == acceptance.QUOTE_DATASET_ID:
-        quote_expectation = _require_quote_registry_binding(root, checked_instrument)
+        expectation = _require_quote_registry_binding(root, checked_instrument)
+    elif checked_dataset == acceptance.FUTOI_DATASET_ID:
+        expectation = acceptance._expectation(root, checked_dataset, checked_instrument)
 
     result = acceptance.audit_history(
         repo_root=root,
@@ -174,13 +215,11 @@ def run_gate(
             "acceptance report path changed during deterministic gate evaluation"
         )
 
-    if (
-        quote_expectation is not None
-        and result.get("acceptance_status") == "pass"
-    ):
-        _apply_quote_grid_failures(
-            result, _quote_grid_failures(root, quote_expectation)
-        )
+    if expectation is not None and result.get("acceptance_status") == "pass":
+        if checked_dataset == acceptance.QUOTE_DATASET_ID:
+            _apply_partition_failures(result, _quote_grid_failures(root, expectation))
+        else:
+            _apply_partition_failures(result, _futoi_clgroup_failures(root, expectation))
 
     if pointer.exists():
         raise acceptance.RawHistoryAcceptanceError(
