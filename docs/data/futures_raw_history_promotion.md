@@ -20,16 +20,19 @@ The promotion runner expands the acceptance-report path only from the repository
 
 Promotion fails closed unless the acceptance report:
 
-- is a JSON object at the exact contract-expanded path;
+- is a regular JSON file at the exact contract-expanded path;
 - belongs to the explicit target dataset, instrument, and acceptance run;
+- identifies the canonical Stage 2 acceptance producer and contract;
+- records the same canonical pointer path that promotion will write;
 - has `acceptance_status=pass`;
 - records `evidence_written=true`;
 - records no pre-existing or written accepted pointer;
 - records no network access, historical backfill, implicit partition discovery, or automatic date selection;
 - has empty failed-partition and hard-failure lists;
-- has exact expected/actual equality for partition count, row count, present-date digest, missing-date digest, and calendar-missing count.
+- has exact expected/actual equality for partition count, row count, present-date digest, missing-date digest, and calendar-missing count;
+- contains a sorted, duplicate-free missing-partition-date list matching the declared missing count.
 
-The acceptance report's SHA-256 is pinned in the immutable accepted manifest.
+The report is parsed and SHA-256 hashed from the same bytes. Its digest is pinned in the immutable accepted manifest and rechecked before pointer creation.
 
 ## Outputs
 
@@ -37,11 +40,13 @@ Immutable accepted manifest:
 
 `${MOEX_DATA_ROOT}/state/accepted_manifests/target_dataset_id={TARGET_DATASET_ID}/instrument_id={INSTRUMENT_ID}/acceptance_run_id={ACCEPTANCE_RUN_ID}/accepted_manifest.json`
 
+The manifest pins the target dataset contract, exact acceptance-report reference and SHA-256, range, counts, present-date digest, missing-date list, and missing-date digest. This allows later readers to resolve a pinned history without filesystem discovery.
+
 Canonical pointer:
 
 `${MOEX_DATA_ROOT}/state/datasets/dataset_id={DATASET_ID}/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json`
 
-The pointer keeps the established envelope fields `dataset_id`, `instrument_id`, `run_id`, `manifest_ref`, and `quality_report_ref`. For history promotion, `quality_report_ref` points to the immutable raw-history acceptance report, `quality_status=pass`, and `promotion_basis=raw_history_acceptance`.
+The pointer keeps the established envelope fields `dataset_id`, `instrument_id`, `run_id`, `manifest_ref`, and `quality_report_ref`, and also records `acceptance_report_ref`. For history promotion, both evidence references point to the immutable raw-history acceptance report, `quality_status=pass`, and `promotion_basis=raw_history_acceptance`.
 
 The pointer is create-only. A pre-existing pointer or a pointer that appears concurrently blocks promotion. The accepted manifest is immutable; an identical pre-created manifest may be reused only to recover from an interruption before pointer creation.
 
