@@ -29,6 +29,10 @@ required_fields:
   - actual_partition_count
   - expected_row_count
   - actual_row_count
+  - expected_partition_dates_sha256
+  - actual_partition_dates_sha256
+  - expected_missing_dates_sha256
+  - actual_missing_dates_sha256
   - missing_partition_dates
   - failed_partition_dates
   - hard_check_failures
@@ -42,6 +46,8 @@ required_fields:
 hard_gate:
   expected_partition_count_match: true
   expected_row_count_match: true
+  exact_partition_date_set_match: true
+  exact_missing_date_set_match: true
   failed_partition_dates_empty: true
   hard_check_failures_empty: true
   preexisting_accepted_pointer_absent: true
@@ -49,6 +55,11 @@ hard_gate:
   network_access_used: false
   historical_backfill_used: false
   evidence_written: true
+exact_date_set_policy:
+  evidence_source: configs/datasets/futures_data_lake.v1.yaml
+  digest_algorithm: sha256
+  serialization: sorted_iso_dates_one_per_line_trailing_newline
+  count_only_acceptance_allowed: false
 lane_rules:
   quotes:
     target_dataset_id: futures_raw_5m
