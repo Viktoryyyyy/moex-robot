@@ -34,6 +34,7 @@ supplementary_state_contract_refs:
   futoi_quality: contracts/datasets/futures_futoi_quality_report.v1.yaml
   futoi_refresh_manifest: contracts/datasets/futures_futoi_refresh_manifest.v1.yaml
   raw_history_acceptance: contracts/datasets/futures_raw_history_acceptance.v1.yaml
+  raw_history_accepted_manifest: contracts/datasets/futures_raw_history_accepted_manifest.v1.yaml
 source_contract_refs:
   quotes: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
   futoi: contracts/sources/futures/moex_algopack_futoi.v1.yaml
