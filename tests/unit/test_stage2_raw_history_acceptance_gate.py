@@ -35,6 +35,21 @@ def _quote_expectation(secid: str = "USDRUBF") -> acceptance.HistoryExpectation:
     )
 
 
+def _futoi_expectation() -> acceptance.HistoryExpectation:
+    return acceptance.HistoryExpectation(
+        target_dataset_id=acceptance.FUTOI_DATASET_ID,
+        instrument_id="si_futures_family",
+        source_id=acceptance.FUTOI_SOURCE_ID,
+        date_start="2026-08-17",
+        date_end="2026-08-17",
+        expected_partitions=1,
+        expected_rows=2,
+        expected_secid="SiU6",
+        expected_source_ticker="si",
+        expected_missing_dates=0,
+    )
+
+
 def test_preexisting_accepted_pointer_blocks_before_history_audit(tmp_path, monkeypatch) -> None:
     repo = tmp_path / "repo"
     _quote_pointer_contract(repo)
@@ -129,6 +144,19 @@ def test_quote_grid_rejects_off_grid_timestamp(tmp_path, monkeypatch) -> None:
 
     assert len(failures) == 1
     assert "not aligned to 5-minute grid" in failures[0]["error"]
+
+
+def test_futoi_clgroup_rejects_noncanonical_stored_spelling(tmp_path, monkeypatch) -> None:
+    path = tmp_path / "part.parquet"
+    pd.DataFrame({"clgroup": ["FIZ", " fiz "]}).to_parquet(path, index=False)
+    monkeypatch.setattr(gate.acceptance, "_contract_path", lambda *args: "unused")
+    monkeypatch.setattr(gate.acceptance, "_date_range", lambda *args: ("2026-08-17",))
+    monkeypatch.setattr(gate.acceptance, "_partition_path", lambda **kwargs: path)
+
+    failures = gate._futoi_clgroup_failures(Path("."), _futoi_expectation())
+
+    assert len(failures) == 1
+    assert "canonical stored values FIZ or YUR" in failures[0]["error"]
 
 
 def test_pointer_created_during_audit_blocks_before_evidence_write(tmp_path, monkeypatch) -> None:
