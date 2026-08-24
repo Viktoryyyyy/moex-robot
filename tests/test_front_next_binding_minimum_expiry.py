@@ -15,10 +15,10 @@ def _reference() -> pd.DataFrame:
     )
 
 
-def test_default_binding_keeps_expiry_day_contract_for_stage3_compatibility() -> None:
+def test_default_binding_keeps_expiry_day_contract_and_payload_shape() -> None:
     result = bind_front_next(_reference(), root="Si", as_of_date="2026-08-24")
     assert [item["secid"] for item in result] == ["SiU6", "SiZ6"]
-    assert all(item["minimum_days_to_expiry"] == "0" for item in result)
+    assert all("minimum_days_to_expiry" not in item for item in result)
 
 
 def test_stage4_binding_skips_expiry_day_contract() -> None:
