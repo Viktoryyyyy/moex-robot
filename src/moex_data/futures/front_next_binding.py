@@ -182,8 +182,9 @@ def bind_front_next(
             "secid": secid,
             "last_trade_date": row["_last_trade_date"].isoformat(),
             "source_id": SOURCE_ID,
-            "minimum_days_to_expiry": str(checked_minimum_days),
         }
+        if checked_minimum_days > 0:
+            item["minimum_days_to_expiry"] = str(checked_minimum_days)
         if checked_availability is not None:
             item["mapping_fixed_ts_utc"] = checked_availability
             item["availability_ts_utc"] = checked_availability
