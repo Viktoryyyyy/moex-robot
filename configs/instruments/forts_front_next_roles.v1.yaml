@@ -1,0 +1,31 @@
+config_id: forts_front_next_roles.v1
+status: stage3_candidate
+source_contract_ref: contracts/sources/futures/moex_iss_forts_securities_reference.v1.yaml
+mapping_contract_ref: contracts/sources/futures/roll_expiry_mapping.v1.yaml
+roles:
+  - instrument_id: si_front_contract
+    root: Si
+    role: front
+    quote_source_id: moex_algopack_fo_tradestats_5m
+    oi_source_id: moex_algopack_fo_open_interest_5m
+  - instrument_id: si_next_contract
+    root: Si
+    role: next
+    quote_source_id: moex_algopack_fo_tradestats_5m
+    oi_source_id: moex_algopack_fo_open_interest_5m
+  - instrument_id: cr_front_contract
+    root: CR
+    role: front
+    quote_source_id: moex_algopack_fo_tradestats_5m
+    oi_source_id: moex_algopack_fo_open_interest_5m
+  - instrument_id: cr_next_contract
+    root: CR
+    role: next
+    quote_source_id: moex_algopack_fo_tradestats_5m
+    oi_source_id: moex_algopack_fo_open_interest_5m
+rules:
+  role_to_secid_binding_is_generated_from_explicit_as_of_date: true
+  static_secid_in_role_config_forbidden: true
+  materializer_requires_explicit_bound_secid: true
+  latest_autodetect_allowed: false
+  physical_pilot_required_before_enablement: true
