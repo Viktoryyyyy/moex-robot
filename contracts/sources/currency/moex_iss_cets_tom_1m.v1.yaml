@@ -29,6 +29,12 @@ response_contract:
     - volume
     - begin
     - end
+  nullable_columns:
+    - volume
+    - value
+  observed_source_semantics:
+    - CETS TOM candles may expose a present volume column with null values while OHLC remains valid.
+    - Null volume is source-unavailable and must remain null; it must not be converted to synthetic zero.
 canonical_secids:
   usd_tom:
     instrument_id: usd_tom
@@ -44,10 +50,12 @@ normalization:
     high: max
     low: min
     close: last
-    volume: sum
-    value: sum_if_present
+    volume: sum_if_any_non_null_else_null
+    value: sum_if_any_non_null_else_null
 failure_semantics:
   empty_response: fail_closed
   schema_mismatch: fail_closed
+  null_ohlc: fail_closed
+  null_volume: preserve_null
   wrong_secid: fail_closed
   implicit_fallback: forbidden
