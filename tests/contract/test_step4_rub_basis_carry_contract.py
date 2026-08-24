@@ -64,6 +64,32 @@ def test_stage4_output_contract_contains_required_market_features() -> None:
     assert "metric_semantics: market_implied_carry_proxy" in text
 
 
+def test_stage4_acceptance_physically_revalidates_parquet_before_promotion() -> None:
+    contract = _read("contracts/datasets/step4_rub_basis_carry_acceptance.v1.yaml")
+    acceptance = _read("src/moex_data/step4_basis_carry_acceptance.py")
+    validator = _read("src/moex_data/analytics/validate_rub_basis_carry_partition.py")
+    for token in (
+        "physical_partition_readback_required: true",
+        "physical_row_count_match_required: true",
+        "physical_instrument_trade_date_identity_required: true",
+        "physical_timezone_aware_utc_timestamp_required: true",
+        "physical_duplicate_ts_zero_required: true",
+        "physical_monotonic_ts_required: true",
+        "physical_market_rates_finite_positive_required: true",
+        "unreadable_parquet_blocks_promotion: true",
+        "physical_validation_completes_before_pointer_writes: true",
+    ):
+        assert token in contract
+    assert "validate_rub_basis_carry_partition as physical" in acceptance
+    assert "physical.validate_partition(" in acceptance
+    assert "pd.read_parquet" in validator
+    assert "derived partition row_count mismatch" in validator
+    assert "derived partition instrument_id mismatch" in validator
+    assert "derived partition trade_date mismatch" in validator
+    assert "derived partition contains duplicate ts" in validator
+    assert "derived partition rate must be finite and positive" in validator
+
+
 def test_stage4_has_immutable_pilot_and_transactional_acceptance() -> None:
     program = _read("configs/datasets/step4_rub_basis_carry.v1.yaml")
     dataset = _read("contracts/datasets/rub_basis_carry_5m.v1.yaml")
