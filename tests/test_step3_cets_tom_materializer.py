@@ -36,6 +36,34 @@ def test_cets_tom_resamples_and_preserves_identity() -> None:
     assert float(result["low"].min()) == 79.9
 
 
+def test_cets_tom_preserves_source_null_volume() -> None:
+    frame = _one_minute_frame()
+    frame["volume"] = None
+    result = normalize_to_5m(
+        frame,
+        trade_date="2026-08-21",
+        instrument_id="cny_tom",
+        secid="CNYRUB_TOM",
+        source_url="https://iss.moex.com/example",
+    )
+    assert not result.empty
+    assert result["volume"].isna().all()
+    assert result[["open", "high", "low", "close"]].notna().all(axis=None)
+
+
+def test_cets_tom_rejects_null_ohlc() -> None:
+    frame = _one_minute_frame()
+    frame.loc[0, "close"] = None
+    with pytest.raises(CetsTomMaterializationError, match="null OHLC"):
+        normalize_to_5m(
+            frame,
+            trade_date="2026-08-21",
+            instrument_id="usd_tom",
+            secid="USD000UTSTOM",
+            source_url="https://iss.moex.com/example",
+        )
+
+
 def test_cets_tom_rejects_wrong_registry_secid() -> None:
     with pytest.raises(CetsTomMaterializationError, match="registry binding"):
         normalize_to_5m(
