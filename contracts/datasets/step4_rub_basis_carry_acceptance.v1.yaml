@@ -28,6 +28,8 @@ validation_policy:
   manifest_partition_and_quality_paths_must_match_validated_artifacts: true
   timestamp_policy_required: naive_exchange_localize_europe_moscow_then_utc
   exact_timestamp_inner_join_required: true
+  front_next_minimum_days_to_expiry_required: 1
+  expiry_day_contract_allowed_for_annualized_carry: false
   forward_fill_used_required: false
   asof_join_used_required: false
   latest_autodetect_used_required: false
