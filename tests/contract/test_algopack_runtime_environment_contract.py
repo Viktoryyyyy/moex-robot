@@ -38,6 +38,17 @@ def _load_dotenv_calls(text: str) -> list[ast.Call]:
     ]
 
 
+def _expected_project_env_assignment(path: str) -> str:
+    source_path = ROOT / path
+    relative_parent_parts = source_path.parent.relative_to(ROOT).parts
+    parent_index = len(relative_parent_parts) + 1
+    return (
+        "PROJECT_ENV_PATH = Path(__file__).resolve().parents["
+        + str(parent_index)
+        + "] / \".env\""
+    )
+
+
 def test_project_env_path_is_explicit_and_repository_env_is_not_a_fallback() -> None:
     canonical_env = "/home/trader/moex_bot/.env"
     assert f"Project environment file: `{canonical_env}`" in SERVER_LAYOUT
@@ -52,14 +63,13 @@ def test_project_env_path_is_explicit_and_repository_env_is_not_a_fallback() -> 
 
 def test_source_dotenv_loaders_use_canonical_parent_project_env() -> None:
     assert DOTENV_SOURCE_TEXTS
-    expected_parent_env = "PROJECT_ENV_PATH = Path(__file__).resolve().parents[4] / \".env\""
-    forbidden_repo_env = "parents[3] / \".env\""
+    forbidden_absolute_repo_env = "/home/trader/moex_bot/moex-robot/.env"
     for path, source in DOTENV_SOURCE_TEXTS.items():
         calls = _load_dotenv_calls(source)
         if not calls:
             continue
-        assert expected_parent_env in source, path
-        assert forbidden_repo_env not in source, path
+        assert _expected_project_env_assignment(path) in source, path
+        assert forbidden_absolute_repo_env not in source, path
         for call in calls:
             assert call.args, path
             first_arg = call.args[0]
