@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 from collections.abc import Mapping, Sequence
+from datetime import date
 from pathlib import Path
 from typing import Final
 
@@ -13,6 +14,7 @@ DATASET_ID: Final[str] = "rub_basis_carry_5m"
 CONTRACT_ID: Final[str] = "step4_rub_basis_carry_acceptance.v1"
 CANONICAL_ENV_PATH: Final[str] = "/home/trader/moex_bot/.env"
 RUNS_SUBPATH: Final[tuple[str, ...]] = ("runs", "step4_rub_basis_carry")
+FRONT_NEXT_MINIMUM_DAYS_TO_EXPIRY: Final[int] = 1
 
 
 class Step4AcceptanceError(ValueError):
@@ -112,6 +114,29 @@ def _same_path(value: object, expected: Path, field_name: str) -> None:
         _fail(field_name + " mismatch")
 
 
+def _validate_future_expiry_bindings(values: Mapping[str, object]) -> None:
+    if values.get("front_next_minimum_days_to_expiry") != FRONT_NEXT_MINIMUM_DAYS_TO_EXPIRY:
+        _fail("front_next_minimum_days_to_expiry mismatch")
+    try:
+        trade_date_value = date.fromisoformat(str(values.get("trade_date") or "").strip())
+    except ValueError as exc:
+        raise Step4AcceptanceError("pilot trade_date must be YYYY-MM-DD") from exc
+    bindings = values.get("bindings")
+    if isinstance(bindings, (str, bytes)) or not isinstance(bindings, Sequence) or len(bindings) != 4:
+        _fail("bindings must contain exactly four entries")
+    for item in bindings:
+        if not isinstance(item, Mapping):
+            _fail("binding must be an object")
+        if str(item.get("minimum_days_to_expiry") or "").strip() != str(FRONT_NEXT_MINIMUM_DAYS_TO_EXPIRY):
+            _fail("binding minimum_days_to_expiry mismatch")
+        try:
+            expiry = date.fromisoformat(str(item.get("last_trade_date") or "").strip())
+        except ValueError as exc:
+            raise Step4AcceptanceError("binding last_trade_date must be YYYY-MM-DD") from exc
+        if expiry <= trade_date_value:
+            _fail("Stage 4 carry binding must expire strictly after trade_date")
+
+
 def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[str, object]]:
     if values.get("project") != "MOEX_Bot" or values.get("step") != 4 or values.get("status") != "pilot_passed":
         _fail("pilot identity/status mismatch")
@@ -123,6 +148,7 @@ def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[st
         _fail("exact timestamp alignment not proven")
     if values.get("timestamp_policy") != "naive_exchange_localize_europe_moscow_then_utc":
         _fail("canonical timestamp policy not proven")
+    _validate_future_expiry_bindings(values)
     for field in ("forward_fill_used", "asof_join_used", "latest_autodetect_used", "continuous_series_used"):
         if values.get(field) is not False:
             _fail(field + " must be false")
