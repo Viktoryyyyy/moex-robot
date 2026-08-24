@@ -23,6 +23,8 @@ required_columns:
   - instrument_id
   - trade_date
   - ts
+  - availability_ts_utc
+  - systime_source
   - secid
   - board
   - market
@@ -42,6 +44,12 @@ quality_checks:
   - non_negative_oi
   - duplicate_instrument_ts_source_count
   - monotonic_ts
+  - non_null_availability_ts_utc
+  - availability_ts_timezone_utc
+pit_rules:
+  source_availability_field: availability_ts_utc
+  ingest_ts_may_substitute_for_availability: false
+  ts_may_substitute_for_availability: false
 accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_open_interest_raw_5m/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
 path_rules:
   hardcoded_server_path_allowed: false
