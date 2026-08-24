@@ -24,6 +24,9 @@ validation_policy:
   every_output_quality_status_required: pass
   every_output_row_count_positive: true
   every_output_partition_manifest_quality_inside_declared_run_root: true
+  manifest_and_quality_run_id_must_equal_derived_output_run_id: true
+  manifest_partition_and_quality_paths_must_match_validated_artifacts: true
+  timestamp_policy_required: naive_exchange_localize_europe_moscow_then_utc
   exact_timestamp_inner_join_required: true
   forward_fill_used_required: false
   asof_join_used_required: false
@@ -31,6 +34,8 @@ validation_policy:
   continuous_series_used_required: false
 promotion_policy:
   validate_all_before_pointer_writes: true
+  pointer_run_id_source: referenced_manifest_run_id
+  acceptance_run_id_stored_separately: true
   pointer_promotion_mode: transactional_with_rollback
   final_acceptance_marker_participates_in_same_transaction: true
   rollback_previous_pointers_on_any_promotion_failure: true
