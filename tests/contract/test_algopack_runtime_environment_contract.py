@@ -64,18 +64,26 @@ def test_project_env_path_is_explicit_and_repository_env_is_not_a_fallback() -> 
 def test_source_dotenv_loaders_use_canonical_parent_project_env() -> None:
     assert DOTENV_SOURCE_TEXTS
     forbidden_absolute_repo_env = "/home/trader/moex_bot/moex-robot/.env"
+    violations: list[str] = []
     for path, source in DOTENV_SOURCE_TEXTS.items():
         calls = _load_dotenv_calls(source)
         if not calls:
             continue
-        assert _expected_project_env_assignment(path) in source, path
-        assert forbidden_absolute_repo_env not in source, path
-        for call in calls:
-            assert call.args, path
-            first_arg = call.args[0]
-            assert isinstance(first_arg, ast.Name) and first_arg.id == "PROJECT_ENV_PATH", path
+        if _expected_project_env_assignment(path) not in source:
+            violations.append(path + ":missing_or_wrong_PROJECT_ENV_PATH")
+        if forbidden_absolute_repo_env in source:
+            violations.append(path + ":forbidden_repo_env_absolute_path")
+        for index, call in enumerate(calls, start=1):
+            if not call.args:
+                violations.append(path + ":load_dotenv_call_" + str(index) + ":missing_path_argument")
+            else:
+                first_arg = call.args[0]
+                if not (isinstance(first_arg, ast.Name) and first_arg.id == "PROJECT_ENV_PATH"):
+                    violations.append(path + ":load_dotenv_call_" + str(index) + ":wrong_path_argument")
             override = next((kw.value for kw in call.keywords if kw.arg == "override"), None)
-            assert isinstance(override, ast.Constant) and override.value is False, path
+            if not (isinstance(override, ast.Constant) and override.value is False):
+                violations.append(path + ":load_dotenv_call_" + str(index) + ":override_must_be_false")
+    assert not violations, "\n".join(violations)
 
 
 def test_algopack_variable_is_canonical_across_example_contract_and_code() -> None:
