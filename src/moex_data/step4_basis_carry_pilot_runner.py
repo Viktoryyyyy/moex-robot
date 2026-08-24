@@ -86,6 +86,19 @@ def _materialization_root(run_root: Path) -> Iterator[None]:
             os.environ["MOEX_DATA_ROOT"] = previous
 
 
+def _canonical_root_restored(canonical_root: Path) -> bool:
+    restored = str(os.environ.get("MOEX_DATA_ROOT", "")).strip()
+    if not restored:
+        return False
+    restored_path = Path(restored)
+    if not restored_path.is_absolute():
+        return False
+    try:
+        return restored_path.resolve() == canonical_root.resolve()
+    except OSError:
+        return False
+
+
 def _write_json_atomic(path: Path, values: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False, suffix=".stage") as handle:
@@ -226,7 +239,7 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
                 raise Step4PilotError("derived output failed for " + output_instrument_id)
             output_results.append(output)
 
-    if os.environ.get("MOEX_DATA_ROOT") != canonical_root.as_posix():
+    if not _canonical_root_restored(canonical_root):
         raise Step4PilotError("canonical MOEX_DATA_ROOT was not restored")
     if len(quote_results) != 6 or len(tom_results) != 2 or len(output_results) != 2:
         raise Step4PilotError("Step 4 output count mismatch")
@@ -256,6 +269,7 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
             "derived_partitions": len(output_results),
         },
         "alignment_policy": derived.ALIGNMENT_POLICY,
+        "timestamp_policy": derived.TIMESTAMP_POLICY,
         "forward_fill_used": False,
         "asof_join_used": False,
         "latest_autodetect_used": False,
