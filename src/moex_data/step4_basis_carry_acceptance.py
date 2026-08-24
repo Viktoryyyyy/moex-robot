@@ -9,6 +9,8 @@ from datetime import date
 from pathlib import Path
 from typing import Final
 
+from moex_data.analytics import validate_rub_basis_carry_partition as physical
+
 EXPECTED_INSTRUMENTS: Final[set[str]] = {"usd_rub_basis_carry", "cny_rub_basis_carry"}
 DATASET_ID: Final[str] = "rub_basis_carry_5m"
 CONTRACT_ID: Final[str] = "step4_rub_basis_carry_acceptance.v1"
@@ -149,6 +151,7 @@ def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[st
     if values.get("timestamp_policy") != "naive_exchange_localize_europe_moscow_then_utc":
         _fail("canonical timestamp policy not proven")
     _validate_future_expiry_bindings(values)
+    pilot_trade_date = str(values.get("trade_date") or "").strip()
     for field in ("forward_fill_used", "asof_join_used", "latest_autodetect_used", "continuous_series_used"):
         if values.get(field) is not False:
             _fail(field + " must be false")
@@ -207,6 +210,15 @@ def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[st
             _fail("manifest/quality timestamp policy mismatch")
         _same_path(manifest_values.get("partition_path"), partition, "manifest.partition_path")
         _same_path(manifest_values.get("quality_report_path"), quality, "manifest.quality_report_path")
+        try:
+            physical_validation = physical.validate_partition(
+                partition,
+                expected_instrument_id=instrument_id,
+                expected_trade_date=pilot_trade_date,
+                expected_row_count=row_count,
+            )
+        except physical.BasisCarryPartitionValidationError as exc:
+            raise Step4AcceptanceError("physical derived partition validation failed: " + str(exc)) from exc
         result.append({
             "instrument_id": instrument_id,
             "row_count": row_count,
@@ -214,6 +226,7 @@ def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[st
             "partition": partition,
             "manifest": manifest,
             "quality": quality,
+            "physical_readback": physical_validation,
         })
     if seen != EXPECTED_INSTRUMENTS:
         _fail("derived output set mismatch")
@@ -304,6 +317,7 @@ def promote(*, run_id: str) -> dict[str, object]:
             "acceptance_run_id": checked_run,
             "pointer_path": pointer.as_posix(),
             "pointer_ref": "${MOEX_DATA_ROOT}/" + pointer.relative_to(_data_root()).as_posix(),
+            "physical_readback": output["physical_readback"],
         })
     marker = _evidence_dir(checked_run) / "accepted_pointers.json"
     result: dict[str, object] = {
@@ -316,6 +330,7 @@ def promote(*, run_id: str) -> dict[str, object]:
         "expected_pointer_count": 2,
         "pointers": pointers,
         "promotion_semantics": "transactional_with_rollback",
+        "physical_partition_readback_required": True,
         "continuous_series_used": False,
     }
     if result["accepted_pointer_count"] != result["expected_pointer_count"]:
