@@ -184,6 +184,9 @@ def normalize_open_interest(frame: pd.DataFrame, *, trade_date: str, instrument_
     if timestamps.isna().any():
         _fail("tradestats response contains invalid TRADEDATE/TRADETIME")
     availability = _availability_ts_utc(work[columns["SYSTIME"]])
+    event_ts_utc = timestamps.dt.tz_localize(SOURCE_TIMEZONE, ambiguous="raise", nonexistent="raise").dt.tz_convert("UTC")
+    if (availability < event_ts_utc).any():
+        _fail("tradestats SYSTIME precedes the OI event timestamp")
     output = pd.DataFrame(
         {
             "instrument_id": checked_instrument,
