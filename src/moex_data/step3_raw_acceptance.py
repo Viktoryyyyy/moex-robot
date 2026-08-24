@@ -388,6 +388,7 @@ def _validate_supplementary_support(spec: PointerSpec, *, context: str) -> None:
         "dataset_id": spec.dataset_id,
         "run_id": spec.manifest_run_id,
         "instrument_id": spec.instrument_id,
+        "source_id": spec.source_id,
         "secid": spec.secid,
         "trade_date": spec.trade_date,
         "quality_status": "pass",
@@ -395,10 +396,7 @@ def _validate_supplementary_support(spec: PointerSpec, *, context: str) -> None:
     for field_name, expected in expected_quality_fields.items():
         if quality.get(field_name) != expected:
             _fail(context + " quality report mismatch: " + field_name)
-    if quality.get("source_id") is not None and quality.get("source_id") != spec.source_id:
-        _fail(context + " quality report source_id mismatch")
-    if quality.get("partition_path") is not None:
-        _same_path(quality.get("partition_path"), spec.partition_path, context + ".quality_report.partition_path")
+    _same_path(quality.get("partition_path"), spec.partition_path, context + ".quality_report.partition_path")
     if _positive_int(quality.get("rows"), context + ".quality_report.rows") != spec.row_count:
         _fail(context + " quality report row count mismatch")
 
