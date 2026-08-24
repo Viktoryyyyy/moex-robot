@@ -86,11 +86,19 @@ def test_open_interest_is_separate_supplementary_dataset() -> None:
     assert "accepted_pointer_path_contract" in dataset
 
 
-def test_step3_acceptance_contract_requires_all_ten_pointers() -> None:
+def test_step3_acceptance_contract_requires_all_ten_causal_transactional_pointers() -> None:
     acceptance = _read("contracts/datasets/step3_canonical_raw_acceptance.v1.yaml")
     assert "total: 10" in acceptance
+    assert "trade_date_must_equal_as_of_date_for_unversioned_binding: true" in acceptance
+    assert "binding_mapping_fixed_ts_utc_required: true" in acceptance
+    assert "binding_availability_ts_utc_required: true" in acceptance
+    assert "futures_quote_and_oi_secids_must_match_bindings: true" in acceptance
+    assert "manifest_and_quality_identity_crosscheck_required: true" in acceptance
+    assert "manifest_and_quality_row_count_crosscheck_required: true" in acceptance
     assert "validate_all_before_pointer_writes: true" in acceptance
-    assert "final_acceptance_marker_written_after_all_pointers: true" in acceptance
+    assert "pointer_promotion_mode: transactional_with_rollback" in acceptance
+    assert "final_acceptance_marker_participates_in_same_transaction: true" in acceptance
+    assert "rollback_previous_pointers_on_any_promotion_failure: true" in acceptance
     assert "partial_pointer_set_without_acceptance_marker_is_not_accepted: true" in acceptance
 
 
