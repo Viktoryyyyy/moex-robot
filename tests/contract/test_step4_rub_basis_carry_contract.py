@@ -34,6 +34,18 @@ def test_stage4_normalization_causal_alignment_and_timestamp_policy_are_explicit
     assert "output_ts_timezone: UTC" in dataset
 
 
+def test_stage4_expiry_day_carry_policy_is_explicit_and_enforced_by_pilot() -> None:
+    program = _read("configs/datasets/step4_rub_basis_carry.v1.yaml")
+    acceptance = _read("contracts/datasets/step4_rub_basis_carry_acceptance.v1.yaml")
+    pilot = _read("src/moex_data/step4_basis_carry_pilot_runner.py")
+    assert "front_next_selection_policy: nearest_two_contracts_with_last_trade_date_strictly_after_trade_date" in program
+    assert "front_next_minimum_days_to_expiry: 1" in program
+    assert "expiry_day_contract_allowed_for_annualized_carry: false" in program
+    assert "front_next_minimum_days_to_expiry_required: 1" in acceptance
+    assert "FRONT_NEXT_MINIMUM_DAYS_TO_EXPIRY: Final[int] = 1" in pilot
+    assert "minimum_days_to_expiry=FRONT_NEXT_MINIMUM_DAYS_TO_EXPIRY" in pilot
+
+
 def test_stage4_output_contract_contains_required_market_features() -> None:
     text = _read("contracts/datasets/rub_basis_carry_5m.v1.yaml")
     for token in (
