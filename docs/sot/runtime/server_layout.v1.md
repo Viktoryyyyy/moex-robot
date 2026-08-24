@@ -2,7 +2,7 @@
 
 Status: active
 Scope: server runtime path references used by ChatGPT/project handoffs.
-Evidence source: user-provided server file listing screenshot dated 2026-06-09 showing `/home/trader/moex_bot` with child directories `data`, `moex-robot`, and `venv`.
+Evidence source: user-provided server file discovery and explicit confirmation dated 2026-08-24 that `/home/trader/moex_bot/.env` is the canonical MOEX Bot runtime environment file.
 
 ## Current observed paths
 
@@ -10,7 +10,7 @@ Evidence source: user-provided server file listing screenshot dated 2026-06-09 s
 - Repository root: `/home/trader/moex_bot/moex-robot`
 - Virtual environment root: `/home/trader/moex_bot/venv`
 - Data root: `/home/trader/moex_bot/data`
-- Project environment file: `/home/trader/moex_bot/moex-robot/.env`
+- Project environment file: `/home/trader/moex_bot/.env`
 
 ## Command construction rule
 
@@ -18,7 +18,9 @@ Use the current observed paths above when constructing server commands for this 
 
 Do not substitute underscore variants or another Linux user unless a newer server-state proof explicitly supersedes this contract.
 
-The project-local `.env` under the repository root is the only canonical dotenv file for MOEX Bot repository commands. `/home/trader/moex_bot/.env` is not a canonical project runtime source and must not be used as a fallback without a newer merged runtime contract.
+The parent project `.env` at `/home/trader/moex_bot/.env` is the only canonical dotenv file for MOEX Bot runtime commands. `/home/trader/moex_bot/moex-robot/.env` is not a canonical project runtime source and must not be used as a fallback without a newer merged runtime contract.
+
+Commands whose implemented CLI accepts an explicit env-file argument must use `/home/trader/moex_bot/.env` when runtime secrets need to be loaded explicitly.
 
 ## Runtime environment identity
 
@@ -35,7 +37,7 @@ Controlled Phase 8.6A AlgoPack runs must use this launcher:
 cd /home/trader/moex_bot/moex-robot && source /home/trader/moex_bot/venv/bin/activate && PYTHONPATH=.:src python -m moex_research.runners.usdrubf_phase8_6a_algopack_cnyrub_runtime <approved-arguments>
 ```
 
-The launcher resolves the repository-local `.env` from its own module path, loads it with `override=False`, and then delegates to `usdrubf_phase8_6a_algopack_cnyrub_source_validation`.
+The launcher resolves the parent project `.env` from its own module path, loads it with `override=False`, and then delegates to `usdrubf_phase8_6a_algopack_cnyrub_source_validation`.
 
 Direct `python -m moex_research.runners.usdrubf_phase8_6a_algopack_cnyrub_source_validation` invocation is not the canonical controlled-server entrypoint because that validator expects the required environment to be loaded already.
 
@@ -47,6 +49,8 @@ The following paths are not valid runtime contract paths for this project and mu
 - `/home/ubuntu/moex_bot/moex-robot`
 - `/home/trader/moex_bot/moex_robot`
 - `~/moex_bot/moex_robot`
+
+For runtime secrets, `/home/trader/moex_bot/moex-robot/.env` is also non-canonical; the canonical path is `/home/trader/moex_bot/.env`.
 
 ## Runtime evidence boundary
 
