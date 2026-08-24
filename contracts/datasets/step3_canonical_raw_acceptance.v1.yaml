@@ -1,0 +1,36 @@
+contract_id: step3_canonical_raw_acceptance.v1
+dataset_id: step3_canonical_raw_acceptance
+status: active_stage3_candidate
+artifact_class: external_pattern
+producer: moex_data.step3_raw_acceptance
+format: json
+schema_version: step3_canonical_raw_acceptance.v1
+storage_root_ref: MOEX_DATA_ROOT
+pilot_evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step3_canonical_raw/run_id={RUN_ID}/pilot_evidence.json"
+acceptance_evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step3_canonical_raw/run_id={RUN_ID}/accepted_pointers.json"
+accepted_pointer_path_pattern: "${MOEX_DATA_ROOT}/state/datasets/dataset_id={DATASET_ID}/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+required_pilot_counts:
+  bindings: 4
+  quote_partitions: 4
+  open_interest_partitions: 4
+  tom_partitions: 2
+required_pointer_counts:
+  futures_raw_5m: 4
+  futures_open_interest_raw_5m: 4
+  fx_spot_raw_5m: 2
+  total: 10
+acceptance_rules:
+  pilot_status_must_equal: pilot_passed
+  every_partition_quality_status_must_equal: pass
+  every_partition_row_count_must_be_positive: true
+  latest_autodetect_used_must_be_false: true
+  continuous_series_created_must_be_false: true
+  all_referenced_manifest_and_quality_files_must_exist: true
+  all_referenced_paths_must_be_under_moex_data_root: true
+  validate_all_before_pointer_writes: true
+  final_acceptance_marker_written_after_all_pointers: true
+  partial_pointer_set_without_acceptance_marker_is_not_accepted: true
+path_rules:
+  hardcoded_server_path_allowed: false
+  dynamic_scan_allowed: false
+  arbitrary_evidence_path_allowed: false
