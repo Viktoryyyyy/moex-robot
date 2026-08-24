@@ -1,0 +1,48 @@
+contract_id: moex_iss_cets_tom_candles_1m.v1
+schema_version: source_contract.v1
+status: implementation_pending_physical_pilot
+source_id: moex_iss_cets_tom_candles_1m
+source_system: moex_iss
+source_kind: native_1m_candles
+engine: currency
+market: selt
+board: CETS
+base_url: https://iss.moex.com
+endpoint_pattern: /iss/engines/currency/markets/selt/boards/CETS/securities/{SECID}/candles.json
+request_contract:
+  explicit_fields:
+    from: "{YYYY-MM-DD}"
+    till: "{YYYY-MM-DD}"
+    interval: 1
+  explicit_secid_required: true
+  latest_autodetect_allowed: false
+  implicit_secid_selection_allowed: false
+instrument_bindings:
+  usd_tom:
+    instrument_id: usd_tom
+    canonical_symbol: USD_TOM
+    secid: USD000UTSTOM
+  cny_tom:
+    instrument_id: cny_tom
+    canonical_symbol: CNY_TOM
+    secid: CNYRUB_TOM
+normalization:
+  source_granularity: 1m
+  canonical_granularity: 5m
+  resample_rule: deterministic_5m_ohlcv
+  timezone: Europe/Moscow
+  no_hidden_forward_fill: true
+failure_semantics:
+  empty_response: fail_closed
+  schema_mismatch: fail_closed
+  implicit_fallback: forbidden
+readiness:
+  source_identity_validated: true
+  repository_materializer_ready: false
+  physical_pilot_passed: false
+  accepted_pointer_ready: false
+source_identity_evidence:
+  validated_at: "2026-08-24"
+  official_moex_identifiers:
+    USD000UTSTOM: official MOEX issue page for USDRUB_TOM
+    CNYRUB_TOM: official MOEX currency session/issue documentation
