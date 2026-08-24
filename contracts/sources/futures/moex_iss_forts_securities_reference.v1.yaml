@@ -1,0 +1,35 @@
+contract_id: moex_iss_forts_securities_reference.v1
+schema_version: source_contract.v1
+status: active_stage3_candidate
+source_id: moex_iss_forts_securities_reference
+source_system: moex_iss
+source_kind: instrument_reference
+engine: futures
+market: forts
+board: RFUD
+endpoint_path: /iss/engines/futures/markets/forts/securities.json
+default_base_url: https://iss.moex.com
+auth:
+  type: none
+request_contract:
+  iss.meta: off
+  securities.columns: SECID,BOARDID,LASTTRADEDATE
+  latest_autodetect_allowed: false
+response_contract:
+  preferred_block: securities
+  required_columns:
+    - SECID
+    - BOARDID
+    - LASTTRADEDATE
+failure_semantics:
+  empty_response: fail_closed
+  schema_mismatch: fail_closed
+  fewer_than_two_eligible_contracts: fail_closed
+  implicit_fallback: forbidden
+usage:
+  allowed:
+    - deterministic_current_front_next_binding
+  forbidden:
+    - quote_history_materialization
+    - continuous_series_materialization
+    - liquidity_optimized_roll_selection
