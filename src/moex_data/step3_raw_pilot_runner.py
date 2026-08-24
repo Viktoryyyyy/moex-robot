@@ -4,7 +4,8 @@ import argparse
 import json
 import os
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 from typing import Final
@@ -15,6 +16,7 @@ from moex_data.futures import materialize_forts_raw_5m_instrument as quotes
 from moex_data.futures import materialize_open_interest_instrument as oi
 
 CANONICAL_ENV_PATH: Final[str] = "/home/trader/moex_bot/.env"
+RUNS_SUBPATH: Final[tuple[str, ...]] = ("runs", "step3_canonical_raw")
 EXPECTED_BINDINGS: Final[int] = 4
 EXPECTED_QUOTE_PARTITIONS: Final[int] = 4
 EXPECTED_OI_PARTITIONS: Final[int] = 4
@@ -56,7 +58,41 @@ def _data_root() -> Path:
     value = str(os.environ.get("MOEX_DATA_ROOT", "")).strip()
     if not value:
         raise Step3PilotError("MOEX_DATA_ROOT is required")
-    return Path(value)
+    path = Path(value)
+    if not path.is_absolute():
+        raise Step3PilotError("MOEX_DATA_ROOT must be absolute")
+    return path
+
+
+def _run_root(canonical_root: Path, run_id: str) -> Path:
+    return canonical_root.joinpath(*RUNS_SUBPATH, "run_id=" + _require_token(run_id, "run_id"))
+
+
+def _run_root_ref(run_id: str) -> str:
+    return "${MOEX_DATA_ROOT}/" + "/".join((*RUNS_SUBPATH, "run_id=" + _require_token(run_id, "run_id")))
+
+
+def _reserve_run_root(canonical_root: Path, run_id: str) -> Path:
+    run_root = _run_root(canonical_root, run_id)
+    run_root.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        run_root.mkdir(exist_ok=False)
+    except FileExistsError as exc:
+        raise Step3PilotError("Step 3 run_id is immutable and cannot be reused") from exc
+    return run_root
+
+
+@contextmanager
+def _materialization_root(run_root: Path) -> Iterator[None]:
+    previous = os.environ.get("MOEX_DATA_ROOT")
+    os.environ["MOEX_DATA_ROOT"] = run_root.as_posix()
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("MOEX_DATA_ROOT", None)
+        else:
+            os.environ["MOEX_DATA_ROOT"] = previous
 
 
 def _write_json_atomic(path: Path, values: Mapping[str, object]) -> None:
@@ -78,8 +114,7 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
     quotes.load_env_file(env_file)
     if not str(os.environ.get("MOEX_API_KEY", "")).strip():
         raise Step3PilotError("MOEX_API_KEY is required")
-    if not str(os.environ.get("MOEX_DATA_ROOT", "")).strip():
-        raise Step3PilotError("MOEX_DATA_ROOT is required")
+    canonical_root = _data_root()
 
     reference_frame, reference_url, reference_observed_at_utc = binding.fetch_reference_frame(
         as_of_date=checked_as_of_date,
@@ -102,46 +137,50 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
     if len(bindings) != EXPECTED_BINDINGS:
         raise Step3PilotError("front-next binding count mismatch")
 
+    run_root = _reserve_run_root(canonical_root, base_artifact)
     quote_results: list[dict[str, object]] = []
     oi_results: list[dict[str, object]] = []
-    for item in bindings:
-        instrument_id = str(item["instrument_id"])
-        secid = str(item["secid"])
-        quote_result = quotes.materialize_instrument_partition(
-            trade_date=checked_trade_date,
-            instrument_id=instrument_id,
-            secid=secid,
-            artifact_version=_artifact(base_artifact, instrument_id + "_quote"),
-            timeout=timeout,
-        ).payload
-        if quote_result.get("quality_status") != "pass" or int(quote_result.get("row_count") or 0) <= 0:
-            raise Step3PilotError("quote pilot failed for " + instrument_id)
-        quote_results.append(quote_result)
-
-        oi_result = oi.materialize_open_interest_partition(
-            trade_date=checked_trade_date,
-            instrument_id=instrument_id,
-            secid=secid,
-            artifact_version=_artifact(base_artifact, instrument_id + "_oi"),
-            timeout=timeout,
-        )
-        if oi_result.get("quality_status") != "pass" or int(oi_result.get("row_count") or 0) <= 0:
-            raise Step3PilotError("OI pilot failed for " + instrument_id)
-        oi_results.append(oi_result)
-
     tom_results: list[dict[str, object]] = []
-    for instrument_id, secid in cets.INSTRUMENTS.items():
-        result = cets.materialize_cets_tom_partition(
-            trade_date=checked_trade_date,
-            instrument_id=instrument_id,
-            secid=secid,
-            artifact_version=_artifact(base_artifact, instrument_id + "_quote"),
-            timeout=timeout,
-        )
-        if result.get("quality_status") != "pass" or int(result.get("row_count") or 0) <= 0:
-            raise Step3PilotError("TOM pilot failed for " + instrument_id)
-        tom_results.append(result)
+    with _materialization_root(run_root):
+        for item in bindings:
+            instrument_id = str(item["instrument_id"])
+            secid = str(item["secid"])
+            quote_result = quotes.materialize_instrument_partition(
+                trade_date=checked_trade_date,
+                instrument_id=instrument_id,
+                secid=secid,
+                artifact_version=_artifact(base_artifact, instrument_id + "_quote"),
+                timeout=timeout,
+            ).payload
+            if quote_result.get("quality_status") != "pass" or int(quote_result.get("row_count") or 0) <= 0:
+                raise Step3PilotError("quote pilot failed for " + instrument_id)
+            quote_results.append(quote_result)
 
+            oi_result = oi.materialize_open_interest_partition(
+                trade_date=checked_trade_date,
+                instrument_id=instrument_id,
+                secid=secid,
+                artifact_version=_artifact(base_artifact, instrument_id + "_oi"),
+                timeout=timeout,
+            )
+            if oi_result.get("quality_status") != "pass" or int(oi_result.get("row_count") or 0) <= 0:
+                raise Step3PilotError("OI pilot failed for " + instrument_id)
+            oi_results.append(oi_result)
+
+        for instrument_id, secid in cets.INSTRUMENTS.items():
+            result = cets.materialize_cets_tom_partition(
+                trade_date=checked_trade_date,
+                instrument_id=instrument_id,
+                secid=secid,
+                artifact_version=_artifact(base_artifact, instrument_id + "_quote"),
+                timeout=timeout,
+            )
+            if result.get("quality_status") != "pass" or int(result.get("row_count") or 0) <= 0:
+                raise Step3PilotError("TOM pilot failed for " + instrument_id)
+            tom_results.append(result)
+
+    if os.environ.get("MOEX_DATA_ROOT") != canonical_root.as_posix():
+        raise Step3PilotError("canonical MOEX_DATA_ROOT was not restored after pilot materialization")
     if len(quote_results) != EXPECTED_QUOTE_PARTITIONS or len(oi_results) != EXPECTED_OI_PARTITIONS or len(tom_results) != EXPECTED_TOM_PARTITIONS:
         raise Step3PilotError("Step3 pilot output count mismatch")
 
@@ -152,6 +191,10 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
         "trade_date": checked_trade_date,
         "as_of_date": checked_as_of_date,
         "artifact_version": base_artifact,
+        "materialization_root": run_root.as_posix(),
+        "materialization_root_ref": _run_root_ref(base_artifact),
+        "run_artifacts_immutable": True,
+        "run_id_reuse_allowed": False,
         "reference_source_url": reference_url,
         "reference_observed_at_utc": reference_observed_at_utc,
         "bindings": bindings,
@@ -168,7 +211,7 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
         "historical_backdating_used": False,
         "continuous_series_created": False,
     }
-    evidence_path = _data_root() / "state" / "acceptance" / "step3_canonical_raw" / ("run_id=" + base_artifact) / "pilot_evidence.json"
+    evidence_path = canonical_root / "state" / "acceptance" / "step3_canonical_raw" / ("run_id=" + base_artifact) / "pilot_evidence.json"
     _write_json_atomic(evidence_path, payload)
     payload["evidence_path"] = evidence_path.as_posix()
     return payload
