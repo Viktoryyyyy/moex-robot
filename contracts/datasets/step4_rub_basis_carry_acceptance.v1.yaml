@@ -1,0 +1,37 @@
+contract_id: step4_rub_basis_carry_acceptance.v1
+dataset_id: step4_rub_basis_carry_acceptance
+artifact_class: external_pattern
+producer: moex_data.step4_basis_carry_acceptance
+producer_ref: src/moex_data/step4_basis_carry_acceptance.py
+source_program_ref: configs/datasets/step4_rub_basis_carry.v1.yaml
+source_dataset_ref: contracts/datasets/rub_basis_carry_5m.v1.yaml
+format: json
+schema_version: step4_rub_basis_carry_acceptance.v1
+storage_root_ref: MOEX_DATA_ROOT
+pilot_evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step4_rub_basis_carry/run_id={RUN_ID}/pilot_evidence.json"
+acceptance_evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step4_rub_basis_carry/run_id={RUN_ID}/accepted_pointers.json"
+accepted_pointer_path_pattern: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=rub_basis_carry_5m/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+expected_outputs:
+  total: 2
+  instrument_ids:
+    - usd_rub_basis_carry
+    - cny_rub_basis_carry
+validation_policy:
+  pilot_status_required: pilot_passed
+  run_artifacts_immutable_required: true
+  run_id_reuse_allowed_required: false
+  output_count_must_equal_expected: true
+  every_output_quality_status_required: pass
+  every_output_row_count_positive: true
+  every_output_partition_manifest_quality_inside_declared_run_root: true
+  exact_timestamp_inner_join_required: true
+  forward_fill_used_required: false
+  asof_join_used_required: false
+  latest_autodetect_used_required: false
+  continuous_series_used_required: false
+promotion_policy:
+  validate_all_before_pointer_writes: true
+  pointer_promotion_mode: transactional_with_rollback
+  final_acceptance_marker_participates_in_same_transaction: true
+  rollback_previous_pointers_on_any_promotion_failure: true
+  partial_pointer_set_without_acceptance_marker_is_not_accepted: true
