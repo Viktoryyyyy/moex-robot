@@ -66,6 +66,12 @@ normalization_policy:
   cny_rub_basis_carry:
     cr_front_next_price_divisor: 1.0
     target_unit: RUB_per_CNY
+timestamp_policy:
+  market_timezone: Europe/Moscow
+  naive_source_timestamp_semantics: exchange_local
+  naive_source_conversion: localize_Europe_Moscow_then_convert_UTC
+  timezone_aware_source_conversion: convert_to_UTC
+  output_ts_timezone: UTC
 alignment_policy:
   mode: exact_timestamp_inner_join
   forward_fill_allowed: false
@@ -84,6 +90,7 @@ calculation_policy:
 quality_checks:
   - nonzero_row_count
   - exact_input_timestamp_intersection
+  - canonical_market_timestamp_policy
   - unique_instrument_ts
   - monotonic_ts
   - positive_normalized_rates
@@ -93,6 +100,9 @@ quality_checks:
   - no_forward_fill
   - no_asof_join
 accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=rub_basis_carry_5m/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+accepted_pointer_identity_policy:
+  pointer_run_id_must_equal_referenced_manifest_run_id: true
+  acceptance_run_id_stored_separately: true
 path_rules:
   storage_root: env_contract
   hardcoded_server_path_allowed: false
