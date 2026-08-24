@@ -77,8 +77,10 @@ def _producer_files(
                 "dataset_id": dataset_id,
                 "run_id": name,
                 "instrument_id": instrument_id,
+                "source_id": source_id,
                 "secid": secid,
                 "trade_date": TRADE_DATE,
+                "partition_path": partition.as_posix(),
                 "rows": row_count,
                 "quality_status": "pass",
             },
@@ -276,6 +278,41 @@ def test_step3_acceptance_rejects_quality_report_mismatch(tmp_path: Path, monkey
     _write_json(acceptance.pilot_evidence_path(run_id), evidence)
 
     with pytest.raises(acceptance.Step3AcceptanceError, match="quote quality report mismatch: quality_status"):
+        acceptance.promote_step3_pilot(run_id=run_id)
+
+
+def test_step3_acceptance_rejects_missing_supplementary_quality_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    run_id = "step3_missing_supp_source"
+    evidence = _pilot_evidence(tmp_path, run_id)
+    oi_rows = evidence["open_interest_partitions"]
+    assert isinstance(oi_rows, list)
+    quality_path = Path(str(oi_rows[0]["quality_report_path"]))
+    quality = json.loads(quality_path.read_text(encoding="utf-8"))
+    quality.pop("source_id")
+    _write_json(quality_path, quality)
+    _write_json(acceptance.pilot_evidence_path(run_id), evidence)
+
+    with pytest.raises(acceptance.Step3AcceptanceError, match="open_interest quality report mismatch: source_id"):
+        acceptance.promote_step3_pilot(run_id=run_id)
+
+
+def test_step3_acceptance_rejects_mismatched_supplementary_quality_partition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    run_id = "step3_bad_supp_partition"
+    evidence = _pilot_evidence(tmp_path, run_id)
+    tom_rows = evidence["tom_partitions"]
+    assert isinstance(tom_rows, list)
+    quality_path = Path(str(tom_rows[0]["quality_report_path"]))
+    unrelated = tmp_path / "producer" / "unrelated" / "part.parquet"
+    unrelated.parent.mkdir(parents=True, exist_ok=True)
+    unrelated.write_bytes(b"unrelated")
+    quality = json.loads(quality_path.read_text(encoding="utf-8"))
+    quality["partition_path"] = unrelated.as_posix()
+    _write_json(quality_path, quality)
+    _write_json(acceptance.pilot_evidence_path(run_id), evidence)
+
+    with pytest.raises(acceptance.Step3AcceptanceError, match="tom.quality_report.partition_path mismatch"):
         acceptance.promote_step3_pilot(run_id=run_id)
 
 
