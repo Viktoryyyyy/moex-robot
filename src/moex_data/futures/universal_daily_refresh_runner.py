@@ -18,6 +18,7 @@ except Exception:
 
 from moex_data.futures import liquidity_history_metrics_probe as base
 
+PROJECT_ENV_PATH = Path(__file__).resolve().parents[4] / ".env"
 SCHEMA_UNIVERSAL_DAILY_REFRESH_MANIFEST = "futures_universal_daily_refresh_manifest.v1"
 ROLL_POLICY_ID = "expiration_minus_1_trading_session_v1"
 ADJUSTMENT_POLICY_ID = "unadjusted_v1"
@@ -469,7 +470,7 @@ def write_manifest(path, manifest):
 
 def main():
     if load_dotenv is not None:
-        load_dotenv()
+        load_dotenv(PROJECT_ENV_PATH, override=False)
     parser = argparse.ArgumentParser()
     parser.add_argument("--snapshot-date", default=today_msk())
     parser.add_argument("--run-date", default=today_msk())
