@@ -18,7 +18,7 @@ def _write_json(path: Path, values: dict[str, object]) -> None:
 
 
 def _producer_files(
-    root: Path,
+    run_root: Path,
     name: str,
     *,
     dataset_id: str,
@@ -27,7 +27,7 @@ def _producer_files(
     source_id: str,
     row_count: int = 10,
 ) -> tuple[Path, Path, Path]:
-    base = root / "producer" / name
+    base = run_root / "producer" / name
     partition = base / "part.parquet"
     quality = base / "quality.json"
     manifest = base / "manifest.json"
@@ -104,6 +104,8 @@ def _producer_files(
 
 
 def _pilot_evidence(root: Path, run_id: str, *, zero_quote_rows: bool = False) -> dict[str, object]:
+    run_root = root / "runs" / "step3_canonical_raw" / ("run_id=" + run_id)
+    run_root.mkdir(parents=True, exist_ok=True)
     quote_rows = []
     oi_rows = []
     tom_rows = []
@@ -129,7 +131,7 @@ def _pilot_evidence(root: Path, run_id: str, *, zero_quote_rows: bool = False) -
             }
         )
         partition, quality, manifest = _producer_files(
-            root,
+            run_root,
             instrument_id + "_quote",
             dataset_id="futures_raw_5m",
             instrument_id=instrument_id,
@@ -151,7 +153,7 @@ def _pilot_evidence(root: Path, run_id: str, *, zero_quote_rows: bool = False) -
             }
         )
         oi_partition, oi_quality, oi_manifest = _producer_files(
-            root,
+            run_root,
             instrument_id + "_oi",
             dataset_id="futures_open_interest_raw_5m",
             instrument_id=instrument_id,
@@ -174,7 +176,7 @@ def _pilot_evidence(root: Path, run_id: str, *, zero_quote_rows: bool = False) -
         )
     for instrument_id, secid in (("usd_tom", "USD000UTSTOM"), ("cny_tom", "CNYRUB_TOM")):
         partition, quality, manifest = _producer_files(
-            root,
+            run_root,
             instrument_id + "_quote",
             dataset_id="fx_spot_raw_5m",
             instrument_id=instrument_id,
@@ -202,6 +204,10 @@ def _pilot_evidence(root: Path, run_id: str, *, zero_quote_rows: bool = False) -
         "trade_date": TRADE_DATE,
         "as_of_date": TRADE_DATE,
         "artifact_version": run_id,
+        "materialization_root": run_root.as_posix(),
+        "materialization_root_ref": "${MOEX_DATA_ROOT}/runs/step3_canonical_raw/run_id=" + run_id,
+        "run_artifacts_immutable": True,
+        "run_id_reuse_allowed": False,
         "reference_observed_at_utc": REFERENCE_TS,
         "bindings": bindings,
         "latest_autodetect_used": False,
@@ -231,6 +237,7 @@ def test_step3_acceptance_promotes_exactly_ten_canonical_pointers(tmp_path: Path
     assert result["accepted_pointer_count"] == 10
     assert result["expected_pointer_count"] == 10
     assert result["promotion_semantics"] == "transactional_with_rollback"
+    assert result["artifact_semantics"] == "immutable_run_scoped"
     assert acceptance.acceptance_evidence_path(run_id).exists()
     assert len(result["pointers"]) == 10
     for item in result["pointers"]:
@@ -262,6 +269,71 @@ def test_step3_acceptance_rejects_noncausal_or_incomplete_binding(tmp_path: Path
     _write_json(acceptance.pilot_evidence_path(run_id), evidence)
 
     with pytest.raises(acceptance.Step3AcceptanceError, match="binding.availability_ts_utc is required"):
+        acceptance.promote_step3_pilot(run_id=run_id)
+
+
+def test_step3_acceptance_rejects_bad_binding_root_pattern(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    run_id = "step3_bad_secid"
+    evidence = _pilot_evidence(tmp_path, run_id)
+    bindings = evidence["bindings"]
+    assert isinstance(bindings, list)
+    bindings[0]["secid"] = "CRU6"
+    _write_json(acceptance.pilot_evidence_path(run_id), evidence)
+
+    with pytest.raises(acceptance.Step3AcceptanceError, match="binding SECID does not match canonical root/month pattern"):
+        acceptance.promote_step3_pilot(run_id=run_id)
+
+
+def test_step3_acceptance_rejects_reversed_front_next_expiry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    run_id = "step3_bad_expiry"
+    evidence = _pilot_evidence(tmp_path, run_id)
+    bindings = evidence["bindings"]
+    assert isinstance(bindings, list)
+    bindings[0]["last_trade_date"] = "2027-03-18"
+    _write_json(acceptance.pilot_evidence_path(run_id), evidence)
+
+    with pytest.raises(acceptance.Step3AcceptanceError, match="Si front last_trade_date must be strictly earlier than next"):
+        acceptance.promote_step3_pilot(run_id=run_id)
+
+
+def test_step3_acceptance_rejects_noncanonical_source_even_when_evidence_is_self_consistent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    run_id = "step3_bad_source"
+    evidence = _pilot_evidence(tmp_path, run_id)
+    quote_rows = evidence["quote_partitions"]
+    assert isinstance(quote_rows, list)
+    row = quote_rows[0]
+    row["source_id"] = "legacy_source"
+    manifest_path = Path(str(row["manifest_reference"]))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["source_scope"] = ["legacy_source"]
+    manifest["source_contract"]["source_id"] = "legacy_source"
+    _write_json(manifest_path, manifest)
+    quality_path = Path(str(row["quality_report_reference"]))
+    quality = json.loads(quality_path.read_text(encoding="utf-8"))
+    quality["rows"][0]["source_id"] = "legacy_source"
+    _write_json(quality_path, quality)
+    _write_json(acceptance.pilot_evidence_path(run_id), evidence)
+
+    with pytest.raises(acceptance.Step3AcceptanceError, match="source_id does not match canonical Step 3 source"):
+        acceptance.promote_step3_pilot(run_id=run_id)
+
+
+def test_step3_acceptance_rejects_artifact_outside_declared_run_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    run_id = "step3_bad_run_root"
+    evidence = _pilot_evidence(tmp_path, run_id)
+    quote_rows = evidence["quote_partitions"]
+    assert isinstance(quote_rows, list)
+    external = tmp_path / "other_run" / "part.parquet"
+    external.parent.mkdir(parents=True, exist_ok=True)
+    external.write_bytes(b"other")
+    quote_rows[0]["storage_partition_path"] = external.as_posix()
+    _write_json(acceptance.pilot_evidence_path(run_id), evidence)
+
+    with pytest.raises(acceptance.Step3AcceptanceError, match="must be inside the declared immutable run root"):
         acceptance.promote_step3_pilot(run_id=run_id)
 
 
@@ -304,7 +376,7 @@ def test_step3_acceptance_rejects_mismatched_supplementary_quality_partition(tmp
     tom_rows = evidence["tom_partitions"]
     assert isinstance(tom_rows, list)
     quality_path = Path(str(tom_rows[0]["quality_report_path"]))
-    unrelated = tmp_path / "producer" / "unrelated" / "part.parquet"
+    unrelated = tmp_path / "runs" / "step3_canonical_raw" / ("run_id=" + run_id) / "unrelated" / "part.parquet"
     unrelated.parent.mkdir(parents=True, exist_ok=True)
     unrelated.write_bytes(b"unrelated")
     quality = json.loads(quality_path.read_text(encoding="utf-8"))
@@ -351,3 +423,10 @@ def test_step3_pilot_rejects_trade_date_different_from_as_of_before_source_acces
             as_of_date=TRADE_DATE,
             artifact_version="step3_mismatch",
         )
+
+
+def test_step3_pilot_run_root_is_immutable_and_run_id_cannot_be_reused(tmp_path: Path) -> None:
+    first = pilot_runner._reserve_run_root(tmp_path, "immutable_run")
+    assert first == tmp_path / "runs" / "step3_canonical_raw" / "run_id=immutable_run"
+    with pytest.raises(pilot_runner.Step3PilotError, match="run_id is immutable and cannot be reused"):
+        pilot_runner._reserve_run_root(tmp_path, "immutable_run")
