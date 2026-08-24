@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 from collections.abc import Mapping, Sequence
+from datetime import date
 from pathlib import Path
 from typing import Final
 
@@ -33,6 +34,24 @@ def _require_token(value: object, field_name: str) -> str:
     return text
 
 
+def _require_date(value: object, field_name: str) -> str:
+    text = str(value or "").strip()
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError as exc:
+        raise Step3PilotError(field_name + " must be explicit YYYY-MM-DD") from exc
+
+
+def _require_causal_dates(trade_date: object, as_of_date: object) -> tuple[str, str]:
+    checked_trade_date = _require_date(trade_date, "trade_date")
+    checked_as_of_date = _require_date(as_of_date, "as_of_date")
+    if checked_trade_date != checked_as_of_date:
+        raise Step3PilotError(
+            "trade_date must equal as_of_date while front/next binding uses the unversioned current FORTS reference"
+        )
+    return checked_trade_date, checked_as_of_date
+
+
 def _data_root() -> Path:
     value = str(os.environ.get("MOEX_DATA_ROOT", "")).strip()
     if not value:
@@ -54,6 +73,7 @@ def _artifact(base: str, suffix: str) -> str:
 
 
 def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_file: str = CANONICAL_ENV_PATH, timeout: float = 60.0) -> dict[str, object]:
+    checked_trade_date, checked_as_of_date = _require_causal_dates(trade_date, as_of_date)
     base_artifact = _require_token(artifact_version, "artifact_version")
     quotes.load_env_file(env_file)
     if not str(os.environ.get("MOEX_API_KEY", "")).strip():
@@ -62,20 +82,20 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
         raise Step3PilotError("MOEX_DATA_ROOT is required")
 
     reference_frame, reference_url, reference_observed_at_utc = binding.fetch_reference_frame(
-        as_of_date=as_of_date,
+        as_of_date=checked_as_of_date,
         timeout=timeout,
     )
     bindings = binding.bind_front_next(
         reference_frame,
         root="Si",
-        as_of_date=as_of_date,
+        as_of_date=checked_as_of_date,
         availability_ts_utc=reference_observed_at_utc,
     )
     bindings.extend(
         binding.bind_front_next(
             reference_frame,
             root="CR",
-            as_of_date=as_of_date,
+            as_of_date=checked_as_of_date,
             availability_ts_utc=reference_observed_at_utc,
         )
     )
@@ -88,7 +108,7 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
         instrument_id = str(item["instrument_id"])
         secid = str(item["secid"])
         quote_result = quotes.materialize_instrument_partition(
-            trade_date=trade_date,
+            trade_date=checked_trade_date,
             instrument_id=instrument_id,
             secid=secid,
             artifact_version=_artifact(base_artifact, instrument_id + "_quote"),
@@ -99,7 +119,7 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
         quote_results.append(quote_result)
 
         oi_result = oi.materialize_open_interest_partition(
-            trade_date=trade_date,
+            trade_date=checked_trade_date,
             instrument_id=instrument_id,
             secid=secid,
             artifact_version=_artifact(base_artifact, instrument_id + "_oi"),
@@ -112,7 +132,7 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
     tom_results: list[dict[str, object]] = []
     for instrument_id, secid in cets.INSTRUMENTS.items():
         result = cets.materialize_cets_tom_partition(
-            trade_date=trade_date,
+            trade_date=checked_trade_date,
             instrument_id=instrument_id,
             secid=secid,
             artifact_version=_artifact(base_artifact, instrument_id + "_quote"),
@@ -129,8 +149,8 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
         "project": "MOEX_Bot",
         "step": 3,
         "status": "pilot_passed",
-        "trade_date": trade_date,
-        "as_of_date": as_of_date,
+        "trade_date": checked_trade_date,
+        "as_of_date": checked_as_of_date,
         "artifact_version": base_artifact,
         "reference_source_url": reference_url,
         "reference_observed_at_utc": reference_observed_at_utc,
