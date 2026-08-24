@@ -10,10 +10,14 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Final
+from zoneinfo import ZoneInfo
+
+import pandas as pd
 
 CONTRACT_ID: Final[str] = "step3_canonical_raw_acceptance.v1"
 CANONICAL_ENV_PATH: Final[str] = "/home/trader/moex_bot/.env"
 RUNS_SUBPATH: Final[tuple[str, ...]] = ("runs", "step3_canonical_raw")
+MOSCOW_TZ: Final[ZoneInfo] = ZoneInfo("Europe/Moscow")
 EXPECTED_COUNTS: Final[dict[str, int]] = {
     "bindings": 4,
     "quote_partitions": 4,
@@ -86,7 +90,7 @@ def _require_date(value: object, field_name: str) -> str:
         raise Step3AcceptanceError(field_name + " must be explicit YYYY-MM-DD") from exc
 
 
-def _require_utc_timestamp(value: object, field_name: str) -> str:
+def _require_utc_datetime(value: object, field_name: str) -> datetime:
     text = str(value or "").strip()
     if not text:
         _fail(field_name + " is required")
@@ -96,8 +100,11 @@ def _require_utc_timestamp(value: object, field_name: str) -> str:
         raise Step3AcceptanceError(field_name + " must be an ISO timestamp") from exc
     if parsed.tzinfo is None:
         _fail(field_name + " must be timezone-aware")
-    parsed_utc = parsed.astimezone(timezone.utc).replace(microsecond=0)
-    return parsed_utc.isoformat()
+    return parsed.astimezone(timezone.utc).replace(microsecond=0)
+
+
+def _require_utc_timestamp(value: object, field_name: str) -> str:
+    return _require_utc_datetime(value, field_name).isoformat()
 
 
 def load_env_file(path: str | None) -> None:
@@ -222,19 +229,6 @@ def _single_scope(value: object, field_name: str) -> str:
     return _require_token(value[0], field_name)
 
 
-def _positive_row_count(values: Mapping[str, object], context: str) -> int:
-    raw = values.get("row_count")
-    if isinstance(raw, bool):
-        _fail(context + " row_count must be a positive integer")
-    try:
-        count = int(raw)
-    except (TypeError, ValueError) as exc:
-        raise Step3AcceptanceError(context + " row_count must be a positive integer") from exc
-    if count <= 0:
-        _fail(context + " row_count must be positive")
-    return count
-
-
 def _positive_int(value: object, field_name: str) -> int:
     if isinstance(value, bool):
         _fail(field_name + " must be a positive integer")
@@ -245,6 +239,10 @@ def _positive_int(value: object, field_name: str) -> int:
     if result <= 0:
         _fail(field_name + " must be positive")
     return result
+
+
+def _positive_row_count(values: Mapping[str, object], context: str) -> int:
+    return _positive_int(values.get("row_count"), context + " row_count")
 
 
 def _same_path(value: object, expected: Path, field_name: str) -> None:
@@ -274,7 +272,6 @@ def _quote_spec(values: Mapping[str, object], *, trade_date: str) -> PointerSpec
         _fail("quote dataset_id mismatch")
     if values.get("quality_status") != "pass":
         _fail("quote quality_status must be pass")
-    row_count = _positive_row_count(values, "quote")
     instrument_id = _single_scope(values.get("instrument_id_scope"), "quote.instrument_id_scope")
     secid = _single_scope(values.get("secid_scope"), "quote.secid_scope")
     source_id = _require_canonical_source("futures_raw_5m", _require_token(values.get("source_id"), "quote.source_id"), "quote")
@@ -282,16 +279,9 @@ def _quote_spec(values: Mapping[str, object], *, trade_date: str) -> PointerSpec
     quality_path = _require_under_root(values.get("quality_report_reference"), "quote.quality_report_reference")
     partition_path = _require_under_root(values.get("storage_partition_path"), "quote.storage_partition_path")
     return PointerSpec(
-        dataset_id="futures_raw_5m",
-        instrument_id=instrument_id,
-        source_id=source_id,
-        secid=secid,
-        trade_date=trade_date,
-        row_count=row_count,
-        manifest_path=manifest_path,
-        quality_path=quality_path,
-        partition_path=partition_path,
-        manifest_run_id=_manifest_run_id(manifest_path),
+        "futures_raw_5m", instrument_id, source_id, secid, trade_date,
+        _positive_row_count(values, "quote"), manifest_path, quality_path, partition_path,
+        _manifest_run_id(manifest_path),
     )
 
 
@@ -302,7 +292,6 @@ def _supplementary_spec(values: Mapping[str, object], *, dataset_id: str, contex
         _fail(context + " trade_date mismatch")
     if values.get("quality_status") != "pass":
         _fail(context + " quality_status must be pass")
-    row_count = _positive_row_count(values, context)
     instrument_id = _require_token(values.get("instrument_id"), context + ".instrument_id")
     secid = _require_token(values.get("secid"), context + ".secid")
     source_id = _require_canonical_source(dataset_id, _require_token(values.get("source_id"), context + ".source_id"), context)
@@ -310,16 +299,9 @@ def _supplementary_spec(values: Mapping[str, object], *, dataset_id: str, contex
     quality_path = _require_under_root(values.get("quality_report_path"), context + ".quality_report_path")
     partition_path = _require_under_root(values.get("partition_path"), context + ".partition_path")
     return PointerSpec(
-        dataset_id=dataset_id,
-        instrument_id=instrument_id,
-        source_id=source_id,
-        secid=secid,
-        trade_date=trade_date,
-        row_count=row_count,
-        manifest_path=manifest_path,
-        quality_path=quality_path,
-        partition_path=partition_path,
-        manifest_run_id=_manifest_run_id(manifest_path),
+        dataset_id, instrument_id, source_id, secid, trade_date,
+        _positive_row_count(values, context), manifest_path, quality_path, partition_path,
+        _manifest_run_id(manifest_path),
     )
 
 
@@ -338,7 +320,11 @@ def _require_list(value: object, field_name: str, expected_count: int) -> tuple[
 
 def _validate_bindings(values: Mapping[str, object], *, trade_date: str, as_of_date: str) -> dict[str, str]:
     rows = _require_list(values.get("bindings"), "bindings", EXPECTED_COUNTS["bindings"])
-    reference_observed_at = _require_utc_timestamp(values.get("reference_observed_at_utc"), "reference_observed_at_utc")
+    reference_dt = _require_utc_datetime(values.get("reference_observed_at_utc"), "reference_observed_at_utc")
+    reference_observed_at = reference_dt.isoformat()
+    if reference_dt.astimezone(MOSCOW_TZ).date().isoformat() != as_of_date:
+        _fail("reference_observed_at_utc Europe/Moscow date must equal as_of_date")
+
     observed: dict[tuple[str, str], tuple[str, str]] = {}
     by_instrument: dict[str, str] = {}
     secids: set[str] = set()
@@ -376,6 +362,7 @@ def _validate_bindings(values: Mapping[str, object], *, trade_date: str, as_of_d
             _fail("binding causal timestamps must equal the controlled reference observation timestamp")
         observed[key] = (instrument_id, secid)
         by_instrument[instrument_id] = secid
+
     if set(observed) != set(EXPECTED_BINDINGS):
         _fail("bindings must contain the exact four canonical root/role identities")
     for root in ("Si", "CR"):
@@ -402,22 +389,20 @@ def _validate_quote_support(spec: PointerSpec) -> None:
     source_contract = manifest.get("source_contract")
     if not isinstance(source_contract, Mapping):
         _fail("quote manifest source_contract must be an object")
-    expected_source_fields = {
+    for field_name, expected in {
         "instrument_id": spec.instrument_id,
         "source_id": spec.source_id,
         "secid": spec.secid,
         "trade_date": spec.trade_date,
-    }
-    for field_name, expected in expected_source_fields.items():
+    }.items():
         if source_contract.get(field_name) != expected:
             _fail("quote manifest source_contract mismatch: " + field_name)
 
     quality = _load_json(spec.quality_path, "quote.quality_report")
     if _require_token(quality.get("run_id"), "quote.quality_report.run_id") != spec.manifest_run_id:
         _fail("quote quality report run_id mismatch")
-    quality_rows = _require_list(quality.get("rows"), "quote.quality_report.rows", 1)
-    row = quality_rows[0]
-    expected_quality_fields = {
+    row = _require_list(quality.get("rows"), "quote.quality_report.rows", 1)[0]
+    for field_name, expected in {
         "run_id": spec.manifest_run_id,
         "dataset_id": spec.dataset_id,
         "instrument_id": spec.instrument_id,
@@ -425,17 +410,16 @@ def _validate_quote_support(spec: PointerSpec) -> None:
         "secid": spec.secid,
         "trade_date": spec.trade_date,
         "quality_status": "pass",
-    }
-    for field_name, expected in expected_quality_fields.items():
+    }.items():
         if row.get(field_name) != expected:
             _fail("quote quality report mismatch: " + field_name)
     if _positive_int(row.get("rows"), "quote.quality_report.rows[0].rows") != spec.row_count:
         _fail("quote quality report row count mismatch")
 
 
-def _validate_supplementary_support(spec: PointerSpec, *, context: str) -> None:
+def _validate_supplementary_support(spec: PointerSpec, *, context: str) -> tuple[Mapping[str, object], Mapping[str, object]]:
     manifest = _load_json(spec.manifest_path, context + ".manifest")
-    expected_manifest_fields = {
+    for field_name, expected in {
         "dataset_id": spec.dataset_id,
         "run_id": spec.manifest_run_id,
         "instrument_id": spec.instrument_id,
@@ -443,8 +427,7 @@ def _validate_supplementary_support(spec: PointerSpec, *, context: str) -> None:
         "secid": spec.secid,
         "trade_date": spec.trade_date,
         "status": "succeeded",
-    }
-    for field_name, expected in expected_manifest_fields.items():
+    }.items():
         if manifest.get(field_name) != expected:
             _fail(context + " manifest mismatch: " + field_name)
     if _positive_int(manifest.get("row_count"), context + ".manifest.row_count") != spec.row_count:
@@ -453,7 +436,7 @@ def _validate_supplementary_support(spec: PointerSpec, *, context: str) -> None:
     _same_path(manifest.get("quality_report_path"), spec.quality_path, context + ".manifest.quality_report_path")
 
     quality = _load_json(spec.quality_path, context + ".quality_report")
-    expected_quality_fields = {
+    for field_name, expected in {
         "dataset_id": spec.dataset_id,
         "run_id": spec.manifest_run_id,
         "instrument_id": spec.instrument_id,
@@ -461,13 +444,51 @@ def _validate_supplementary_support(spec: PointerSpec, *, context: str) -> None:
         "secid": spec.secid,
         "trade_date": spec.trade_date,
         "quality_status": "pass",
-    }
-    for field_name, expected in expected_quality_fields.items():
+    }.items():
         if quality.get(field_name) != expected:
             _fail(context + " quality report mismatch: " + field_name)
     _same_path(quality.get("partition_path"), spec.partition_path, context + ".quality_report.partition_path")
     if _positive_int(quality.get("rows"), context + ".quality_report.rows") != spec.row_count:
         _fail(context + " quality report row count mismatch")
+    return manifest, quality
+
+
+def _validate_oi_causal_partition(spec: PointerSpec, manifest: Mapping[str, object], quality: Mapping[str, object]) -> None:
+    manifest_min = _require_utc_datetime(manifest.get("min_availability_ts_utc"), "open_interest.manifest.min_availability_ts_utc")
+    manifest_max = _require_utc_datetime(manifest.get("max_availability_ts_utc"), "open_interest.manifest.max_availability_ts_utc")
+    quality_min = _require_utc_datetime(quality.get("min_availability_ts_utc"), "open_interest.quality_report.min_availability_ts_utc")
+    quality_max = _require_utc_datetime(quality.get("max_availability_ts_utc"), "open_interest.quality_report.max_availability_ts_utc")
+    if manifest_min != quality_min or manifest_max != quality_max:
+        _fail("open_interest availability bounds mismatch between manifest and quality report")
+    if quality_min > quality_max:
+        _fail("open_interest availability bounds are not ordered")
+
+    try:
+        frame = pd.read_parquet(spec.partition_path, columns=["availability_ts_utc", "systime_source"])
+    except Exception as exc:
+        raise Step3AcceptanceError("open_interest partition causal Parquet validation failed: " + str(exc)) from exc
+    if len(frame.index) != spec.row_count:
+        _fail("open_interest Parquet row count mismatch")
+    if frame["availability_ts_utc"].isna().any() or frame["systime_source"].isna().any():
+        _fail("open_interest Parquet causal columns contain null values")
+    if frame["systime_source"].astype(str).str.strip().eq("").any():
+        _fail("open_interest Parquet systime_source contains empty values")
+
+    parsed: list[datetime] = []
+    for value in frame["availability_ts_utc"].tolist():
+        try:
+            timestamp = pd.Timestamp(value)
+        except Exception as exc:
+            raise Step3AcceptanceError("open_interest Parquet availability_ts_utc is invalid") from exc
+        if timestamp.tzinfo is None:
+            _fail("open_interest Parquet availability_ts_utc must be timezone-aware")
+        parsed.append(timestamp.tz_convert("UTC").to_pydatetime().astimezone(timezone.utc).replace(microsecond=0))
+    if not parsed:
+        _fail("open_interest Parquet must contain availability evidence")
+    actual_min = min(parsed)
+    actual_max = max(parsed)
+    if actual_min != quality_min or actual_max != quality_max:
+        _fail("open_interest Parquet availability bounds mismatch declared evidence")
 
 
 def validate_pilot_evidence(values: Mapping[str, object], *, run_id: str) -> tuple[PointerSpec, ...]:
@@ -499,19 +520,13 @@ def validate_pilot_evidence(values: Mapping[str, object], *, run_id: str) -> tup
             _fail("pilot evidence count mismatch: " + field_name)
 
     binding_by_instrument = _validate_bindings(values, trade_date=trade_date, as_of_date=as_of_date)
-
     quote_rows = _require_list(values.get("quote_partitions"), "quote_partitions", EXPECTED_COUNTS["quote_partitions"])
     oi_rows = _require_list(values.get("open_interest_partitions"), "open_interest_partitions", EXPECTED_COUNTS["open_interest_partitions"])
     tom_rows = _require_list(values.get("tom_partitions"), "tom_partitions", EXPECTED_COUNTS["tom_partitions"])
+
     specs: list[PointerSpec] = [_quote_spec(item, trade_date=trade_date) for item in quote_rows]
-    specs.extend(
-        _supplementary_spec(item, dataset_id="futures_open_interest_raw_5m", context="open_interest", trade_date=trade_date)
-        for item in oi_rows
-    )
-    specs.extend(
-        _supplementary_spec(item, dataset_id="fx_spot_raw_5m", context="tom", trade_date=trade_date)
-        for item in tom_rows
-    )
+    specs.extend(_supplementary_spec(item, dataset_id="futures_open_interest_raw_5m", context="open_interest", trade_date=trade_date) for item in oi_rows)
+    specs.extend(_supplementary_spec(item, dataset_id="fx_spot_raw_5m", context="tom", trade_date=trade_date) for item in tom_rows)
 
     keys = {(spec.dataset_id, spec.instrument_id) for spec in specs}
     if len(keys) != sum(EXPECTED_POINTER_COUNTS.values()):
@@ -545,7 +560,8 @@ def validate_pilot_evidence(values: Mapping[str, object], *, run_id: str) -> tup
         if spec.dataset_id == "futures_raw_5m":
             _validate_quote_support(spec)
         elif spec.dataset_id == "futures_open_interest_raw_5m":
-            _validate_supplementary_support(spec, context="open_interest")
+            manifest, quality = _validate_supplementary_support(spec, context="open_interest")
+            _validate_oi_causal_partition(spec, manifest, quality)
         elif spec.dataset_id == "fx_spot_raw_5m":
             _validate_supplementary_support(spec, context="tom")
         else:
@@ -625,9 +641,7 @@ def _transactional_json_replace(records: Sequence[tuple[Path, Mapping[str, objec
                 except OSError:
                     pass
         if rollback_errors:
-            raise Step3AcceptanceError(
-                "pointer promotion failed and rollback was incomplete: " + "; ".join(rollback_errors)
-            ) from exc
+            raise Step3AcceptanceError("pointer promotion failed and rollback was incomplete: " + "; ".join(rollback_errors)) from exc
         raise Step3AcceptanceError("pointer promotion transaction failed: " + str(exc)) from exc
     finally:
         for staged_path, _ in staged:
@@ -641,8 +655,7 @@ def _transactional_json_replace(records: Sequence[tuple[Path, Mapping[str, objec
 def promote_step3_pilot(*, run_id: str) -> dict[str, object]:
     checked_run = _require_token(run_id, "run_id")
     evidence_path = pilot_evidence_path(checked_run)
-    values = _load_json(evidence_path, "pilot_evidence")
-    specs = validate_pilot_evidence(values, run_id=checked_run)
+    specs = validate_pilot_evidence(_load_json(evidence_path, "pilot_evidence"), run_id=checked_run)
 
     pointer_records: list[dict[str, object]] = []
     pointer_writes: list[tuple[Path, Mapping[str, object]]] = []
