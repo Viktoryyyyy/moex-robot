@@ -19,10 +19,7 @@ PRODUCER_ID: Final[str] = "moex_data.currency.materialize_cets_tom_raw_5m.v1"
 DEFAULT_BASE_URL: Final[str] = "https://iss.moex.com"
 CANONICAL_ENV_PATH: Final[str] = "/home/trader/moex_bot/.env"
 MAX_PAGES: Final[int] = 100
-INSTRUMENTS: Final[dict[str, str]] = {
-    "usd_tom": "USD000UTSTOM",
-    "cny_tom": "CNYRUB_TOM",
-}
+INSTRUMENTS: Final[dict[str, str]] = {"usd_tom": "USD000UTSTOM", "cny_tom": "CNYRUB_TOM"}
 
 
 class CetsTomMaterializationError(ValueError):
@@ -119,12 +116,7 @@ def fetch_1m_candles(*, trade_date: str, secid: str, timeout: float = 30.0, base
     start = 0
     source_url = url
     for _ in range(MAX_PAGES):
-        response = requests.get(
-            url,
-            params={"from": checked_date, "till": checked_date, "interval": 1, "start": start, "iss.meta": "off"},
-            timeout=timeout,
-            headers={"User-Agent": "moex_bot_step3_cets_tom/1.0"},
-        )
+        response = requests.get(url, params={"from": checked_date, "till": checked_date, "interval": 1, "start": start, "iss.meta": "off"}, timeout=timeout, headers={"User-Agent": "moex_bot_step3_cets_tom/1.0"})
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, Mapping):
@@ -146,6 +138,10 @@ def fetch_1m_candles(*, trade_date: str, secid: str, timeout: float = 30.0, base
     return pd.concat(frames, ignore_index=True), source_url
 
 
+def _sum_preserve_all_null(values: pd.Series) -> float:
+    return values.sum(min_count=1)
+
+
 def normalize_to_5m(frame: pd.DataFrame, *, trade_date: str, instrument_id: str, secid: str, source_url: str) -> pd.DataFrame:
     checked_date = _require_date(trade_date)
     checked_instrument, checked_secid = _validate_identity(instrument_id, secid)
@@ -158,45 +154,29 @@ def normalize_to_5m(frame: pd.DataFrame, *, trade_date: str, instrument_id: str,
     for name in ("open", "high", "low", "close", "volume", "value"):
         column = by_lower.get(name)
         if column is not None:
-            work[name] = pd.to_numeric(work[column], errors="coerce")
+            original = work[column]
+            converted = pd.to_numeric(original, errors="coerce")
+            if (original.notna() & converted.isna()).any():
+                _fail("MOEX ISS candles contain nonnumeric " + name)
+            work[name] = converted
     work["_end"] = pd.to_datetime(work[by_lower["end"]], errors="coerce")
     if work["_end"].isna().any():
         _fail("MOEX ISS candles contain invalid end timestamps")
     work = work.loc[work["_end"].dt.date.astype(str).eq(checked_date)].copy()
     if work.empty:
         _fail("MOEX ISS candles contain no rows for explicit trade_date")
-    if work[["open", "high", "low", "close", "volume"]].isna().any(axis=None):
-        _fail("MOEX ISS candles contain null OHLCV")
+    if work[["open", "high", "low", "close"]].isna().any(axis=None):
+        _fail("MOEX ISS candles contain null OHLC")
     work = work.set_index("_end").sort_index()
-    aggregation: dict[str, str] = {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+    aggregation: dict[str, object] = {"open": "first", "high": "max", "low": "min", "close": "last", "volume": _sum_preserve_all_null}
     if "value" in work.columns:
-        aggregation["value"] = "sum"
+        aggregation["value"] = _sum_preserve_all_null
     bars = work.resample("5min", label="right", closed="right").agg(aggregation).dropna(subset=["open", "high", "low", "close"]).reset_index()
     if bars.empty:
         _fail("5m resample produced no rows")
     if "value" not in bars.columns:
         bars["value"] = pd.NA
-    output = pd.DataFrame(
-        {
-            "instrument_id": checked_instrument,
-            "trade_date": checked_date,
-            "ts": bars["_end"],
-            "session_date": checked_date,
-            "secid": checked_secid,
-            "board": "CETS",
-            "market": "selt",
-            "engine": "currency",
-            "source_id": SOURCE_ID,
-            "open": bars["open"],
-            "high": bars["high"],
-            "low": bars["low"],
-            "close": bars["close"],
-            "volume": bars["volume"],
-            "value": bars["value"],
-            "source": source_url,
-            "ingest_ts": _utc_now(),
-        }
-    ).sort_values("ts").reset_index(drop=True)
+    output = pd.DataFrame({"instrument_id": checked_instrument, "trade_date": checked_date, "ts": bars["_end"], "session_date": checked_date, "secid": checked_secid, "board": "CETS", "market": "selt", "engine": "currency", "source_id": SOURCE_ID, "open": bars["open"], "high": bars["high"], "low": bars["low"], "close": bars["close"], "volume": bars["volume"], "value": bars["value"], "source": source_url, "ingest_ts": _utc_now()}).sort_values("ts").reset_index(drop=True)
     if (output["high"] < output["low"]).any():
         _fail("5m bars contain high lower than low")
     if ((output["open"] < output["low"]) | (output["open"] > output["high"]) | (output["close"] < output["low"]) | (output["close"] > output["high"])).any():
@@ -246,34 +226,8 @@ def materialize_cets_tom_partition(*, trade_date: str, instrument_id: str, secid
     quality_path = _state_path("quality", checked_date, run_id, "quality_report.json")
     manifest_path = _state_path("refresh", checked_date, run_id, "manifest.json")
     _write_parquet_atomic(partition_path, normalized, run_id)
-    quality = {
-        "dataset_id": DATASET_ID,
-        "run_id": run_id,
-        "instrument_id": checked_instrument,
-        "source_id": SOURCE_ID,
-        "secid": checked_secid,
-        "trade_date": checked_date,
-        "partition_path": partition_path.as_posix(),
-        "rows": int(len(normalized.index)),
-        "min_ts": str(normalized["ts"].min()),
-        "max_ts": str(normalized["ts"].max()),
-        "quality_status": "pass",
-    }
-    manifest = {
-        "dataset_id": DATASET_ID,
-        "producer": PRODUCER_ID,
-        "source_id": SOURCE_ID,
-        "source_contract_ref": SOURCE_CONTRACT_REF,
-        "run_id": run_id,
-        "trade_date": checked_date,
-        "instrument_id": checked_instrument,
-        "secid": checked_secid,
-        "partition_path": partition_path.as_posix(),
-        "quality_report_path": quality_path.as_posix(),
-        "row_count": int(len(normalized.index)),
-        "status": "succeeded",
-        "latest_autodetect_used": False,
-    }
+    quality = {"dataset_id": DATASET_ID, "run_id": run_id, "instrument_id": checked_instrument, "source_id": SOURCE_ID, "secid": checked_secid, "trade_date": checked_date, "partition_path": partition_path.as_posix(), "rows": int(len(normalized.index)), "min_ts": str(normalized["ts"].min()), "max_ts": str(normalized["ts"].max()), "volume_null_rows": int(normalized["volume"].isna().sum()), "value_null_rows": int(normalized["value"].isna().sum()), "quality_status": "pass"}
+    manifest = {"dataset_id": DATASET_ID, "producer": PRODUCER_ID, "source_id": SOURCE_ID, "source_contract_ref": SOURCE_CONTRACT_REF, "run_id": run_id, "trade_date": checked_date, "instrument_id": checked_instrument, "secid": checked_secid, "partition_path": partition_path.as_posix(), "quality_report_path": quality_path.as_posix(), "row_count": int(len(normalized.index)), "status": "succeeded", "latest_autodetect_used": False}
     _write_json_atomic(quality_path, quality)
     _write_json_atomic(manifest_path, manifest)
     return {**manifest, "manifest_path": manifest_path.as_posix(), "quality_status": "pass"}
@@ -295,14 +249,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         load_env_file(args.env_file)
-        payload = materialize_cets_tom_partition(
-            trade_date=args.trade_date,
-            instrument_id=args.instrument_id,
-            secid=args.secid,
-            artifact_version=args.artifact_version,
-            timeout=args.timeout,
-            base_url=args.iss_base_url,
-        )
+        payload = materialize_cets_tom_partition(trade_date=args.trade_date, instrument_id=args.instrument_id, secid=args.secid, artifact_version=args.artifact_version, timeout=args.timeout, base_url=args.iss_base_url)
     except Exception as exc:
         print(json.dumps({"status": "failed", "dataset_id": DATASET_ID, "error": str(exc), "latest_autodetect_used": False}, ensure_ascii=False, sort_keys=True))
         return 1
