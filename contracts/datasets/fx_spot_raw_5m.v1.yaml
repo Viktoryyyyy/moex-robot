@@ -37,6 +37,9 @@ required_columns:
   - value
   - source
   - ingest_ts
+nullable_columns:
+  - volume
+  - value
 source_contract_ref: contracts/sources/currency/moex_iss_cets_tom_1m.v1.yaml
 quality_checks:
   - non_null_ohlc
