@@ -77,6 +77,24 @@ def test_exact_timestamp_intersection_only() -> None:
     assert result["ts"].iloc[0] == pd.Timestamp("2026-08-24T07:05:00Z")
 
 
+def test_naive_exchange_timestamp_is_localized_to_moscow_before_utc() -> None:
+    naive = ["2026-08-24 10:00:00", "2026-08-24 10:05:00"]
+    result = build_basis_carry_frame(
+        instrument_id="cny_rub_basis_carry",
+        trade_date="2026-08-24",
+        spot_frame=_frame("cny_tom", [12.0, 12.01], naive),
+        perpetual_frame=_frame("cnyrubf_futures_family", [12.1, 12.11], naive),
+        front_frame=_frame("cr_front_contract", [12.2, 12.21], naive),
+        next_frame=_frame("cr_next_contract", [12.4, 12.41], naive),
+        front_binding=_binding("CR", "front", "cr_front_contract", "CRU6", "2026-09-17"),
+        next_binding=_binding("CR", "next", "cr_next_contract", "CRZ6", "2026-12-17"),
+    )
+    assert result["ts"].tolist() == [
+        pd.Timestamp("2026-08-24T07:00:00Z"),
+        pd.Timestamp("2026-08-24T07:05:00Z"),
+    ]
+
+
 def test_empty_exact_intersection_fails_closed() -> None:
     with pytest.raises(BasisCarryMaterializationError, match="intersection is empty"):
         build_basis_carry_frame(
