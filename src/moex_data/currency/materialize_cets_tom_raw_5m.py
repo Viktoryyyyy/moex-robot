@@ -146,6 +146,10 @@ def fetch_1m_candles(*, trade_date: str, secid: str, timeout: float = 30.0, base
     return pd.concat(frames, ignore_index=True), source_url
 
 
+def _sum_preserve_all_null(values: pd.Series) -> float:
+    return values.sum(min_count=1)
+
+
 def normalize_to_5m(frame: pd.DataFrame, *, trade_date: str, instrument_id: str, secid: str, source_url: str) -> pd.DataFrame:
     checked_date = _require_date(trade_date)
     checked_instrument, checked_secid = _validate_identity(instrument_id, secid)
@@ -165,12 +169,18 @@ def normalize_to_5m(frame: pd.DataFrame, *, trade_date: str, instrument_id: str,
     work = work.loc[work["_end"].dt.date.astype(str).eq(checked_date)].copy()
     if work.empty:
         _fail("MOEX ISS candles contain no rows for explicit trade_date")
-    if work[["open", "high", "low", "close", "volume"]].isna().any(axis=None):
-        _fail("MOEX ISS candles contain null OHLCV")
+    if work[["open", "high", "low", "close"]].isna().any(axis=None):
+        _fail("MOEX ISS candles contain null OHLC")
     work = work.set_index("_end").sort_index()
-    aggregation: dict[str, str] = {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+    aggregation: dict[str, object] = {
+        "open": "first",
+        "high": "max",
+        "low": "min",
+        "close": "last",
+        "volume": _sum_preserve_all_null,
+    }
     if "value" in work.columns:
-        aggregation["value"] = "sum"
+        aggregation["value"] = _sum_preserve_all_null
     bars = work.resample("5min", label="right", closed="right").agg(aggregation).dropna(subset=["open", "high", "low", "close"]).reset_index()
     if bars.empty:
         _fail("5m resample produced no rows")
@@ -257,6 +267,8 @@ def materialize_cets_tom_partition(*, trade_date: str, instrument_id: str, secid
         "rows": int(len(normalized.index)),
         "min_ts": str(normalized["ts"].min()),
         "max_ts": str(normalized["ts"].max()),
+        "volume_null_rows": int(normalized["volume"].isna().sum()),
+        "value_null_rows": int(normalized["value"].isna().sum()),
         "quality_status": "pass",
     }
     manifest = {
