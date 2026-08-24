@@ -35,14 +35,23 @@ response_contract:
     - OI_HIGH
     - OI_LOW
     - OI_CLOSE
+    - SYSTIME
 canonical_semantics:
   ts: TRADEDATE + TRADETIME
+  systime_source: SYSTIME
+  availability_ts_utc: SYSTIME interpreted in Europe/Moscow and converted to UTC
+  source_timezone: Europe/Moscow
+  ts_must_not_equal_systime_by_substitution: true
   oi_open: OI_OPEN
   oi_high: OI_HIGH
   oi_low: OI_LOW
   oi_close: OI_CLOSE
   quote_partition_embedding_allowed: false
   supplementary_dataset_required: true
+point_in_time_policy:
+  availability_timestamp_required: true
+  missing_or_invalid_systime: fail_closed
+  ingestion_time_is_not_source_availability: true
 failure_semantics:
   unauthorized: fail_closed
   empty_response: fail_closed
