@@ -61,9 +61,24 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
     if not str(os.environ.get("MOEX_DATA_ROOT", "")).strip():
         raise Step3PilotError("MOEX_DATA_ROOT is required")
 
-    reference_frame, reference_url = binding.fetch_reference_frame(timeout=timeout)
-    bindings = binding.bind_front_next(reference_frame, root="Si", as_of_date=as_of_date)
-    bindings.extend(binding.bind_front_next(reference_frame, root="CR", as_of_date=as_of_date))
+    reference_frame, reference_url, reference_observed_at_utc = binding.fetch_reference_frame(
+        as_of_date=as_of_date,
+        timeout=timeout,
+    )
+    bindings = binding.bind_front_next(
+        reference_frame,
+        root="Si",
+        as_of_date=as_of_date,
+        availability_ts_utc=reference_observed_at_utc,
+    )
+    bindings.extend(
+        binding.bind_front_next(
+            reference_frame,
+            root="CR",
+            as_of_date=as_of_date,
+            availability_ts_utc=reference_observed_at_utc,
+        )
+    )
     if len(bindings) != EXPECTED_BINDINGS:
         raise Step3PilotError("front-next binding count mismatch")
 
@@ -118,6 +133,7 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
         "as_of_date": as_of_date,
         "artifact_version": base_artifact,
         "reference_source_url": reference_url,
+        "reference_observed_at_utc": reference_observed_at_utc,
         "bindings": bindings,
         "quote_partitions": quote_results,
         "open_interest_partitions": oi_results,
@@ -129,6 +145,7 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
             "tom_partitions": len(tom_results),
         },
         "latest_autodetect_used": False,
+        "historical_backdating_used": False,
         "continuous_series_created": False,
     }
     evidence_path = _data_root() / "state" / "acceptance" / "step3_canonical_raw" / ("run_id=" + base_artifact) / "pilot_evidence.json"
