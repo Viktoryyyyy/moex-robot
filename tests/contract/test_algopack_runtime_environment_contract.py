@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
@@ -18,13 +19,23 @@ ALGOPACK_CONTRACT = json.loads(
 ALGOPACK_SOURCE = (
     ROOT / "src/moex_research/external_data/moex_cnyrub_algopack_history.py"
 ).read_text(encoding="utf-8")
-RUNNERS_DIR = ROOT / "src/moex_research/runners"
-DOTENV_RUNNER_TEXTS = {
+SRC_DIR = ROOT / "src"
+DOTENV_SOURCE_TEXTS = {
     str(path.relative_to(ROOT)): text
-    for path in sorted(RUNNERS_DIR.rglob("*.py"))
+    for path in sorted(SRC_DIR.rglob("*.py"))
     if "load_dotenv" in (text := path.read_text(encoding="utf-8"))
-    and "PROJECT_ENV_PATH" in text
 }
+
+
+def _load_dotenv_calls(text: str) -> list[ast.Call]:
+    tree = ast.parse(text)
+    return [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "load_dotenv"
+    ]
 
 
 def test_project_env_path_is_explicit_and_repository_env_is_not_a_fallback() -> None:
@@ -37,12 +48,24 @@ def test_project_env_path_is_explicit_and_repository_env_is_not_a_fallback() -> 
     assert f'load_dotenv("{canonical_env}", override=False)' in SUBCHAT_EXECUTION_RULES
     assert 'load_dotenv(".env", override=False)' not in SUBCHAT_EXECUTION_RULES
     assert "load_dotenv('.env', override=False)" not in SUBCHAT_EXECUTION_RULES
-    assert DOTENV_RUNNER_TEXTS
+
+
+def test_source_dotenv_loaders_use_canonical_parent_project_env() -> None:
+    assert DOTENV_SOURCE_TEXTS
     expected_parent_env = "PROJECT_ENV_PATH = Path(__file__).resolve().parents[4] / \".env\""
     forbidden_repo_env = "parents[3] / \".env\""
-    for path, runner in DOTENV_RUNNER_TEXTS.items():
-        assert expected_parent_env in runner, path
-        assert forbidden_repo_env not in runner, path
+    for path, source in DOTENV_SOURCE_TEXTS.items():
+        calls = _load_dotenv_calls(source)
+        if not calls:
+            continue
+        assert expected_parent_env in source, path
+        assert forbidden_repo_env not in source, path
+        for call in calls:
+            assert call.args, path
+            first_arg = call.args[0]
+            assert isinstance(first_arg, ast.Name) and first_arg.id == "PROJECT_ENV_PATH", path
+            override = next((kw.value for kw in call.keywords if kw.arg == "override"), None)
+            assert isinstance(override, ast.Constant) and override.value is False, path
 
 
 def test_algopack_variable_is_canonical_across_example_contract_and_code() -> None:
