@@ -82,3 +82,16 @@ def test_open_interest_rejects_invalid_source_publication_timestamp() -> None:
             secid="SiU6",
             source_url="https://apim.moex.com/example",
         )
+
+
+def test_open_interest_rejects_publication_before_event_timestamp() -> None:
+    frame = _tradestats_frame()
+    frame.loc[0, "SYSTIME"] = "2026-08-21 09:59:59"
+    with pytest.raises(OpenInterestMaterializationError, match="precedes the OI event timestamp"):
+        normalize_open_interest(
+            frame,
+            trade_date="2026-08-21",
+            instrument_id="si_front_contract",
+            secid="SiU6",
+            source_url="https://apim.moex.com/example",
+        )
