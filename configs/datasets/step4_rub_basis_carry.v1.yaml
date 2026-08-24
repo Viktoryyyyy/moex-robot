@@ -69,6 +69,9 @@ calculation_policy:
   explicit_trade_date_required: true
   explicit_as_of_date_required: true
   trade_date_must_equal_as_of_date_for_unversioned_front_next_reference: true
+  front_next_selection_policy: nearest_two_contracts_with_last_trade_date_strictly_after_trade_date
+  front_next_minimum_days_to_expiry: 1
+  expiry_day_contract_allowed_for_annualized_carry: false
   annualization_basis_days: 365
   front_spot_implied_carry_formula: ((front_rate / spot_rate) - 1) * 365 / calendar_days_to_front_expiry
   next_spot_implied_carry_formula: ((next_rate / spot_rate) - 1) * 365 / calendar_days_to_next_expiry
