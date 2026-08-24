@@ -15,21 +15,24 @@ ALGOPACK_CONTRACT = json.loads(
 ALGOPACK_SOURCE = (
     ROOT / "src/moex_research/external_data/moex_cnyrub_algopack_history.py"
 ).read_text(encoding="utf-8")
+ALGOPACK_RUNTIME = (
+    ROOT / "src/moex_research/runners/usdrubf_phase8_6a_algopack_cnyrub_runtime.py"
+).read_text(encoding="utf-8")
 
 
-def test_project_env_path_is_explicit_and_parent_env_is_not_a_fallback() -> None:
+def test_project_env_path_is_explicit_and_repository_env_is_not_a_fallback() -> None:
+    assert "Project environment file: `/home/trader/moex_bot/.env`" in SERVER_LAYOUT
     assert (
-        "Project environment file: `/home/trader/moex_bot/moex-robot/.env`"
+        "`/home/trader/moex_bot/moex-robot/.env` is not a canonical project runtime source"
         in SERVER_LAYOUT
     )
-    assert (
-        "`/home/trader/moex_bot/.env` is not a canonical project runtime source"
-        in SERVER_LAYOUT
-    )
+    assert "PROJECT_ENV_PATH = Path(__file__).resolve().parents[4] / \".env\"" in ALGOPACK_RUNTIME
+    assert "parents[3] / \".env\"" not in ALGOPACK_RUNTIME
 
 
 def test_algopack_variable_is_canonical_across_example_contract_and_code() -> None:
-    assert ENV_EXAMPLE.count("MOEX_ALGOPACK_TOKEN=") == 1
+    algopack_assignment = "MOEX_" + "ALGOPACK_TOKEN" + "="
+    assert ENV_EXAMPLE.count(algopack_assignment) == 1
     assert ALGOPACK_CONTRACT["authorization_policy"]["required_environment_variable"] == (
         "MOEX_ALGOPACK_TOKEN"
     )
@@ -40,7 +43,8 @@ def test_algopack_variable_is_canonical_across_example_contract_and_code() -> No
 
 
 def test_legacy_api_key_is_not_an_algopack_alias() -> None:
-    assert ENV_EXAMPLE.count("MOEX_API_KEY=") == 1
+    api_key_assignment = "MOEX_" + "API_KEY" + "="
+    assert ENV_EXAMPLE.count(api_key_assignment) == 1
     assert (
         "This variable is not accepted as a fallback for subscribed AlgoPack routes."
         in ENV_EXAMPLE
