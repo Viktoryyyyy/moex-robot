@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from typing import Final
 
 CONTRACT_ID: Final[str] = "step3_canonical_raw_acceptance.v1"
 CANONICAL_ENV_PATH: Final[str] = "/home/trader/moex_bot/.env"
+RUNS_SUBPATH: Final[tuple[str, ...]] = ("runs", "step3_canonical_raw")
 EXPECTED_COUNTS: Final[dict[str, int]] = {
     "bindings": 4,
     "quote_partitions": 4,
@@ -23,11 +25,20 @@ EXPECTED_POINTER_COUNTS: Final[dict[str, int]] = {
     "futures_open_interest_raw_5m": 4,
     "fx_spot_raw_5m": 2,
 }
+EXPECTED_SOURCE_IDS: Final[dict[str, str]] = {
+    "futures_raw_5m": "moex_algopack_fo_tradestats_5m",
+    "futures_open_interest_raw_5m": "moex_algopack_fo_open_interest_5m",
+    "fx_spot_raw_5m": "moex_iss_cets_tom_1m",
+}
 EXPECTED_BINDINGS: Final[dict[tuple[str, str], str]] = {
     ("Si", "front"): "si_front_contract",
     ("Si", "next"): "si_next_contract",
     ("CR", "front"): "cr_front_contract",
     ("CR", "next"): "cr_next_contract",
+}
+SECID_PATTERNS: Final[dict[str, re.Pattern[str]]] = {
+    "Si": re.compile(r"^Si[HMUZ][0-9]$"),
+    "CR": re.compile(r"^CR[HMUZ][0-9]$"),
 }
 EXPECTED_TOM_IDENTITIES: Final[dict[str, str]] = {
     "usd_tom": "USD000UTSTOM",
@@ -166,6 +177,45 @@ def _rooted_ref(path: Path) -> str:
     return "${MOEX_DATA_ROOT}/" + relative.as_posix()
 
 
+def _expected_run_root(run_id: str) -> Path:
+    return _data_root().joinpath(*RUNS_SUBPATH, "run_id=" + _require_token(run_id, "run_id"))
+
+
+def _expected_run_root_ref(run_id: str) -> str:
+    return "${MOEX_DATA_ROOT}/" + "/".join((*RUNS_SUBPATH, "run_id=" + _require_token(run_id, "run_id")))
+
+
+def _validate_materialization_root(values: Mapping[str, object], run_id: str) -> Path:
+    if values.get("run_artifacts_immutable") is not True:
+        _fail("pilot evidence must prove run_artifacts_immutable=true")
+    if values.get("run_id_reuse_allowed") is not False:
+        _fail("pilot evidence must prove run_id_reuse_allowed=false")
+    if values.get("materialization_root_ref") != _expected_run_root_ref(run_id):
+        _fail("pilot materialization_root_ref mismatch")
+    raw = str(values.get("materialization_root") or "").strip()
+    if not raw:
+        _fail("pilot materialization_root is required")
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        _fail("pilot materialization_root must be absolute")
+    try:
+        resolved = candidate.resolve(strict=True)
+        expected = _expected_run_root(run_id).resolve(strict=True)
+        resolved.relative_to(_data_root().resolve(strict=True))
+    except (OSError, ValueError) as exc:
+        raise Step3AcceptanceError("pilot materialization_root must exist under canonical MOEX_DATA_ROOT") from exc
+    if resolved != expected or not resolved.is_dir():
+        _fail("pilot materialization_root must equal the immutable run-scoped root")
+    return resolved
+
+
+def _require_path_in_run_root(path: Path, run_root: Path, field_name: str) -> None:
+    try:
+        path.resolve(strict=True).relative_to(run_root.resolve(strict=True))
+    except (OSError, ValueError) as exc:
+        raise Step3AcceptanceError(field_name + " must be inside the declared immutable run root") from exc
+
+
 def _single_scope(value: object, field_name: str) -> str:
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence) or len(value) != 1:
         _fail(field_name + " must contain exactly one value")
@@ -212,6 +262,13 @@ def _manifest_run_id(path: Path) -> str:
     return run_id
 
 
+def _require_canonical_source(dataset_id: str, source_id: str, context: str) -> str:
+    expected = EXPECTED_SOURCE_IDS.get(dataset_id)
+    if expected is None or source_id != expected:
+        _fail(context + " source_id does not match canonical Step 3 source")
+    return source_id
+
+
 def _quote_spec(values: Mapping[str, object], *, trade_date: str) -> PointerSpec:
     if values.get("dataset_id") != "futures_raw_5m":
         _fail("quote dataset_id mismatch")
@@ -220,7 +277,7 @@ def _quote_spec(values: Mapping[str, object], *, trade_date: str) -> PointerSpec
     row_count = _positive_row_count(values, "quote")
     instrument_id = _single_scope(values.get("instrument_id_scope"), "quote.instrument_id_scope")
     secid = _single_scope(values.get("secid_scope"), "quote.secid_scope")
-    source_id = _require_token(values.get("source_id"), "quote.source_id")
+    source_id = _require_canonical_source("futures_raw_5m", _require_token(values.get("source_id"), "quote.source_id"), "quote")
     manifest_path = _require_under_root(values.get("manifest_reference"), "quote.manifest_reference")
     quality_path = _require_under_root(values.get("quality_report_reference"), "quote.quality_report_reference")
     partition_path = _require_under_root(values.get("storage_partition_path"), "quote.storage_partition_path")
@@ -248,7 +305,7 @@ def _supplementary_spec(values: Mapping[str, object], *, dataset_id: str, contex
     row_count = _positive_row_count(values, context)
     instrument_id = _require_token(values.get("instrument_id"), context + ".instrument_id")
     secid = _require_token(values.get("secid"), context + ".secid")
-    source_id = _require_token(values.get("source_id"), context + ".source_id")
+    source_id = _require_canonical_source(dataset_id, _require_token(values.get("source_id"), context + ".source_id"), context)
     manifest_path = _require_under_root(values.get("manifest_path"), context + ".manifest_path")
     quality_path = _require_under_root(values.get("quality_report_path"), context + ".quality_report_path")
     partition_path = _require_under_root(values.get("partition_path"), context + ".partition_path")
@@ -284,6 +341,8 @@ def _validate_bindings(values: Mapping[str, object], *, trade_date: str, as_of_d
     reference_observed_at = _require_utc_timestamp(values.get("reference_observed_at_utc"), "reference_observed_at_utc")
     observed: dict[tuple[str, str], tuple[str, str]] = {}
     by_instrument: dict[str, str] = {}
+    secids: set[str] = set()
+    expiries: dict[tuple[str, str], date] = {}
     for row in rows:
         root = _require_token(row.get("root"), "binding.root")
         role = _require_token(row.get("role"), "binding.role")
@@ -297,6 +356,12 @@ def _validate_bindings(values: Mapping[str, object], *, trade_date: str, as_of_d
         if instrument_id != expected_instrument:
             _fail("binding instrument_id does not match canonical root/role")
         secid = _require_token(row.get("secid"), "binding.secid")
+        pattern = SECID_PATTERNS.get(root)
+        if pattern is None or pattern.fullmatch(secid) is None:
+            _fail("binding SECID does not match canonical root/month pattern")
+        if secid in secids:
+            _fail("all four binding SECIDs must be distinct")
+        secids.add(secid)
         if row.get("source_id") != BINDING_SOURCE_ID:
             _fail("binding source_id mismatch")
         if _require_date(row.get("as_of_date"), "binding.as_of_date") != as_of_date:
@@ -304,6 +369,7 @@ def _validate_bindings(values: Mapping[str, object], *, trade_date: str, as_of_d
         last_trade_date = _require_date(row.get("last_trade_date"), "binding.last_trade_date")
         if last_trade_date < trade_date:
             _fail("binding last_trade_date precedes trade_date")
+        expiries[key] = date.fromisoformat(last_trade_date)
         mapping_fixed = _require_utc_timestamp(row.get("mapping_fixed_ts_utc"), "binding.mapping_fixed_ts_utc")
         availability = _require_utc_timestamp(row.get("availability_ts_utc"), "binding.availability_ts_utc")
         if mapping_fixed != availability or availability != reference_observed_at:
@@ -312,6 +378,9 @@ def _validate_bindings(values: Mapping[str, object], *, trade_date: str, as_of_d
         by_instrument[instrument_id] = secid
     if set(observed) != set(EXPECTED_BINDINGS):
         _fail("bindings must contain the exact four canonical root/role identities")
+    for root in ("Si", "CR"):
+        if expiries[(root, "front")] >= expiries[(root, "next")]:
+            _fail(root + " front last_trade_date must be strictly earlier than next")
     return by_instrument
 
 
@@ -420,6 +489,7 @@ def validate_pilot_evidence(values: Mapping[str, object], *, run_id: str) -> tup
     as_of_date = _require_date(values.get("as_of_date"), "pilot.as_of_date")
     if trade_date != as_of_date:
         _fail("pilot trade_date must equal as_of_date for the unversioned current FORTS binding")
+    run_root = _validate_materialization_root(values, checked_run)
 
     counts = values.get("counts")
     if not isinstance(counts, Mapping):
@@ -449,6 +519,10 @@ def validate_pilot_evidence(values: Mapping[str, object], *, run_id: str) -> tup
     for dataset_id, expected in EXPECTED_POINTER_COUNTS.items():
         if sum(1 for spec in specs if spec.dataset_id == dataset_id) != expected:
             _fail("accepted pointer count mismatch for " + dataset_id)
+    for spec in specs:
+        _require_path_in_run_root(spec.partition_path, run_root, spec.dataset_id + ".partition_path")
+        _require_path_in_run_root(spec.manifest_path, run_root, spec.dataset_id + ".manifest_path")
+        _require_path_in_run_root(spec.quality_path, run_root, spec.dataset_id + ".quality_path")
 
     quote_by_instrument = {spec.instrument_id: spec for spec in specs if spec.dataset_id == "futures_raw_5m"}
     oi_by_instrument = {spec.instrument_id: spec for spec in specs if spec.dataset_id == "futures_open_interest_raw_5m"}
@@ -599,6 +673,7 @@ def promote_step3_pilot(*, run_id: str) -> dict[str, object]:
         "historical_backdating_used": False,
         "continuous_series_created": False,
         "promotion_semantics": "transactional_with_rollback",
+        "artifact_semantics": "immutable_run_scoped",
     }
     if result["accepted_pointer_count"] != result["expected_pointer_count"]:
         _fail("accepted pointer total count mismatch")
