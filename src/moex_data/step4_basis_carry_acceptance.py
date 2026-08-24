@@ -99,6 +99,19 @@ def _rooted_ref(path: Path) -> str:
     return "${MOEX_DATA_ROOT}/" + relative.as_posix()
 
 
+def _same_path(value: object, expected: Path, field_name: str) -> None:
+    raw = str(value or "").strip()
+    if not raw:
+        _fail(field_name + " is required")
+    try:
+        actual = Path(raw).resolve(strict=True)
+        expected_resolved = expected.resolve(strict=True)
+    except OSError as exc:
+        raise Step4AcceptanceError(field_name + " must identify an existing artifact") from exc
+    if actual != expected_resolved:
+        _fail(field_name + " mismatch")
+
+
 def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[str, object]]:
     if values.get("project") != "MOEX_Bot" or values.get("step") != 4 or values.get("status") != "pilot_passed":
         _fail("pilot identity/status mismatch")
@@ -108,6 +121,8 @@ def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[st
         _fail("immutable run semantics not proven")
     if values.get("alignment_policy") != "exact_timestamp_inner_join":
         _fail("exact timestamp alignment not proven")
+    if values.get("timestamp_policy") != "naive_exchange_localize_europe_moscow_then_utc":
+        _fail("canonical timestamp policy not proven")
     for field in ("forward_fill_used", "asof_join_used", "latest_autodetect_used", "continuous_series_used"):
         if values.get(field) is not False:
             _fail(field + " must be false")
@@ -150,20 +165,26 @@ def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[st
             raise Step4AcceptanceError("row_count must be positive") from exc
         if row_count <= 0:
             _fail("row_count must be positive")
-        if row.get("alignment_policy") != "exact_timestamp_inner_join" or row.get("forward_fill_used") is not False or row.get("asof_join_used") is not False or row.get("continuous_series_used") is not False:
-            _fail("derived output causal flags mismatch")
+        manifest_run_id = _require_token(row.get("run_id"), "derived.run_id")
+        if row.get("alignment_policy") != "exact_timestamp_inner_join" or row.get("timestamp_policy") != "naive_exchange_localize_europe_moscow_then_utc" or row.get("forward_fill_used") is not False or row.get("asof_join_used") is not False or row.get("continuous_series_used") is not False:
+            _fail("derived output causal/timestamp flags mismatch")
         partition = _require_under_run_root(row.get("partition_path"), run_root, "partition_path")
         manifest = _require_under_run_root(row.get("manifest_path"), run_root, "manifest_path")
         quality = _require_under_run_root(row.get("quality_report_path"), run_root, "quality_report_path")
         manifest_values = _load_json(manifest, "manifest")
         quality_values = _load_json(quality, "quality")
-        if manifest_values.get("instrument_id") != instrument_id or manifest_values.get("row_count") != row_count or manifest_values.get("quality_status") != "pass":
-            _fail("manifest identity/count/quality mismatch")
-        if quality_values.get("instrument_id") != instrument_id or quality_values.get("row_count") != row_count or quality_values.get("quality_status") != "pass":
-            _fail("quality identity/count/status mismatch")
+        if manifest_values.get("instrument_id") != instrument_id or manifest_values.get("row_count") != row_count or manifest_values.get("quality_status") != "pass" or manifest_values.get("run_id") != manifest_run_id:
+            _fail("manifest identity/count/quality/run mismatch")
+        if quality_values.get("instrument_id") != instrument_id or quality_values.get("row_count") != row_count or quality_values.get("quality_status") != "pass" or quality_values.get("run_id") != manifest_run_id:
+            _fail("quality identity/count/status/run mismatch")
+        if manifest_values.get("timestamp_policy") != "naive_exchange_localize_europe_moscow_then_utc" or quality_values.get("timestamp_policy") != "naive_exchange_localize_europe_moscow_then_utc":
+            _fail("manifest/quality timestamp policy mismatch")
+        _same_path(manifest_values.get("partition_path"), partition, "manifest.partition_path")
+        _same_path(manifest_values.get("quality_report_path"), quality, "manifest.quality_report_path")
         result.append({
             "instrument_id": instrument_id,
             "row_count": row_count,
+            "manifest_run_id": manifest_run_id,
             "partition": partition,
             "manifest": manifest,
             "quality": quality,
@@ -198,23 +219,35 @@ def _restore(path: Path, previous: bytes | None) -> None:
 
 
 def _transactional_replace(records: Sequence[tuple[Path, Mapping[str, object]]]) -> None:
-    previous = {path: path.read_bytes() if path.exists() else None for path, _ in records}
+    paths = [path for path, _ in records]
+    if len(paths) != len(set(paths)):
+        _fail("transaction target paths must be unique")
+    previous = {path: path.read_bytes() if path.exists() else None for path in paths}
     staged: list[tuple[Path, Path]] = []
     applied: list[Path] = []
     try:
-        for final, values in records:
-            staged.append((_stage_json(final, values), final))
+        for final, record_values in records:
+            staged.append((_stage_json(final, record_values), final))
         for source, final in staged:
             source.replace(final)
             applied.append(final)
     except Exception as exc:
+        rollback_errors: list[str] = []
         for final in reversed(applied):
-            _restore(final, previous[final])
+            try:
+                _restore(final, previous[final])
+            except Exception as rollback_exc:
+                rollback_errors.append(str(rollback_exc))
+        if rollback_errors:
+            raise Step4AcceptanceError("pointer promotion failed and rollback was incomplete: " + "; ".join(rollback_errors)) from exc
         raise Step4AcceptanceError("pointer promotion transaction failed: " + str(exc)) from exc
     finally:
         for source, _ in staged:
             if source.exists():
-                source.unlink()
+                try:
+                    source.unlink()
+                except OSError:
+                    pass
 
 
 def promote(*, run_id: str) -> dict[str, object]:
@@ -225,19 +258,27 @@ def promote(*, run_id: str) -> dict[str, object]:
     records: list[tuple[Path, Mapping[str, object]]] = []
     for output in outputs:
         instrument_id = str(output["instrument_id"])
+        manifest_run_id = str(output["manifest_run_id"])
         pointer = _pointer_path(instrument_id)
-        values = {
+        pointer_values = {
             "dataset_id": DATASET_ID,
             "instrument_id": instrument_id,
-            "run_id": checked_run,
+            "run_id": manifest_run_id,
+            "acceptance_run_id": checked_run,
             "manifest_ref": _rooted_ref(output["manifest"]),
             "quality_report_ref": _rooted_ref(output["quality"]),
             "partition_ref": _rooted_ref(output["partition"]),
             "quality_status": "pass",
             "acceptance_contract_id": CONTRACT_ID,
         }
-        records.append((pointer, values))
-        pointers.append({"instrument_id": instrument_id, "pointer_path": pointer.as_posix(), "pointer_ref": "${MOEX_DATA_ROOT}/" + pointer.relative_to(_data_root()).as_posix()})
+        records.append((pointer, pointer_values))
+        pointers.append({
+            "instrument_id": instrument_id,
+            "run_id": manifest_run_id,
+            "acceptance_run_id": checked_run,
+            "pointer_path": pointer.as_posix(),
+            "pointer_ref": "${MOEX_DATA_ROOT}/" + pointer.relative_to(_data_root()).as_posix(),
+        })
     marker = _evidence_dir(checked_run) / "accepted_pointers.json"
     result: dict[str, object] = {
         "project": "MOEX_Bot",
@@ -251,6 +292,8 @@ def promote(*, run_id: str) -> dict[str, object]:
         "promotion_semantics": "transactional_with_rollback",
         "continuous_series_used": False,
     }
+    if result["accepted_pointer_count"] != result["expected_pointer_count"]:
+        _fail("accepted pointer count mismatch")
     records.append((marker, result))
     _transactional_replace(records)
     result["acceptance_evidence_path"] = marker.as_posix()
