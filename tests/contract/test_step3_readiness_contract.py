@@ -5,7 +5,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_step3_readiness_records_physical_acceptance_without_opening_downstream_gates() -> None:
     text = (ROOT / "configs/datasets/step3_canonical_raw.v1.yaml").read_text(encoding="utf-8")
+    architecture = (ROOT / "contracts/architecture/moex_data_access_canon_v1.yaml").read_text(encoding="utf-8")
     assert text.startswith("config_id: step3_canonical_raw.v1\nstatus: raw_canonical_stage3_accepted\n")
+    assert "storage_transition_policy:\n  status: raw_canonical_stage3_accepted\n" in architecture
 
     evidence = text.split("  applied_state_evidence:\n", 1)[1].split("\nreadiness_flags:\n", 1)[0]
     for token in (
