@@ -1,100 +1,82 @@
 contract_id: futures.roll_expiry_mapping.v1
-status: design_only
-lane: ema_3_19_ai
-artifact_kind: source_placeholder_contract
+status: active_stage3_candidate
+artifact_kind: deterministic_source_binding_contract
 source_family: futures.roll_expiry_mapping
 instrument_scope:
-  - USDRUBF
   - Si
-
-readiness_flags:
-  design_only: true
-  ingestion_ready: false
-  runtime_ready: false
-  loader_ready: false
-  materialization_ready: false
-  feature_computation_ready: false
-  modeling_ready: false
-  registry_mutation_ready: false
-  provider_approved_for_ingestion: false
-  provider_approved_for_runtime: false
-  provider_approved_for_modeling: false
+  - CR
 
 purpose: >
-  Design-only deterministic roll and expiry mapping placeholder for future
-  USDRUBF / Si daily phase research alignment. This file does not mutate any
-  registry or runtime continuous-contract configuration.
+  Deterministically bind explicit front and next FORTS contracts for Si and CR
+  from the official MOEX ISS instrument reference. The binding step produces
+  explicit SECIDs which downstream materializers must receive as arguments.
 
-required_mapping_fields:
-  - continuous_symbol
-  - contract_code
-  - trade_date
-  - expiry_date
-  - roll_effective_date
-  - mapping_fixed_ts_utc
-  - availability_ts_utc
-  - mapping_rule_id
-  - source_id
+reference_source:
+  source_id: moex_iss_forts_securities_reference
+  endpoint_path: /iss/engines/futures/markets/forts/securities.json
+  engine: futures
+  market: forts
+  board: RFUD
+  transport: public_iss
+  required_columns:
+    - SECID
+    - BOARDID
+    - LASTTRADEDATE
 
-canonical_time_fields:
-  mapping_fixed_ts_utc:
-    required: true
-    timezone: UTC
-    source: deterministic_mapping_policy_audit
-  availability_ts_utc:
-    required: true
-    timezone: UTC
-    source: mapping_fixed_ts_utc_or_later_publication_audit
-  forecast_anchor_ts:
-    timezone: UTC
-    local_anchor: "06:00 Europe/Moscow"
-  timezone_conversion_to_utc_required: true
+binding_inputs:
+  explicit_as_of_date_required: true
+  explicit_root_required: true
+  allowed_roots:
+    Si:
+      secid_prefix: Si
+      contract_month_codes: [H, M, U, Z]
+    CR:
+      secid_prefix: CR
+      contract_month_codes: [H, M, U, Z]
+
+binding_rule:
+  1_filter_board: BOARDID == RFUD
+  2_filter_root: SECID matches exact configured root prefix plus quarterly month code and one year digit
+  3_filter_alive: LASTTRADEDATE >= explicit as_of_date
+  4_sort: LASTTRADEDATE ascending, then SECID ascending
+  5_front: first row
+  6_next: second row
+  require_two_distinct_contracts: true
+  output_fields:
+    - root
+    - as_of_date
+    - role
+    - secid
+    - last_trade_date
+    - source_id
 
 point_in_time_rules:
-  eligibility_rule: availability_ts_utc <= forecast_anchor_ts
-  fixed_before_anchor_requirement: >
-    The mapping for any forecast anchor must be fixed before that anchor.
-    Mapping changes decided after the forecast anchor cannot be applied
-    retroactively to that anchor.
-  unknown_timestamp_rule: >
-    If mapping_fixed_ts_utc or availability_ts_utc is unknown, exclude the row
-    or shift by at least one trading day.
-  revision_policy: >
-    Mapping revisions require PIT revision history. Without it, revisions cannot
-    be applied to earlier anchors.
+  binding_as_of_date_is_explicit: true
+  latest_autodetect_allowed: false
+  implicit_contract_selection_allowed: false
+  post_as_of_volume_selection_allowed: false
+  post_as_of_open_interest_selection_allowed: false
+  future_return_optimized_roll_allowed: false
 
-prohibited_roll_decisions:
-  - future liquidity optimized roll date
-  - future return optimized roll date
-  - future slippage optimized roll date
-  - future model-performance optimized roll date
-  - roll choice selected using post-anchor volume outcomes
-  - roll choice selected using post-anchor open-interest outcomes
+materialization_boundary:
+  discovery_does_not_write_quote_data: true
+  downstream_secid_must_equal_binding_output: true
+  downstream_instrument_role_ids:
+    Si:
+      front: si_front_contract
+      next: si_next_contract
+    CR:
+      front: cr_front_contract
+      next: cr_next_contract
 
-allowed_design_principle: >
-  A later implementation must use a deterministic rule fixed before the affected
-  forecast anchor and documented as point-in-time safe.
-
-excluded_input_fields:
-  - B/S/OUT labels
-  - EMA cross labels
-  - future returns
-  - future volatility
-  - drawdown
-  - phase-completion targets
-  - LLM classifications
-  - post-fact annotations
-  - realized event outcomes
+readiness_flags:
+  deterministic_binding_implemented: true
+  physical_pilot_required: true
+  continuous_series_ready: false
+  research_ready: false
 
 explicit_non_authorizations:
-  - no registry mutation
-  - no configs mutation
-  - no src implementation
-  - no tests
-  - no ingestion
-  - no backfill
-  - no materialization
-  - no runtime
-  - no feature computation
-  - no modeling
-  - no server apply
+  - no continuous contract construction in Step 3
+  - no liquidity-optimized roll rule
+  - no implicit latest contract
+  - no research/modeling use before physical acceptance
