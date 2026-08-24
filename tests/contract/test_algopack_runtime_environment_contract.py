@@ -6,6 +6,9 @@ from pathlib import Path
 ROOT = Path(__file__).parents[2]
 ENV_EXAMPLE = (ROOT / ".env.example").read_text(encoding="utf-8")
 SERVER_LAYOUT = (ROOT / "docs/sot/runtime/server_layout.v1.md").read_text(encoding="utf-8")
+SUBCHAT_EXECUTION_RULES = (
+    ROOT / "docs/sot/runtime/subchat_server_execution_rules.v1.md"
+).read_text(encoding="utf-8")
 ALGOPACK_CONTRACT = json.loads(
     (
         ROOT
@@ -25,11 +28,15 @@ DOTENV_RUNNER_TEXTS = {
 
 
 def test_project_env_path_is_explicit_and_repository_env_is_not_a_fallback() -> None:
-    assert "Project environment file: `/home/trader/moex_bot/.env`" in SERVER_LAYOUT
+    canonical_env = "/home/trader/moex_bot/.env"
+    assert f"Project environment file: `{canonical_env}`" in SERVER_LAYOUT
     assert (
         "`/home/trader/moex_bot/moex-robot/.env` is not a canonical project runtime source"
         in SERVER_LAYOUT
     )
+    assert f'load_dotenv("{canonical_env}", override=False)' in SUBCHAT_EXECUTION_RULES
+    assert 'load_dotenv(".env", override=False)' not in SUBCHAT_EXECUTION_RULES
+    assert "load_dotenv('.env', override=False)" not in SUBCHAT_EXECUTION_RULES
     assert DOTENV_RUNNER_TEXTS
     expected_parent_env = "PROJECT_ENV_PATH = Path(__file__).resolve().parents[4] / \".env\""
     forbidden_repo_env = "parents[3] / \".env\""
