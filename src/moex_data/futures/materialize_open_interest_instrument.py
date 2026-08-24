@@ -21,6 +21,7 @@ SOURCE_CONTRACT_REF: Final[str] = "contracts/sources/futures/moex_algopack_fo_op
 PRODUCER_ID: Final[str] = "moex_data.futures.materialize_open_interest_instrument.v1"
 ENDPOINT_PATH: Final[str] = "/iss/datashop/algopack/fo/tradestats.json"
 CANONICAL_ENV_PATH: Final[str] = "/home/trader/moex_bot/.env"
+SOURCE_TIMEZONE: Final[str] = "Europe/Moscow"
 
 
 class OpenInterestMaterializationError(ValueError):
@@ -147,11 +148,26 @@ def _find_column(frame: pd.DataFrame, name: str) -> object:
     return column
 
 
+def _availability_ts_utc(values: pd.Series) -> pd.Series:
+    parsed = pd.to_datetime(values, errors="coerce")
+    if parsed.isna().any():
+        _fail("tradestats response contains invalid SYSTIME")
+    try:
+        if parsed.dt.tz is None:
+            parsed = parsed.dt.tz_localize(SOURCE_TIMEZONE, ambiguous="raise", nonexistent="raise")
+        return parsed.dt.tz_convert("UTC")
+    except (TypeError, ValueError) as exc:
+        raise OpenInterestMaterializationError("tradestats SYSTIME cannot be converted to canonical UTC availability") from exc
+
+
 def normalize_open_interest(frame: pd.DataFrame, *, trade_date: str, instrument_id: str, secid: str, source_url: str) -> pd.DataFrame:
     checked_date = _require_date(trade_date)
     checked_instrument = _require_token(instrument_id, "instrument_id")
     checked_secid = _require_token(secid, "secid")
-    columns = {name: _find_column(frame, name) for name in ("SECID", "TRADEDATE", "TRADETIME", "OI_OPEN", "OI_HIGH", "OI_LOW", "OI_CLOSE")}
+    columns = {
+        name: _find_column(frame, name)
+        for name in ("SECID", "TRADEDATE", "TRADETIME", "OI_OPEN", "OI_HIGH", "OI_LOW", "OI_CLOSE", "SYSTIME")
+    }
     work = frame.loc[frame[columns["SECID"]].astype(str).str.upper().eq(checked_secid.upper())].copy()
     if work.empty:
         _fail("tradestats response contains no rows for requested secid")
@@ -167,11 +183,14 @@ def normalize_open_interest(frame: pd.DataFrame, *, trade_date: str, instrument_
     )
     if timestamps.isna().any():
         _fail("tradestats response contains invalid TRADEDATE/TRADETIME")
+    availability = _availability_ts_utc(work[columns["SYSTIME"]])
     output = pd.DataFrame(
         {
             "instrument_id": checked_instrument,
             "trade_date": checked_date,
             "ts": timestamps,
+            "availability_ts_utc": availability,
+            "systime_source": work[columns["SYSTIME"]].astype(str),
             "secid": checked_secid,
             "board": "RFUD",
             "market": "FORTS",
@@ -188,6 +207,10 @@ def normalize_open_interest(frame: pd.DataFrame, *, trade_date: str, instrument_
     oi_columns = ["oi_open", "oi_high", "oi_low", "oi_close"]
     if output[oi_columns].isna().any(axis=None):
         _fail("tradestats response contains null OI values")
+    if output["availability_ts_utc"].isna().any():
+        _fail("tradestats response contains null canonical availability timestamps")
+    if str(output["availability_ts_utc"].dt.tz) != "UTC":
+        _fail("canonical availability timestamp must be UTC")
     if (output[oi_columns] < 0).any(axis=None):
         _fail("tradestats response contains negative OI values")
     if (output["oi_high"] < output["oi_low"]).any():
@@ -212,6 +235,8 @@ def materialize_open_interest_partition(*, trade_date: str, instrument_id: str, 
     quality_path = _state_path("quality", checked_date, run_id, "quality_report.json")
     manifest_path = _state_path("refresh", checked_date, run_id, "manifest.json")
     _write_parquet_atomic(partition_path, normalized, run_id)
+    min_availability = normalized["availability_ts_utc"].min().isoformat()
+    max_availability = normalized["availability_ts_utc"].max().isoformat()
     quality = {
         "dataset_id": DATASET_ID,
         "run_id": run_id,
@@ -221,6 +246,8 @@ def materialize_open_interest_partition(*, trade_date: str, instrument_id: str, 
         "rows": int(len(normalized.index)),
         "min_ts": str(normalized["ts"].min()),
         "max_ts": str(normalized["ts"].max()),
+        "min_availability_ts_utc": min_availability,
+        "max_availability_ts_utc": max_availability,
         "quality_status": "pass",
     }
     manifest = {
@@ -235,6 +262,8 @@ def materialize_open_interest_partition(*, trade_date: str, instrument_id: str, 
         "partition_path": partition_path.as_posix(),
         "quality_report_path": quality_path.as_posix(),
         "row_count": int(len(normalized.index)),
+        "min_availability_ts_utc": min_availability,
+        "max_availability_ts_utc": max_availability,
         "status": "succeeded",
         "latest_autodetect_used": False,
     }
