@@ -19,7 +19,7 @@ def test_stage4_replaces_mandatory_continuous_with_basis_carry() -> None:
     assert "spot_instrument_id: cny_tom" in text
 
 
-def test_stage4_normalization_and_causal_alignment_are_explicit() -> None:
+def test_stage4_normalization_causal_alignment_and_timestamp_policy_are_explicit() -> None:
     program = _read("configs/datasets/step4_rub_basis_carry.v1.yaml")
     dataset = _read("contracts/datasets/rub_basis_carry_5m.v1.yaml")
     for text in (program, dataset):
@@ -29,6 +29,9 @@ def test_stage4_normalization_and_causal_alignment_are_explicit() -> None:
         assert "asof_join_allowed: false" in text
     assert "CR_is_quoted_in_RUB_per_1_CNY" in program
     assert "Si_is_quoted_in_RUB_per_1000_USD_lot" in program
+    assert "naive_source_timestamp_semantics: exchange_local" in dataset
+    assert "naive_source_conversion: localize_Europe_Moscow_then_convert_UTC" in dataset
+    assert "output_ts_timezone: UTC" in dataset
 
 
 def test_stage4_output_contract_contains_required_market_features() -> None:
@@ -51,9 +54,15 @@ def test_stage4_output_contract_contains_required_market_features() -> None:
 
 def test_stage4_has_immutable_pilot_and_transactional_acceptance() -> None:
     program = _read("configs/datasets/step4_rub_basis_carry.v1.yaml")
+    dataset = _read("contracts/datasets/rub_basis_carry_5m.v1.yaml")
     acceptance = _read("contracts/datasets/step4_rub_basis_carry_acceptance.v1.yaml")
     assert "run_artifacts_immutable: true" in program
     assert "expected_accepted_pointer_count: 2" in program
+    assert "pointer_run_id_must_equal_referenced_manifest_run_id: true" in dataset
+    assert "acceptance_run_id_stored_separately: true" in dataset
+    assert "manifest_and_quality_run_id_must_equal_derived_output_run_id: true" in acceptance
+    assert "timestamp_policy_required: naive_exchange_localize_europe_moscow_then_utc" in acceptance
+    assert "pointer_run_id_source: referenced_manifest_run_id" in acceptance
     assert "pointer_promotion_mode: transactional_with_rollback" in acceptance
     assert "continuous_series_used_required: false" in acceptance
     assert "partial_pointer_set_without_acceptance_marker_is_not_accepted: true" in acceptance
