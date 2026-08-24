@@ -69,12 +69,16 @@ If `PYTHONPATH=.:src` is omitted, imports such as `moex_data` may fail with `Mod
 
 Do not rely on shell `source .env` for production or controlled server runs.
 
-Load `.env` inside the Python process:
+The canonical runtime environment file is `/home/trader/moex_bot/.env`.
+
+Load that exact file inside the Python process when dotenv loading is required:
 
 ```python
 from dotenv import load_dotenv
-load_dotenv(".env", override=False)
+load_dotenv("/home/trader/moex_bot/.env", override=False)
 ```
+
+Do not load a relative `.env` from the repository root and do not use `/home/trader/moex_bot/moex-robot/.env` as a fallback.
 
 For controlled data runs, set required explicit env contracts inside Python where needed, for example:
 
