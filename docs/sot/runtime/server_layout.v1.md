@@ -35,6 +35,9 @@ Removal of the duplicate repository-local `.env` is an Applied State migration s
 ## Runtime environment identity
 
 - `MOEX_DATA_ROOT=/home/trader/moex_bot/data`
+- `REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt` is required for Python `requests` calls to current MOEX HTTPS endpoints on the canonical server runtime.
+- The Russian trusted root and sub-CA certificates must be installed in the system trust store before this bundle is used.
+- TLS verification must remain enabled; `verify=False` is forbidden.
 - `MOEX_ALGOPACK_TOKEN` is the sole credential variable for subscribed MOEX AlgoPack routes.
 - `MOEX_API_KEY` is not an alias or fallback for `MOEX_ALGOPACK_TOKEN`.
 - Real credential values must remain outside GitHub and must not appear in logs, artifacts, commands, or reports.
