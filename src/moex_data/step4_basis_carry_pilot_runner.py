@@ -19,6 +19,7 @@ from moex_data.futures import materialize_forts_raw_5m_instrument as quotes
 
 CANONICAL_ENV_PATH: Final[str] = "/home/trader/moex_bot/.env"
 RUNS_SUBPATH: Final[tuple[str, ...]] = ("runs", "step4_rub_basis_carry")
+FRONT_NEXT_MINIMUM_DAYS_TO_EXPIRY: Final[int] = 1
 PERPETUALS: Final[dict[str, str]] = {
     "usdrubf_futures_family": "USDRUBF",
     "cnyrubf_futures_family": "CNYRUBF",
@@ -158,6 +159,7 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
         root="Si",
         as_of_date=checked_as_of_date,
         availability_ts_utc=observed_at,
+        minimum_days_to_expiry=FRONT_NEXT_MINIMUM_DAYS_TO_EXPIRY,
     )
     bindings.extend(
         binding.bind_front_next(
@@ -165,6 +167,7 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
             root="CR",
             as_of_date=checked_as_of_date,
             availability_ts_utc=observed_at,
+            minimum_days_to_expiry=FRONT_NEXT_MINIMUM_DAYS_TO_EXPIRY,
         )
     )
     if len(bindings) != 4:
@@ -258,6 +261,7 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
         "reference_source_url": reference_url,
         "reference_observed_at_utc": observed_at,
         "bindings": bindings,
+        "front_next_minimum_days_to_expiry": FRONT_NEXT_MINIMUM_DAYS_TO_EXPIRY,
         "quote_partitions": list(quote_results.values()),
         "tom_partitions": list(tom_results.values()),
         "derived_partitions": output_results,
