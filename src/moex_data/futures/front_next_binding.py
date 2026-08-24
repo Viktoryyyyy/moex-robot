@@ -5,7 +5,7 @@ import json
 import os
 import re
 from collections.abc import Mapping, Sequence
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Final
 from zoneinfo import ZoneInfo
 
@@ -77,6 +77,12 @@ def _require_root(value: str) -> str:
     raise FrontNextBindingError("root must be one of: Si, CR")
 
 
+def _require_minimum_days(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise FrontNextBindingError("minimum_days_to_expiry must be a nonnegative integer")
+    return value
+
+
 def _block_to_frame(payload: Mapping[str, object], block_name: str) -> pd.DataFrame:
     block = payload.get(block_name)
     if not isinstance(block, Mapping):
@@ -133,9 +139,11 @@ def bind_front_next(
     root: str,
     as_of_date: str,
     availability_ts_utc: str | None = None,
+    minimum_days_to_expiry: int = 0,
 ) -> list[dict[str, str]]:
     checked_root = _require_root(root)
     checked_as_of = _require_date(as_of_date)
+    checked_minimum_days = _require_minimum_days(minimum_days_to_expiry)
     checked_availability = _require_utc_timestamp(availability_ts_utc) if availability_ts_utc is not None else None
     column_map = {str(column).upper(): column for column in frame.columns}
     required = ("SECID", "BOARDID", "LASTTRADEDATE")
@@ -155,11 +163,12 @@ def bind_front_next(
     if work["_last_trade_date"].isna().any():
         raise FrontNextBindingError("eligible FORTS contract has invalid LASTTRADEDATE")
     as_of = date.fromisoformat(checked_as_of)
-    work = work.loc[work["_last_trade_date"] >= as_of].copy()
+    minimum_expiry = as_of + timedelta(days=checked_minimum_days)
+    work = work.loc[work["_last_trade_date"] >= minimum_expiry].copy()
     work["_secid_sort"] = work[secid_col].astype(str)
     work = work.sort_values(["_last_trade_date", "_secid_sort"], kind="stable").reset_index(drop=True)
     if len(work.index) < 2:
-        raise FrontNextBindingError("fewer than two eligible contracts for explicit root/as_of_date")
+        raise FrontNextBindingError("fewer than two eligible contracts for explicit root/as_of_date/minimum_days_to_expiry")
 
     selected = work.iloc[:2]
     result: list[dict[str, str]] = []
@@ -174,6 +183,8 @@ def bind_front_next(
             "last_trade_date": row["_last_trade_date"].isoformat(),
             "source_id": SOURCE_ID,
         }
+        if checked_minimum_days > 0:
+            item["minimum_days_to_expiry"] = str(checked_minimum_days)
         if checked_availability is not None:
             item["mapping_fixed_ts_utc"] = checked_availability
             item["availability_ts_utc"] = checked_availability
