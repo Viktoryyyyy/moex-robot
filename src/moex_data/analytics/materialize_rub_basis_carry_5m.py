@@ -16,6 +16,8 @@ DATASET_ID: Final[str] = "rub_basis_carry_5m"
 SCHEMA_VERSION: Final[str] = "rub_basis_carry_5m.v1"
 PRODUCER_ID: Final[str] = "moex_data.analytics.materialize_rub_basis_carry_5m.v1"
 ALIGNMENT_POLICY: Final[str] = "exact_timestamp_inner_join"
+MARKET_TIMEZONE: Final[str] = "Europe/Moscow"
+TIMESTAMP_POLICY: Final[str] = "naive_exchange_localize_europe_moscow_then_utc"
 
 
 class BasisCarryMaterializationError(ValueError):
@@ -100,6 +102,21 @@ def _validate_binding(
     return secid, expiry
 
 
+def _normalize_market_ts_value(value: object) -> pd.Timestamp | pd.NaT:
+    try:
+        timestamp = pd.Timestamp(value)
+    except (TypeError, ValueError):
+        return pd.NaT
+    if pd.isna(timestamp):
+        return pd.NaT
+    try:
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.tz_localize(MARKET_TIMEZONE)
+        return timestamp.tz_convert("UTC")
+    except (TypeError, ValueError):
+        return pd.NaT
+
+
 def _prepare_rate_frame(
     frame: pd.DataFrame,
     *,
@@ -124,7 +141,9 @@ def _prepare_rate_frame(
         _fail(label + " trade_date mismatch")
 
     result = frame[["ts", "close"]].copy()
-    result["ts"] = pd.to_datetime(result["ts"], utc=True, errors="coerce")
+    result["ts"] = pd.to_datetime(
+        result["ts"].map(_normalize_market_ts_value), utc=True, errors="coerce"
+    )
     if result["ts"].isna().any():
         _fail(label + " contains invalid ts")
     if result["ts"].duplicated().any():
@@ -350,6 +369,7 @@ def materialize_pair_partition(
         "duplicate_ts_count": int(frame["ts"].duplicated().sum()),
         "monotonic_ts": bool(frame["ts"].is_monotonic_increasing),
         "exact_timestamp_inner_join": True,
+        "timestamp_policy": TIMESTAMP_POLICY,
         "forward_fill_used": False,
         "asof_join_used": False,
         "positive_rate_check": bool((frame[["spot_rate", "perpetual_rate", "front_rate", "next_rate"]] > 0).all().all()),
@@ -373,6 +393,7 @@ def materialize_pair_partition(
         "partition_path": partition.as_posix(),
         "quality_report_path": quality.as_posix(),
         "alignment_policy": ALIGNMENT_POLICY,
+        "timestamp_policy": TIMESTAMP_POLICY,
         "forward_fill_used": False,
         "asof_join_used": False,
         "continuous_series_used": False,
@@ -391,6 +412,7 @@ def materialize_pair_partition(
         "quality_status": "pass",
         "row_count": int(len(frame.index)),
         "alignment_policy": ALIGNMENT_POLICY,
+        "timestamp_policy": TIMESTAMP_POLICY,
         "forward_fill_used": False,
         "asof_join_used": False,
         "continuous_series_used": False,
