@@ -5,6 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from config_utils import load_config, save_config
 
+PROJECT_ENV_PATH = Path(__file__).resolve().parents[3] / ".env"
 OFFSET_FILE = Path(".state/cmd_bot.offset")
 STOP_FILE   = Path(".state/stop_mr1")
 LOCK_FILE   = Path(".state/loop_mr1.lock")
@@ -31,7 +32,7 @@ def send_message(token: str, chat_id: int, text: str):
     return r.json()
 
 def main():
-    load_dotenv()
+    load_dotenv(PROJECT_ENV_PATH, override=False)
     token = os.getenv("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN", "")
     admin_id = int(os.getenv("ADMIN_USER_ID", "0"))
     if not token or not admin_id:
@@ -114,4 +115,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
