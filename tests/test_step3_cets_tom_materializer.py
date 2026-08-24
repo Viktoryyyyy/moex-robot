@@ -41,6 +41,7 @@ def test_cets_tom_preserves_source_null_volume() -> None:
 
 def test_cets_tom_rejects_malformed_volume() -> None:
     frame = _one_minute_frame()
+    frame["volume"] = frame["volume"].astype(object)
     frame.loc[0, "volume"] = "bad"
     with pytest.raises(CetsTomMaterializationError, match="nonnumeric volume"):
         normalize_to_5m(frame, trade_date="2026-08-21", instrument_id="usd_tom", secid="USD000UTSTOM", source_url="https://iss.moex.com/example")
