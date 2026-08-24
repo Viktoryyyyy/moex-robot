@@ -26,6 +26,14 @@ validation_policy:
   every_output_partition_manifest_quality_inside_declared_run_root: true
   manifest_and_quality_run_id_must_equal_derived_output_run_id: true
   manifest_partition_and_quality_paths_must_match_validated_artifacts: true
+  physical_partition_readback_required: true
+  physical_row_count_match_required: true
+  physical_instrument_trade_date_identity_required: true
+  physical_timezone_aware_utc_timestamp_required: true
+  physical_duplicate_ts_zero_required: true
+  physical_monotonic_ts_required: true
+  physical_market_rates_finite_positive_required: true
+  unreadable_parquet_blocks_promotion: true
   timestamp_policy_required: naive_exchange_localize_europe_moscow_then_utc
   exact_timestamp_inner_join_required: true
   front_next_minimum_days_to_expiry_required: 1
@@ -36,6 +44,7 @@ validation_policy:
   continuous_series_used_required: false
 promotion_policy:
   validate_all_before_pointer_writes: true
+  physical_validation_completes_before_pointer_writes: true
   pointer_run_id_source: referenced_manifest_run_id
   acceptance_run_id_stored_separately: true
   pointer_promotion_mode: transactional_with_rollback
