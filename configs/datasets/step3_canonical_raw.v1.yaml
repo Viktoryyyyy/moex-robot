@@ -1,0 +1,72 @@
+config_id: step3_canonical_raw.v1
+status: implementation_candidate_physical_pilot_pending
+architecture_contract_ref: contracts/architecture/moex_data_access_canon_v1.yaml
+purpose: >
+  Canonical raw onboarding for Si/CR deterministic front+next quotes, CETS
+  USD_TOM/CNY_TOM quotes, and futures open interest as a separate supplementary dataset.
+
+source_contract_refs:
+  front_next_reference: contracts/sources/futures/moex_iss_forts_securities_reference.v1.yaml
+  front_next_mapping: contracts/sources/futures/roll_expiry_mapping.v1.yaml
+  futures_quotes: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
+  futures_open_interest: contracts/sources/futures/moex_algopack_fo_open_interest_5m.v1.yaml
+  cets_tom: contracts/sources/currency/moex_iss_cets_tom_1m.v1.yaml
+
+dataset_contract_refs:
+  futures_quotes: contracts/datasets/futures_raw_5m.v1.yaml
+  futures_open_interest: contracts/datasets/futures_open_interest_raw_5m.v1.yaml
+  cets_tom: contracts/datasets/fx_spot_raw_5m.v1.yaml
+
+registry_refs:
+  forts_family_registry: configs/instruments/forts_instrument_registry.v1.yaml
+  front_next_roles: configs/instruments/forts_front_next_roles.v1.yaml
+  cets_registry: configs/instruments/cets_instrument_registry.v1.yaml
+
+producer_refs:
+  front_next_binding: src/moex_data/futures/front_next_binding.py
+  futures_quotes: src/moex_data/futures/materialize_forts_raw_5m_instrument.py
+  futures_open_interest: src/moex_data/futures/materialize_open_interest_instrument.py
+  cets_tom: src/moex_data/currency/materialize_cets_tom_raw_5m.py
+  controlled_pilot: src/moex_data/step3_raw_pilot_runner.py
+
+canonical_instrument_scope:
+  quote_roles:
+    - si_front_contract
+    - si_next_contract
+    - cr_front_contract
+    - cr_next_contract
+  tom:
+    - usd_tom
+    - cny_tom
+  open_interest_roles:
+    - si_front_contract
+    - si_next_contract
+    - cr_front_contract
+    - cr_next_contract
+
+invariants:
+  explicit_as_of_date_required_for_front_next: true
+  explicit_trade_date_required_for_materialization: true
+  latest_autodetect_allowed: false
+  implicit_secid_selection_allowed: false
+  quote_and_open_interest_share_partition_file_allowed: false
+  open_interest_storage_class: supplementary
+  continuous_series_created_in_step3: false
+  server_apply_requires_merged_sha: true
+
+physical_acceptance:
+  expected_binding_count: 4
+  expected_quote_partition_count: 4
+  expected_open_interest_partition_count: 4
+  expected_tom_partition_count: 2
+  every_partition_requires_nonzero_rows: true
+  every_partition_requires_quality_pass: true
+  evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step3_canonical_raw/run_id={RUN_ID}/pilot_evidence.json"
+
+readiness_flags:
+  implementation_ready: true
+  physical_pilot_passed: false
+  accepted_pointer_ready: false
+  continuous_series_ready: false
+  scheduler_ready: false
+  research_ready: false
