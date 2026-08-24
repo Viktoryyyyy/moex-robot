@@ -16,6 +16,7 @@ dataset_contract_refs:
   futures_quotes: contracts/datasets/futures_raw_5m.v1.yaml
   futures_open_interest: contracts/datasets/futures_open_interest_raw_5m.v1.yaml
   cets_tom: contracts/datasets/fx_spot_raw_5m.v1.yaml
+  physical_acceptance: contracts/datasets/step3_canonical_raw_acceptance.v1.yaml
 
 registry_refs:
   forts_family_registry: configs/instruments/forts_instrument_registry.v1.yaml
@@ -28,6 +29,7 @@ producer_refs:
   futures_open_interest: src/moex_data/futures/materialize_open_interest_instrument.py
   cets_tom: src/moex_data/currency/materialize_cets_tom_raw_5m.py
   controlled_pilot: src/moex_data/step3_raw_pilot_runner.py
+  acceptance_promotion: src/moex_data/step3_raw_acceptance.py
 
 canonical_instrument_scope:
   quote_roles:
@@ -53,15 +55,21 @@ invariants:
   open_interest_storage_class: supplementary
   continuous_series_created_in_step3: false
   server_apply_requires_merged_sha: true
+  accepted_pointer_written_only_after_full_pilot_pass: true
 
 physical_acceptance:
   expected_binding_count: 4
   expected_quote_partition_count: 4
   expected_open_interest_partition_count: 4
   expected_tom_partition_count: 2
+  expected_accepted_pointer_count: 10
   every_partition_requires_nonzero_rows: true
   every_partition_requires_quality_pass: true
-  evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step3_canonical_raw/run_id={RUN_ID}/pilot_evidence.json"
+  pilot_evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step3_canonical_raw/run_id={RUN_ID}/pilot_evidence.json"
+  acceptance_evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step3_canonical_raw/run_id={RUN_ID}/accepted_pointers.json"
+  accepted_pointer_path_pattern: "${MOEX_DATA_ROOT}/state/datasets/dataset_id={DATASET_ID}/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+  acceptance_marker_required_after_pointer_writes: true
+  partial_pointer_set_without_acceptance_marker_is_not_accepted: true
 
 readiness_flags:
   implementation_ready: true
