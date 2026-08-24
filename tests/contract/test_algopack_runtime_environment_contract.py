@@ -15,9 +15,11 @@ ALGOPACK_CONTRACT = json.loads(
 ALGOPACK_SOURCE = (
     ROOT / "src/moex_research/external_data/moex_cnyrub_algopack_history.py"
 ).read_text(encoding="utf-8")
-ALGOPACK_RUNTIME = (
-    ROOT / "src/moex_research/runners/usdrubf_phase8_6a_algopack_cnyrub_runtime.py"
-).read_text(encoding="utf-8")
+ALGOPACK_RUNTIME_PATHS = (
+    ROOT / "src/moex_research/runners/usdrubf_phase8_6a_algopack_cnyrub_runtime.py",
+    ROOT / "src/moex_research/runners/usdrubf_phase8_6a_algopack_cnyrubf_runtime.py",
+)
+ALGOPACK_RUNTIMES = tuple(path.read_text(encoding="utf-8") for path in ALGOPACK_RUNTIME_PATHS)
 
 
 def test_project_env_path_is_explicit_and_repository_env_is_not_a_fallback() -> None:
@@ -26,8 +28,11 @@ def test_project_env_path_is_explicit_and_repository_env_is_not_a_fallback() -> 
         "`/home/trader/moex_bot/moex-robot/.env` is not a canonical project runtime source"
         in SERVER_LAYOUT
     )
-    assert "PROJECT_ENV_PATH = Path(__file__).resolve().parents[4] / \".env\"" in ALGOPACK_RUNTIME
-    assert "parents[3] / \".env\"" not in ALGOPACK_RUNTIME
+    expected_parent_env = "PROJECT_ENV_PATH = Path(__file__).resolve().parents[4] / \".env\""
+    forbidden_repo_env = "parents[3] / \".env\""
+    for runtime in ALGOPACK_RUNTIMES:
+        assert expected_parent_env in runtime
+        assert forbidden_repo_env not in runtime
 
 
 def test_algopack_variable_is_canonical_across_example_contract_and_code() -> None:
