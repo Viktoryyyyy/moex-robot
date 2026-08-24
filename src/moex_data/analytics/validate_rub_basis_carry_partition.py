@@ -97,6 +97,12 @@ def _finite_numeric(frame: pd.DataFrame, column: str, *, positive: bool = False)
     return numeric
 
 
+def _require_close(actual: pd.Series, expected: pd.Series, field_name: str) -> None:
+    tolerance = 1e-10 + 1e-10 * expected.abs()
+    if ((actual - expected).abs() > tolerance).any():
+        _fail("derived partition formula mismatch: " + field_name)
+
+
 def validate_partition(
     path: str | Path,
     *,
@@ -154,10 +160,12 @@ def validate_partition(
         "calendar_days_to_next_expiry": (next_expiry - trade_date_value).days,
         "calendar_days_between_expiries": (next_expiry - front_expiry).days,
     }
+    day_values: dict[str, pd.Series] = {}
     for column in DAY_COLUMNS:
         numeric = _finite_numeric(frame, column, positive=True)
         if not numeric.eq(float(expected_days[column])).all():
             _fail("derived partition expiry day-count mismatch: " + column)
+        day_values[column] = numeric
 
     if not frame["alignment_policy"].astype(str).eq("exact_timestamp_inner_join").all():
         _fail("derived partition alignment_policy mismatch")
@@ -178,10 +186,32 @@ def validate_partition(
     if build_ts.isna().any():
         _fail("derived partition contains invalid build_ts")
 
-    for column in RATE_COLUMNS:
-        _finite_numeric(frame, column, positive=True)
-    for column in DERIVED_NUMERIC_COLUMNS:
-        _finite_numeric(frame, column)
+    rates = {column: _finite_numeric(frame, column, positive=True) for column in RATE_COLUMNS}
+    derived_values = {column: _finite_numeric(frame, column) for column in DERIVED_NUMERIC_COLUMNS}
+
+    spot = rates["spot_rate"]
+    perpetual = rates["perpetual_rate"]
+    front = rates["front_rate"]
+    nxt = rates["next_rate"]
+    expected_formulas = {
+        "perpetual_spot_basis_abs": perpetual - spot,
+        "perpetual_spot_basis_bps": ((perpetual / spot) - 1.0) * 10000.0,
+        "front_spot_basis_abs": front - spot,
+        "front_spot_basis_bps": ((front / spot) - 1.0) * 10000.0,
+        "next_spot_basis_abs": nxt - spot,
+        "next_spot_basis_bps": ((nxt / spot) - 1.0) * 10000.0,
+        "front_perpetual_basis_abs": front - perpetual,
+        "front_perpetual_basis_bps": ((front / perpetual) - 1.0) * 10000.0,
+        "next_perpetual_basis_abs": nxt - perpetual,
+        "next_perpetual_basis_bps": ((nxt / perpetual) - 1.0) * 10000.0,
+        "front_next_spread_abs": nxt - front,
+        "front_next_spread_bps": ((nxt / front) - 1.0) * 10000.0,
+        "front_spot_implied_carry_annualized": ((front / spot) - 1.0) * 365.0 / day_values["calendar_days_to_front_expiry"],
+        "next_spot_implied_carry_annualized": ((nxt / spot) - 1.0) * 365.0 / day_values["calendar_days_to_next_expiry"],
+        "front_next_term_carry_annualized": ((nxt / front) - 1.0) * 365.0 / day_values["calendar_days_between_expiries"],
+    }
+    for column, expected in expected_formulas.items():
+        _require_close(derived_values[column], expected.astype(float), column)
 
     return {
         "row_count": int(len(frame.index)),
@@ -194,6 +224,7 @@ def validate_partition(
         "duplicate_ts_count": int(utc_ts.duplicated().sum()),
         "rates_valid": True,
         "derived_metrics_valid": True,
+        "derived_formulas_valid": True,
         "expiry_metadata_valid": True,
         "physical_readback_passed": True,
     }
