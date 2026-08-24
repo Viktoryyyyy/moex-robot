@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from moex_data import step4_basis_carry_acceptance as acceptance
 from moex_data import step4_basis_carry_pilot_runner as pilot
 
@@ -12,7 +14,16 @@ def _write_json(path: Path, values: dict[str, object]) -> None:
     path.write_text(json.dumps(values), encoding="utf-8")
 
 
-def _build_pilot_fixture(root: Path, run_id: str) -> None:
+def _bindings(front_expiry: str = "2026-09-17") -> list[dict[str, object]]:
+    return [
+        {"root": "Si", "role": "front", "instrument_id": "si_front_contract", "secid": "SiU6", "last_trade_date": front_expiry, "minimum_days_to_expiry": "1"},
+        {"root": "Si", "role": "next", "instrument_id": "si_next_contract", "secid": "SiZ6", "last_trade_date": "2026-12-17", "minimum_days_to_expiry": "1"},
+        {"root": "CR", "role": "front", "instrument_id": "cr_front_contract", "secid": "CRU6", "last_trade_date": front_expiry, "minimum_days_to_expiry": "1"},
+        {"root": "CR", "role": "next", "instrument_id": "cr_next_contract", "secid": "CRZ6", "last_trade_date": "2026-12-17", "minimum_days_to_expiry": "1"},
+    ]
+
+
+def _build_pilot_fixture(root: Path, run_id: str, *, front_expiry: str = "2026-09-17") -> None:
     run_root = root / "runs" / "step4_rub_basis_carry" / f"run_id={run_id}"
     run_root.mkdir(parents=True)
     outputs: list[dict[str, object]] = []
@@ -65,12 +76,15 @@ def _build_pilot_fixture(root: Path, run_id: str) -> None:
         "project": "MOEX_Bot",
         "step": 4,
         "status": "pilot_passed",
+        "trade_date": "2026-08-24",
         "artifact_version": run_id,
         "materialization_root": run_root.as_posix(),
         "run_artifacts_immutable": True,
         "run_id_reuse_allowed": False,
         "alignment_policy": "exact_timestamp_inner_join",
         "timestamp_policy": "naive_exchange_localize_europe_moscow_then_utc",
+        "front_next_minimum_days_to_expiry": 1,
+        "bindings": _bindings(front_expiry),
         "forward_fill_used": False,
         "asof_join_used": False,
         "latest_autodetect_used": False,
@@ -111,6 +125,15 @@ def test_accepted_pointer_run_id_matches_manifest_and_keeps_acceptance_run(monke
         pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
         assert pointer["run_id"] == f"{run_id}_{instrument_id}"
         assert pointer["acceptance_run_id"] == run_id
+
+
+def test_acceptance_rejects_expiry_day_front_binding(monkeypatch, tmp_path: Path) -> None:
+    run_id = "step4_expiry_day_fixture"
+    monkeypatch.setenv("MOEX_DATA_ROOT", tmp_path.as_posix())
+    _build_pilot_fixture(tmp_path, run_id, front_expiry="2026-08-24")
+
+    with pytest.raises(acceptance.Step4AcceptanceError, match="strictly after trade_date"):
+        acceptance.promote(run_id=run_id)
 
 
 def test_canonical_root_restoration_accepts_equivalent_trailing_slash(monkeypatch, tmp_path: Path) -> None:
