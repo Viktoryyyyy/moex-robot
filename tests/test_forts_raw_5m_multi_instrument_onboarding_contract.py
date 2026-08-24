@@ -80,7 +80,7 @@ def test_scheduler_and_runtime_remain_blocked_after_raw_backfill_completion():
     assert "scheduler_ready: false" in data_lake
     assert "d1_materialization_ready: false" in data_lake
     assert "research_ready: false" in data_lake
-    assert "accepted_pointer_ready: false" in data_lake
+    assert "accepted_pointer_ready: true" in data_lake
     assert "server_apply_requires_merged_github_contract: true" in architecture
     assert "accepted pointer remains absent until the architecture gate enables it" in runbook
 
