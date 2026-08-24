@@ -15,11 +15,12 @@ ALGOPACK_CONTRACT = json.loads(
 ALGOPACK_SOURCE = (
     ROOT / "src/moex_research/external_data/moex_cnyrub_algopack_history.py"
 ).read_text(encoding="utf-8")
-ALGOPACK_RUNTIME_PATHS = (
-    ROOT / "src/moex_research/runners/usdrubf_phase8_6a_algopack_cnyrub_runtime.py",
-    ROOT / "src/moex_research/runners/usdrubf_phase8_6a_algopack_cnyrubf_runtime.py",
-)
-ALGOPACK_RUNTIMES = tuple(path.read_text(encoding="utf-8") for path in ALGOPACK_RUNTIME_PATHS)
+RUNNERS_DIR = ROOT / "src/moex_research/runners"
+DOTENV_RUNTIME_TEXTS = {
+    path.name: text
+    for path in sorted(RUNNERS_DIR.glob("*_runtime.py"))
+    if "load_dotenv" in (text := path.read_text(encoding="utf-8"))
+}
 
 
 def test_project_env_path_is_explicit_and_repository_env_is_not_a_fallback() -> None:
@@ -28,9 +29,10 @@ def test_project_env_path_is_explicit_and_repository_env_is_not_a_fallback() -> 
         "`/home/trader/moex_bot/moex-robot/.env` is not a canonical project runtime source"
         in SERVER_LAYOUT
     )
+    assert DOTENV_RUNTIME_TEXTS
     expected_parent_env = "PROJECT_ENV_PATH = Path(__file__).resolve().parents[4] / \".env\""
     forbidden_repo_env = "parents[3] / \".env\""
-    for runtime in ALGOPACK_RUNTIMES:
+    for runtime in DOTENV_RUNTIME_TEXTS.values():
         assert expected_parent_env in runtime
         assert forbidden_repo_env not in runtime
 
