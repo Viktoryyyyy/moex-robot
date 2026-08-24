@@ -36,6 +36,15 @@ def test_front_next_contract_is_explicit_as_of_and_not_liquidity_selected() -> N
     assert "latest_autodetect_allowed: false" in text
 
 
+def test_front_next_contract_preserves_pit_unknown_availability_rule() -> None:
+    text = _read("contracts/sources/futures/roll_expiry_mapping.v1.yaml").lower()
+    assert "availability_ts_utc <= forecast_anchor_ts" in text
+    assert "unknown" in text and "unresolved" in text
+    assert "shift its eligibility by" in text
+    assert "at least one trading day" in text
+    assert "never infer an earlier availability timestamp" in text
+
+
 def test_tom_source_ids_are_explicit_and_legacy_csv_is_not_canonical() -> None:
     source = _read("contracts/sources/currency/moex_iss_cets_tom_1m.v1.yaml")
     registry = _read("configs/instruments/cets_instrument_registry.v1.yaml")
