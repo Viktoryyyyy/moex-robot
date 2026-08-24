@@ -1,0 +1,59 @@
+contract_id: moex_algopack_fo_open_interest_5m.v1
+schema_version: source_contract.v1
+status: active_stage3_candidate
+source_id: moex_algopack_fo_open_interest_5m
+source_system: moex_algopack
+source_kind: open_interest_from_tradestats
+engine: futures
+market: forts
+board: RFUD
+endpoint_path: /iss/datashop/algopack/fo/tradestats.json
+default_base_url: https://apim.moex.com
+base_url_env: MOEX_API_URL
+auth:
+  type: bearer
+  token_env: MOEX_API_KEY
+  token_required_for_apim: true
+request_contract:
+  explicit_fields:
+    date: "{YYYY-MM-DD}"
+    from: "{YYYY-MM-DD}"
+    till: "{YYYY-MM-DD}"
+    secid: "{SECID}"
+    start: "0"
+    iss.meta: "off"
+    iss.only: tradestats
+  explicit_secid_required: true
+  latest_autodetect_allowed: false
+response_contract:
+  preferred_block: tradestats
+  required_columns:
+    - SECID
+    - TRADEDATE
+    - TRADETIME
+    - OI_OPEN
+    - OI_HIGH
+    - OI_LOW
+    - OI_CLOSE
+    - SYSTIME
+canonical_semantics:
+  ts: TRADEDATE + TRADETIME
+  systime_source: SYSTIME
+  availability_ts_utc: SYSTIME interpreted in Europe/Moscow and converted to UTC
+  source_timezone: Europe/Moscow
+  ts_must_not_equal_systime_by_substitution: true
+  oi_open: OI_OPEN
+  oi_high: OI_HIGH
+  oi_low: OI_LOW
+  oi_close: OI_CLOSE
+  quote_partition_embedding_allowed: false
+  supplementary_dataset_required: true
+point_in_time_policy:
+  availability_timestamp_required: true
+  missing_or_invalid_systime: fail_closed
+  ingestion_time_is_not_source_availability: true
+failure_semantics:
+  unauthorized: fail_closed
+  empty_response: fail_closed
+  schema_mismatch: fail_closed
+  implicit_fallback: forbidden

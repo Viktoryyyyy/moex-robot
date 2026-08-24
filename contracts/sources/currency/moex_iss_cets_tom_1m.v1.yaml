@@ -1,0 +1,53 @@
+contract_id: moex_iss_cets_tom_1m.v1
+schema_version: source_contract.v1
+status: active_stage3_candidate
+source_id: moex_iss_cets_tom_1m
+source_system: moex_iss
+source_kind: native_1m_candles
+engine: currency
+market: selt
+board: CETS
+default_base_url: https://iss.moex.com
+auth:
+  type: none
+endpoint_pattern: /iss/engines/currency/markets/selt/boards/CETS/securities/{SECID}/candles.json
+request_contract:
+  explicit_fields:
+    from: "{YYYY-MM-DD}"
+    till: "{YYYY-MM-DD}"
+    interval: "1"
+    iss.meta: "off"
+  explicit_secid_required: true
+  latest_autodetect_allowed: false
+response_contract:
+  preferred_block: candles
+  required_columns:
+    - open
+    - high
+    - low
+    - close
+    - volume
+    - begin
+    - end
+canonical_secids:
+  usd_tom:
+    instrument_id: usd_tom
+    secid: USD000UTSTOM
+  cny_tom:
+    instrument_id: cny_tom
+    secid: CNYRUB_TOM
+normalization:
+  source_granularity: 1m
+  canonical_granularity: 5m
+  resample_rule:
+    open: first
+    high: max
+    low: min
+    close: last
+    volume: sum
+    value: sum_if_present
+failure_semantics:
+  empty_response: fail_closed
+  schema_mismatch: fail_closed
+  wrong_secid: fail_closed
+  implicit_fallback: forbidden

@@ -9,6 +9,7 @@ purpose:
   - define one instrument-independent canon for quote updating
   - define one instrument-independent canon for quote retrieval
   - define one instrument-independent canon for supplementary MOEX datasets
+  - support deterministic FORTS front/next roles and explicit CETS spot identities without implicit contract selection
 
 identity_model:
   canonical_identity_field: instrument_id
@@ -77,9 +78,18 @@ market_data_lane_model:
       - secid
       - clgroup
     same_moment_source_revisions_preserved_in_raw: true
+  open_interest:
+    lane: supplementary
+    dataset_id: futures_open_interest_raw_5m
+    separate_from_quote_partitions_required: true
+    independent_quality_manifest_pointer_required: true
+    source_contract_ref: contracts/sources/futures/moex_algopack_fo_open_interest_5m.v1.yaml
+    transport: authenticated_apim_only
+    source_endpoint: /iss/datashop/algopack/fo/tradestats.json
+    canonical_timestamp: tradedate_plus_tradetime
 
 storage_transition_policy:
-  status: stage2_canonical_writers_active_raw_backfills_completed_acceptance_pending
+  status: stage3_implementation_candidate_physical_pilot_pending
   canonical_new_write_root: "${MOEX_DATA_ROOT}/market"
   new_materialization_to_legacy_roots_allowed: false
   new_dataset_creation_to_legacy_roots_allowed: false
@@ -119,6 +129,9 @@ registry_model:
   registry_entry_required_for_materialization: true
   active_instrument_registry_ref: configs/instruments/forts_instrument_registry.v1.yaml
   active_data_lake_config_ref: configs/datasets/futures_data_lake.v1.yaml
+  stage3_dynamic_front_next_role_registry_ref: configs/instruments/forts_front_next_roles.v1.yaml
+  stage3_cets_instrument_registry_ref: configs/instruments/cets_instrument_registry.v1.yaml
+  stage3_front_next_mapping_contract_ref: contracts/sources/futures/roll_expiry_mapping.v1.yaml
   registry_entry_required_fields:
     - instrument_id
     - canonical_symbol
@@ -135,6 +148,24 @@ registry_model:
   stage2_source_contract_refs:
     quotes: contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml
     futoi: contracts/sources/futures/moex_algopack_futoi.v1.yaml
+  stage3_identity_resolution:
+    static_forts:
+      registry_ref: configs/instruments/forts_instrument_registry.v1.yaml
+      explicit_secid_required: true
+    dynamic_forts_front_next:
+      role_registry_ref: configs/instruments/forts_front_next_roles.v1.yaml
+      mapping_contract_ref: contracts/sources/futures/roll_expiry_mapping.v1.yaml
+      explicit_as_of_date_required: true
+      binding_output_must_include_instrument_id_and_secid: true
+      materializer_must_receive_explicit_bound_secid: true
+      static_secid_in_role_registry_allowed: false
+      latest_autodetect_allowed: false
+      implicit_contract_selection_allowed: false
+    cets_tom:
+      registry_ref: configs/instruments/cets_instrument_registry.v1.yaml
+      explicit_instrument_id_required: true
+      explicit_secid_required: true
+      materializer_identity_must_match_registry: true
 
 loading_model:
   source_selection: explicit_source_id

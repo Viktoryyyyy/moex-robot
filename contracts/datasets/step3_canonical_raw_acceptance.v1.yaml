@@ -1,0 +1,82 @@
+contract_id: step3_canonical_raw_acceptance.v1
+dataset_id: step3_canonical_raw_acceptance
+status: active_stage3_candidate
+artifact_class: external_pattern
+producer: moex_data.step3_raw_acceptance
+format: json
+schema_version: step3_canonical_raw_acceptance.v1
+storage_root_ref: MOEX_DATA_ROOT
+pilot_evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step3_canonical_raw/run_id={RUN_ID}/pilot_evidence.json"
+acceptance_evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step3_canonical_raw/run_id={RUN_ID}/accepted_pointers.json"
+accepted_pointer_path_pattern: "${MOEX_DATA_ROOT}/state/datasets/dataset_id={DATASET_ID}/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+immutable_pilot_run_root_pattern: "${MOEX_DATA_ROOT}/runs/step3_canonical_raw/run_id={RUN_ID}"
+required_pilot_counts:
+  bindings: 4
+  quote_partitions: 4
+  open_interest_partitions: 4
+  tom_partitions: 2
+required_pointer_counts:
+  futures_raw_5m: 4
+  futures_open_interest_raw_5m: 4
+  fx_spot_raw_5m: 2
+  total: 10
+canonical_source_ids:
+  futures_raw_5m: moex_algopack_fo_tradestats_5m
+  futures_open_interest_raw_5m: moex_algopack_fo_open_interest_5m
+  fx_spot_raw_5m: moex_iss_cets_tom_1m
+acceptance_rules:
+  pilot_status_must_equal: pilot_passed
+  trade_date_must_equal_as_of_date_for_unversioned_binding: true
+  historical_backdating_used_must_be_false: true
+  reference_observation_moscow_date_must_equal_as_of_date: true
+  exact_canonical_bindings_required:
+    - Si/front/si_front_contract
+    - Si/next/si_next_contract
+    - CR/front/cr_front_contract
+    - CR/next/cr_next_contract
+  binding_secid_patterns:
+    Si: "^Si[HMUZ][0-9]$"
+    CR: "^CR[HMUZ][0-9]$"
+  all_four_binding_secids_must_be_distinct: true
+  front_last_trade_date_must_precede_next_by_root: true
+  binding_mapping_fixed_ts_utc_required: true
+  binding_availability_ts_utc_required: true
+  binding_timestamps_must_match_controlled_reference_observation: true
+  futures_quote_and_oi_secids_must_match_bindings: true
+  tom_identities_must_match_registry: true
+  every_dataset_source_id_must_match_canonical_source_ids: true
+  every_partition_quality_status_must_equal: pass
+  every_partition_row_count_must_be_positive: true
+  manifest_and_quality_identity_crosscheck_required: true
+  manifest_and_quality_run_crosscheck_required: true
+  manifest_and_quality_row_count_crosscheck_required: true
+  manifest_source_and_partition_crosscheck_required: true
+  oi_manifest_min_availability_ts_utc_required: true
+  oi_manifest_max_availability_ts_utc_required: true
+  oi_quality_min_availability_ts_utc_required: true
+  oi_quality_max_availability_ts_utc_required: true
+  oi_manifest_and_quality_availability_bounds_must_match: true
+  oi_availability_bounds_must_be_ordered: true
+  oi_partition_parquet_validation_required: true
+  oi_partition_required_causal_columns:
+    - availability_ts_utc
+    - systime_source
+  oi_partition_availability_must_be_timezone_aware_utc: true
+  oi_partition_row_count_must_match_evidence: true
+  oi_partition_availability_bounds_must_match_manifest_and_quality: true
+  latest_autodetect_used_must_be_false: true
+  continuous_series_created_must_be_false: true
+  run_artifacts_immutable_must_be_true: true
+  run_id_reuse_allowed_must_be_false: true
+  all_producer_artifacts_must_be_inside_exact_run_root: true
+  all_referenced_manifest_and_quality_files_must_exist: true
+  all_referenced_paths_must_be_under_moex_data_root: true
+  validate_all_before_pointer_writes: true
+  pointer_promotion_mode: transactional_with_rollback
+  final_acceptance_marker_participates_in_same_transaction: true
+  rollback_previous_pointers_on_any_promotion_failure: true
+  partial_pointer_set_without_acceptance_marker_is_not_accepted: true
+path_rules:
+  hardcoded_server_path_allowed: false
+  dynamic_scan_allowed: false
+  arbitrary_evidence_path_allowed: false

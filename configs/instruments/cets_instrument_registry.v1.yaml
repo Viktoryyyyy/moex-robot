@@ -1,0 +1,36 @@
+registry_id: cets_instrument_registry.v1
+schema_version: instrument_registry.v1
+status: stage3_candidate
+scope_policy:
+  explicit_instrument_id_required: true
+  explicit_source_id_required: true
+  explicit_secid_required: true
+  latest_autodetect_allowed: false
+  implicit_instrument_selection_allowed: false
+instruments:
+  - instrument_id: usd_tom
+    canonical_symbol: USD_TOM
+    display_name: USD/RUB TOM
+    source_system: moex_iss
+    source_id: moex_iss_cets_tom_1m
+    secid: USD000UTSTOM
+    board: CETS
+    market: selt
+    engine: currency
+    enabled_for_materialization: false
+    evidence_status: official_source_identity_validated
+  - instrument_id: cny_tom
+    canonical_symbol: CNY_TOM
+    display_name: CNY/RUB TOM
+    source_system: moex_iss
+    source_id: moex_iss_cets_tom_1m
+    secid: CNYRUB_TOM
+    board: CETS
+    market: selt
+    engine: currency
+    enabled_for_materialization: false
+    evidence_status: official_source_identity_validated
+rules:
+  materialization_requires_exact_registry_match: true
+  physical_pilot_required_before_enablement: true
+  accepted_pointer_required_before_scheduler: true

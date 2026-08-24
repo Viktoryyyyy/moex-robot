@@ -1,0 +1,51 @@
+contract_id: fx_spot_raw_5m.v1
+dataset_id: fx_spot_raw_5m
+artifact_class: external_pattern
+producer: moex_data.currency.materialize_cets_tom_raw_5m
+consumers:
+  - moex_data.step3_raw_pilot_runner
+  - moex_data.futures.continuous_series_builder
+format: parquet
+schema_version: fx_spot_raw_5m.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/market/raw/timeframe=5m/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet"
+partitioning:
+  - timeframe
+  - instrument_id
+  - trade_date
+  - source_id
+grain: 5m_bar
+primary_key:
+  - instrument_id
+  - ts
+  - source_id
+required_columns:
+  - instrument_id
+  - trade_date
+  - ts
+  - session_date
+  - secid
+  - board
+  - market
+  - engine
+  - source_id
+  - open
+  - high
+  - low
+  - close
+  - volume
+  - value
+  - source
+  - ingest_ts
+source_contract_ref: contracts/sources/currency/moex_iss_cets_tom_1m.v1.yaml
+quality_checks:
+  - non_null_ohlc
+  - high_ge_low
+  - open_high_low_close_inside_range
+  - duplicate_instrument_ts_source_count
+  - monotonic_ts
+accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=fx_spot_raw_5m/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+path_rules:
+  hardcoded_server_path_allowed: false
+  implicit_file_selection_allowed: false
+retention_policy: keep_all_valid_partitions
