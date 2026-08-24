@@ -46,7 +46,7 @@ from src.moex_research.runners.usdrubf_macro_live_cbr_smoke import (
 
 PROJECT = "MOEX_Bot"
 MODE = "short_live_shadow_input_bridge"
-PROJECT_ENV_PATH = Path(__file__).resolve().parents[3] / ".env"
+PROJECT_ENV_PATH = Path(__file__).resolve().parents[4] / ".env"
 _REQUIRED_CBR_MACRO_METRICS = frozenset({"cbr_ruonia_rate_pct", "cbr_key_rate_pct"})
 _DEFAULT_NEWS_MAX_EVENTS = 20
 
