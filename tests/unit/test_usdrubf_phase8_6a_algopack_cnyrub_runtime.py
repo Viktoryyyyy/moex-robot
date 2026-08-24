@@ -5,7 +5,7 @@ from pathlib import Path
 from moex_research.runners import usdrubf_phase8_6a_algopack_cnyrub_runtime as runtime
 
 
-def test_runtime_loads_env_and_installs_timestamp_policy_before_validation(
+def test_runtime_loads_parent_project_env_and_installs_timestamp_policy_before_validation(
     monkeypatch,
 ) -> None:
     calls: list[tuple[object, ...]] = []
@@ -30,12 +30,12 @@ def test_runtime_loads_env_and_installs_timestamp_policy_before_validation(
     monkeypatch.setattr(runtime, "validation_main", fake_validation_main)
 
     argv = ["--run-id", "phase8_6a_algopack_cnyrub_source_validation_20260722_v2"]
+    expected_project_env = Path(__file__).resolve().parents[3] / ".env"
 
     assert runtime.main(argv) == 0
     assert calls == [
-        ("load_dotenv", runtime.PROJECT_ENV_PATH, False),
+        ("load_dotenv", expected_project_env, False),
         ("install_timestamp_policy",),
         ("validation_main", argv),
     ]
-    assert runtime.PROJECT_ENV_PATH.name == ".env"
-    assert runtime.PROJECT_ENV_PATH.parent.name == "moex-robot"
+    assert runtime.PROJECT_ENV_PATH == expected_project_env

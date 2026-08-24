@@ -10,7 +10,7 @@ from moex_research.runners.usdrubf_phase8_6a_algopack_cnyrubf_source_validation 
 )
 
 
-PROJECT_ENV_PATH = Path(__file__).resolve().parents[3] / ".env"
+PROJECT_ENV_PATH = Path(__file__).resolve().parents[4] / ".env"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
