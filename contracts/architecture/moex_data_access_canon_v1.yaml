@@ -89,7 +89,7 @@ market_data_lane_model:
     canonical_timestamp: tradedate_plus_tradetime
 
 storage_transition_policy:
-  status: stage3_implementation_candidate_physical_pilot_pending
+  status: raw_canonical_stage3_accepted
   canonical_new_write_root: "${MOEX_DATA_ROOT}/market"
   new_materialization_to_legacy_roots_allowed: false
   new_dataset_creation_to_legacy_roots_allowed: false
