@@ -1,0 +1,168 @@
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import tempfile
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from typing import Final
+
+from moex_data.currency import materialize_cets_tom_raw_5m as cets
+from moex_data.futures import front_next_binding as binding
+from moex_data.futures import materialize_forts_raw_5m_instrument as quotes
+from moex_data.futures import materialize_open_interest_instrument as oi
+
+CANONICAL_ENV_PATH: Final[str] = "/home/trader/moex_bot/.env"
+EXPECTED_BINDINGS: Final[int] = 4
+EXPECTED_QUOTE_PARTITIONS: Final[int] = 4
+EXPECTED_OI_PARTITIONS: Final[int] = 4
+EXPECTED_TOM_PARTITIONS: Final[int] = 2
+
+
+class Step3PilotError(ValueError):
+    pass
+
+
+def _require_token(value: object, field_name: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise Step3PilotError(field_name + " is required")
+    if text in (".", "..") or "/" in text or "\\" in text or any(marker in text for marker in ("*", "{", "}", "$(", "`")):
+        raise Step3PilotError(field_name + " must be an explicit safe token")
+    return text
+
+
+def _data_root() -> Path:
+    value = str(os.environ.get("MOEX_DATA_ROOT", "")).strip()
+    if not value:
+        raise Step3PilotError("MOEX_DATA_ROOT is required")
+    return Path(value)
+
+
+def _write_json_atomic(path: Path, values: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False, suffix=".tmp") as handle:
+        json.dump(values, handle, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+        handle.write("\n")
+        temp_name = handle.name
+    Path(temp_name).replace(path)
+
+
+def _artifact(base: str, suffix: str) -> str:
+    return _require_token(base + "_" + suffix, "artifact_version")
+
+
+def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_file: str = CANONICAL_ENV_PATH, timeout: float = 60.0) -> dict[str, object]:
+    base_artifact = _require_token(artifact_version, "artifact_version")
+    quotes.load_env_file(env_file)
+    if not str(os.environ.get("MOEX_API_KEY", "")).strip():
+        raise Step3PilotError("MOEX_API_KEY is required")
+    if not str(os.environ.get("MOEX_DATA_ROOT", "")).strip():
+        raise Step3PilotError("MOEX_DATA_ROOT is required")
+
+    reference_frame, reference_url = binding.fetch_reference_frame(timeout=timeout)
+    bindings = binding.bind_front_next(reference_frame, root="Si", as_of_date=as_of_date)
+    bindings.extend(binding.bind_front_next(reference_frame, root="CR", as_of_date=as_of_date))
+    if len(bindings) != EXPECTED_BINDINGS:
+        raise Step3PilotError("front-next binding count mismatch")
+
+    quote_results: list[dict[str, object]] = []
+    oi_results: list[dict[str, object]] = []
+    for item in bindings:
+        instrument_id = str(item["instrument_id"])
+        secid = str(item["secid"])
+        quote_result = quotes.materialize_instrument_partition(
+            trade_date=trade_date,
+            instrument_id=instrument_id,
+            secid=secid,
+            artifact_version=_artifact(base_artifact, instrument_id + "_quote"),
+            timeout=timeout,
+        ).payload
+        if quote_result.get("quality_status") != "pass" or int(quote_result.get("row_count") or 0) <= 0:
+            raise Step3PilotError("quote pilot failed for " + instrument_id)
+        quote_results.append(quote_result)
+
+        oi_result = oi.materialize_open_interest_partition(
+            trade_date=trade_date,
+            instrument_id=instrument_id,
+            secid=secid,
+            artifact_version=_artifact(base_artifact, instrument_id + "_oi"),
+            timeout=timeout,
+        )
+        if oi_result.get("quality_status") != "pass" or int(oi_result.get("row_count") or 0) <= 0:
+            raise Step3PilotError("OI pilot failed for " + instrument_id)
+        oi_results.append(oi_result)
+
+    tom_results: list[dict[str, object]] = []
+    for instrument_id, secid in cets.INSTRUMENTS.items():
+        result = cets.materialize_cets_tom_partition(
+            trade_date=trade_date,
+            instrument_id=instrument_id,
+            secid=secid,
+            artifact_version=_artifact(base_artifact, instrument_id + "_quote"),
+            timeout=timeout,
+        )
+        if result.get("quality_status") != "pass" or int(result.get("row_count") or 0) <= 0:
+            raise Step3PilotError("TOM pilot failed for " + instrument_id)
+        tom_results.append(result)
+
+    if len(quote_results) != EXPECTED_QUOTE_PARTITIONS or len(oi_results) != EXPECTED_OI_PARTITIONS or len(tom_results) != EXPECTED_TOM_PARTITIONS:
+        raise Step3PilotError("Step3 pilot output count mismatch")
+
+    payload: dict[str, object] = {
+        "project": "MOEX_Bot",
+        "step": 3,
+        "status": "pilot_passed",
+        "trade_date": trade_date,
+        "as_of_date": as_of_date,
+        "artifact_version": base_artifact,
+        "reference_source_url": reference_url,
+        "bindings": bindings,
+        "quote_partitions": quote_results,
+        "open_interest_partitions": oi_results,
+        "tom_partitions": tom_results,
+        "counts": {
+            "bindings": len(bindings),
+            "quote_partitions": len(quote_results),
+            "open_interest_partitions": len(oi_results),
+            "tom_partitions": len(tom_results),
+        },
+        "latest_autodetect_used": False,
+        "continuous_series_created": False,
+    }
+    evidence_path = _data_root() / "state" / "acceptance" / "step3_canonical_raw" / ("run_id=" + base_artifact) / "pilot_evidence.json"
+    _write_json_atomic(evidence_path, payload)
+    payload["evidence_path"] = evidence_path.as_posix()
+    return payload
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the controlled comprehensive Step 3 canonical raw pilot.")
+    parser.add_argument("--trade-date", required=True)
+    parser.add_argument("--as-of", required=True, dest="as_of_date")
+    parser.add_argument("--artifact-version", required=True)
+    parser.add_argument("--env-file", default=CANONICAL_ENV_PATH)
+    parser.add_argument("--timeout", type=float, default=60.0)
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
+    try:
+        payload = run_pilot(
+            trade_date=args.trade_date,
+            as_of_date=args.as_of_date,
+            artifact_version=args.artifact_version,
+            env_file=args.env_file,
+            timeout=args.timeout,
+        )
+    except Exception as exc:
+        print(json.dumps({"project": "MOEX_Bot", "step": 3, "status": "pilot_failed", "error": str(exc)}, ensure_ascii=False, sort_keys=True))
+        return 1
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
