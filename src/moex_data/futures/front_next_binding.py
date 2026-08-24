@@ -17,7 +17,6 @@ ENDPOINT_PATH: Final[str] = "/iss/engines/futures/markets/forts/securities.json"
 DEFAULT_BASE_URL: Final[str] = "https://iss.moex.com"
 BOARD_ID: Final[str] = "RFUD"
 MOSCOW_TZ: Final[ZoneInfo] = ZoneInfo("Europe/Moscow")
-MAX_PAGES: Final[int] = 100
 ROOTS: Final[dict[str, str]] = {"Si": "Si", "CR": "CR"}
 ROLE_INSTRUMENT_IDS: Final[dict[tuple[str, str], str]] = {
     ("Si", "front"): "si_front_contract",
@@ -89,16 +88,6 @@ def _block_to_frame(payload: Mapping[str, object], block_name: str) -> pd.DataFr
     return pd.DataFrame(rows, columns=columns)
 
 
-def _page_signature(frame: pd.DataFrame) -> tuple[object, ...]:
-    if frame.empty:
-        return (0,)
-    return (
-        len(frame.index),
-        tuple(str(value) for value in frame.iloc[0].tolist()),
-        tuple(str(value) for value in frame.iloc[-1].tolist()),
-    )
-
-
 def fetch_reference_frame(
     *,
     as_of_date: str,
@@ -110,48 +99,31 @@ def fetch_reference_frame(
     if not base:
         raise FrontNextBindingError("MOEX ISS base URL is required")
     url = base + ENDPOINT_PATH
-    frames: list[pd.DataFrame] = []
-    seen_pages: set[tuple[object, ...]] = set()
-    start = 0
-    source_url = url
-    for _ in range(MAX_PAGES):
-        response = requests.get(
-            url,
-            params={
-                "iss.meta": "off",
-                "iss.only": "securities",
-                "securities.columns": "SECID,BOARDID,LASTTRADEDATE",
-                "start": start,
-            },
-            timeout=timeout,
-            headers={"User-Agent": "moex_bot_step3_front_next/1.0"},
-        )
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, Mapping):
-            raise FrontNextBindingError("MOEX ISS response root is not an object")
-        frame = _block_to_frame(payload, "securities")
-        source_url = str(getattr(response, "url", url))
-        if frame.empty:
-            if not frames:
-                raise FrontNextBindingError("MOEX ISS securities response is empty")
-            break
-        signature = _page_signature(frame)
-        if signature in seen_pages:
-            raise FrontNextBindingError("MOEX ISS securities pagination did not advance")
-        seen_pages.add(signature)
-        frames.append(frame)
-        start += len(frame.index)
-    else:
-        raise FrontNextBindingError("MOEX ISS securities pagination exceeded max-pages guard")
+    response = requests.get(
+        url,
+        params={
+            "iss.meta": "off",
+            "iss.only": "securities",
+            "securities.columns": "SECID,BOARDID,LASTTRADEDATE",
+        },
+        timeout=timeout,
+        headers={"User-Agent": "moex_bot_step3_front_next/1.0"},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, Mapping):
+        raise FrontNextBindingError("MOEX ISS response root is not an object")
+    combined = _block_to_frame(payload, "securities")
+    source_url = str(getattr(response, "url", url))
+    if combined.empty:
+        raise FrontNextBindingError("MOEX ISS securities response is empty")
 
-    combined = pd.concat(frames, ignore_index=True)
     column_map = {str(column).upper(): column for column in combined.columns}
     dedupe_columns = [column_map[name] for name in ("SECID", "BOARDID", "LASTTRADEDATE") if name in column_map]
     if len(dedupe_columns) == 3:
         combined = combined.drop_duplicates(subset=dedupe_columns, keep="first").reset_index(drop=True)
     if combined.empty:
-        raise FrontNextBindingError("MOEX ISS securities pagination produced no rows")
+        raise FrontNextBindingError("MOEX ISS securities response produced no rows")
     return combined, source_url, _utc_now()
 
 
