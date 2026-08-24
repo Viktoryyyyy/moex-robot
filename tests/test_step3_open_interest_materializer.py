@@ -9,13 +9,13 @@ from moex_data.futures.materialize_open_interest_instrument import OpenInterestM
 def _tradestats_frame() -> pd.DataFrame:
     return pd.DataFrame(
         [
-            {"SECID": "SiU6", "TRADEDATE": "2026-08-21", "TRADETIME": "10:00:00", "OI_OPEN": 1000, "OI_HIGH": 1020, "OI_LOW": 995, "OI_CLOSE": 1010},
-            {"SECID": "SiU6", "TRADEDATE": "2026-08-21", "TRADETIME": "10:05:00", "OI_OPEN": 1010, "OI_HIGH": 1030, "OI_LOW": 1005, "OI_CLOSE": 1025},
+            {"SECID": "SiU6", "TRADEDATE": "2026-08-21", "TRADETIME": "10:00:00", "OI_OPEN": 1000, "OI_HIGH": 1020, "OI_LOW": 995, "OI_CLOSE": 1010, "SYSTIME": "2026-08-21 10:05:01"},
+            {"SECID": "SiU6", "TRADEDATE": "2026-08-21", "TRADETIME": "10:05:00", "OI_OPEN": 1010, "OI_HIGH": 1030, "OI_LOW": 1005, "OI_CLOSE": 1025, "SYSTIME": "2026-08-21 10:10:02"},
         ]
     )
 
 
-def test_open_interest_normalization_preserves_exact_source_semantics() -> None:
+def test_open_interest_normalization_preserves_exact_source_semantics_and_availability() -> None:
     result = normalize_open_interest(
         _tradestats_frame(),
         trade_date="2026-08-21",
@@ -28,6 +28,10 @@ def test_open_interest_normalization_preserves_exact_source_semantics() -> None:
     assert set(result["source_id"]) == {"moex_algopack_fo_open_interest_5m"}
     assert set(result["secid"]) == {"SiU6"}
     assert result["ts"].is_monotonic_increasing
+    assert str(result["availability_ts_utc"].dt.tz) == "UTC"
+    assert result.loc[0, "systime_source"] == "2026-08-21 10:05:01"
+    assert result.loc[0, "availability_ts_utc"].isoformat() == "2026-08-21T07:05:01+00:00"
+    assert result.loc[0, "ts"] != result.loc[0, "availability_ts_utc"].tz_localize(None)
 
 
 def test_open_interest_rejects_invalid_range() -> None:
@@ -46,6 +50,31 @@ def test_open_interest_rejects_invalid_range() -> None:
 def test_open_interest_rejects_missing_required_source_field() -> None:
     frame = _tradestats_frame().drop(columns=["OI_CLOSE"])
     with pytest.raises(OpenInterestMaterializationError, match="missing required column"):
+        normalize_open_interest(
+            frame,
+            trade_date="2026-08-21",
+            instrument_id="si_front_contract",
+            secid="SiU6",
+            source_url="https://apim.moex.com/example",
+        )
+
+
+def test_open_interest_rejects_missing_source_publication_timestamp() -> None:
+    frame = _tradestats_frame().drop(columns=["SYSTIME"])
+    with pytest.raises(OpenInterestMaterializationError, match="SYSTIME"):
+        normalize_open_interest(
+            frame,
+            trade_date="2026-08-21",
+            instrument_id="si_front_contract",
+            secid="SiU6",
+            source_url="https://apim.moex.com/example",
+        )
+
+
+def test_open_interest_rejects_invalid_source_publication_timestamp() -> None:
+    frame = _tradestats_frame()
+    frame.loc[0, "SYSTIME"] = "not-a-time"
+    with pytest.raises(OpenInterestMaterializationError, match="invalid SYSTIME"):
         normalize_open_interest(
             frame,
             trade_date="2026-08-21",
