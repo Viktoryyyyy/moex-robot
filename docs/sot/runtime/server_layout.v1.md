@@ -22,6 +22,16 @@ The parent project `.env` at `/home/trader/moex_bot/.env` is the only canonical 
 
 Commands whose implemented CLI accepts an explicit env-file argument must use `/home/trader/moex_bot/.env` when runtime secrets need to be loaded explicitly.
 
+## Applied-state dotenv invariant
+
+The canonical parent file `/home/trader/moex_bot/.env` must exist on the applied server state before runtime execution.
+
+The duplicate repository-local file `/home/trader/moex_bot/moex-robot/.env` must be absent after this runtime-path migration. It must not be copied, recreated, or used as a compatibility secret source.
+
+Python entrypoints that call `load_dotenv()` without an explicit path may rely on python-dotenv upward discovery only under this invariant: with the repository-local duplicate absent, discovery continues from the source tree through the repository root to the canonical parent file. Top-level controlled runtime launchers may instead resolve and load the canonical parent path explicitly.
+
+Removal of the duplicate repository-local `.env` is an Applied State migration step and must happen only after the canonical parent `.env` has been verified to exist. Secret values must never be printed during this verification.
+
 ## Runtime environment identity
 
 - `MOEX_DATA_ROOT=/home/trader/moex_bot/data`
