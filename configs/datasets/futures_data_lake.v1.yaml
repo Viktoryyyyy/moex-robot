@@ -79,7 +79,7 @@ instrument_scope:
     - 1h
     - 4h
 market_data_storage_policy:
-  status: stage2_raw_historical_backfills_completed_acceptance_pending
+  status: stage2_raw_history_accepted
   canonical_new_write_root: "${MOEX_DATA_ROOT}/market"
   raw_quotes_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
   futoi_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
@@ -132,8 +132,18 @@ phase2_6_source_bindings:
     - no model fitting
     - no prediction
 stage2_forts_source_bindings:
-  status: raw_historical_backfills_completed_acceptance_pending
-  evidence_date: "2026-08-21"
+  status: raw_history_accepted
+  evidence_date: "2026-08-24"
+  accepted_pointer_evidence:
+    status: completed
+    applied_state_evidence_date: "2026-08-24"
+    expected_pointer_count: 4
+    verified_pointer_count: 4
+    instrument_ids:
+      - usdrubf_futures_family
+      - cnyrubf_futures_family
+      - si_futures_family
+      - cr_futures_family
   backfill_authorization:
     status: all_pilots_passed_backfill_ready
     purpose: controlled_repair_or_extension_of_validated_history
@@ -253,7 +263,7 @@ stage2_forts_source_bindings:
     priority_futoi_raw_backfill_completed: true
     raw_physical_audit_completed: true
     reference_full_historical_backfill_required: false
-    accepted_pointer_ready: false
+    accepted_pointer_ready: true
     observed_source_refresh_ready: false
     scheduler_ready: false
     d1_materialization_ready: false

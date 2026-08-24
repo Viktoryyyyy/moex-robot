@@ -51,7 +51,10 @@ def test_raw_history_acceptance_is_registered_and_fail_closed() -> None:
     assert "quote partition ts date mismatch" in validator
     assert "FUTOI availability timestamp precedes source publication timestamp" in validator
 
-    assert "accepted_pointer_ready: false" in config
+    assert "status: stage2_raw_history_accepted" in config
+    assert "status: raw_history_accepted" in config
+    assert "accepted_pointer_ready: true" in config
+    assert "verified_pointer_count: 4" in config
     assert "scheduler_ready: false" in config
     assert "d1_materialization_ready: false" in config
     assert "research_ready: false" in config

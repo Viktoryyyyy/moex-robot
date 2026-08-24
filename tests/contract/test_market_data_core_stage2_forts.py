@@ -134,7 +134,7 @@ def test_stage2_raw_backfills_complete_but_runtime_and_research_remain_fail_clos
     assert registry.count("enabled_for_raw_5m_materialization: false") == 4
     assert registry.count("enabled_for_d1_derivation: false") == 4
     assert registry.count("enabled_for_research: false") == 4
-    assert "accepted_pointer_ready: false" in data_lake
+    assert "accepted_pointer_ready: true" in data_lake
     assert "observed_source_refresh_ready: false" in data_lake
     assert "scheduler_ready: false" in data_lake
     assert "research_ready: false" in data_lake

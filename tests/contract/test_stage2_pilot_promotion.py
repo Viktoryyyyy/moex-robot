@@ -42,7 +42,7 @@ def test_stage2_pilot_promotion_records_completed_backfills_but_keeps_runtime_cl
     assert "stage2_reference_quote_instrument_ids:" in data_lake
     assert "historical_backfill_instrument_ids:" in data_lake
     assert "reference_instrument_ids:" in data_lake
-    assert "accepted_pointer_ready: false" in data_lake
+    assert "accepted_pointer_ready: true" in data_lake
     assert "observed_source_refresh_ready: false" in data_lake
     assert "scheduler_ready: false" in data_lake
     assert "research_ready: false" in data_lake

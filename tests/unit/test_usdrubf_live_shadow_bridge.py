@@ -234,9 +234,17 @@ def test_runner_requires_explicit_flowise_config_without_safe_wait() -> None:
 
 
 def test_runner_one_shot_safe_wait_uses_explicit_state_root(monkeypatch, tmp_path) -> None:
-    now = datetime.now(MOSCOW).replace(microsecond=0)
-    current_day = now.date()
+    current_day = datetime.now(MOSCOW).date()
+    fixed_now = datetime.combine(current_day, datetime.min.time(), tzinfo=MOSCOW) + timedelta(hours=12)
     prior_day = current_day - timedelta(days=1)
+
+    class _FixedClock:
+        @staticmethod
+        def now(_tz=None):
+            return fixed_now
+
+    monkeypatch.setattr(runner, "datetime", _FixedClock)
+
     current = (
         _bar(
             datetime.combine(current_day, datetime.min.time(), tzinfo=MOSCOW) + timedelta(hours=10),
