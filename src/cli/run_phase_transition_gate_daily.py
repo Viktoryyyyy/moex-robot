@@ -3,11 +3,8 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from pathlib import Path
-
 from dotenv import load_dotenv
 
-PROJECT_ENV_PATH = Path(__file__).resolve().parents[3] / ".env"
 IN_5M = 'data/state/fo_5m_D-1.csv'
 IN_DAY = 'data/state/day_metrics_D-1.csv'
 IN_HISTORY = 'data/state/rel_range_history.csv'
@@ -21,7 +18,7 @@ def run(cmd):
         raise SystemExit(rc)
 
 def main():
-    load_dotenv(PROJECT_ENV_PATH, override=False)
+    load_dotenv()
     master_path = os.getenv('MASTER_PATH')
     if not master_path:
         raise SystemExit('MASTER_PATH is required for canonical tail refresh')
@@ -33,3 +30,4 @@ def main():
 
 if __name__ == '__main__':
     raise SystemExit(main())
+
