@@ -27,7 +27,9 @@ runtime_environment:
 - repo_root: /home/trader/moex_bot/moex-robot
 - data_root_cli_arg: /home/trader/moex_bot/data
 - pythonpath: src
-- dotenv_policy: .env may be loaded only inside Python process through python-dotenv, never by shell-sourcing as production dependency.
+- canonical_dotenv: /home/trader/moex_bot/.env
+- repository_local_dotenv: forbidden_duplicate_must_be_absent_on_applied_state
+- dotenv_policy: canonical top-level runtime loads the parent env explicitly; parameterless child discovery is permitted only when the repository-local duplicate is absent, so discovery reaches the canonical parent env; shell-sourcing .env is never a production dependency.
 
 required_canonical_stage_order:
 1. registry_refresh
@@ -93,6 +95,8 @@ acceptance_criteria:
 - Repository contains futures_universal_daily_refresh_manifest_contract.md.
 - universal_daily_refresh_runner.py requires the universal manifest contract before execution.
 - universal_daily_refresh_runner.py canonical_stage_order matches required_canonical_stage_order.
+- canonical parent dotenv path is explicit in the runtime contract.
+- applied server state has no repository-local duplicate dotenv after migration.
 - GitHub Actions tests pass before merge to origin/main.
 - Server apply happens only after origin/main contains the accepted commit.
 - Real server run writes one universal daily manifest.
