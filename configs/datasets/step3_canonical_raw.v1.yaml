@@ -1,5 +1,5 @@
 config_id: step3_canonical_raw.v1
-status: implementation_candidate_physical_pilot_pending
+status: raw_canonical_stage3_accepted
 architecture_contract_ref: contracts/architecture/moex_data_access_canon_v1.yaml
 purpose: >
   Canonical raw onboarding for Si/CR deterministic front+next quotes, CETS
@@ -70,11 +70,21 @@ physical_acceptance:
   accepted_pointer_path_pattern: "${MOEX_DATA_ROOT}/state/datasets/dataset_id={DATASET_ID}/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
   acceptance_marker_required_after_pointer_writes: true
   partial_pointer_set_without_acceptance_marker_is_not_accepted: true
+  applied_state_evidence:
+    status: accepted
+    evidence_date: "2026-08-24"
+    run_id: step3_pilot_20260824_1705
+    binding_count: 4
+    quote_partition_count: 4
+    open_interest_partition_count: 4
+    tom_partition_count: 2
+    accepted_pointer_count: 10
+    promotion_semantics: transactional_with_rollback
 
 readiness_flags:
   implementation_ready: true
-  physical_pilot_passed: false
-  accepted_pointer_ready: false
+  physical_pilot_passed: true
+  accepted_pointer_ready: true
   continuous_series_ready: false
   scheduler_ready: false
   research_ready: false
