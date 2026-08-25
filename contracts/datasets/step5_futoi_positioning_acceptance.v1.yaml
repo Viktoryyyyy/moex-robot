@@ -39,6 +39,9 @@ validation_policy:
   frozen_partition_date_set_must_equal_current_accepted_raw_date_set: true
   frozen_canonical_source_path_identity_required: true
   eod_source_frozen_ref_and_sha_lineage_required: true
+  eod_reconstruction_from_physically_revalidated_frozen_raw_required: true
+  eod_reconstruction_independent_from_eod_producer_required: true
+  eod_reconstruction_exact_field_equality_before_promotion_required: true
   root_aggregate_semantics_required: true
   front_next_split_claimed_required: false
   historical_pit_research_ready_claimed_required: false
