@@ -18,7 +18,7 @@ def test_stage5_scope_is_si_cr_root_aggregate_without_raw_rewrite_or_front_next_
     assert "front_next_split_claimed: false" in text
 
 
-def test_stage5_requires_canonical_accepted_raw_history_before_eod_reads() -> None:
+def test_stage5_requires_canonical_accepted_raw_history_and_immutable_byte_freeze() -> None:
     text = _read("configs/datasets/step5_futoi_positioning.v1.yaml")
     assert "raw_history_accepted_manifest_ref: contracts/datasets/futures_raw_history_accepted_manifest.v1.yaml" in text
     assert "accepted_raw_pointer_required: true" in text
@@ -26,6 +26,14 @@ def test_stage5_requires_canonical_accepted_raw_history_before_eod_reads() -> No
     assert "accepted_raw_manifest_date_set_digest_required: true" in text
     assert "accepted_raw_acceptance_report_sha256_required: true" in text
     assert "unaccepted_physical_partition_read_allowed: false" in text
+    assert "immutable_raw_input_freeze:" in text
+    assert "stage2_futoi_partition_validator_reapplied: true" in text
+    assert "source_bytes_sha256_required: true" in text
+    assert "frozen_bytes_sha256_required: true" in text
+    assert "freeze_mode: create_only_hardlink_same_validated_inode" in text
+    assert "hardlink_failure_fallback_allowed: false" in text
+    assert "canonical_raw_reads_after_freeze_allowed: false" in text
+    assert "frozen_partition_hash_and_physical_revalidation_at_acceptance: true" in text
 
 
 def test_stage5_revision_and_final_snapshot_policy_are_fail_closed() -> None:
@@ -38,12 +46,17 @@ def test_stage5_revision_and_final_snapshot_policy_are_fail_closed() -> None:
     assert "eod_clock_time_hardcoded: false" in text
 
 
-def test_stage5_eod_contract_covers_position_balance_and_participant_metrics() -> None:
+def test_stage5_eod_contract_covers_frozen_lineage_position_balance_and_participant_metrics() -> None:
     text = _read("contracts/datasets/futures_futoi_eod.v1.yaml")
     for token in (
         "current_pointer_required: true",
         "promotion_basis_required: raw_history_acceptance",
         "unaccepted_physical_partition_read_allowed: false",
+        "schema_version: step5_futoi_raw_frozen_input.v1",
+        "source_frozen_hash_equality_required: true",
+        "canonical_raw_reads_after_freeze_allowed: false",
+        "source_canonical_partition_ref",
+        "source_frozen_partition_sha256",
         "phys_net", "legal_net", "total_open_interest", "phys_gross", "legal_gross",
         "phys_net_share_of_oi", "phys_gross_share_of_two_sided_oi",
         "phys_avg_long_per_participant", "legal_avg_short_per_participant",
@@ -66,9 +79,15 @@ def test_stage5_feature_contract_uses_only_current_and_prior_eod_observations() 
     assert "historical_pit_research_ready_claimed: false" in text
 
 
-def test_stage5_acceptance_requires_physical_formula_and_source_revalidation_and_four_pointers() -> None:
+def test_stage5_acceptance_requires_frozen_bytes_formula_and_source_revalidation_and_four_pointers() -> None:
     text = _read("contracts/datasets/step5_futoi_positioning_acceptance.v1.yaml")
     assert "accepted_pointer_count: 4" in text
+    assert "immutable_raw_input_freeze_required: true" in text
+    assert "raw_input_freeze_mode_required: create_only_hardlink_same_validated_inode" in text
+    assert "canonical_raw_partition_reads_after_freeze_used_required: false" in text
+    assert "frozen_partition_sha256_revalidated: true" in text
+    assert "frozen_partition_stage2_futoi_physical_validator_reapplied_at_acceptance: true" in text
+    assert "eod_source_frozen_ref_and_sha_lineage_required: true" in text
     assert "physical_parquet_readback_required: true" in text
     assert "eod_accepted_raw_current_pointer_required: true" in text
     assert "eod_all_derived_metrics_recomputed: true" in text
