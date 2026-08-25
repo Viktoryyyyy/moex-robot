@@ -45,7 +45,12 @@ def fsync_generation(root: Path) -> None:
             fsync_file(child)
     for directory in sorted(directories, key=lambda value: len(value.parts), reverse=True):
         fsync_dir(directory)
+    # Persist both the generation directory entry in the attestation root and,
+    # on first publication, the attestation-root entry in accepted_manifests.
+    # Without the second fsync a power loss could recover without the entire
+    # raw_history_content_attestation directory even after returning accepted.
     fsync_dir(root.parent)
+    fsync_dir(root.parent.parent)
 
 
 def durable_replace_json(path: Path, values: Mapping[str, object]) -> str:
