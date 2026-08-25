@@ -4,7 +4,7 @@ import hashlib
 import json
 import math
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -26,6 +26,8 @@ RAW_REQUIRED: Final[tuple[str, ...]] = (
 ACCEPTED_MANIFEST_SCHEMA: Final[str] = "futures_raw_history_accepted_manifest.v1"
 ACCEPTED_MANIFEST_DATASET: Final[str] = "futures_raw_history_accepted_manifest"
 ACCEPTED_MANIFEST_PRODUCER: Final[str] = "moex_data.futures.stage2_raw_history_promotion.v1"
+FROZEN_INPUT_SCHEMA: Final[str] = "step5_futoi_raw_frozen_input.v1"
+FROZEN_INPUT_PRODUCER: Final[str] = "moex_data.futures.freeze_accepted_futoi_history.v1"
 ROOT_PREFIX: Final[str] = "${MOEX_DATA_ROOT}/"
 
 
@@ -42,6 +44,18 @@ class AcceptedHistoryScope:
     acceptance_report_ref: str
     acceptance_run_id: str
     partition_dates_sha256: str
+
+
+@dataclass(frozen=True)
+class FrozenInputScope:
+    manifest_path: Path
+    manifest_sha256: str
+    accepted_raw_pointer_ref: str
+    accepted_raw_manifest_ref: str
+    accepted_raw_acceptance_report_ref: str
+    accepted_raw_history_run_id: str
+    accepted_partition_dates_sha256: str
+    records: tuple[Mapping[str, object], ...]
 
 
 def _fail(message: str) -> None:
@@ -69,7 +83,7 @@ def _date_range(start: str, end: str) -> list[str]:
     return [(a + timedelta(days=n)).isoformat() for n in range((b - a).days + 1)]
 
 
-def _date_set_sha256(values: list[str] | tuple[str, ...]) -> str:
+def _date_set_sha256(values: Sequence[str]) -> str:
     payload = (("\n".join(values) + "\n") if values else "").encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
@@ -214,6 +228,84 @@ def raw_partition_path(data_root: Path, instrument_id: str, trade_date: str) -> 
     )
 
 
+def _load_frozen_input_scope(
+    root: Path,
+    frozen_input_manifest: str | Path,
+    instrument_id: str,
+    start_date: str,
+    end_date: str,
+) -> FrozenInputScope:
+    manifest_path = Path(frozen_input_manifest)
+    if not manifest_path.is_absolute():
+        _fail("frozen_input_manifest must be an absolute run-scoped path")
+    try:
+        manifest_path = manifest_path.resolve(strict=True)
+        manifest_path.relative_to(root.resolve(strict=True))
+    except (OSError, ValueError) as exc:
+        raise FutoiEodError("frozen_input_manifest must be inside MOEX_DATA_ROOT") from exc
+    manifest = _load_json(manifest_path, "frozen input manifest")
+    if manifest.get("schema_version") != FROZEN_INPUT_SCHEMA or manifest.get("producer") != FROZEN_INPUT_PRODUCER:
+        _fail("frozen input manifest schema/producer mismatch")
+    if manifest.get("dataset_id") != SOURCE_DATASET_ID or manifest.get("instrument_id") != instrument_id:
+        _fail("frozen input manifest identity mismatch")
+    if manifest.get("requested_from") != start_date or manifest.get("requested_till") != end_date:
+        _fail("frozen input manifest requested range mismatch")
+    if manifest.get("physical_validation") != "stage2_futoi_partition_validator_reapplied":
+        _fail("frozen input manifest physical validation evidence mismatch")
+    if manifest.get("freeze_mode") != "create_only_hardlink_same_validated_inode":
+        _fail("frozen input manifest freeze mode mismatch")
+    if manifest.get("network_calls_used") is not False or manifest.get("latest_autodetect_used") is not False:
+        _fail("frozen input manifest execution-boundary evidence mismatch")
+
+    accepted = _accepted_history_scope(root, instrument_id, start_date, end_date)
+    for field, expected in (
+        ("accepted_raw_pointer_ref", accepted.pointer_ref),
+        ("accepted_raw_manifest_ref", accepted.manifest_ref),
+        ("accepted_raw_acceptance_report_ref", accepted.acceptance_report_ref),
+        ("accepted_raw_history_run_id", accepted.acceptance_run_id),
+        ("accepted_partition_dates_sha256", accepted.partition_dates_sha256),
+    ):
+        if manifest.get(field) != expected:
+            _fail("frozen input accepted-raw binding mismatch: " + field)
+
+    records = manifest.get("records")
+    if isinstance(records, (str, bytes)) or not isinstance(records, Sequence):
+        _fail("frozen input records must be a sequence")
+    if int(manifest.get("partition_count") or 0) != len(records) or len(records) != len(accepted.accepted_dates):
+        _fail("frozen input partition count mismatch")
+    record_dates: list[str] = []
+    checked_records: list[Mapping[str, object]] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            _fail("frozen input record must be an object")
+        trade_date = _iso_date(record.get("trade_date"), "frozen input trade_date")
+        record_dates.append(trade_date)
+        frozen_path = _expand_root_ref(root, record.get("frozen_partition_ref"), "frozen_partition_ref")
+        frozen_sha = str(record.get("frozen_sha256") or "").strip().lower()
+        source_sha = str(record.get("source_sha256_at_freeze") or "").strip().lower()
+        if len(frozen_sha) != 64 or frozen_sha != source_sha:
+            _fail("frozen input source/frozen SHA binding mismatch")
+        if hashlib.sha256(frozen_path.read_bytes()).hexdigest() != frozen_sha:
+            _fail("frozen input partition SHA-256 mismatch")
+        if record.get("hardlink_same_validated_inode") is not True or record.get("physical_validation_status") != "pass":
+            _fail("frozen input inode/physical validation evidence mismatch")
+        checked_records.append(record)
+    if tuple(record_dates) != accepted.accepted_dates:
+        _fail("frozen input record dates differ from accepted raw date set")
+    if _date_set_sha256(record_dates) != accepted.partition_dates_sha256:
+        _fail("frozen input record date digest mismatch")
+    return FrozenInputScope(
+        manifest_path=manifest_path,
+        manifest_sha256=hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+        accepted_raw_pointer_ref=accepted.pointer_ref,
+        accepted_raw_manifest_ref=accepted.manifest_ref,
+        accepted_raw_acceptance_report_ref=accepted.acceptance_report_ref,
+        accepted_raw_history_run_id=accepted.acceptance_run_id,
+        accepted_partition_dates_sha256=accepted.partition_dates_sha256,
+        records=tuple(checked_records),
+    )
+
+
 def _localize_exchange(series: pd.Series, field: str) -> tuple[pd.Series, pd.Series]:
     parsed = pd.to_datetime(series, errors="coerce")
     if bool(parsed.isna().any()):
@@ -312,7 +404,15 @@ def _average(position: int, count: int, field: str) -> float | None:
     return float(position) / float(count)
 
 
-def _single_eod_row(frame: pd.DataFrame, *, instrument_id: str, trade_date: str, source_ref: str) -> dict[str, object]:
+def _single_eod_row(
+    frame: pd.DataFrame,
+    *,
+    instrument_id: str,
+    trade_date: str,
+    frozen_ref: str,
+    canonical_source_ref: str,
+    frozen_sha256: str,
+) -> dict[str, object]:
     work = _validate_raw(frame, instrument_id=instrument_id, trade_date=trade_date)
     resolved, revisions_dropped = _resolve_revisions(work)
     final_ts = resolved["_ts_utc"].max()
@@ -393,11 +493,20 @@ def _single_eod_row(frame: pd.DataFrame, *, instrument_id: str, trade_date: str,
         "legal_avg_short_per_participant": _average(legal_short_abs, legal_short_num, "legal_short"),
         "source_row_count": int(len(work.index)),
         "source_revision_rows_dropped": revisions_dropped,
-        "source_partition_ref": source_ref,
+        "source_partition_ref": frozen_ref,
+        "source_canonical_partition_ref": canonical_source_ref,
+        "source_frozen_partition_sha256": frozen_sha256,
     }
 
 
-def build_eod_history(*, data_root: str | Path, instrument_id: str, start_date: str, end_date: str) -> tuple[pd.DataFrame, list[str], AcceptedHistoryScope]:
+def build_eod_history(
+    *,
+    data_root: str | Path,
+    frozen_input_manifest: str | Path,
+    instrument_id: str,
+    start_date: str,
+    end_date: str,
+) -> tuple[pd.DataFrame, list[str], FrozenInputScope]:
     root = Path(data_root).resolve()
     instrument = _safe_token(instrument_id, "instrument_id")
     if instrument not in MANDATORY_INSTRUMENTS:
@@ -406,26 +515,32 @@ def build_eod_history(*, data_root: str | Path, instrument_id: str, start_date: 
     end = _iso_date(end_date, "end_date")
     if start > end:
         _fail("start_date must be <= end_date")
-    scope = _accepted_history_scope(root, instrument, start, end)
+    frozen = _load_frozen_input_scope(root, frozen_input_manifest, instrument, start, end)
     rows: list[dict[str, object]] = []
     inputs: list[str] = []
-    for trade_date in scope.accepted_dates:
-        partition = raw_partition_path(root, instrument, trade_date)
-        if not partition.is_file() or partition.is_symlink():
-            _fail("accepted raw FUTOI partition is missing or not a regular file: " + trade_date)
-        try:
-            resolved = partition.resolve(strict=True)
-            rel = resolved.relative_to(root.resolve(strict=True))
-        except (OSError, ValueError) as exc:
-            raise FutoiEodError("accepted raw partition escaped data root") from exc
-        frame = pd.read_parquet(resolved)
-        source_ref = ROOT_PREFIX + rel.as_posix()
-        rows.append(_single_eod_row(frame, instrument_id=instrument, trade_date=trade_date, source_ref=source_ref))
-        inputs.append(source_ref)
+    for record in frozen.records:
+        trade_date = str(record["trade_date"])
+        frozen_ref = str(record["frozen_partition_ref"])
+        frozen_path = _expand_root_ref(root, frozen_ref, "frozen_partition_ref")
+        expected_sha = str(record["frozen_sha256"])
+        if hashlib.sha256(frozen_path.read_bytes()).hexdigest() != expected_sha:
+            _fail("frozen partition changed before EOD read")
+        frame = pd.read_parquet(frozen_path)
+        rows.append(
+            _single_eod_row(
+                frame,
+                instrument_id=instrument,
+                trade_date=trade_date,
+                frozen_ref=frozen_ref,
+                canonical_source_ref=str(record["canonical_source_ref"]),
+                frozen_sha256=expected_sha,
+            )
+        )
+        inputs.append(frozen_ref)
     result = pd.DataFrame(rows).sort_values("trade_date").reset_index(drop=True)
     if result.empty or result.duplicated(subset=["instrument_id", "trade_date"]).any():
         _fail("derived EOD is empty or contains duplicate instrument/trade_date")
-    return result, inputs, scope
+    return result, inputs, frozen
 
 
 def _atomic_json(path: Path, values: Mapping[str, object]) -> None:
@@ -452,6 +567,7 @@ def materialize_eod_history(
     *,
     data_root: str | Path,
     output_root: str | Path,
+    frozen_input_manifest: str | Path,
     instrument_id: str,
     start_date: str,
     end_date: str,
@@ -459,8 +575,9 @@ def materialize_eod_history(
 ) -> dict[str, object]:
     checked_run = _safe_token(run_id, "run_id")
     checked_instrument = _safe_token(instrument_id, "instrument_id")
-    frame, inputs, scope = build_eod_history(
+    frame, inputs, frozen = build_eod_history(
         data_root=data_root,
+        frozen_input_manifest=frozen_input_manifest,
         instrument_id=checked_instrument,
         start_date=start_date,
         end_date=end_date,
@@ -485,10 +602,10 @@ def materialize_eod_history(
         "duplicate_identity_count": int(frame.duplicated(subset=["instrument_id", "trade_date"]).sum()),
         "input_partition_count": len(inputs),
         "source_revision_rows_dropped": int(frame["source_revision_rows_dropped"].sum()),
-        "missing_calendar_date_count": len(scope.missing_requested_dates),
-        "accepted_raw_history_required": True,
-        "accepted_raw_history_run_id": scope.acceptance_run_id,
-        "accepted_raw_partition_dates_sha256": scope.partition_dates_sha256,
+        "accepted_raw_history_run_id": frozen.accepted_raw_history_run_id,
+        "accepted_raw_partition_dates_sha256": frozen.accepted_partition_dates_sha256,
+        "frozen_input_manifest_sha256": frozen.manifest_sha256,
+        "immutable_frozen_input_required": True,
         "root_aggregate_semantics": True,
         "front_next_split_claimed": False,
         "historical_pit_research_ready_claimed": False,
@@ -504,16 +621,19 @@ def materialize_eod_history(
         "partition_path": partition.as_posix(),
         "quality_report_path": quality.as_posix(),
         "input_partition_count": len(inputs),
-        "input_partition_refs": inputs,
-        "missing_calendar_dates": list(scope.missing_requested_dates),
-        "accepted_raw_pointer_ref": scope.pointer_ref,
-        "accepted_raw_manifest_ref": scope.manifest_ref,
-        "accepted_raw_acceptance_report_ref": scope.acceptance_report_ref,
-        "accepted_raw_history_run_id": scope.acceptance_run_id,
-        "accepted_raw_partition_dates_sha256": scope.partition_dates_sha256,
+        "input_frozen_partition_refs": inputs,
+        "frozen_input_manifest_path": frozen.manifest_path.as_posix(),
+        "frozen_input_manifest_ref": _rooted_ref(Path(data_root).resolve(), frozen.manifest_path),
+        "frozen_input_manifest_sha256": frozen.manifest_sha256,
+        "accepted_raw_pointer_ref": frozen.accepted_raw_pointer_ref,
+        "accepted_raw_manifest_ref": frozen.accepted_raw_manifest_ref,
+        "accepted_raw_acceptance_report_ref": frozen.accepted_raw_acceptance_report_ref,
+        "accepted_raw_history_run_id": frozen.accepted_raw_history_run_id,
+        "accepted_raw_partition_dates_sha256": frozen.accepted_partition_dates_sha256,
         "producer": "moex_data.futures.materialize_futoi_eod.v1",
         "network_calls_used": False,
         "latest_autodetect_used": False,
+        "canonical_raw_partition_reads_used": False,
         "revision_policy": "same_analytical_key_single_sess_id_then_max_seqnum",
         "snapshot_policy": "max_resolved_ts_requires_FIZ_and_YUR",
         "build_ts_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
@@ -534,10 +654,11 @@ def materialize_eod_history(
         "input_partition_count": len(inputs),
         "min_trade_date": str(frame["trade_date"].min()),
         "max_trade_date": str(frame["trade_date"].max()),
-        "accepted_raw_pointer_ref": scope.pointer_ref,
-        "accepted_raw_manifest_ref": scope.manifest_ref,
-        "accepted_raw_history_run_id": scope.acceptance_run_id,
+        "frozen_input_manifest_path": frozen.manifest_path.as_posix(),
+        "frozen_input_manifest_sha256": frozen.manifest_sha256,
+        "accepted_raw_history_run_id": frozen.accepted_raw_history_run_id,
         "network_calls_used": False,
         "latest_autodetect_used": False,
+        "canonical_raw_partition_reads_used": False,
         "front_next_split_claimed": False,
     }
