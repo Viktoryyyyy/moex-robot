@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Final
 
+from moex_data.futures.freeze_accepted_futoi_history import freeze_accepted_history
 from moex_data.futures.materialize_futoi_eod import materialize_eod_history
 from moex_data.futures.materialize_futoi_positioning_features_d1 import materialize_features
 
@@ -80,20 +81,38 @@ def run_pilot(*, artifact_version: str, env_file: str | None = CANONICAL_ENV_PAT
     if run_root.exists() or evidence_dir.exists():
         _fail("immutable Stage 5 run_id already exists")
 
+    frozen_inputs: list[dict[str, object]] = []
     eod_outputs: list[dict[str, object]] = []
     feature_outputs: list[dict[str, object]] = []
     for instrument_id, (start_date, end_date, expected_partitions) in HISTORY.items():
+        freeze_run = run_id + "_" + instrument_id + "_raw_freeze"
+        frozen = freeze_accepted_history(
+            data_root=root,
+            output_root=run_root,
+            repo_root=Path.cwd(),
+            instrument_id=instrument_id,
+            start_date=start_date,
+            end_date=end_date,
+            run_id=freeze_run,
+        )
+        if int(frozen["partition_count"]) != expected_partitions or frozen["physical_validation_status"] != "pass":
+            _fail("Stage 5 frozen raw partition count/quality mismatch for " + instrument_id)
+        frozen_inputs.append(frozen)
+
         eod_run = run_id + "_" + instrument_id + "_eod"
         eod = materialize_eod_history(
             data_root=root,
             output_root=run_root,
+            frozen_input_manifest=str(frozen["manifest_path"]),
             instrument_id=instrument_id,
             start_date=start_date,
             end_date=end_date,
             run_id=eod_run,
         )
         if int(eod["input_partition_count"]) != expected_partitions or int(eod["row_count"]) != expected_partitions:
-            _fail("Stage 5 historical partition/EOD count mismatch for " + instrument_id)
+            _fail("Stage 5 historical frozen-input/EOD count mismatch for " + instrument_id)
+        if eod.get("canonical_raw_partition_reads_used") is not False:
+            _fail("Stage 5 EOD must not read mutable canonical raw partitions")
         eod_outputs.append(eod)
 
         feature_run = run_id + "_" + instrument_id + "_features"
@@ -120,6 +139,9 @@ def run_pilot(*, artifact_version: str, env_file: str | None = CANONICAL_ENV_PAT
         "raw_ingestion_changed": False,
         "network_calls_used": False,
         "latest_autodetect_used": False,
+        "canonical_raw_partition_reads_after_freeze_used": False,
+        "immutable_raw_input_freeze_used": True,
+        "raw_input_freeze_mode": "create_only_hardlink_same_validated_inode",
         "root_aggregate_semantics": True,
         "front_next_split_claimed": False,
         "historical_pit_research_ready_claimed": False,
@@ -127,6 +149,7 @@ def run_pilot(*, artifact_version: str, env_file: str | None = CANONICAL_ENV_PAT
         "snapshot_policy": "max_resolved_ts_requires_FIZ_and_YUR",
         "counts": {
             "mandatory_instruments": 2,
+            "frozen_raw_inputs": len(frozen_inputs),
             "eod_outputs": len(eod_outputs),
             "feature_outputs": len(feature_outputs),
             "expected_accepted_pointers": 4,
@@ -139,6 +162,7 @@ def run_pilot(*, artifact_version: str, env_file: str | None = CANONICAL_ENV_PAT
             }
             for instrument_id, values in HISTORY.items()
         },
+        "frozen_inputs": frozen_inputs,
         "eod_outputs": eod_outputs,
         "feature_outputs": feature_outputs,
         "created_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
@@ -150,7 +174,7 @@ def run_pilot(*, artifact_version: str, env_file: str | None = CANONICAL_ENV_PAT
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run immutable Stage 5 Si/CR FUTOI EOD and positioning-feature pilot.")
+    parser = argparse.ArgumentParser(description="Run immutable Stage 5 Si/CR FUTOI raw-freeze, EOD and positioning-feature pilot.")
     parser.add_argument("--artifact-version", required=True)
     parser.add_argument("--env-file", default=CANONICAL_ENV_PATH)
     return parser.parse_args(argv)
