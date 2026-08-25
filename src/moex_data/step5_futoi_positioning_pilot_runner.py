@@ -1,0 +1,171 @@
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import tempfile
+from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Final
+
+from moex_data.futures.materialize_futoi_eod import materialize_eod_history
+from moex_data.futures.materialize_futoi_positioning_features_d1 import materialize_features
+
+CANONICAL_ENV_PATH: Final[str] = "/home/trader/moex_bot/.env"
+RUN_SUBPATH: Final[tuple[str, ...]] = ("runs", "step5_futoi_positioning")
+HISTORY: Final[dict[str, tuple[str, str, int]]] = {
+    "si_futures_family": ("2020-01-03", "2026-08-17", 1757),
+    "cr_futures_family": ("2022-04-21", "2026-08-17", 1177),
+}
+
+
+class Step5PilotError(ValueError):
+    pass
+
+
+def _fail(message: str) -> None:
+    raise Step5PilotError(message)
+
+
+def _safe_token(value: object, field: str) -> str:
+    text = str(value or "").strip()
+    if not text or text in {".", ".."} or "/" in text or "\\" in text or any(x in text for x in ("*", "{", "}", "$(", "`")):
+        _fail(field + " must be an explicit safe token")
+    return text
+
+
+def load_env_file(path: str | None) -> None:
+    if not path:
+        return
+    env_path = Path(path)
+    if not env_path.is_file():
+        _fail("env_file does not exist")
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def _data_root() -> Path:
+    value = str(os.environ.get("MOEX_DATA_ROOT", "")).strip()
+    if not value:
+        _fail("MOEX_DATA_ROOT is required")
+    root = Path(value)
+    if not root.is_absolute():
+        _fail("MOEX_DATA_ROOT must be absolute")
+    return root.resolve()
+
+
+def _atomic_json(path: Path, values: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False, suffix=".tmp") as handle:
+        json.dump(values, handle, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+        handle.write("\n")
+        temp = Path(handle.name)
+    temp.replace(path)
+
+
+def run_pilot(*, artifact_version: str, env_file: str | None = CANONICAL_ENV_PATH) -> dict[str, object]:
+    load_env_file(env_file)
+    run_id = _safe_token(artifact_version, "artifact_version")
+    root = _data_root()
+    run_root = root.joinpath(*RUN_SUBPATH, "run_id=" + run_id)
+    evidence_dir = root / "state" / "acceptance" / "step5_futoi_positioning" / ("run_id=" + run_id)
+    if run_root.exists() or evidence_dir.exists():
+        _fail("immutable Stage 5 run_id already exists")
+
+    eod_outputs: list[dict[str, object]] = []
+    feature_outputs: list[dict[str, object]] = []
+    for instrument_id, (start_date, end_date, expected_partitions) in HISTORY.items():
+        eod_run = run_id + "_" + instrument_id + "_eod"
+        eod = materialize_eod_history(
+            data_root=root,
+            output_root=run_root,
+            instrument_id=instrument_id,
+            start_date=start_date,
+            end_date=end_date,
+            run_id=eod_run,
+        )
+        if int(eod["input_partition_count"]) != expected_partitions or int(eod["row_count"]) != expected_partitions:
+            _fail("Stage 5 historical partition/EOD count mismatch for " + instrument_id)
+        eod_outputs.append(eod)
+
+        feature_run = run_id + "_" + instrument_id + "_features"
+        features = materialize_features(
+            eod_partition=str(eod["partition_path"]),
+            output_root=run_root,
+            instrument_id=instrument_id,
+            run_id=feature_run,
+        )
+        if int(features["row_count"]) != expected_partitions:
+            _fail("Stage 5 feature row count mismatch for " + instrument_id)
+        feature_outputs.append(features)
+
+    evidence: dict[str, object] = {
+        "project": "MOEX_Bot",
+        "step": 5,
+        "status": "pilot_passed",
+        "artifact_version": run_id,
+        "run_id": run_id,
+        "run_root": run_root.as_posix(),
+        "source_data_root": root.as_posix(),
+        "run_artifacts_immutable": True,
+        "run_id_reuse_allowed": False,
+        "raw_ingestion_changed": False,
+        "network_calls_used": False,
+        "latest_autodetect_used": False,
+        "root_aggregate_semantics": True,
+        "front_next_split_claimed": False,
+        "historical_pit_research_ready_claimed": False,
+        "revision_policy": "same_analytical_key_single_sess_id_then_max_seqnum",
+        "snapshot_policy": "max_resolved_ts_requires_FIZ_and_YUR",
+        "counts": {
+            "mandatory_instruments": 2,
+            "eod_outputs": len(eod_outputs),
+            "feature_outputs": len(feature_outputs),
+            "expected_accepted_pointers": 4,
+        },
+        "histories": {
+            instrument_id: {
+                "start_date": values[0],
+                "end_date": values[1],
+                "expected_raw_partitions": values[2],
+            }
+            for instrument_id, values in HISTORY.items()
+        },
+        "eod_outputs": eod_outputs,
+        "feature_outputs": feature_outputs,
+        "created_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+    }
+    evidence_path = evidence_dir / "pilot_evidence.json"
+    _atomic_json(evidence_path, evidence)
+    evidence["evidence_path"] = evidence_path.as_posix()
+    return evidence
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run immutable Stage 5 Si/CR FUTOI EOD and positioning-feature pilot.")
+    parser.add_argument("--artifact-version", required=True)
+    parser.add_argument("--env-file", default=CANONICAL_ENV_PATH)
+    return parser.parse_args(argv)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
+    try:
+        result = run_pilot(artifact_version=args.artifact_version, env_file=args.env_file)
+    except Exception as exc:
+        print(json.dumps({"project": "MOEX_Bot", "step": 5, "status": "pilot_failed", "error": str(exc)}, ensure_ascii=False))
+        return 1
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
