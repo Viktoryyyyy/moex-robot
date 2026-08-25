@@ -1,0 +1,36 @@
+contract_id: futures_raw_history_content_attestation.v1
+status: implementation_candidate
+purpose: >
+  Bind Stage 2 accepted raw-history evidence to the exact bytes of every accepted
+  canonical partition so downstream consumers can reject later replacement bytes.
+covered_target_datasets:
+  - futures_raw_5m
+  - futures_futoi_raw
+partition_content_policy:
+  digest_algorithm: sha256
+  digest_input: exact_parquet_file_bytes
+  one_digest_per_accepted_trade_date: true
+  accepted_partition_only: true
+  missing_partition_digest_allowed: false
+  duplicate_trade_date_allowed: false
+  deterministic_order: ascending_trade_date
+  aggregate_digest_required: true
+  aggregate_serialization: trade_date_tab_sha256_newline
+acceptance_report_requirements:
+  partition_content_sha256_by_trade_date_required: true
+  partition_content_set_sha256_required: true
+  physical_validation_before_hash_binding_required: true
+  hash_and_validation_same_opened_inode_required: true
+promotion_requirements:
+  accepted_manifest_copies_partition_content_digests: true
+  accepted_manifest_copies_partition_content_set_sha256: true
+  report_snapshot_sha256_required: true
+  promotion_must_not_reread_mutable_partition_bytes: true
+downstream_policy:
+  consumer_must_verify_source_partition_sha256_against_accepted_manifest: true
+  current_date_set_match_without_content_match_is_insufficient: true
+execution_boundary:
+  network_access_allowed: false
+  historical_backfill_allowed: false
+  latest_autodetect_allowed: false
+  canonical_raw_mutation_allowed: false
