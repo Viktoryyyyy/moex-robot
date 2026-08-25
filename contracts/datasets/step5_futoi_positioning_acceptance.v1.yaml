@@ -28,10 +28,17 @@ validation_policy:
   all_artifacts_inside_declared_run_root: true
   physical_parquet_readback_required: true
   manifest_quality_identity_and_row_count_match_required: true
+  eod_accepted_raw_current_pointer_required: true
+  eod_accepted_raw_promotion_basis_required: raw_history_acceptance
   eod_required_schema_complete: true
   eod_balance_invariants_revalidated: true
+  eod_all_derived_metrics_recomputed: true
+  eod_participant_average_zero_count_rules_revalidated: true
   eod_final_snapshot_timestamp_metadata_valid: true
   feature_required_schema_complete: true
+  feature_source_eod_identity_exact_match_required: true
+  feature_source_eod_timestamp_exact_match_required: true
+  feature_source_eod_base_columns_exact_match_required: true
   feature_changes_recomputed: true
   feature_rolling_zscores_recomputed: true
   feature_rolling_percentiles_recomputed: true
