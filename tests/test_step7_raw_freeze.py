@@ -15,7 +15,10 @@ def test_freeze_hardlink_remains_bound_to_validated_bytes_after_canonical_replac
     source.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame({"marker": [1]}).to_parquet(source, index=False)
 
-    monkeypatch.setattr(freeze.stage2, "_expectation", lambda *args, **kwargs: object())
+    def stale_pre_promotion_gate(*args, **kwargs):
+        raise AssertionError("legacy stage2 _expectation must not be called by Stage 7 runtime")
+
+    monkeypatch.setattr(freeze.stage2, "_expectation", stale_pre_promotion_gate)
     monkeypatch.setattr(freeze.stage2, "_validate_quote_partition", lambda *args, **kwargs: (1, ("USDRUBF",)))
 
     run_root = tmp_path / "runs" / "step7_fixture"
