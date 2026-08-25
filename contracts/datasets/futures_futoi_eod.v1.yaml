@@ -14,6 +14,15 @@ identity_model:
   source_scope: root_aggregate_futoi
   front_next_split_available_from_source: false
 source_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
+accepted_raw_history:
+  acceptance_contract_ref: contracts/datasets/futures_raw_history_acceptance.v1.yaml
+  accepted_manifest_contract_ref: contracts/datasets/futures_raw_history_accepted_manifest.v1.yaml
+  current_pointer_required: true
+  pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_futoi_raw/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+  promotion_basis_required: raw_history_acceptance
+  accepted_manifest_partition_date_digest_required: true
+  acceptance_report_sha256_required: true
+  unaccepted_physical_partition_read_allowed: false
 revision_resolution:
   analytical_key_fields:
     - trade_date
@@ -79,17 +88,20 @@ required_columns:
   - legal_avg_short_per_participant
   - source_row_count
   - source_revision_rows_dropped
+  - source_partition_ref
 position_invariants:
   phys_net_plus_legal_net_equals_zero: true
   total_open_interest_formula: phys_long + legal_long
   total_short_abs_formula: phys_short_abs + legal_short_abs
   total_open_interest_equals_total_short_abs: true
+  gross_formula: long + short_abs
   gross_denominator: 2 * total_open_interest
   total_open_interest_must_be_positive: true
   position_values_must_be_finite_integral: true
   participant_counts_must_be_nonnegative_integral: true
   nonzero_position_with_zero_participant_count: fail_closed
 quality_checks:
+  - accepted_raw_history_lineage_valid
   - nonzero_row_count
   - unique_instrument_trade_date
   - chronological_trade_date
@@ -98,7 +110,8 @@ quality_checks:
   - balanced_net_positions
   - balanced_long_short_open_interest
   - positive_total_open_interest
-  - finite_shares
+  - recomputed_gross_and_share_metrics
+  - recomputed_participant_averages
   - participant_count_denominator_safety
   - source_lineage_present
 accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_futoi_eod/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
