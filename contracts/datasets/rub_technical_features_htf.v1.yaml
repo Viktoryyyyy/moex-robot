@@ -1,0 +1,83 @@
+contract_id: rub_technical_features_htf.v1
+dataset_id: rub_technical_features_htf
+artifact_class: external_pattern
+producer: moex_data.step7_rub_native_d1_w1_materializer
+format: parquet
+schema_version: rub_technical_features_htf.v1
+storage_root_ref: MOEX_DATA_ROOT
+grain: one_row_per_instrument_period
+source_dataset_ref: contracts/datasets/rub_native_ohlcv_htf.v1.yaml
+identity_model:
+  mandatory_instrument_ids:
+    - usdrubf_futures_family
+    - cnyrubf_futures_family
+  supported_timeframes:
+    - 1D
+    - 1W
+causality:
+  future_rows_allowed: false
+  current_and_prior_rows_only: true
+  source_availability_inherited: true
+required_columns:
+  - instrument_id
+  - secid
+  - timeframe
+  - period_start_date
+  - period_end_date
+  - availability_ts_utc
+  - close
+  - return_1obs
+  - gap_abs
+  - gap_pct
+  - range_abs
+  - true_range
+  - atr_14_wilder
+  - atr_20_wilder
+  - higher_high_vs_prev_bar
+  - higher_low_vs_prev_bar
+  - lower_high_vs_prev_bar
+  - lower_low_vs_prev_bar
+  - close_break_prev_high
+  - close_break_prev_low
+  - source_ohlcv_run_id
+  - build_ts_utc
+formula_policy:
+  return_1obs: close / previous_close - 1
+  gap_abs: open - previous_close
+  gap_pct: open / previous_close - 1
+  range_abs: high - low
+  true_range: max(high-low, abs(high-previous_close), abs(low-previous_close))
+  first_true_range_without_previous_close: high - low
+  atr_14_wilder:
+    window: 14
+    seed: arithmetic_mean_first_14_true_ranges
+    recurrence: previous_atr + (current_true_range - previous_atr) / 14
+  atr_20_wilder:
+    window: 20
+    seed: arithmetic_mean_first_20_true_ranges
+    recurrence: previous_atr + (current_true_range - previous_atr) / 20
+  higher_high_vs_prev_bar: high > previous_high
+  higher_low_vs_prev_bar: low > previous_low
+  lower_high_vs_prev_bar: high < previous_high
+  lower_low_vs_prev_bar: low < previous_low
+  close_break_prev_high: close > previous_high
+  close_break_prev_low: close < previous_low
+null_policy:
+  first_row_return_gap_and_previous_bar_relations: null
+  atr_before_seed_window_complete: null
+  no_forward_fill: true
+  no_backfill: true
+explicitly_deferred_features:
+  - ema_filter_until_exact_window_approved
+  - realized_volatility_until_exact_window_and_annualization_approved
+  - range_percentile_until_exact_window_approved
+  - swing_high_low_until_causal_confirmation_policy_approved
+  - break_of_structure_until_swing_policy_approved
+quality_checks:
+  - exact_source_identity_and_period_match
+  - formula_recalculation_pass
+  - boolean_relation_domain_valid
+  - finite_non_null_features
+  - no_future_rows
+accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=rub_technical_features_htf/timeframe={TIMEFRAME}/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+retention_policy: keep_all_accepted_run_scoped_outputs
