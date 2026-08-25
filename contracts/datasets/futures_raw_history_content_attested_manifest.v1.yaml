@@ -1,0 +1,59 @@
+contract_id: futures_raw_history_content_attested_manifest.v1
+dataset_id: futures_raw_history_accepted_manifest
+artifact_class: external_pattern
+producer: moex_data.futures.stage2_raw_history_content_reattestation
+format: json
+schema_version: futures_raw_history_content_attested_manifest.v1
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/state/accepted_manifests/target_dataset_id={TARGET_DATASET_ID}/instrument_id={INSTRUMENT_ID}/acceptance_run_id={ACCEPTANCE_RUN_ID}/accepted_manifest.json"
+grain: content_attested_history_manifest_by_target_dataset_instrument_and_run
+required_fields:
+  - schema_version
+  - producer
+  - dataset_id
+  - target_dataset_id
+  - target_dataset_contract_ref
+  - instrument_id
+  - acceptance_run_id
+  - acceptance_contract_ref
+  - source_acceptance_report_ref
+  - acceptance_report_ref
+  - acceptance_report_sha256
+  - source_id
+  - secid_scope
+  - requested_from
+  - requested_till
+  - partition_count
+  - row_count
+  - partition_dates_sha256
+  - missing_partition_dates
+  - missing_dates_sha256
+  - calendar_missing_partition_count
+  - partition_content_records
+  - partition_content_set_sha256
+  - prior_accepted_run_id
+  - prior_accepted_manifest_ref
+  - prior_accepted_manifest_sha256
+  - prior_pointer_sha256
+  - acceptance_status
+  - network_access_used
+  - historical_backfill_used
+  - promotion_basis
+content_attestation_policy:
+  partition_digest_algorithm: sha256
+  exact_file_bytes_required: true
+  physical_validation_and_digest_same_bytes_required: true
+  deterministic_record_order: ascending_trade_date
+  aggregate_serialization: trade_date_tab_sha256_newline
+  prior_pointer_identity_required: true
+  prior_state_must_remain_unchanged_until_pointer_transaction: true
+promotion_policy:
+  promotion_basis: raw_history_content_attestation
+  four_pointer_transaction_required_for_controlled_batch: true
+  rollback_required: true
+  final_marker_same_transaction_required: true
+  pointer_absence_window_allowed: false
+execution_boundary:
+  network_access_allowed: false
+  historical_backfill_allowed: false
+  canonical_raw_mutation_allowed: false
