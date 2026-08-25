@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from . import stage2_raw_history_content_reattestation_durability as _durability
 
-# Keep the large, already-reviewed implementation body non-executable.  Execute it
-# into this canonical module namespace with a non-__main__ name so its historical
-# CLI guard cannot run before the durability override below is installed.
+# Execute the reviewed implementation body under the canonical import name so
+# dataclasses and other module-aware machinery can resolve cls.__module__ via
+# sys.modules.  When invoked with `python -m`, __name__ starts as __main__;
+# register the same module object under its canonical name before exec so the
+# implementation's own __main__ guard cannot run before the durability override.
 _IMPL_PATH = Path(__file__).with_name("stage2_raw_history_content_reattestation_impl.inc")
 _REAL_NAME = __name__
-globals()["__name__"] = "moex_data.futures.stage2_raw_history_content_reattestation._impl"
+_CANONICAL_NAME = "moex_data.futures.stage2_raw_history_content_reattestation"
+_current_module = sys.modules[_REAL_NAME]
+_existing_canonical = sys.modules.get(_CANONICAL_NAME)
+if _existing_canonical is not None and _existing_canonical is not _current_module:
+    raise RuntimeError("canonical content-reattestation module already loaded as a different object")
+sys.modules[_CANONICAL_NAME] = _current_module
+globals()["__name__"] = _CANONICAL_NAME
 try:
     exec(compile(_IMPL_PATH.read_text(encoding="utf-8"), _IMPL_PATH.as_posix(), "exec"), globals(), globals())
 finally:
