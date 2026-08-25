@@ -7,9 +7,17 @@ purpose: >
 
 upstream:
   raw_dataset_ref: contracts/datasets/futures_futoi_raw.v1.yaml
+  raw_history_acceptance_ref: contracts/datasets/futures_raw_history_acceptance.v1.yaml
+  raw_history_accepted_manifest_ref: contracts/datasets/futures_raw_history_accepted_manifest.v1.yaml
   source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v1.yaml
   raw_ingestion_changed_by_step5: false
   raw_revisions_preserved: true
+  accepted_raw_pointer_required: true
+  accepted_raw_pointer_path: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_futoi_raw/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+  accepted_raw_promotion_basis_required: raw_history_acceptance
+  accepted_raw_manifest_date_set_digest_required: true
+  accepted_raw_acceptance_report_sha256_required: true
+  unaccepted_physical_partition_read_allowed: false
 
 scope:
   mandatory_instrument_ids:
@@ -62,6 +70,7 @@ positioning_policy:
 feature_policy:
   output_dataset_ref: contracts/datasets/futures_futoi_positioning_features_d1.v1.yaml
   source: run_scoped_futures_futoi_eod
+  source_identity_timestamp_base_equality_required_at_acceptance: true
   causality: current_and_past_eod_only
   observation_lags:
     daily_change: 1
@@ -91,6 +100,7 @@ physical_pilot:
     cr_futures_family:
       start_date: "2022-04-21"
   immutable_run_required: true
+  accepted_raw_history_required: true
   raw_network_calls_allowed: false
   raw_api_latest_allowed: false
   expected_eod_outputs: 2
