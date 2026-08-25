@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -12,6 +13,16 @@ from typing import Final
 import numpy as np
 import pandas as pd
 
+from moex_data.futures import materialize_futoi_instrument as futoi_materializer
+from moex_data.futures import stage2_raw_history_acceptance as raw_acceptance
+from moex_data.futures.materialize_futoi_eod import (
+    FROZEN_INPUT_PRODUCER,
+    FROZEN_INPUT_SCHEMA,
+    SOURCE_DATASET_ID,
+    SOURCE_ID,
+    _accepted_history_scope,
+    raw_partition_path,
+)
 from moex_data.futures.materialize_futoi_positioning_features_d1 import BASE_FIELDS, LAGS, WINDOWS
 
 CANONICAL_ENV_PATH: Final[str] = "/home/trader/moex_bot/.env"
@@ -34,6 +45,7 @@ EOD_REQUIRED: Final[tuple[str, ...]] = (
     "phys_avg_long_per_participant", "phys_avg_short_per_participant",
     "legal_avg_long_per_participant", "legal_avg_short_per_participant",
     "source_row_count", "source_revision_rows_dropped", "source_partition_ref",
+    "source_canonical_partition_ref", "source_frozen_partition_sha256",
 )
 
 
@@ -113,7 +125,7 @@ def _artifact_path(value: object, run_root: Path, field: str) -> Path:
     return resolved
 
 
-def _expand_root_ref(value: object, field: str) -> Path:
+def _expand_root_ref(value: object, field: str, *, require_run_root: Path | None = None) -> Path:
     text = str(value or "").strip()
     if not text.startswith(ROOT_PREFIX):
         _fail(field + " must be a ${MOEX_DATA_ROOT} rooted reference")
@@ -124,8 +136,10 @@ def _expand_root_ref(value: object, field: str) -> Path:
     path = (root / relative).resolve(strict=True)
     try:
         path.relative_to(root)
+        if require_run_root is not None:
+            path.relative_to(require_run_root.resolve(strict=True))
     except ValueError as exc:
-        raise Step5AcceptanceError(field + " escaped MOEX_DATA_ROOT") from exc
+        raise Step5AcceptanceError(field + " escaped approved root") from exc
     if not path.is_file() or path.is_symlink():
         _fail(field + " must resolve to a regular non-symlink file")
     return path
@@ -240,8 +254,9 @@ def _validate_eod(path: Path, instrument_id: str, expected_rows: int) -> dict[st
     snapshot_msk = pd.to_datetime(frame["snapshot_ts_msk"], errors="coerce")
     if bool(snapshot_msk.isna().any()) or getattr(snapshot_msk.dt, "tz", None) is None:
         _fail("EOD snapshot_ts_msk must be timezone-aware")
-    if bool(frame["source_partition_ref"].astype(str).str.strip().eq("").any()):
-        _fail("EOD source lineage missing")
+    for field in ("source_partition_ref", "source_canonical_partition_ref", "source_frozen_partition_sha256"):
+        if bool(frame[field].astype(str).str.strip().eq("").any()):
+            _fail("EOD source lineage missing: " + field)
     _validate_eod_metrics(frame)
     return {
         "row_count": int(len(frame.index)),
@@ -363,6 +378,132 @@ def _validate_eod_raw_lineage(manifest_values: Mapping[str, object], instrument_
     _expand_root_ref(pointer.get("manifest_ref"), "EOD accepted_raw_manifest_ref")
 
 
+def _frozen_expectation(instrument_id: str, frozen: Mapping[str, object]) -> raw_acceptance.HistoryExpectation:
+    binding = futoi_materializer._registry_binding(Path.cwd() / futoi_materializer.REGISTRY_PATH, instrument_id)
+    if str(binding.get("futoi.source_id")) != SOURCE_ID:
+        _fail("frozen input registry source binding mismatch")
+    return raw_acceptance.HistoryExpectation(
+        target_dataset_id=SOURCE_DATASET_ID,
+        instrument_id=instrument_id,
+        source_id=SOURCE_ID,
+        date_start=str(frozen.get("requested_from")),
+        date_end=str(frozen.get("requested_till")),
+        expected_partitions=int(frozen.get("partition_count") or 0),
+        expected_rows=int(frozen.get("row_count") or 0),
+        expected_secid=str(binding["secid"]),
+        expected_source_ticker=str(binding["futoi.ticker"]),
+    )
+
+
+def _validate_frozen_input(
+    manifest_values: Mapping[str, object],
+    instrument_id: str,
+    run_root: Path,
+    expected_rows: int,
+) -> dict[str, object]:
+    frozen_manifest = _artifact_path(manifest_values.get("frozen_input_manifest_path"), run_root, "frozen_input_manifest_path")
+    expected_manifest_sha = str(manifest_values.get("frozen_input_manifest_sha256") or "").strip().lower()
+    if len(expected_manifest_sha) != 64 or hashlib.sha256(frozen_manifest.read_bytes()).hexdigest() != expected_manifest_sha:
+        _fail("frozen input manifest SHA-256 mismatch")
+    frozen = _load_json(frozen_manifest, "frozen input manifest")
+    if frozen.get("schema_version") != FROZEN_INPUT_SCHEMA or frozen.get("producer") != FROZEN_INPUT_PRODUCER:
+        _fail("frozen input schema/producer mismatch")
+    if frozen.get("dataset_id") != RAW_DATASET or frozen.get("instrument_id") != instrument_id:
+        _fail("frozen input dataset/instrument mismatch")
+    if frozen.get("physical_validation") != "stage2_futoi_partition_validator_reapplied":
+        _fail("frozen input physical validation marker mismatch")
+    if frozen.get("freeze_mode") != "create_only_hardlink_same_validated_inode":
+        _fail("frozen input freeze mode mismatch")
+    if frozen.get("network_calls_used") is not False or frozen.get("latest_autodetect_used") is not False:
+        _fail("frozen input network/latest evidence mismatch")
+    for field in ("accepted_raw_pointer_ref", "accepted_raw_manifest_ref", "accepted_raw_acceptance_report_ref", "accepted_raw_history_run_id", "accepted_partition_dates_sha256"):
+        eod_field = "accepted_raw_partition_dates_sha256" if field == "accepted_partition_dates_sha256" else field
+        if frozen.get(field) != manifest_values.get(eod_field):
+            _fail("frozen/EOD accepted-raw binding mismatch: " + field)
+
+    start_date = str(frozen.get("requested_from") or "")
+    end_date = str(frozen.get("requested_till") or "")
+    accepted = _accepted_history_scope(_data_root(), instrument_id, start_date, end_date)
+    if frozen.get("accepted_raw_pointer_ref") != accepted.pointer_ref or frozen.get("accepted_raw_manifest_ref") != accepted.manifest_ref:
+        _fail("frozen input no longer binds current accepted raw history")
+    if frozen.get("accepted_partition_dates_sha256") != accepted.partition_dates_sha256:
+        _fail("frozen input accepted date-set digest mismatch")
+
+    records = frozen.get("records")
+    if isinstance(records, (str, bytes)) or not isinstance(records, Sequence):
+        _fail("frozen input records must be a sequence")
+    if len(records) != expected_rows or int(frozen.get("partition_count") or 0) != expected_rows:
+        _fail("frozen input partition count mismatch")
+    expectation = _frozen_expectation(instrument_id, frozen)
+    total_raw_rows = 0
+    record_by_date: dict[str, Mapping[str, object]] = {}
+    for record in records:
+        if not isinstance(record, Mapping):
+            _fail("frozen input record must be object")
+        trade_date = str(record.get("trade_date") or "")
+        if trade_date in record_by_date:
+            _fail("duplicate frozen input trade_date")
+        frozen_path = _expand_root_ref(record.get("frozen_partition_ref"), "frozen_partition_ref", require_run_root=run_root)
+        frozen_sha = str(record.get("frozen_sha256") or "").strip().lower()
+        source_sha = str(record.get("source_sha256_at_freeze") or "").strip().lower()
+        if len(frozen_sha) != 64 or frozen_sha != source_sha:
+            _fail("frozen source/snapshot hash binding mismatch")
+        if hashlib.sha256(frozen_path.read_bytes()).hexdigest() != frozen_sha:
+            _fail("frozen partition content SHA-256 mismatch")
+        if record.get("hardlink_same_validated_inode") is not True or record.get("physical_validation_status") != "pass":
+            _fail("frozen partition validation/inode evidence mismatch")
+        expected_canonical = raw_partition_path(_data_root(), instrument_id, trade_date)
+        if str(record.get("canonical_source_ref") or "") != _rooted_ref(expected_canonical):
+            _fail("frozen canonical source path identity mismatch")
+        try:
+            frame = pd.read_parquet(frozen_path)
+            rows, _ = raw_acceptance._validate_futoi_partition(frame, expectation, trade_date)
+        except Exception as exc:
+            raise Step5AcceptanceError("frozen FUTOI physical revalidation failed for " + trade_date + ": " + str(exc)) from exc
+        if int(record.get("row_count") or 0) != rows:
+            _fail("frozen partition row count evidence mismatch")
+        total_raw_rows += rows
+        record_by_date[trade_date] = record
+    if tuple(record_by_date) != accepted.accepted_dates:
+        _fail("frozen partition dates differ from accepted raw date set")
+    if total_raw_rows != int(frozen.get("row_count") or 0):
+        _fail("frozen aggregate raw row count mismatch")
+    return {
+        "manifest_path": frozen_manifest,
+        "manifest_sha256": expected_manifest_sha,
+        "records_by_date": record_by_date,
+        "physical_partition_revalidation_passed": True,
+        "partition_count": len(records),
+        "raw_row_count": total_raw_rows,
+    }
+
+
+def _rooted_ref(path: Path) -> str:
+    try:
+        rel = path.resolve(strict=True).relative_to(_data_root().resolve(strict=True))
+    except (OSError, ValueError) as exc:
+        raise Step5AcceptanceError("artifact must be inside MOEX_DATA_ROOT") from exc
+    return ROOT_PREFIX + rel.as_posix()
+
+
+def _validate_eod_frozen_lineage(eod_path: Path, frozen_validation: Mapping[str, object]) -> None:
+    eod = pd.read_parquet(eod_path)
+    records = frozen_validation.get("records_by_date")
+    if not isinstance(records, Mapping):
+        _fail("frozen validation records missing")
+    for _, row in eod.iterrows():
+        trade_date = str(row["trade_date"])
+        record = records.get(trade_date)
+        if not isinstance(record, Mapping):
+            _fail("EOD trade_date missing from frozen input")
+        if str(row["source_partition_ref"]) != str(record["frozen_partition_ref"]):
+            _fail("EOD frozen partition lineage mismatch")
+        if str(row["source_canonical_partition_ref"]) != str(record["canonical_source_ref"]):
+            _fail("EOD canonical raw lineage mismatch")
+        if str(row["source_frozen_partition_sha256"]) != str(record["frozen_sha256"]):
+            _fail("EOD frozen partition hash lineage mismatch")
+
+
 def _validate_output_record(row: Mapping[str, object], *, dataset_id: str, run_root: Path, expected_rows: int) -> dict[str, object]:
     instrument_id = _safe_token(row.get("instrument_id"), "instrument_id")
     if instrument_id not in EXPECTED_INSTRUMENTS:
@@ -386,9 +527,15 @@ def _validate_output_record(row: Mapping[str, object], *, dataset_id: str, run_r
         _fail("manifest partition path mismatch")
     if Path(str(manifest_values.get("quality_report_path") or "")).resolve() != quality:
         _fail("manifest quality path mismatch")
+    frozen_validation: dict[str, object] | None = None
     if dataset_id == EOD_DATASET:
+        if manifest_values.get("canonical_raw_partition_reads_used") is not False:
+            _fail("EOD manifest must forbid canonical raw reads after freeze")
         _validate_eod_raw_lineage(manifest_values, instrument_id)
+        frozen_validation = _validate_frozen_input(manifest_values, instrument_id, run_root, expected_rows)
         physical = _validate_eod(partition, instrument_id, expected_rows)
+        _validate_eod_frozen_lineage(partition, frozen_validation)
+        physical["immutable_frozen_raw_revalidation_passed"] = True
     else:
         physical = _validate_features(partition, instrument_id, expected_rows)
     return {
@@ -400,6 +547,7 @@ def _validate_output_record(row: Mapping[str, object], *, dataset_id: str, run_r
         "quality": quality,
         "physical_readback": physical,
         "source_eod_partition_path": manifest_values.get("source_eod_partition_path"),
+        "frozen_input_manifest_path": manifest_values.get("frozen_input_manifest_path"),
     }
 
 
@@ -408,12 +556,19 @@ def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[st
         _fail("pilot identity/status mismatch")
     if values.get("artifact_version") != run_id or values.get("run_id") != run_id:
         _fail("pilot run identity mismatch")
-    required_false = ("run_id_reuse_allowed", "raw_ingestion_changed", "network_calls_used", "latest_autodetect_used", "front_next_split_claimed", "historical_pit_research_ready_claimed")
+    required_false = (
+        "run_id_reuse_allowed", "raw_ingestion_changed", "network_calls_used", "latest_autodetect_used",
+        "canonical_raw_partition_reads_after_freeze_used", "front_next_split_claimed", "historical_pit_research_ready_claimed",
+    )
     for field in required_false:
         if values.get(field) is not False:
             _fail(field + " must be false")
     if values.get("run_artifacts_immutable") is not True or values.get("root_aggregate_semantics") is not True:
         _fail("pilot immutable/root aggregate semantics mismatch")
+    if values.get("immutable_raw_input_freeze_used") is not True:
+        _fail("pilot immutable_raw_input_freeze_used must be true")
+    if values.get("raw_input_freeze_mode") != "create_only_hardlink_same_validated_inode":
+        _fail("pilot raw_input_freeze_mode mismatch")
     if values.get("revision_policy") != "same_analytical_key_single_sess_id_then_max_seqnum":
         _fail("pilot revision policy mismatch")
     if values.get("snapshot_policy") != "max_resolved_ts_requires_FIZ_and_YUR":
@@ -422,13 +577,32 @@ def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[st
     if not run_root.is_dir() or Path(str(values.get("run_root") or "")).resolve() != run_root:
         _fail("pilot run_root mismatch")
 
-    outputs: list[dict[str, object]] = []
+    frozen_rows = values.get("frozen_inputs")
     eod_rows = values.get("eod_outputs")
     feature_rows = values.get("feature_outputs")
+    if isinstance(frozen_rows, (str, bytes)) or not isinstance(frozen_rows, Sequence) or len(frozen_rows) != 2:
+        _fail("pilot must contain two frozen raw inputs")
     if isinstance(eod_rows, (str, bytes)) or not isinstance(eod_rows, Sequence) or len(eod_rows) != 2:
         _fail("pilot must contain two EOD outputs")
     if isinstance(feature_rows, (str, bytes)) or not isinstance(feature_rows, Sequence) or len(feature_rows) != 2:
         _fail("pilot must contain two feature outputs")
+    frozen_manifest_by_instrument: dict[str, Path] = {}
+    for row in frozen_rows:
+        if not isinstance(row, Mapping):
+            _fail("frozen input output record must be object")
+        instrument = _safe_token(row.get("instrument_id"), "instrument_id")
+        if instrument in frozen_manifest_by_instrument or instrument not in EXPECTED_INSTRUMENTS:
+            _fail("duplicate/unexpected frozen input instrument")
+        if row.get("status") != "succeeded" or row.get("physical_validation_status") != "pass":
+            _fail("frozen input pilot output is not pass")
+        if int(row.get("partition_count") or 0) != EXPECTED_ROWS[instrument]:
+            _fail("frozen input pilot partition count mismatch")
+        manifest_path = _artifact_path(row.get("manifest_path"), run_root, "frozen pilot manifest_path")
+        frozen_manifest_by_instrument[instrument] = manifest_path
+    if set(frozen_manifest_by_instrument) != EXPECTED_INSTRUMENTS:
+        _fail("frozen input instrument set mismatch")
+
+    outputs: list[dict[str, object]] = []
     seen_eod: dict[str, dict[str, object]] = {}
     for row in eod_rows:
         if not isinstance(row, Mapping):
@@ -437,6 +611,8 @@ def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[st
         checked = _validate_output_record(row, dataset_id=EOD_DATASET, run_root=run_root, expected_rows=EXPECTED_ROWS[instrument])
         if instrument in seen_eod:
             _fail("duplicate EOD output instrument")
+        if Path(str(checked.get("frozen_input_manifest_path") or "")).resolve() != frozen_manifest_by_instrument[instrument]:
+            _fail("EOD frozen input does not match pilot frozen input output")
         seen_eod[instrument] = checked
         outputs.append(checked)
     if set(seen_eod) != EXPECTED_INSTRUMENTS:
@@ -466,14 +642,6 @@ def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[st
 
 def _pointer_path(dataset_id: str, instrument_id: str) -> Path:
     return _data_root() / "state" / "datasets" / ("dataset_id=" + dataset_id) / ("instrument_id=" + instrument_id) / "current_accepted_manifest.json"
-
-
-def _rooted_ref(path: Path) -> str:
-    try:
-        rel = path.resolve(strict=True).relative_to(_data_root().resolve(strict=True))
-    except (OSError, ValueError) as exc:
-        raise Step5AcceptanceError("artifact must be inside MOEX_DATA_ROOT") from exc
-    return ROOT_PREFIX + rel.as_posix()
 
 
 def _stage_json(path: Path, values: Mapping[str, object]) -> Path:
@@ -545,6 +713,7 @@ def promote(*, run_id: str) -> dict[str, object]:
             "partition_ref": _rooted_ref(output["partition"]),
             "quality_status": "pass",
             "acceptance_contract_id": CONTRACT_ID,
+            "immutable_frozen_raw_input_verified": True,
             "historical_pit_research_ready_claimed": False,
         }
         records.append((pointer, values))
@@ -570,6 +739,7 @@ def promote(*, run_id: str) -> dict[str, object]:
         "pointers": pointer_summaries,
         "promotion_semantics": "transactional_with_rollback",
         "physical_partition_readback_required": True,
+        "immutable_frozen_raw_input_verified": True,
         "root_aggregate_semantics": True,
         "front_next_split_claimed": False,
         "historical_pit_research_ready_claimed": False,
