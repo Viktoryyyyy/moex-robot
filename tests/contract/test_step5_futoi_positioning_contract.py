@@ -79,7 +79,7 @@ def test_stage5_feature_contract_uses_only_current_and_prior_eod_observations() 
     assert "historical_pit_research_ready_claimed: false" in text
 
 
-def test_stage5_acceptance_requires_frozen_bytes_formula_and_source_revalidation_and_four_pointers() -> None:
+def test_stage5_acceptance_requires_frozen_bytes_formula_source_and_reconstruction_revalidation_and_four_pointers() -> None:
     text = _read("contracts/datasets/step5_futoi_positioning_acceptance.v1.yaml")
     assert "accepted_pointer_count: 4" in text
     assert "immutable_raw_input_freeze_required: true" in text
@@ -88,6 +88,9 @@ def test_stage5_acceptance_requires_frozen_bytes_formula_and_source_revalidation
     assert "frozen_partition_sha256_revalidated: true" in text
     assert "frozen_partition_stage2_futoi_physical_validator_reapplied_at_acceptance: true" in text
     assert "eod_source_frozen_ref_and_sha_lineage_required: true" in text
+    assert "eod_reconstruction_from_physically_revalidated_frozen_raw_required: true" in text
+    assert "eod_reconstruction_independent_from_eod_producer_required: true" in text
+    assert "eod_reconstruction_exact_field_equality_before_promotion_required: true" in text
     assert "physical_parquet_readback_required: true" in text
     assert "eod_accepted_raw_current_pointer_required: true" in text
     assert "eod_all_derived_metrics_recomputed: true" in text
