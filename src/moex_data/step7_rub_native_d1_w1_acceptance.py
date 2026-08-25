@@ -12,6 +12,7 @@ import pandas as pd
 from pandas.testing import assert_series_equal
 
 from moex_data.futures import stage2_raw_history_acceptance as stage2
+from moex_data.futures.freeze_step7_accepted_raw_5m import accepted_quote_history, quote_validation_expectation
 from moex_data.step7_rub_native_d1_w1_materializer import (
     OHLCV_DATASET,
     TECH_DATASET,
@@ -112,8 +113,21 @@ def _inside_run(path_value: object, run_root: Path, field: str) -> Path:
 
 
 def _revalidate_frozen(*, repo_root: Path, data_root: Path, manifest_path: Path, instrument_id: str, start: str, end: str, validation_run_id: str) -> dict[str, object]:
+    frozen_values = _load_json(manifest_path, "frozen raw manifest")
+    current_scope = accepted_quote_history(data_root, instrument_id, start, end)
+    if frozen_values.get("accepted_raw_history_run_id") != current_scope.acceptance_run_id:
+        _fail("frozen raw upstream accepted run is stale")
+    if frozen_values.get("accepted_raw_manifest_ref") != current_scope.manifest_ref:
+        _fail("frozen raw upstream accepted manifest is stale")
+    if frozen_values.get("accepted_raw_pointer_ref") != current_scope.pointer_ref:
+        _fail("frozen raw upstream accepted pointer binding mismatch")
+    if frozen_values.get("accepted_partition_dates_sha256") != current_scope.partition_dates_sha256:
+        _fail("frozen raw upstream accepted date-set digest mismatch")
+
     records, content_digest = _validate_frozen_manifest(data_root, manifest_path, instrument_id, start, end)
-    expectation = stage2._expectation(repo_root, "futures_raw_5m", instrument_id)
+    if tuple(str(row["trade_date"]) for row in records) != current_scope.accepted_dates:
+        _fail("frozen raw date set no longer equals current accepted scope")
+    expectation = quote_validation_expectation(instrument_id, start, end)
     total_rows = 0
     for record in records:
         frame = pd.read_parquet(record["path"])
@@ -127,6 +141,7 @@ def _revalidate_frozen(*, repo_root: Path, data_root: Path, manifest_path: Path,
         "partition_count": len(records),
         "row_count": total_rows,
         "content_sha256": content_digest,
+        "current_accepted_scope_match": True,
         "physical_revalidation_passed": True,
     }
 
@@ -151,7 +166,7 @@ def _compare_frame(actual: pd.DataFrame, expected: pd.DataFrame, name: str) -> N
             raise Step7AcceptanceError(name + " physical formula/source mismatch: " + column) from exc
 
 
-def _validate_manifest_quality(record: Mapping[str, object], run_root: Path) -> tuple[Path, dict[str, object], dict[str, object]]:
+def _validate_manifest_quality(record: Mapping[str, object], run_root: Path) -> tuple[Path, Path, Path, dict[str, object], dict[str, object]]:
     partition = _inside_run(record.get("partition_path"), run_root, "partition_path")
     manifest_path = _inside_run(record.get("manifest_path"), run_root, "manifest_path")
     quality_path = _inside_run(record.get("quality_report_path"), run_root, "quality_report_path")
@@ -174,7 +189,7 @@ def _validate_manifest_quality(record: Mapping[str, object], run_root: Path) -> 
         _fail("manifest quality path mismatch")
     if manifest.get("network_calls_used") is not False or manifest.get("latest_autodetect_used") is not False or manifest.get("continuous_series_used") is not False:
         _fail("manifest execution boundary mismatch")
-    return partition, manifest, quality
+    return partition, manifest_path, quality_path, manifest, quality
 
 
 def validate_pilot(values: Mapping[str, object], *, run_id: str, repo_root: str | Path = ".") -> list[dict[str, object]]:
@@ -183,7 +198,12 @@ def validate_pilot(values: Mapping[str, object], *, run_id: str, repo_root: str 
         _fail("pilot identity/status mismatch")
     if values.get("artifact_version") != checked_run or values.get("run_id") != checked_run:
         _fail("pilot run identity mismatch")
-    for field in ("run_id_reuse_allowed", "network_calls_used", "latest_autodetect_used", "continuous_series_used", "mutable_canonical_raw_read_after_freeze_allowed", "si_cr_continuous_ready", "weekly_oi_ready", "advanced_technical_policy_ready", "research_ready"):
+    false_fields = (
+        "run_id_reuse_allowed", "network_calls_used", "latest_autodetect_used", "continuous_series_used",
+        "mutable_canonical_raw_read_after_freeze_allowed", "si_cr_continuous_ready", "weekly_oi_ready",
+        "advanced_technical_policy_ready", "research_ready",
+    )
+    for field in false_fields:
         if values.get(field) is not False:
             _fail(field + " must be false")
     if values.get("run_artifacts_immutable") is not True or values.get("accepted_raw_history_required") is not True:
@@ -231,8 +251,11 @@ def validate_pilot(values: Mapping[str, object], *, run_id: str, repo_root: str 
         key = (str(record.get("dataset_id") or ""), str(record.get("timeframe") or ""), str(record.get("instrument_id") or ""))
         if key not in EXPECTED_KEYS or key in output_by_key:
             _fail("unexpected/duplicate output key")
-        partition, manifest, quality = _validate_manifest_quality(record, run_root)
-        output_by_key[key] = {"record": record, "partition": partition, "manifest": manifest, "quality": quality}
+        partition, manifest_path, quality_path, manifest, quality = _validate_manifest_quality(record, run_root)
+        output_by_key[key] = {
+            "record": record, "partition": partition, "manifest_path": manifest_path,
+            "quality_path": quality_path, "manifest": manifest, "quality": quality,
+        }
     if set(output_by_key) != set(EXPECTED_KEYS):
         _fail("Stage 7 output key set mismatch")
 
@@ -271,18 +294,16 @@ def validate_pilot(values: Mapping[str, object], *, run_id: str, repo_root: str 
         if Path(str(w1_tech_item["manifest"].get("source_ref") or "")).resolve() != Path(w1_item["partition"]).resolve():
             _fail("W1 technical source lineage mismatch")
 
-        for key in ((OHLCV_DATASET, "1D", instrument_id), (OHLCV_DATASET, "1W", instrument_id), (TECH_DATASET, "1D", instrument_id), (TECH_DATASET, "1W", instrument_id)):
+        for key in (
+            (OHLCV_DATASET, "1D", instrument_id), (OHLCV_DATASET, "1W", instrument_id),
+            (TECH_DATASET, "1D", instrument_id), (TECH_DATASET, "1W", instrument_id),
+        ):
             item = output_by_key[key]
             validated.append({
-                "dataset_id": key[0],
-                "timeframe": key[1],
-                "instrument_id": key[2],
-                "producer_run_id": str(item["record"]["run_id"]),
-                "partition": item["partition"],
-                "manifest_path": _inside_run(item["record"]["manifest_path"], run_root, "manifest_path"),
-                "quality_path": _inside_run(item["record"]["quality_report_path"], run_root, "quality_report_path"),
-                "row_count": int(item["record"]["row_count"]),
-                "physical_readback_passed": True,
+                "dataset_id": key[0], "timeframe": key[1], "instrument_id": key[2],
+                "producer_run_id": str(item["record"]["run_id"]), "partition": item["partition"],
+                "manifest_path": item["manifest_path"], "quality_path": item["quality_path"],
+                "row_count": int(item["record"]["row_count"]), "physical_readback_passed": True,
             })
     if len(validated) != 8:
         _fail("validated output count mismatch")
@@ -358,52 +379,30 @@ def promote(*, run_id: str, repo_root: str | Path = ".") -> dict[str, object]:
     for item in validated:
         pointer_path = _pointer_path(str(item["dataset_id"]), str(item["timeframe"]), str(item["instrument_id"]))
         pointer_values = {
-            "dataset_id": item["dataset_id"],
-            "timeframe": item["timeframe"],
-            "instrument_id": item["instrument_id"],
-            "run_id": item["producer_run_id"],
-            "acceptance_run_id": checked_run,
-            "manifest_ref": _rooted_ref(item["manifest_path"]),
-            "quality_report_ref": _rooted_ref(item["quality_path"]),
-            "partition_ref": _rooted_ref(item["partition"]),
-            "quality_status": "pass",
-            "acceptance_contract_id": CONTRACT_ID,
-            "continuous_series_used": False,
-            "research_ready": False,
+            "dataset_id": item["dataset_id"], "timeframe": item["timeframe"], "instrument_id": item["instrument_id"],
+            "run_id": item["producer_run_id"], "acceptance_run_id": checked_run,
+            "manifest_ref": _rooted_ref(item["manifest_path"]), "quality_report_ref": _rooted_ref(item["quality_path"]),
+            "partition_ref": _rooted_ref(item["partition"]), "quality_status": "pass",
+            "acceptance_contract_id": CONTRACT_ID, "continuous_series_used": False, "research_ready": False,
         }
         records.append((pointer_path, pointer_values))
         summaries.append({
-            "dataset_id": item["dataset_id"],
-            "timeframe": item["timeframe"],
-            "instrument_id": item["instrument_id"],
-            "run_id": item["producer_run_id"],
-            "acceptance_run_id": checked_run,
-            "row_count": item["row_count"],
-            "pointer_path": pointer_path.as_posix(),
-            "physical_readback_passed": True,
+            "dataset_id": item["dataset_id"], "timeframe": item["timeframe"], "instrument_id": item["instrument_id"],
+            "run_id": item["producer_run_id"], "acceptance_run_id": checked_run, "row_count": item["row_count"],
+            "pointer_path": pointer_path.as_posix(), "physical_readback_passed": True,
         })
     if len(summaries) != 8:
         _fail("accepted pointer count mismatch")
     marker = _evidence_dir(checked_run) / "accepted_pointers.json"
     result: dict[str, object] = {
-        "project": "MOEX_Bot",
-        "step": 7,
-        "status": "accepted",
-        "run_id": checked_run,
-        "acceptance_contract_id": CONTRACT_ID,
-        "accepted_pointer_count": 8,
-        "expected_pointer_count": 8,
-        "pointers": summaries,
-        "promotion_semantics": "transactional_with_rollback",
-        "physical_partition_readback_required": True,
-        "frozen_raw_physical_revalidation_required": True,
-        "d1_w1_formula_revalidation_required": True,
-        "technical_formula_revalidation_required": True,
-        "continuous_series_used": False,
-        "si_cr_continuous_ready": False,
-        "weekly_oi_ready": False,
-        "advanced_technical_policy_ready": False,
-        "research_ready": False,
+        "project": "MOEX_Bot", "step": 7, "status": "accepted", "run_id": checked_run,
+        "acceptance_contract_id": CONTRACT_ID, "accepted_pointer_count": 8, "expected_pointer_count": 8,
+        "pointers": summaries, "promotion_semantics": "transactional_with_rollback",
+        "physical_partition_readback_required": True, "frozen_raw_physical_revalidation_required": True,
+        "current_accepted_raw_scope_match_required": True, "d1_w1_formula_revalidation_required": True,
+        "technical_formula_revalidation_required": True, "continuous_series_used": False,
+        "si_cr_continuous_ready": False, "weekly_oi_ready": False,
+        "advanced_technical_policy_ready": False, "research_ready": False,
     }
     records.append((marker, result))
     _transactional_replace(records)
