@@ -20,6 +20,8 @@ EXPECTED_ROWS: Final[dict[str, int]] = {"si_futures_family": 1757, "cr_futures_f
 EXPECTED_INSTRUMENTS: Final[frozenset[str]] = frozenset(EXPECTED_ROWS)
 EOD_DATASET: Final[str] = "futures_futoi_eod"
 FEATURE_DATASET: Final[str] = "futures_futoi_positioning_features_d1"
+RAW_DATASET: Final[str] = "futures_futoi_raw"
+ROOT_PREFIX: Final[str] = "${MOEX_DATA_ROOT}/"
 EOD_REQUIRED: Final[tuple[str, ...]] = (
     "instrument_id", "trade_date", "snapshot_ts_msk", "snapshot_ts_utc", "availability_ts_utc",
     "phys_sess_id", "phys_seqnum", "phys_systime_utc", "legal_sess_id", "legal_seqnum", "legal_systime_utc",
@@ -86,8 +88,8 @@ def _evidence_dir(run_id: str) -> Path:
 
 
 def _load_json(path: Path, field: str) -> Mapping[str, object]:
-    if not path.is_file():
-        _fail(field + " does not exist")
+    if not path.is_file() or path.is_symlink():
+        _fail(field + " does not exist as regular non-symlink file")
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
@@ -106,9 +108,27 @@ def _artifact_path(value: object, run_root: Path, field: str) -> Path:
         resolved.relative_to(run_root.resolve(strict=True))
     except (OSError, ValueError) as exc:
         raise Step5AcceptanceError(field + " must be a file inside immutable run root") from exc
-    if not resolved.is_file():
-        _fail(field + " must be a regular file")
+    if not resolved.is_file() or resolved.is_symlink():
+        _fail(field + " must be a regular non-symlink file")
     return resolved
+
+
+def _expand_root_ref(value: object, field: str) -> Path:
+    text = str(value or "").strip()
+    if not text.startswith(ROOT_PREFIX):
+        _fail(field + " must be a ${MOEX_DATA_ROOT} rooted reference")
+    relative = text[len(ROOT_PREFIX):]
+    if not relative or relative.startswith("/") or ".." in Path(relative).parts:
+        _fail(field + " contains invalid rooted path")
+    root = _data_root().resolve(strict=True)
+    path = (root / relative).resolve(strict=True)
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise Step5AcceptanceError(field + " escaped MOEX_DATA_ROOT") from exc
+    if not path.is_file() or path.is_symlink():
+        _fail(field + " must resolve to a regular non-symlink file")
+    return path
 
 
 def _finite(series: pd.Series, field: str, *, allow_null: bool = False) -> pd.Series:
@@ -119,6 +139,81 @@ def _finite(series: pd.Series, field: str, *, allow_null: bool = False) -> pd.Se
     if not valid.map(math.isfinite).all():
         _fail("nonfinite field: " + field)
     return numeric
+
+
+def _integral(series: pd.Series, field: str, *, nonnegative: bool = False) -> pd.Series:
+    numeric = _finite(series, field).astype(float)
+    rounded = numeric.round()
+    if not np.allclose(numeric.to_numpy(), rounded.to_numpy(), rtol=0.0, atol=0.0):
+        _fail("nonintegral field: " + field)
+    if nonnegative and bool((rounded < 0).any()):
+        _fail("negative field: " + field)
+    return rounded.astype("int64")
+
+
+def _require_allclose(actual: pd.Series | np.ndarray, expected: pd.Series | np.ndarray, field: str) -> None:
+    left = np.asarray(actual, dtype=float)
+    right = np.asarray(expected, dtype=float)
+    if not np.allclose(left, right, equal_nan=True, rtol=1e-10, atol=1e-12):
+        _fail("derived metric formula mismatch: " + field)
+
+
+def _validate_average(frame: pd.DataFrame, position_field: str, count_field: str, average_field: str) -> None:
+    position = _integral(frame[position_field], position_field, nonnegative=True).astype(float)
+    count = _integral(frame[count_field], count_field, nonnegative=True).astype(float)
+    actual = _finite(frame[average_field], average_field, allow_null=True).astype(float)
+    zero_count = count.eq(0.0)
+    if bool((zero_count & position.ne(0.0)).any()):
+        _fail("nonzero position with zero participant count: " + average_field)
+    expected = position / count.replace(0.0, np.nan)
+    if bool(actual[zero_count].notna().any()):
+        _fail("average must be null when participant count is zero: " + average_field)
+    _require_allclose(actual, expected, average_field)
+
+
+def _validate_eod_metrics(frame: pd.DataFrame) -> None:
+    phys_net = _integral(frame["phys_net"], "phys_net").astype(float)
+    legal_net = _integral(frame["legal_net"], "legal_net").astype(float)
+    phys_long = _integral(frame["phys_long"], "phys_long", nonnegative=True).astype(float)
+    legal_long = _integral(frame["legal_long"], "legal_long", nonnegative=True).astype(float)
+    phys_short = _integral(frame["phys_short_abs"], "phys_short_abs", nonnegative=True).astype(float)
+    legal_short = _integral(frame["legal_short_abs"], "legal_short_abs", nonnegative=True).astype(float)
+    total_oi = _integral(frame["total_open_interest"], "total_open_interest", nonnegative=True).astype(float)
+    total_short = _integral(frame["total_short_abs"], "total_short_abs", nonnegative=True).astype(float)
+    phys_gross = _integral(frame["phys_gross"], "phys_gross", nonnegative=True).astype(float)
+    legal_gross = _integral(frame["legal_gross"], "legal_gross", nonnegative=True).astype(float)
+    for field in ("phys_long_num", "phys_short_num", "legal_long_num", "legal_short_num", "source_row_count", "source_revision_rows_dropped"):
+        _integral(frame[field], field, nonnegative=True)
+
+    if bool((total_oi <= 0).any()):
+        _fail("EOD total_open_interest must be positive")
+    _require_allclose(phys_net + legal_net, np.zeros(len(frame.index)), "phys_net_plus_legal_net")
+    _require_allclose(phys_long + legal_long, total_oi, "total_open_interest")
+    _require_allclose(phys_short + legal_short, total_short, "total_short_abs")
+    _require_allclose(total_oi, total_short, "long_short_open_interest_balance")
+    _require_allclose(phys_long - phys_short, phys_net, "phys_net")
+    _require_allclose(legal_long - legal_short, legal_net, "legal_net")
+    _require_allclose(phys_long + phys_short, phys_gross, "phys_gross")
+    _require_allclose(legal_long + legal_short, legal_gross, "legal_gross")
+
+    formulas = {
+        "phys_long_share_of_oi": phys_long / total_oi,
+        "phys_short_share_of_oi": phys_short / total_oi,
+        "phys_net_share_of_oi": phys_net / total_oi,
+        "legal_long_share_of_oi": legal_long / total_oi,
+        "legal_short_share_of_oi": legal_short / total_oi,
+        "legal_net_share_of_oi": legal_net / total_oi,
+        "phys_gross_share_of_two_sided_oi": phys_gross / (2.0 * total_oi),
+        "legal_gross_share_of_two_sided_oi": legal_gross / (2.0 * total_oi),
+    }
+    for field, expected in formulas.items():
+        actual = _finite(frame[field], field).astype(float)
+        _require_allclose(actual, expected, field)
+
+    _validate_average(frame, "phys_long", "phys_long_num", "phys_avg_long_per_participant")
+    _validate_average(frame, "phys_short_abs", "phys_short_num", "phys_avg_short_per_participant")
+    _validate_average(frame, "legal_long", "legal_long_num", "legal_avg_long_per_participant")
+    _validate_average(frame, "legal_short_abs", "legal_short_num", "legal_avg_short_per_participant")
 
 
 def _validate_eod(path: Path, instrument_id: str, expected_rows: int) -> dict[str, object]:
@@ -145,54 +240,17 @@ def _validate_eod(path: Path, instrument_id: str, expected_rows: int) -> dict[st
     snapshot_msk = pd.to_datetime(frame["snapshot_ts_msk"], errors="coerce")
     if bool(snapshot_msk.isna().any()) or getattr(snapshot_msk.dt, "tz", None) is None:
         _fail("EOD snapshot_ts_msk must be timezone-aware")
-
-    numeric_required = (
-        "phys_net", "phys_long", "phys_short_abs", "phys_long_num", "phys_short_num",
-        "legal_net", "legal_long", "legal_short_abs", "legal_long_num", "legal_short_num",
-        "total_open_interest", "total_short_abs", "phys_gross", "legal_gross",
-        "phys_long_share_of_oi", "phys_short_share_of_oi", "phys_net_share_of_oi",
-        "legal_long_share_of_oi", "legal_short_share_of_oi", "legal_net_share_of_oi",
-        "phys_gross_share_of_two_sided_oi", "legal_gross_share_of_two_sided_oi",
-        "source_row_count", "source_revision_rows_dropped",
-    )
-    values = {field: _finite(frame[field], field) for field in numeric_required}
-    for field in (
-        "phys_avg_long_per_participant", "phys_avg_short_per_participant",
-        "legal_avg_long_per_participant", "legal_avg_short_per_participant",
-    ):
-        _finite(frame[field], field, allow_null=True)
-
-    phys_net = values["phys_net"].astype(float)
-    legal_net = values["legal_net"].astype(float)
-    phys_long = values["phys_long"].astype(float)
-    legal_long = values["legal_long"].astype(float)
-    phys_short = values["phys_short_abs"].astype(float)
-    legal_short = values["legal_short_abs"].astype(float)
-    total_oi = values["total_open_interest"].astype(float)
-    total_short = values["total_short_abs"].astype(float)
-    if bool((total_oi <= 0).any()):
-        _fail("EOD total_open_interest must be positive")
-    if not np.allclose((phys_net + legal_net).to_numpy(), 0.0):
-        _fail("EOD phys/legal net balance invariant failed")
-    if not np.allclose((phys_long + legal_long).to_numpy(), total_oi.to_numpy()):
-        _fail("EOD total_open_interest formula failed")
-    if not np.allclose((phys_short + legal_short).to_numpy(), total_short.to_numpy()):
-        _fail("EOD total short formula failed")
-    if not np.allclose(total_oi.to_numpy(), total_short.to_numpy()):
-        _fail("EOD long/short OI balance failed")
-    if not np.allclose((phys_long - phys_short).to_numpy(), phys_net.to_numpy()):
-        _fail("EOD phys net formula failed")
-    if not np.allclose((legal_long - legal_short).to_numpy(), legal_net.to_numpy()):
-        _fail("EOD legal net formula failed")
     if bool(frame["source_partition_ref"].astype(str).str.strip().eq("").any()):
         _fail("EOD source lineage missing")
+    _validate_eod_metrics(frame)
     return {
         "row_count": int(len(frame.index)),
         "required_schema_complete": True,
+        "all_derived_metrics_recomputed": True,
         "balance_invariants_valid": True,
         "min_trade_date": str(frame["trade_date"].min()),
         "max_trade_date": str(frame["trade_date"].max()),
-        "source_revision_rows_dropped": int(values["source_revision_rows_dropped"].sum()),
+        "source_revision_rows_dropped": int(pd.to_numeric(frame["source_revision_rows_dropped"]).sum()),
         "physical_readback_passed": True,
     }
 
@@ -265,6 +323,46 @@ def _validate_features(path: Path, instrument_id: str, expected_rows: int) -> di
     }
 
 
+def _validate_feature_source_alignment(feature_path: Path, eod_path: Path) -> None:
+    features = pd.read_parquet(feature_path)
+    eod = pd.read_parquet(eod_path)
+    if len(features.index) != len(eod.index):
+        _fail("feature/EOD source row count mismatch")
+    for field in ("instrument_id", "trade_date"):
+        left = features[field].astype(str).reset_index(drop=True)
+        right = eod[field].astype(str).reset_index(drop=True)
+        if not left.equals(right):
+            _fail("feature/EOD source identity mismatch: " + field)
+    for field in ("snapshot_ts_utc", "availability_ts_utc"):
+        left = pd.to_datetime(features[field], errors="coerce", utc=True)
+        right = pd.to_datetime(eod[field], errors="coerce", utc=True)
+        if bool(left.isna().any()) or bool(right.isna().any()) or not left.reset_index(drop=True).equals(right.reset_index(drop=True)):
+            _fail("feature/EOD source timestamp mismatch: " + field)
+    for field in BASE_FIELDS:
+        left = _finite(features[field], "feature " + field, allow_null=True).astype(float)
+        right = _finite(eod[field], "EOD " + field, allow_null=True).astype(float)
+        if not np.allclose(left.to_numpy(), right.to_numpy(), equal_nan=True, rtol=1e-10, atol=1e-12):
+            _fail("feature/EOD source base-column mismatch: " + field)
+
+
+def _validate_eod_raw_lineage(manifest_values: Mapping[str, object], instrument_id: str) -> None:
+    expected_pointer = _data_root() / "state" / "datasets" / ("dataset_id=" + RAW_DATASET) / ("instrument_id=" + instrument_id) / "current_accepted_manifest.json"
+    pointer_ref = str(manifest_values.get("accepted_raw_pointer_ref") or "").strip()
+    pointer_path = _expand_root_ref(pointer_ref, "EOD accepted_raw_pointer_ref")
+    if pointer_path.resolve() != expected_pointer.resolve():
+        _fail("EOD accepted raw pointer path mismatch")
+    pointer = _load_json(pointer_path, "EOD accepted raw pointer")
+    if pointer.get("dataset_id") != RAW_DATASET or pointer.get("instrument_id") != instrument_id:
+        _fail("EOD accepted raw pointer identity mismatch")
+    if pointer.get("quality_status") != "pass" or pointer.get("acceptance_status") != "pass" or pointer.get("promotion_basis") != "raw_history_acceptance":
+        _fail("EOD accepted raw pointer is not canonical PASS raw-history promotion")
+    if pointer.get("run_id") != manifest_values.get("accepted_raw_history_run_id"):
+        _fail("EOD accepted raw run identity mismatch")
+    if pointer.get("manifest_ref") != manifest_values.get("accepted_raw_manifest_ref"):
+        _fail("EOD accepted raw manifest binding mismatch")
+    _expand_root_ref(pointer.get("manifest_ref"), "EOD accepted_raw_manifest_ref")
+
+
 def _validate_output_record(row: Mapping[str, object], *, dataset_id: str, run_root: Path, expected_rows: int) -> dict[str, object]:
     instrument_id = _safe_token(row.get("instrument_id"), "instrument_id")
     if instrument_id not in EXPECTED_INSTRUMENTS:
@@ -288,7 +386,11 @@ def _validate_output_record(row: Mapping[str, object], *, dataset_id: str, run_r
         _fail("manifest partition path mismatch")
     if Path(str(manifest_values.get("quality_report_path") or "")).resolve() != quality:
         _fail("manifest quality path mismatch")
-    physical = _validate_eod(partition, instrument_id, expected_rows) if dataset_id == EOD_DATASET else _validate_features(partition, instrument_id, expected_rows)
+    if dataset_id == EOD_DATASET:
+        _validate_eod_raw_lineage(manifest_values, instrument_id)
+        physical = _validate_eod(partition, instrument_id, expected_rows)
+    else:
+        physical = _validate_features(partition, instrument_id, expected_rows)
     return {
         "dataset_id": dataset_id,
         "instrument_id": instrument_id,
@@ -352,6 +454,10 @@ def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[st
         source_path = str(checked.get("source_eod_partition_path") or "")
         if not source_path or Path(source_path).resolve() != seen_eod[instrument]["partition"]:
             _fail("feature source EOD lineage mismatch")
+        _validate_feature_source_alignment(checked["partition"], seen_eod[instrument]["partition"])
+        physical = dict(checked["physical_readback"])
+        physical["source_eod_identity_timestamp_base_match"] = True
+        checked["physical_readback"] = physical
         outputs.append(checked)
     if seen_features != EXPECTED_INSTRUMENTS:
         _fail("feature output instrument set mismatch")
@@ -367,7 +473,7 @@ def _rooted_ref(path: Path) -> str:
         rel = path.resolve(strict=True).relative_to(_data_root().resolve(strict=True))
     except (OSError, ValueError) as exc:
         raise Step5AcceptanceError("artifact must be inside MOEX_DATA_ROOT") from exc
-    return "${MOEX_DATA_ROOT}/" + rel.as_posix()
+    return ROOT_PREFIX + rel.as_posix()
 
 
 def _stage_json(path: Path, values: Mapping[str, object]) -> Path:
