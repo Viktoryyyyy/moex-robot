@@ -3,7 +3,8 @@ status: implementation_candidate_physical_pilot_pending
 architecture_contract_ref: contracts/architecture/moex_data_access_canon_v1.yaml
 purpose: >
   Canonical Si/CR participant-positioning layer derived from accepted FUTOI raw history:
-  deterministic revision resolution, paired FIZ/YUR EOD snapshots, and causal D1 positioning features.
+  immutable byte-pinned raw input, deterministic revision resolution, paired FIZ/YUR EOD snapshots,
+  and causal D1 positioning features.
 
 upstream:
   raw_dataset_ref: contracts/datasets/futures_futoi_raw.v1.yaml
@@ -18,6 +19,23 @@ upstream:
   accepted_raw_manifest_date_set_digest_required: true
   accepted_raw_acceptance_report_sha256_required: true
   unaccepted_physical_partition_read_allowed: false
+
+immutable_raw_input_freeze:
+  required_before_eod: true
+  producer: moex_data.futures.freeze_accepted_futoi_history.v1
+  schema_version: step5_futoi_raw_frozen_input.v1
+  scope: exact_full_accepted_history_range
+  stage2_futoi_partition_validator_reapplied: true
+  source_bytes_sha256_required: true
+  frozen_bytes_sha256_required: true
+  source_and_frozen_sha256_must_match: true
+  freeze_mode: create_only_hardlink_same_validated_inode
+  source_inode_must_equal_frozen_inode_at_link_time: true
+  hardlink_failure_fallback_allowed: false
+  canonical_raw_reads_after_freeze_allowed: false
+  frozen_partition_hash_revalidation_before_eod: true
+  frozen_partition_hash_and_physical_revalidation_at_acceptance: true
+  canonical_path_replacement_after_freeze_must_not_change_frozen_input: true
 
 scope:
   mandatory_instrument_ids:
@@ -101,8 +119,10 @@ physical_pilot:
       start_date: "2022-04-21"
   immutable_run_required: true
   accepted_raw_history_required: true
+  immutable_raw_input_freeze_required: true
   raw_network_calls_allowed: false
   raw_api_latest_allowed: false
+  expected_frozen_inputs: 2
   expected_eod_outputs: 2
   expected_feature_outputs: 2
   expected_accepted_pointer_count: 4
