@@ -1,0 +1,60 @@
+contract_id: step7_rub_native_d1_w1_technical_acceptance.v1
+artifact_class: external_pattern
+producer: moex_data.step7_rub_native_d1_w1_acceptance
+program_ref: configs/datasets/step7_rub_native_d1_w1_technical.v1.yaml
+pilot_evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step7_rub_native_d1_w1/run_id={RUN_ID}/pilot_evidence.json"
+acceptance_evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step7_rub_native_d1_w1/run_id={RUN_ID}/accepted_pointers.json"
+expected_outputs:
+  ohlcv:
+    dataset_id: rub_native_ohlcv_htf
+    timeframes:
+      - 1D
+      - 1W
+    instruments:
+      - usdrubf_futures_family
+      - cnyrubf_futures_family
+  technical:
+    dataset_id: rub_technical_features_htf
+    timeframes:
+      - 1D
+      - 1W
+    instruments:
+      - usdrubf_futures_family
+      - cnyrubf_futures_family
+  accepted_pointer_count: 8
+validation_policy:
+  pilot_status_required: pilot_passed
+  immutable_run_required: true
+  network_calls_used_required: false
+  latest_autodetect_used_required: false
+  continuous_series_used_required: false
+  accepted_raw_history_required: true
+  frozen_raw_manifest_required: true
+  frozen_raw_partition_sha256_recheck_required: true
+  frozen_raw_physical_revalidation_required: true
+  all_outputs_inside_declared_run_root: true
+  physical_parquet_readback_required: true
+  manifest_quality_identity_and_row_count_match_required: true
+  d1_expected_rows:
+    usdrubf_futures_family: 1100
+    cnyrubf_futures_family: 1100
+  d1_ohlcv_reaggregation_required: true
+  w1_completed_week_only_required: true
+  w1_ohlcv_reaggregation_from_d1_required: true
+  source_lineage_sha256_required: true
+  technical_source_identity_period_availability_exact_match_required: true
+  technical_formula_recalculation_required: true
+  atr_wilder_seed_and_recurrence_recalculation_required: true
+  no_future_rows_required: true
+promotion_policy:
+  validate_all_before_pointer_writes: true
+  pointer_run_id_source: referenced_manifest_run_id
+  acceptance_run_id_stored_separately: true
+  pointer_promotion_mode: transactional_with_rollback
+  final_acceptance_marker_participates_in_same_transaction: true
+  partial_pointer_set_without_acceptance_marker_is_not_accepted: true
+readiness_boundaries:
+  si_cr_continuous_ready: false
+  weekly_oi_ready: false
+  advanced_technical_policy_ready: false
+  research_ready: false
