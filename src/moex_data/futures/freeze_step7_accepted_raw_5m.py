@@ -16,11 +16,16 @@ from . import stage2_raw_history_acceptance as stage2
 
 SOURCE_DATASET_ID: Final[str] = "futures_raw_5m"
 SOURCE_ID: Final[str] = "moex_algopack_fo_tradestats_5m"
+SOURCE_CONTRACT_REF: Final[str] = "contracts/datasets/futures_raw_5m.v1.yaml"
 ROOT_PREFIX: Final[str] = "${MOEX_DATA_ROOT}/"
 ACCEPTED_MANIFEST_SCHEMA: Final[str] = "futures_raw_history_accepted_manifest.v1"
 ACCEPTED_MANIFEST_DATASET: Final[str] = "futures_raw_history_accepted_manifest"
 ACCEPTED_MANIFEST_PRODUCER: Final[str] = "moex_data.futures.stage2_raw_history_promotion.v1"
-ALLOWED_INSTRUMENTS: Final[frozenset[str]] = frozenset({"usdrubf_futures_family", "cnyrubf_futures_family"})
+EXPECTED_SECID: Final[dict[str, str]] = {
+    "usdrubf_futures_family": "USDRUBF",
+    "cnyrubf_futures_family": "CNYRUBF",
+}
+ALLOWED_INSTRUMENTS: Final[frozenset[str]] = frozenset(EXPECTED_SECID)
 
 
 class Step7RawFreezeError(ValueError):
@@ -31,6 +36,7 @@ class Step7RawFreezeError(ValueError):
 class AcceptedQuoteHistory:
     instrument_id: str
     source_id: str
+    secid: str
     accepted_dates: tuple[str, ...]
     missing_dates: tuple[str, ...]
     acceptance_run_id: str
@@ -117,6 +123,7 @@ def accepted_quote_history(root: Path, instrument_id: str, start_date: str, end_
     instrument = _safe_token(instrument_id, "instrument_id")
     if instrument not in ALLOWED_INSTRUMENTS:
         _fail("Stage 7 production quote scope is USDRUBF/CNYRUBF only")
+    expected_secid = EXPECTED_SECID[instrument]
     start = _iso_date(start_date, "start_date")
     end = _iso_date(end_date, "end_date")
     pointer_path = accepted_pointer_path(root, instrument)
@@ -135,10 +142,15 @@ def accepted_quote_history(root: Path, instrument_id: str, start_date: str, end_
         _fail("accepted raw manifest schema/producer mismatch")
     if manifest.get("dataset_id") != ACCEPTED_MANIFEST_DATASET or manifest.get("target_dataset_id") != SOURCE_DATASET_ID:
         _fail("accepted raw manifest dataset binding mismatch")
+    if manifest.get("target_dataset_contract_ref") != SOURCE_CONTRACT_REF:
+        _fail("accepted raw manifest target contract mismatch")
     if manifest.get("instrument_id") != instrument or manifest.get("acceptance_run_id") != acceptance_run_id:
         _fail("accepted raw manifest identity/run mismatch")
     if manifest.get("source_id") != SOURCE_ID or manifest.get("acceptance_status") != "pass":
         _fail("accepted raw manifest source/status mismatch")
+    secid_scope = manifest.get("secid_scope")
+    if not isinstance(secid_scope, list) or set(str(x) for x in secid_scope) != {expected_secid}:
+        _fail("accepted raw manifest SECID scope mismatch")
     if manifest.get("network_access_used") is not False or manifest.get("historical_backfill_used") is not False:
         _fail("accepted raw manifest execution boundary mismatch")
 
@@ -181,6 +193,7 @@ def accepted_quote_history(root: Path, instrument_id: str, start_date: str, end_
     return AcceptedQuoteHistory(
         instrument_id=instrument,
         source_id=SOURCE_ID,
+        secid=expected_secid,
         accepted_dates=accepted,
         missing_dates=requested_missing,
         acceptance_run_id=acceptance_run_id,
@@ -188,6 +201,22 @@ def accepted_quote_history(root: Path, instrument_id: str, start_date: str, end_
         manifest_ref=_rooted_ref(root, manifest_path),
         acceptance_report_ref=_rooted_ref(root, report_path),
         partition_dates_sha256=partition_digest,
+    )
+
+
+def quote_validation_expectation(instrument_id: str, start_date: str, end_date: str) -> stage2.HistoryExpectation:
+    instrument = _safe_token(instrument_id, "instrument_id")
+    if instrument not in EXPECTED_SECID:
+        _fail("unsupported Stage 7 quote instrument")
+    return stage2.HistoryExpectation(
+        target_dataset_id=SOURCE_DATASET_ID,
+        instrument_id=instrument,
+        source_id=SOURCE_ID,
+        date_start=_iso_date(start_date, "start_date"),
+        date_end=_iso_date(end_date, "end_date"),
+        expected_partitions=0,
+        expected_rows=0,
+        expected_secid=EXPECTED_SECID[instrument],
     )
 
 
@@ -215,13 +244,11 @@ def _sha_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _freeze_one(*, repo_root: Path, data_root: Path, instrument_id: str, trade_date: str, freeze_root: Path, validation_run_id: str) -> dict[str, object]:
+def _freeze_one(*, repo_root: Path, data_root: Path, instrument_id: str, trade_date: str, freeze_root: Path, validation_run_id: str, expectation: stage2.HistoryExpectation | None = None) -> dict[str, object]:
     source = canonical_partition_path(data_root, instrument_id, trade_date)
     if not source.is_file() or source.is_symlink():
         _fail("accepted canonical raw partition is missing/non-regular: " + trade_date)
-    flags = os.O_RDONLY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
+    flags = os.O_RDONLY | (getattr(os, "O_NOFOLLOW", 0))
     fd = os.open(source, flags)
     try:
         opened_stat = os.fstat(fd)
@@ -229,10 +256,9 @@ def _freeze_one(*, repo_root: Path, data_root: Path, instrument_id: str, trade_d
             _fail("accepted raw partition fd is not regular")
         with os.fdopen(os.dup(fd), "rb") as handle:
             frame = pd.read_parquet(handle)
-        expectation = stage2._expectation(repo_root, SOURCE_DATASET_ID, instrument_id)
-        rows, secids = stage2._validate_quote_partition(repo_root, frame, expectation, trade_date, validation_run_id)
+        checked_expectation = expectation or quote_validation_expectation(instrument_id, trade_date, trade_date)
+        rows, secids = stage2._validate_quote_partition(repo_root, frame, checked_expectation, trade_date, validation_run_id)
         sha256 = _sha_fd(fd)
-
         current_stat = os.stat(source, follow_symlinks=False)
         if (current_stat.st_dev, current_stat.st_ino) != (opened_stat.st_dev, opened_stat.st_ino):
             _fail("canonical raw partition changed during validation")
@@ -282,6 +308,7 @@ def freeze_accepted_quote_history(*, repo_root: str | Path, data_root: str | Pat
     run = Path(run_root).resolve()
     checked_run = _safe_token(run_id, "run_id")
     scope = accepted_quote_history(root, instrument_id, start_date, end_date)
+    expectation = quote_validation_expectation(scope.instrument_id, start_date, end_date)
     freeze_root = run / "inputs" / ("dataset_id=" + SOURCE_DATASET_ID)
     records = [
         _freeze_one(
@@ -291,6 +318,7 @@ def freeze_accepted_quote_history(*, repo_root: str | Path, data_root: str | Pat
             trade_date=trade_date,
             freeze_root=freeze_root,
             validation_run_id=checked_run + "_freeze_validation",
+            expectation=expectation,
         )
         for trade_date in scope.accepted_dates
     ]
@@ -303,6 +331,7 @@ def freeze_accepted_quote_history(*, repo_root: str | Path, data_root: str | Pat
         "dataset_id": SOURCE_DATASET_ID,
         "instrument_id": scope.instrument_id,
         "source_id": SOURCE_ID,
+        "secid": scope.secid,
         "accepted_raw_history_run_id": scope.acceptance_run_id,
         "accepted_raw_pointer_ref": scope.pointer_ref,
         "accepted_raw_manifest_ref": scope.manifest_ref,
