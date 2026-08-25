@@ -1,0 +1,137 @@
+config_id: step7_rub_native_d1_w1_technical.v1
+status: implementation_candidate_physical_pilot_pending
+architecture_contract_ref: contracts/architecture/moex_data_access_canon_v1.yaml
+purpose: >
+  Canonical production D1/W1 OHLCV and causal technical context for the two RUB
+  perpetual futures families with fully accepted native 5m history.
+
+production_scope:
+  mandatory_instrument_ids:
+    - usdrubf_futures_family
+    - cnyrubf_futures_family
+  mandatory_secids:
+    usdrubf_futures_family: USDRUBF
+    cnyrubf_futures_family: CNYRUBF
+  source_dataset_id: futures_raw_5m
+  source_id: moex_algopack_fo_tradestats_5m
+  accepted_raw_history_required: true
+  accepted_raw_pointer_required: true
+  mutable_canonical_raw_read_after_freeze_allowed: false
+  continuous_series_required_for_production: false
+
+si_cr_continuous_gap:
+  required_by_weekly_forecast_spec: true
+  production_dependency_enabled: false
+  status: deferred_research_only_pending_separate_continuous_policy
+  fixed_expiry_substitution_allowed: false
+
+native_history:
+  usdrubf_futures_family:
+    first_available: "2022-04-26"
+    last_available: "2026-08-17"
+    expected_d1_rows: 1100
+  cnyrubf_futures_family:
+    first_available: "2022-04-26"
+    last_available: "2026-08-17"
+    expected_d1_rows: 1100
+
+input_freeze_policy:
+  physical_revalidation_before_freeze: true
+  per_partition_sha256_required: true
+  create_only_run_scoped_hardlink_required: true
+  validated_inode_binding_required: true
+  frozen_sha256_recheck_required: true
+  acceptance_revalidates_frozen_bytes: true
+
+higher_timeframe_policy:
+  d1:
+    source: frozen_native_5m
+    open: first_5m_open
+    high: max_5m_high
+    low: min_5m_low
+    close: last_5m_close
+    additive_fields:
+      - volume
+      - value
+      - num_trades
+    all_null_additive_input_preserved_as_null: true
+    availability_policy: conservative_trade_date_plus_1_calendar_day_0600_europe_moscow
+  w1:
+    source: run_scoped_d1
+    iso_week_start: monday
+    iso_week_end: sunday
+    completed_weeks_only: true
+    week_is_complete_when: iso_week_end_date_less_than_or_equal_to_explicit_history_end_date
+    open: first_d1_open
+    high: max_d1_high
+    low: min_d1_low
+    close: last_d1_close
+    additive_fields:
+      - volume
+      - value
+      - num_trades
+    availability_policy: following_monday_0600_europe_moscow
+
+technical_feature_policy:
+  causality: current_and_prior_rows_only
+  supported_timeframes:
+    - 1D
+    - 1W
+  exact_features:
+    - return_1obs
+    - gap_abs
+    - gap_pct
+    - range_abs
+    - true_range
+    - atr_14_wilder
+    - atr_20_wilder
+    - higher_high_vs_prev_bar
+    - higher_low_vs_prev_bar
+    - lower_high_vs_prev_bar
+    - lower_low_vs_prev_bar
+    - close_break_prev_high
+    - close_break_prev_low
+  atr_method: wilder_rma_seeded_by_first_n_true_ranges
+  atr_windows:
+    - 14
+    - 20
+  future_rows_allowed: false
+  unresolved_feature_policies:
+    ema_filter:
+      status: deferred_exact_window_not_approved
+    realized_volatility:
+      status: deferred_exact_window_and_annualization_not_approved
+    range_percentile:
+      status: deferred_exact_window_not_approved
+    swing_high_low:
+      status: deferred_causal_confirmation_policy_not_approved
+    break_of_structure:
+      status: deferred_until_swing_policy_approved
+
+open_interest_policy:
+  weekly_oi_required_by_forecast_spec: true
+  native_raw_quote_contract_contains_oi: false
+  fabricated_oi_allowed: false
+  status: separate_source_join_required
+
+outputs:
+  ohlcv_contract_ref: contracts/datasets/rub_native_ohlcv_htf.v1.yaml
+  technical_contract_ref: contracts/datasets/rub_technical_features_htf.v1.yaml
+  acceptance_contract_ref: contracts/datasets/step7_rub_native_d1_w1_technical_acceptance.v1.yaml
+  expected_pointer_count: 8
+
+physical_pilot:
+  immutable_run_required: true
+  network_calls_allowed: false
+  latest_autodetect_allowed: false
+  explicit_history_end_date: "2026-08-17"
+
+readiness_flags:
+  implementation_ready: true
+  physical_pilot_passed: false
+  accepted_pointer_ready: false
+  scheduler_ready: false
+  research_ready: false
+  si_cr_continuous_ready: false
+  weekly_oi_ready: false
+  advanced_technical_policy_ready: false
