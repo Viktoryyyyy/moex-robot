@@ -1,5 +1,5 @@
 config_id: step4_rub_basis_carry.v1
-status: implementation_candidate_physical_pilot_pending
+status: rub_basis_carry_stage4_accepted
 architecture_contract_ref: contracts/architecture/moex_data_access_canon_v1.yaml
 purpose: >
   Canonical causal 5m basis, term-spread and market-implied carry features for
@@ -89,10 +89,25 @@ physical_acceptance:
   every_output_requires_nonzero_rows: true
   every_output_requires_quality_pass: true
   run_artifacts_immutable: true
+  applied_state_evidence:
+    status: accepted
+    evidence_date: "2026-08-24"
+    run_id: step4_pilot_20260824_1908
+    binding_count: 4
+    perpetual_quote_partition_count: 2
+    front_next_quote_partition_count: 4
+    tom_partition_count: 2
+    derived_partition_count: 2
+    accepted_pointer_count: 2
+    usd_rub_basis_carry_row_count: 27
+    cny_rub_basis_carry_row_count: 108
+    physical_partition_readback_required: true
+    required_schema_complete: true
+    promotion_semantics: transactional_with_rollback
 
 readiness_flags:
   implementation_ready: true
-  physical_pilot_passed: false
-  accepted_pointer_ready: false
+  physical_pilot_passed: true
+  accepted_pointer_ready: true
   scheduler_ready: false
   research_ready: false
