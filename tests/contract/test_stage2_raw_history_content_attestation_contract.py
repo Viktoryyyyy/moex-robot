@@ -1,42 +1,44 @@
 from pathlib import Path
 
 
-def test_content_attestation_contract_declares_exact_byte_binding() -> None:
+def test_content_attestation_contract_declares_exact_byte_atomic_generation() -> None:
     text = Path("contracts/datasets/futures_raw_history_content_attestation.v1.yaml").read_text(encoding="utf-8")
     for required in (
-        "producer_impl_ref: src/moex_data/futures/stage2_raw_history_content_reattestation.py",
-        "content_attestation_is_required_second_gate_for_downstream_consumption: true",
-        "expected_pointer_count: 4",
-        "explicit_prior_four_pointer_state_sha256_required: true",
-        "four_pointer_replacement_transactional_with_rollback: true",
-        "final_batch_marker_same_transaction: true",
+        "content_attestation_is_required_second_gate_for_stage5_stage7: true",
+        "legacy_stage2_pointers_mutated: false",
+        "exact_scope_count: 4",
+        "explicit_prior_state_sha256_required: true",
+        "concurrent_writer_lock_required: true",
         "digest_input: exact_parquet_file_bytes",
-        "physical_validation_before_hash_binding_required: true",
-        "hash_and_validation_same_exact_bytes_required: true",
-        "source_path_inode_stability_during_capture_required: true",
-        "partition_content_sha256_by_trade_date_required: true",
-        "partition_content_set_sha256_required: true",
-        "consumer_must_verify_source_partition_sha256_against_accepted_manifest: true",
-        "consumer_must_verify_batch_acceptance_marker: true",
-        "current_date_set_match_without_content_match_is_insufficient: true",
+        "same_opened_inode_validation_and_hash_required: true",
+        "validated_inode_hardlink_snapshot_required: true",
+        "recorded_missing_dates_must_still_be_absent: true",
+        "canonical_partition_inode_and_sha_recheck_before_marker_switch: true",
+        "marker_switch_atomic_replace: true",
+        "crash_before_marker_switch_preserves_previous_canonical_state: true",
+        "stage5_stage7_must_use_resolver: true",
+        "consumer_reads_generation_snapshots_not_mutable_canonical_raw: true",
         "canonical_raw_mutation_allowed: false",
     ):
         assert required in text
 
 
-def test_content_attested_manifest_contract_requires_prior_state_and_batch_transaction() -> None:
+def test_content_attested_manifest_contract_uses_single_marker_generation() -> None:
     text = Path("contracts/datasets/futures_raw_history_content_attested_manifest.v1.yaml").read_text(encoding="utf-8")
     for required in (
         "schema_version: futures_raw_history_content_attested_manifest.v1",
+        "current_marker_path:",
         "partition_content_records",
         "partition_content_set_sha256",
-        "prior_accepted_run_id",
-        "prior_accepted_manifest_sha256",
-        "prior_pointer_sha256",
-        "promotion_basis: raw_history_content_attestation",
-        "four_pointer_transaction_required_for_controlled_batch: true",
-        "rollback_required: true",
-        "final_marker_same_transaction_required: true",
-        "pointer_absence_window_allowed: false",
+        "legacy_pointer_sha256",
+        "legacy_manifest_sha256",
+        "legacy_report_sha256",
+        "schema_version: futures_raw_history_content_attested_batch_marker.v1",
+        "exact_scope_count: 4",
+        "single_atomic_marker_switch_required: true",
+        "marker_is_only_mutable_canonical_reference: true",
+        "resolve_only_through_current_marker: true",
+        "verify_each_snapshot_sha256: true",
+        "mutable_canonical_raw_read_required: false",
     ):
         assert required in text
