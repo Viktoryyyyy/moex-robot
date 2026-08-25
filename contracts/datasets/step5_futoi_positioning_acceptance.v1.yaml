@@ -1,0 +1,48 @@
+contract_id: step5_futoi_positioning_acceptance.v1
+artifact_class: external_pattern
+producer: moex_data.step5_futoi_positioning_acceptance
+program_ref: configs/datasets/step5_futoi_positioning.v1.yaml
+pilot_evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step5_futoi_positioning/run_id={RUN_ID}/pilot_evidence.json"
+acceptance_evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step5_futoi_positioning/run_id={RUN_ID}/accepted_pointers.json"
+expected_outputs:
+  eod:
+    dataset_id: futures_futoi_eod
+    instruments:
+      - si_futures_family
+      - cr_futures_family
+  positioning_features:
+    dataset_id: futures_futoi_positioning_features_d1
+    instruments:
+      - si_futures_family
+      - cr_futures_family
+  accepted_pointer_count: 4
+validation_policy:
+  pilot_status_required: pilot_passed
+  run_artifacts_immutable_required: true
+  run_id_reuse_allowed_required: false
+  network_calls_used_required: false
+  latest_autodetect_used_required: false
+  root_aggregate_semantics_required: true
+  front_next_split_claimed_required: false
+  historical_pit_research_ready_claimed_required: false
+  all_artifacts_inside_declared_run_root: true
+  physical_parquet_readback_required: true
+  manifest_quality_identity_and_row_count_match_required: true
+  eod_required_schema_complete: true
+  eod_balance_invariants_revalidated: true
+  eod_final_snapshot_timestamp_metadata_valid: true
+  feature_required_schema_complete: true
+  feature_changes_recomputed: true
+  feature_rolling_zscores_recomputed: true
+  feature_rolling_percentiles_recomputed: true
+  feature_percentiles_in_unit_interval: true
+  historical_expected_rows:
+    si_futures_family: 1757
+    cr_futures_family: 1177
+promotion_policy:
+  validate_all_before_pointer_writes: true
+  pointer_run_id_source: referenced_manifest_run_id
+  acceptance_run_id_stored_separately: true
+  pointer_promotion_mode: transactional_with_rollback
+  final_acceptance_marker_participates_in_same_transaction: true
+  partial_pointer_set_without_acceptance_marker_is_not_accepted: true
