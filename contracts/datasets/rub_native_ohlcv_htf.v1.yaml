@@ -1,0 +1,77 @@
+contract_id: rub_native_ohlcv_htf.v1
+dataset_id: rub_native_ohlcv_htf
+artifact_class: external_pattern
+producer: moex_data.step7_rub_native_d1_w1_materializer
+format: parquet
+schema_version: rub_native_ohlcv_htf.v1
+storage_root_ref: MOEX_DATA_ROOT
+grain: one_row_per_instrument_period
+identity_model:
+  canonical_identity_field: instrument_id
+  mandatory_instrument_ids:
+    - usdrubf_futures_family
+    - cnyrubf_futures_family
+  supported_timeframes:
+    - 1D
+    - 1W
+source_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
+accepted_raw_history:
+  accepted_manifest_contract_ref: contracts/datasets/futures_raw_history_accepted_manifest.v1.yaml
+  current_pointer_required: true
+  promotion_basis_required: raw_history_acceptance
+  physical_partition_revalidation_required: true
+  immutable_run_scoped_freeze_required: true
+  frozen_partition_sha256_required: true
+  mutable_canonical_raw_read_after_freeze_allowed: false
+timestamp_semantics:
+  market_timezone: Europe/Moscow
+  d1_availability_rule: trade_date_plus_1_calendar_day_at_0600_europe_moscow
+  w1_availability_rule: following_monday_at_0600_europe_moscow
+  output_availability_timezone: UTC
+required_columns_common:
+  - instrument_id
+  - secid
+  - timeframe
+  - period_start_date
+  - period_end_date
+  - availability_ts_utc
+  - open
+  - high
+  - low
+  - close
+  - volume
+  - value
+  - num_trades
+  - source_row_count
+  - source_period_count
+  - source_lineage_sha256
+  - build_ts_utc
+d1_required_columns:
+  - trade_date
+w1_required_columns:
+  - week_start_date
+  - week_end_date
+  - trading_day_count
+aggregation_policy:
+  open: first_source_open
+  high: max_source_high
+  low: min_source_low
+  close: last_source_close
+  additive_fields:
+    - volume
+    - value
+    - num_trades
+  all_null_additive_input_preserved_as_null: true
+  completed_w1_only: true
+quality_checks:
+  - nonzero_row_count
+  - unique_instrument_timeframe_period
+  - chronological_period_order
+  - non_null_finite_ohlc
+  - high_ge_open_close_low
+  - source_lineage_present
+  - no_future_source_rows
+  - availability_timestamp_valid
+  - completed_w1_only
+accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=rub_native_ohlcv_htf/timeframe={TIMEFRAME}/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+retention_policy: keep_all_accepted_run_scoped_outputs
