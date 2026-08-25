@@ -18,8 +18,19 @@ def _raw(*, ambiguous_session: bool = False, incomplete_final: bool = False) -> 
     return pd.DataFrame(rows)
 
 
+def _row(frame: pd.DataFrame) -> dict[str, object]:
+    return _single_eod_row(
+        frame,
+        instrument_id="si_futures_family",
+        trade_date="2026-08-17",
+        frozen_ref="${MOEX_DATA_ROOT}/runs/fixture/frozen.parquet",
+        canonical_source_ref="${MOEX_DATA_ROOT}/market/fixture.parquet",
+        frozen_sha256="a" * 64,
+    )
+
+
 def test_eod_resolves_same_session_revision_and_uses_paired_final_snapshot() -> None:
-    row = _single_eod_row(_raw(), instrument_id="si_futures_family", trade_date="2026-08-17", source_ref="${MOEX_DATA_ROOT}/fixture.parquet")
+    row = _row(_raw())
     assert row["phys_seqnum"] == 3
     assert row["legal_seqnum"] == 3
     assert row["phys_net"] == 20
@@ -29,13 +40,14 @@ def test_eod_resolves_same_session_revision_and_uses_paired_final_snapshot() -> 
     assert row["source_revision_rows_dropped"] == 1
     assert row["snapshot_ts_utc"] == "2026-08-17T07:05:00+00:00"
     assert row["phys_net_share_of_oi"] == pytest.approx(0.2)
+    assert row["source_frozen_partition_sha256"] == "a" * 64
 
 
 def test_eod_rejects_multi_session_revision_for_same_event() -> None:
     with pytest.raises(FutoiEodError, match="multi-session revision"):
-        _single_eod_row(_raw(ambiguous_session=True), instrument_id="si_futures_family", trade_date="2026-08-17", source_ref="fixture")
+        _row(_raw(ambiguous_session=True))
 
 
 def test_eod_rejects_incomplete_final_fiz_yur_snapshot() -> None:
     with pytest.raises(FutoiEodError, match="incomplete final FUTOI snapshot"):
-        _single_eod_row(_raw(incomplete_final=True), instrument_id="si_futures_family", trade_date="2026-08-17", source_ref="fixture")
+        _row(_raw(incomplete_final=True))
