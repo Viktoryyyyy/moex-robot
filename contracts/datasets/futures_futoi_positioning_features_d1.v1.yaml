@@ -1,0 +1,68 @@
+contract_id: futures_futoi_positioning_features_d1.v1
+dataset_id: futures_futoi_positioning_features_d1
+artifact_class: external_pattern
+producer: moex_data.futures.materialize_futoi_positioning_features_d1
+format: parquet
+schema_version: futures_futoi_positioning_features_d1.v1
+storage_root_ref: MOEX_DATA_ROOT
+grain: one_row_per_trade_date_per_root_instrument
+source_dataset_ref: contracts/datasets/futures_futoi_eod.v1.yaml
+causality:
+  future_rows_allowed: false
+  current_and_prior_eod_only: true
+  observation_lag_semantics: valid_snapshot_observations_not_calendar_days
+  historical_pit_research_ready_claimed: false
+feature_policy:
+  base_fields:
+    - phys_net_share_of_oi
+    - phys_gross_share_of_two_sided_oi
+    - phys_long_num
+    - phys_short_num
+    - phys_avg_long_per_participant
+    - phys_avg_short_per_participant
+  changes:
+    d1_observation_lag: 1
+    w1_observation_lag: 5
+    formulas:
+      absolute_change: current - lagged
+  rolling:
+    windows:
+      - 252
+      - 504
+    zscore_formula: (current - mean(window)) / population_std(window)
+    zscore_ddof: 0
+    percentile_formula: count(window <= current) / window_size
+    current_observation_in_window: true
+    incomplete_window: null
+    zero_std_zscore: null
+required_identity_columns:
+  - instrument_id
+  - trade_date
+  - snapshot_ts_utc
+  - availability_ts_utc
+required_base_columns:
+  - phys_net_share_of_oi
+  - phys_gross_share_of_two_sided_oi
+  - phys_long_num
+  - phys_short_num
+  - phys_avg_long_per_participant
+  - phys_avg_short_per_participant
+required_feature_suffixes:
+  - _chg_1obs
+  - _chg_5obs
+  - _zscore_252obs
+  - _pctile_252obs
+  - _zscore_504obs
+  - _pctile_504obs
+quality_checks:
+  - nonzero_row_count
+  - unique_instrument_trade_date
+  - chronological_trade_date
+  - identity_matches_source_eod
+  - changes_use_only_prior_rows
+  - rolling_windows_are_backward_looking
+  - percentile_in_unit_interval
+  - finite_non_null_features
+  - source_lineage_present
+accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_futoi_positioning_features_d1/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+retention_policy: keep_all_accepted_run_scoped_outputs
