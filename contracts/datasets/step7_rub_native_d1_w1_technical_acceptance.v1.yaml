@@ -29,9 +29,13 @@ validation_policy:
   latest_autodetect_used_required: false
   continuous_series_used_required: false
   accepted_raw_history_required: true
+  current_accepted_raw_pointer_must_match_frozen_upstream: true
+  current_accepted_raw_manifest_must_match_frozen_upstream: true
+  current_accepted_raw_date_set_must_match_frozen_upstream: true
   frozen_raw_manifest_required: true
   frozen_raw_partition_sha256_recheck_required: true
   frozen_raw_physical_revalidation_required: true
+  physical_quote_validation_must_not_depend_on_pre_promotion_stage2_status: true
   all_outputs_inside_declared_run_root: true
   physical_parquet_readback_required: true
   manifest_quality_identity_and_row_count_match_required: true
