@@ -124,10 +124,19 @@ def test_recheck_rejects_previously_missing_date_that_appeared(monkeypatch: pyte
 
 
 def test_publish_marker_is_single_atomic_canonical_switch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    marker_path = tmp_path / "state" / "current_batch.json"
-    marker_path.parent.mkdir(parents=True)
+    monkeypatch.setenv("MOEX_DATA_ROOT", tmp_path.as_posix())
+    generation_root = (
+        tmp_path
+        / "state"
+        / "accepted_manifests"
+        / "raw_history_content_attestation"
+        / "generation_id=new"
+    )
+    generation_root.mkdir(parents=True)
+    (generation_root / "proof.txt").write_text("ready\n", encoding="utf-8")
+    marker_path = content._current_marker_path()
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
     marker_path.write_text('{"generation_id":"old"}\n', encoding="utf-8")
-    monkeypatch.setattr(content, "_current_marker_path", lambda: marker_path)
     marker = {"schema_version": content.MARKER_SCHEMA, "generation_id": "new", "status": "accepted"}
     sha = content._publish_marker(marker)
     raw = marker_path.read_bytes()
