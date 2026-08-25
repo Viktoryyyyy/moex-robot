@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Final
@@ -21,10 +23,25 @@ RAW_REQUIRED: Final[tuple[str, ...]] = (
     "instrument_id", "trade_date", "ts", "systime", "sess_id", "seqnum", "clgroup",
     *POSITION_FIELDS, "availability_ts_utc",
 )
+ACCEPTED_MANIFEST_SCHEMA: Final[str] = "futures_raw_history_accepted_manifest.v1"
+ACCEPTED_MANIFEST_DATASET: Final[str] = "futures_raw_history_accepted_manifest"
+ACCEPTED_MANIFEST_PRODUCER: Final[str] = "moex_data.futures.stage2_raw_history_promotion.v1"
+ROOT_PREFIX: Final[str] = "${MOEX_DATA_ROOT}/"
 
 
 class FutoiEodError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class AcceptedHistoryScope:
+    accepted_dates: tuple[str, ...]
+    missing_requested_dates: tuple[str, ...]
+    pointer_ref: str
+    manifest_ref: str
+    acceptance_report_ref: str
+    acceptance_run_id: str
+    partition_dates_sha256: str
 
 
 def _fail(message: str) -> None:
@@ -50,6 +67,139 @@ def _date_range(start: str, end: str) -> list[str]:
     a = date.fromisoformat(start)
     b = date.fromisoformat(end)
     return [(a + timedelta(days=n)).isoformat() for n in range((b - a).days + 1)]
+
+
+def _date_set_sha256(values: list[str] | tuple[str, ...]) -> str:
+    payload = (("\n".join(values) + "\n") if values else "").encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _rooted_ref(root: Path, path: Path) -> str:
+    try:
+        relative = path.resolve(strict=True).relative_to(root.resolve(strict=True))
+    except (OSError, ValueError) as exc:
+        raise FutoiEodError("artifact must be inside MOEX_DATA_ROOT") from exc
+    return ROOT_PREFIX + relative.as_posix()
+
+
+def _expand_root_ref(root: Path, value: object, field: str) -> Path:
+    text = str(value or "").strip()
+    if not text.startswith(ROOT_PREFIX):
+        _fail(field + " must be a ${MOEX_DATA_ROOT} rooted reference")
+    relative = text[len(ROOT_PREFIX):]
+    if not relative or relative.startswith("/") or ".." in Path(relative).parts:
+        _fail(field + " contains invalid rooted path")
+    candidate = (root / relative).resolve(strict=True)
+    try:
+        candidate.relative_to(root.resolve(strict=True))
+    except ValueError as exc:
+        raise FutoiEodError(field + " escaped MOEX_DATA_ROOT") from exc
+    if not candidate.is_file() or candidate.is_symlink():
+        _fail(field + " must resolve to a regular non-symlink file")
+    return candidate
+
+
+def _load_json(path: Path, field: str) -> dict[str, object]:
+    if not path.is_file() or path.is_symlink():
+        _fail(field + " must be a regular non-symlink JSON file")
+    try:
+        values = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise FutoiEodError(field + " is not valid JSON: " + str(exc)) from exc
+    if not isinstance(values, dict):
+        _fail(field + " must be a JSON object")
+    return values
+
+
+def accepted_raw_pointer_path(data_root: Path, instrument_id: str) -> Path:
+    return (
+        data_root
+        / "state" / "datasets"
+        / ("dataset_id=" + SOURCE_DATASET_ID)
+        / ("instrument_id=" + instrument_id)
+        / "current_accepted_manifest.json"
+    )
+
+
+def _accepted_history_scope(root: Path, instrument_id: str, start_date: str, end_date: str) -> AcceptedHistoryScope:
+    pointer_path = accepted_raw_pointer_path(root, instrument_id)
+    pointer = _load_json(pointer_path, "accepted raw pointer")
+    if pointer.get("dataset_id") != SOURCE_DATASET_ID or pointer.get("instrument_id") != instrument_id:
+        _fail("accepted raw pointer identity mismatch")
+    if pointer.get("quality_status") != "pass" or pointer.get("acceptance_status") != "pass":
+        _fail("accepted raw pointer is not PASS")
+    if pointer.get("promotion_basis") != "raw_history_acceptance":
+        _fail("accepted raw pointer promotion_basis mismatch")
+    acceptance_run_id = _safe_token(pointer.get("run_id"), "accepted raw pointer run_id")
+
+    manifest_path = _expand_root_ref(root, pointer.get("manifest_ref"), "accepted raw manifest_ref")
+    manifest = _load_json(manifest_path, "accepted raw manifest")
+    if manifest.get("schema_version") != ACCEPTED_MANIFEST_SCHEMA:
+        _fail("accepted raw manifest schema mismatch")
+    if manifest.get("producer") != ACCEPTED_MANIFEST_PRODUCER:
+        _fail("accepted raw manifest producer mismatch")
+    if manifest.get("dataset_id") != ACCEPTED_MANIFEST_DATASET:
+        _fail("accepted raw manifest dataset_id mismatch")
+    if manifest.get("target_dataset_id") != SOURCE_DATASET_ID or manifest.get("instrument_id") != instrument_id:
+        _fail("accepted raw manifest target identity mismatch")
+    if manifest.get("acceptance_run_id") != acceptance_run_id:
+        _fail("accepted raw manifest acceptance_run_id mismatch")
+    if manifest.get("source_id") != SOURCE_ID or manifest.get("acceptance_status") != "pass":
+        _fail("accepted raw manifest source/status mismatch")
+    if manifest.get("network_access_used") is not False or manifest.get("historical_backfill_used") is not False:
+        _fail("accepted raw manifest execution-boundary evidence mismatch")
+
+    accepted_start = _iso_date(manifest.get("requested_from"), "accepted raw requested_from")
+    accepted_end = _iso_date(manifest.get("requested_till"), "accepted raw requested_till")
+    if start_date < accepted_start or end_date > accepted_end:
+        _fail("requested Stage 5 range is outside accepted raw-history range")
+
+    missing = manifest.get("missing_partition_dates")
+    if not isinstance(missing, list):
+        _fail("accepted raw missing_partition_dates must be a list")
+    checked_missing = [_iso_date(value, "accepted raw missing_partition_dates") for value in missing]
+    if checked_missing != sorted(checked_missing) or len(checked_missing) != len(set(checked_missing)):
+        _fail("accepted raw missing_partition_dates must be sorted and unique")
+    full_dates = _date_range(accepted_start, accepted_end)
+    if not set(checked_missing).issubset(set(full_dates)):
+        _fail("accepted raw missing_partition_dates contains date outside accepted range")
+    present_dates = [value for value in full_dates if value not in set(checked_missing)]
+    if manifest.get("partition_count") != len(present_dates):
+        _fail("accepted raw partition_count does not match pinned date set")
+    if manifest.get("calendar_missing_partition_count") != len(checked_missing):
+        _fail("accepted raw calendar missing count mismatch")
+    partition_digest = str(manifest.get("partition_dates_sha256") or "").strip().lower()
+    missing_digest = str(manifest.get("missing_dates_sha256") or "").strip().lower()
+    if partition_digest != _date_set_sha256(present_dates):
+        _fail("accepted raw partition date digest mismatch")
+    if missing_digest != _date_set_sha256(checked_missing):
+        _fail("accepted raw missing date digest mismatch")
+
+    acceptance_report_path = _expand_root_ref(root, manifest.get("acceptance_report_ref"), "accepted raw acceptance_report_ref")
+    expected_report_sha = str(manifest.get("acceptance_report_sha256") or "").strip().lower()
+    if len(expected_report_sha) != 64 or hashlib.sha256(acceptance_report_path.read_bytes()).hexdigest() != expected_report_sha:
+        _fail("accepted raw acceptance report SHA-256 mismatch")
+    pointer_quality_ref = str(pointer.get("quality_report_ref") or "").strip()
+    pointer_acceptance_ref = str(pointer.get("acceptance_report_ref") or "").strip()
+    manifest_acceptance_ref = str(manifest.get("acceptance_report_ref") or "").strip()
+    if pointer_quality_ref != manifest_acceptance_ref or pointer_acceptance_ref != manifest_acceptance_ref:
+        _fail("accepted raw pointer acceptance-report binding mismatch")
+
+    requested_dates = _date_range(start_date, end_date)
+    accepted_present = set(present_dates)
+    accepted_dates = tuple(value for value in requested_dates if value in accepted_present)
+    missing_requested = tuple(value for value in requested_dates if value not in accepted_present)
+    if not accepted_dates:
+        _fail("accepted raw history contains no partitions in requested Stage 5 range")
+    return AcceptedHistoryScope(
+        accepted_dates=accepted_dates,
+        missing_requested_dates=missing_requested,
+        pointer_ref=_rooted_ref(root, pointer_path),
+        manifest_ref=_rooted_ref(root, manifest_path),
+        acceptance_report_ref=_rooted_ref(root, acceptance_report_path),
+        acceptance_run_id=acceptance_run_id,
+        partition_dates_sha256=partition_digest,
+    )
 
 
 def raw_partition_path(data_root: Path, instrument_id: str, trade_date: str) -> Path:
@@ -247,7 +397,7 @@ def _single_eod_row(frame: pd.DataFrame, *, instrument_id: str, trade_date: str,
     }
 
 
-def build_eod_history(*, data_root: str | Path, instrument_id: str, start_date: str, end_date: str) -> tuple[pd.DataFrame, list[str], list[str]]:
+def build_eod_history(*, data_root: str | Path, instrument_id: str, start_date: str, end_date: str) -> tuple[pd.DataFrame, list[str], AcceptedHistoryScope]:
     root = Path(data_root).resolve()
     instrument = _safe_token(instrument_id, "instrument_id")
     if instrument not in MANDATORY_INSTRUMENTS:
@@ -256,28 +406,26 @@ def build_eod_history(*, data_root: str | Path, instrument_id: str, start_date: 
     end = _iso_date(end_date, "end_date")
     if start > end:
         _fail("start_date must be <= end_date")
+    scope = _accepted_history_scope(root, instrument, start, end)
     rows: list[dict[str, object]] = []
     inputs: list[str] = []
-    missing_dates: list[str] = []
-    for trade_date in _date_range(start, end):
+    for trade_date in scope.accepted_dates:
         partition = raw_partition_path(root, instrument, trade_date)
-        if not partition.is_file():
-            missing_dates.append(trade_date)
-            continue
-        frame = pd.read_parquet(partition)
+        if not partition.is_file() or partition.is_symlink():
+            _fail("accepted raw FUTOI partition is missing or not a regular file: " + trade_date)
         try:
-            rel = partition.resolve().relative_to(root)
-        except ValueError as exc:
-            raise FutoiEodError("raw partition escaped data root") from exc
-        source_ref = "${MOEX_DATA_ROOT}/" + rel.as_posix()
+            resolved = partition.resolve(strict=True)
+            rel = resolved.relative_to(root.resolve(strict=True))
+        except (OSError, ValueError) as exc:
+            raise FutoiEodError("accepted raw partition escaped data root") from exc
+        frame = pd.read_parquet(resolved)
+        source_ref = ROOT_PREFIX + rel.as_posix()
         rows.append(_single_eod_row(frame, instrument_id=instrument, trade_date=trade_date, source_ref=source_ref))
         inputs.append(source_ref)
-    if not rows:
-        _fail("no canonical raw FUTOI partitions found in requested range")
     result = pd.DataFrame(rows).sort_values("trade_date").reset_index(drop=True)
-    if result.duplicated(subset=["instrument_id", "trade_date"]).any():
-        _fail("derived EOD contains duplicate instrument/trade_date")
-    return result, inputs, missing_dates
+    if result.empty or result.duplicated(subset=["instrument_id", "trade_date"]).any():
+        _fail("derived EOD is empty or contains duplicate instrument/trade_date")
+    return result, inputs, scope
 
 
 def _atomic_json(path: Path, values: Mapping[str, object]) -> None:
@@ -311,7 +459,7 @@ def materialize_eod_history(
 ) -> dict[str, object]:
     checked_run = _safe_token(run_id, "run_id")
     checked_instrument = _safe_token(instrument_id, "instrument_id")
-    frame, inputs, missing_dates = build_eod_history(
+    frame, inputs, scope = build_eod_history(
         data_root=data_root,
         instrument_id=checked_instrument,
         start_date=start_date,
@@ -337,7 +485,10 @@ def materialize_eod_history(
         "duplicate_identity_count": int(frame.duplicated(subset=["instrument_id", "trade_date"]).sum()),
         "input_partition_count": len(inputs),
         "source_revision_rows_dropped": int(frame["source_revision_rows_dropped"].sum()),
-        "missing_calendar_date_count": len(missing_dates),
+        "missing_calendar_date_count": len(scope.missing_requested_dates),
+        "accepted_raw_history_required": True,
+        "accepted_raw_history_run_id": scope.acceptance_run_id,
+        "accepted_raw_partition_dates_sha256": scope.partition_dates_sha256,
         "root_aggregate_semantics": True,
         "front_next_split_claimed": False,
         "historical_pit_research_ready_claimed": False,
@@ -354,7 +505,12 @@ def materialize_eod_history(
         "quality_report_path": quality.as_posix(),
         "input_partition_count": len(inputs),
         "input_partition_refs": inputs,
-        "missing_calendar_dates": missing_dates,
+        "missing_calendar_dates": list(scope.missing_requested_dates),
+        "accepted_raw_pointer_ref": scope.pointer_ref,
+        "accepted_raw_manifest_ref": scope.manifest_ref,
+        "accepted_raw_acceptance_report_ref": scope.acceptance_report_ref,
+        "accepted_raw_history_run_id": scope.acceptance_run_id,
+        "accepted_raw_partition_dates_sha256": scope.partition_dates_sha256,
         "producer": "moex_data.futures.materialize_futoi_eod.v1",
         "network_calls_used": False,
         "latest_autodetect_used": False,
@@ -378,6 +534,9 @@ def materialize_eod_history(
         "input_partition_count": len(inputs),
         "min_trade_date": str(frame["trade_date"].min()),
         "max_trade_date": str(frame["trade_date"].max()),
+        "accepted_raw_pointer_ref": scope.pointer_ref,
+        "accepted_raw_manifest_ref": scope.manifest_ref,
+        "accepted_raw_history_run_id": scope.acceptance_run_id,
         "network_calls_used": False,
         "latest_autodetect_used": False,
         "front_next_split_claimed": False,
