@@ -1,0 +1,105 @@
+config_id: step5_futoi_positioning.v1
+status: implementation_candidate_physical_pilot_pending
+architecture_contract_ref: contracts/architecture/moex_data_access_canon_v1.yaml
+purpose: >
+  Canonical Si/CR participant-positioning layer derived from accepted FUTOI raw history:
+  deterministic revision resolution, paired FIZ/YUR EOD snapshots, and causal D1 positioning features.
+
+upstream:
+  raw_dataset_ref: contracts/datasets/futures_futoi_raw.v1.yaml
+  source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v1.yaml
+  raw_ingestion_changed_by_step5: false
+  raw_revisions_preserved: true
+
+scope:
+  mandatory_instrument_ids:
+    - si_futures_family
+    - cr_futures_family
+  perpetual_futoi_mandatory: false
+  perpetual_futoi_role: optional_supplementary_not_replacement_for_si_cr
+  root_aggregate_semantics: true
+  front_next_split_claimed: false
+
+revision_resolution_policy:
+  analytical_key_fields:
+    - trade_date
+    - ts
+    - instrument_id
+    - clgroup
+  systime_as_revision_order_allowed: false
+  multi_sess_id_same_analytical_key: fail_closed
+  within_single_sess_id_revision_order: greatest_seqnum
+  exact_max_seqnum_tie: fail_closed
+
+snapshot_policy:
+  output_dataset_ref: contracts/datasets/futures_futoi_eod.v1.yaml
+  one_row_per_trade_date_instrument: true
+  final_event_ts_rule: maximum_resolved_ts_for_trade_date
+  final_event_requires_exact_groups:
+    - FIZ
+    - YUR
+  incomplete_final_snapshot: fail_closed
+  eod_clock_time_hardcoded: false
+  source_systime_preserved_as_metadata: true
+  source_availability_preserved: true
+
+positioning_policy:
+  phys_group: FIZ
+  legal_group: YUR
+  short_positions_stored_as_absolute_in_derived: true
+  total_open_interest_formula: phys_long + legal_long
+  total_short_abs_formula: abs(phys_short) + abs(legal_short)
+  total_long_must_equal_total_short_abs: true
+  phys_net_plus_legal_net_must_equal_zero: true
+  gross_formula: long + short_abs
+  long_share_of_oi_formula: long / total_open_interest
+  short_share_of_oi_formula: short_abs / total_open_interest
+  net_share_of_oi_formula: net / total_open_interest
+  average_long_per_participant_formula: long / long_num
+  average_short_per_participant_formula: short_abs / short_num
+  nonzero_position_with_zero_participant_count: fail_closed
+
+feature_policy:
+  output_dataset_ref: contracts/datasets/futures_futoi_positioning_features_d1.v1.yaml
+  source: run_scoped_futures_futoi_eod
+  causality: current_and_past_eod_only
+  observation_lags:
+    daily_change: 1
+    weekly_change: 5
+  rolling_windows_observations:
+    one_year: 252
+    two_year: 504
+  rolling_metrics:
+    - zscore
+    - percentile
+  percentile_formula: count(window_values <= current_value) / window_size
+  zscore_ddof: 0
+  incomplete_rolling_window: null
+  feature_fields:
+    - phys_net_share_of_oi
+    - phys_gross_share_of_two_sided_oi
+    - phys_long_num
+    - phys_short_num
+    - phys_avg_long_per_participant
+    - phys_avg_short_per_participant
+
+physical_pilot:
+  history_end_date: "2026-08-17"
+  required_histories:
+    si_futures_family:
+      start_date: "2020-01-03"
+    cr_futures_family:
+      start_date: "2022-04-21"
+  immutable_run_required: true
+  raw_network_calls_allowed: false
+  raw_api_latest_allowed: false
+  expected_eod_outputs: 2
+  expected_feature_outputs: 2
+  expected_accepted_pointer_count: 4
+
+readiness_flags:
+  implementation_ready: true
+  physical_pilot_passed: false
+  accepted_pointer_ready: false
+  scheduler_ready: false
+  research_ready: false
