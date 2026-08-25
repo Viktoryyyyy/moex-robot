@@ -23,6 +23,19 @@ accepted_raw_history:
   accepted_manifest_partition_date_digest_required: true
   acceptance_report_sha256_required: true
   unaccepted_physical_partition_read_allowed: false
+immutable_raw_input:
+  required: true
+  schema_version: step5_futoi_raw_frozen_input.v1
+  producer: moex_data.futures.freeze_accepted_futoi_history.v1
+  scope: exact_full_accepted_history_range
+  physical_validator: stage2_futoi_partition_validator_reapplied
+  source_sha256_required: true
+  frozen_sha256_required: true
+  source_frozen_hash_equality_required: true
+  freeze_mode: create_only_hardlink_same_validated_inode
+  hardlink_failure_fallback_allowed: false
+  canonical_raw_reads_after_freeze_allowed: false
+  frozen_sha256_revalidated_before_eod_read: true
 revision_resolution:
   analytical_key_fields:
     - trade_date
@@ -89,6 +102,8 @@ required_columns:
   - source_row_count
   - source_revision_rows_dropped
   - source_partition_ref
+  - source_canonical_partition_ref
+  - source_frozen_partition_sha256
 position_invariants:
   phys_net_plus_legal_net_equals_zero: true
   total_open_interest_formula: phys_long + legal_long
@@ -102,6 +117,9 @@ position_invariants:
   nonzero_position_with_zero_participant_count: fail_closed
 quality_checks:
   - accepted_raw_history_lineage_valid
+  - immutable_frozen_raw_content_hash_valid
+  - frozen_raw_stage2_physical_revalidation_passed
+  - no_mutable_canonical_raw_read_after_freeze
   - nonzero_row_count
   - unique_instrument_trade_date
   - chronological_trade_date
