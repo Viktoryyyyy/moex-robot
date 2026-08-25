@@ -33,6 +33,8 @@ validation_policy:
   current_accepted_raw_manifest_must_match_frozen_upstream: true
   current_accepted_raw_date_set_must_match_frozen_upstream: true
   frozen_raw_manifest_required: true
+  frozen_raw_partition_inside_declared_run_root_required: true
+  frozen_raw_partition_inside_declared_input_dataset_root_required: true
   frozen_raw_partition_sha256_recheck_required: true
   frozen_raw_physical_revalidation_required: true
   physical_quote_validation_must_not_depend_on_pre_promotion_stage2_status: true
