@@ -1,11 +1,36 @@
 contract_id: futures_raw_history_content_attestation.v1
 status: implementation_candidate
+producer: moex_data.futures.stage2_raw_history_content_reattestation
+producer_impl_ref: src/moex_data/futures/stage2_raw_history_content_reattestation.py
 purpose: >
-  Bind Stage 2 accepted raw-history evidence to the exact bytes of every accepted
+  Required content-attestation overlay for Stage 2 raw-history acceptance. It binds
+  an already physically accepted history to the exact bytes of every accepted
   canonical partition so downstream consumers can reject later replacement bytes.
+lifecycle:
+  base_raw_history_acceptance_remains_physical_and_date_set_gate: true
+  content_attestation_is_required_second_gate_for_downstream_consumption: true
+  existing_accepted_pointer_deletion_required: false
+  existing_pointer_remains_valid_until_full_batch_pass: true
+  canonical_content_attested_state_requires_batch_marker: true
 covered_target_datasets:
   - futures_raw_5m
   - futures_futoi_raw
+controlled_batch_scope:
+  expected_pointer_count: 4
+  instruments:
+    - target_dataset_id: futures_raw_5m
+      instrument_id: usdrubf_futures_family
+    - target_dataset_id: futures_raw_5m
+      instrument_id: cnyrubf_futures_family
+    - target_dataset_id: futures_futoi_raw
+      instrument_id: si_futures_family
+    - target_dataset_id: futures_futoi_raw
+      instrument_id: cr_futures_family
+  explicit_prior_four_pointer_state_sha256_required: true
+  validate_all_before_pointer_mutation: true
+  four_pointer_replacement_transactional_with_rollback: true
+  final_batch_marker_same_transaction: true
+  partial_new_pointer_set_without_marker_is_not_accepted: true
 partition_content_policy:
   digest_algorithm: sha256
   digest_input: exact_parquet_file_bytes
@@ -20,14 +45,21 @@ acceptance_report_requirements:
   partition_content_sha256_by_trade_date_required: true
   partition_content_set_sha256_required: true
   physical_validation_before_hash_binding_required: true
-  hash_and_validation_same_opened_inode_required: true
+  hash_and_validation_same_exact_bytes_required: true
+  source_path_inode_stability_during_capture_required: true
 promotion_requirements:
   accepted_manifest_copies_partition_content_digests: true
   accepted_manifest_copies_partition_content_set_sha256: true
-  report_snapshot_sha256_required: true
+  content_attestation_report_sha256_required: true
+  prior_pointer_sha256_required: true
+  prior_accepted_manifest_sha256_required: true
   promotion_must_not_reread_mutable_partition_bytes: true
+  no_pointer_absence_window: true
 downstream_policy:
+  content_attested_pointer_required: true
+  content_attested_manifest_schema_required: futures_raw_history_content_attested_manifest.v1
   consumer_must_verify_source_partition_sha256_against_accepted_manifest: true
+  consumer_must_verify_batch_acceptance_marker: true
   current_date_set_match_without_content_match_is_insufficient: true
 execution_boundary:
   network_access_allowed: false
