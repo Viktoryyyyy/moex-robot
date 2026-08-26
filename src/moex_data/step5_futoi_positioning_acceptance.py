@@ -10,6 +10,8 @@ import pandas as pd
 from moex_data import step5_futoi_positioning_acceptance_base as base
 from moex_data.futures import validate_futoi_eod_from_frozen as frozen_oracle
 
+SNAPSHOT_POLICY = "latest_resolved_complete_balanced_FIZ_YUR_event_ts"
+
 # Re-export the existing acceptance surface so current tests/callers keep the same API.
 for _name in dir(base):
     if _name not in globals():
@@ -86,7 +88,7 @@ def _validate_candidate_partition(
         "reconstructed_eod_rows": rebuilt,
         "reconstructed_from_frozen_raw_match": True,
         "independent_from_eod_producer": True,
-        "snapshot_policy": "latest_resolved_complete_balanced_FIZ_YUR_event_ts",
+        "snapshot_policy": SNAPSHOT_POLICY,
     }
 
 
@@ -96,6 +98,8 @@ def _validate_output_record(row: Mapping[str, object], *, dataset_id: str, run_r
         return checked
 
     manifest_values = base._load_json(checked["manifest"], "manifest")
+    if manifest_values.get("snapshot_policy") != SNAPSHOT_POLICY:
+        base._fail("EOD manifest snapshot policy mismatch")
     instrument_id = str(checked["instrument_id"])
     frozen_validation = base._validate_frozen_input(manifest_values, instrument_id, run_root, expected_rows)
     records = frozen_validation.get("records_by_date")
