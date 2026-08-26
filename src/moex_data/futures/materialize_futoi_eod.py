@@ -21,8 +21,10 @@ finally:
 
 from . import stage2_raw_history_content_reattestation as _content_attestation
 
+SNAPSHOT_POLICY = "latest_resolved_complete_balanced_FIZ_YUR_event_ts"
 _BASE_LOAD_FROZEN_INPUT_SCOPE = _load_frozen_input_scope
 _BASE_SINGLE_EOD_ROW = _single_eod_row
+_BASE_MATERIALIZE_EOD_HISTORY = materialize_eod_history
 
 
 def _require_stage2_root(root: Path) -> None:
@@ -145,14 +147,7 @@ def _single_eod_row(
     canonical_source_ref: str,
     frozen_sha256: str,
 ) -> dict[str, object]:
-    """Select the latest resolved snapshot that is complete and exactly balanced.
-
-    FUTOI history contains rare source-level tail snapshots where only one client
-    group is published, plus rare complete snapshots with a small non-zero market
-    residual.  Neither case is safe to normalize synthetically.  Walk backward
-    through resolved event timestamps and use the latest exact FIZ/YUR snapshot
-    whose source positions satisfy the existing strict balance invariants.
-    """
+    """Select the latest resolved snapshot that is complete and exactly balanced."""
     work = _validate_raw(frame, instrument_id=instrument_id, trade_date=trade_date)
     resolved, revisions_dropped = _resolve_revisions(work)
     for candidate_ts in sorted(resolved["_ts_utc"].drop_duplicates().tolist(), reverse=True):
@@ -176,6 +171,32 @@ def _single_eod_row(
         row["source_revision_rows_dropped"] = revisions_dropped
         return row
     _fail("no complete balanced FIZ/YUR snapshot exists for FUTOI trade_date")
+
+
+def materialize_eod_history(
+    *,
+    data_root: str | Path,
+    output_root: str | Path,
+    frozen_input_manifest: str | Path,
+    instrument_id: str,
+    start_date: str,
+    end_date: str,
+    run_id: str,
+) -> dict[str, object]:
+    result = _BASE_MATERIALIZE_EOD_HISTORY(
+        data_root=data_root,
+        output_root=output_root,
+        frozen_input_manifest=frozen_input_manifest,
+        instrument_id=instrument_id,
+        start_date=start_date,
+        end_date=end_date,
+        run_id=run_id,
+    )
+    manifest_path = Path(str(result["manifest_path"]))
+    manifest_values = _load_json(manifest_path, "EOD manifest")
+    manifest_values["snapshot_policy"] = SNAPSHOT_POLICY
+    _atomic_json(manifest_path, manifest_values)
+    return result
 
 
 if _REAL_NAME == "__main__":
