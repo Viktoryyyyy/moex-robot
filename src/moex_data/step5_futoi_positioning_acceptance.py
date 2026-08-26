@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -13,6 +14,7 @@ for _name in dir(base):
         globals()[_name] = getattr(base, _name)
 
 _BASE_VALIDATE_OUTPUT_RECORD = base._validate_output_record
+_VALIDATOR_SWAP_LOCK = threading.RLock()
 
 
 def _validate_output_record(row: Mapping[str, object], *, dataset_id: str, run_root: Path, expected_rows: int) -> dict[str, object]:
@@ -39,12 +41,13 @@ def _validate_output_record(row: Mapping[str, object], *, dataset_id: str, run_r
 
 
 def _with_wrapped_output_validator(callable_, *args, **kwargs):
-    original = base._validate_output_record
-    base._validate_output_record = _validate_output_record
-    try:
-        return callable_(*args, **kwargs)
-    finally:
-        base._validate_output_record = original
+    with _VALIDATOR_SWAP_LOCK:
+        original = base._validate_output_record
+        base._validate_output_record = _validate_output_record
+        try:
+            return callable_(*args, **kwargs)
+        finally:
+            base._validate_output_record = original
 
 
 def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[str, object]]:
