@@ -29,9 +29,13 @@ validation_policy:
   latest_autodetect_used_required: false
   continuous_series_used_required: false
   accepted_raw_history_required: true
-  current_accepted_raw_pointer_must_match_frozen_upstream: true
-  current_accepted_raw_manifest_must_match_frozen_upstream: true
-  current_accepted_raw_date_set_must_match_frozen_upstream: true
+  content_attested_source_mode_required: stage2_content_attested_generation_snapshots_only
+  legacy_accepted_pointer_consumption_used_required: false
+  current_content_attestation_generation_must_match_frozen_upstream: true
+  current_content_attestation_marker_ref_and_sha256_must_match_frozen_upstream: true
+  current_content_attested_manifest_ref_and_sha256_must_match_frozen_upstream: true
+  current_content_attested_partition_content_set_must_match_frozen_upstream: true
+  current_content_attested_date_set_and_counts_must_match_frozen_upstream: true
   frozen_raw_manifest_required: true
   frozen_raw_partition_inside_declared_run_root_required: true
   frozen_raw_partition_inside_declared_input_dataset_root_required: true
