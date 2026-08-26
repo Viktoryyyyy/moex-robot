@@ -11,7 +11,7 @@ def _row(ts: str, group: str, *, pos: int, long: int, short: int, seqnum: int) -
         "instrument_id": "si_futures_family",
         "trade_date": "2026-08-17",
         "ts": ts,
-        "systime": ts.replace("00", "10", 1) if False else ts,
+        "systime": ts,
         "sess_id": 1,
         "seqnum": seqnum,
         "clgroup": group,
@@ -52,6 +52,18 @@ def test_acceptance_oracle_walks_past_incomplete_and_unbalanced_tail() -> None:
     assert rebuilt["phys_net"] == 20
     assert rebuilt["legal_net"] == -20
     assert rebuilt["source_row_count"] == 5
+
+
+def test_acceptance_oracle_walks_past_aggregate_balanced_but_group_inconsistent_pair() -> None:
+    frame = _raw()
+    latest_pair = frame["ts"] == "2026-08-17 20:05:00"
+    frame.loc[latest_pair & frame["clgroup"].eq("FIZ"), "pos"] = 31
+    frame.loc[latest_pair & frame["clgroup"].eq("YUR"), "pos_long"] = 40
+    frame.loc[latest_pair & frame["clgroup"].eq("YUR"), "pos"] = -31
+    rebuilt = _rebuild(frame)
+    assert rebuilt["snapshot_ts_utc"] == "2026-08-17T17:00:00+00:00"
+    assert rebuilt["phys_net"] == 20
+    assert rebuilt["legal_net"] == -20
 
 
 def test_acceptance_oracle_fails_closed_without_balanced_pair() -> None:
