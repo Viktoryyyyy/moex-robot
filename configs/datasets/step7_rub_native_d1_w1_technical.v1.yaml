@@ -15,7 +15,8 @@ production_scope:
   source_dataset_id: futures_raw_5m
   source_id: moex_algopack_fo_tradestats_5m
   accepted_raw_history_required: true
-  accepted_raw_pointer_required: true
+  current_content_attested_generation_required: true
+  legacy_accepted_pointer_consumption_allowed: false
   mutable_canonical_raw_read_after_freeze_allowed: false
   continuous_series_required_for_production: false
 
@@ -36,6 +37,11 @@ native_history:
     expected_d1_rows: 1100
 
 input_freeze_policy:
+  source_mode: stage2_content_attested_generation_snapshots_only
+  exact_full_content_attested_range_required: true
+  current_generation_marker_binding_required: true
+  current_generation_manifest_binding_required: true
+  current_generation_partition_content_set_binding_required: true
   physical_revalidation_before_freeze: true
   per_partition_sha256_required: true
   create_only_run_scoped_hardlink_required: true
