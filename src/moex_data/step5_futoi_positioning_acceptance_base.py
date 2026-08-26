@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import sys
 from pathlib import Path
 
@@ -20,6 +21,12 @@ finally:
 from moex_data.futures import stage2_raw_history_content_reattestation as _content_attestation
 
 _BASE_VALIDATE_FROZEN_INPUT = _validate_frozen_input
+
+
+def _content_date_set_sha256(values: Sequence[object]) -> str:
+    normalized = [str(value) for value in values]
+    payload = (("\n".join(normalized) + "\n") if normalized else "").encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _current_content_attestation(instrument_id: str) -> tuple[dict[str, object], str, str, str]:
@@ -44,7 +51,7 @@ def _validate_eod_raw_lineage(manifest_values: Mapping[str, object], instrument_
         "accepted_raw_manifest_ref": manifest_ref,
         "accepted_raw_acceptance_report_ref": report_ref,
         "accepted_raw_history_run_id": str(resolved.get("generation_id") or ""),
-        "accepted_raw_partition_dates_sha256": _date_set_sha256(list(resolved.get("accepted_dates", ()))),
+        "accepted_raw_partition_dates_sha256": _content_date_set_sha256(resolved.get("accepted_dates", ())),
     }
     for field, wanted in expected.items():
         if manifest_values.get(field) != wanted:
