@@ -138,6 +138,25 @@ def _load_frozen_input_scope(
     return checked
 
 
+def _candidate_satisfies_position_invariants(candidate) -> bool:
+    if len(candidate.index) != 2 or set(candidate["clgroup"].tolist()) != GROUPS:
+        return False
+    total_long = int(candidate["pos_long"].sum())
+    total_short_abs = int(candidate["pos_short"].abs().sum())
+    if total_long <= 0 or total_long != total_short_abs or int(candidate["pos"].sum()) != 0:
+        return False
+    for _, row in candidate.iterrows():
+        long_position = int(row["pos_long"])
+        short_abs = abs(int(row["pos_short"]))
+        if int(row["pos"]) != long_position - short_abs:
+            return False
+        if int(row["pos_long_num"]) == 0 and long_position != 0:
+            return False
+        if int(row["pos_short_num"]) == 0 and short_abs != 0:
+            return False
+    return True
+
+
 def _single_eod_row(
     frame,
     *,
@@ -147,17 +166,12 @@ def _single_eod_row(
     canonical_source_ref: str,
     frozen_sha256: str,
 ) -> dict[str, object]:
-    """Select the latest resolved snapshot that is complete and exactly balanced."""
+    """Select the latest resolved snapshot satisfying every strict position invariant."""
     work = _validate_raw(frame, instrument_id=instrument_id, trade_date=trade_date)
     resolved, revisions_dropped = _resolve_revisions(work)
     for candidate_ts in sorted(resolved["_ts_utc"].drop_duplicates().tolist(), reverse=True):
         candidate = resolved.loc[resolved["_ts_utc"].eq(candidate_ts)].copy()
-        if len(candidate.index) != 2 or set(candidate["clgroup"].tolist()) != GROUPS:
-            continue
-        total_long = int(candidate["pos_long"].sum())
-        total_short_abs = int(candidate["pos_short"].abs().sum())
-        total_net = int(candidate["pos"].sum())
-        if total_long != total_short_abs or total_net != 0:
+        if not _candidate_satisfies_position_invariants(candidate):
             continue
         row = _BASE_SINGLE_EOD_ROW(
             candidate,
