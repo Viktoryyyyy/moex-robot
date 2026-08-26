@@ -213,5 +213,11 @@ def _transactional_replace(records: Sequence[tuple[Path, Mapping[str, object]]])
             raise Step5AcceptanceError("content-attestation changed during promotion; Stage 5 pointer set rolled back: " + str(exc)) from exc
 
 
+def _reject_direct_base_cli() -> None:
+    raise Step5AcceptanceError(
+        "direct Stage 5 acceptance base CLI is forbidden; use moex_data.step5_futoi_positioning_acceptance"
+    )
+
+
 if _REAL_NAME == "__main__":
-    raise SystemExit(main())
+    _reject_direct_base_cli()
