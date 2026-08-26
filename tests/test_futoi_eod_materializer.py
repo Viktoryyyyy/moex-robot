@@ -48,6 +48,29 @@ def test_eod_rejects_multi_session_revision_for_same_event() -> None:
         _row(_raw(ambiguous_session=True))
 
 
-def test_eod_rejects_incomplete_final_fiz_yur_snapshot() -> None:
-    with pytest.raises(FutoiEodError, match="incomplete final FUTOI snapshot"):
-        _row(_raw(incomplete_final=True))
+def test_eod_falls_back_from_incomplete_latest_snapshot() -> None:
+    row = _row(_raw(incomplete_final=True))
+    assert row["snapshot_ts_utc"] == "2026-08-17T07:00:00+00:00"
+    assert row["phys_net"] == 10
+    assert row["legal_net"] == -10
+    assert row["source_row_count"] == 4
+    assert row["source_revision_rows_dropped"] == 1
+
+
+def test_eod_falls_back_from_complete_but_unbalanced_latest_snapshot() -> None:
+    frame = _raw()
+    mask = (frame["ts"] == "2026-08-17 10:05:00") & (frame["clgroup"] == "YUR")
+    frame.loc[mask, "pos_long"] = 41
+    frame.loc[mask, "pos"] = -19
+    row = _row(frame)
+    assert row["snapshot_ts_utc"] == "2026-08-17T07:00:00+00:00"
+    assert row["total_open_interest"] == 100
+    assert row["total_short_abs"] == 100
+
+
+def test_eod_fails_closed_when_no_complete_balanced_snapshot_exists() -> None:
+    frame = _raw()
+    frame.loc[frame["clgroup"] == "YUR", "pos_long"] += 1
+    frame.loc[frame["clgroup"] == "YUR", "pos"] += 1
+    with pytest.raises(FutoiEodError, match="no complete balanced FIZ/YUR snapshot"):
+        _row(frame)
