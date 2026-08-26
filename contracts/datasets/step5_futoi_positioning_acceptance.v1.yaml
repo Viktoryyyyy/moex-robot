@@ -30,6 +30,9 @@ validation_policy:
   latest_autodetect_used_required: false
   immutable_raw_input_freeze_required: true
   raw_input_freeze_mode_required: create_only_hardlink_same_validated_inode
+  canonical_acceptance_entrypoint_required: moex_data.step5_futoi_positioning_acceptance
+  direct_acceptance_base_cli_forbidden: true
+  canonical_validator_wrapper_same_process_concurrency_serialized: true
   content_attestation_current_generation_marker_required: true
   content_attestation_resolver_required: moex_data.futures.stage2_raw_history_content_reattestation.resolve_content_attested_history
   legacy_raw_pointer_consumption_forbidden: true
