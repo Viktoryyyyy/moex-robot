@@ -55,6 +55,14 @@ validation_policy:
   eod_reconstruction_from_physically_revalidated_frozen_raw_required: true
   eod_reconstruction_independent_from_eod_producer_required: true
   eod_reconstruction_exact_field_equality_before_promotion_required: true
+  source_quality_omission_policy_required: explicit_attested_date_only_fail_closed_otherwise
+  source_quality_omission_manifest_quality_exact_match_required: true
+  source_quality_coverage_status_exact_match_required: true
+  source_quality_omitted_date_independent_frozen_raw_revalidation_required: true
+  eod_requested_range_must_equal_frozen_input_requested_range: true
+  pilot_history_range_must_equal_eod_manifest_requested_range: true
+  pilot_counts_source_quality_omission_count_exact_required: true
+  undeclared_derived_coverage_loss_forbidden: true
   root_aggregate_semantics_required: true
   front_next_split_claimed_required: false
   historical_pit_research_ready_claimed_required: false
@@ -75,9 +83,17 @@ validation_policy:
   feature_rolling_zscores_recomputed: true
   feature_rolling_percentiles_recomputed: true
   feature_percentiles_in_unit_interval: true
-  historical_expected_rows:
+  historical_expected_raw_partitions:
     si_futures_family: 1757
     cr_futures_family: 1177
+  historical_expected_derived_rows:
+    si_futures_family: 1756
+    cr_futures_family: 1177
+  declared_source_quality_omissions:
+    si_futures_family:
+      - trade_date: "2025-08-11"
+        reason: no_complete_balanced_FIZ_YUR_snapshot
+    cr_futures_family: []
 promotion_policy:
   validate_all_before_pointer_writes: true
   frozen_raw_inputs_are_run_scoped_evidence_not_dataset_pointer_targets: true

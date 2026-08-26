@@ -145,7 +145,24 @@ def _materialize_fixture(root: Path, instrument_id: str, dates: list[str], run_r
     return frozen, eod, features
 
 
-def _pilot_evidence(run_id: str, run_root: Path, frozen_outputs: list[dict[str, object]], eod_outputs: list[dict[str, object]], feature_outputs: list[dict[str, object]]) -> dict[str, object]:
+def _pilot_evidence(
+    run_id: str,
+    run_root: Path,
+    dates: list[str],
+    frozen_outputs: list[dict[str, object]],
+    eod_outputs: list[dict[str, object]],
+    feature_outputs: list[dict[str, object]],
+) -> dict[str, object]:
+    histories = {
+        instrument_id: {
+            "start_date": dates[0],
+            "end_date": dates[-1],
+            "expected_raw_partitions": len(dates),
+            "expected_eod_rows": len(dates),
+            "source_quality_omissions": [],
+        }
+        for instrument_id in ("si_futures_family", "cr_futures_family")
+    }
     return {
         "project":"MOEX_Bot","step":5,"status":"pilot_passed","artifact_version":run_id,"run_id":run_id,
         "run_root":run_root.as_posix(),"run_artifacts_immutable":True,"run_id_reuse_allowed":False,
@@ -156,6 +173,16 @@ def _pilot_evidence(run_id: str, run_root: Path, frozen_outputs: list[dict[str, 
         "root_aggregate_semantics":True,"front_next_split_claimed":False,"historical_pit_research_ready_claimed":False,
         "revision_policy":"same_analytical_key_single_sess_id_then_max_seqnum",
         "snapshot_policy":"latest_resolved_complete_balanced_FIZ_YUR_event_ts",
+        "source_quality_omission_policy":"explicit_attested_date_only_fail_closed_otherwise",
+        "counts":{
+            "mandatory_instruments":2,
+            "frozen_raw_inputs":len(frozen_outputs),
+            "eod_outputs":len(eod_outputs),
+            "feature_outputs":len(feature_outputs),
+            "source_quality_omission_count":0,
+            "expected_accepted_pointers":4,
+        },
+        "histories":histories,
         "frozen_inputs":frozen_outputs,"eod_outputs":eod_outputs,"feature_outputs":feature_outputs,
     }
 
@@ -176,7 +203,7 @@ def test_stage5_end_to_end_acceptance_promotes_four_validated_pointers(monkeypat
         eod_outputs.append(eod)
         feature_outputs.append(features)
 
-    evidence = _pilot_evidence(run_id, run_root, frozen_outputs, eod_outputs, feature_outputs)
+    evidence = _pilot_evidence(run_id, run_root, dates, frozen_outputs, eod_outputs, feature_outputs)
     _write_json(tmp_path / "state" / "acceptance" / "step5_futoi_positioning" / f"run_id={run_id}" / "pilot_evidence.json", evidence)
 
     result = acceptance.promote(run_id=run_id)

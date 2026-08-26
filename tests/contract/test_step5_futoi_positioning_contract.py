@@ -39,7 +39,7 @@ def test_stage5_requires_content_attested_generation_and_immutable_byte_freeze()
     assert "legacy_pointer_bypass_allowed: false" in text
 
 
-def test_stage5_revision_and_final_snapshot_policy_are_fail_closed() -> None:
+def test_stage5_revision_snapshot_and_source_quality_omission_policy_are_fail_closed() -> None:
     text = _read("configs/datasets/step5_futoi_positioning.v1.yaml")
     assert "systime_as_revision_order_allowed: false" in text
     assert "multi_sess_id_same_analytical_key: fail_closed" in text
@@ -49,7 +49,12 @@ def test_stage5_revision_and_final_snapshot_policy_are_fail_closed() -> None:
     assert "later_unbalanced_source_tail_allowed: true" in text
     assert "synthetic_missing_group_fill_allowed: false" in text
     assert "selected_event_must_satisfy_exact_position_balance: true" in text
-    assert "no_complete_balanced_snapshot: fail_closed" in text
+    assert "no_complete_balanced_snapshot: omit_only_if_explicit_attested_source_quality_exception" in text
+    assert "undeclared_no_complete_balanced_snapshot: fail_closed" in text
+    assert "mode: explicit_attested_date_only_fail_closed_otherwise" in text
+    assert 'trade_date: "2025-08-11"' in text
+    assert "reason: no_complete_balanced_FIZ_YUR_snapshot" in text
+    assert "tolerance_normalization_allowed: false" in text
     assert "eod_clock_time_hardcoded: false" in text
 
 
@@ -66,7 +71,10 @@ def test_stage5_eod_contract_covers_attested_lineage_position_balance_and_partic
         "canonical_raw_reads_after_freeze_allowed: false",
         "rule: latest_resolved_complete_balanced_FIZ_YUR_event_ts",
         "synthetic_missing_group_fill_allowed: false",
-        "no_complete_balanced_snapshot: fail_closed",
+        "no_complete_balanced_snapshot: omit_only_if_explicit_attested_source_quality_exception",
+        "undeclared_no_complete_balanced_snapshot: fail_closed",
+        "acceptance_independent_frozen_raw_revalidation_required: true",
+        'trade_date: "2025-08-11"',
         "source_canonical_partition_ref",
         "source_frozen_partition_sha256",
         "phys_net", "legal_net", "total_open_interest", "phys_gross", "legal_gross",
@@ -76,6 +84,8 @@ def test_stage5_eod_contract_covers_attested_lineage_position_balance_and_partic
         "total_open_interest_equals_total_short_abs: true",
         "recomputed_gross_and_share_metrics",
         "recomputed_participant_averages",
+        "declared_source_quality_omission_set_exact",
+        "omitted_source_quality_dates_independently_revalidated",
     ):
         assert token in text
 
@@ -110,6 +120,17 @@ def test_stage5_acceptance_requires_content_attested_frozen_bytes_and_independen
     assert "eod_reconstruction_from_physically_revalidated_frozen_raw_required: true" in text
     assert "eod_reconstruction_independent_from_eod_producer_required: true" in text
     assert "eod_reconstruction_exact_field_equality_before_promotion_required: true" in text
+    assert "source_quality_omission_policy_required: explicit_attested_date_only_fail_closed_otherwise" in text
+    assert "source_quality_omission_manifest_quality_exact_match_required: true" in text
+    assert "source_quality_coverage_status_exact_match_required: true" in text
+    assert "source_quality_omitted_date_independent_frozen_raw_revalidation_required: true" in text
+    assert "eod_requested_range_must_equal_frozen_input_requested_range: true" in text
+    assert "pilot_history_range_must_equal_eod_manifest_requested_range: true" in text
+    assert "pilot_counts_source_quality_omission_count_exact_required: true" in text
+    assert "undeclared_derived_coverage_loss_forbidden: true" in text
+    assert "historical_expected_raw_partitions:" in text
+    assert "historical_expected_derived_rows:" in text
+    assert "si_futures_family: 1756" in text
     assert "physical_parquet_readback_required: true" in text
     assert "eod_current_content_attestation_marker_required: true" in text
     assert "eod_all_derived_metrics_recomputed: true" in text

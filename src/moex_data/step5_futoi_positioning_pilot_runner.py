@@ -12,6 +12,7 @@ from typing import Final
 from moex_data.futures.freeze_accepted_futoi_history import freeze_accepted_history
 from moex_data.futures.materialize_futoi_eod import materialize_eod_history
 from moex_data.futures.materialize_futoi_positioning_features_d1 import materialize_features
+from moex_data.futures.step5_futoi_source_quality import expected_derived_rows, omission_records
 
 CANONICAL_ENV_PATH: Final[str] = "/home/trader/moex_bot/.env"
 RUN_SUBPATH: Final[tuple[str, ...]] = ("runs", "step5_futoi_positioning")
@@ -85,6 +86,18 @@ def run_pilot(*, artifact_version: str, env_file: str | None = CANONICAL_ENV_PAT
     eod_outputs: list[dict[str, object]] = []
     feature_outputs: list[dict[str, object]] = []
     for instrument_id, (start_date, end_date, expected_partitions) in HISTORY.items():
+        expected_eod_rows = expected_derived_rows(
+            instrument_id,
+            expected_partitions,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        expected_omissions = omission_records(
+            instrument_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
         freeze_run = run_id + "_" + instrument_id + "_raw_freeze"
         frozen = freeze_accepted_history(
             data_root=root,
@@ -109,8 +122,10 @@ def run_pilot(*, artifact_version: str, env_file: str | None = CANONICAL_ENV_PAT
             end_date=end_date,
             run_id=eod_run,
         )
-        if int(eod["input_partition_count"]) != expected_partitions or int(eod["row_count"]) != expected_partitions:
+        if int(eod["input_partition_count"]) != expected_partitions or int(eod["row_count"]) != expected_eod_rows:
             _fail("Stage 5 historical frozen-input/EOD count mismatch for " + instrument_id)
+        if eod.get("source_quality_omissions") != expected_omissions:
+            _fail("Stage 5 EOD source-quality omission evidence mismatch for " + instrument_id)
         if eod.get("canonical_raw_partition_reads_used") is not False:
             _fail("Stage 5 EOD must not read mutable canonical raw partitions")
         eod_outputs.append(eod)
@@ -122,7 +137,7 @@ def run_pilot(*, artifact_version: str, env_file: str | None = CANONICAL_ENV_PAT
             instrument_id=instrument_id,
             run_id=feature_run,
         )
-        if int(features["row_count"]) != expected_partitions:
+        if int(features["row_count"]) != expected_eod_rows:
             _fail("Stage 5 feature row count mismatch for " + instrument_id)
         feature_outputs.append(features)
 
@@ -147,11 +162,16 @@ def run_pilot(*, artifact_version: str, env_file: str | None = CANONICAL_ENV_PAT
         "historical_pit_research_ready_claimed": False,
         "revision_policy": "same_analytical_key_single_sess_id_then_max_seqnum",
         "snapshot_policy": "latest_resolved_complete_balanced_FIZ_YUR_event_ts",
+        "source_quality_omission_policy": "explicit_attested_date_only_fail_closed_otherwise",
         "counts": {
             "mandatory_instruments": 2,
             "frozen_raw_inputs": len(frozen_inputs),
             "eod_outputs": len(eod_outputs),
             "feature_outputs": len(feature_outputs),
+            "source_quality_omission_count": sum(
+                len(omission_records(instrument_id, start_date=values[0], end_date=values[1]))
+                for instrument_id, values in HISTORY.items()
+            ),
             "expected_accepted_pointers": 4,
         },
         "histories": {
@@ -159,6 +179,17 @@ def run_pilot(*, artifact_version: str, env_file: str | None = CANONICAL_ENV_PAT
                 "start_date": values[0],
                 "end_date": values[1],
                 "expected_raw_partitions": values[2],
+                "expected_eod_rows": expected_derived_rows(
+                    instrument_id,
+                    values[2],
+                    start_date=values[0],
+                    end_date=values[1],
+                ),
+                "source_quality_omissions": omission_records(
+                    instrument_id,
+                    start_date=values[0],
+                    end_date=values[1],
+                ),
             }
             for instrument_id, values in HISTORY.items()
         },
