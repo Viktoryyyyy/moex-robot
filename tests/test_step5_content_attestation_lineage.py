@@ -209,6 +209,7 @@ def test_stage5_eod_materializer_rejects_self_declared_frozen_sha_not_in_atteste
 
 
 def test_stage5_pointer_transaction_rolls_back_if_generation_changes_during_publish(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("MOEX_DATA_ROOT", tmp_path.as_posix())
     target = tmp_path / "current_accepted_manifest.json"
     target.write_text("old\n", encoding="utf-8")
     records = [(target, {"dataset_id": "futures_futoi_eod", "instrument_id": "si_futures_family"})]
