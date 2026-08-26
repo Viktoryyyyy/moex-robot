@@ -196,9 +196,30 @@ def _eod_scope_from_row(row: Mapping[str, object], run_root: Path) -> tuple[str,
     return start_date, end_date, manifest_values
 
 
+def _validate_eod_frozen_range_binding(
+    manifest_values: Mapping[str, object],
+    *,
+    run_root: Path,
+    start_date: str,
+    end_date: str,
+) -> None:
+    frozen_manifest_path = base._artifact_path(
+        manifest_values.get("frozen_input_manifest_path"),
+        run_root,
+        "frozen_input_manifest_path",
+    )
+    frozen_values = base._load_json(frozen_manifest_path, "frozen input manifest")
+    frozen_start = str(frozen_values.get("requested_from") or "")
+    frozen_end = str(frozen_values.get("requested_till") or "")
+    if (frozen_start, frozen_end) != (start_date, end_date):
+        base._fail("EOD requested range differs from frozen input requested range")
+
+
 def _validate_output_record(row: Mapping[str, object], *, dataset_id: str, run_root: Path, expected_rows: int) -> dict[str, object]:
     instrument_id = str(row.get("instrument_id") or "")
     expected_omissions: list[dict[str, str]] = []
+    start_date = ""
+    end_date = ""
     if dataset_id == base.EOD_DATASET:
         start_date, end_date, _ = _eod_scope_from_row(row, run_root)
         expected_omissions = omission_records(
@@ -229,13 +250,31 @@ def _validate_output_record(row: Mapping[str, object], *, dataset_id: str, run_r
 
     manifest_values = base._load_json(checked["manifest"], "manifest")
     quality_values = base._load_json(checked["quality"], "quality")
+    _validate_eod_frozen_range_binding(
+        manifest_values,
+        run_root=run_root,
+        start_date=start_date,
+        end_date=end_date,
+    )
     if manifest_values.get("snapshot_policy") != SNAPSHOT_POLICY:
         base._fail("EOD manifest snapshot policy mismatch")
+    expected_coverage_status = (
+        "pass_with_attested_source_quality_omissions" if expected_omissions else "pass_complete"
+    )
     for values, name in ((manifest_values, "EOD manifest"), (quality_values, "EOD quality")):
         if values.get("source_quality_omissions") != expected_omissions:
             base._fail(name + " source-quality omission evidence mismatch")
         if int(values.get("source_quality_omission_count") or 0) != len(expected_omissions):
             base._fail(name + " source-quality omission count mismatch")
+        if values.get("coverage_status") != expected_coverage_status:
+            base._fail(name + " coverage_status mismatch")
+    if row.get("source_quality_omissions") != expected_omissions:
+        base._fail("EOD pilot output source-quality omission evidence mismatch")
+    if int(row.get("source_quality_omission_count") or 0) != len(expected_omissions):
+        base._fail("EOD pilot output source-quality omission count mismatch")
+    if row.get("coverage_status") != expected_coverage_status:
+        base._fail("EOD pilot output coverage_status mismatch")
+
     frozen_validation = _BASE_VALIDATE_FROZEN_INPUT(manifest_values, instrument_id, run_root, expected_rows)
     records = frozen_validation.get("records_by_date")
     if not isinstance(records, Mapping):
@@ -264,12 +303,39 @@ def _with_wrapped_output_validator(callable_, *args, **kwargs):
             base._validate_output_record = original
 
 
+def _pilot_eod_outputs_by_instrument(values: Mapping[str, object], run_root: Path) -> dict[str, Mapping[str, object]]:
+    outputs = values.get("eod_outputs")
+    if isinstance(outputs, (str, bytes)) or not isinstance(outputs, Sequence):
+        base._fail("pilot EOD outputs missing")
+    mapped: dict[str, Mapping[str, object]] = {}
+    for row in outputs:
+        if not isinstance(row, Mapping):
+            base._fail("pilot EOD output must be object")
+        instrument_id = str(row.get("instrument_id") or "")
+        if instrument_id in mapped or instrument_id not in base.EXPECTED_INSTRUMENTS:
+            base._fail("pilot EOD output instrument set invalid")
+        # Validate the path now so pilot-history range checks cannot read outside the immutable run.
+        base._artifact_path(row.get("manifest_path"), run_root, "pilot EOD manifest_path")
+        mapped[instrument_id] = row
+    if set(mapped) != base.EXPECTED_INSTRUMENTS:
+        base._fail("pilot EOD output instrument set mismatch")
+    return mapped
+
+
 def _validate_pilot_omission_evidence(values: Mapping[str, object]) -> None:
     if values.get("source_quality_omission_policy") != SOURCE_QUALITY_OMISSION_POLICY:
         base._fail("pilot source-quality omission policy mismatch")
+    run_id = str(values.get("run_id") or "")
+    run_root = base._run_root(run_id)
+    declared_run_root = Path(str(values.get("run_root") or ""))
+    if not declared_run_root.is_absolute() or declared_run_root.resolve() != run_root.resolve():
+        base._fail("pilot run_root mismatch during omission validation")
+
     histories = values.get("histories")
     if not isinstance(histories, Mapping):
         base._fail("pilot histories missing")
+    eod_by_instrument = _pilot_eod_outputs_by_instrument(values, run_root)
+    total_omissions = 0
     for instrument_id, raw_expected in base.EXPECTED_ROWS.items():
         history = histories.get(instrument_id)
         if not isinstance(history, Mapping):
@@ -291,10 +357,37 @@ def _validate_pilot_omission_evidence(values: Mapping[str, object]) -> None:
             start_date=start_date,
             end_date=end_date,
         )
+        total_omissions += len(expected_omissions)
         if int(history.get("expected_eod_rows") or 0) != expected_eod:
             base._fail("pilot derived history count mismatch: " + instrument_id)
         if history.get("source_quality_omissions") != expected_omissions:
             base._fail("pilot history source-quality omission mismatch: " + instrument_id)
+
+        eod_row = eod_by_instrument[instrument_id]
+        manifest_path = base._artifact_path(eod_row.get("manifest_path"), run_root, "pilot EOD manifest_path")
+        manifest_values = base._load_json(manifest_path, "pilot EOD manifest")
+        if (
+            str(manifest_values.get("requested_start_date") or ""),
+            str(manifest_values.get("requested_end_date") or ""),
+        ) != (start_date, end_date):
+            base._fail("pilot history range differs from EOD manifest range: " + instrument_id)
+        if int(eod_row.get("row_count") or 0) != expected_eod:
+            base._fail("pilot EOD output row count differs from history evidence: " + instrument_id)
+
+    counts = values.get("counts")
+    if not isinstance(counts, Mapping):
+        base._fail("pilot counts missing")
+    expected_counts = {
+        "mandatory_instruments": 2,
+        "frozen_raw_inputs": 2,
+        "eod_outputs": 2,
+        "feature_outputs": 2,
+        "source_quality_omission_count": total_omissions,
+        "expected_accepted_pointers": 4,
+    }
+    for field, expected in expected_counts.items():
+        if int(counts.get(field) or 0) != expected:
+            base._fail("pilot counts mismatch: " + field)
 
 
 def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[str, object]]:
