@@ -68,6 +68,17 @@ def test_eod_falls_back_from_complete_but_unbalanced_latest_snapshot() -> None:
     assert row["total_short_abs"] == 100
 
 
+def test_eod_falls_back_from_aggregate_balanced_but_group_inconsistent_snapshot() -> None:
+    frame = _raw()
+    latest = frame["ts"] == "2026-08-17 10:05:00"
+    frame.loc[latest & frame["clgroup"].eq("FIZ"), "pos"] = 21
+    frame.loc[latest & frame["clgroup"].eq("YUR"), "pos"] = -21
+    row = _row(frame)
+    assert row["snapshot_ts_utc"] == "2026-08-17T07:00:00+00:00"
+    assert row["phys_net"] == 10
+    assert row["legal_net"] == -10
+
+
 def test_eod_fails_closed_when_no_complete_balanced_snapshot_exists() -> None:
     frame = _raw()
     frame.loc[frame["clgroup"] == "YUR", "pos_long"] += 1
