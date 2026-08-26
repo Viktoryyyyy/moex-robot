@@ -13,7 +13,21 @@ def test_step7_production_scope_uses_only_full_history_native_perpetuals() -> No
     assert "- cnyrubf_futures_family" in text
     assert "continuous_series_required_for_production: false" in text
     assert "fixed_expiry_substitution_allowed: false" in text
-    assert "expected_d1_rows: 1100" in text
+    assert text.count("expected_d1_rows: 1100") == 2
+
+
+def test_step7_requires_current_content_attested_snapshot_source() -> None:
+    text = _read("configs/datasets/step7_rub_native_d1_w1_technical.v1.yaml")
+    for token in (
+        "current_content_attested_generation_required: true",
+        "legacy_accepted_pointer_consumption_allowed: false",
+        "source_mode: stage2_content_attested_generation_snapshots_only",
+        "exact_full_content_attested_range_required: true",
+        "current_generation_marker_binding_required: true",
+        "current_generation_manifest_binding_required: true",
+        "current_generation_partition_content_set_binding_required: true",
+    ):
+        assert token in text
 
 
 def test_step7_requires_immutable_validated_raw_byte_freeze() -> None:
@@ -45,11 +59,17 @@ def test_step7_ohlcv_contract_uses_completed_weeks_and_conservative_availability
     assert "w1_availability_rule: following_monday_at_0600_europe_moscow" in text
     assert "completed_w1_only: true" in text
     assert "frozen_partition_sha256_required: true" in text
+    assert "source_mode_required: stage2_content_attested_generation_snapshots_only" in text
+    assert "legacy_accepted_pointer_consumption_allowed: false" in text
 
 
 def test_step7_acceptance_requires_formula_rebuild_and_eight_pointers() -> None:
     text = _read("contracts/datasets/step7_rub_native_d1_w1_technical_acceptance.v1.yaml")
     assert "accepted_pointer_count: 8" in text
+    assert "content_attested_source_mode_required: stage2_content_attested_generation_snapshots_only" in text
+    assert "legacy_accepted_pointer_consumption_used_required: false" in text
+    assert "current_content_attestation_marker_ref_and_sha256_must_match_frozen_upstream: true" in text
+    assert "current_content_attested_partition_content_set_must_match_frozen_upstream: true" in text
     assert "frozen_raw_physical_revalidation_required: true" in text
     assert "d1_ohlcv_reaggregation_required: true" in text
     assert "w1_ohlcv_reaggregation_from_d1_required: true" in text
