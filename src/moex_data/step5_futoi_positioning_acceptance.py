@@ -21,6 +21,25 @@ _BASE_VALIDATE_OUTPUT_RECORD = base._validate_output_record
 _VALIDATOR_SWAP_LOCK = threading.RLock()
 
 
+def _candidate_satisfies_position_invariants(candidate: pd.DataFrame) -> bool:
+    if len(candidate.index) != 2 or set(candidate["clgroup"].tolist()) != frozen_oracle.GROUPS:
+        return False
+    total_long = int(candidate["pos_long"].sum())
+    total_short_abs = int(candidate["pos_short"].abs().sum())
+    if total_long <= 0 or total_long != total_short_abs or int(candidate["pos"].sum()) != 0:
+        return False
+    for _, row in candidate.iterrows():
+        long_position = int(row["pos_long"])
+        short_abs = abs(int(row["pos_short"]))
+        if int(row["pos"]) != long_position - short_abs:
+            return False
+        if int(row["pos_long_num"]) == 0 and long_position != 0:
+            return False
+        if int(row["pos_short_num"]) == 0 and short_abs != 0:
+            return False
+    return True
+
+
 def _reconstruct_eod_row_with_source_tail_policy(
     frame: pd.DataFrame,
     *,
@@ -35,12 +54,7 @@ def _reconstruct_eod_row_with_source_tail_policy(
     resolved, revisions_dropped = frozen_oracle._resolve_revisions(work)
     for candidate_ts in sorted(resolved["_ts_utc"].drop_duplicates().tolist(), reverse=True):
         candidate = resolved.loc[resolved["_ts_utc"].eq(candidate_ts)].copy()
-        if len(candidate.index) != 2 or set(candidate["clgroup"].tolist()) != frozen_oracle.GROUPS:
-            continue
-        total_long = int(candidate["pos_long"].sum())
-        total_short_abs = int(candidate["pos_short"].abs().sum())
-        total_net = int(candidate["pos"].sum())
-        if total_long != total_short_abs or total_net != 0:
+        if not _candidate_satisfies_position_invariants(candidate):
             continue
         rebuilt = frozen_oracle.reconstruct_eod_row(
             candidate,
