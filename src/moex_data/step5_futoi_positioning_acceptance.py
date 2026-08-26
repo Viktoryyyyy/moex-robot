@@ -74,11 +74,10 @@ def _reconstruct_eod_row_with_source_tail_policy(
     frozen_oracle._fail(OMISSION_ORACLE_ERROR)
 
 
-def _read_frozen_record(record: Mapping[str, object], expand_frozen_ref) -> tuple[str, Path, pd.DataFrame]:
-    trade_date = str(record["trade_date"])
+def _read_frozen_record(record: Mapping[str, object], expand_frozen_ref) -> pd.DataFrame:
     frozen_ref = str(record["frozen_partition_ref"])
     frozen_path = Path(expand_frozen_ref(frozen_ref))
-    return trade_date, frozen_path, pd.read_parquet(frozen_path)
+    return pd.read_parquet(frozen_path)
 
 
 def _validate_candidate_partition(
@@ -108,7 +107,7 @@ def _validate_candidate_partition(
         record = records_by_date.get(trade_date)
         if not isinstance(record, Mapping):
             frozen_oracle._fail("EOD trade_date missing frozen raw reconstruction input")
-        _, _, raw = _read_frozen_record(record, expand_frozen_ref)
+        raw = _read_frozen_record(record, expand_frozen_ref)
         expected = _reconstruct_eod_row_with_source_tail_policy(
             raw,
             instrument_id=instrument_id,
@@ -127,7 +126,7 @@ def _validate_candidate_partition(
         record = records_by_date.get(trade_date)
         if not isinstance(record, Mapping):
             frozen_oracle._fail("source-quality omitted date missing frozen raw input")
-        _, _, raw = _read_frozen_record(record, expand_frozen_ref)
+        raw = _read_frozen_record(record, expand_frozen_ref)
         try:
             _reconstruct_eod_row_with_source_tail_policy(
                 raw,
@@ -187,9 +186,37 @@ def _call_base_output_validator_with_split_counts(
         base._validate_frozen_input = original_frozen_validator
 
 
+def _eod_scope_from_row(row: Mapping[str, object], run_root: Path) -> tuple[str, str, Mapping[str, object]]:
+    manifest_path = base._artifact_path(row.get("manifest_path"), run_root, "manifest_path")
+    manifest_values = base._load_json(manifest_path, "manifest")
+    start_date = str(manifest_values.get("requested_start_date") or "")
+    end_date = str(manifest_values.get("requested_end_date") or "")
+    if not start_date or not end_date or start_date > end_date:
+        base._fail("EOD manifest requested range invalid")
+    return start_date, end_date, manifest_values
+
+
 def _validate_output_record(row: Mapping[str, object], *, dataset_id: str, run_root: Path, expected_rows: int) -> dict[str, object]:
     instrument_id = str(row.get("instrument_id") or "")
-    derived_rows = expected_derived_rows(instrument_id, expected_rows)
+    expected_omissions: list[dict[str, str]] = []
+    if dataset_id == base.EOD_DATASET:
+        start_date, end_date, _ = _eod_scope_from_row(row, run_root)
+        expected_omissions = omission_records(
+            instrument_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        derived_rows = expected_derived_rows(
+            instrument_id,
+            expected_rows,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    else:
+        derived_rows = int(row.get("row_count") or 0)
+        if derived_rows <= 0:
+            base._fail("feature output row_count must be positive")
+
     checked = _call_base_output_validator_with_split_counts(
         row,
         dataset_id=dataset_id,
@@ -204,7 +231,6 @@ def _validate_output_record(row: Mapping[str, object], *, dataset_id: str, run_r
     quality_values = base._load_json(checked["quality"], "quality")
     if manifest_values.get("snapshot_policy") != SNAPSHOT_POLICY:
         base._fail("EOD manifest snapshot policy mismatch")
-    expected_omissions = omission_records(instrument_id)
     for values, name in ((manifest_values, "EOD manifest"), (quality_values, "EOD quality")):
         if values.get("source_quality_omissions") != expected_omissions:
             base._fail(name + " source-quality omission evidence mismatch")
@@ -248,11 +274,26 @@ def _validate_pilot_omission_evidence(values: Mapping[str, object]) -> None:
         history = histories.get(instrument_id)
         if not isinstance(history, Mapping):
             base._fail("pilot history missing instrument: " + instrument_id)
+        start_date = str(history.get("start_date") or "")
+        end_date = str(history.get("end_date") or "")
+        if not start_date or not end_date or start_date > end_date:
+            base._fail("pilot history requested range invalid: " + instrument_id)
         if int(history.get("expected_raw_partitions") or 0) != raw_expected:
             base._fail("pilot raw history count mismatch: " + instrument_id)
-        if int(history.get("expected_eod_rows") or 0) != expected_derived_rows(instrument_id, raw_expected):
+        expected_eod = expected_derived_rows(
+            instrument_id,
+            raw_expected,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        expected_omissions = omission_records(
+            instrument_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        if int(history.get("expected_eod_rows") or 0) != expected_eod:
             base._fail("pilot derived history count mismatch: " + instrument_id)
-        if history.get("source_quality_omissions") != omission_records(instrument_id):
+        if history.get("source_quality_omissions") != expected_omissions:
             base._fail("pilot history source-quality omission mismatch: " + instrument_id)
 
 
