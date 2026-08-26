@@ -174,6 +174,14 @@ def _pilot_evidence(
         "revision_policy":"same_analytical_key_single_sess_id_then_max_seqnum",
         "snapshot_policy":"latest_resolved_complete_balanced_FIZ_YUR_event_ts",
         "source_quality_omission_policy":"explicit_attested_date_only_fail_closed_otherwise",
+        "counts":{
+            "mandatory_instruments":2,
+            "frozen_raw_inputs":len(frozen_outputs),
+            "eod_outputs":len(eod_outputs),
+            "feature_outputs":len(feature_outputs),
+            "source_quality_omission_count":0,
+            "expected_accepted_pointers":4,
+        },
         "histories":histories,
         "frozen_inputs":frozen_outputs,"eod_outputs":eod_outputs,"feature_outputs":feature_outputs,
     }
