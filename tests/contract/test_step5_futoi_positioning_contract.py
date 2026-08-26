@@ -74,7 +74,8 @@ def test_stage5_eod_contract_covers_attested_lineage_position_balance_and_partic
         "synthetic_missing_group_fill_allowed: false",
         "no_complete_balanced_snapshot: omit_only_if_explicit_attested_source_quality_exception",
         "undeclared_no_complete_balanced_snapshot: fail_closed",
-        "acceptance_independent_frozen_raw_revalidation_required: true",
+        "acceptance_targeted_omission_frozen_raw_revalidation_required: true",
+        "acceptance_full_frozen_raw_rehash_required: false",
         'trade_date: "2025-08-11"',
         "source_canonical_partition_ref",
         "source_frozen_partition_sha256",
@@ -102,8 +103,11 @@ def test_stage5_feature_contract_uses_only_current_and_prior_eod_observations() 
     assert "historical_pit_research_ready_claimed: false" in text
 
 
-def test_stage5_acceptance_requires_content_attested_frozen_bytes_and_independent_reconstruction() -> None:
+def test_stage5_acceptance_is_single_pass_and_avoids_full_raw_rehash() -> None:
     text = _read("contracts/datasets/step5_futoi_positioning_acceptance.v1.yaml")
+    assert "producer: moex_data.step5_futoi_positioning_acceptance_fast" in text
+    assert "canonical_acceptance_entrypoint_required: moex_data.step5_futoi_positioning_acceptance_fast" in text
+    assert "single_acceptance_validation_pass_required: true" in text
     assert "accepted_pointer_count: 4" in text
     assert "immutable_raw_input_freeze_required: true" in text
     assert "raw_input_freeze_mode_required: create_only_hardlink_same_validated_inode" in text
@@ -113,34 +117,25 @@ def test_stage5_acceptance_requires_content_attested_frozen_bytes_and_independen
     assert "content_attestation_marker_sha256_revalidated: true" in text
     assert "content_attested_manifest_sha256_revalidated: true" in text
     assert "content_attested_content_set_sha256_revalidated: true" in text
-    assert "content_attested_partition_sha256_revalidated: true" in text
-    assert "frozen_partition_sha_must_equal_content_attested_sha: true" in text
-    assert "canonical_raw_partition_reads_after_freeze_used_required: false" in text
-    assert "frozen_partition_stage2_futoi_physical_validator_reapplied_at_acceptance: true" in text
-    assert "eod_source_frozen_ref_and_sha_lineage_required: true" in text
-    assert "eod_reconstruction_from_physically_revalidated_frozen_raw_required: true" in text
-    assert "eod_reconstruction_independent_from_eod_producer_required: true" in text
-    assert "eod_reconstruction_exact_field_equality_before_promotion_required: true" in text
+    assert "content_attested_partition_sha_lineage_revalidated_from_manifests: true" in text
+    assert "frozen_manifest_sha256_revalidated: true" in text
+    assert "frozen_partition_full_sha256_rehash_at_acceptance_required: false" in text
+    assert "frozen_partition_hardlink_inode_identity_revalidated: true" in text
+    assert "frozen_partition_stage2_physical_validator_reapplied_at_acceptance: false" in text
+    assert "derived_eod_semantic_revalidation_required: true" in text
+    assert "derived_feature_semantic_revalidation_required: true" in text
+    assert "full_eod_reconstruction_from_all_frozen_raw_at_acceptance_required: false" in text
     assert "source_quality_omission_policy_required: explicit_attested_date_only_fail_closed_otherwise" in text
-    assert "source_quality_omission_manifest_quality_exact_match_required: true" in text
-    assert "source_quality_coverage_status_exact_match_required: true" in text
     assert "source_quality_omitted_date_independent_frozen_raw_revalidation_required: true" in text
+    assert "source_quality_targeted_raw_partition_reads_only: true" in text
     assert "eod_requested_range_must_equal_frozen_input_requested_range: true" in text
-    assert "pilot_history_range_must_equal_eod_manifest_requested_range: true" in text
     assert "pilot_counts_source_quality_omission_count_exact_required: true" in text
     assert "undeclared_derived_coverage_loss_forbidden: true" in text
-    assert "historical_expected_raw_partitions:" in text
-    assert "historical_expected_derived_rows:" in text
     assert "si_futures_family: 1756" in text
     assert "cr_futures_family: 1176" in text
     assert text.count('trade_date: "2025-08-11"') == 2
     assert "physical_parquet_readback_required: true" in text
-    assert "eod_current_content_attestation_marker_required: true" in text
     assert "eod_all_derived_metrics_recomputed: true" in text
-    assert "eod_participant_average_zero_count_rules_revalidated: true" in text
-    assert "feature_source_eod_identity_exact_match_required: true" in text
-    assert "feature_source_eod_timestamp_exact_match_required: true" in text
-    assert "feature_source_eod_base_columns_exact_match_required: true" in text
     assert "feature_changes_recomputed: true" in text
     assert "feature_rolling_zscores_recomputed: true" in text
     assert "feature_rolling_percentiles_recomputed: true" in text

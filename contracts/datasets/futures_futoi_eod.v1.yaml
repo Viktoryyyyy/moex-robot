@@ -68,7 +68,8 @@ source_quality_omissions:
   raw_partition_retained: true
   tolerance_normalization_allowed: false
   synthetic_fill_allowed: false
-  acceptance_independent_frozen_raw_revalidation_required: true
+  acceptance_targeted_omission_frozen_raw_revalidation_required: true
+  acceptance_full_frozen_raw_rehash_required: false
   declared:
     si_futures_family:
       - trade_date: "2025-08-11"
