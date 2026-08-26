@@ -121,7 +121,12 @@ def test_stage5_acceptance_requires_content_attested_frozen_bytes_and_independen
     assert "eod_reconstruction_independent_from_eod_producer_required: true" in text
     assert "eod_reconstruction_exact_field_equality_before_promotion_required: true" in text
     assert "source_quality_omission_policy_required: explicit_attested_date_only_fail_closed_otherwise" in text
+    assert "source_quality_omission_manifest_quality_exact_match_required: true" in text
+    assert "source_quality_coverage_status_exact_match_required: true" in text
     assert "source_quality_omitted_date_independent_frozen_raw_revalidation_required: true" in text
+    assert "eod_requested_range_must_equal_frozen_input_requested_range: true" in text
+    assert "pilot_history_range_must_equal_eod_manifest_requested_range: true" in text
+    assert "pilot_counts_source_quality_omission_count_exact_required: true" in text
     assert "undeclared_derived_coverage_loss_forbidden: true" in text
     assert "historical_expected_raw_partitions:" in text
     assert "historical_expected_derived_rows:" in text
