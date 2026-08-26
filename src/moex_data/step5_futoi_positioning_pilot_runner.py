@@ -86,8 +86,17 @@ def run_pilot(*, artifact_version: str, env_file: str | None = CANONICAL_ENV_PAT
     eod_outputs: list[dict[str, object]] = []
     feature_outputs: list[dict[str, object]] = []
     for instrument_id, (start_date, end_date, expected_partitions) in HISTORY.items():
-        expected_eod_rows = expected_derived_rows(instrument_id, expected_partitions)
-        expected_omissions = omission_records(instrument_id)
+        expected_eod_rows = expected_derived_rows(
+            instrument_id,
+            expected_partitions,
+            start_date=start_date,
+            end_date=end_date,
+        )
+        expected_omissions = omission_records(
+            instrument_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
         freeze_run = run_id + "_" + instrument_id + "_raw_freeze"
         frozen = freeze_accepted_history(
@@ -159,7 +168,10 @@ def run_pilot(*, artifact_version: str, env_file: str | None = CANONICAL_ENV_PAT
             "frozen_raw_inputs": len(frozen_inputs),
             "eod_outputs": len(eod_outputs),
             "feature_outputs": len(feature_outputs),
-            "source_quality_omission_count": sum(len(omission_records(instrument_id)) for instrument_id in HISTORY),
+            "source_quality_omission_count": sum(
+                len(omission_records(instrument_id, start_date=values[0], end_date=values[1]))
+                for instrument_id, values in HISTORY.items()
+            ),
             "expected_accepted_pointers": 4,
         },
         "histories": {
@@ -167,8 +179,17 @@ def run_pilot(*, artifact_version: str, env_file: str | None = CANONICAL_ENV_PAT
                 "start_date": values[0],
                 "end_date": values[1],
                 "expected_raw_partitions": values[2],
-                "expected_eod_rows": expected_derived_rows(instrument_id, values[2]),
-                "source_quality_omissions": omission_records(instrument_id),
+                "expected_eod_rows": expected_derived_rows(
+                    instrument_id,
+                    values[2],
+                    start_date=values[0],
+                    end_date=values[1],
+                ),
+                "source_quality_omissions": omission_records(
+                    instrument_id,
+                    start_date=values[0],
+                    end_date=values[1],
+                ),
             }
             for instrument_id, values in HISTORY.items()
         },
