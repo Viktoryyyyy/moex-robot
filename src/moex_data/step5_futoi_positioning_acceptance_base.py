@@ -21,6 +21,7 @@ finally:
 from moex_data.futures import stage2_raw_history_content_reattestation as _content_attestation
 
 _BASE_VALIDATE_FROZEN_INPUT = _validate_frozen_input
+_BASE_TRANSACTIONAL_REPLACE = _transactional_replace
 
 
 def _content_date_set_sha256(values: Sequence[object]) -> str:
@@ -115,6 +116,72 @@ def _validate_frozen_input(
     checked["content_attestation_marker_sha256"] = str(resolved.get("marker_sha256") or "")
     checked["content_attested_partition_content_set_sha256"] = str(resolved.get("partition_content_set_sha256") or "")
     return checked
+
+
+def _final_content_attestation_write_gate(records: Sequence[tuple[Path, Mapping[str, object]]]) -> tuple[str, str, str]:
+    batch_keys: set[tuple[str, str, str]] = set()
+    seen: set[str] = set()
+    for _, values in records:
+        if values.get("dataset_id") != EOD_DATASET:
+            continue
+        instrument_id = _safe_token(values.get("instrument_id"), "final gate instrument_id")
+        if instrument_id in seen or instrument_id not in EXPECTED_INSTRUMENTS:
+            _fail("final content-attestation gate EOD instrument set invalid")
+        seen.add(instrument_id)
+
+        resolved, marker_ref, manifest_ref, report_ref = _current_content_attestation(instrument_id)
+        generation_id = str(resolved.get("generation_id") or "")
+        marker_sha = str(resolved.get("marker_sha256") or "")
+        if len(marker_sha) != 64 or not generation_id:
+            _fail("final content-attestation marker identity invalid")
+
+        eod_manifest_path = _expand_root_ref(values.get("manifest_ref"), "pending EOD manifest_ref")
+        eod_manifest = _load_json(eod_manifest_path, "pending EOD manifest")
+        frozen_manifest_path = _expand_root_ref(eod_manifest.get("frozen_input_manifest_ref"), "pending frozen_input_manifest_ref")
+        frozen = _load_json(frozen_manifest_path, "pending frozen input manifest")
+        expected = {
+            "content_attestation_generation_id": generation_id,
+            "content_attestation_marker_ref": marker_ref,
+            "content_attestation_marker_sha256": marker_sha,
+            "content_attested_manifest_ref": manifest_ref,
+            "content_attested_manifest_sha256": str(resolved.get("manifest_sha256") or ""),
+            "content_attested_partition_content_set_sha256": str(resolved.get("partition_content_set_sha256") or ""),
+            "accepted_raw_pointer_ref": marker_ref,
+            "accepted_raw_manifest_ref": manifest_ref,
+            "accepted_raw_acceptance_report_ref": report_ref,
+            "accepted_raw_history_run_id": generation_id,
+        }
+        for field, wanted in expected.items():
+            if frozen.get(field) != wanted:
+                _fail("final content-attestation write gate mismatch: " + instrument_id + " " + field)
+        if frozen.get("legacy_pointer_consumption_used") is not False or frozen.get("source_mode") != "stage2_content_attested_generation_snapshots_only":
+            _fail("final content-attestation write gate detected legacy/non-attested frozen lineage")
+        batch_keys.add((generation_id, marker_ref, marker_sha))
+
+    if seen != EXPECTED_INSTRUMENTS or len(batch_keys) != 1:
+        _fail("final content-attestation write gate requires one shared current generation for Si/CR")
+    return next(iter(batch_keys))
+
+
+def _transactional_replace(records: Sequence[tuple[Path, Mapping[str, object]]]) -> None:
+    paths = [path for path, _ in records]
+    previous = {path: path.read_bytes() if path.exists() else None for path in paths}
+    before = _final_content_attestation_write_gate(records)
+    _BASE_TRANSACTIONAL_REPLACE(records)
+    try:
+        after = _final_content_attestation_write_gate(records)
+        if after != before:
+            _fail("content-attestation marker changed during Stage 5 pointer promotion")
+    except Exception as exc:
+        rollback_errors: list[str] = []
+        for path in reversed(paths):
+            try:
+                _restore(path, previous[path])
+            except Exception as rollback_exc:
+                rollback_errors.append(str(rollback_exc))
+        if rollback_errors:
+            raise Step5AcceptanceError("content-attestation changed during promotion and rollback incomplete: " + ";".join(rollback_errors)) from exc
+        raise Step5AcceptanceError("content-attestation changed during promotion; Stage 5 pointer set rolled back: " + str(exc)) from exc
 
 
 if _REAL_NAME == "__main__":
