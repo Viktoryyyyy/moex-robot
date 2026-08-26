@@ -2,40 +2,48 @@ config_id: step5_futoi_positioning.v1
 status: implementation_candidate_physical_pilot_pending
 architecture_contract_ref: contracts/architecture/moex_data_access_canon_v1.yaml
 purpose: >
-  Canonical Si/CR participant-positioning layer derived from accepted FUTOI raw history:
+  Canonical Si/CR participant-positioning layer derived from content-attested FUTOI raw history:
   immutable byte-pinned raw input, deterministic revision resolution, paired FIZ/YUR EOD snapshots,
   and causal D1 positioning features.
 
 upstream:
   raw_dataset_ref: contracts/datasets/futures_futoi_raw.v1.yaml
   raw_history_acceptance_ref: contracts/datasets/futures_raw_history_acceptance.v1.yaml
-  raw_history_accepted_manifest_ref: contracts/datasets/futures_raw_history_accepted_manifest.v1.yaml
+  raw_history_content_attestation_ref: contracts/datasets/futures_raw_history_content_attestation.v1.yaml
+  content_attested_manifest_ref: contracts/datasets/futures_raw_history_content_attested_manifest.v1.yaml
   source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v1.yaml
   raw_ingestion_changed_by_step5: false
   raw_revisions_preserved: true
-  accepted_raw_pointer_required: true
-  accepted_raw_pointer_path: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_futoi_raw/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
-  accepted_raw_promotion_basis_required: raw_history_acceptance
-  accepted_raw_manifest_date_set_digest_required: true
-  accepted_raw_acceptance_report_sha256_required: true
+  content_attestation_current_generation_marker_required: true
+  content_attestation_resolver_required: moex_data.futures.stage2_raw_history_content_reattestation.resolve_content_attested_history
+  legacy_accepted_raw_pointer_consumption_allowed: false
+  content_attested_manifest_sha256_required: true
+  content_attested_partition_content_set_sha256_required: true
+  per_partition_attested_sha256_required: true
+  immutable_generation_snapshot_read_required: true
+  canonical_raw_partition_read_allowed: false
   unaccepted_physical_partition_read_allowed: false
 
 immutable_raw_input_freeze:
   required_before_eod: true
   producer: moex_data.futures.freeze_accepted_futoi_history.v1
   schema_version: step5_futoi_raw_frozen_input.v1
-  scope: exact_full_accepted_history_range
+  scope: exact_full_content_attested_history_range
+  source_mode: stage2_content_attested_generation_snapshots_only
   stage2_futoi_partition_validator_reapplied: true
+  attested_snapshot_sha256_revalidated_before_freeze: true
   source_bytes_sha256_required: true
   frozen_bytes_sha256_required: true
-  source_and_frozen_sha256_must_match: true
+  source_and_frozen_sha256_must_match_attested_sha256: true
   freeze_mode: create_only_hardlink_same_validated_inode
   source_inode_must_equal_frozen_inode_at_link_time: true
   hardlink_failure_fallback_allowed: false
   canonical_raw_reads_after_freeze_allowed: false
   frozen_partition_hash_revalidation_before_eod: true
   frozen_partition_hash_and_physical_revalidation_at_acceptance: true
-  canonical_path_replacement_after_freeze_must_not_change_frozen_input: true
+  content_attestation_generation_re_resolved_at_acceptance: true
+  marker_manifest_content_set_and_partition_sha_lineage_required: true
+  legacy_pointer_bypass_allowed: false
 
 scope:
   mandatory_instrument_ids:
@@ -118,7 +126,7 @@ physical_pilot:
     cr_futures_family:
       start_date: "2022-04-21"
   immutable_run_required: true
-  accepted_raw_history_required: true
+  content_attested_raw_history_required: true
   immutable_raw_input_freeze_required: true
   raw_network_calls_allowed: false
   raw_api_latest_allowed: false
