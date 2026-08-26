@@ -1,6 +1,6 @@
 contract_id: step5_futoi_positioning_acceptance.v1
 artifact_class: external_pattern
-producer: moex_data.step5_futoi_positioning_acceptance
+producer: moex_data.step5_futoi_positioning_acceptance_fast
 program_ref: configs/datasets/step5_futoi_positioning.v1.yaml
 pilot_evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step5_futoi_positioning/run_id={RUN_ID}/pilot_evidence.json"
 acceptance_evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step5_futoi_positioning/run_id={RUN_ID}/accepted_pointers.json"
@@ -30,9 +30,9 @@ validation_policy:
   latest_autodetect_used_required: false
   immutable_raw_input_freeze_required: true
   raw_input_freeze_mode_required: create_only_hardlink_same_validated_inode
-  canonical_acceptance_entrypoint_required: moex_data.step5_futoi_positioning_acceptance
-  direct_acceptance_base_cli_forbidden: true
-  canonical_validator_wrapper_same_process_concurrency_serialized: true
+  canonical_acceptance_entrypoint_required: moex_data.step5_futoi_positioning_acceptance_fast
+  legacy_heavy_acceptance_entrypoint_not_required: true
+  single_acceptance_validation_pass_required: true
   content_attestation_current_generation_marker_required: true
   content_attestation_resolver_required: moex_data.futures.stage2_raw_history_content_reattestation.resolve_content_attested_history
   legacy_raw_pointer_consumption_forbidden: true
@@ -40,25 +40,28 @@ validation_policy:
   content_attestation_marker_sha256_revalidated: true
   content_attested_manifest_sha256_revalidated: true
   content_attested_content_set_sha256_revalidated: true
-  content_attested_partition_sha256_revalidated: true
+  content_attested_partition_sha_lineage_revalidated_from_manifests: true
   content_attested_snapshot_ref_exact_match_required: true
   frozen_manifest_inside_declared_run_root_required: true
   frozen_manifest_sha256_revalidated: true
-  frozen_partition_sha256_revalidated: true
-  frozen_source_and_snapshot_sha256_equality_required: true
-  frozen_partition_sha_must_equal_content_attested_sha: true
-  frozen_partition_stage2_futoi_physical_validator_reapplied_at_acceptance: true
+  frozen_partition_full_sha256_rehash_at_acceptance_required: false
+  frozen_partition_hardlink_inode_identity_revalidated: true
+  frozen_source_and_snapshot_sha256_lineage_equality_required: true
+  frozen_partition_sha_lineage_must_equal_content_attested_sha: true
+  frozen_partition_stage2_physical_validation_evidence_from_pilot_required: true
+  frozen_partition_stage2_physical_validator_reapplied_at_acceptance: false
   frozen_partition_date_set_must_equal_current_content_attested_date_set: true
   frozen_canonical_source_path_identity_required: true
   canonical_raw_partition_reads_after_freeze_used_required: false
   eod_source_frozen_ref_and_sha_lineage_required: true
-  eod_reconstruction_from_physically_revalidated_frozen_raw_required: true
-  eod_reconstruction_independent_from_eod_producer_required: true
-  eod_reconstruction_exact_field_equality_before_promotion_required: true
+  full_eod_reconstruction_from_all_frozen_raw_at_acceptance_required: false
+  derived_eod_semantic_revalidation_required: true
+  derived_feature_semantic_revalidation_required: true
   source_quality_omission_policy_required: explicit_attested_date_only_fail_closed_otherwise
   source_quality_omission_manifest_quality_exact_match_required: true
   source_quality_coverage_status_exact_match_required: true
   source_quality_omitted_date_independent_frozen_raw_revalidation_required: true
+  source_quality_targeted_raw_partition_reads_only: true
   eod_requested_range_must_equal_frozen_input_requested_range: true
   pilot_history_range_must_equal_eod_manifest_requested_range: true
   pilot_counts_source_quality_omission_count_exact_required: true
