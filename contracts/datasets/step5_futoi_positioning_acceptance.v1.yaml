@@ -81,5 +81,7 @@ promotion_policy:
   pointer_run_id_source: referenced_manifest_run_id
   acceptance_run_id_stored_separately: true
   pointer_promotion_mode: transactional_with_rollback
+  pointer_publication_serialized_by_shared_process_lock: true
+  publication_lock_scope_includes_snapshot_pre_gate_transaction_post_gate_and_rollback: true
   final_acceptance_marker_participates_in_same_transaction: true
   partial_pointer_set_without_acceptance_marker_is_not_accepted: true
