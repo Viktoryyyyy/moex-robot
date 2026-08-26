@@ -5,7 +5,7 @@ producer: moex_data.futures.materialize_futoi_eod
 format: parquet
 schema_version: futures_futoi_eod.v1
 storage_root_ref: MOEX_DATA_ROOT
-grain: one_row_per_trade_date_per_root_instrument
+grain: one_row_per_available_valid_trade_date_per_root_instrument
 identity_model:
   canonical_identity_field: instrument_id
   mandatory_instrument_ids:
@@ -60,8 +60,20 @@ snapshot_selection:
   later_unbalanced_event_allowed_as_source_tail: true
   synthetic_missing_group_fill_allowed: false
   selected_snapshot_must_satisfy_position_invariants: true
-  no_complete_balanced_snapshot: fail_closed
+  no_complete_balanced_snapshot: omit_only_if_explicit_attested_source_quality_exception
+  undeclared_no_complete_balanced_snapshot: fail_closed
   hardcoded_eod_clock: false
+source_quality_omissions:
+  policy: explicit_attested_date_only_fail_closed_otherwise
+  raw_partition_retained: true
+  tolerance_normalization_allowed: false
+  synthetic_fill_allowed: false
+  acceptance_independent_frozen_raw_revalidation_required: true
+  declared:
+    si_futures_family:
+      - trade_date: "2025-08-11"
+        reason: no_complete_balanced_FIZ_YUR_snapshot
+    cr_futures_family: []
 timestamp_semantics:
   raw_event_ts_semantics: exchange_local_Europe_Moscow
   snapshot_ts_local_field: snapshot_ts_msk
@@ -137,6 +149,8 @@ quality_checks:
   - unique_instrument_trade_date
   - chronological_trade_date
   - latest_complete_balanced_FIZ_YUR_snapshot_selected
+  - declared_source_quality_omission_set_exact
+  - omitted_source_quality_dates_independently_revalidated
   - deterministic_revision_resolution
   - balanced_net_positions
   - balanced_long_short_open_interest
