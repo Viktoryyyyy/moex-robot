@@ -44,8 +44,12 @@ def test_stage5_revision_and_final_snapshot_policy_are_fail_closed() -> None:
     assert "systime_as_revision_order_allowed: false" in text
     assert "multi_sess_id_same_analytical_key: fail_closed" in text
     assert "within_single_sess_id_revision_order: greatest_seqnum" in text
-    assert "final_event_ts_rule: maximum_resolved_ts_for_trade_date" in text
-    assert "incomplete_final_snapshot: fail_closed" in text
+    assert "final_event_ts_rule: latest_resolved_complete_balanced_FIZ_YUR_event_ts" in text
+    assert "later_incomplete_source_tail_allowed: true" in text
+    assert "later_unbalanced_source_tail_allowed: true" in text
+    assert "synthetic_missing_group_fill_allowed: false" in text
+    assert "selected_event_must_satisfy_exact_position_balance: true" in text
+    assert "no_complete_balanced_snapshot: fail_closed" in text
     assert "eod_clock_time_hardcoded: false" in text
 
 
@@ -60,6 +64,9 @@ def test_stage5_eod_contract_covers_attested_lineage_position_balance_and_partic
         "source_mode: stage2_content_attested_generation_snapshots_only",
         "source_frozen_attested_hash_equality_required: true",
         "canonical_raw_reads_after_freeze_allowed: false",
+        "rule: latest_resolved_complete_balanced_FIZ_YUR_event_ts",
+        "synthetic_missing_group_fill_allowed: false",
+        "no_complete_balanced_snapshot: fail_closed",
         "source_canonical_partition_ref",
         "source_frozen_partition_sha256",
         "phys_net", "legal_net", "total_open_interest", "phys_gross", "legal_gross",
