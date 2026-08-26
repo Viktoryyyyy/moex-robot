@@ -22,6 +22,7 @@ finally:
 from . import stage2_raw_history_content_reattestation as _content_attestation
 
 _BASE_LOAD_FROZEN_INPUT_SCOPE = _load_frozen_input_scope
+_BASE_SINGLE_EOD_ROW = _single_eod_row
 
 
 def _require_stage2_root(root: Path) -> None:
@@ -133,6 +134,48 @@ def _load_frozen_input_scope(
         if frozen_record.get("canonical_source_ref") != attested.get("canonical_ref"):
             _fail("frozen record canonical ref differs from attested generation during EOD materialization: " + trade_date)
     return checked
+
+
+def _single_eod_row(
+    frame,
+    *,
+    instrument_id: str,
+    trade_date: str,
+    frozen_ref: str,
+    canonical_source_ref: str,
+    frozen_sha256: str,
+) -> dict[str, object]:
+    """Select the latest resolved snapshot that is complete and exactly balanced.
+
+    FUTOI history contains rare source-level tail snapshots where only one client
+    group is published, plus rare complete snapshots with a small non-zero market
+    residual.  Neither case is safe to normalize synthetically.  Walk backward
+    through resolved event timestamps and use the latest exact FIZ/YUR snapshot
+    whose source positions satisfy the existing strict balance invariants.
+    """
+    work = _validate_raw(frame, instrument_id=instrument_id, trade_date=trade_date)
+    resolved, revisions_dropped = _resolve_revisions(work)
+    for candidate_ts in sorted(resolved["_ts_utc"].drop_duplicates().tolist(), reverse=True):
+        candidate = resolved.loc[resolved["_ts_utc"].eq(candidate_ts)].copy()
+        if len(candidate.index) != 2 or set(candidate["clgroup"].tolist()) != GROUPS:
+            continue
+        total_long = int(candidate["pos_long"].sum())
+        total_short_abs = int(candidate["pos_short"].abs().sum())
+        total_net = int(candidate["pos"].sum())
+        if total_long != total_short_abs or total_net != 0:
+            continue
+        row = _BASE_SINGLE_EOD_ROW(
+            candidate,
+            instrument_id=instrument_id,
+            trade_date=trade_date,
+            frozen_ref=frozen_ref,
+            canonical_source_ref=canonical_source_ref,
+            frozen_sha256=frozen_sha256,
+        )
+        row["source_row_count"] = int(len(work.index))
+        row["source_revision_rows_dropped"] = revisions_dropped
+        return row
+    _fail("no complete balanced FIZ/YUR snapshot exists for FUTOI trade_date")
 
 
 if _REAL_NAME == "__main__":
