@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+
+import pandas as pd
 
 _IMPL_PATH = Path(__file__).with_name("materialize_futoi_eod_impl.inc")
 _REAL_NAME = __name__
@@ -20,10 +23,13 @@ finally:
     globals()["__name__"] = _REAL_NAME
 
 from . import stage2_raw_history_content_reattestation as _content_attestation
+from .step5_futoi_source_quality import omissions_for_instrument
 
 SNAPSHOT_POLICY = "latest_resolved_complete_balanced_FIZ_YUR_event_ts"
+SOURCE_QUALITY_OMISSION_ERROR = "no complete balanced FIZ/YUR snapshot exists for FUTOI trade_date"
 _BASE_LOAD_FROZEN_INPUT_SCOPE = _load_frozen_input_scope
 _BASE_SINGLE_EOD_ROW = _single_eod_row
+_BASE_BUILD_EOD_HISTORY = build_eod_history
 _BASE_MATERIALIZE_EOD_HISTORY = materialize_eod_history
 
 
@@ -184,7 +190,69 @@ def _single_eod_row(
         row["source_row_count"] = int(len(work.index))
         row["source_revision_rows_dropped"] = revisions_dropped
         return row
-    _fail("no complete balanced FIZ/YUR snapshot exists for FUTOI trade_date")
+    _fail(SOURCE_QUALITY_OMISSION_ERROR)
+
+
+def _declared_omissions_in_range(instrument_id: str, start_date: str, end_date: str) -> dict[str, str]:
+    return {
+        trade_date: reason
+        for trade_date, reason in omissions_for_instrument(instrument_id).items()
+        if start_date <= trade_date <= end_date
+    }
+
+
+def build_eod_history(
+    *,
+    data_root: str | Path,
+    frozen_input_manifest: str | Path,
+    instrument_id: str,
+    start_date: str,
+    end_date: str,
+) -> tuple[pd.DataFrame, list[str], FrozenInputScope]:
+    root = Path(data_root).resolve()
+    instrument = _safe_token(instrument_id, "instrument_id")
+    if instrument not in MANDATORY_INSTRUMENTS:
+        _fail("Stage 5 mandatory scope is Si/CR only")
+    start = _iso_date(start_date, "start_date")
+    end = _iso_date(end_date, "end_date")
+    if start > end:
+        _fail("start_date must be <= end_date")
+    frozen = _load_frozen_input_scope(root, frozen_input_manifest, instrument, start, end)
+    declared = _declared_omissions_in_range(instrument, start, end)
+    encountered: dict[str, str] = {}
+    rows: list[dict[str, object]] = []
+    inputs: list[str] = []
+    for record in frozen.records:
+        trade_date = str(record["trade_date"])
+        frozen_ref = str(record["frozen_partition_ref"])
+        frozen_path = _expand_root_ref(root, frozen_ref, "frozen_partition_ref")
+        expected_sha = str(record["frozen_sha256"])
+        if hashlib.sha256(frozen_path.read_bytes()).hexdigest() != expected_sha:
+            _fail("frozen partition changed before EOD read")
+        inputs.append(frozen_ref)
+        frame = pd.read_parquet(frozen_path)
+        try:
+            row = _single_eod_row(
+                frame,
+                instrument_id=instrument,
+                trade_date=trade_date,
+                frozen_ref=frozen_ref,
+                canonical_source_ref=str(record["canonical_source_ref"]),
+                frozen_sha256=expected_sha,
+            )
+        except FutoiEodError as exc:
+            reason = declared.get(trade_date)
+            if reason == "no_complete_balanced_FIZ_YUR_snapshot" and str(exc) == SOURCE_QUALITY_OMISSION_ERROR:
+                encountered[trade_date] = reason
+                continue
+            raise
+        rows.append(row)
+    if encountered != declared:
+        _fail("declared Stage 5 source-quality omission set did not reproduce exactly")
+    result = pd.DataFrame(rows).sort_values("trade_date").reset_index(drop=True)
+    if result.empty or result.duplicated(subset=["instrument_id", "trade_date"]).any():
+        _fail("derived EOD is empty or contains duplicate instrument/trade_date")
+    return result, inputs, frozen
 
 
 def materialize_eod_history(
@@ -206,10 +274,26 @@ def materialize_eod_history(
         end_date=end_date,
         run_id=run_id,
     )
+    omissions = [
+        {"trade_date": trade_date, "reason": reason}
+        for trade_date, reason in sorted(_declared_omissions_in_range(instrument_id, start_date, end_date).items())
+    ]
     manifest_path = Path(str(result["manifest_path"]))
+    quality_path = Path(str(result["quality_report_path"]))
     manifest_values = _load_json(manifest_path, "EOD manifest")
+    quality_values = _load_json(quality_path, "EOD quality report")
     manifest_values["snapshot_policy"] = SNAPSHOT_POLICY
+    manifest_values["source_quality_omissions"] = omissions
+    manifest_values["source_quality_omission_count"] = len(omissions)
+    manifest_values["coverage_status"] = "pass_with_attested_source_quality_omissions" if omissions else "pass_complete"
+    quality_values["source_quality_omissions"] = omissions
+    quality_values["source_quality_omission_count"] = len(omissions)
+    quality_values["coverage_status"] = manifest_values["coverage_status"]
     _atomic_json(manifest_path, manifest_values)
+    _atomic_json(quality_path, quality_values)
+    result["source_quality_omissions"] = omissions
+    result["source_quality_omission_count"] = len(omissions)
+    result["coverage_status"] = manifest_values["coverage_status"]
     return result
 
 
