@@ -1,0 +1,111 @@
+contract_id: step5_futoi_positioning_acceptance.v1
+artifact_class: external_pattern
+producer: moex_data.step5_futoi_positioning_acceptance_fast
+program_ref: configs/datasets/step5_futoi_positioning.v1.yaml
+pilot_evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step5_futoi_positioning/run_id={RUN_ID}/pilot_evidence.json"
+acceptance_evidence_path_pattern: "${MOEX_DATA_ROOT}/state/acceptance/step5_futoi_positioning/run_id={RUN_ID}/accepted_pointers.json"
+expected_outputs:
+  frozen_raw_inputs:
+    dataset_id: futures_futoi_raw
+    instruments:
+      - si_futures_family
+      - cr_futures_family
+    promoted_as_dataset_pointers: false
+  eod:
+    dataset_id: futures_futoi_eod
+    instruments:
+      - si_futures_family
+      - cr_futures_family
+  positioning_features:
+    dataset_id: futures_futoi_positioning_features_d1
+    instruments:
+      - si_futures_family
+      - cr_futures_family
+  accepted_pointer_count: 4
+validation_policy:
+  pilot_status_required: pilot_passed
+  run_artifacts_immutable_required: true
+  run_id_reuse_allowed_required: false
+  network_calls_used_required: false
+  latest_autodetect_used_required: false
+  immutable_raw_input_freeze_required: true
+  raw_input_freeze_mode_required: create_only_hardlink_same_validated_inode
+  canonical_acceptance_entrypoint_required: moex_data.step5_futoi_positioning_acceptance_fast
+  legacy_heavy_acceptance_entrypoint_not_required: true
+  single_acceptance_validation_pass_required: true
+  content_attestation_current_generation_marker_required: true
+  content_attestation_resolver_required: moex_data.futures.stage2_raw_history_content_reattestation.resolve_content_attested_history
+  legacy_raw_pointer_consumption_forbidden: true
+  content_attestation_generation_re_resolved_at_acceptance: true
+  content_attestation_marker_sha256_revalidated: true
+  content_attested_manifest_sha256_revalidated: true
+  content_attested_content_set_sha256_revalidated: true
+  content_attested_partition_sha_lineage_revalidated_from_manifests: true
+  content_attested_snapshot_ref_exact_match_required: true
+  frozen_manifest_inside_declared_run_root_required: true
+  frozen_manifest_sha256_revalidated: true
+  frozen_partition_full_sha256_rehash_at_acceptance_required: false
+  frozen_partition_hardlink_inode_identity_revalidated: true
+  frozen_source_and_snapshot_sha256_lineage_equality_required: true
+  frozen_partition_sha_lineage_must_equal_content_attested_sha: true
+  frozen_partition_stage2_physical_validation_evidence_from_pilot_required: true
+  frozen_partition_stage2_physical_validator_reapplied_at_acceptance: false
+  frozen_partition_date_set_must_equal_current_content_attested_date_set: true
+  frozen_canonical_source_path_identity_required: true
+  canonical_raw_partition_reads_after_freeze_used_required: false
+  eod_source_frozen_ref_and_sha_lineage_required: true
+  full_eod_reconstruction_from_all_frozen_raw_at_acceptance_required: false
+  derived_eod_semantic_revalidation_required: true
+  derived_feature_semantic_revalidation_required: true
+  source_quality_omission_policy_required: explicit_attested_date_only_fail_closed_otherwise
+  source_quality_omission_manifest_quality_exact_match_required: true
+  source_quality_coverage_status_exact_match_required: true
+  source_quality_omitted_date_independent_frozen_raw_revalidation_required: true
+  source_quality_targeted_raw_partition_reads_only: true
+  eod_requested_range_must_equal_frozen_input_requested_range: true
+  pilot_history_range_must_equal_eod_manifest_requested_range: true
+  pilot_counts_source_quality_omission_count_exact_required: true
+  undeclared_derived_coverage_loss_forbidden: true
+  root_aggregate_semantics_required: true
+  front_next_split_claimed_required: false
+  historical_pit_research_ready_claimed_required: false
+  all_artifacts_inside_declared_run_root: true
+  physical_parquet_readback_required: true
+  manifest_quality_identity_and_row_count_match_required: true
+  eod_current_content_attestation_marker_required: true
+  eod_required_schema_complete: true
+  eod_balance_invariants_revalidated: true
+  eod_all_derived_metrics_recomputed: true
+  eod_participant_average_zero_count_rules_revalidated: true
+  eod_final_snapshot_timestamp_metadata_valid: true
+  feature_required_schema_complete: true
+  feature_source_eod_identity_exact_match_required: true
+  feature_source_eod_timestamp_exact_match_required: true
+  feature_source_eod_base_columns_exact_match_required: true
+  feature_changes_recomputed: true
+  feature_rolling_zscores_recomputed: true
+  feature_rolling_percentiles_recomputed: true
+  feature_percentiles_in_unit_interval: true
+  historical_expected_raw_partitions:
+    si_futures_family: 1757
+    cr_futures_family: 1177
+  historical_expected_derived_rows:
+    si_futures_family: 1756
+    cr_futures_family: 1176
+  declared_source_quality_omissions:
+    si_futures_family:
+      - trade_date: "2025-08-11"
+        reason: no_complete_balanced_FIZ_YUR_snapshot
+    cr_futures_family:
+      - trade_date: "2025-08-11"
+        reason: no_complete_balanced_FIZ_YUR_snapshot
+promotion_policy:
+  validate_all_before_pointer_writes: true
+  frozen_raw_inputs_are_run_scoped_evidence_not_dataset_pointer_targets: true
+  pointer_run_id_source: referenced_manifest_run_id
+  acceptance_run_id_stored_separately: true
+  pointer_promotion_mode: transactional_with_rollback
+  pointer_publication_serialized_by_shared_process_lock: true
+  publication_lock_scope_includes_snapshot_pre_gate_transaction_post_gate_and_rollback: true
+  final_acceptance_marker_participates_in_same_transaction: true
+  partial_pointer_set_without_acceptance_marker_is_not_accepted: true

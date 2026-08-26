@@ -1,0 +1,191 @@
+config_id: step5_futoi_positioning.v1
+status: futoi_positioning_stage5_accepted
+architecture_contract_ref: contracts/architecture/moex_data_access_canon_v1.yaml
+purpose: >
+  Canonical Si/CR participant-positioning layer derived from content-attested FUTOI raw history:
+  immutable byte-pinned raw input, deterministic revision resolution, paired FIZ/YUR EOD snapshots,
+  explicit source-quality coverage omissions, and causal D1 positioning features.
+
+upstream:
+  raw_dataset_ref: contracts/datasets/futures_futoi_raw.v1.yaml
+  raw_history_acceptance_ref: contracts/datasets/futures_raw_history_acceptance.v1.yaml
+  raw_history_content_attestation_ref: contracts/datasets/futures_raw_history_content_attestation.v1.yaml
+  content_attested_manifest_ref: contracts/datasets/futures_raw_history_content_attested_manifest.v1.yaml
+  source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v1.yaml
+  raw_ingestion_changed_by_step5: false
+  raw_revisions_preserved: true
+  content_attestation_current_generation_marker_required: true
+  content_attestation_resolver_required: moex_data.futures.stage2_raw_history_content_reattestation.resolve_content_attested_history
+  legacy_accepted_raw_pointer_consumption_allowed: false
+  content_attested_manifest_sha256_required: true
+  content_attested_partition_content_set_sha256_required: true
+  per_partition_attested_sha256_required: true
+  immutable_generation_snapshot_read_required: true
+  canonical_raw_partition_read_allowed: false
+  unaccepted_physical_partition_read_allowed: false
+
+immutable_raw_input_freeze:
+  required_before_eod: true
+  producer: moex_data.futures.freeze_accepted_futoi_history.v1
+  schema_version: step5_futoi_raw_frozen_input.v1
+  scope: exact_full_content_attested_history_range
+  source_mode: stage2_content_attested_generation_snapshots_only
+  stage2_futoi_partition_validator_reapplied: true
+  attested_snapshot_sha256_revalidated_before_freeze: true
+  source_bytes_sha256_required: true
+  frozen_bytes_sha256_required: true
+  source_and_frozen_sha256_must_match_attested_sha256: true
+  freeze_mode: create_only_hardlink_same_validated_inode
+  source_inode_must_equal_frozen_inode_at_link_time: true
+  hardlink_failure_fallback_allowed: false
+  canonical_raw_reads_after_freeze_allowed: false
+  frozen_partition_hash_revalidation_before_eod: true
+  content_attestation_generation_re_resolved_at_acceptance: true
+  marker_manifest_content_set_and_partition_sha_lineage_required: true
+  frozen_partition_full_sha256_rehash_at_acceptance_required: false
+  frozen_partition_hardlink_inode_identity_revalidated_at_acceptance: true
+  derived_eod_semantic_revalidation_at_acceptance: true
+  derived_feature_semantic_revalidation_at_acceptance: true
+  source_quality_targeted_raw_partition_reads_only_at_acceptance: true
+  legacy_pointer_bypass_allowed: false
+
+scope:
+  mandatory_instrument_ids:
+    - si_futures_family
+    - cr_futures_family
+  perpetual_futoi_mandatory: false
+  perpetual_futoi_role: optional_supplementary_not_replacement_for_si_cr
+  root_aggregate_semantics: true
+  front_next_split_claimed: false
+
+revision_resolution_policy:
+  analytical_key_fields:
+    - trade_date
+    - ts
+    - instrument_id
+    - clgroup
+  systime_as_revision_order_allowed: false
+  multi_sess_id_same_analytical_key: fail_closed
+  within_single_sess_id_revision_order: greatest_seqnum
+  exact_max_seqnum_tie: fail_closed
+
+snapshot_policy:
+  output_dataset_ref: contracts/datasets/futures_futoi_eod.v1.yaml
+  one_row_per_available_valid_trade_date_instrument: true
+  final_event_ts_rule: latest_resolved_complete_balanced_FIZ_YUR_event_ts
+  selected_event_requires_exact_groups:
+    - FIZ
+    - YUR
+  later_incomplete_source_tail_allowed: true
+  later_unbalanced_source_tail_allowed: true
+  synthetic_missing_group_fill_allowed: false
+  selected_event_must_satisfy_exact_position_balance: true
+  no_complete_balanced_snapshot: omit_only_if_explicit_attested_source_quality_exception
+  undeclared_no_complete_balanced_snapshot: fail_closed
+  eod_clock_time_hardcoded: false
+  source_systime_preserved_as_metadata: true
+  source_availability_preserved: true
+
+source_quality_omission_policy:
+  mode: explicit_attested_date_only_fail_closed_otherwise
+  raw_history_date_remains_present: true
+  synthetic_fill_allowed: false
+  tolerance_normalization_allowed: false
+  omitted_date_must_be_independently_revalidated_from_frozen_raw_at_acceptance: true
+  declared_omissions:
+    si_futures_family:
+      - trade_date: "2025-08-11"
+        reason: no_complete_balanced_FIZ_YUR_snapshot
+    cr_futures_family:
+      - trade_date: "2025-08-11"
+        reason: no_complete_balanced_FIZ_YUR_snapshot
+
+positioning_policy:
+  phys_group: FIZ
+  legal_group: YUR
+  short_positions_stored_as_absolute_in_derived: true
+  total_open_interest_formula: phys_long + legal_long
+  total_short_abs_formula: abs(phys_short) + abs(legal_short)
+  total_long_must_equal_total_short_abs: true
+  phys_net_plus_legal_net_must_equal_zero: true
+  gross_formula: long + short_abs
+  long_share_of_oi_formula: long / total_open_interest
+  short_share_of_oi_formula: short_abs / total_open_interest
+  net_share_of_oi_formula: net / total_open_interest
+  average_long_per_participant_formula: long / long_num
+  average_short_per_participant_formula: short_abs / short_num
+  nonzero_position_with_zero_participant_count: fail_closed
+
+feature_policy:
+  output_dataset_ref: contracts/datasets/futures_futoi_positioning_features_d1.v1.yaml
+  source: run_scoped_futures_futoi_eod
+  source_identity_timestamp_base_equality_required_at_acceptance: true
+  causality: current_and_past_eod_only
+  observation_lags:
+    daily_change: 1
+    weekly_change: 5
+  rolling_windows_observations:
+    one_year: 252
+    two_year: 504
+  rolling_metrics:
+    - zscore
+    - percentile
+  percentile_formula: count(window_values <= current_value) / window_size
+  zscore_ddof: 0
+  incomplete_rolling_window: null
+  feature_fields:
+    - phys_net_share_of_oi
+    - phys_gross_share_of_two_sided_oi
+    - phys_long_num
+    - phys_short_num
+    - phys_avg_long_per_participant
+    - phys_avg_short_per_participant
+
+physical_pilot:
+  history_end_date: "2026-08-17"
+  required_histories:
+    si_futures_family:
+      start_date: "2020-01-03"
+      expected_raw_partitions: 1757
+      expected_eod_rows: 1756
+    cr_futures_family:
+      start_date: "2022-04-21"
+      expected_raw_partitions: 1177
+      expected_eod_rows: 1176
+  immutable_run_required: true
+  content_attested_raw_history_required: true
+  immutable_raw_input_freeze_required: true
+  raw_network_calls_allowed: false
+  raw_api_latest_allowed: false
+  expected_frozen_inputs: 2
+  expected_eod_outputs: 2
+  expected_feature_outputs: 2
+  expected_accepted_pointer_count: 4
+  applied_state_evidence:
+    status: accepted
+    evidence_date: "2026-08-26"
+    run_id: step5_pilot_20260826_v9
+    content_attestation_generation_id: stage2_content_attestation_20260826_v1
+    acceptance_validation_mode: manifest_lineage_output_semantics_targeted_omission_oracle
+    si_raw_partition_count: 1757
+    cr_raw_partition_count: 1177
+    si_eod_row_count: 1756
+    cr_eod_row_count: 1176
+    si_feature_row_count: 1756
+    cr_feature_row_count: 1176
+    source_quality_omission_count: 2
+    accepted_pointer_count: 4
+    expected_pointer_count: 4
+    current_content_attestation_manifest_lineage_revalidated: true
+    derived_output_semantic_revalidation: true
+    physical_partition_readback_required: true
+    source_quality_omissions_independently_revalidated: true
+    full_frozen_raw_rehash_at_acceptance: false
+    promotion_semantics: transactional_with_rollback
+
+readiness_flags:
+  implementation_ready: true
+  physical_pilot_passed: true
+  accepted_pointer_ready: true
+  scheduler_ready: false
+  research_ready: false
