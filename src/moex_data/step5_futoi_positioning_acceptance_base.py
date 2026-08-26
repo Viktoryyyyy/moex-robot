@@ -25,6 +25,7 @@ from moex_data.futures import stage2_raw_history_content_reattestation as _conte
 
 _BASE_VALIDATE_FROZEN_INPUT = _validate_frozen_input
 _BASE_TRANSACTIONAL_REPLACE = _transactional_replace
+_BASE_VALIDATE_PILOT = validate_pilot
 
 
 def _content_date_set_sha256(values: Sequence[object]) -> str:
@@ -211,6 +212,14 @@ def _transactional_replace(records: Sequence[tuple[Path, Mapping[str, object]]])
             if rollback_errors:
                 raise Step5AcceptanceError("content-attestation changed during promotion and rollback incomplete: " + ";".join(rollback_errors)) from exc
             raise Step5AcceptanceError("content-attestation changed during promotion; Stage 5 pointer set rolled back: " + str(exc)) from exc
+
+
+def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[str, object]]:
+    if values.get("snapshot_policy") != "latest_resolved_complete_balanced_FIZ_YUR_event_ts":
+        _fail("pilot snapshot policy mismatch")
+    compatibility = dict(values)
+    compatibility["snapshot_policy"] = "max_resolved_ts_requires_FIZ_and_YUR"
+    return _BASE_VALIDATE_PILOT(compatibility, run_id=run_id)
 
 
 def _reject_direct_base_cli() -> None:
