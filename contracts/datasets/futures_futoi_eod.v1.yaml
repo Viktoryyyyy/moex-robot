@@ -1,0 +1,145 @@
+contract_id: futures_futoi_eod.v1
+dataset_id: futures_futoi_eod
+artifact_class: external_pattern
+producer: moex_data.futures.materialize_futoi_eod
+format: parquet
+schema_version: futures_futoi_eod.v1
+storage_root_ref: MOEX_DATA_ROOT
+grain: one_row_per_trade_date_per_root_instrument
+identity_model:
+  canonical_identity_field: instrument_id
+  mandatory_instrument_ids:
+    - si_futures_family
+    - cr_futures_family
+  source_scope: root_aggregate_futoi
+  front_next_split_available_from_source: false
+source_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
+content_attested_raw_history:
+  acceptance_contract_ref: contracts/datasets/futures_raw_history_acceptance.v1.yaml
+  content_attestation_contract_ref: contracts/datasets/futures_raw_history_content_attestation.v1.yaml
+  content_attested_manifest_contract_ref: contracts/datasets/futures_raw_history_content_attested_manifest.v1.yaml
+  current_generation_marker_required: true
+  resolver_required: moex_data.futures.stage2_raw_history_content_reattestation.resolve_content_attested_history
+  legacy_accepted_pointer_read_allowed: false
+  immutable_generation_snapshot_read_required: true
+  content_attested_manifest_sha256_required: true
+  content_set_sha256_required: true
+  per_partition_attested_sha256_required: true
+  canonical_raw_partition_read_allowed: false
+  unaccepted_physical_partition_read_allowed: false
+immutable_raw_input:
+  required: true
+  schema_version: step5_futoi_raw_frozen_input.v1
+  producer: moex_data.futures.freeze_accepted_futoi_history.v1
+  scope: exact_full_content_attested_history_range
+  source_mode: stage2_content_attested_generation_snapshots_only
+  physical_validator: stage2_futoi_partition_validator_reapplied
+  attested_snapshot_sha256_revalidated_before_freeze: true
+  source_sha256_required: true
+  frozen_sha256_required: true
+  source_frozen_attested_hash_equality_required: true
+  freeze_mode: create_only_hardlink_same_validated_inode
+  hardlink_failure_fallback_allowed: false
+  canonical_raw_reads_after_freeze_allowed: false
+  frozen_sha256_revalidated_before_eod_read: true
+revision_resolution:
+  analytical_key_fields:
+    - trade_date
+    - ts
+    - instrument_id
+    - clgroup
+  systime_is_revision_order: false
+  multiple_sess_id_for_same_analytical_key: fail_closed
+  revision_order_within_session: greatest_seqnum
+snapshot_selection:
+  rule: maximum_resolved_event_ts
+  required_groups_at_final_event:
+    - FIZ
+    - YUR
+  incomplete_final_event: fail_closed
+  hardcoded_eod_clock: false
+timestamp_semantics:
+  raw_event_ts_semantics: exchange_local_Europe_Moscow
+  snapshot_ts_local_field: snapshot_ts_msk
+  snapshot_ts_utc_field: snapshot_ts_utc
+  source_publication_fields:
+    - phys_systime_utc
+    - legal_systime_utc
+  availability_field: availability_ts_utc
+  historical_publication_metadata_is_not_event_identity: true
+required_columns:
+  - instrument_id
+  - trade_date
+  - snapshot_ts_msk
+  - snapshot_ts_utc
+  - availability_ts_utc
+  - phys_sess_id
+  - phys_seqnum
+  - phys_systime_utc
+  - legal_sess_id
+  - legal_seqnum
+  - legal_systime_utc
+  - phys_net
+  - phys_long
+  - phys_short_abs
+  - phys_long_num
+  - phys_short_num
+  - legal_net
+  - legal_long
+  - legal_short_abs
+  - legal_long_num
+  - legal_short_num
+  - total_open_interest
+  - total_short_abs
+  - phys_gross
+  - legal_gross
+  - phys_long_share_of_oi
+  - phys_short_share_of_oi
+  - phys_net_share_of_oi
+  - legal_long_share_of_oi
+  - legal_short_share_of_oi
+  - legal_net_share_of_oi
+  - phys_gross_share_of_two_sided_oi
+  - legal_gross_share_of_two_sided_oi
+  - phys_avg_long_per_participant
+  - phys_avg_short_per_participant
+  - legal_avg_long_per_participant
+  - legal_avg_short_per_participant
+  - source_row_count
+  - source_revision_rows_dropped
+  - source_partition_ref
+  - source_canonical_partition_ref
+  - source_frozen_partition_sha256
+position_invariants:
+  phys_net_plus_legal_net_equals_zero: true
+  total_open_interest_formula: phys_long + legal_long
+  total_short_abs_formula: phys_short_abs + legal_short_abs
+  total_open_interest_equals_total_short_abs: true
+  gross_formula: long + short_abs
+  gross_denominator: 2 * total_open_interest
+  total_open_interest_must_be_positive: true
+  position_values_must_be_finite_integral: true
+  participant_counts_must_be_nonnegative_integral: true
+  nonzero_position_with_zero_participant_count: fail_closed
+quality_checks:
+  - content_attested_raw_history_lineage_valid
+  - current_generation_marker_valid
+  - per_partition_attested_sha_matches_frozen_source
+  - immutable_frozen_raw_content_hash_valid
+  - frozen_raw_stage2_physical_revalidation_passed
+  - no_legacy_pointer_bypass
+  - no_mutable_canonical_raw_read_after_freeze
+  - nonzero_row_count
+  - unique_instrument_trade_date
+  - chronological_trade_date
+  - exact_FIZ_YUR_final_snapshot
+  - deterministic_revision_resolution
+  - balanced_net_positions
+  - balanced_long_short_open_interest
+  - positive_total_open_interest
+  - recomputed_gross_and_share_metrics
+  - recomputed_participant_averages
+  - participant_count_denominator_safety
+  - source_lineage_present
+accepted_pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_futoi_eod/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
+retention_policy: keep_all_accepted_run_scoped_outputs
