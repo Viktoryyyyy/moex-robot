@@ -30,14 +30,24 @@ validation_policy:
   latest_autodetect_used_required: false
   immutable_raw_input_freeze_required: true
   raw_input_freeze_mode_required: create_only_hardlink_same_validated_inode
-  canonical_raw_partition_reads_after_freeze_used_required: false
+  content_attestation_current_generation_marker_required: true
+  content_attestation_resolver_required: moex_data.futures.stage2_raw_history_content_reattestation.resolve_content_attested_history
+  legacy_raw_pointer_consumption_forbidden: true
+  content_attestation_generation_re_resolved_at_acceptance: true
+  content_attestation_marker_sha256_revalidated: true
+  content_attested_manifest_sha256_revalidated: true
+  content_attested_content_set_sha256_revalidated: true
+  content_attested_partition_sha256_revalidated: true
+  content_attested_snapshot_ref_exact_match_required: true
   frozen_manifest_inside_declared_run_root_required: true
   frozen_manifest_sha256_revalidated: true
   frozen_partition_sha256_revalidated: true
   frozen_source_and_snapshot_sha256_equality_required: true
+  frozen_partition_sha_must_equal_content_attested_sha: true
   frozen_partition_stage2_futoi_physical_validator_reapplied_at_acceptance: true
-  frozen_partition_date_set_must_equal_current_accepted_raw_date_set: true
+  frozen_partition_date_set_must_equal_current_content_attested_date_set: true
   frozen_canonical_source_path_identity_required: true
+  canonical_raw_partition_reads_after_freeze_used_required: false
   eod_source_frozen_ref_and_sha_lineage_required: true
   eod_reconstruction_from_physically_revalidated_frozen_raw_required: true
   eod_reconstruction_independent_from_eod_producer_required: true
@@ -48,8 +58,7 @@ validation_policy:
   all_artifacts_inside_declared_run_root: true
   physical_parquet_readback_required: true
   manifest_quality_identity_and_row_count_match_required: true
-  eod_accepted_raw_current_pointer_required: true
-  eod_accepted_raw_promotion_basis_required: raw_history_acceptance
+  eod_current_content_attestation_marker_required: true
   eod_required_schema_complete: true
   eod_balance_invariants_revalidated: true
   eod_all_derived_metrics_recomputed: true
