@@ -16,9 +16,10 @@ identity_model:
     - 1W
 source_contract_ref: contracts/datasets/futures_raw_5m.v1.yaml
 accepted_raw_history:
-  accepted_manifest_contract_ref: contracts/datasets/futures_raw_history_accepted_manifest.v1.yaml
-  current_pointer_required: true
-  promotion_basis_required: raw_history_acceptance
+  current_content_attested_generation_required: true
+  source_mode_required: stage2_content_attested_generation_snapshots_only
+  legacy_accepted_pointer_consumption_allowed: false
+  exact_generation_marker_manifest_content_set_binding_required: true
   physical_partition_revalidation_required: true
   immutable_run_scoped_freeze_required: true
   frozen_partition_sha256_required: true
