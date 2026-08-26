@@ -155,7 +155,7 @@ def _pilot_evidence(run_id: str, run_root: Path, frozen_outputs: list[dict[str, 
         "raw_input_freeze_mode":"create_only_hardlink_same_validated_inode",
         "root_aggregate_semantics":True,"front_next_split_claimed":False,"historical_pit_research_ready_claimed":False,
         "revision_policy":"same_analytical_key_single_sess_id_then_max_seqnum",
-        "snapshot_policy":"max_resolved_ts_requires_FIZ_and_YUR",
+        "snapshot_policy":"latest_resolved_complete_balanced_FIZ_YUR_event_ts",
         "frozen_inputs":frozen_outputs,"eod_outputs":eod_outputs,"feature_outputs":feature_outputs,
     }
 
