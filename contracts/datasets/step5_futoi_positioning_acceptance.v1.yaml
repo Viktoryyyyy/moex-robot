@@ -88,12 +88,14 @@ validation_policy:
     cr_futures_family: 1177
   historical_expected_derived_rows:
     si_futures_family: 1756
-    cr_futures_family: 1177
+    cr_futures_family: 1176
   declared_source_quality_omissions:
     si_futures_family:
       - trade_date: "2025-08-11"
         reason: no_complete_balanced_FIZ_YUR_snapshot
-    cr_futures_family: []
+    cr_futures_family:
+      - trade_date: "2025-08-11"
+        reason: no_complete_balanced_FIZ_YUR_snapshot
 promotion_policy:
   validate_all_before_pointer_writes: true
   frozen_raw_inputs_are_run_scoped_evidence_not_dataset_pointer_targets: true
