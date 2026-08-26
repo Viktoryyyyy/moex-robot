@@ -5,6 +5,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from moex_data import step7_rub_native_d1_w1_acceptance_base as base
+from moex_data.futures.freeze_step7_accepted_raw_5m import accepted_quote_history
 
 # Re-export the established Stage 7 acceptance surface for existing callers/tests.
 for _name in dir(base):
@@ -40,9 +41,46 @@ def _guard_frozen_refs_inside_run_root(manifest_path: Path) -> Path:
     return run_root
 
 
+def _guard_current_content_attestation(*, repo_root: Path, data_root: Path, manifest_path: Path, instrument_id: str, start: str, end: str) -> None:
+    values = base._load_json(Path(manifest_path), "frozen raw manifest")
+    if values.get("source_mode") != "stage2_content_attested_generation_snapshots_only":
+        raise base.Step7AcceptanceError("frozen raw source_mode is not content-attested snapshots only")
+    if values.get("legacy_pointer_consumption_used") is not False:
+        raise base.Step7AcceptanceError("legacy accepted pointer consumption is forbidden")
+    if values.get("network_calls_used") is not False or values.get("latest_autodetect_used") is not False:
+        raise base.Step7AcceptanceError("frozen raw execution boundary mismatch")
+
+    current = accepted_quote_history(data_root, instrument_id, start, end, repo_root=repo_root)
+    exact_pairs = (
+        ("content_attestation_generation_id", current.acceptance_run_id),
+        ("content_attestation_marker_ref", current.pointer_ref),
+        ("content_attestation_marker_sha256", current.marker_sha256),
+        ("content_attested_manifest_ref", current.manifest_ref),
+        ("content_attested_manifest_sha256", current.manifest_sha256),
+        ("content_attested_partition_content_set_sha256", current.partition_content_set_sha256),
+        ("frozen_content_sha256", current.partition_content_set_sha256),
+        ("accepted_partition_dates_sha256", current.partition_dates_sha256),
+    )
+    for field, expected in exact_pairs:
+        if values.get(field) != expected:
+            raise base.Step7AcceptanceError("frozen raw current content-attestation mismatch: " + field)
+    if int(values.get("partition_count") or -1) != len(current.accepted_dates):
+        raise base.Step7AcceptanceError("frozen raw current content-attestation partition_count mismatch")
+    if int(values.get("row_count") or -1) != current.row_count:
+        raise base.Step7AcceptanceError("frozen raw current content-attestation row_count mismatch")
+
+
 def _revalidate_frozen(*, repo_root: Path, data_root: Path, manifest_path: Path, instrument_id: str, start: str, end: str, validation_run_id: str) -> dict[str, object]:
     _guard_frozen_refs_inside_run_root(Path(manifest_path))
-    return _BASE_REVALIDATE_FROZEN(
+    _guard_current_content_attestation(
+        repo_root=repo_root,
+        data_root=data_root,
+        manifest_path=Path(manifest_path),
+        instrument_id=instrument_id,
+        start=start,
+        end=end,
+    )
+    result = _BASE_REVALIDATE_FROZEN(
         repo_root=repo_root,
         data_root=data_root,
         manifest_path=manifest_path,
@@ -51,6 +89,8 @@ def _revalidate_frozen(*, repo_root: Path, data_root: Path, manifest_path: Path,
         end=end,
         validation_run_id=validation_run_id,
     )
+    result["current_content_attestation_match"] = True
+    return result
 
 
 def _with_run_root_guard(callable_, *args, **kwargs):
