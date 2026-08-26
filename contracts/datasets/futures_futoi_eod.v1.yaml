@@ -73,7 +73,9 @@ source_quality_omissions:
     si_futures_family:
       - trade_date: "2025-08-11"
         reason: no_complete_balanced_FIZ_YUR_snapshot
-    cr_futures_family: []
+    cr_futures_family:
+      - trade_date: "2025-08-11"
+        reason: no_complete_balanced_FIZ_YUR_snapshot
 timestamp_semantics:
   raw_event_ts_semantics: exchange_local_Europe_Moscow
   snapshot_ts_local_field: snapshot_ts_msk

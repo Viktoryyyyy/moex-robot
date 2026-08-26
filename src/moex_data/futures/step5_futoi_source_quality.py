@@ -7,7 +7,9 @@ SOURCE_QUALITY_OMISSIONS: Final[dict[str, dict[str, str]]] = {
     "si_futures_family": {
         "2025-08-11": "no_complete_balanced_FIZ_YUR_snapshot",
     },
-    "cr_futures_family": {},
+    "cr_futures_family": {
+        "2025-08-11": "no_complete_balanced_FIZ_YUR_snapshot",
+    },
 }
 
 

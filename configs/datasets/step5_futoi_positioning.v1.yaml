@@ -92,7 +92,9 @@ source_quality_omission_policy:
     si_futures_family:
       - trade_date: "2025-08-11"
         reason: no_complete_balanced_FIZ_YUR_snapshot
-    cr_futures_family: []
+    cr_futures_family:
+      - trade_date: "2025-08-11"
+        reason: no_complete_balanced_FIZ_YUR_snapshot
 
 positioning_policy:
   phys_group: FIZ
@@ -145,7 +147,7 @@ physical_pilot:
     cr_futures_family:
       start_date: "2022-04-21"
       expected_raw_partitions: 1177
-      expected_eod_rows: 1177
+      expected_eod_rows: 1176
   immutable_run_required: true
   content_attested_raw_history_required: true
   immutable_raw_input_freeze_required: true

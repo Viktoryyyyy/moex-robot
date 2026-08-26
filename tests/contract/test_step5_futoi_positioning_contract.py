@@ -52,7 +52,7 @@ def test_stage5_revision_snapshot_and_source_quality_omission_policy_are_fail_cl
     assert "no_complete_balanced_snapshot: omit_only_if_explicit_attested_source_quality_exception" in text
     assert "undeclared_no_complete_balanced_snapshot: fail_closed" in text
     assert "mode: explicit_attested_date_only_fail_closed_otherwise" in text
-    assert 'trade_date: "2025-08-11"' in text
+    assert text.count('trade_date: "2025-08-11"') == 2
     assert "reason: no_complete_balanced_FIZ_YUR_snapshot" in text
     assert "tolerance_normalization_allowed: false" in text
     assert "eod_clock_time_hardcoded: false" in text
@@ -60,6 +60,7 @@ def test_stage5_revision_snapshot_and_source_quality_omission_policy_are_fail_cl
 
 def test_stage5_eod_contract_covers_attested_lineage_position_balance_and_participant_metrics() -> None:
     text = _read("contracts/datasets/futures_futoi_eod.v1.yaml")
+    assert text.count('trade_date: "2025-08-11"') == 2
     for token in (
         "current_generation_marker_required: true",
         "resolver_required: moex_data.futures.stage2_raw_history_content_reattestation.resolve_content_attested_history",
@@ -131,6 +132,8 @@ def test_stage5_acceptance_requires_content_attested_frozen_bytes_and_independen
     assert "historical_expected_raw_partitions:" in text
     assert "historical_expected_derived_rows:" in text
     assert "si_futures_family: 1756" in text
+    assert "cr_futures_family: 1176" in text
+    assert text.count('trade_date: "2025-08-11"') == 2
     assert "physical_parquet_readback_required: true" in text
     assert "eod_current_content_attestation_marker_required: true" in text
     assert "eod_all_derived_metrics_recomputed: true" in text
