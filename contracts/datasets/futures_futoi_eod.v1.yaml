@@ -14,24 +14,30 @@ identity_model:
   source_scope: root_aggregate_futoi
   front_next_split_available_from_source: false
 source_contract_ref: contracts/datasets/futures_futoi_raw.v1.yaml
-accepted_raw_history:
+content_attested_raw_history:
   acceptance_contract_ref: contracts/datasets/futures_raw_history_acceptance.v1.yaml
-  accepted_manifest_contract_ref: contracts/datasets/futures_raw_history_accepted_manifest.v1.yaml
-  current_pointer_required: true
-  pointer_path_contract: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_futoi_raw/instrument_id={INSTRUMENT_ID}/current_accepted_manifest.json"
-  promotion_basis_required: raw_history_acceptance
-  accepted_manifest_partition_date_digest_required: true
-  acceptance_report_sha256_required: true
+  content_attestation_contract_ref: contracts/datasets/futures_raw_history_content_attestation.v1.yaml
+  content_attested_manifest_contract_ref: contracts/datasets/futures_raw_history_content_attested_manifest.v1.yaml
+  current_generation_marker_required: true
+  resolver_required: moex_data.futures.stage2_raw_history_content_reattestation.resolve_content_attested_history
+  legacy_accepted_pointer_read_allowed: false
+  immutable_generation_snapshot_read_required: true
+  content_attested_manifest_sha256_required: true
+  content_set_sha256_required: true
+  per_partition_attested_sha256_required: true
+  canonical_raw_partition_read_allowed: false
   unaccepted_physical_partition_read_allowed: false
 immutable_raw_input:
   required: true
   schema_version: step5_futoi_raw_frozen_input.v1
   producer: moex_data.futures.freeze_accepted_futoi_history.v1
-  scope: exact_full_accepted_history_range
+  scope: exact_full_content_attested_history_range
+  source_mode: stage2_content_attested_generation_snapshots_only
   physical_validator: stage2_futoi_partition_validator_reapplied
+  attested_snapshot_sha256_revalidated_before_freeze: true
   source_sha256_required: true
   frozen_sha256_required: true
-  source_frozen_hash_equality_required: true
+  source_frozen_attested_hash_equality_required: true
   freeze_mode: create_only_hardlink_same_validated_inode
   hardlink_failure_fallback_allowed: false
   canonical_raw_reads_after_freeze_allowed: false
@@ -116,9 +122,12 @@ position_invariants:
   participant_counts_must_be_nonnegative_integral: true
   nonzero_position_with_zero_participant_count: fail_closed
 quality_checks:
-  - accepted_raw_history_lineage_valid
+  - content_attested_raw_history_lineage_valid
+  - current_generation_marker_valid
+  - per_partition_attested_sha_matches_frozen_source
   - immutable_frozen_raw_content_hash_valid
   - frozen_raw_stage2_physical_revalidation_passed
+  - no_legacy_pointer_bypass
   - no_mutable_canonical_raw_read_after_freeze
   - nonzero_row_count
   - unique_instrument_trade_date
