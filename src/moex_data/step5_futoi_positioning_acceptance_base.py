@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
+import os
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 _IMPL_PATH = Path(__file__).with_name("step5_futoi_positioning_acceptance_base_impl.inc")
@@ -163,25 +166,51 @@ def _final_content_attestation_write_gate(records: Sequence[tuple[Path, Mapping[
     return next(iter(batch_keys))
 
 
-def _transactional_replace(records: Sequence[tuple[Path, Mapping[str, object]]]) -> None:
-    paths = [path for path, _ in records]
-    previous = {path: path.read_bytes() if path.exists() else None for path in paths}
-    before = _final_content_attestation_write_gate(records)
-    _BASE_TRANSACTIONAL_REPLACE(records)
+def _publication_lock_path() -> Path:
+    return _data_root() / "state" / "acceptance" / "step5_futoi_positioning" / ".pointer_publication.lock"
+
+
+@contextmanager
+def _stage5_publication_lock():
+    path = _publication_lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    flags = os.O_CREAT | os.O_RDWR
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
-        after = _final_content_attestation_write_gate(records)
-        if after != before:
-            _fail("content-attestation marker changed during Stage 5 pointer promotion")
-    except Exception as exc:
-        rollback_errors: list[str] = []
-        for path in reversed(paths):
-            try:
-                _restore(path, previous[path])
-            except Exception as rollback_exc:
-                rollback_errors.append(str(rollback_exc))
-        if rollback_errors:
-            raise Step5AcceptanceError("content-attestation changed during promotion and rollback incomplete: " + ";".join(rollback_errors)) from exc
-        raise Step5AcceptanceError("content-attestation changed during promotion; Stage 5 pointer set rolled back: " + str(exc)) from exc
+        fd = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise Step5AcceptanceError("cannot open Stage 5 publication lock: " + str(exc)) from exc
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
+def _transactional_replace(records: Sequence[tuple[Path, Mapping[str, object]]]) -> None:
+    with _stage5_publication_lock():
+        paths = [path for path, _ in records]
+        previous = {path: path.read_bytes() if path.exists() else None for path in paths}
+        before = _final_content_attestation_write_gate(records)
+        _BASE_TRANSACTIONAL_REPLACE(records)
+        try:
+            after = _final_content_attestation_write_gate(records)
+            if after != before:
+                _fail("content-attestation marker changed during Stage 5 pointer promotion")
+        except Exception as exc:
+            rollback_errors: list[str] = []
+            for path in reversed(paths):
+                try:
+                    _restore(path, previous[path])
+                except Exception as rollback_exc:
+                    rollback_errors.append(str(rollback_exc))
+            if rollback_errors:
+                raise Step5AcceptanceError("content-attestation changed during promotion and rollback incomplete: " + ";".join(rollback_errors)) from exc
+            raise Step5AcceptanceError("content-attestation changed during promotion; Stage 5 pointer set rolled back: " + str(exc)) from exc
 
 
 if _REAL_NAME == "__main__":
