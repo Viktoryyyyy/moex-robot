@@ -146,7 +146,7 @@ def run_pilot(*, artifact_version: str, env_file: str | None = CANONICAL_ENV_PAT
         "front_next_split_claimed": False,
         "historical_pit_research_ready_claimed": False,
         "revision_policy": "same_analytical_key_single_sess_id_then_max_seqnum",
-        "snapshot_policy": "max_resolved_ts_requires_FIZ_and_YUR",
+        "snapshot_policy": "latest_resolved_complete_balanced_FIZ_YUR_event_ts",
         "counts": {
             "mandatory_instruments": 2,
             "frozen_raw_inputs": len(frozen_inputs),

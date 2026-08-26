@@ -68,11 +68,15 @@ revision_resolution_policy:
 snapshot_policy:
   output_dataset_ref: contracts/datasets/futures_futoi_eod.v1.yaml
   one_row_per_trade_date_instrument: true
-  final_event_ts_rule: maximum_resolved_ts_for_trade_date
-  final_event_requires_exact_groups:
+  final_event_ts_rule: latest_resolved_complete_balanced_FIZ_YUR_event_ts
+  selected_event_requires_exact_groups:
     - FIZ
     - YUR
-  incomplete_final_snapshot: fail_closed
+  later_incomplete_source_tail_allowed: true
+  later_unbalanced_source_tail_allowed: true
+  synthetic_missing_group_fill_allowed: false
+  selected_event_must_satisfy_exact_position_balance: true
+  no_complete_balanced_snapshot: fail_closed
   eod_clock_time_hardcoded: false
   source_systime_preserved_as_metadata: true
   source_availability_preserved: true

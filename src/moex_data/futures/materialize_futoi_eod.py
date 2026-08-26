@@ -21,7 +21,10 @@ finally:
 
 from . import stage2_raw_history_content_reattestation as _content_attestation
 
+SNAPSHOT_POLICY = "latest_resolved_complete_balanced_FIZ_YUR_event_ts"
 _BASE_LOAD_FROZEN_INPUT_SCOPE = _load_frozen_input_scope
+_BASE_SINGLE_EOD_ROW = _single_eod_row
+_BASE_MATERIALIZE_EOD_HISTORY = materialize_eod_history
 
 
 def _require_stage2_root(root: Path) -> None:
@@ -133,6 +136,81 @@ def _load_frozen_input_scope(
         if frozen_record.get("canonical_source_ref") != attested.get("canonical_ref"):
             _fail("frozen record canonical ref differs from attested generation during EOD materialization: " + trade_date)
     return checked
+
+
+def _candidate_satisfies_position_invariants(candidate) -> bool:
+    if len(candidate.index) != 2 or set(candidate["clgroup"].tolist()) != GROUPS:
+        return False
+    total_long = int(candidate["pos_long"].sum())
+    total_short_abs = int(candidate["pos_short"].abs().sum())
+    if total_long <= 0 or total_long != total_short_abs or int(candidate["pos"].sum()) != 0:
+        return False
+    for _, row in candidate.iterrows():
+        long_position = int(row["pos_long"])
+        short_abs = abs(int(row["pos_short"]))
+        if int(row["pos"]) != long_position - short_abs:
+            return False
+        if int(row["pos_long_num"]) == 0 and long_position != 0:
+            return False
+        if int(row["pos_short_num"]) == 0 and short_abs != 0:
+            return False
+    return True
+
+
+def _single_eod_row(
+    frame,
+    *,
+    instrument_id: str,
+    trade_date: str,
+    frozen_ref: str,
+    canonical_source_ref: str,
+    frozen_sha256: str,
+) -> dict[str, object]:
+    """Select the latest resolved snapshot satisfying every strict position invariant."""
+    work = _validate_raw(frame, instrument_id=instrument_id, trade_date=trade_date)
+    resolved, revisions_dropped = _resolve_revisions(work)
+    for candidate_ts in sorted(resolved["_ts_utc"].drop_duplicates().tolist(), reverse=True):
+        candidate = resolved.loc[resolved["_ts_utc"].eq(candidate_ts)].copy()
+        if not _candidate_satisfies_position_invariants(candidate):
+            continue
+        row = _BASE_SINGLE_EOD_ROW(
+            candidate,
+            instrument_id=instrument_id,
+            trade_date=trade_date,
+            frozen_ref=frozen_ref,
+            canonical_source_ref=canonical_source_ref,
+            frozen_sha256=frozen_sha256,
+        )
+        row["source_row_count"] = int(len(work.index))
+        row["source_revision_rows_dropped"] = revisions_dropped
+        return row
+    _fail("no complete balanced FIZ/YUR snapshot exists for FUTOI trade_date")
+
+
+def materialize_eod_history(
+    *,
+    data_root: str | Path,
+    output_root: str | Path,
+    frozen_input_manifest: str | Path,
+    instrument_id: str,
+    start_date: str,
+    end_date: str,
+    run_id: str,
+) -> dict[str, object]:
+    result = _BASE_MATERIALIZE_EOD_HISTORY(
+        data_root=data_root,
+        output_root=output_root,
+        frozen_input_manifest=frozen_input_manifest,
+        instrument_id=instrument_id,
+        start_date=start_date,
+        end_date=end_date,
+        run_id=run_id,
+    )
+    manifest_path = Path(str(result["manifest_path"]))
+    manifest_values = _load_json(manifest_path, "EOD manifest")
+    manifest_values["snapshot_policy"] = SNAPSHOT_POLICY
+    _atomic_json(manifest_path, manifest_values)
+    return result
 
 
 if _REAL_NAME == "__main__":

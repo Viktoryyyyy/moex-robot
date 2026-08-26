@@ -52,11 +52,15 @@ revision_resolution:
   multiple_sess_id_for_same_analytical_key: fail_closed
   revision_order_within_session: greatest_seqnum
 snapshot_selection:
-  rule: maximum_resolved_event_ts
-  required_groups_at_final_event:
+  rule: latest_resolved_complete_balanced_FIZ_YUR_event_ts
+  required_groups_at_selected_event:
     - FIZ
     - YUR
-  incomplete_final_event: fail_closed
+  later_incomplete_event_allowed_as_source_tail: true
+  later_unbalanced_event_allowed_as_source_tail: true
+  synthetic_missing_group_fill_allowed: false
+  selected_snapshot_must_satisfy_position_invariants: true
+  no_complete_balanced_snapshot: fail_closed
   hardcoded_eod_clock: false
 timestamp_semantics:
   raw_event_ts_semantics: exchange_local_Europe_Moscow
@@ -132,7 +136,7 @@ quality_checks:
   - nonzero_row_count
   - unique_instrument_trade_date
   - chronological_trade_date
-  - exact_FIZ_YUR_final_snapshot
+  - latest_complete_balanced_FIZ_YUR_snapshot_selected
   - deterministic_revision_resolution
   - balanced_net_positions
   - balanced_long_short_open_interest
