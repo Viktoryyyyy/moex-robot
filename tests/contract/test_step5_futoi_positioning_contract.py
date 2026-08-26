@@ -18,22 +18,25 @@ def test_stage5_scope_is_si_cr_root_aggregate_without_raw_rewrite_or_front_next_
     assert "front_next_split_claimed: false" in text
 
 
-def test_stage5_requires_canonical_accepted_raw_history_and_immutable_byte_freeze() -> None:
+def test_stage5_requires_content_attested_generation_and_immutable_byte_freeze() -> None:
     text = _read("configs/datasets/step5_futoi_positioning.v1.yaml")
-    assert "raw_history_accepted_manifest_ref: contracts/datasets/futures_raw_history_accepted_manifest.v1.yaml" in text
-    assert "accepted_raw_pointer_required: true" in text
-    assert "accepted_raw_promotion_basis_required: raw_history_acceptance" in text
-    assert "accepted_raw_manifest_date_set_digest_required: true" in text
-    assert "accepted_raw_acceptance_report_sha256_required: true" in text
-    assert "unaccepted_physical_partition_read_allowed: false" in text
+    assert "raw_history_content_attestation_ref: contracts/datasets/futures_raw_history_content_attestation.v1.yaml" in text
+    assert "content_attested_manifest_ref: contracts/datasets/futures_raw_history_content_attested_manifest.v1.yaml" in text
+    assert "content_attestation_current_generation_marker_required: true" in text
+    assert "content_attestation_resolver_required: moex_data.futures.stage2_raw_history_content_reattestation.resolve_content_attested_history" in text
+    assert "legacy_accepted_raw_pointer_consumption_allowed: false" in text
+    assert "per_partition_attested_sha256_required: true" in text
+    assert "immutable_generation_snapshot_read_required: true" in text
+    assert "canonical_raw_partition_read_allowed: false" in text
     assert "immutable_raw_input_freeze:" in text
+    assert "source_mode: stage2_content_attested_generation_snapshots_only" in text
+    assert "attested_snapshot_sha256_revalidated_before_freeze: true" in text
     assert "stage2_futoi_partition_validator_reapplied: true" in text
-    assert "source_bytes_sha256_required: true" in text
-    assert "frozen_bytes_sha256_required: true" in text
     assert "freeze_mode: create_only_hardlink_same_validated_inode" in text
     assert "hardlink_failure_fallback_allowed: false" in text
     assert "canonical_raw_reads_after_freeze_allowed: false" in text
-    assert "frozen_partition_hash_and_physical_revalidation_at_acceptance: true" in text
+    assert "content_attestation_generation_re_resolved_at_acceptance: true" in text
+    assert "legacy_pointer_bypass_allowed: false" in text
 
 
 def test_stage5_revision_and_final_snapshot_policy_are_fail_closed() -> None:
@@ -46,14 +49,16 @@ def test_stage5_revision_and_final_snapshot_policy_are_fail_closed() -> None:
     assert "eod_clock_time_hardcoded: false" in text
 
 
-def test_stage5_eod_contract_covers_frozen_lineage_position_balance_and_participant_metrics() -> None:
+def test_stage5_eod_contract_covers_attested_lineage_position_balance_and_participant_metrics() -> None:
     text = _read("contracts/datasets/futures_futoi_eod.v1.yaml")
     for token in (
-        "current_pointer_required: true",
-        "promotion_basis_required: raw_history_acceptance",
-        "unaccepted_physical_partition_read_allowed: false",
-        "schema_version: step5_futoi_raw_frozen_input.v1",
-        "source_frozen_hash_equality_required: true",
+        "current_generation_marker_required: true",
+        "resolver_required: moex_data.futures.stage2_raw_history_content_reattestation.resolve_content_attested_history",
+        "legacy_accepted_pointer_read_allowed: false",
+        "immutable_generation_snapshot_read_required: true",
+        "per_partition_attested_sha256_required: true",
+        "source_mode: stage2_content_attested_generation_snapshots_only",
+        "source_frozen_attested_hash_equality_required: true",
         "canonical_raw_reads_after_freeze_allowed: false",
         "source_canonical_partition_ref",
         "source_frozen_partition_sha256",
@@ -79,20 +84,27 @@ def test_stage5_feature_contract_uses_only_current_and_prior_eod_observations() 
     assert "historical_pit_research_ready_claimed: false" in text
 
 
-def test_stage5_acceptance_requires_frozen_bytes_formula_source_and_reconstruction_revalidation_and_four_pointers() -> None:
+def test_stage5_acceptance_requires_content_attested_frozen_bytes_and_independent_reconstruction() -> None:
     text = _read("contracts/datasets/step5_futoi_positioning_acceptance.v1.yaml")
     assert "accepted_pointer_count: 4" in text
     assert "immutable_raw_input_freeze_required: true" in text
     assert "raw_input_freeze_mode_required: create_only_hardlink_same_validated_inode" in text
+    assert "content_attestation_current_generation_marker_required: true" in text
+    assert "legacy_raw_pointer_consumption_forbidden: true" in text
+    assert "content_attestation_generation_re_resolved_at_acceptance: true" in text
+    assert "content_attestation_marker_sha256_revalidated: true" in text
+    assert "content_attested_manifest_sha256_revalidated: true" in text
+    assert "content_attested_content_set_sha256_revalidated: true" in text
+    assert "content_attested_partition_sha256_revalidated: true" in text
+    assert "frozen_partition_sha_must_equal_content_attested_sha: true" in text
     assert "canonical_raw_partition_reads_after_freeze_used_required: false" in text
-    assert "frozen_partition_sha256_revalidated: true" in text
     assert "frozen_partition_stage2_futoi_physical_validator_reapplied_at_acceptance: true" in text
     assert "eod_source_frozen_ref_and_sha_lineage_required: true" in text
     assert "eod_reconstruction_from_physically_revalidated_frozen_raw_required: true" in text
     assert "eod_reconstruction_independent_from_eod_producer_required: true" in text
     assert "eod_reconstruction_exact_field_equality_before_promotion_required: true" in text
     assert "physical_parquet_readback_required: true" in text
-    assert "eod_accepted_raw_current_pointer_required: true" in text
+    assert "eod_current_content_attestation_marker_required: true" in text
     assert "eod_all_derived_metrics_recomputed: true" in text
     assert "eod_participant_average_zero_count_rules_revalidated: true" in text
     assert "feature_source_eod_identity_exact_match_required: true" in text
