@@ -1,5 +1,5 @@
 config_id: step7_rub_native_d1_w1_technical.v1
-status: implementation_candidate_physical_pilot_pending
+status: rub_native_d1_w1_technical_stage7_accepted
 architecture_contract_ref: contracts/architecture/moex_data_access_canon_v1.yaml
 purpose: >
   Canonical production D1/W1 OHLCV and causal technical context for the two RUB
@@ -134,11 +134,39 @@ physical_pilot:
   network_calls_allowed: false
   latest_autodetect_allowed: false
   explicit_history_end_date: "2026-08-17"
+  applied_state_evidence:
+    status: accepted
+    evidence_date: "2026-08-27"
+    run_id: step7_pilot_20260827_v1
+    acceptance_contract_id: step7_rub_native_d1_w1_technical_acceptance.v1
+    content_attestation_generation_id: stage2_content_attestation_20260826_v1
+    stage2_content_attestation_marker_sha256: 03ef2b6d554ce8857af614275ebe6ba699a47cd6e77f9507aa204c6424f789ff
+    usdrubf_raw_partition_count: 1100
+    cnyrubf_raw_partition_count: 1100
+    usdrubf_d1_ohlcv_row_count: 1100
+    cnyrubf_d1_ohlcv_row_count: 1100
+    usdrubf_w1_ohlcv_row_count: 224
+    cnyrubf_w1_ohlcv_row_count: 224
+    usdrubf_d1_technical_row_count: 1100
+    cnyrubf_d1_technical_row_count: 1100
+    usdrubf_w1_technical_row_count: 224
+    cnyrubf_w1_technical_row_count: 224
+    accepted_pointer_count: 8
+    expected_pointer_count: 8
+    physical_partition_readback_required: true
+    frozen_raw_physical_revalidation_required: true
+    current_accepted_raw_scope_match_required: true
+    independent_d1_w1_oracle_required: true
+    independent_technical_oracle_required: true
+    output_single_descriptor_capture_required: true
+    output_content_sha256_binding_required: true
+    output_identity_sha256_prewrite_recheck_required: true
+    promotion_semantics: serialized_transactional_with_rollback
 
 readiness_flags:
   implementation_ready: true
-  physical_pilot_passed: false
-  accepted_pointer_ready: false
+  physical_pilot_passed: true
+  accepted_pointer_ready: true
   scheduler_ready: false
   research_ready: false
   si_cr_continuous_ready: false
