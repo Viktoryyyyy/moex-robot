@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
+import re
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -20,6 +20,7 @@ SCENARIO_KEYS = (
     "usd_rub_plus_5",
 )
 SOURCE_MODES = {"manual", "read_only_broker_export"}
+_SAFE_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*\Z")
 
 
 class Step8PositionRiskError(ValueError):
@@ -53,7 +54,9 @@ def _expect_keys(value: Mapping[str, Any], required: set[str], optional: set[str
 
 
 def _text(value: object, field: str) -> str:
-    text = str(value or "").strip()
+    if not isinstance(value, str):
+        _fail(field + " must be string")
+    text = value.strip()
     if not text:
         _fail(field + " must be non-empty string")
     return text
@@ -61,7 +64,7 @@ def _text(value: object, field: str) -> str:
 
 def _safe_token(value: object, field: str) -> str:
     text = _text(value, field)
-    if text in {".", ".."} or "/" in text or "\\" in text or any(x in text for x in ("*", "{", "}", "$(", "`")):
+    if _SAFE_TOKEN_RE.fullmatch(text) is None:
         _fail(field + " must be explicit safe token")
     return text
 
@@ -108,7 +111,7 @@ def _utc_timestamp(value: object, field: str) -> str:
         raise Step8PositionRiskError(field + " must be ISO-8601 UTC timestamp") from exc
     if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
         _fail(field + " must be UTC timestamp")
-    return parsed.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+    return parsed.astimezone(timezone.utc).isoformat()
 
 
 def _iso_date_or_none(value: object, field: str) -> str | None:
@@ -127,9 +130,19 @@ def _position(value: object, index: int) -> dict[str, Any]:
     _expect_keys(
         raw,
         {
-            "position_id", "instrument_id", "expiry", "contracts", "average_price", "fills",
-            "commission_total_rub", "realized_pnl_rub", "unrealized_pnl_rub", "horizon",
-            "invalidation", "protective_stop", "tranches",
+            "position_id",
+            "instrument_id",
+            "expiry",
+            "contracts",
+            "average_price",
+            "fills",
+            "commission_total_rub",
+            "realized_pnl_rub",
+            "unrealized_pnl_rub",
+            "horizon",
+            "invalidation",
+            "protective_stop",
+            "tranches",
         },
         {"expiry_not_applicable_reason"},
         field,
@@ -140,11 +153,13 @@ def _position(value: object, index: int) -> dict[str, Any]:
         expiry_reason = _text(expiry_reason, field + ".expiry_not_applicable_reason")
     elif expiry_reason not in (None, ""):
         _fail(field + ".expiry_not_applicable_reason must be null when expiry is set")
+
     contracts = _int(raw["contracts"], field + ".contracts", nonzero=True)
     average_price = _decimal(raw["average_price"], field + ".average_price", positive=True)
 
     fills_out: list[dict[str, Any]] = []
     fill_ids: set[str] = set()
+    fill_contract_sum = 0
     fill_commission_sum = Decimal("0")
     for fill_index, fill_value in enumerate(_list(raw["fills"], field + ".fills")):
         fill_field = f"{field}.fills[{fill_index}]"
@@ -154,21 +169,43 @@ def _position(value: object, index: int) -> dict[str, Any]:
         if fill_id in fill_ids:
             _fail(field + " duplicate fill_id")
         fill_ids.add(fill_id)
+        fill_contracts = _int(fill["contracts"], fill_field + ".contracts", nonzero=True)
         commission = _decimal(fill["commission_rub"], fill_field + ".commission_rub", minimum=Decimal("0"))
+        fill_contract_sum += fill_contracts
         fill_commission_sum += commission
-        fills_out.append({
-            "fill_id": fill_id,
-            "ts_utc": _utc_timestamp(fill["ts_utc"], fill_field + ".ts_utc"),
-            "contracts": _int(fill["contracts"], fill_field + ".contracts", nonzero=True),
-            "price": _decimal_text(_decimal(fill["price"], fill_field + ".price", positive=True)),
-            "commission_rub": _decimal_text(commission),
-        })
+        fills_out.append(
+            {
+                "fill_id": fill_id,
+                "ts_utc": _utc_timestamp(fill["ts_utc"], fill_field + ".ts_utc"),
+                "contracts": fill_contracts,
+                "price": _decimal_text(_decimal(fill["price"], fill_field + ".price", positive=True)),
+                "commission_rub": _decimal_text(commission),
+            }
+        )
+
+    commission_total = _decimal(
+        raw["commission_total_rub"],
+        field + ".commission_total_rub",
+        minimum=Decimal("0"),
+    )
+    if fill_contract_sum != contracts:
+        _fail(field + ".fills contracts do not reconcile to position contracts")
+    if fill_commission_sum != commission_total:
+        _fail(field + ".fills commissions do not reconcile to commission_total_rub")
 
     invalidation_raw = _mapping(raw["invalidation"], field + ".invalidation")
     _expect_keys(invalidation_raw, {"level", "loss_rub"}, set(), field + ".invalidation")
     invalidation = {
-        "level": _decimal_text(_decimal(invalidation_raw["level"], field + ".invalidation.level", positive=True)),
-        "loss_rub": _decimal_text(_decimal(invalidation_raw["loss_rub"], field + ".invalidation.loss_rub", minimum=Decimal("0"))),
+        "level": _decimal_text(
+            _decimal(invalidation_raw["level"], field + ".invalidation.level", positive=True)
+        ),
+        "loss_rub": _decimal_text(
+            _decimal(
+                invalidation_raw["loss_rub"],
+                field + ".invalidation.loss_rub",
+                minimum=Decimal("0"),
+            )
+        ),
     }
 
     stop_value = raw["protective_stop"]
@@ -178,17 +215,29 @@ def _position(value: object, index: int) -> dict[str, Any]:
     else:
         stop_raw = _mapping(stop_value, field + ".protective_stop")
         _expect_keys(stop_raw, {"level"}, set(), field + ".protective_stop")
-        protective_stop = {"level": _decimal_text(_decimal(stop_raw["level"], field + ".protective_stop.level", positive=True))}
+        protective_stop = {
+            "level": _decimal_text(
+                _decimal(stop_raw["level"], field + ".protective_stop.level", positive=True)
+            )
+        }
 
     tranches_out: list[dict[str, Any]] = []
     for tranche_index, tranche_value in enumerate(_list(raw["tranches"], field + ".tranches")):
         tranche_field = f"{field}.tranches[{tranche_index}]"
         tranche = _mapping(tranche_value, tranche_field)
         _expect_keys(tranche, {"level", "contracts_delta"}, set(), tranche_field)
-        tranches_out.append({
-            "level": _decimal_text(_decimal(tranche["level"], tranche_field + ".level", positive=True)),
-            "contracts_delta": _int(tranche["contracts_delta"], tranche_field + ".contracts_delta", nonzero=True),
-        })
+        tranches_out.append(
+            {
+                "level": _decimal_text(
+                    _decimal(tranche["level"], tranche_field + ".level", positive=True)
+                ),
+                "contracts_delta": _int(
+                    tranche["contracts_delta"],
+                    tranche_field + ".contracts_delta",
+                    nonzero=True,
+                ),
+            }
+        )
 
     return {
         "position_id": _safe_token(raw["position_id"], field + ".position_id"),
@@ -198,10 +247,15 @@ def _position(value: object, index: int) -> dict[str, Any]:
         "contracts": contracts,
         "average_price": _decimal_text(average_price),
         "fills": fills_out,
+        "fill_contract_sum": fill_contract_sum,
         "fill_commission_sum_rub": _decimal_text(fill_commission_sum),
-        "commission_total_rub": _decimal_text(_decimal(raw["commission_total_rub"], field + ".commission_total_rub", minimum=Decimal("0"))),
-        "realized_pnl_rub": _decimal_text(_decimal(raw["realized_pnl_rub"], field + ".realized_pnl_rub")),
-        "unrealized_pnl_rub": _decimal_text(_decimal(raw["unrealized_pnl_rub"], field + ".unrealized_pnl_rub")),
+        "commission_total_rub": _decimal_text(commission_total),
+        "realized_pnl_rub": _decimal_text(
+            _decimal(raw["realized_pnl_rub"], field + ".realized_pnl_rub")
+        ),
+        "unrealized_pnl_rub": _decimal_text(
+            _decimal(raw["unrealized_pnl_rub"], field + ".unrealized_pnl_rub")
+        ),
         "horizon": _text(raw["horizon"], field + ".horizon"),
         "invalidation": invalidation,
         "protective_stop": protective_stop,
@@ -212,7 +266,10 @@ def _position(value: object, index: int) -> dict[str, Any]:
 def _scenario_grid(value: object) -> dict[str, Any]:
     raw = _mapping(value, "scenario_pnl_rub")
     _expect_keys(raw, set(SCENARIO_KEYS) | {"gap"}, set(), "scenario_pnl_rub")
-    result = {key: _decimal_text(_decimal(raw[key], "scenario_pnl_rub." + key)) for key in SCENARIO_KEYS}
+    result = {
+        key: _decimal_text(_decimal(raw[key], "scenario_pnl_rub." + key))
+        for key in SCENARIO_KEYS
+    }
     gap = _mapping(raw["gap"], "scenario_pnl_rub.gap")
     _expect_keys(gap, {"usd_rub_move", "pnl_rub"}, set(), "scenario_pnl_rub.gap")
     move = _decimal(gap["usd_rub_move"], "scenario_pnl_rub.gap.usd_rub_move")
@@ -227,7 +284,20 @@ def _scenario_grid(value: object) -> dict[str, Any]:
 
 def build_position_risk_state(payload: Mapping[str, Any]) -> dict[str, Any]:
     raw = _mapping(payload, "payload")
-    _expect_keys(raw, {"schema_version", "snapshot_id", "as_of_ts_utc", "source", "account", "positions", "scenario_pnl_rub"}, set(), "payload")
+    _expect_keys(
+        raw,
+        {
+            "schema_version",
+            "snapshot_id",
+            "as_of_ts_utc",
+            "source",
+            "account",
+            "positions",
+            "scenario_pnl_rub",
+        },
+        set(),
+        "payload",
+    )
     if raw["schema_version"] != INPUT_SCHEMA_VERSION:
         _fail("schema_version mismatch")
 
@@ -241,16 +311,29 @@ def build_position_risk_state(payload: Mapping[str, Any]) -> dict[str, Any]:
     _expect_keys(
         account,
         {
-            "currency", "free_funds_rub", "current_initial_margin_rub", "variation_margin_rub",
-            "liquidity_buffer_rub", "max_total_contracts", "max_allowed_loss_rub",
+            "currency",
+            "free_funds_rub",
+            "current_initial_margin_rub",
+            "variation_margin_rub",
+            "liquidity_buffer_rub",
+            "max_total_contracts",
+            "max_allowed_loss_rub",
         },
         set(),
         "account",
     )
     if account["currency"] != "RUB":
         _fail("account.currency must be RUB")
-    max_total_contracts = _int(account["max_total_contracts"], "account.max_total_contracts", minimum=0)
-    max_allowed_loss = _decimal(account["max_allowed_loss_rub"], "account.max_allowed_loss_rub", minimum=Decimal("0"))
+    max_total_contracts = _int(
+        account["max_total_contracts"],
+        "account.max_total_contracts",
+        minimum=0,
+    )
+    max_allowed_loss = _decimal(
+        account["max_allowed_loss_rub"],
+        "account.max_allowed_loss_rub",
+        minimum=Decimal("0"),
+    )
     liquidity_buffer = _decimal(account["liquidity_buffer_rub"], "account.liquidity_buffer_rub")
 
     positions_out: list[dict[str, Any]] = []
@@ -272,7 +355,9 @@ def build_position_risk_state(payload: Mapping[str, Any]) -> dict[str, Any]:
             _fail("duplicate instrument_id/expiry position")
         position_keys.add(position_key)
         current_gross += abs(int(position["contracts"]))
-        conservative_additional_gross += sum(abs(int(item["contracts_delta"])) for item in position["tranches"])
+        conservative_additional_gross += sum(
+            abs(int(item["contracts_delta"])) for item in position["tranches"]
+        )
         total_invalidation_loss += Decimal(str(position["invalidation"]["loss_rub"]))
         total_commission += Decimal(str(position["commission_total_rub"]))
         total_realized += Decimal(str(position["realized_pnl_rub"]))
@@ -282,7 +367,8 @@ def build_position_risk_state(payload: Mapping[str, Any]) -> dict[str, Any]:
     scenarios = _scenario_grid(raw["scenario_pnl_rub"])
     scenario_values = [Decimal(str(scenarios[key])) for key in SCENARIO_KEYS]
     scenario_values.append(Decimal(str(scenarios["gap"]["pnl_rub"])))
-    worst_scenario_pnl = min(scenario_values) if scenario_values else Decimal("0")
+    worst_scenario_pnl = min(scenario_values)
+    best_scenario_pnl = max(scenario_values)
     worst_scenario_loss = max(Decimal("0"), -worst_scenario_pnl)
 
     planned_conservative_gross = current_gross + conservative_additional_gross
@@ -295,12 +381,25 @@ def build_position_risk_state(payload: Mapping[str, Any]) -> dict[str, Any]:
         "schema_version": OUTPUT_SCHEMA_VERSION,
         "snapshot_id": _safe_token(raw["snapshot_id"], "snapshot_id"),
         "as_of_ts_utc": _utc_timestamp(raw["as_of_ts_utc"], "as_of_ts_utc"),
-        "source": {"mode": source_mode, "reference": _text(source["reference"], "source.reference")},
+        "source": {
+            "mode": source_mode,
+            "reference": _text(source["reference"], "source.reference"),
+        },
         "account": {
             "currency": "RUB",
-            "free_funds_rub": _decimal_text(_decimal(account["free_funds_rub"], "account.free_funds_rub")),
-            "current_initial_margin_rub": _decimal_text(_decimal(account["current_initial_margin_rub"], "account.current_initial_margin_rub", minimum=Decimal("0"))),
-            "variation_margin_rub": _decimal_text(_decimal(account["variation_margin_rub"], "account.variation_margin_rub")),
+            "free_funds_rub": _decimal_text(
+                _decimal(account["free_funds_rub"], "account.free_funds_rub")
+            ),
+            "current_initial_margin_rub": _decimal_text(
+                _decimal(
+                    account["current_initial_margin_rub"],
+                    "account.current_initial_margin_rub",
+                    minimum=Decimal("0"),
+                )
+            ),
+            "variation_margin_rub": _decimal_text(
+                _decimal(account["variation_margin_rub"], "account.variation_margin_rub")
+            ),
             "liquidity_buffer_rub": _decimal_text(liquidity_buffer),
             "max_total_contracts": max_total_contracts,
             "max_allowed_loss_rub": _decimal_text(max_allowed_loss),
@@ -319,6 +418,7 @@ def build_position_risk_state(payload: Mapping[str, Any]) -> dict[str, Any]:
             "invalidation_loss_headroom_rub": _decimal_text(invalidation_headroom),
             "invalidation_loss_limit_breach": invalidation_headroom < 0,
             "worst_supplied_scenario_pnl_rub": _decimal_text(worst_scenario_pnl),
+            "best_supplied_scenario_pnl_rub": _decimal_text(best_scenario_pnl),
             "worst_supplied_scenario_loss_rub": _decimal_text(worst_scenario_loss),
             "scenario_loss_headroom_rub": _decimal_text(scenario_headroom),
             "scenario_loss_limit_breach": scenario_headroom < 0,
@@ -332,6 +432,8 @@ def build_position_risk_state(payload: Mapping[str, Any]) -> dict[str, Any]:
             "automatic_order_placement_allowed": False,
             "automatic_position_sizing_allowed": False,
             "trade_recommendation_generated": False,
+            "stop_or_invalidation_generation_allowed": False,
+            "tranche_generation_allowed": False,
             "realized_pnl_recomputed": False,
             "unrealized_pnl_recomputed": False,
             "invalidation_loss_recomputed_from_price": False,
@@ -343,7 +445,9 @@ def build_position_risk_state(payload: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Validate and aggregate explicit Stage 8 position/risk state.")
+    parser = argparse.ArgumentParser(
+        description="Validate and aggregate explicit Stage 8 position/risk state."
+    )
     parser.add_argument("--input-json", required=True)
     parser.add_argument("--output-json")
     return parser.parse_args(argv)
@@ -362,7 +466,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print(encoded, end="")
     except Exception as exc:
-        print(json.dumps({"project": "MOEX_Bot", "step": 8, "status": "position_risk_failed", "error": str(exc)}, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "project": "MOEX_Bot",
+                    "step": 8,
+                    "status": "position_risk_failed",
+                    "error": str(exc),
+                },
+                ensure_ascii=False,
+            )
+        )
         return 1
     return 0
 
