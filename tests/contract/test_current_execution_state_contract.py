@@ -4,6 +4,52 @@ ROOT = Path(__file__).resolve().parents[2]
 STATE = ROOT / "docs" / "MOEX_BOT_CURRENT_EXECUTION_STATE_2026-08-27.md"
 POINTER = ROOT / "docs" / "MOEX_BOT_CURRENT_EXECUTION_STATE.md"
 
+IMPLEMENTATION_SHA = "21b57e54e993dd63f9f3a8b772bb39f39508db5e"
+READINESS_SHA = "19fa3525b79973da75e1111e496358b6c3f68d95"
+
+EXPECTED_APPLY_TEMPLATE = (
+    'cd ~/moex_bot && source venv/bin/activate && cd moex-robot && '
+    'test -z "$(git status --porcelain)" && '
+    'test "$(git branch --show-current)" = "main" && '
+    'git fetch origin main && '
+    'test "$(git rev-parse origin/main)" = "<MERGED_SHA>" && '
+    'git merge --ff-only origin/main && '
+    'test "$(git rev-parse HEAD)" = "<MERGED_SHA>" && '
+    'echo PROJECT=MOEX_Bot ACTION=server_apply STATUS=APPLIED APPLIED_SHA=$(git rev-parse HEAD)'
+)
+
+EXPECTED_STAGE7_PILOT = (
+    'cd ~/moex_bot && source venv/bin/activate && cd moex-robot && '
+    'test -z "$(git status --porcelain)" && '
+    'test "$(git branch --show-current)" = "main" && '
+    f'test "$(git rev-parse HEAD)" = "{IMPLEMENTATION_SHA}" && '
+    'test ! -e /home/trader/moex_bot/data/runs/step7_rub_native_d1_w1/run_id=step7_pilot_20260827_v1 && '
+    'test ! -e /home/trader/moex_bot/data/state/acceptance/step7_rub_native_d1_w1/run_id=step7_pilot_20260827_v1 && '
+    'test ! -e /home/trader/moex_bot/step7_pilot_20260827_v1.log && '
+    '(nohup env MOEX_DATA_ROOT=/home/trader/moex_bot/data PYTHONPATH=src '
+    'python -m moex_data.step7_rub_native_d1_w1_pilot_runner '
+    '--artifact-version step7_pilot_20260827_v1 '
+    '--env-file /home/trader/moex_bot/.env '
+    '> /home/trader/moex_bot/step7_pilot_20260827_v1.log 2>&1 < /dev/null '
+    '& pid=$!; echo PROJECT=MOEX_Bot STATUS=STAGE7_V1_STARTED PID=$pid)'
+)
+
+EXPECTED_STAGE7_ACCEPTANCE = (
+    'cd ~/moex_bot && source venv/bin/activate && cd moex-robot && '
+    'test -z "$(git status --porcelain)" && '
+    'test "$(git branch --show-current)" = "main" && '
+    f'test "$(git rev-parse HEAD)" = "{IMPLEMENTATION_SHA}" && '
+    'test ! -e /home/trader/moex_bot/data/state/acceptance/step7_rub_native_d1_w1/'
+    'run_id=step7_pilot_20260827_v1/accepted_pointers.json && '
+    'test ! -e /home/trader/moex_bot/step7_accept_20260827_v1.log && '
+    '(nohup env MOEX_DATA_ROOT=/home/trader/moex_bot/data PYTHONPATH=src '
+    'python -m moex_data.step7_rub_native_d1_w1_acceptance '
+    '--run-id step7_pilot_20260827_v1 --repo-root . '
+    '--env-file /home/trader/moex_bot/.env '
+    '> /home/trader/moex_bot/step7_accept_20260827_v1.log 2>&1 < /dev/null '
+    '& pid=$!; echo PROJECT=MOEX_Bot STATUS=STAGE7_ACCEPTANCE_STARTED PID=$pid)'
+)
+
 
 def _state_text() -> str:
     return STATE.read_text(encoding="utf-8")
@@ -17,7 +63,11 @@ def _section(text: str, start: str, end: str) -> str:
     return text.split(start, 1)[1].split(end, 1)[0]
 
 
-def test_current_execution_state_uses_canonical_server_paths() -> None:
+def _bash_block(section: str) -> str:
+    return section.split("```bash\n", 1)[1].split("\n```", 1)[0].strip()
+
+
+def test_current_execution_state_uses_canonical_server_paths_only() -> None:
     text = _state_text()
     lines = _exact_lines(text)
     for line in (
@@ -27,48 +77,42 @@ def test_current_execution_state_uses_canonical_server_paths() -> None:
     ):
         assert line in lines
 
-    forbidden = text.split("Forbidden/deprecated paths:\n", 1)[1].split("\nRules:\n", 1)[0]
+    prefix, after_marker = text.split("Forbidden/deprecated paths:\n", 1)
+    forbidden, suffix = after_marker.split("\nRules:\n", 1)
     forbidden_lines = _exact_lines(forbidden)
-    assert forbidden_lines == {
-        "```text",
-        "```",
+    deprecated = {
         "/home/trader/moex_bot/moex_robot",
         "~/moex_bot/moex_robot",
         "cd ~/moex_bot/moex_robot && source venv/bin/activate",
     }
+    assert deprecated.issubset(forbidden_lines)
+
+    active_text = prefix + "\nRules:\n" + suffix
+    for path in deprecated:
+        assert path not in active_text
 
 
-def test_server_apply_template_is_exact_sha_guarded() -> None:
-    text = _state_text()
-    for token in (
-        'test -z "$(git status --porcelain)"',
-        'test "$(git branch --show-current)" = "main"',
-        "git fetch origin main",
-        'test "$(git rev-parse origin/main)" = "<MERGED_SHA>"',
-        "git merge --ff-only origin/main",
-        'test "$(git rev-parse HEAD)" = "<MERGED_SHA>"',
-        "PROJECT=MOEX_Bot ACTION=server_apply STATUS=APPLIED",
-    ):
-        assert token in text
+def test_server_apply_template_is_exact_guarded_command() -> None:
+    section = _section(
+        _state_text(),
+        "## 2. Canonical server apply command template\n",
+        "\nThis command is the canonical apply pattern",
+    )
+    assert _bash_block(section) == EXPECTED_APPLY_TEMPLATE
 
 
-def test_stage7_launch_commands_pin_clean_main_exact_head_before_backgrounding() -> None:
+def test_stage7_launch_commands_are_exact_guarded_commands() -> None:
     text = _state_text()
     pilot = _section(text, "### 5.2 Physical pilot start\n", "\nPilot result log:\n")
     acceptance = _section(text, "### 5.3 Acceptance start\n", "\nAcceptance result log:\n")
-    for section in (pilot, acceptance):
-        assert 'test -z "$(git status --porcelain)"' in section
-        assert 'test "$(git branch --show-current)" = "main"' in section
-        assert 'test "$(git rev-parse HEAD)" = "21b57e54e993dd63f9f3a8b772bb39f39508db5e"' in section
-        assert "&& (nohup env MOEX_DATA_ROOT=/home/trader/moex_bot/data" in section
-        assert "& pid=$!; echo PROJECT=MOEX_Bot" in section
-        assert "2>&1 < /dev/null & echo PROJECT=MOEX_Bot" not in section
+    assert _bash_block(pilot) == EXPECTED_STAGE7_PILOT
+    assert _bash_block(acceptance) == EXPECTED_STAGE7_ACCEPTANCE
 
 
 def test_stage7_closed_metadata_is_exact() -> None:
     lines = _exact_lines(_state_text())
     for line in (
-        "merged implementation SHA: 21b57e54e993dd63f9f3a8b772bb39f39508db5e",
+        f"merged implementation SHA: {IMPLEMENTATION_SHA}",
         "run_id: step7_pilot_20260827_v1",
         "USDRUBF D1 OHLCV: 1100",
         "CNYRUBF D1 OHLCV: 1100",
@@ -76,8 +120,8 @@ def test_stage7_closed_metadata_is_exact() -> None:
         "CNYRUBF completed W1 OHLCV: 224",
         "accepted_pointer_count: 8",
         "expected_pointer_count: 8",
-        "readiness merge SHA: 19fa3525b79973da75e1111e496358b6c3f68d95",
-        "server applied SHA: 19fa3525b79973da75e1111e496358b6c3f68d95",
+        f"readiness merge SHA: {READINESS_SHA}",
+        f"server applied SHA: {READINESS_SHA}",
     ):
         assert line in lines
 
