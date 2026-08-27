@@ -4,7 +4,19 @@ import argparse
 import json
 import re
 from datetime import date, datetime, timezone
-from decimal import MAX_EMAX, MAX_PREC, MIN_EMIN, Decimal, DecimalException, InvalidOperation, localcontext
+from decimal import (
+    MAX_EMAX,
+    MIN_EMIN,
+    Clamped,
+    Decimal,
+    DecimalException,
+    Inexact,
+    InvalidOperation,
+    Overflow,
+    Rounded,
+    Underflow,
+    localcontext,
+)
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -21,6 +33,7 @@ SCENARIO_KEYS = (
 )
 SOURCE_MODES = {"manual", "read_only_broker_export"}
 _SAFE_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]*\Z")
+_MAX_EXACT_AGGREGATE_PRECISION_DIGITS = 100_000
 
 
 class Step8PositionRiskError(ValueError):
@@ -107,15 +120,19 @@ def _sum_exact(values: Sequence[Decimal]) -> Decimal:
     minimum_exponent = min(int(item.as_tuple().exponent) for item in items)
     maximum_adjusted = max(item.adjusted() for item in items)
     carry_digits = len(str(len(items))) + 1
-    precision = max(1, maximum_adjusted - minimum_exponent + 1 + carry_digits)
-    if precision > MAX_PREC:
-        _fail("decimal aggregate exceeds exact Decimal precision range")
+    span_precision = maximum_adjusted - minimum_exponent + 1 + carry_digits
+    subnormal_precision = max(1, MIN_EMIN - minimum_exponent + 1)
+    precision = max(1, span_precision, subnormal_precision)
+    if precision > _MAX_EXACT_AGGREGATE_PRECISION_DIGITS:
+        _fail("decimal aggregate exceeds exact resource-safety precision bound")
     try:
         with localcontext() as context:
             context.prec = precision
             context.Emax = MAX_EMAX
             context.Emin = MIN_EMIN
             context.clamp = 0
+            for signal in (Clamped, Inexact, Rounded, Underflow, Overflow):
+                context.traps[signal] = True
             total = Decimal("0")
             for item in items:
                 total += item
