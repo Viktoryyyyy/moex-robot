@@ -4,7 +4,7 @@ import argparse
 import json
 import re
 from datetime import date, datetime, timezone
-from decimal import MAX_EMAX, MIN_EMIN, Decimal, InvalidOperation, localcontext
+from decimal import MAX_EMAX, MAX_PREC, MIN_EMIN, Decimal, DecimalException, InvalidOperation, localcontext
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -63,10 +63,15 @@ def _text(value: object, field: str) -> str:
 
 
 def _safe_token(value: object, field: str) -> str:
-    text = _text(value, field)
-    if _SAFE_TOKEN_RE.fullmatch(text) is None:
+    if not isinstance(value, str):
+        _fail(field + " must be string")
+    if not value:
+        _fail(field + " must be non-empty string")
+    if value != value.strip():
+        _fail(field + " must not contain surrounding whitespace")
+    if _SAFE_TOKEN_RE.fullmatch(value) is None:
         _fail(field + " must be explicit safe token")
-    return text
+    return value
 
 
 def _int(value: object, field: str, *, minimum: int | None = None, nonzero: bool = False) -> int:
@@ -99,26 +104,39 @@ def _sum_exact(values: Sequence[Decimal]) -> Decimal:
     items = [item for item in values if item != 0]
     if not items:
         return Decimal("0")
-    minimum_exponent = min(item.as_tuple().exponent for item in items)
+    minimum_exponent = min(int(item.as_tuple().exponent) for item in items)
     maximum_adjusted = max(item.adjusted() for item in items)
     carry_digits = len(str(len(items))) + 1
     precision = max(1, maximum_adjusted - minimum_exponent + 1 + carry_digits)
-    with localcontext() as context:
-        context.prec = precision
-        context.Emax = MAX_EMAX
-        context.Emin = MIN_EMIN
-        context.clamp = 0
-        total = Decimal("0")
-        for item in items:
-            total += item
-        return total
+    if precision > MAX_PREC:
+        _fail("decimal aggregate exceeds exact Decimal precision range")
+    try:
+        with localcontext() as context:
+            context.prec = precision
+            context.Emax = MAX_EMAX
+            context.Emin = MIN_EMIN
+            context.clamp = 0
+            total = Decimal("0")
+            for item in items:
+                total += item
+            return total
+    except (DecimalException, ValueError) as exc:
+        raise Step8PositionRiskError(
+            "decimal aggregate exceeds exact Decimal representability"
+        ) from exc
 
 
 def _decimal_text(value: Decimal) -> str:
     if value == 0:
         return "0"
-    text = format(value, "f")
-    return text.rstrip("0").rstrip(".") if "." in text else text
+    tuple_value = value.as_tuple()
+    exponent = int(tuple_value.exponent)
+    digits = list(tuple_value.digits)
+    while exponent < 0 and digits and digits[-1] == 0:
+        digits.pop()
+        exponent += 1
+    canonical = Decimal((tuple_value.sign, tuple(digits), exponent))
+    return str(canonical)
 
 
 def _reject_json_constant(token: str) -> None:
