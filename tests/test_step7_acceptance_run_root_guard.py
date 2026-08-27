@@ -108,3 +108,38 @@ def test_stage7_acceptance_rejects_stale_content_attestation_marker(monkeypatch,
             start="2026-08-17",
             end="2026-08-17",
         )
+
+
+def test_stage7_base_revalidation_uses_explicit_repo_root(monkeypatch, tmp_path: Path) -> None:
+    explicit_repo = tmp_path / "explicit_repo"
+    explicit_repo.mkdir()
+    seen: dict[str, Path] = {}
+
+    def fake_current(root, instrument_id, start, end, *, repo_root="."):
+        seen["repo_root"] = Path(repo_root).resolve()
+        return _current_scope()
+
+    def fake_base(**kwargs):
+        acceptance.base.accepted_quote_history(
+            kwargs["data_root"],
+            kwargs["instrument_id"],
+            kwargs["start"],
+            kwargs["end"],
+        )
+        return {"physical_revalidation_passed": True}
+
+    original = acceptance.base.accepted_quote_history
+    monkeypatch.setattr(acceptance, "accepted_quote_history", fake_current)
+    monkeypatch.setattr(acceptance, "_BASE_REVALIDATE_FROZEN", fake_base)
+    result = acceptance._call_base_revalidate_frozen(
+        repo_root=explicit_repo,
+        data_root=tmp_path,
+        manifest_path=tmp_path / "unused.json",
+        instrument_id="usdrubf_futures_family",
+        start="2026-08-17",
+        end="2026-08-17",
+        validation_run_id="fixture",
+    )
+    assert result["physical_revalidation_passed"] is True
+    assert seen["repo_root"] == explicit_repo.resolve()
+    assert acceptance.base.accepted_quote_history is original
