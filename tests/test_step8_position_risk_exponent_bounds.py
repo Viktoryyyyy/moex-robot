@@ -1,4 +1,4 @@
-from decimal import MAX_EMAX, Decimal, localcontext
+from decimal import MAX_EMAX, MIN_EMIN, Decimal, localcontext
 
 import pytest
 
@@ -34,6 +34,22 @@ def test_sum_exact_rejects_unrepresentable_absolute_boundary_fail_closed() -> No
     value = Decimal(f"9e{MAX_EMAX}")
     with pytest.raises(Step8PositionRiskError, match="exact Decimal representability"):
         _sum_exact((value, value))
+
+
+def test_sum_exact_preserves_small_exact_subnormal_with_sufficient_precision() -> None:
+    value = Decimal(f"1e{MIN_EMIN - 3}")
+    assert _sum_exact((value,)) == value
+
+
+def test_sum_exact_rejects_extreme_subnormal_before_silent_underflow() -> None:
+    value = Decimal("1e-1999999999999999997")
+    with pytest.raises(Step8PositionRiskError, match="resource-safety precision bound"):
+        _sum_exact((value,))
+
+
+def test_sum_exact_rejects_pathological_exponent_span_before_allocation() -> None:
+    with pytest.raises(Step8PositionRiskError, match="resource-safety precision bound"):
+        _sum_exact((Decimal("1e1000000000"), Decimal("1")))
 
 
 def test_decimal_text_keeps_large_positive_exponent_compact_and_exact() -> None:
