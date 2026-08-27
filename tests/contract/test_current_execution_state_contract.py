@@ -13,6 +13,10 @@ def _exact_lines(text: str) -> set[str]:
     return {line.strip() for line in text.splitlines() if line.strip()}
 
 
+def _section(text: str, start: str, end: str) -> str:
+    return text.split(start, 1)[1].split(end, 1)[0]
+
+
 def test_current_execution_state_uses_canonical_server_paths() -> None:
     text = _state_text()
     lines = _exact_lines(text)
@@ -46,6 +50,19 @@ def test_server_apply_template_is_exact_sha_guarded() -> None:
         "PROJECT=MOEX_Bot ACTION=server_apply STATUS=APPLIED",
     ):
         assert token in text
+
+
+def test_stage7_launch_commands_pin_clean_main_exact_head_before_backgrounding() -> None:
+    text = _state_text()
+    pilot = _section(text, "### 5.2 Physical pilot start\n", "\nPilot result log:\n")
+    acceptance = _section(text, "### 5.3 Acceptance start\n", "\nAcceptance result log:\n")
+    for section in (pilot, acceptance):
+        assert 'test -z "$(git status --porcelain)"' in section
+        assert 'test "$(git branch --show-current)" = "main"' in section
+        assert 'test "$(git rev-parse HEAD)" = "21b57e54e993dd63f9f3a8b772bb39f39508db5e"' in section
+        assert "&& (nohup env MOEX_DATA_ROOT=/home/trader/moex_bot/data" in section
+        assert "& pid=$!; echo PROJECT=MOEX_Bot" in section
+        assert "2>&1 < /dev/null & echo PROJECT=MOEX_Bot" not in section
 
 
 def test_stage7_closed_metadata_is_exact() -> None:
