@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 
 from moex_data import step7_rub_native_d1_w1_acceptance as acceptance
@@ -110,36 +111,53 @@ def test_stage7_acceptance_rejects_stale_content_attestation_marker(monkeypatch,
         )
 
 
-def test_stage7_base_revalidation_uses_explicit_repo_root(monkeypatch, tmp_path: Path) -> None:
+def test_stage7_current_attestation_uses_explicit_repo_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("MOEX_DATA_ROOT", tmp_path.as_posix())
     explicit_repo = tmp_path / "explicit_repo"
     explicit_repo.mkdir()
+    manifest = _content_manifest(tmp_path)
     seen: dict[str, Path] = {}
 
     def fake_current(root, instrument_id, start, end, *, repo_root="."):
         seen["repo_root"] = Path(repo_root).resolve()
         return _current_scope()
 
-    def fake_base(**kwargs):
-        acceptance.base.accepted_quote_history(
-            kwargs["data_root"],
-            kwargs["instrument_id"],
-            kwargs["start"],
-            kwargs["end"],
-        )
-        return {"physical_revalidation_passed": True}
-
-    original = acceptance.base.accepted_quote_history
     monkeypatch.setattr(acceptance, "accepted_quote_history", fake_current)
-    monkeypatch.setattr(acceptance, "_BASE_REVALIDATE_FROZEN", fake_base)
-    result = acceptance._call_base_revalidate_frozen(
+    acceptance._guard_current_content_attestation(
         repo_root=explicit_repo,
         data_root=tmp_path,
-        manifest_path=tmp_path / "unused.json",
+        manifest_path=manifest,
         instrument_id="usdrubf_futures_family",
         start="2026-08-17",
         end="2026-08-17",
-        validation_run_id="fixture",
     )
-    assert result["physical_revalidation_passed"] is True
     assert seen["repo_root"] == explicit_repo.resolve()
-    assert acceptance.base.accepted_quote_history is original
+
+
+def test_stage7_oracle_d1_requires_captured_validated_frame() -> None:
+    with pytest.raises(ValueError, match="requires captured validated frame"):
+        acceptance._oracle_d1(
+            [{"trade_date": "2026-08-17", "sha256": "a" * 64}],
+            "usdrubf_futures_family",
+        )
+
+
+def test_stage7_oracle_technical_rejects_zero_previous_close() -> None:
+    rows = []
+    for n, close in enumerate((100.0, 0.0, 102.0)):
+        trade_date = f"2026-08-{17 + n:02d}"
+        rows.append({
+            "instrument_id": "usdrubf_futures_family",
+            "secid": "USDRUBF",
+            "timeframe": "1D",
+            "period_start_date": trade_date,
+            "period_end_date": trade_date,
+            "trade_date": trade_date,
+            "availability_ts_utc": "2026-08-20T03:00:00+00:00",
+            "open": close,
+            "high": close + 1.0,
+            "low": close - 1.0,
+            "close": close,
+        })
+    with pytest.raises(ValueError, match="previous close denominator is zero"):
+        acceptance._oracle_technical(pd.DataFrame(rows), "fixture")
