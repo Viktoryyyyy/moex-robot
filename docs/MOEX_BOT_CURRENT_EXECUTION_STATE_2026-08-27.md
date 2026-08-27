@@ -58,7 +58,7 @@ Stage 4: complete; accepted/readiness/server-applied
 Stage 5: complete; accepted/readiness/server-applied
 Stage 6: folded into Stage 4; complete
 Stage 7: complete; implementation, physical pilot, acceptance, readiness and server apply closed
-Stage 8: WIP branch only; not accepted, not merged, not server-applied
+Stage 8: WIP branch/open PR only; not accepted, not merged, not server-applied
 Stage 9: pending
 Stage 10: pending; scheduler must not be enabled before prerequisite readiness
 Stage 11: pending Oil_RUB research
@@ -210,7 +210,9 @@ base/merge-base: 19fa3525b79973da75e1111e496358b6c3f68d95
 current WIP head: e77d9ea6ae35b87d34d797f86e1022186e978f56
 ahead_by: 4
 behind_by: 0
-PR: none at record time
+PR: #393
+PR state at record time: open
+PR title: Implement Stage 8 bounded position risk state
 merged: false
 server_applied: false
 accepted: false
@@ -241,7 +243,7 @@ Before continuing work:
 
 1. verify current GitHub `main` SHA;
 2. verify whether `agent/step8-position-risk-state` still exists and its exact head;
-3. verify whether a Stage 8 PR has since been created;
+3. verify PR #393 current state, base and exact head before using this dated record;
 4. compare Stage 8 branch to current `main` before any further mutation;
 5. preserve one task = one active route, one branch = one mutation owner, one PR = one task;
 6. after any new commit, treat prior CI/review as stale;
