@@ -1,0 +1,116 @@
+contract_id: position_risk_state.v1
+status: implementation_candidate
+purpose: >
+  Canonical explicit position/risk snapshot for the RUB forecasting workflow. The
+  contract validates user-entered or read-only broker-export state and derives
+  only arithmetic risk aggregates. It does not place orders, size positions, or
+  invent instrument payout mechanics.
+
+input_contract:
+  schema_version: step8_position_risk_input.v1
+  source_modes:
+    - manual
+    - read_only_broker_export
+  account_currency: RUB
+  required_account_fields:
+    - free_funds_rub
+    - current_initial_margin_rub
+    - variation_margin_rub
+    - liquidity_buffer_rub
+    - max_total_contracts
+    - max_allowed_loss_rub
+  required_position_fields:
+    - position_id
+    - instrument_id
+    - expiry
+    - contracts
+    - average_price
+    - fills
+    - commission_total_rub
+    - realized_pnl_rub
+    - unrealized_pnl_rub
+    - horizon
+    - invalidation
+    - protective_stop
+    - tranches
+  expiry_policy:
+    strict_iso_date_when_present: true
+    null_allowed_with_explicit_reason: true
+  signed_contracts_required: true
+  all_numeric_values_finite: true
+  decimal_money_serialization: canonical_decimal_string
+  scenario_grid_required:
+    - usd_rub_minus_5
+    - usd_rub_minus_3
+    - usd_rub_minus_1
+    - usd_rub_plus_1
+    - usd_rub_plus_3
+    - usd_rub_plus_5
+    - gap
+
+calculation_contract:
+  exact_derived_fields:
+    - current_gross_contracts
+    - current_contract_headroom
+    - current_contract_limit_breach
+    - planned_conservative_additional_gross_contracts
+    - planned_conservative_gross_contracts
+    - planned_conservative_contract_headroom
+    - planned_conservative_contract_limit_breach
+    - total_invalidation_loss_rub
+    - invalidation_loss_headroom_rub
+    - invalidation_loss_limit_breach
+    - worst_supplied_scenario_pnl_rub
+    - worst_supplied_scenario_loss_rub
+    - scenario_loss_headroom_rub
+    - scenario_loss_limit_breach
+    - liquidity_buffer_breach
+    - total_commission_rub
+    - total_realized_pnl_rub
+    - total_unrealized_pnl_rub
+  current_gross_contracts_formula: sum_abs_signed_position_contracts
+  planned_conservative_gross_formula: current_gross_plus_sum_abs_all_planned_contract_deltas
+  invalidation_loss_formula: sum_supplied_nonnegative_position_invalidation_loss_rub
+  worst_scenario_formula: minimum_of_supplied_six_standard_scenarios_and_gap_pnl
+  breach_thresholds:
+    contract_headroom_negative: true
+    invalidation_loss_headroom_negative: true
+    scenario_loss_headroom_negative: true
+    liquidity_buffer_negative: true
+
+pnl_provenance_policy:
+  realized_pnl_recomputed: false
+  unrealized_pnl_recomputed: false
+  invalidation_loss_recomputed_from_price: false
+  scenario_pnl_recomputed_from_market_move: false
+  supplied_pnl_fields_are_external_evidence: true
+  instrument_payout_mapping_required_before_pnl_recalculation: true
+
+safety_policy:
+  broker_write_access_used: false
+  automatic_order_placement_allowed: false
+  automatic_position_sizing_allowed: false
+  trade_recommendation_generated: false
+  stop_or_invalidation_generation_allowed: false
+  tranche_generation_allowed: false
+
+fail_closed_policy:
+  unknown_input_keys_rejected: true
+  duplicate_position_ids_rejected: true
+  duplicate_instrument_expiry_positions_rejected: true
+  duplicate_fill_ids_within_position_rejected: true
+  zero_position_contracts_rejected: true
+  zero_fill_contracts_rejected: true
+  zero_tranche_contract_delta_rejected: true
+  non_utc_snapshot_and_fill_timestamps_rejected: true
+  incomplete_scenario_grid_rejected: true
+
+unresolved_dependencies:
+  instrument_payout_and_lot_mapping:
+    status: required_before_price_based_pnl_recalculation
+  broker_ingest_adapter:
+    status: optional_read_only_adapter_not_implemented
+  persistent_current_pointer:
+    status: deferred_until_snapshot_acceptance_policy_is_approved
+  daily_weekly_bundle_join:
+    status: stage9_dependency
