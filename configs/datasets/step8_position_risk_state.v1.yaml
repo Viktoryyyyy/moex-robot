@@ -1,0 +1,90 @@
+config_id: step8_position_risk_state.v1
+status: implementation_candidate_policy_bounded
+purpose: >
+  Position/risk state for the RUB daily/weekly analysis workflow using explicit
+  manual or read-only broker-export inputs. This stage must not fabricate
+  trading limits, stop levels, tranche rules, or instrument payout mechanics.
+
+source_policy:
+  allowed_modes:
+    - manual
+    - read_only_broker_export
+  broker_write_access_allowed: false
+  order_placement_allowed: false
+  latest_autodetect_allowed: false
+
+required_state:
+  account:
+    - free_funds_rub
+    - current_initial_margin_rub
+    - variation_margin_rub
+    - liquidity_buffer_rub
+    - max_total_contracts
+    - max_allowed_loss_rub
+  positions:
+    - instrument_id
+    - expiry_or_explicit_not_applicable_reason
+    - signed_contracts
+    - average_price
+    - all_fills
+    - commissions
+    - realized_pnl_rub
+    - unrealized_pnl_rub
+    - horizon
+    - invalidation_level_and_supplied_loss_rub
+    - protective_stop_or_null
+    - explicit_tranche_plan
+  scenarios:
+    standard_usd_rub_moves:
+      - -5
+      - -3
+      - -1
+      - 1
+      - 3
+      - 5
+    explicit_gap_required: true
+
+calculation_scope:
+  allowed:
+    - aggregate_current_gross_contracts
+    - aggregate_conservative_planned_gross_contracts
+    - contract_limit_headroom_and_breach
+    - aggregate_supplied_invalidation_loss
+    - invalidation_loss_headroom_and_breach
+    - worst_supplied_scenario_loss
+    - scenario_loss_headroom_and_breach
+    - liquidity_buffer_zero_boundary_breach
+    - aggregate_supplied_commission_realized_and_unrealized_pnl
+  forbidden_until_policy_exists:
+    - recompute_realized_pnl
+    - recompute_unrealized_pnl
+    - infer_invalidation_loss_from_price
+    - infer_scenario_pnl_from_usd_rub_move
+    - recommend_position_size
+    - generate_stop
+    - generate_invalidation
+    - generate_tranches
+    - generate_trade
+
+contracts:
+  position_risk_state_contract_ref: contracts/datasets/position_risk_state.v1.yaml
+
+unresolved_policy_gaps:
+  instrument_payout_and_lot_mapping:
+    status: not_approved
+  broker_read_only_adapter:
+    status: not_implemented
+  snapshot_acceptance_and_current_pointer:
+    status: not_approved
+  stage9_daily_weekly_bundle_join:
+    status: pending
+
+readiness_flags:
+  implementation_ready: true
+  deterministic_validation_ready: true
+  price_based_pnl_recalculation_ready: false
+  broker_ingest_ready: false
+  accepted_pointer_ready: false
+  daily_weekly_bundle_ready: false
+  scheduler_ready: false
+  research_ready: false
