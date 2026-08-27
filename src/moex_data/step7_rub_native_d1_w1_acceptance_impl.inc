@@ -676,7 +676,3 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
     return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
