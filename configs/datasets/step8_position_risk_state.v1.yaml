@@ -26,7 +26,7 @@ required_state:
     - expiry_or_explicit_not_applicable_reason
     - signed_contracts
     - average_price
-    - all_fills
+    - complete_signed_fills
     - commissions
     - realized_pnl_rub
     - unrealized_pnl_rub
@@ -44,6 +44,17 @@ required_state:
       - 5
     explicit_gap_required: true
 
+validation_scope:
+  strict_string_types: true
+  safe_identifier_tokens: true
+  utc_timestamps_only: true
+  preserve_fractional_timestamp_precision: true
+  finite_numeric_values_only: true
+  complete_fill_contract_reconciliation: true
+  exact_fill_commission_reconciliation: true
+  duplicate_ids_fail_closed: true
+  exact_scenario_keys_fail_closed: true
+
 calculation_scope:
   allowed:
     - aggregate_current_gross_contracts
@@ -51,7 +62,8 @@ calculation_scope:
     - contract_limit_headroom_and_breach
     - aggregate_supplied_invalidation_loss
     - invalidation_loss_headroom_and_breach
-    - worst_supplied_scenario_loss
+    - worst_supplied_scenario_pnl_and_loss
+    - best_supplied_scenario_pnl
     - scenario_loss_headroom_and_breach
     - liquidity_buffer_zero_boundary_breach
     - aggregate_supplied_commission_realized_and_unrealized_pnl
