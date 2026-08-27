@@ -19,13 +19,7 @@ data_root=/home/trader/moex_bot/data
 env_path=/home/trader/moex_bot/.env
 ```
 
-Forbidden/deprecated paths:
-
-```text
-/home/trader/moex_bot/moex_robot
-~/moex_bot/moex_robot
-cd ~/moex_bot/moex_robot && source venv/bin/activate
-```
+Deprecated underscore repository-path variants are forbidden. The authoritative explicit deprecated-path list remains in `docs/MOEX_BOT_MANAGEMENT_CANON.md`; this operational handoff contains only active canonical hyphen-path commands.
 
 Rules:
 
@@ -47,7 +41,7 @@ Before use, `<MERGED_SHA>` must be replaced with the exact SHA verified on GitHu
 cd ~/moex_bot && source venv/bin/activate && cd moex-robot && test -z "$(git status --porcelain)" && test "$(git branch --show-current)" = "main" && git fetch origin main && test "$(git rev-parse origin/main)" = "<MERGED_SHA>" && git merge --ff-only origin/main && test "$(git rev-parse HEAD)" = "<MERGED_SHA>" && echo PROJECT=MOEX_Bot ACTION=server_apply STATUS=APPLIED APPLIED_SHA=$(git rev-parse HEAD)
 ```
 
-This command is the canonical apply pattern for current work. Do not replace it with an underscore path or a command that pulls/merges without exact-SHA guards.
+This command is the canonical apply pattern for current work. Do not replace it with a deprecated path or a command that pulls/merges without exact-SHA guards.
 
 ## 3. Stage status as of this record
 
