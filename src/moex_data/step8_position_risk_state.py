@@ -13,7 +13,6 @@ from decimal import (
     Inexact,
     InvalidOperation,
     Overflow,
-    Rounded,
     Underflow,
     localcontext,
 )
@@ -131,7 +130,7 @@ def _sum_exact(values: Sequence[Decimal]) -> Decimal:
             context.Emax = MAX_EMAX
             context.Emin = MIN_EMIN
             context.clamp = 0
-            for signal in (Clamped, Inexact, Rounded, Underflow, Overflow):
+            for signal in (Clamped, Inexact, Underflow, Overflow):
                 context.traps[signal] = True
             total = Decimal("0")
             for item in items:
