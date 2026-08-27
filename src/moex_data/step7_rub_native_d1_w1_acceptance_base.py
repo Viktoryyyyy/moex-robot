@@ -44,6 +44,75 @@ class _FrozenFrameRecord(dict):
     """Validation-only record carrying the exact captured parquet frame."""
 
 
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (int(info.st_dev), int(info.st_ino), int(info.st_size), int(info.st_mtime_ns), int(info.st_ctime_ns))
+
+
+def _inside_run(path_value: object, run_root: Path, field: str) -> Path:
+    path = Path(str(path_value or ""))
+    if not path.is_absolute():
+        _fail(field + " must be absolute")
+    try:
+        parent = path.parent.resolve(strict=True)
+        candidate = parent / path.name
+        candidate.relative_to(run_root.resolve(strict=True))
+    except (OSError, ValueError) as exc:
+        raise Step7AcceptanceError(field + " must exist inside run root") from exc
+    if candidate.is_symlink() or not candidate.is_file():
+        _fail(field + " must be regular non-symlink file")
+    return candidate
+
+
+def _capture_regular_bytes(path: Path, field: str) -> tuple[bytes, str, tuple[int, int, int, int, int]]:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise Step7AcceptanceError(field + " cannot be opened as regular non-symlink file") from exc
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            _fail(field + " descriptor is not regular")
+        chunks: list[bytes] = []
+        while True:
+            block = os.read(descriptor, 1024 * 1024)
+            if not block:
+                break
+            chunks.append(block)
+        raw = b"".join(chunks)
+        after = os.fstat(descriptor)
+        try:
+            pathname = os.stat(path, follow_symlinks=False)
+        except OSError as exc:
+            raise Step7AcceptanceError(field + " pathname changed during validated byte capture") from exc
+        identity = _stat_identity(before)
+        if identity != _stat_identity(after) or identity != _stat_identity(pathname) or len(raw) != int(before.st_size):
+            _fail(field + " changed during validated byte capture")
+        return raw, hashlib.sha256(raw).hexdigest(), identity
+    finally:
+        os.close(descriptor)
+
+
+def _capture_output_json(path: Path, field: str) -> tuple[dict[str, object], str, tuple[int, int, int, int, int]]:
+    raw, digest, identity = _capture_regular_bytes(path, field)
+    try:
+        values = json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        raise Step7AcceptanceError(field + " invalid JSON") from exc
+    if not isinstance(values, dict):
+        _fail(field + " must be object")
+    return values, digest, identity
+
+
+def _capture_output_parquet(path: Path) -> tuple[pd.DataFrame, str, tuple[int, int, int, int, int]]:
+    raw, digest, identity = _capture_regular_bytes(path, "output partition")
+    try:
+        frame = pd.read_parquet(io.BytesIO(raw))
+    except Exception as exc:
+        raise Step7AcceptanceError("output partition parquet unreadable") from exc
+    return frame, digest, identity
+
+
 def _guard_frozen_refs_inside_run_root(manifest_path: Path) -> Path:
     manifest = Path(manifest_path).resolve(strict=True)
     try:
@@ -95,10 +164,6 @@ def _guard_current_content_attestation(*, repo_root: Path, data_root: Path, mani
     if int(values.get("row_count") or -1) != current.row_count:
         raise Step7AcceptanceError("frozen raw current content-attestation row_count mismatch")
     return current
-
-
-def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
-    return (int(info.st_dev), int(info.st_ino), int(info.st_size), int(info.st_mtime_ns), int(info.st_ctime_ns))
 
 
 def _capture_frozen_frame(path: Path, expected_sha: str) -> tuple[pd.DataFrame, os.stat_result]:
@@ -312,8 +377,108 @@ def _oracle_technical(ohlcv: pd.DataFrame, source_run_id: str) -> pd.DataFrame:
     return out
 
 
+def _validate_manifest_quality(record: Mapping[str, object], run_root: Path) -> dict[str, object]:
+    partition = _inside_run(record.get("partition_path"), run_root, "partition_path")
+    manifest_path = _inside_run(record.get("manifest_path"), run_root, "manifest_path")
+    quality_path = _inside_run(record.get("quality_report_path"), run_root, "quality_report_path")
+    physical, partition_sha, partition_identity = _capture_output_parquet(partition)
+    manifest, manifest_sha, manifest_identity = _capture_output_json(manifest_path, "output manifest")
+    quality, quality_sha, quality_identity = _capture_output_json(quality_path, "output quality")
+    dataset_id = str(record.get("dataset_id") or "")
+    instrument_id = str(record.get("instrument_id") or "")
+    timeframe = str(record.get("timeframe") or "")
+    producer_run_id = str(record.get("run_id") or "")
+    evidence_rows = int(record.get("row_count") or -1)
+    if len(physical.index) != evidence_rows:
+        _fail("physical parquet row count differs from evidence record")
+    for values, name in ((manifest, "manifest"), (quality, "quality")):
+        if values.get("dataset_id") != dataset_id or values.get("instrument_id") != instrument_id or values.get("timeframe") != timeframe:
+            _fail(name + " output identity mismatch")
+        if values.get("run_id") != producer_run_id or values.get("quality_status") != "pass":
+            _fail(name + " run/quality mismatch")
+        if int(values.get("row_count") or -2) != len(physical.index):
+            _fail(name + " row_count does not match physical parquet")
+    if Path(str(manifest.get("partition_path") or "")).resolve() != partition.resolve():
+        _fail("manifest partition path mismatch")
+    if Path(str(manifest.get("quality_report_path") or "")).resolve() != quality_path.resolve():
+        _fail("manifest quality path mismatch")
+    if manifest.get("network_calls_used") is not False or manifest.get("latest_autodetect_used") is not False or manifest.get("continuous_series_used") is not False:
+        _fail("manifest execution boundary mismatch")
+    if not isinstance(record, dict):
+        _fail("output evidence record must be mutable object")
+    record["_validated_partition_sha256"] = partition_sha
+    record["_validated_manifest_sha256"] = manifest_sha
+    record["_validated_quality_report_sha256"] = quality_sha
+    record["_validated_partition_identity"] = partition_identity
+    record["_validated_manifest_identity"] = manifest_identity
+    record["_validated_quality_report_identity"] = quality_identity
+    return {
+        "record": record,
+        "partition": partition,
+        "manifest_path": manifest_path,
+        "quality_path": quality_path,
+        "manifest": manifest,
+        "quality": quality,
+        "physical": physical,
+        "partition_sha256": partition_sha,
+        "manifest_sha256": manifest_sha,
+        "quality_report_sha256": quality_sha,
+        "partition_identity": partition_identity,
+        "manifest_identity": manifest_identity,
+        "quality_report_identity": quality_identity,
+    }
+
+
 def validate_pilot(values: Mapping[str, object], *, run_id: str, repo_root: str | Path = ".") -> list[dict[str, object]]:
-    return _BASE_VALIDATE_PILOT(values, run_id=run_id, repo_root=repo_root)
+    validated = _BASE_VALIDATE_PILOT(values, run_id=run_id, repo_root=repo_root)
+    output_rows = values.get("outputs")
+    if not isinstance(output_rows, list) or len(output_rows) != 8:
+        _fail("pilot must have eight output records")
+    bound: dict[tuple[str, str, str], Mapping[str, object]] = {}
+    for record in output_rows:
+        if not isinstance(record, Mapping):
+            _fail("output evidence must be object")
+        key = (str(record.get("dataset_id") or ""), str(record.get("timeframe") or ""), str(record.get("instrument_id") or ""))
+        if key in bound:
+            _fail("duplicate output content binding key")
+        for field in (
+            "_validated_partition_sha256", "_validated_manifest_sha256", "_validated_quality_report_sha256",
+            "_validated_partition_identity", "_validated_manifest_identity", "_validated_quality_report_identity",
+        ):
+            if field not in record:
+                _fail("validated output content binding missing: " + field)
+        bound[key] = record
+    enriched: list[dict[str, object]] = []
+    for item in validated:
+        key = (str(item["dataset_id"]), str(item["timeframe"]), str(item["instrument_id"]))
+        record = bound.get(key)
+        if record is None:
+            _fail("validated output content binding key missing")
+        enriched.append({
+            **item,
+            "partition_sha256": record["_validated_partition_sha256"],
+            "manifest_sha256": record["_validated_manifest_sha256"],
+            "quality_report_sha256": record["_validated_quality_report_sha256"],
+            "partition_identity": tuple(record["_validated_partition_identity"]),
+            "manifest_identity": tuple(record["_validated_manifest_identity"]),
+            "quality_report_identity": tuple(record["_validated_quality_report_identity"]),
+        })
+    return enriched
+
+
+def _recheck_validated_output(item: Mapping[str, object]) -> None:
+    checks = (
+        ("partition", "partition_sha256", "partition_identity", "output partition"),
+        ("manifest_path", "manifest_sha256", "manifest_identity", "output manifest"),
+        ("quality_path", "quality_report_sha256", "quality_report_identity", "output quality"),
+    )
+    for path_field, sha_field, identity_field, label in checks:
+        path = Path(item[path_field])
+        _, digest, identity = _capture_regular_bytes(path, label + " pre-promotion recheck")
+        expected_sha = str(item.get(sha_field) or "").strip().lower()
+        expected_identity = tuple(item.get(identity_field) or ())
+        if len(expected_sha) != 64 or digest != expected_sha or identity != expected_identity:
+            _fail(label + " changed after validation")
 
 
 @contextmanager
@@ -369,8 +534,11 @@ def promote(*, run_id: str, repo_root: str | Path = ".") -> dict[str, object]:
                     "run_id": item["producer_run_id"],
                     "acceptance_run_id": checked_run,
                     "manifest_ref": _rooted_ref(item["manifest_path"]),
+                    "manifest_sha256": item["manifest_sha256"],
                     "quality_report_ref": _rooted_ref(item["quality_path"]),
+                    "quality_report_sha256": item["quality_report_sha256"],
                     "partition_ref": _rooted_ref(item["partition"]),
+                    "partition_sha256": item["partition_sha256"],
                     "quality_status": "pass",
                     "acceptance_contract_id": CONTRACT_ID,
                     "continuous_series_used": False,
@@ -385,6 +553,9 @@ def promote(*, run_id: str, repo_root: str | Path = ".") -> dict[str, object]:
                     "acceptance_run_id": checked_run,
                     "row_count": item["row_count"],
                     "pointer_path": pointer_path.as_posix(),
+                    "partition_sha256": item["partition_sha256"],
+                    "manifest_sha256": item["manifest_sha256"],
+                    "quality_report_sha256": item["quality_report_sha256"],
                     "physical_readback_passed": True,
                 })
             if len(summaries) != 8:
@@ -410,6 +581,9 @@ def promote(*, run_id: str, repo_root: str | Path = ".") -> dict[str, object]:
                 "independent_technical_oracle_required": True,
                 "physical_row_count_binding_required": True,
                 "contracted_build_ts_required": True,
+                "output_single_descriptor_capture_required": True,
+                "output_content_sha256_binding_required": True,
+                "output_identity_sha256_prewrite_recheck_required": True,
                 "continuous_series_used": False,
                 "si_cr_continuous_ready": False,
                 "weekly_oi_ready": False,
@@ -417,6 +591,10 @@ def promote(*, run_id: str, repo_root: str | Path = ".") -> dict[str, object]:
                 "research_ready": False,
             }
             records.append((marker, result))
+            if _sha_file(marker_path) != marker_sha:
+                _fail("Stage 2 content-attestation marker changed immediately before output recheck")
+            for item in validated:
+                _recheck_validated_output(item)
             if _sha_file(marker_path) != marker_sha:
                 _fail("Stage 2 content-attestation marker changed immediately before pointer writes")
             _BASE_TRANSACTIONAL_REPLACE(records)
