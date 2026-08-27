@@ -126,6 +126,7 @@ safety_policy:
 
 fail_closed_policy:
   unknown_input_keys_rejected: true
+  duplicate_json_object_members_rejected: true
   non_string_text_fields_rejected: true
   unsafe_identifier_tokens_rejected: true
   nonfinite_numeric_values_rejected: true
