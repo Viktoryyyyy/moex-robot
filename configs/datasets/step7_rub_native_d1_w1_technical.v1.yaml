@@ -44,10 +44,11 @@ input_freeze_policy:
   current_generation_partition_content_set_binding_required: true
   physical_revalidation_before_freeze: true
   per_partition_sha256_required: true
-  create_only_run_scoped_hardlink_required: true
-  validated_inode_binding_required: true
+  create_only_run_scoped_independent_inode_exact_byte_copy_required: true
+  source_descriptor_snapshot_stability_required: true
   frozen_sha256_recheck_required: true
   acceptance_revalidates_frozen_bytes: true
+  acceptance_hashes_and_parses_same_opened_byte_snapshot: true
 
 higher_timeframe_policy:
   d1:
@@ -101,6 +102,8 @@ technical_feature_policy:
   atr_windows:
     - 14
     - 20
+  zero_previous_close_denominator_policy: fail_closed_before_ratio_computation
+  emitted_numeric_feature_policy: finite_when_non_null
   future_rows_allowed: false
   unresolved_feature_policies:
     ema_filter:
