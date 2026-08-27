@@ -4,7 +4,7 @@ import argparse
 import json
 import re
 from datetime import date, datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -80,8 +80,8 @@ def _int(value: object, field: str, *, minimum: int | None = None, nonzero: bool
 
 
 def _decimal(value: object, field: str, *, minimum: Decimal | None = None, positive: bool = False) -> Decimal:
-    if isinstance(value, bool) or value is None:
-        _fail(field + " must be finite decimal")
+    if isinstance(value, (bool, float)) or value is None or not isinstance(value, (str, int, Decimal)):
+        _fail(field + " must be finite decimal without binary float coercion")
     try:
         result = Decimal(str(value))
     except (InvalidOperation, ValueError) as exc:
@@ -95,11 +95,31 @@ def _decimal(value: object, field: str, *, minimum: Decimal | None = None, posit
     return result
 
 
+def _sum_exact(values: Sequence[Decimal]) -> Decimal:
+    items = list(values)
+    if not items:
+        return Decimal("0")
+    minimum_exponent = min(item.as_tuple().exponent for item in items)
+    maximum_adjusted = max((item.adjusted() for item in items if item != 0), default=0)
+    carry_digits = len(str(len(items))) + 1
+    precision = max(1, maximum_adjusted - minimum_exponent + 1 + carry_digits)
+    with localcontext() as context:
+        context.prec = precision
+        total = Decimal("0")
+        for item in items:
+            total += item
+        return total
+
+
 def _decimal_text(value: Decimal) -> str:
     if value == 0:
         return "0"
-    text = format(value.normalize(), "f")
+    text = format(value, "f")
     return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def _reject_json_constant(token: str) -> None:
+    _fail("JSON numeric constant must be finite: " + token)
 
 
 def _utc_timestamp(value: object, field: str) -> str:
@@ -160,7 +180,7 @@ def _position(value: object, index: int) -> dict[str, Any]:
     fills_out: list[dict[str, Any]] = []
     fill_ids: set[str] = set()
     fill_contract_sum = 0
-    fill_commission_sum = Decimal("0")
+    fill_commissions: list[Decimal] = []
     for fill_index, fill_value in enumerate(_list(raw["fills"], field + ".fills")):
         fill_field = f"{field}.fills[{fill_index}]"
         fill = _mapping(fill_value, fill_field)
@@ -172,7 +192,7 @@ def _position(value: object, index: int) -> dict[str, Any]:
         fill_contracts = _int(fill["contracts"], fill_field + ".contracts", nonzero=True)
         commission = _decimal(fill["commission_rub"], fill_field + ".commission_rub", minimum=Decimal("0"))
         fill_contract_sum += fill_contracts
-        fill_commission_sum += commission
+        fill_commissions.append(commission)
         fills_out.append(
             {
                 "fill_id": fill_id,
@@ -183,6 +203,7 @@ def _position(value: object, index: int) -> dict[str, Any]:
             }
         )
 
+    fill_commission_sum = _sum_exact(fill_commissions)
     commission_total = _decimal(
         raw["commission_total_rub"],
         field + ".commission_total_rub",
@@ -341,10 +362,10 @@ def build_position_risk_state(payload: Mapping[str, Any]) -> dict[str, Any]:
     position_keys: set[tuple[str, str | None]] = set()
     current_gross = 0
     conservative_additional_gross = 0
-    total_invalidation_loss = Decimal("0")
-    total_commission = Decimal("0")
-    total_realized = Decimal("0")
-    total_unrealized = Decimal("0")
+    invalidation_losses: list[Decimal] = []
+    commissions: list[Decimal] = []
+    realized_pnls: list[Decimal] = []
+    unrealized_pnls: list[Decimal] = []
     for index, value in enumerate(_list(raw["positions"], "positions")):
         position = _position(value, index)
         if position["position_id"] in position_ids:
@@ -358,24 +379,29 @@ def build_position_risk_state(payload: Mapping[str, Any]) -> dict[str, Any]:
         conservative_additional_gross += sum(
             abs(int(item["contracts_delta"])) for item in position["tranches"]
         )
-        total_invalidation_loss += Decimal(str(position["invalidation"]["loss_rub"]))
-        total_commission += Decimal(str(position["commission_total_rub"]))
-        total_realized += Decimal(str(position["realized_pnl_rub"]))
-        total_unrealized += Decimal(str(position["unrealized_pnl_rub"]))
+        invalidation_losses.append(Decimal(str(position["invalidation"]["loss_rub"])))
+        commissions.append(Decimal(str(position["commission_total_rub"])))
+        realized_pnls.append(Decimal(str(position["realized_pnl_rub"])))
+        unrealized_pnls.append(Decimal(str(position["unrealized_pnl_rub"])))
         positions_out.append(position)
+
+    total_invalidation_loss = _sum_exact(invalidation_losses)
+    total_commission = _sum_exact(commissions)
+    total_realized = _sum_exact(realized_pnls)
+    total_unrealized = _sum_exact(unrealized_pnls)
 
     scenarios = _scenario_grid(raw["scenario_pnl_rub"])
     scenario_values = [Decimal(str(scenarios[key])) for key in SCENARIO_KEYS]
     scenario_values.append(Decimal(str(scenarios["gap"]["pnl_rub"])))
     worst_scenario_pnl = min(scenario_values)
     best_scenario_pnl = max(scenario_values)
-    worst_scenario_loss = max(Decimal("0"), -worst_scenario_pnl)
+    worst_scenario_loss = max(Decimal("0"), worst_scenario_pnl.copy_negate())
 
     planned_conservative_gross = current_gross + conservative_additional_gross
     current_headroom = max_total_contracts - current_gross
     planned_headroom = max_total_contracts - planned_conservative_gross
-    invalidation_headroom = max_allowed_loss - total_invalidation_loss
-    scenario_headroom = max_allowed_loss - worst_scenario_loss
+    invalidation_headroom = _sum_exact((max_allowed_loss, total_invalidation_loss.copy_negate()))
+    scenario_headroom = _sum_exact((max_allowed_loss, worst_scenario_loss.copy_negate()))
 
     return {
         "schema_version": OUTPUT_SCHEMA_VERSION,
@@ -456,7 +482,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        payload = json.loads(Path(args.input_json).read_text(encoding="utf-8"))
+        payload = json.loads(
+            Path(args.input_json).read_text(encoding="utf-8"),
+            parse_float=Decimal,
+            parse_constant=_reject_json_constant,
+        )
         result = build_position_risk_state(payload)
         encoded = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         if args.output_json:
