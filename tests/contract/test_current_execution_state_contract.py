@@ -76,20 +76,8 @@ def test_current_execution_state_uses_canonical_server_paths_only() -> None:
         "command_prefix=cd ~/moex_bot && source venv/bin/activate && cd moex-robot",
     ):
         assert line in lines
-
-    prefix, after_marker = text.split("Forbidden/deprecated paths:\n", 1)
-    forbidden, suffix = after_marker.split("\nRules:\n", 1)
-    forbidden_lines = _exact_lines(forbidden)
-    deprecated = {
-        "/home/trader/moex_bot/moex_robot",
-        "~/moex_bot/moex_robot",
-        "cd ~/moex_bot/moex_robot && source venv/bin/activate",
-    }
-    assert deprecated.issubset(forbidden_lines)
-
-    active_text = prefix + "\nRules:\n" + suffix
-    for path in deprecated:
-        assert path not in active_text
+    assert "moex_robot" not in text
+    assert "Forbidden/deprecated paths:" not in text
 
 
 def test_server_apply_template_is_exact_guarded_command() -> None:
