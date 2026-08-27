@@ -1,4 +1,4 @@
-from decimal import MAX_EMAX, MIN_EMIN, Decimal, localcontext
+from decimal import MAX_EMAX, MIN_EMIN, Decimal, Rounded, Subnormal, localcontext
 
 import pytest
 
@@ -39,6 +39,20 @@ def test_sum_exact_rejects_unrepresentable_absolute_boundary_fail_closed() -> No
 def test_sum_exact_preserves_small_exact_subnormal_with_sufficient_precision() -> None:
     value = Decimal(f"1e{MIN_EMIN - 3}")
     assert _sum_exact((value,)) == value
+
+
+def test_sum_exact_ignores_ambient_rounded_trap_for_exact_result() -> None:
+    value = Decimal("1.00E+5")
+    with localcontext() as context:
+        context.traps[Rounded] = True
+        assert _sum_exact((value,)) == value
+
+
+def test_sum_exact_ignores_ambient_subnormal_trap_for_exact_result() -> None:
+    value = Decimal(f"1e{MIN_EMIN - 3}")
+    with localcontext() as context:
+        context.traps[Subnormal] = True
+        assert _sum_exact((value,)) == value
 
 
 def test_sum_exact_rejects_extreme_subnormal_before_silent_underflow() -> None:
