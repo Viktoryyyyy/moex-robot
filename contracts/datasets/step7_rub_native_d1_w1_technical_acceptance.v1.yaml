@@ -40,7 +40,11 @@ validation_policy:
   frozen_raw_partition_inside_declared_run_root_required: true
   frozen_raw_partition_inside_declared_input_dataset_root_required: true
   frozen_raw_partition_sha256_recheck_required: true
+  frozen_raw_independent_inode_exact_byte_copy_required: true
+  frozen_raw_single_open_byte_snapshot_hash_and_parse_required: true
+  frozen_raw_descriptor_and_path_stat_stability_required: true
   frozen_raw_physical_revalidation_required: true
+  independent_oracle_must_consume_captured_validated_frame: true
   physical_quote_validation_must_not_depend_on_pre_promotion_stage2_status: true
   all_outputs_inside_declared_run_root: true
   physical_parquet_readback_required: true
@@ -54,13 +58,18 @@ validation_policy:
   source_lineage_sha256_required: true
   technical_source_identity_period_availability_exact_match_required: true
   technical_formula_recalculation_required: true
+  technical_zero_previous_close_denominator_rejected: true
+  technical_non_null_numeric_features_must_be_finite: true
   atr_wilder_seed_and_recurrence_recalculation_required: true
   no_future_rows_required: true
 promotion_policy:
   validate_all_before_pointer_writes: true
   pointer_run_id_source: referenced_manifest_run_id
   acceptance_run_id_stored_separately: true
-  pointer_promotion_mode: transactional_with_rollback
+  pointer_promotion_mode: serialized_transactional_with_rollback
+  stage7_publication_lock_required: true
+  stage2_content_attestation_lock_required_during_validation_and_commit: true
+  stage2_marker_identity_recheck_immediately_before_pointer_writes: true
   final_acceptance_marker_participates_in_same_transaction: true
   partial_pointer_set_without_acceptance_marker_is_not_accepted: true
 readiness_boundaries:
