@@ -48,6 +48,9 @@ validation_policy:
   physical_quote_validation_must_not_depend_on_pre_promotion_stage2_status: true
   all_outputs_inside_declared_run_root: true
   physical_parquet_readback_required: true
+  output_single_open_byte_snapshot_hash_and_parse_required: true
+  output_descriptor_and_path_stat_stability_required: true
+  output_partition_manifest_quality_sha256_required: true
   manifest_quality_identity_and_row_count_match_required: true
   d1_expected_rows:
     usdrubf_futures_family: 1100
@@ -70,6 +73,9 @@ promotion_policy:
   stage7_publication_lock_required: true
   stage2_content_attestation_lock_required_during_validation_and_commit: true
   stage2_marker_identity_recheck_immediately_before_pointer_writes: true
+  pointer_content_sha256_binding_required: true
+  acceptance_evidence_content_sha256_binding_required: true
+  output_identity_and_sha256_recheck_immediately_before_pointer_writes: true
   final_acceptance_marker_participates_in_same_transaction: true
   partial_pointer_set_without_acceptance_marker_is_not_accepted: true
 readiness_boundaries:
