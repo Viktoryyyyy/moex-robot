@@ -97,6 +97,28 @@ def test_freeze_uses_content_attested_snapshot_not_mutable_canonical(monkeypatch
     assert result["legacy_pointer_consumption_used"] is False
     assert result["content_attestation_generation_id"] == resolved["generation_id"]
     assert result["frozen_content_sha256"] == resolved["partition_content_set_sha256"]
+    assert result["freeze_method"] == "validated_descriptor_create_only_independent_inode_exact_byte_copy"
+    assert result["partitions"][0]["independent_inode_exact_byte_copy"] is True
+    assert snapshot.stat().st_ino != frozen.stat().st_ino
+
+
+def test_frozen_bytes_do_not_change_if_source_inode_is_mutated(monkeypatch, tmp_path: Path) -> None:
+    snapshot, _, _ = _attested_fixture(monkeypatch, tmp_path)
+    result = freeze.freeze_accepted_quote_history(
+        repo_root=tmp_path,
+        data_root=tmp_path,
+        run_root=tmp_path / "runs" / "step7_rub_native_d1_w1" / "run_id=independent",
+        instrument_id="usdrubf_futures_family",
+        start_date="2026-08-17",
+        end_date="2026-08-17",
+        run_id="independent_usdrub",
+    )
+    frozen = tmp_path / str(result["partitions"][0]["frozen_ref"])[len(freeze.ROOT_PREFIX):]
+    frozen_before = frozen.read_bytes()
+    snapshot.chmod(0o644)
+    snapshot.write_bytes(b"source-mutated-after-freeze")
+    assert frozen.read_bytes() == frozen_before
+    assert frozen.read_bytes() != snapshot.read_bytes()
 
 
 def test_freeze_rejects_content_attested_snapshot_sha_mismatch(monkeypatch, tmp_path: Path) -> None:
