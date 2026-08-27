@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import stat
@@ -198,6 +199,10 @@ def quote_validation_expectation(instrument_id: str, start_date: str, end_date: 
     )
 
 
+def _stat_identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (int(info.st_dev), int(info.st_ino), int(info.st_size), int(info.st_mtime_ns), int(info.st_ctime_ns))
+
+
 def _freeze_attested_record(*, repo_root: Path, data_root: Path, source_record: Mapping[str, object], instrument_id: str, freeze_root: Path, validation_run_id: str, expectation: stage2.HistoryExpectation) -> dict[str, object]:
     trade_date = _iso_date(source_record.get("trade_date"), "content-attested trade_date")
     source = Path(str(source_record.get("snapshot_path") or "")).resolve(strict=True)
@@ -216,32 +221,47 @@ def _freeze_attested_record(*, repo_root: Path, data_root: Path, source_record: 
         opened_stat = os.fstat(fd)
         if not stat.S_ISREG(opened_stat.st_mode):
             _fail("content-attested snapshot fd is not regular")
-        with os.fdopen(os.dup(fd), "rb") as handle:
-            frame = pd.read_parquet(handle)
-        rows, secids = stage2._validate_quote_partition(repo_root, frame, expectation, trade_date, validation_run_id)
-        source_sha = hashlib.sha256()
+        chunks: list[bytes] = []
         os.lseek(fd, 0, os.SEEK_SET)
         while True:
             block = os.read(fd, 1024 * 1024)
             if not block:
                 break
-            source_sha.update(block)
-        if source_sha.hexdigest() != expected_sha:
+            chunks.append(block)
+        raw = b"".join(chunks)
+        after_read = os.fstat(fd)
+        current_stat = os.stat(source, follow_symlinks=False)
+        if _stat_identity(opened_stat) != _stat_identity(after_read) or _stat_identity(opened_stat) != _stat_identity(current_stat) or len(raw) != int(opened_stat.st_size):
+            _fail("content-attested snapshot changed during validated byte capture")
+        actual_sha = hashlib.sha256(raw).hexdigest()
+        if actual_sha != expected_sha:
             _fail("content-attested snapshot SHA-256 differs from generation evidence")
+        try:
+            frame = pd.read_parquet(io.BytesIO(raw))
+        except Exception as exc:
+            raise Step7RawFreezeError("content-attested snapshot parquet unreadable: " + trade_date) from exc
+        rows, secids = stage2._validate_quote_partition(repo_root, frame, expectation, trade_date, validation_run_id)
         if int(source_record.get("row_count") or -1) != int(rows):
             _fail("content-attested snapshot row-count evidence mismatch")
-        current_stat = os.stat(source, follow_symlinks=False)
-        if (current_stat.st_dev, current_stat.st_ino) != (opened_stat.st_dev, opened_stat.st_ino):
-            _fail("content-attested snapshot changed during validation")
+
         target = freeze_root / ("instrument_id=" + instrument_id) / ("trade_date=" + trade_date) / "part.parquet"
         target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists():
-            _fail("immutable frozen raw target already exists")
-        os.link(source, target, follow_symlinks=False)
-        frozen_stat = os.stat(target, follow_symlinks=False)
-        if (frozen_stat.st_dev, frozen_stat.st_ino) != (opened_stat.st_dev, opened_stat.st_ino):
+        try:
+            target_fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o444)
+        except FileExistsError as exc:
+            raise Step7RawFreezeError("immutable frozen raw target already exists") from exc
+        try:
+            view = memoryview(raw)
+            written = 0
+            while written < len(view):
+                written += os.write(target_fd, view[written:])
+            os.fsync(target_fd)
+            frozen_stat = os.fstat(target_fd)
+        finally:
+            os.close(target_fd)
+        if (frozen_stat.st_dev, frozen_stat.st_ino) == (opened_stat.st_dev, opened_stat.st_ino):
             target.unlink(missing_ok=True)
-            _fail("frozen hardlink is not bound to validated content-attested inode")
+            _fail("frozen copy unexpectedly shares source inode")
         if _sha_file(target) != expected_sha:
             target.unlink(missing_ok=True)
             _fail("frozen partition hash mismatch")
@@ -254,8 +274,19 @@ def _freeze_attested_record(*, repo_root: Path, data_root: Path, source_record: 
             "content_attested_snapshot_ref": str(source_record.get("snapshot_ref") or ""),
             "canonical_source_ref": str(source_record.get("canonical_ref") or ""),
             "frozen_ref": _rooted_ref(data_root, target),
-            "validated_inode": {"st_dev": int(opened_stat.st_dev), "st_ino": int(opened_stat.st_ino)},
-            "hardlink_same_validated_inode": True,
+            "validated_source_identity": {
+                "st_dev": int(opened_stat.st_dev),
+                "st_ino": int(opened_stat.st_ino),
+                "st_size": int(opened_stat.st_size),
+                "st_mtime_ns": int(opened_stat.st_mtime_ns),
+                "st_ctime_ns": int(opened_stat.st_ctime_ns),
+            },
+            "frozen_identity": {
+                "st_dev": int(frozen_stat.st_dev),
+                "st_ino": int(frozen_stat.st_ino),
+                "st_size": int(frozen_stat.st_size),
+            },
+            "independent_inode_exact_byte_copy": True,
         }
     finally:
         os.close(fd)
@@ -332,7 +363,7 @@ def freeze_accepted_quote_history(*, repo_root: str | Path, data_root: str | Pat
         "row_count": sum(int(row["row_count"]) for row in records),
         "missing_dates": list(scope.missing_dates),
         "frozen_content_sha256": content_digest,
-        "freeze_method": "validated_inode_create_only_hardlink",
+        "freeze_method": "validated_descriptor_create_only_independent_inode_exact_byte_copy",
         "source_mode": "stage2_content_attested_generation_snapshots_only",
         "legacy_pointer_consumption_used": False,
         "mutable_canonical_raw_read_after_freeze_allowed": False,
