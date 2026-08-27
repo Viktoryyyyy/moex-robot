@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 import sys
@@ -185,3 +186,48 @@ def test_stage7_oracle_technical_rejects_zero_previous_close() -> None:
         })
     with pytest.raises(ValueError, match="previous close denominator is zero"):
         acceptance_base._oracle_technical(pd.DataFrame(rows), "fixture")
+
+
+def test_stage7_output_parquet_hash_and_parse_use_same_captured_bytes(tmp_path: Path) -> None:
+    partition = tmp_path / "part.parquet"
+    pd.DataFrame({"value": [1, 2, 3]}).to_parquet(partition, index=False)
+    raw = partition.read_bytes()
+    frame, digest, identity = acceptance_base._capture_output_parquet(partition)
+    assert frame["value"].tolist() == [1, 2, 3]
+    assert digest == hashlib.sha256(raw).hexdigest()
+    assert identity[2] == len(raw)
+
+
+def test_stage7_output_path_rejects_symlink(tmp_path: Path) -> None:
+    run_root = tmp_path / "run_id=guard"
+    run_root.mkdir()
+    target = run_root / "target.json"
+    target.write_text("{}", encoding="utf-8")
+    link = run_root / "link.json"
+    link.symlink_to(target)
+    with pytest.raises(ValueError, match="regular non-symlink"):
+        acceptance_base._inside_run(link.as_posix(), run_root, "output")
+
+
+def test_stage7_output_recheck_rejects_replaced_validated_bytes(tmp_path: Path) -> None:
+    paths = {
+        "partition": tmp_path / "part.parquet",
+        "manifest_path": tmp_path / "manifest.json",
+        "quality_path": tmp_path / "quality.json",
+    }
+    paths["partition"].write_bytes(b"partition-v1")
+    paths["manifest_path"].write_bytes(b"manifest-v1")
+    paths["quality_path"].write_bytes(b"quality-v1")
+    item: dict[str, object] = dict(paths)
+    for path_field, sha_field, identity_field, label in (
+        ("partition", "partition_sha256", "partition_identity", "partition"),
+        ("manifest_path", "manifest_sha256", "manifest_identity", "manifest"),
+        ("quality_path", "quality_report_sha256", "quality_report_identity", "quality"),
+    ):
+        _, digest, identity = acceptance_base._capture_regular_bytes(Path(item[path_field]), label)
+        item[sha_field] = digest
+        item[identity_field] = identity
+    acceptance_base._recheck_validated_output(item)
+    paths["partition"].write_bytes(b"partition-v2")
+    with pytest.raises(ValueError, match="changed after validation"):
+        acceptance_base._recheck_validated_output(item)
