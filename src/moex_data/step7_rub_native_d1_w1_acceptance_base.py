@@ -166,6 +166,47 @@ def _guard_current_content_attestation(*, repo_root: Path, data_root: Path, mani
     return current
 
 
+def _current_snapshot_records(current: object) -> dict[str, Mapping[str, object]]:
+    records = getattr(current, "records", ())
+    accepted_dates = tuple(str(value) for value in getattr(current, "accepted_dates", ()))
+    if not isinstance(records, tuple) or len(records) != len(accepted_dates) or not records:
+        _fail("current content-attested snapshot records missing/count mismatch")
+    by_date: dict[str, Mapping[str, object]] = {}
+    ordered_dates: list[str] = []
+    for record in records:
+        if not isinstance(record, Mapping):
+            _fail("current content-attested snapshot record must be object")
+        trade_date = str(record.get("trade_date") or "")
+        if not trade_date or trade_date in by_date:
+            _fail("current content-attested snapshot record date set invalid")
+        by_date[trade_date] = record
+        ordered_dates.append(trade_date)
+    if tuple(ordered_dates) != accepted_dates:
+        _fail("current content-attested snapshot record order/date set mismatch")
+    return by_date
+
+
+def _capture_current_snapshot_identity(*, data_root: Path, current_record: Mapping[str, object], trade_date: str, expected_sha: str) -> tuple[int, int, int, int, int]:
+    if str(current_record.get("trade_date") or "") != trade_date:
+        _fail("current content-attested snapshot trade_date mismatch")
+    current_sha = str(current_record.get("sha256") or "").strip().lower()
+    if len(current_sha) != 64 or current_sha != expected_sha:
+        _fail("current content-attested snapshot SHA-256 evidence mismatch")
+    raw_path = Path(str(current_record.get("snapshot_path") or ""))
+    if not raw_path.is_absolute():
+        _fail("current content-attested snapshot path must be absolute")
+    try:
+        parent = raw_path.parent.resolve(strict=True)
+        snapshot_path = parent / raw_path.name
+        snapshot_path.relative_to(data_root.resolve(strict=True))
+    except (OSError, ValueError) as exc:
+        raise Step7AcceptanceError("current content-attested snapshot escaped MOEX_DATA_ROOT") from exc
+    _, digest, identity = _capture_regular_bytes(snapshot_path, "current content-attested snapshot")
+    if digest != current_sha:
+        _fail("current content-attested snapshot SHA-256 differs from current generation evidence")
+    return identity
+
+
 def _capture_frozen_frame(path: Path, expected_sha: str) -> tuple[pd.DataFrame, os.stat_result]:
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     descriptor = os.open(path, flags)
@@ -224,6 +265,7 @@ def _revalidate_frozen(*, repo_root: Path, data_root: Path, manifest_path: Path,
         expected_partitions=len(current.accepted_dates),
         expected_rows=current.row_count,
     )
+    current_by_date = _current_snapshot_records(current)
     expected_secid = EXPECTED_SECID[instrument_id]
     physical_records: list[dict[str, object]] = []
     content_lines: list[str] = []
@@ -248,11 +290,17 @@ def _revalidate_frozen(*, repo_root: Path, data_root: Path, manifest_path: Path,
         if len(expected_sha) != 64:
             _fail("frozen raw partition SHA-256 missing")
         frame, frozen_stat = _capture_frozen_frame(path, expected_sha)
-        source_identity = record.get("validated_source_identity")
-        if not isinstance(source_identity, Mapping):
-            _fail("validated source identity evidence missing")
-        if (int(frozen_stat.st_dev), int(frozen_stat.st_ino)) == (int(source_identity.get("st_dev") or -1), int(source_identity.get("st_ino") or -1)):
-            _fail("frozen raw copy shares content-attested source inode")
+        current_record = current_by_date.get(trade_date)
+        if current_record is None:
+            _fail("current content-attested snapshot record missing for frozen trade_date")
+        current_identity = _capture_current_snapshot_identity(
+            data_root=data_root,
+            current_record=current_record,
+            trade_date=trade_date,
+            expected_sha=expected_sha,
+        )
+        if (int(frozen_stat.st_dev), int(frozen_stat.st_ino)) == (int(current_identity[0]), int(current_identity[1])):
+            _fail("frozen raw copy shares live content-attested snapshot inode")
         rows, secids = stage2._validate_quote_partition(repo_root, frame, expectation, trade_date, validation_run_id)
         if int(rows) != int(record.get("row_count") or -1):
             _fail("frozen raw physical row_count mismatch")
