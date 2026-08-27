@@ -14,6 +14,11 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def test_iso_date_rejects_datetime_string() -> None:
+    with pytest.raises(freeze.Step7RawFreezeError, match="must be YYYY-MM-DD"):
+        freeze._iso_date("2026-08-17T00:00:00", "trade_date")
+
+
 def _attested_fixture(monkeypatch, tmp_path: Path, *, expected_sha: str | None = None) -> tuple[Path, Path, dict[str, object]]:
     monkeypatch.setenv("MOEX_DATA_ROOT", tmp_path.as_posix())
     instrument = "usdrubf_futures_family"
