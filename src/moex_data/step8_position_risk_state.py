@@ -4,7 +4,7 @@ import argparse
 import json
 import re
 from datetime import date, datetime, timezone
-from decimal import Decimal, InvalidOperation, localcontext
+from decimal import MAX_EMAX, MIN_EMIN, Decimal, InvalidOperation, localcontext
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -96,15 +96,18 @@ def _decimal(value: object, field: str, *, minimum: Decimal | None = None, posit
 
 
 def _sum_exact(values: Sequence[Decimal]) -> Decimal:
-    items = list(values)
+    items = [item for item in values if item != 0]
     if not items:
         return Decimal("0")
     minimum_exponent = min(item.as_tuple().exponent for item in items)
-    maximum_adjusted = max((item.adjusted() for item in items if item != 0), default=0)
+    maximum_adjusted = max(item.adjusted() for item in items)
     carry_digits = len(str(len(items))) + 1
     precision = max(1, maximum_adjusted - minimum_exponent + 1 + carry_digits)
     with localcontext() as context:
         context.prec = precision
+        context.Emax = MAX_EMAX
+        context.Emin = MIN_EMIN
+        context.clamp = 0
         total = Decimal("0")
         for item in items:
             total += item
