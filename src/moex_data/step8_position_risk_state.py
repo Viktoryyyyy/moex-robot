@@ -122,16 +122,38 @@ def _reject_json_constant(token: str) -> None:
     _fail("JSON numeric constant must be finite: " + token)
 
 
+def _reject_duplicate_json_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            _fail("duplicate JSON object member: " + key)
+        result[key] = value
+    return result
+
+
 def _utc_timestamp(value: object, field: str) -> str:
     text = _text(value, field)
-    normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+    if re.search(r"[+-]\d{2}:\d{2}\Z", text) and not text.endswith("+00:00"):
+        _fail(field + " must be UTC timestamp")
+    match = re.fullmatch(
+        r"(?P<date>\d{4}-\d{2}-\d{2})T"
+        r"(?P<hour>\d{2}):(?P<minute>\d{2}):(?P<second>\d{2})"
+        r"(?P<fraction>\.\d+)?(?P<tz>Z|\+00:00)",
+        text,
+    )
+    if match is None:
+        _fail(field + " must be ISO-8601 UTC timestamp")
     try:
-        parsed = datetime.fromisoformat(normalized)
+        datetime.fromisoformat(
+            f"{match.group('date')}T{match.group('hour')}:{match.group('minute')}:{match.group('second')}+00:00"
+        )
     except ValueError as exc:
         raise Step8PositionRiskError(field + " must be ISO-8601 UTC timestamp") from exc
-    if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
-        _fail(field + " must be UTC timestamp")
-    return parsed.astimezone(timezone.utc).isoformat()
+    fraction = match.group("fraction") or ""
+    return (
+        f"{match.group('date')}T{match.group('hour')}:{match.group('minute')}:{match.group('second')}"
+        f"{fraction}+00:00"
+    )
 
 
 def _iso_date_or_none(value: object, field: str) -> str | None:
@@ -486,6 +508,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             Path(args.input_json).read_text(encoding="utf-8"),
             parse_float=Decimal,
             parse_constant=_reject_json_constant,
+            object_pairs_hook=_reject_duplicate_json_members,
         )
         result = build_position_risk_state(payload)
         encoded = json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
