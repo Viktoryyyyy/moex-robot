@@ -1,0 +1,118 @@
+config_id: step9_rub_analysis_bundle.v1
+status: implementation_candidate
+purpose: >
+  Deterministic read-only daily/weekly RUB analysis evidence bundle built only
+  from canonical accepted Stage 3/4/5/7 pointers plus an optional explicit
+  Stage 8 manual/read-only position-risk input.
+
+interface:
+  module: moex_data.step9_rub_analysis_bundle
+  scopes:
+    - daily
+    - weekly
+  as_of_required: true
+  as_of_timezone_aware_required: true
+  position_risk_input_mode: explicit_file_only
+  fastapi_dependency_required: false
+  network_calls_allowed: false
+  broker_write_access_allowed: false
+
+upstream:
+  step3:
+    config_ref: configs/datasets/step3_canonical_raw.v1.yaml
+    accepted_pointer_ready_required: true
+    daily_weekly_required_pointer_count: 10
+  step4:
+    config_ref: configs/datasets/step4_rub_basis_carry.v1.yaml
+    accepted_pointer_ready_required: true
+    daily_weekly_required_pointer_count: 2
+  step5:
+    config_ref: configs/datasets/step5_futoi_positioning.v1.yaml
+    accepted_pointer_ready_required: true
+    daily_weekly_required_pointer_count: 4
+  step7:
+    config_ref: configs/datasets/step7_rub_native_d1_w1_technical.v1.yaml
+    accepted_pointer_ready_required: true
+    daily_required_pointer_count: 4
+    weekly_required_pointer_count: 8
+  step8:
+    config_ref: configs/datasets/step8_position_risk_state.v1.yaml
+    accepted_pointer_required: false
+    explicit_input_optional: true
+    missing_input_status: not_supplied
+
+pointer_policy:
+  deterministic_contract_path_only: true
+  latest_autodetect_allowed: false
+  directory_scan_allowed: false
+  mutable_physical_file_discovery_allowed: false
+  unaccepted_partition_read_allowed: false
+  pointer_file_symlink_allowed: false
+  rooted_refs_only: true
+  rooted_ref_prefix: "${MOEX_DATA_ROOT}/"
+  root_escape_allowed: false
+  referenced_file_symlink_allowed: false
+  sha256_revalidated_when_pointer_supplies_hash: true
+  quality_status_pass_required: true
+  duplicate_json_object_members_rejected: true
+
+causality:
+  explicit_as_of_required: true
+  future_observation_allowed: false
+  fall_forward_allowed: false
+  availability_field_required_when_contract_defines_one: true
+  fields:
+    futures_raw_5m: ts
+    futures_open_interest_raw_5m: availability_ts_utc
+    fx_spot_raw_5m: ts
+    rub_basis_carry_5m: ts
+    futures_futoi_eod: availability_ts_utc
+    futures_futoi_positioning_features_d1: availability_ts_utc
+    rub_native_ohlcv_htf: availability_ts_utc
+    rub_technical_features_htf: availability_ts_utc
+
+scope_counts:
+  daily_server_core_blocks: 20
+  weekly_server_core_blocks: 24
+
+external_context:
+  server_ready_claimed: false
+  required_blocks:
+    - macro_ru
+    - government_fx_operations_and_tax_cycle
+    - official_event_calendar_and_surprises
+    - fresh_news_and_geopolitics
+    - oil_brent_urals
+    - global_usd_usd_cny_cnh_dxy_ust
+
+weekly_policy_gaps:
+  preserve_as_not_ready:
+    - si_cr_continuous_weekly
+    - weekly_open_interest
+    - ema_filter
+    - realized_volatility
+    - range_percentile
+    - swing_high_low
+    - break_of_structure
+
+forbidden_outputs:
+  - trade_recommendation
+  - scenario_probability
+  - market_regime_generation
+  - position_size_generation
+  - stop_generation
+  - target_generation
+  - price_based_futures_pnl_recalculation
+
+readiness_flags:
+  implementation_ready: true
+  deterministic_pointer_resolution_ready: true
+  causal_as_of_selection_ready: true
+  explicit_stage8_integration_ready: true
+  fastapi_endpoint_ready: false
+  external_context_cache_ready: false
+  si_cr_continuous_weekly_ready: false
+  weekly_oi_ready: false
+  advanced_technical_policy_ready: false
+  scheduler_ready: false
+  research_ready: false
