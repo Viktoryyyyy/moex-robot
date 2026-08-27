@@ -36,7 +36,8 @@ Rules:
 - no heredoc for phone execution;
 - do not invent server paths;
 - server apply is allowed only for an exact merged GitHub SHA;
-- stop on dirty working tree, non-`main` branch, origin/main SHA mismatch or non-fast-forward state.
+- stop on dirty working tree, non-`main` branch, origin/main SHA mismatch or non-fast-forward state;
+- pilot/acceptance launch guards run in the foreground; only the `nohup` process may be backgrounded.
 
 ## 2. Canonical server apply command template
 
@@ -160,9 +161,9 @@ advanced_technical_policy_ready: false
 
 The readiness contract test parses typed YAML values; substring checks are forbidden because `11000`, `2240` or `80` must not satisfy the `1100`, `224` or `8` invariants.
 
-## 5. Stage 7 exact server commands used
+## 5. Stage 7 canonical server command forms
 
-These are historical verified commands for the completed Stage 7 run. Do not rerun immutable pilot/acceptance commands unless a new task explicitly requires a new run ID.
+The commands below are pinned to the completed Stage 7 implementation SHA. They document the safe launch form for the completed run. The immutable run ID must not be reused. Any future pilot must use a new approved run ID and an exact approved implementation SHA.
 
 ### 5.1 Apply Stage 7 implementation SHA
 
@@ -172,8 +173,10 @@ cd ~/moex_bot && source venv/bin/activate && cd moex-robot && test -z "$(git sta
 
 ### 5.2 Physical pilot start
 
+All checkout/run guards execute in the foreground. Only the `nohup` runner is backgrounded.
+
 ```bash
-cd ~/moex_bot && source venv/bin/activate && cd moex-robot && test ! -e /home/trader/moex_bot/data/runs/step7_rub_native_d1_w1/run_id=step7_pilot_20260827_v1 && test ! -e /home/trader/moex_bot/data/state/acceptance/step7_rub_native_d1_w1/run_id=step7_pilot_20260827_v1 && test ! -e /home/trader/moex_bot/step7_pilot_20260827_v1.log && nohup env MOEX_DATA_ROOT=/home/trader/moex_bot/data PYTHONPATH=src python -m moex_data.step7_rub_native_d1_w1_pilot_runner --artifact-version step7_pilot_20260827_v1 --env-file /home/trader/moex_bot/.env > /home/trader/moex_bot/step7_pilot_20260827_v1.log 2>&1 < /dev/null & echo PROJECT=MOEX_Bot STATUS=STAGE7_V1_STARTED PID=$!
+cd ~/moex_bot && source venv/bin/activate && cd moex-robot && test -z "$(git status --porcelain)" && test "$(git branch --show-current)" = "main" && test "$(git rev-parse HEAD)" = "21b57e54e993dd63f9f3a8b772bb39f39508db5e" && test ! -e /home/trader/moex_bot/data/runs/step7_rub_native_d1_w1/run_id=step7_pilot_20260827_v1 && test ! -e /home/trader/moex_bot/data/state/acceptance/step7_rub_native_d1_w1/run_id=step7_pilot_20260827_v1 && test ! -e /home/trader/moex_bot/step7_pilot_20260827_v1.log && (nohup env MOEX_DATA_ROOT=/home/trader/moex_bot/data PYTHONPATH=src python -m moex_data.step7_rub_native_d1_w1_pilot_runner --artifact-version step7_pilot_20260827_v1 --env-file /home/trader/moex_bot/.env > /home/trader/moex_bot/step7_pilot_20260827_v1.log 2>&1 < /dev/null & pid=$!; echo PROJECT=MOEX_Bot STATUS=STAGE7_V1_STARTED PID=$pid)
 ```
 
 Pilot result log:
@@ -184,8 +187,10 @@ cat /home/trader/moex_bot/step7_pilot_20260827_v1.log
 
 ### 5.3 Acceptance start
 
+Acceptance uses the same clean-tree, `main`, and exact implementation SHA guards. Only the `nohup` process is backgrounded.
+
 ```bash
-cd ~/moex_bot && source venv/bin/activate && cd moex-robot && test "$(git rev-parse HEAD)" = "21b57e54e993dd63f9f3a8b772bb39f39508db5e" && test ! -e /home/trader/moex_bot/data/state/acceptance/step7_rub_native_d1_w1/run_id=step7_pilot_20260827_v1/accepted_pointers.json && test ! -e /home/trader/moex_bot/step7_accept_20260827_v1.log && nohup env MOEX_DATA_ROOT=/home/trader/moex_bot/data PYTHONPATH=src python -m moex_data.step7_rub_native_d1_w1_acceptance --run-id step7_pilot_20260827_v1 --repo-root . --env-file /home/trader/moex_bot/.env > /home/trader/moex_bot/step7_accept_20260827_v1.log 2>&1 < /dev/null & echo PROJECT=MOEX_Bot STATUS=STAGE7_ACCEPTANCE_STARTED PID=$!
+cd ~/moex_bot && source venv/bin/activate && cd moex-robot && test -z "$(git status --porcelain)" && test "$(git branch --show-current)" = "main" && test "$(git rev-parse HEAD)" = "21b57e54e993dd63f9f3a8b772bb39f39508db5e" && test ! -e /home/trader/moex_bot/data/state/acceptance/step7_rub_native_d1_w1/run_id=step7_pilot_20260827_v1/accepted_pointers.json && test ! -e /home/trader/moex_bot/step7_accept_20260827_v1.log && (nohup env MOEX_DATA_ROOT=/home/trader/moex_bot/data PYTHONPATH=src python -m moex_data.step7_rub_native_d1_w1_acceptance --run-id step7_pilot_20260827_v1 --repo-root . --env-file /home/trader/moex_bot/.env > /home/trader/moex_bot/step7_accept_20260827_v1.log 2>&1 < /dev/null & pid=$!; echo PROJECT=MOEX_Bot STATUS=STAGE7_ACCEPTANCE_STARTED PID=$pid)
 ```
 
 Acceptance result log:
