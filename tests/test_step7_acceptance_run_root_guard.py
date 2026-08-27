@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from moex_data import step7_rub_native_d1_w1_acceptance as acceptance
+from moex_data import step7_rub_native_d1_w1_acceptance_base as acceptance_base
 
 ROOT_PREFIX = "${MOEX_DATA_ROOT}/"
 
@@ -24,13 +25,21 @@ def _manifest(root: Path, frozen_ref: str, **extra) -> Path:
     return manifest
 
 
+def test_stage7_wrapper_and_base_share_hardened_surfaces() -> None:
+    assert acceptance.promote is acceptance_base.promote
+    assert acceptance.validate_pilot is acceptance_base.validate_pilot
+    assert acceptance._revalidate_frozen is acceptance_base._revalidate_frozen
+    assert acceptance._oracle_d1 is acceptance_base._oracle_d1
+    assert acceptance._oracle_technical is acceptance_base._oracle_technical
+
+
 def test_stage7_guard_accepts_frozen_partition_inside_declared_run_root(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("MOEX_DATA_ROOT", tmp_path.as_posix())
     frozen = tmp_path / "runs" / "step7_rub_native_d1_w1" / "run_id=guard" / "inputs" / "dataset_id=futures_raw_5m" / "instrument_id=usdrubf_futures_family" / "trade_date=2026-08-17" / "part.parquet"
     frozen.parent.mkdir(parents=True, exist_ok=True)
     frozen.write_bytes(b"fixture")
     manifest = _manifest(tmp_path, _rooted(tmp_path, frozen))
-    assert acceptance._guard_frozen_refs_inside_run_root(manifest).name == "run_id=guard"
+    assert acceptance_base._guard_frozen_refs_inside_run_root(manifest).name == "run_id=guard"
 
 
 def test_stage7_guard_rejects_frozen_partition_outside_declared_run_root(monkeypatch, tmp_path: Path) -> None:
@@ -40,7 +49,7 @@ def test_stage7_guard_rejects_frozen_partition_outside_declared_run_root(monkeyp
     escaped.write_bytes(b"fixture")
     manifest = _manifest(tmp_path, _rooted(tmp_path, escaped))
     with pytest.raises(ValueError, match="escaped approved root|escaped immutable Stage 7 input root"):
-        acceptance._guard_frozen_refs_inside_run_root(manifest)
+        acceptance_base._guard_frozen_refs_inside_run_root(manifest)
 
 
 def _current_scope() -> SimpleNamespace:
@@ -85,8 +94,8 @@ def _content_manifest(root: Path, *, marker_sha: str = "a" * 64) -> Path:
 def test_stage7_acceptance_requires_exact_current_content_attestation(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("MOEX_DATA_ROOT", tmp_path.as_posix())
     manifest = _content_manifest(tmp_path)
-    monkeypatch.setattr(acceptance, "accepted_quote_history", lambda *args, **kwargs: _current_scope())
-    acceptance._guard_current_content_attestation(
+    monkeypatch.setattr(acceptance_base, "_content_attested_history", lambda *args, **kwargs: _current_scope())
+    acceptance_base._guard_current_content_attestation(
         repo_root=tmp_path,
         data_root=tmp_path,
         manifest_path=manifest,
@@ -99,9 +108,9 @@ def test_stage7_acceptance_requires_exact_current_content_attestation(monkeypatc
 def test_stage7_acceptance_rejects_stale_content_attestation_marker(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("MOEX_DATA_ROOT", tmp_path.as_posix())
     manifest = _content_manifest(tmp_path, marker_sha="f" * 64)
-    monkeypatch.setattr(acceptance, "accepted_quote_history", lambda *args, **kwargs: _current_scope())
+    monkeypatch.setattr(acceptance_base, "_content_attested_history", lambda *args, **kwargs: _current_scope())
     with pytest.raises(ValueError, match="content_attestation_marker_sha256"):
-        acceptance._guard_current_content_attestation(
+        acceptance_base._guard_current_content_attestation(
             repo_root=tmp_path,
             data_root=tmp_path,
             manifest_path=manifest,
@@ -122,8 +131,8 @@ def test_stage7_current_attestation_uses_explicit_repo_root(monkeypatch, tmp_pat
         seen["repo_root"] = Path(repo_root).resolve()
         return _current_scope()
 
-    monkeypatch.setattr(acceptance, "accepted_quote_history", fake_current)
-    acceptance._guard_current_content_attestation(
+    monkeypatch.setattr(acceptance_base, "_content_attested_history", fake_current)
+    acceptance_base._guard_current_content_attestation(
         repo_root=explicit_repo,
         data_root=tmp_path,
         manifest_path=manifest,
@@ -136,7 +145,7 @@ def test_stage7_current_attestation_uses_explicit_repo_root(monkeypatch, tmp_pat
 
 def test_stage7_oracle_d1_requires_captured_validated_frame() -> None:
     with pytest.raises(ValueError, match="requires captured validated frame"):
-        acceptance._oracle_d1(
+        acceptance_base._oracle_d1(
             [{"trade_date": "2026-08-17", "sha256": "a" * 64}],
             "usdrubf_futures_family",
         )
@@ -160,4 +169,4 @@ def test_stage7_oracle_technical_rejects_zero_previous_close() -> None:
             "close": close,
         })
     with pytest.raises(ValueError, match="previous close denominator is zero"):
-        acceptance._oracle_technical(pd.DataFrame(rows), "fixture")
+        acceptance_base._oracle_technical(pd.DataFrame(rows), "fixture")
