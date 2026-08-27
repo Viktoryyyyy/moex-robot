@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-import yaml
+import re
 
 from moex_data import step9_rub_analysis_bundle as bundle
 
@@ -14,6 +14,39 @@ from moex_data import step9_rub_analysis_bundle as bundle
 AS_OF = "2026-08-27T12:00:00+00:00"
 PAST = "2026-08-26T10:00:00+00:00"
 FUTURE = "2026-08-28T10:00:00+00:00"
+
+
+def _parse_scalar(raw: str) -> object:
+    value = raw.strip()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    if re.fullmatch(r"-?\d+", value):
+        return int(value)
+    if value.startswith('"') and value.endswith('"'):
+        return json.loads(value)
+    return value
+
+
+def _parse_scalar_mapping(text: str, header: str, child_indent: int) -> dict[str, object]:
+    lines = text.splitlines()
+    try:
+        start = lines.index(header) + 1
+    except ValueError as exc:
+        raise AssertionError("missing mapping header: " + header) from exc
+    values: dict[str, object] = {}
+    for line in lines[start:]:
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if indent < child_indent:
+            break
+        if indent != child_indent or ":" not in line:
+            raise AssertionError("unexpected nested/non-scalar YAML under " + header + ": " + line)
+        key, raw = line.strip().split(":", 1)
+        values[key] = _parse_scalar(raw)
+    return values
 
 
 def _sha(path: Path) -> str:
@@ -285,25 +318,37 @@ def test_output_is_deterministic_for_identical_inputs(tmp_path, monkeypatch):
 
 
 def test_typed_stage9_config_and_contract_are_exact():
-    config = yaml.safe_load(Path("configs/datasets/step9_rub_analysis_bundle.v1.yaml").read_text(encoding="utf-8"))
-    contract = yaml.safe_load(Path("contracts/datasets/rub_analysis_bundle.v1.yaml").read_text(encoding="utf-8"))
+    config_text = Path("configs/datasets/step9_rub_analysis_bundle.v1.yaml").read_text(encoding="utf-8")
+    contract_text = Path("contracts/datasets/rub_analysis_bundle.v1.yaml").read_text(encoding="utf-8")
 
-    assert config["scope_counts"] == {
+    scope_counts = _parse_scalar_mapping(config_text, "scope_counts:", 2)
+    assert scope_counts == {
         "daily_server_core_blocks": 20,
         "weekly_server_core_blocks": 24,
     }
-    assert config["pointer_policy"]["latest_autodetect_allowed"] is False
-    assert config["pointer_policy"]["directory_scan_allowed"] is False
-    assert config["readiness_flags"]["fastapi_endpoint_ready"] is False
-    assert config["readiness_flags"]["si_cr_continuous_weekly_ready"] is False
-    assert config["readiness_flags"]["weekly_oi_ready"] is False
-    assert config["readiness_flags"]["advanced_technical_policy_ready"] is False
-    assert config["readiness_flags"]["scheduler_ready"] is False
 
-    assert contract["daily_server_core"]["exact_block_count"] == 20
-    assert contract["weekly_server_core"]["exact_block_count"] == 24
-    assert contract["weekly_declared_gaps"]["may_be_normalized_to_ready_without_separate_approved_policy"] is False
-    assert contract["safety"] == {
+    pointer_policy = _parse_scalar_mapping(config_text, "pointer_policy:", 2)
+    assert pointer_policy["latest_autodetect_allowed"] is False
+    assert pointer_policy["directory_scan_allowed"] is False
+    assert pointer_policy["sha256_revalidated_when_pointer_supplies_hash"] is True
+
+    readiness = _parse_scalar_mapping(config_text, "readiness_flags:", 2)
+    assert readiness == {
+        "implementation_ready": True,
+        "deterministic_pointer_resolution_ready": True,
+        "causal_as_of_selection_ready": True,
+        "explicit_stage8_integration_ready": True,
+        "fastapi_endpoint_ready": False,
+        "external_context_cache_ready": False,
+        "si_cr_continuous_weekly_ready": False,
+        "weekly_oi_ready": False,
+        "advanced_technical_policy_ready": False,
+        "scheduler_ready": False,
+        "research_ready": False,
+    }
+
+    safety = _parse_scalar_mapping(contract_text, "safety:", 2)
+    assert safety == {
         "network_calls_used": False,
         "broker_write_access_used": False,
         "order_placement_allowed": False,
@@ -315,3 +360,7 @@ def test_typed_stage9_config_and_contract_are_exact():
         "price_based_futures_pnl_recomputed": False,
         "participant_group_smart_money_label_generated": False,
     }
+
+    assert "  exact_block_count: 20" in contract_text
+    assert "  exact_block_count: 24" in contract_text
+    assert "  may_be_normalized_to_ready_without_separate_approved_policy: false" in contract_text
