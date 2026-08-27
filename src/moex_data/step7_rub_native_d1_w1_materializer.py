@@ -112,7 +112,7 @@ def _validate_frozen_manifest(root: Path, manifest_path: Path, instrument_id: st
         _fail("frozen raw manifest source mismatch")
     if values.get("requested_start_date") != history_start or values.get("requested_end_date") != history_end:
         _fail("frozen raw manifest requested range mismatch")
-    if values.get("freeze_method") != "validated_inode_create_only_hardlink" or values.get("mutable_canonical_raw_read_after_freeze_allowed") is not False:
+    if values.get("freeze_method") != "validated_descriptor_create_only_independent_inode_exact_byte_copy" or values.get("mutable_canonical_raw_read_after_freeze_allowed") is not False:
         _fail("frozen raw manifest freeze semantics mismatch")
     rows = values.get("partitions")
     if not isinstance(rows, list) or not rows:
@@ -131,6 +131,8 @@ def _validate_frozen_manifest(root: Path, manifest_path: Path, instrument_id: st
         previous = trade_date
         if row.get("instrument_id") != instrument_id:
             _fail("frozen raw partition instrument mismatch")
+        if row.get("independent_inode_exact_byte_copy") is not True:
+            _fail("frozen raw partition independent-copy evidence missing")
         expected_sha = str(row.get("sha256") or "").strip().lower()
         if len(expected_sha) != 64:
             _fail("frozen raw partition SHA-256 missing")
@@ -267,6 +269,13 @@ def _wilder_atr(tr: pd.Series, window: int) -> pd.Series:
     return out
 
 
+def _require_finite_feature(series: pd.Series, field: str) -> None:
+    numeric = pd.to_numeric(series, errors="coerce")
+    present = numeric.dropna().to_numpy(dtype="float64")
+    if not np.isfinite(present).all():
+        _fail("technical feature contains non-finite value: " + field)
+
+
 def build_technical_features(ohlcv: pd.DataFrame, *, source_ohlcv_run_id: str) -> pd.DataFrame:
     if ohlcv.empty:
         _fail("technical source OHLCV empty")
@@ -278,6 +287,8 @@ def build_technical_features(ohlcv: pd.DataFrame, *, source_ohlcv_run_id: str) -
         if bool(work[field].isna().any()) or not np.isfinite(work[field]).all():
             _fail("technical source invalid OHLC")
     prev_close = work["close"].shift(1)
+    if len(work.index) > 1 and bool(prev_close.iloc[1:].eq(0.0).any()):
+        _fail("technical previous close denominator is zero")
     prev_high = work["high"].shift(1)
     prev_low = work["low"].shift(1)
     high_low = work["high"] - work["low"]
@@ -290,6 +301,8 @@ def build_technical_features(ohlcv: pd.DataFrame, *, source_ohlcv_run_id: str) -
     out["true_range"] = true_range
     out["atr_14_wilder"] = _wilder_atr(true_range, 14)
     out["atr_20_wilder"] = _wilder_atr(true_range, 20)
+    for field in ("return_1obs", "gap_abs", "gap_pct", "range_abs", "true_range", "atr_14_wilder", "atr_20_wilder"):
+        _require_finite_feature(out[field], field)
     relations = {
         "higher_high_vs_prev_bar": work["high"] > prev_high,
         "higher_low_vs_prev_bar": work["low"] > prev_low,
