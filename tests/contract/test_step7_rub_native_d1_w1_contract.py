@@ -84,3 +84,16 @@ def test_step7_acceptance_requires_formula_rebuild_and_eight_pointers() -> None:
     assert "pointer_promotion_mode: serialized_transactional_with_rollback" in text
     assert "stage7_publication_lock_required: true" in text
     assert "stage2_content_attestation_lock_required_during_validation_and_commit: true" in text
+
+
+def test_step7_acceptance_binds_promoted_outputs_to_validated_bytes() -> None:
+    text = _read("contracts/datasets/step7_rub_native_d1_w1_technical_acceptance.v1.yaml")
+    for token in (
+        "output_single_open_byte_snapshot_hash_and_parse_required: true",
+        "output_descriptor_and_path_stat_stability_required: true",
+        "output_partition_manifest_quality_sha256_required: true",
+        "pointer_content_sha256_binding_required: true",
+        "acceptance_evidence_content_sha256_binding_required: true",
+        "output_identity_and_sha256_recheck_immediately_before_pointer_writes: true",
+    ):
+        assert token in text
