@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -31,6 +33,19 @@ def test_stage7_wrapper_and_base_share_hardened_surfaces() -> None:
     assert acceptance._revalidate_frozen is acceptance_base._revalidate_frozen
     assert acceptance._oracle_d1 is acceptance_base._oracle_d1
     assert acceptance._oracle_technical is acceptance_base._oracle_technical
+
+
+def test_stage7_impl_include_has_no_direct_cli_execution() -> None:
+    impl = Path(acceptance_base.__file__).with_name("step7_rub_native_d1_w1_acceptance_impl.inc")
+    result = subprocess.run(
+        [sys.executable, impl.as_posix(), "--help"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
 
 
 def test_stage7_guard_accepts_frozen_partition_inside_declared_run_root(monkeypatch, tmp_path: Path) -> None:
