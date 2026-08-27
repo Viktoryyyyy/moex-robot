@@ -1,6 +1,13 @@
-from decimal import Decimal, localcontext
+from decimal import MAX_EMAX, Decimal, localcontext
 
-from moex_data.step8_position_risk_state import _sum_exact
+import pytest
+
+from moex_data.step8_position_risk_state import (
+    Step8PositionRiskError,
+    _decimal_text,
+    _safe_token,
+    _sum_exact,
+)
 
 
 def test_sum_exact_is_independent_of_ambient_decimal_exponent_bounds() -> None:
@@ -21,3 +28,27 @@ def test_sum_exact_preserves_exact_cancellation_at_large_exponent() -> None:
         result = _sum_exact((Decimal("1e1000000"), Decimal("-1e1000000")))
 
     assert result == Decimal("0")
+
+
+def test_sum_exact_rejects_unrepresentable_absolute_boundary_fail_closed() -> None:
+    value = Decimal(f"9e{MAX_EMAX}")
+    with pytest.raises(Step8PositionRiskError, match="exact Decimal representability"):
+        _sum_exact((value, value))
+
+
+def test_decimal_text_keeps_large_positive_exponent_compact_and_exact() -> None:
+    rendered = _decimal_text(Decimal("1e1000000000"))
+    assert rendered == "1E+1000000000"
+    assert Decimal(rendered) == Decimal("1e1000000000")
+    assert len(rendered) < 32
+
+
+def test_decimal_text_preserves_normal_canonical_values() -> None:
+    assert _decimal_text(Decimal("120.50")) == "120.5"
+    assert _decimal_text(Decimal("1000")) == "1000"
+    assert _decimal_text(Decimal("0.00100")) == "0.001"
+
+
+def test_safe_token_rejects_surrounding_whitespace_without_normalization() -> None:
+    with pytest.raises(Step8PositionRiskError, match="surrounding whitespace"):
+        _safe_token(" risk_20260827_v1 ", "snapshot_id")
