@@ -37,6 +37,7 @@ def _frozen_manifest(root: Path, dates: list[str]) -> Path:
             "secids": ["USDRUBF"],
             "sha256": _sha(path),
             "frozen_ref": ROOT_PREFIX + path.relative_to(root).as_posix(),
+            "independent_inode_exact_byte_copy": True,
         })
     digest = hashlib.sha256("".join(r["trade_date"] + "\t" + r["sha256"] + "\n" for r in records).encode()).hexdigest()
     manifest = root / "runs" / "fixture" / "state" / "frozen_inputs" / f"instrument_id={instrument}" / "frozen_raw_manifest.json"
@@ -48,7 +49,7 @@ def _frozen_manifest(root: Path, dates: list[str]) -> Path:
         "source_id": "moex_algopack_fo_tradestats_5m",
         "requested_start_date": dates[0],
         "requested_end_date": dates[-1],
-        "freeze_method": "validated_inode_create_only_hardlink",
+        "freeze_method": "validated_descriptor_create_only_independent_inode_exact_byte_copy",
         "mutable_canonical_raw_read_after_freeze_allowed": False,
         "partition_count": len(records),
         "frozen_content_sha256": digest,
@@ -88,6 +89,19 @@ def test_w1_excludes_partial_first_and_last_iso_weeks() -> None:
     assert w1.loc[0, "trading_day_count"] == 7
 
 
+def _technical_rows(closes: list[float]) -> pd.DataFrame:
+    rows = []
+    for n, close in enumerate(closes):
+        trade_date = (pd.Timestamp("2026-01-01") + pd.Timedelta(days=n)).strftime("%Y-%m-%d")
+        rows.append({
+            "instrument_id":"usdrubf_futures_family","secid":"USDRUBF","timeframe":"1D",
+            "period_start_date":trade_date,"period_end_date":trade_date,"trade_date":trade_date,
+            "availability_ts_utc":"2026-01-01T00:00:00+00:00",
+            "open":close,"high":close + 1.0,"low":close - 1.0,"close":close,
+        })
+    return pd.DataFrame(rows)
+
+
 def test_technical_features_are_causal_and_wilder_atr_is_seeded_exactly() -> None:
     rows = []
     for n in range(25):
@@ -108,3 +122,9 @@ def test_technical_features_are_causal_and_wilder_atr_is_seeded_exactly() -> Non
     assert features.loc[13, "atr_14_wilder"] == pytest.approx(3.0)
     assert features.loc[19, "atr_20_wilder"] == pytest.approx(3.0)
     assert features.loc[24, "atr_14_wilder"] == pytest.approx(3.0)
+
+
+def test_technical_features_reject_zero_previous_close_denominator() -> None:
+    d1 = _technical_rows([100.0, 0.0, 102.0])
+    with pytest.raises(ValueError, match="previous close denominator is zero"):
+        build_technical_features(d1, source_ohlcv_run_id="zero_previous_close")
