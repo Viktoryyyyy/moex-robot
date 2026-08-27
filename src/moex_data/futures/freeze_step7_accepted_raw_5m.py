@@ -6,6 +6,7 @@ import os
 import stat
 import tempfile
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Final, Mapping
 
@@ -61,9 +62,12 @@ def _safe_token(value: object, field: str) -> str:
 def _iso_date(value: object, field: str) -> str:
     text = str(value or "").strip()
     try:
-        return pd.Timestamp(text).date().isoformat()
-    except Exception as exc:
+        parsed = date.fromisoformat(text)
+    except ValueError as exc:
         raise Step7RawFreezeError(field + " must be YYYY-MM-DD") from exc
+    if parsed.isoformat() != text:
+        _fail(field + " must be YYYY-MM-DD")
+    return text
 
 
 def _date_set_sha(values: tuple[str, ...] | list[str]) -> str:
