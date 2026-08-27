@@ -52,6 +52,7 @@ validation_scope:
   finite_numeric_values_only: true
   binary_float_coercion_forbidden: true
   json_decimal_tokens_parsed_as_decimal: true
+  duplicate_json_object_members_rejected: true
   supplied_decimal_precision_preserved: true
   complete_fill_contract_reconciliation: true
   exact_fill_commission_reconciliation: true
