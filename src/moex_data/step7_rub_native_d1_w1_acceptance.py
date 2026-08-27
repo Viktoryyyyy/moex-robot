@@ -70,6 +70,33 @@ def _guard_current_content_attestation(*, repo_root: Path, data_root: Path, mani
         raise base.Step7AcceptanceError("frozen raw current content-attestation row_count mismatch")
 
 
+def _call_base_revalidate_frozen(*, repo_root: Path, data_root: Path, manifest_path: Path, instrument_id: str, start: str, end: str, validation_run_id: str) -> dict[str, object]:
+    original = base.accepted_quote_history
+
+    def _accepted_with_explicit_repo(root, checked_instrument, checked_start, checked_end):
+        return accepted_quote_history(
+            root,
+            checked_instrument,
+            checked_start,
+            checked_end,
+            repo_root=repo_root,
+        )
+
+    base.accepted_quote_history = _accepted_with_explicit_repo
+    try:
+        return _BASE_REVALIDATE_FROZEN(
+            repo_root=repo_root,
+            data_root=data_root,
+            manifest_path=manifest_path,
+            instrument_id=instrument_id,
+            start=start,
+            end=end,
+            validation_run_id=validation_run_id,
+        )
+    finally:
+        base.accepted_quote_history = original
+
+
 def _revalidate_frozen(*, repo_root: Path, data_root: Path, manifest_path: Path, instrument_id: str, start: str, end: str, validation_run_id: str) -> dict[str, object]:
     _guard_frozen_refs_inside_run_root(Path(manifest_path))
     _guard_current_content_attestation(
@@ -80,7 +107,7 @@ def _revalidate_frozen(*, repo_root: Path, data_root: Path, manifest_path: Path,
         start=start,
         end=end,
     )
-    result = _BASE_REVALIDATE_FROZEN(
+    result = _call_base_revalidate_frozen(
         repo_root=repo_root,
         data_root=data_root,
         manifest_path=manifest_path,
