@@ -40,6 +40,11 @@ input_contract:
     utc_only: true
     fractional_seconds_preserved: true
     output_offset: "+00:00"
+  numeric_precision_policy:
+    binary_float_direct_inputs_rejected: true
+    json_decimal_tokens_parsed_as_decimal: true
+    supplied_decimal_precision_preserved: true
+    exact_decimal_aggregation_without_default_context_rounding: true
   string_fields_strict_type: true
   safe_token_pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
   signed_contracts_required: true
@@ -124,6 +129,7 @@ fail_closed_policy:
   non_string_text_fields_rejected: true
   unsafe_identifier_tokens_rejected: true
   nonfinite_numeric_values_rejected: true
+  binary_float_coercion_rejected: true
   unsupported_source_modes_rejected: true
   duplicate_position_ids_rejected: true
   duplicate_instrument_expiry_positions_rejected: true
