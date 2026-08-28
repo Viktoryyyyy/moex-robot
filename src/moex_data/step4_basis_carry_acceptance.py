@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import tempfile
@@ -101,6 +102,14 @@ def _rooted_ref(path: Path) -> str:
     except (OSError, ValueError) as exc:
         raise Step4AcceptanceError("artifact must be inside MOEX_DATA_ROOT") from exc
     return "${MOEX_DATA_ROOT}/" + relative.as_posix()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _same_path(value: object, expected: Path, field_name: str) -> None:
@@ -305,8 +314,11 @@ def promote(*, run_id: str) -> dict[str, object]:
             "run_id": manifest_run_id,
             "acceptance_run_id": checked_run,
             "manifest_ref": _rooted_ref(output["manifest"]),
+            "manifest_sha256": _sha256_file(output["manifest"]),
             "quality_report_ref": _rooted_ref(output["quality"]),
+            "quality_report_sha256": _sha256_file(output["quality"]),
             "partition_ref": _rooted_ref(output["partition"]),
+            "partition_sha256": _sha256_file(output["partition"]),
             "quality_status": "pass",
             "acceptance_contract_id": CONTRACT_ID,
         }
