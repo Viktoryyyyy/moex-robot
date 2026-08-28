@@ -607,7 +607,7 @@ def build_analysis_bundle(
             "as_of": _iso_utc(as_of_dt),
         },
         "server_core": {
-            "status": "integrity_ready_freshness_alignment_not_ready",
+            "status": "not_ready_policy_gap",
             "block_count": len(blocks),
             "blocks": blocks,
             "freshness_alignment": freshness_alignment,
@@ -616,7 +616,7 @@ def build_analysis_bundle(
         "external_context_required": external,
         "readiness": {
             "bundle_status": bundle_status,
-            "server_core": "integrity_ready_freshness_alignment_not_ready",
+            "server_core": "not_ready_policy_gap",
             "position_risk": position_risk["status"],
             "external_context": "external_context_required",
             "policy_gaps": gaps,
