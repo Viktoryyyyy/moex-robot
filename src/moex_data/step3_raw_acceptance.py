@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -182,6 +183,14 @@ def _rooted_ref(path: Path) -> str:
     except (OSError, ValueError) as exc:
         raise Step3AcceptanceError("artifact path must be rooted at MOEX_DATA_ROOT") from exc
     return "${MOEX_DATA_ROOT}/" + relative.as_posix()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _expected_run_root(run_id: str) -> Path:
@@ -582,8 +591,11 @@ def _pointer_values(spec: PointerSpec, *, acceptance_run_id: str) -> dict[str, o
         "run_id": spec.manifest_run_id,
         "acceptance_run_id": acceptance_run_id,
         "manifest_ref": _rooted_ref(spec.manifest_path),
+        "manifest_sha256": _sha256_file(spec.manifest_path),
         "quality_report_ref": _rooted_ref(spec.quality_path),
+        "quality_report_sha256": _sha256_file(spec.quality_path),
         "partition_ref": _rooted_ref(spec.partition_path),
+        "partition_sha256": _sha256_file(spec.partition_path),
         "quality_status": "pass",
         "refresh_status": "succeeded",
         "acceptance_contract_id": CONTRACT_ID,
