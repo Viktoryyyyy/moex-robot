@@ -253,6 +253,14 @@ def test_no_observation_before_as_of_fails_closed(tmp_path, monkeypatch):
         bundle.build_analysis_bundle(scope="daily", as_of="2020-01-01T00:00:00Z")
 
 
+def test_stage3_naive_exchange_timestamp_is_localized_to_moscow():
+    spec = bundle._stage3_specs()[0]
+    frame = pd.DataFrame([_row(spec, "2026-08-27 11:00:00", "available")])
+    selected, count = bundle._selected_row(frame, spec, bundle._parse_as_of("2026-08-27T08:30:00Z"))
+    assert count == 1
+    assert selected["marker"] == "available"
+
+
 def test_missing_mandatory_pointer_fails_closed(tmp_path, monkeypatch):
     root = _materialize_scope(tmp_path, monkeypatch, "daily")
     first = bundle.pointer_specs("daily")[0]
@@ -303,6 +311,17 @@ def test_stage_inappropriate_acceptance_contract_fails_closed(tmp_path, monkeypa
     values["acceptance_contract_id"] = "step4_rub_basis_carry_acceptance.v1"
     path.write_text(json.dumps(values), encoding="utf-8")
     with pytest.raises(bundle.Step9AnalysisBundleError, match="acceptance_contract_id mismatch"):
+        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+
+
+def test_mixed_acceptance_runs_within_stage_fail_closed(tmp_path, monkeypatch):
+    root = _materialize_scope(tmp_path, monkeypatch, "daily")
+    spec = bundle._stage3_specs()[0]
+    path = bundle._pointer_path(root, spec)
+    values = json.loads(path.read_text(encoding="utf-8"))
+    values["acceptance_run_id"] = "different_acceptance_run"
+    path.write_text(json.dumps(values, sort_keys=True), encoding="utf-8")
+    with pytest.raises(bundle.Step9AnalysisBundleError, match="mixed acceptance_run_id within stage.*3"):
         bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
 
 
