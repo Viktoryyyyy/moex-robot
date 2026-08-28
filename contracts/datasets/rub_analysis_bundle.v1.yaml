@@ -51,7 +51,11 @@ accepted_evidence:
     rooted_refs_only: true
     path_traversal_rejected: true
     symlink_escape_rejected: true
-    sha256_revalidated_when_present: true
+    manifest_sha256_required: true
+    quality_report_sha256_required: true
+    partition_sha256_required: true
+    trusted_sha256_revalidated: true
+    missing_trusted_sha256: fail_closed
 
 daily_server_core:
   exact_block_count: 20
@@ -164,6 +168,7 @@ safety:
 
 failure_semantics:
   missing_mandatory_accepted_pointer: fail_closed
+  missing_trusted_integrity_digest: fail_closed
   invalid_pointer_identity: fail_closed
   invalid_support_identity: fail_closed
   pointer_quality_not_pass: fail_closed
