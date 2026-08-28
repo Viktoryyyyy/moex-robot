@@ -252,7 +252,14 @@ def test_naive_as_of_fails_closed(tmp_path, monkeypatch):
 
 
 def test_no_observation_before_as_of_fails_closed(tmp_path, monkeypatch):
-    _materialize_scope(tmp_path, monkeypatch, "daily")
+    root = _materialize_scope(tmp_path, monkeypatch, "daily")
+    for spec in bundle._stage3_specs():
+        if spec.dataset_id not in {"futures_raw_5m", "futures_open_interest_raw_5m"}:
+            continue
+        path = bundle._pointer_path(root, spec)
+        values = json.loads(path.read_text(encoding="utf-8"))
+        values["binding_availability_ts_utc"] = "2019-12-31T00:00:00Z"
+        path.write_text(json.dumps(values, sort_keys=True), encoding="utf-8")
     with pytest.raises(bundle.Step9AnalysisBundleError, match="no causal observation"):
         bundle.build_analysis_bundle(scope="daily", as_of="2020-01-01T00:00:00Z")
 
