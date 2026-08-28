@@ -161,13 +161,8 @@ def _risk_payload(as_of: str = "2026-08-26T09:00:00Z") -> dict[str, object]:
 def test_daily_bundle_uses_exact_twenty_blocks_and_excludes_future_rows(tmp_path, monkeypatch):
     _materialize_scope(tmp_path, monkeypatch, "daily")
     result = bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
-
     assert result["schema_version"] == "rub_analysis_bundle.v1"
-    assert result["identity"] == {
-        "project": "MOEX_Bot",
-        "scope": "daily",
-        "as_of": "2026-08-27T12:00:00+00:00",
-    }
+    assert result["identity"] == {"project": "MOEX_Bot", "scope": "daily", "as_of": "2026-08-27T12:00:00+00:00"}
     assert result["server_core"]["status"] == "ready"
     assert result["server_core"]["block_count"] == 20
     assert len(result["server_core"]["blocks"]) == 20
@@ -177,23 +172,21 @@ def test_daily_bundle_uses_exact_twenty_blocks_and_excludes_future_rows(tmp_path
     assert result["readiness"]["policy_gaps"] == []
     assert result["quality_gates"]["bundle_generates_trade_recommendation"] is False
     assert result["quality_gates"]["bundle_generates_position_size"] is False
+    assert all(
+        set(("manifest_sha256", "quality_report_sha256", "partition_sha256")).issubset(row["provenance"])
+        for row in result["server_core"]["blocks"]
+    )
 
 
 def test_weekly_bundle_adds_w1_and_preserves_declared_policy_gaps(tmp_path, monkeypatch):
     _materialize_scope(tmp_path, monkeypatch, "weekly")
     result = bundle.build_analysis_bundle(scope="weekly", as_of=AS_OF)
-
     assert result["server_core"]["block_count"] == 24
     assert len(result["server_core"]["blocks"]) == 24
     assert {row["timeframe"] for row in result["server_core"]["blocks"] if row["stage"] == 7} == {"1D", "1W"}
     assert [row["block_id"] for row in result["readiness"]["policy_gaps"]] == [
-        "si_cr_continuous_weekly",
-        "weekly_open_interest",
-        "ema_filter",
-        "realized_volatility",
-        "range_percentile",
-        "swing_high_low",
-        "break_of_structure",
+        "si_cr_continuous_weekly", "weekly_open_interest", "ema_filter", "realized_volatility",
+        "range_percentile", "swing_high_low", "break_of_structure",
     ]
     assert all(row["status"] == "not_ready_policy_gap" for row in result["readiness"]["policy_gaps"])
 
@@ -202,9 +195,7 @@ def test_explicit_stage8_input_is_strictly_validated_and_carried(tmp_path, monke
     _materialize_scope(tmp_path, monkeypatch, "daily")
     risk = tmp_path / "risk.json"
     risk.write_text(json.dumps(_risk_payload()), encoding="utf-8")
-
     result = bundle.build_analysis_bundle(scope="daily", as_of=AS_OF, position_risk_input=str(risk))
-
     assert result["position_risk"]["status"] == "ready"
     assert result["position_risk"]["state"]["schema_version"] == "step8_position_risk_state.v1"
     assert result["position_risk"]["state"]["snapshot_id"] == "risk_snapshot_1"
@@ -215,7 +206,6 @@ def test_stage8_state_later_than_bundle_as_of_fails_closed(tmp_path, monkeypatch
     _materialize_scope(tmp_path, monkeypatch, "daily")
     risk = tmp_path / "risk.json"
     risk.write_text(json.dumps(_risk_payload("2026-08-29T09:00:00Z")), encoding="utf-8")
-
     with pytest.raises(bundle.Step9AnalysisBundleError, match="later than bundle as_of"):
         bundle.build_analysis_bundle(scope="daily", as_of=AS_OF, position_risk_input=str(risk))
 
@@ -236,7 +226,6 @@ def test_missing_mandatory_pointer_fails_closed(tmp_path, monkeypatch):
     root = _materialize_scope(tmp_path, monkeypatch, "daily")
     first = bundle.pointer_specs("daily")[0]
     bundle._pointer_path(root, first).unlink()
-
     with pytest.raises(bundle.Step9AnalysisBundleError, match="accepted pointer missing"):
         bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
 
@@ -248,8 +237,18 @@ def test_pointer_identity_and_quality_fail_closed(tmp_path, monkeypatch):
     values = json.loads(path.read_text(encoding="utf-8"))
     values["instrument_id"] = "wrong"
     path.write_text(json.dumps(values), encoding="utf-8")
-
     with pytest.raises(bundle.Step9AnalysisBundleError, match="instrument_id mismatch"):
+        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+
+
+def test_missing_trusted_digest_fails_closed(tmp_path, monkeypatch):
+    root = _materialize_scope(tmp_path, monkeypatch, "daily")
+    first = bundle.pointer_specs("daily")[0]
+    path = bundle._pointer_path(root, first)
+    values = json.loads(path.read_text(encoding="utf-8"))
+    values.pop("partition_sha256")
+    path.write_text(json.dumps(values), encoding="utf-8")
+    with pytest.raises(bundle.Step9AnalysisBundleError, match="partition_sha256 is required trusted integrity evidence"):
         bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
 
 
@@ -260,7 +259,6 @@ def test_pointer_sha_mismatch_fails_closed(tmp_path, monkeypatch):
     values = json.loads(path.read_text(encoding="utf-8"))
     values["partition_sha256"] = "0" * 64
     path.write_text(json.dumps(values), encoding="utf-8")
-
     with pytest.raises(bundle.Step9AnalysisBundleError, match="partition_sha256 mismatch"):
         bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
 
@@ -271,9 +269,7 @@ def test_traversal_ref_fails_closed(tmp_path, monkeypatch):
     path = bundle._pointer_path(root, first)
     values = json.loads(path.read_text(encoding="utf-8"))
     values["partition_ref"] = "${MOEX_DATA_ROOT}/../foreign.parquet"
-    values.pop("partition_sha256")
     path.write_text(json.dumps(values), encoding="utf-8")
-
     with pytest.raises(bundle.Step9AnalysisBundleError, match="path traversal"):
         bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
 
@@ -287,9 +283,7 @@ def test_symlink_partition_fails_closed(tmp_path, monkeypatch):
     real = target.with_name("real.parquet")
     target.replace(real)
     target.symlink_to(real)
-    values.pop("partition_sha256")
     pointer_path.write_text(json.dumps(values), encoding="utf-8")
-
     with pytest.raises(bundle.Step9AnalysisBundleError, match="symlink"):
         bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
 
@@ -302,7 +296,6 @@ def test_duplicate_pointer_json_member_fails_closed(tmp_path, monkeypatch):
     payload = json.dumps(valid)
     payload = payload[:-1] + ',"dataset_id":"duplicate"}'
     path.write_text(payload, encoding="utf-8")
-
     with pytest.raises(bundle.Step9AnalysisBundleError, match="duplicate JSON object member"):
         bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
 
@@ -311,10 +304,7 @@ def test_output_is_deterministic_for_identical_inputs(tmp_path, monkeypatch):
     _materialize_scope(tmp_path, monkeypatch, "daily")
     first = bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
     second = bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
-
-    assert json.dumps(first, sort_keys=True, separators=(",", ":")) == json.dumps(
-        second, sort_keys=True, separators=(",", ":")
-    )
+    assert json.dumps(first, sort_keys=True, separators=(",", ":")) == json.dumps(second, sort_keys=True, separators=(",", ":"))
 
 
 def test_typed_stage9_config_and_contract_are_exact():
@@ -322,15 +312,15 @@ def test_typed_stage9_config_and_contract_are_exact():
     contract_text = Path("contracts/datasets/rub_analysis_bundle.v1.yaml").read_text(encoding="utf-8")
 
     scope_counts = _parse_scalar_mapping(config_text, "scope_counts:", 2)
-    assert scope_counts == {
-        "daily_server_core_blocks": 20,
-        "weekly_server_core_blocks": 24,
-    }
+    assert scope_counts == {"daily_server_core_blocks": 20, "weekly_server_core_blocks": 24}
 
     pointer_policy = _parse_scalar_mapping(config_text, "pointer_policy:", 2)
     assert pointer_policy["latest_autodetect_allowed"] is False
     assert pointer_policy["directory_scan_allowed"] is False
-    assert pointer_policy["sha256_revalidated_when_pointer_supplies_hash"] is True
+    assert pointer_policy["trusted_sha256_required_for_manifest"] is True
+    assert pointer_policy["trusted_sha256_required_for_quality_report"] is True
+    assert pointer_policy["trusted_sha256_required_for_partition"] is True
+    assert pointer_policy["missing_trusted_sha256_fail_closed"] is True
 
     readiness = _parse_scalar_mapping(config_text, "readiness_flags:", 2)
     assert readiness == {
@@ -361,6 +351,12 @@ def test_typed_stage9_config_and_contract_are_exact():
         "participant_group_smart_money_label_generated": False,
     }
 
+    pointer_integrity = _parse_scalar_mapping(contract_text, "  pointer_integrity:", 4)
+    assert pointer_integrity["manifest_sha256_required"] is True
+    assert pointer_integrity["quality_report_sha256_required"] is True
+    assert pointer_integrity["partition_sha256_required"] is True
+    assert pointer_integrity["trusted_sha256_revalidated"] is True
+    assert pointer_integrity["missing_trusted_sha256"] == "fail_closed"
     assert "  exact_block_count: 20" in contract_text
     assert "  exact_block_count: 24" in contract_text
     assert "  may_be_normalized_to_ready_without_separate_approved_policy: false" in contract_text
