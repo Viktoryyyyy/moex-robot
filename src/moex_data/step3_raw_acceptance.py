@@ -582,7 +582,12 @@ def _pointer_path(spec: PointerSpec) -> Path:
     return _data_root() / "state" / "datasets" / ("dataset_id=" + spec.dataset_id) / ("instrument_id=" + spec.instrument_id) / "current_accepted_manifest.json"
 
 
-def _pointer_values(spec: PointerSpec, *, acceptance_run_id: str, binding_availability_ts_utc: str) -> dict[str, object]:
+def _pointer_values(
+    spec: PointerSpec,
+    *,
+    acceptance_run_id: str,
+    binding_availability_ts_utc: str | None = None,
+) -> dict[str, object]:
     values: dict[str, object] = {
         "dataset_id": spec.dataset_id,
         "instrument_id": spec.instrument_id,
@@ -600,7 +605,7 @@ def _pointer_values(spec: PointerSpec, *, acceptance_run_id: str, binding_availa
         "refresh_status": "succeeded",
         "acceptance_contract_id": CONTRACT_ID,
     }
-    if spec.dataset_id in {"futures_raw_5m", "futures_open_interest_raw_5m"}:
+    if spec.dataset_id in {"futures_raw_5m", "futures_open_interest_raw_5m"} and binding_availability_ts_utc is not None:
         values["binding_availability_ts_utc"] = binding_availability_ts_utc
     return values
 
