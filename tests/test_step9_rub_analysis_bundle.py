@@ -130,7 +130,7 @@ def _materialize_pointer(root: Path, spec: bundle.PointerSpec, *, include_hashes
             3: "step3_canonical_raw_acceptance.v1",
             4: "step4_rub_basis_carry_acceptance.v1",
             5: "step5_futoi_positioning_acceptance.v1",
-            7: "step7_test_acceptance.v1",
+            7: "step7_rub_native_d1_w1_technical_acceptance.v1",
         }[spec.stage],
         "manifest_ref": _root_ref(root, manifest),
         "quality_report_ref": _root_ref(root, quality),
