@@ -443,6 +443,13 @@ def _read_pointer_block(root: Path, spec: PointerSpec, as_of: datetime) -> dict[
     if "refresh_status" in pointer and pointer.get("refresh_status") != "succeeded":
         _fail(spec.block_id + " pointer refresh_status must be succeeded")
     run_id, acceptance_run_id, acceptance_contract_id = _validate_pointer_provenance(pointer, spec)
+    binding_availability_ts_utc: str | None = None
+    if spec.stage == 3 and spec.dataset_id in {"futures_raw_5m", "futures_open_interest_raw_5m"}:
+        binding_raw = _required_pointer_token(pointer, "binding_availability_ts_utc", spec)
+        binding_availability = _parse_as_of(binding_raw)
+        if binding_availability > as_of:
+            _fail(spec.block_id + " binding availability is later than as_of")
+        binding_availability_ts_utc = _iso_utc(binding_availability)
 
     resolved: dict[str, Path] = {}
     observed_hashes: dict[str, str] = {}
@@ -498,6 +505,7 @@ def _read_pointer_block(root: Path, spec: PointerSpec, as_of: datetime) -> dict[
             "run_id": run_id,
             "acceptance_run_id": acceptance_run_id,
             "acceptance_contract_id": acceptance_contract_id,
+            "binding_availability_ts_utc": binding_availability_ts_utc,
             "manifest_ref": pointer["manifest_ref"],
             "quality_report_ref": pointer["quality_report_ref"],
             "partition_ref": pointer["partition_ref"],
