@@ -128,11 +128,11 @@ def _resolve_root_ref(value: object, field: str, root: Path) -> Path:
     return resolved
 
 
-def _verify_sha_if_present(pointer: Mapping[str, Any], field: str, path: Path) -> str | None:
+def _verify_required_sha(pointer: Mapping[str, Any], field: str, path: Path) -> str:
     sha_field = field + "_sha256"
     expected = pointer.get(sha_field)
     if expected is None:
-        return None
+        _fail(sha_field + " is required trusted integrity evidence")
     if not isinstance(expected, str) or _SHA256_RE.fullmatch(expected) is None:
         _fail(sha_field + " must be lowercase SHA256")
     observed = _sha256_file(path)
@@ -377,9 +377,7 @@ def _read_pointer_block(root: Path, spec: PointerSpec, as_of: datetime) -> dict[
             "quality_report_ref": "quality_report",
             "partition_ref": "partition",
         }[field]
-        observed = _verify_sha_if_present(pointer, base, path)
-        if observed is not None:
-            observed_hashes[base + "_sha256"] = observed
+        observed_hashes[base + "_sha256"] = _verify_required_sha(pointer, base, path)
 
     manifest = _load_json(resolved["manifest_ref"], spec.block_id + ".manifest")
     quality = _load_json(resolved["quality_report_ref"], spec.block_id + ".quality_report")
