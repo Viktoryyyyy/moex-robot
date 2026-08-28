@@ -346,7 +346,7 @@ def _to_utc_series(frame: pd.DataFrame, spec: PointerSpec) -> pd.Series:
     return converted
 
 
-def _selected_row(frame: pd.DataFrame, spec: PointerSpec, as_of: datetime) -> tuple[dict[str, Any], int]:
+def _selected_row(frame: pd.DataFrame, spec: PointerSpec, as_of: datetime) -> tuple[dict[str, Any], int, str]:
     if frame.empty:
         _fail(spec.block_id + " accepted partition is empty")
     if "instrument_id" not in frame.columns:
@@ -381,9 +381,10 @@ def _selected_row(frame: pd.DataFrame, spec: PointerSpec, as_of: datetime) -> tu
             eligible["_step9_sort_" + field] = eligible[field].astype(str)
         sort_fields.append("_step9_sort_" + field)
     eligible = eligible.sort_values(sort_fields, kind="mergesort")
+    selected_causal_utc = eligible.iloc[-1]["_step9_causal"]
     row = eligible.iloc[-1].drop(labels=[column for column in eligible.columns if column.startswith("_step9_")])
     selected = {str(key): _json_value(value, spec.block_id + "." + str(key)) for key, value in row.to_dict().items()}
-    return selected, int(eligible_mask.sum())
+    return selected, int(eligible_mask.sum()), selected_causal_utc.isoformat()
 
 
 def _json_value(value: Any, field: str) -> Any:
@@ -475,7 +476,7 @@ def _read_pointer_block(root: Path, spec: PointerSpec, as_of: datetime) -> dict[
     if not isinstance(frame, pd.DataFrame):
         _fail(spec.block_id + " partition did not produce a dataframe")
 
-    selected, causal_row_count = _selected_row(frame, spec, as_of)
+    selected, causal_row_count, selected_causal_ts_utc = _selected_row(frame, spec, as_of)
     selected_causal_value = selected.get(spec.causal_field)
     if selected_causal_value is None:
         _fail(spec.block_id + " selected observation lost causal field")
@@ -489,6 +490,8 @@ def _read_pointer_block(root: Path, spec: PointerSpec, as_of: datetime) -> dict[
         "status": "ready",
         "causal_field": spec.causal_field,
         "selected_observation": selected,
+        "selected_causal_ts_utc": selected_causal_ts_utc,
+        "age_seconds_at_as_of": int((as_of - datetime.fromisoformat(selected_causal_ts_utc)).total_seconds()),
         "causal_rows_at_or_before_as_of": causal_row_count,
         "provenance": {
             "pointer_ref": ROOT_REF_PREFIX + pointer_path.relative_to(root).as_posix(),
@@ -576,6 +579,15 @@ def build_analysis_bundle(
     mixed_stages = sorted(stage for stage, run_ids in acceptance_runs_by_stage.items() if len(run_ids) != 1)
     if mixed_stages:
         _fail("mixed acceptance_run_id within stage(s): " + ",".join(str(stage) for stage in mixed_stages))
+    causal_times = [datetime.fromisoformat(str(block["selected_causal_ts_utc"])) for block in blocks]
+    freshness_alignment = {
+        "status": "not_ready_policy_gap",
+        "reason": "no approved stage-specific freshness/alignment thresholds exist",
+        "oldest_selected_causal_ts_utc": min(causal_times).isoformat(),
+        "newest_selected_causal_ts_utc": max(causal_times).isoformat(),
+        "cross_block_alignment_span_seconds": int((max(causal_times) - min(causal_times)).total_seconds()),
+        "exact_trigger_generation_allowed": False,
+    }
     position_risk = _load_position_risk(position_risk_input, as_of_dt)
     external = _external_context_required()
     gaps = _policy_gaps(scope)
@@ -595,15 +607,16 @@ def build_analysis_bundle(
             "as_of": _iso_utc(as_of_dt),
         },
         "server_core": {
-            "status": "ready",
+            "status": "integrity_ready_freshness_alignment_not_ready",
             "block_count": len(blocks),
             "blocks": blocks,
+            "freshness_alignment": freshness_alignment,
         },
         "position_risk": position_risk,
         "external_context_required": external,
         "readiness": {
             "bundle_status": bundle_status,
-            "server_core": "ready",
+            "server_core": "integrity_ready_freshness_alignment_not_ready",
             "position_risk": position_risk["status"],
             "external_context": "external_context_required",
             "policy_gaps": gaps,
@@ -616,6 +629,8 @@ def build_analysis_bundle(
             "bundle_generates_position_size": False,
             "bundle_generates_stop_or_target": False,
             "no_front_next_mix_without_explicit_stage3_binding": True,
+            "exact_trigger_generation_allowed": False,
+            "core_freshness_alignment_policy_ready": False,
             "futoi_participant_groups_are_descriptive_not_smart_money_labels": True,
             "missing_external_context_requires_downstream_completion": True,
             "missing_position_risk_blocks_downstream_size_or_add_recommendation": position_risk["status"] != "ready",
