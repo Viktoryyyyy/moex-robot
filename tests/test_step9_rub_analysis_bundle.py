@@ -88,19 +88,50 @@ def _materialize_pointer(root: Path, spec: bundle.PointerSpec, *, include_hashes
     identity = {
         "dataset_id": spec.dataset_id,
         "instrument_id": spec.instrument_id,
+        "run_id": "producer_run",
         "quality_status": "pass",
     }
     if spec.timeframe is not None:
         identity["timeframe"] = spec.timeframe
-    manifest.write_text(json.dumps(identity, sort_keys=True), encoding="utf-8")
-    quality.write_text(json.dumps(identity, sort_keys=True), encoding="utf-8")
+    manifest_identity = dict(identity)
+    quality_identity = dict(identity)
+    if spec.stage == 3 and spec.dataset_id == "futures_raw_5m":
+        manifest_identity = {
+            "run_id": "producer_run",
+            "refresh_status": "succeeded",
+            "instrument_scope": [spec.instrument_id],
+            "source_contract": {
+                "instrument_id": spec.instrument_id,
+                "source_id": "moex_algopack_fo_tradestats_5m",
+            },
+        }
+        quality_identity = {
+            "run_id": "producer_run",
+            "rows": [{
+                "run_id": "producer_run",
+                "dataset_id": spec.dataset_id,
+                "instrument_id": spec.instrument_id,
+                "source_id": "moex_algopack_fo_tradestats_5m",
+                "quality_status": "pass",
+            }],
+        }
+    elif spec.stage == 3:
+        manifest_identity["status"] = "succeeded"
+        manifest_identity.pop("quality_status")
+    manifest.write_text(json.dumps(manifest_identity, sort_keys=True), encoding="utf-8")
+    quality.write_text(json.dumps(quality_identity, sort_keys=True), encoding="utf-8")
 
     pointer = {
         "dataset_id": spec.dataset_id,
         "instrument_id": spec.instrument_id,
         "run_id": "producer_run",
         "acceptance_run_id": "acceptance_run",
-        "acceptance_contract_id": "test_acceptance.v1",
+        "acceptance_contract_id": {
+            3: "step3_canonical_raw_acceptance.v1",
+            4: "step4_rub_basis_carry_acceptance.v1",
+            5: "step5_futoi_positioning_acceptance.v1",
+            7: "step7_test_acceptance.v1",
+        }[spec.stage],
         "manifest_ref": _root_ref(root, manifest),
         "quality_report_ref": _root_ref(root, quality),
         "partition_ref": _root_ref(root, partition),
@@ -252,6 +283,44 @@ def test_missing_trusted_digest_fails_closed(tmp_path, monkeypatch):
         bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
 
 
+@pytest.mark.parametrize("field", ["run_id", "acceptance_run_id", "acceptance_contract_id"])
+def test_missing_pointer_provenance_fails_closed(tmp_path, monkeypatch, field):
+    root = _materialize_scope(tmp_path, monkeypatch, "daily")
+    spec = bundle.pointer_specs("daily")[0]
+    path = bundle._pointer_path(root, spec)
+    values = json.loads(path.read_text(encoding="utf-8"))
+    values.pop(field)
+    path.write_text(json.dumps(values), encoding="utf-8")
+    with pytest.raises(bundle.Step9AnalysisBundleError, match=field + " must be non-empty"):
+        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+
+
+def test_stage_inappropriate_acceptance_contract_fails_closed(tmp_path, monkeypatch):
+    root = _materialize_scope(tmp_path, monkeypatch, "daily")
+    spec = bundle.pointer_specs("daily")[0]
+    path = bundle._pointer_path(root, spec)
+    values = json.loads(path.read_text(encoding="utf-8"))
+    values["acceptance_contract_id"] = "step4_rub_basis_carry_acceptance.v1"
+    path.write_text(json.dumps(values), encoding="utf-8")
+    with pytest.raises(bundle.Step9AnalysisBundleError, match="acceptance_contract_id mismatch"):
+        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+
+
+def test_support_documents_must_correlate_to_pointer_producer_run(tmp_path, monkeypatch):
+    root = _materialize_scope(tmp_path, monkeypatch, "daily")
+    spec = bundle.pointer_specs("daily")[0]
+    pointer_path = bundle._pointer_path(root, spec)
+    pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
+    manifest = root / pointer["manifest_ref"].removeprefix("${MOEX_DATA_ROOT}/")
+    values = json.loads(manifest.read_text(encoding="utf-8"))
+    values["run_id"] = "different_producer_run"
+    manifest.write_text(json.dumps(values, sort_keys=True), encoding="utf-8")
+    pointer["manifest_sha256"] = _sha(manifest)
+    pointer_path.write_text(json.dumps(pointer, sort_keys=True), encoding="utf-8")
+    with pytest.raises(bundle.Step9AnalysisBundleError, match="manifest run_id mismatch"):
+        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+
+
 def test_pointer_sha_mismatch_fails_closed(tmp_path, monkeypatch):
     root = _materialize_scope(tmp_path, monkeypatch, "daily")
     first = bundle.pointer_specs("daily")[0]
@@ -360,3 +429,4 @@ def test_typed_stage9_config_and_contract_are_exact():
     assert "  exact_block_count: 20" in contract_text
     assert "  exact_block_count: 24" in contract_text
     assert "  may_be_normalized_to_ready_without_separate_approved_policy: false" in contract_text
+
