@@ -87,9 +87,12 @@ For every accepted current pointer consumed:
 - require `quality_status=pass` where contracted;
 - resolve only `${MOEX_DATA_ROOT}/...` refs under the configured data root;
 - reject traversal, absolute foreign paths and symlink escapes;
-- if pointer carries SHA256 for manifest/partition/quality report, re-hash and require exact match before reading;
+- require trusted SHA256 bindings for manifest, partition and quality report, then re-hash and require exact match before reading;
+- require manifest and quality-report support identities (`dataset_id`, `instrument_id`, and `timeframe` where applicable) to exist and exactly match the pointer scope before `ready`;
 - require referenced files to be regular files;
 - fail closed on malformed JSON, duplicate JSON object members, unknown critical identities, missing mandatory provenance or duplicate logical blocks.
+
+Stage 3/4/5 canonical promotion now writes these SHA256 bindings during promotion. Existing accepted pointers created before this rule are migrated only by replaying the canonical promotion for their explicit `acceptance_run_id`; that replay revalidates the immutable run-scoped acceptance evidence and rewrites the same deterministic current pointer with trusted hashes. Do not backfill hashes by reading mutable current files without replaying canonical acceptance.
 
 ## Stage 8 integration
 
@@ -135,7 +138,9 @@ For identical input files and arguments the JSON result must be byte-stable apar
 - `as_of` causality is tested with later rows that must be excluded;
 - missing Stage 8 input produces explicit `not_supplied`, never zeros;
 - malformed/foreign/traversal/symlink pointer refs fail closed;
-- pointer SHA mismatch fails closed where SHA is present;
+- missing pointer SHA or pointer SHA mismatch fails closed;
+- Stage 3/4/5 canonical promotions are regression-tested to publish all Stage 9 integrity digests;
+- missing manifest/quality support identity fails closed;
 - duplicate JSON keys fail closed;
 - missing/invalid mandatory accepted evidence fails closed;
 - declared Stage 7 weekly gaps remain explicit and false/not-ready, not normalized to green;
