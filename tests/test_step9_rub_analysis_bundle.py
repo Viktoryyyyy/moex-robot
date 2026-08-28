@@ -194,7 +194,7 @@ def test_daily_bundle_uses_exact_twenty_blocks_and_excludes_future_rows(tmp_path
     result = bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
     assert result["schema_version"] == "rub_analysis_bundle.v1"
     assert result["identity"] == {"project": "MOEX_Bot", "scope": "daily", "as_of": "2026-08-27T12:00:00+00:00"}
-    assert result["server_core"]["status"] == "integrity_ready_freshness_alignment_not_ready"
+    assert result["server_core"]["status"] == "not_ready_policy_gap"
     assert result["server_core"]["freshness_alignment"]["status"] == "not_ready_policy_gap"
     assert result["quality_gates"]["exact_trigger_generation_allowed"] is False
     assert result["server_core"]["block_count"] == 20
