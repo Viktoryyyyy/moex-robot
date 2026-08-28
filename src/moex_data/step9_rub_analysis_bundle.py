@@ -247,14 +247,24 @@ def _validate_support_identity(
     *,
     quality_required: bool,
 ) -> None:
-    if "dataset_id" in values and values["dataset_id"] != spec.dataset_id:
+    if "dataset_id" not in values:
+        _fail(label + " missing dataset_id")
+    if values["dataset_id"] != spec.dataset_id:
         _fail(label + " dataset_id mismatch")
-    if "instrument_id" in values and values["instrument_id"] != spec.instrument_id:
+    if "instrument_id" not in values:
+        _fail(label + " missing instrument_id")
+    if values["instrument_id"] != spec.instrument_id:
         _fail(label + " instrument_id mismatch")
-    if spec.timeframe is not None and "timeframe" in values and values["timeframe"] != spec.timeframe:
-        _fail(label + " timeframe mismatch")
-    if quality_required and "quality_status" in values and values["quality_status"] != "pass":
-        _fail(label + " quality_status must be pass")
+    if spec.timeframe is not None:
+        if "timeframe" not in values:
+            _fail(label + " missing timeframe")
+        if values["timeframe"] != spec.timeframe:
+            _fail(label + " timeframe mismatch")
+    if quality_required:
+        if "quality_status" not in values:
+            _fail(label + " missing quality_status")
+        if values["quality_status"] != "pass":
+            _fail(label + " quality_status must be pass")
 
 
 def _to_utc_series(frame: pd.DataFrame, field: str, block_id: str) -> pd.Series:
