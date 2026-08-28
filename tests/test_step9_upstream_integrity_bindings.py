@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 
 import pytest
@@ -47,56 +46,81 @@ def test_step3_pointer_values_publish_all_stage9_digests(tmp_path, monkeypatch):
     assert values["partition_sha256"] == _sha(partition)
 
 
-@pytest.mark.parametrize(
-    ("module", "dataset_id", "instrument_id"),
-    [
-        (step4, "rub_basis_carry_5m", "usd_rub_basis_carry"),
-        (step5, "futures_futoi_eod", "si_futures_family"),
-    ],
-)
-def test_stage4_stage5_promotions_publish_all_stage9_digests(tmp_path, monkeypatch, module, dataset_id, instrument_id):
+def test_step4_promotion_publishes_all_stage9_digests(tmp_path, monkeypatch):
     monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
-    manifest = _write(tmp_path / "runs" / "test" / "manifest.json", b"manifest")
-    quality = _write(tmp_path / "runs" / "test" / "quality.json", b"quality")
-    partition = _write(tmp_path / "runs" / "test" / "part.parquet", b"partition")
-    evidence_dir = tmp_path / "state" / "acceptance" / "test" / "run_id=acceptance"
+    evidence_dir = tmp_path / "state" / "acceptance" / "step4_rub_basis_carry" / "run_id=acceptance"
     evidence_dir.mkdir(parents=True)
     (evidence_dir / "pilot_evidence.json").write_text("{}", encoding="utf-8")
 
-    monkeypatch.setattr(module, "_evidence_dir", lambda run_id: evidence_dir)
-    monkeypatch.setattr(
-        module,
-        "validate_pilot",
-        lambda values, run_id: [
+    outputs = []
+    expected = ("usd_rub_basis_carry", "cny_rub_basis_carry")
+    for index, instrument_id in enumerate(expected):
+        base = tmp_path / "runs" / "step4_rub_basis_carry" / "run_id=acceptance" / instrument_id
+        manifest = _write(base / "manifest.json", f"manifest-{index}".encode())
+        quality = _write(base / "quality.json", f"quality-{index}".encode())
+        partition = _write(base / "part.parquet", f"partition-{index}".encode())
+        outputs.append(
             {
-                "dataset_id": dataset_id,
                 "instrument_id": instrument_id,
-                "producer_run_id": "producer",
                 "manifest_run_id": "producer",
                 "manifest": manifest,
                 "quality": quality,
                 "partition": partition,
                 "physical_readback": {"physical_readback_passed": True},
             }
-        ],
-    )
+        )
+
+    monkeypatch.setattr(step4, "validate_pilot", lambda values, run_id: outputs)
     captured = []
-    monkeypatch.setattr(module, "_transactional_replace", lambda records: captured.extend(records))
+    monkeypatch.setattr(step4, "_transactional_replace", lambda records: captured.extend(records))
 
-    if module is step4:
-        monkeypatch.setattr(module, "EXPECTED_INSTRUMENTS", {instrument_id})
-        result = module.promote(run_id="acceptance")
-        pointer_values = captured[0][1]
-        assert result["accepted_pointer_count"] == 1
-    else:
-        monkeypatch.setattr(module, "EXPECTED_INSTRUMENTS", frozenset({instrument_id}))
-        result = module.promote(run_id="acceptance")
-        pointer_values = captured[0][1]
-        assert result["accepted_pointer_count"] == 1
+    result = step4.promote(run_id="acceptance")
 
-    assert pointer_values["manifest_sha256"] == _sha(manifest)
-    assert pointer_values["quality_report_sha256"] == _sha(quality)
-    assert pointer_values["partition_sha256"] == _sha(partition)
+    assert result["accepted_pointer_count"] == 2
+    for record, output in zip(captured[:2], outputs):
+        values = record[1]
+        assert values["manifest_sha256"] == _sha(output["manifest"])
+        assert values["quality_report_sha256"] == _sha(output["quality"])
+        assert values["partition_sha256"] == _sha(output["partition"])
+
+
+def test_step5_promotion_publishes_all_stage9_digests(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    evidence_dir = tmp_path / "state" / "acceptance" / "step5_futoi_positioning" / "run_id=acceptance"
+    evidence_dir.mkdir(parents=True)
+    (evidence_dir / "pilot_evidence.json").write_text("{}", encoding="utf-8")
+
+    outputs = []
+    for dataset_id in (step5.EOD_DATASET, step5.FEATURE_DATASET):
+        for index, instrument_id in enumerate(("si_futures_family", "cr_futures_family")):
+            base = tmp_path / "runs" / "step5_futoi_positioning" / "run_id=acceptance" / dataset_id / instrument_id
+            manifest = _write(base / "manifest.json", f"manifest-{dataset_id}-{index}".encode())
+            quality = _write(base / "quality.json", f"quality-{dataset_id}-{index}".encode())
+            partition = _write(base / "part.parquet", f"partition-{dataset_id}-{index}".encode())
+            outputs.append(
+                {
+                    "dataset_id": dataset_id,
+                    "instrument_id": instrument_id,
+                    "producer_run_id": "producer",
+                    "manifest": manifest,
+                    "quality": quality,
+                    "partition": partition,
+                    "physical_readback": {"physical_readback_passed": True},
+                }
+            )
+
+    monkeypatch.setattr(step5, "validate_pilot", lambda values, run_id: outputs)
+    captured = []
+    monkeypatch.setattr(step5, "_transactional_replace", lambda records: captured.extend(records))
+
+    result = step5.promote(run_id="acceptance")
+
+    assert result["accepted_pointer_count"] == 4
+    for record, output in zip(captured[:4], outputs):
+        values = record[1]
+        assert values["manifest_sha256"] == _sha(output["manifest"])
+        assert values["quality_report_sha256"] == _sha(output["quality"])
+        assert values["partition_sha256"] == _sha(output["partition"])
 
 
 def test_stage9_support_identity_fields_are_mandatory():
@@ -112,9 +136,7 @@ def test_stage9_support_identity_fields_are_mandatory():
     with pytest.raises(step9.Step9AnalysisBundleError, match="missing dataset_id"):
         step9._validate_support_identity({}, spec, "manifest", quality_required=True)
     with pytest.raises(step9.Step9AnalysisBundleError, match="missing instrument_id"):
-        step9._validate_support_identity(
-            {"dataset_id": spec.dataset_id}, spec, "manifest", quality_required=True
-        )
+        step9._validate_support_identity({"dataset_id": spec.dataset_id}, spec, "manifest", quality_required=True)
     with pytest.raises(step9.Step9AnalysisBundleError, match="missing timeframe"):
         step9._validate_support_identity(
             {"dataset_id": spec.dataset_id, "instrument_id": spec.instrument_id},
@@ -124,11 +146,7 @@ def test_stage9_support_identity_fields_are_mandatory():
         )
     with pytest.raises(step9.Step9AnalysisBundleError, match="missing quality_status"):
         step9._validate_support_identity(
-            {
-                "dataset_id": spec.dataset_id,
-                "instrument_id": spec.instrument_id,
-                "timeframe": "1D",
-            },
+            {"dataset_id": spec.dataset_id, "instrument_id": spec.instrument_id, "timeframe": "1D"},
             spec,
             "manifest",
             quality_required=True,
