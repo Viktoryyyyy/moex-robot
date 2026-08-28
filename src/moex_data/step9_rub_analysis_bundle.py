@@ -328,11 +328,17 @@ def _validate_pointer_provenance(pointer: Mapping[str, Any], spec: PointerSpec) 
     return run_id, acceptance_run_id, acceptance_contract_id
 
 
-def _to_utc_series(frame: pd.DataFrame, field: str, block_id: str) -> pd.Series:
+def _to_utc_series(frame: pd.DataFrame, spec: PointerSpec) -> pd.Series:
+    field = spec.causal_field
+    block_id = spec.block_id
     if field not in frame.columns:
         _fail(block_id + " missing causal field: " + field)
     try:
-        converted = pd.to_datetime(frame[field], utc=True, errors="raise")
+        converted = pd.to_datetime(frame[field], errors="raise")
+        if converted.dt.tz is None:
+            timezone_name = "Europe/Moscow" if spec.stage == 3 and field == "ts" else "UTC"
+            converted = converted.dt.tz_localize(timezone_name, ambiguous="raise", nonexistent="raise")
+        converted = converted.dt.tz_convert("UTC")
     except Exception as exc:
         raise Step9AnalysisBundleError(block_id + " causal field is not timestamp-compatible") from exc
     if converted.isna().any():
@@ -355,7 +361,7 @@ def _selected_row(frame: pd.DataFrame, spec: PointerSpec, as_of: datetime) -> tu
         if timeframes != {spec.timeframe}:
             _fail(spec.block_id + " partition timeframe mismatch")
 
-    causal = _to_utc_series(frame, spec.causal_field, spec.block_id)
+    causal = _to_utc_series(frame, spec)
     cutoff = pd.Timestamp(as_of)
     eligible_mask = causal <= cutoff
     eligible = frame.loc[eligible_mask].copy()
@@ -564,6 +570,12 @@ def build_analysis_bundle(
     blocks = [_read_pointer_block(root, spec, as_of_dt) for spec in pointer_specs(scope)]
     if len({block["block_id"] for block in blocks}) != len(blocks):
         _fail("duplicate logical server-core block")
+    acceptance_runs_by_stage: dict[int, set[str]] = {}
+    for block in blocks:
+        acceptance_runs_by_stage.setdefault(int(block["stage"]), set()).add(str(block["provenance"]["acceptance_run_id"]))
+    mixed_stages = sorted(stage for stage, run_ids in acceptance_runs_by_stage.items() if len(run_ids) != 1)
+    if mixed_stages:
+        _fail("mixed acceptance_run_id within stage(s): " + ",".join(str(stage) for stage in mixed_stages))
     position_risk = _load_position_risk(position_risk_input, as_of_dt)
     external = _external_context_required()
     gaps = _policy_gaps(scope)
