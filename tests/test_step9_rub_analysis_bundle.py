@@ -141,6 +141,8 @@ def _materialize_pointer(root: Path, spec: bundle.PointerSpec, *, include_hashes
         pointer["timeframe"] = spec.timeframe
     if spec.stage == 3:
         pointer["refresh_status"] = "succeeded"
+    if spec.stage == 3 and spec.dataset_id in {"futures_raw_5m", "futures_open_interest_raw_5m"}:
+        pointer["binding_availability_ts_utc"] = PAST
     if include_hashes:
         pointer["manifest_sha256"] = _sha(manifest)
         pointer["quality_report_sha256"] = _sha(quality)
@@ -325,6 +327,17 @@ def test_mixed_acceptance_runs_within_stage_fail_closed(tmp_path, monkeypatch):
     values["acceptance_run_id"] = "different_acceptance_run"
     path.write_text(json.dumps(values, sort_keys=True), encoding="utf-8")
     with pytest.raises(bundle.Step9AnalysisBundleError, match="mixed acceptance_run_id within stage.*3"):
+        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+
+
+def test_stage3_future_binding_availability_fails_closed(tmp_path, monkeypatch):
+    root = _materialize_scope(tmp_path, monkeypatch, "daily")
+    spec = bundle._stage3_specs()[0]
+    path = bundle._pointer_path(root, spec)
+    values = json.loads(path.read_text(encoding="utf-8"))
+    values["binding_availability_ts_utc"] = FUTURE
+    path.write_text(json.dumps(values, sort_keys=True), encoding="utf-8")
+    with pytest.raises(bundle.Step9AnalysisBundleError, match="binding availability is later than as_of"):
         bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
 
 
