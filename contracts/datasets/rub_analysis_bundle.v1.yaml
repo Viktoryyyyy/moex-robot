@@ -1,0 +1,181 @@
+contract_id: rub_analysis_bundle.v1
+dataset_id: rub_analysis_bundle
+artifact_class: deterministic_read_only_bundle
+producer: moex_data.step9_rub_analysis_bundle
+format: json
+schema_version: rub_analysis_bundle.v1
+
+request:
+  required:
+    - scope
+    - as_of
+  scope_enum:
+    - daily
+    - weekly
+  as_of_timezone_aware_required: true
+  optional:
+    - position_risk_input
+  position_risk_input_semantics: explicit_file_only_no_autodetect
+
+output:
+  required_top_level:
+    - schema_version
+    - identity
+    - server_core
+    - position_risk
+    - external_context_required
+    - readiness
+    - quality_gates
+  identity:
+    project: MOEX_Bot
+    as_of_normalized_to_utc: true
+  deterministic_serialization:
+    map_keys_sorted: true
+    wall_clock_generated_at_field: false
+    identical_inputs_byte_stable: true
+
+accepted_evidence:
+  source_of_truth: current_accepted_pointers_only
+  pointer_discovery:
+    deterministic_contract_path_only: true
+    directory_scan_for_latest: false
+    mtime_selection: false
+    arbitrary_physical_file_selection: false
+  pointer_integrity:
+    exact_dataset_identity_required: true
+    exact_instrument_identity_required: true
+    exact_timeframe_identity_required_when_applicable: true
+    quality_status_pass_required: true
+    refresh_status_succeeded_required_when_present: true
+    duplicate_json_object_members_rejected: true
+    rooted_refs_only: true
+    path_traversal_rejected: true
+    symlink_escape_rejected: true
+    manifest_sha256_required: true
+    quality_report_sha256_required: true
+    partition_sha256_required: true
+    trusted_sha256_revalidated: true
+    missing_trusted_sha256: fail_closed
+
+daily_server_core:
+  exact_block_count: 20
+  stages:
+    step3:
+      futures_raw_5m:
+        - si_front_contract
+        - si_next_contract
+        - cr_front_contract
+        - cr_next_contract
+      futures_open_interest_raw_5m:
+        - si_front_contract
+        - si_next_contract
+        - cr_front_contract
+        - cr_next_contract
+      fx_spot_raw_5m:
+        - usd_tom
+        - cny_tom
+    step4:
+      rub_basis_carry_5m:
+        - usd_rub_basis_carry
+        - cny_rub_basis_carry
+    step5:
+      futures_futoi_eod:
+        - si_futures_family
+        - cr_futures_family
+      futures_futoi_positioning_features_d1:
+        - si_futures_family
+        - cr_futures_family
+    step7:
+      rub_native_ohlcv_htf_1D:
+        - usdrubf_futures_family
+        - cnyrubf_futures_family
+      rub_technical_features_htf_1D:
+        - usdrubf_futures_family
+        - cnyrubf_futures_family
+
+weekly_server_core:
+  exact_block_count: 24
+  includes_daily_server_core: true
+  additional_step7:
+    rub_native_ohlcv_htf_1W:
+      - usdrubf_futures_family
+      - cnyrubf_futures_family
+    rub_technical_features_htf_1W:
+      - usdrubf_futures_family
+      - cnyrubf_futures_family
+
+causal_selection:
+  explicit_as_of: true
+  latest_row_at_or_before_as_of: true
+  future_rows_rejected_from_selection: true
+  fall_forward: false
+  dataset_causal_fields:
+    futures_raw_5m: ts
+    futures_open_interest_raw_5m: availability_ts_utc
+    fx_spot_raw_5m: ts
+    rub_basis_carry_5m: ts
+    futures_futoi_eod: availability_ts_utc
+    futures_futoi_positioning_features_d1: availability_ts_utc
+    rub_native_ohlcv_htf: availability_ts_utc
+    rub_technical_features_htf: availability_ts_utc
+
+position_risk:
+  validator: moex_data.step8_position_risk_state.build_position_risk_state
+  explicit_input_only: true
+  omitted_status: not_supplied
+  omitted_is_zero_risk: false
+  state_as_of_must_not_exceed_bundle_as_of: true
+  payout_or_contract_size_inference_allowed: false
+  automatic_position_sizing_allowed: false
+
+readiness_status_enum:
+  - ready
+  - not_supplied
+  - not_ready_policy_gap
+  - external_context_required
+  - missing_or_invalid_accepted_evidence
+
+weekly_declared_gaps:
+  exact:
+    - si_cr_continuous_weekly
+    - weekly_open_interest
+    - ema_filter
+    - realized_volatility
+    - range_percentile
+    - swing_high_low
+    - break_of_structure
+  may_be_normalized_to_ready_without_separate_approved_policy: false
+
+external_context_required:
+  - macro_ru
+  - government_fx_operations_and_tax_cycle
+  - official_event_calendar_and_surprises
+  - fresh_news_and_geopolitics
+  - oil_brent_urals
+  - global_usd_usd_cny_cnh_dxy_ust
+
+safety:
+  network_calls_used: false
+  broker_write_access_used: false
+  order_placement_allowed: false
+  trade_recommendation_generated: false
+  scenario_probability_generated: false
+  market_regime_generated: false
+  position_size_generated: false
+  stop_or_target_generated: false
+  price_based_futures_pnl_recomputed: false
+  participant_group_smart_money_label_generated: false
+
+failure_semantics:
+  missing_mandatory_accepted_pointer: fail_closed
+  missing_trusted_integrity_digest: fail_closed
+  invalid_pointer_identity: fail_closed
+  invalid_support_identity: fail_closed
+  pointer_quality_not_pass: fail_closed
+  malformed_json: fail_closed
+  duplicate_json_member: fail_closed
+  foreign_or_traversal_ref: fail_closed
+  symlink_escape: fail_closed
+  sha256_mismatch: fail_closed
+  no_causal_row_at_or_before_as_of: fail_closed
+  stage8_state_later_than_bundle_as_of: fail_closed

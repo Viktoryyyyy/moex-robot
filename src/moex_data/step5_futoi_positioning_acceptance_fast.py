@@ -351,7 +351,7 @@ def promote(*, run_id: str) -> dict[str, object]:
     for output in outputs:
         dataset_id, instrument_id = str(output["dataset_id"]), str(output["instrument_id"])
         pointer = base._pointer_path(dataset_id, instrument_id)
-        pointer_values = {"dataset_id": dataset_id, "instrument_id": instrument_id, "run_id": str(output["producer_run_id"]), "acceptance_run_id": checked_run, "manifest_ref": base._rooted_ref(output["manifest"]), "quality_report_ref": base._rooted_ref(output["quality"]), "partition_ref": base._rooted_ref(output["partition"]), "quality_status": "pass", "acceptance_contract_id": base.CONTRACT_ID, "immutable_frozen_raw_input_verified": True, "acceptance_validation_mode": VALIDATION_MODE, "full_frozen_raw_rehash_at_acceptance": False, "historical_pit_research_ready_claimed": False}
+        pointer_values = {"dataset_id": dataset_id, "instrument_id": instrument_id, "run_id": str(output["producer_run_id"]), "acceptance_run_id": checked_run, "manifest_ref": base._rooted_ref(output["manifest"]), "manifest_sha256": hashlib.sha256(output["manifest"].read_bytes()).hexdigest(), "quality_report_ref": base._rooted_ref(output["quality"]), "quality_report_sha256": hashlib.sha256(output["quality"].read_bytes()).hexdigest(), "partition_ref": base._rooted_ref(output["partition"]), "partition_sha256": hashlib.sha256(output["partition"].read_bytes()).hexdigest(), "quality_status": "pass", "acceptance_contract_id": base.CONTRACT_ID, "immutable_frozen_raw_input_verified": True, "acceptance_validation_mode": VALIDATION_MODE, "full_frozen_raw_rehash_at_acceptance": False, "historical_pit_research_ready_claimed": False}
         records.append((pointer, pointer_values))
         pointer_summaries.append({"dataset_id": dataset_id, "instrument_id": instrument_id, "run_id": str(output["producer_run_id"]), "acceptance_run_id": checked_run, "pointer_path": pointer.as_posix(), "physical_readback": output["physical_readback"]})
     if len(pointer_summaries) != 4:
@@ -382,3 +382,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
