@@ -245,8 +245,42 @@ def _validate_support_identity(
     spec: PointerSpec,
     label: str,
     *,
+    support_kind: str,
+    producer_run_id: str,
     quality_required: bool,
 ) -> None:
+    if values.get("run_id") != producer_run_id:
+        _fail(label + " run_id mismatch")
+    if spec.stage == 3 and spec.dataset_id == "futures_raw_5m":
+        if support_kind == "manifest":
+            scope = values.get("instrument_scope")
+            if isinstance(scope, (str, bytes)) or not isinstance(scope, Sequence) or list(scope) != [spec.instrument_id]:
+                _fail(label + " instrument_scope mismatch")
+            source_contract = values.get("source_contract")
+            if not isinstance(source_contract, Mapping):
+                _fail(label + " source_contract must be an object")
+            if source_contract.get("instrument_id") != spec.instrument_id:
+                _fail(label + " source_contract instrument_id mismatch")
+            if source_contract.get("source_id") != "moex_algopack_fo_tradestats_5m":
+                _fail(label + " source_contract source_id mismatch")
+            if values.get("refresh_status") != "succeeded":
+                _fail(label + " refresh_status must be succeeded")
+            return
+        rows = values.get("rows")
+        if isinstance(rows, (str, bytes)) or not isinstance(rows, Sequence) or len(rows) != 1 or not isinstance(rows[0], Mapping):
+            _fail(label + " rows must contain exactly one identity object")
+        row = rows[0]
+        if row.get("run_id") != producer_run_id:
+            _fail(label + " rows[0].run_id mismatch")
+        if row.get("dataset_id") != spec.dataset_id:
+            _fail(label + " rows[0].dataset_id mismatch")
+        if row.get("instrument_id") != spec.instrument_id:
+            _fail(label + " rows[0].instrument_id mismatch")
+        if row.get("source_id") != "moex_algopack_fo_tradestats_5m":
+            _fail(label + " rows[0].source_id mismatch")
+        if row.get("quality_status") != "pass":
+            _fail(label + " rows[0].quality_status must be pass")
+        return
     if "dataset_id" not in values:
         _fail(label + " missing dataset_id")
     if values["dataset_id"] != spec.dataset_id:
@@ -261,10 +295,36 @@ def _validate_support_identity(
         if values["timeframe"] != spec.timeframe:
             _fail(label + " timeframe mismatch")
     if quality_required:
-        if "quality_status" not in values:
-            _fail(label + " missing quality_status")
-        if values["quality_status"] != "pass":
-            _fail(label + " quality_status must be pass")
+        status_field = "status" if spec.stage == 3 and support_kind == "manifest" else "quality_status"
+        expected_status = "succeeded" if status_field == "status" else "pass"
+        if status_field not in values:
+            _fail(label + " missing " + status_field)
+        if values[status_field] != expected_status:
+            _fail(label + " " + status_field + " must be " + expected_status)
+
+
+def _required_pointer_token(pointer: Mapping[str, Any], field: str, spec: PointerSpec) -> str:
+    value = pointer.get(field)
+    if not isinstance(value, str) or not value or value != value.strip():
+        _fail(spec.block_id + " pointer " + field + " must be non-empty without surrounding whitespace")
+    return value
+
+
+def _validate_pointer_provenance(pointer: Mapping[str, Any], spec: PointerSpec) -> tuple[str, str, str]:
+    run_id = _required_pointer_token(pointer, "run_id", spec)
+    acceptance_run_id = _required_pointer_token(pointer, "acceptance_run_id", spec)
+    acceptance_contract_id = _required_pointer_token(pointer, "acceptance_contract_id", spec)
+    expected_contracts = {
+        3: "step3_canonical_raw_acceptance.v1",
+        4: "step4_rub_basis_carry_acceptance.v1",
+        5: "step5_futoi_positioning_acceptance.v1",
+    }
+    expected = expected_contracts.get(spec.stage)
+    if expected is not None and acceptance_contract_id != expected:
+        _fail(spec.block_id + " pointer acceptance_contract_id mismatch")
+    if expected is None and not acceptance_contract_id.startswith("step" + str(spec.stage) + "_"):
+        _fail(spec.block_id + " pointer acceptance_contract_id is not stage-appropriate")
+    return run_id, acceptance_run_id, acceptance_contract_id
 
 
 def _to_utc_series(frame: pd.DataFrame, field: str, block_id: str) -> pd.Series:
@@ -374,6 +434,7 @@ def _read_pointer_block(root: Path, spec: PointerSpec, as_of: datetime) -> dict[
         _fail(spec.block_id + " pointer quality_status must be pass")
     if "refresh_status" in pointer and pointer.get("refresh_status") != "succeeded":
         _fail(spec.block_id + " pointer refresh_status must be succeeded")
+    run_id, acceptance_run_id, acceptance_contract_id = _validate_pointer_provenance(pointer, spec)
 
     resolved: dict[str, Path] = {}
     observed_hashes: dict[str, str] = {}
@@ -391,8 +452,14 @@ def _read_pointer_block(root: Path, spec: PointerSpec, as_of: datetime) -> dict[
 
     manifest = _load_json(resolved["manifest_ref"], spec.block_id + ".manifest")
     quality = _load_json(resolved["quality_report_ref"], spec.block_id + ".quality_report")
-    _validate_support_identity(manifest, spec, spec.block_id + ".manifest", quality_required=True)
-    _validate_support_identity(quality, spec, spec.block_id + ".quality_report", quality_required=True)
+    _validate_support_identity(
+        manifest, spec, spec.block_id + ".manifest",
+        support_kind="manifest", producer_run_id=run_id, quality_required=True,
+    )
+    _validate_support_identity(
+        quality, spec, spec.block_id + ".quality_report",
+        support_kind="quality_report", producer_run_id=run_id, quality_required=True,
+    )
 
     try:
         frame = pd.read_parquet(resolved["partition_ref"])
@@ -418,9 +485,9 @@ def _read_pointer_block(root: Path, spec: PointerSpec, as_of: datetime) -> dict[
         "causal_rows_at_or_before_as_of": causal_row_count,
         "provenance": {
             "pointer_ref": ROOT_REF_PREFIX + pointer_path.relative_to(root).as_posix(),
-            "run_id": pointer.get("run_id"),
-            "acceptance_run_id": pointer.get("acceptance_run_id"),
-            "acceptance_contract_id": pointer.get("acceptance_contract_id"),
+            "run_id": run_id,
+            "acceptance_run_id": acceptance_run_id,
+            "acceptance_contract_id": acceptance_contract_id,
             "manifest_ref": pointer["manifest_ref"],
             "quality_report_ref": pointer["quality_report_ref"],
             "partition_ref": pointer["partition_ref"],
@@ -589,3 +656,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
