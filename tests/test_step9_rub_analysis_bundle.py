@@ -194,7 +194,9 @@ def test_daily_bundle_uses_exact_twenty_blocks_and_excludes_future_rows(tmp_path
     result = bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
     assert result["schema_version"] == "rub_analysis_bundle.v1"
     assert result["identity"] == {"project": "MOEX_Bot", "scope": "daily", "as_of": "2026-08-27T12:00:00+00:00"}
-    assert result["server_core"]["status"] == "ready"
+    assert result["server_core"]["status"] == "integrity_ready_freshness_alignment_not_ready"
+    assert result["server_core"]["freshness_alignment"]["status"] == "not_ready_policy_gap"
+    assert result["quality_gates"]["exact_trigger_generation_allowed"] is False
     assert result["server_core"]["block_count"] == 20
     assert len(result["server_core"]["blocks"]) == 20
     assert {row["selected_observation"]["marker"] for row in result["server_core"]["blocks"]} == {"past"}
@@ -256,9 +258,10 @@ def test_no_observation_before_as_of_fails_closed(tmp_path, monkeypatch):
 def test_stage3_naive_exchange_timestamp_is_localized_to_moscow():
     spec = bundle._stage3_specs()[0]
     frame = pd.DataFrame([_row(spec, "2026-08-27 11:00:00", "available")])
-    selected, count = bundle._selected_row(frame, spec, bundle._parse_as_of("2026-08-27T08:30:00Z"))
+    selected, count, causal_ts = bundle._selected_row(frame, spec, bundle._parse_as_of("2026-08-27T08:30:00Z"))
     assert count == 1
     assert selected["marker"] == "available"
+    assert causal_ts == "2026-08-27T08:00:00+00:00"
 
 
 def test_missing_mandatory_pointer_fails_closed(tmp_path, monkeypatch):
