@@ -245,11 +245,11 @@ def _validate_support_identity(
     spec: PointerSpec,
     label: str,
     *,
-    support_kind: str,
-    producer_run_id: str,
     quality_required: bool,
+    support_kind: str = "manifest",
+    producer_run_id: str | None = None,
 ) -> None:
-    if values.get("run_id") != producer_run_id:
+    if producer_run_id is not None and values.get("run_id") != producer_run_id:
         _fail(label + " run_id mismatch")
     if spec.stage == 3 and spec.dataset_id == "futures_raw_5m":
         if support_kind == "manifest":
