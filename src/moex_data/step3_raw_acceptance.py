@@ -582,8 +582,8 @@ def _pointer_path(spec: PointerSpec) -> Path:
     return _data_root() / "state" / "datasets" / ("dataset_id=" + spec.dataset_id) / ("instrument_id=" + spec.instrument_id) / "current_accepted_manifest.json"
 
 
-def _pointer_values(spec: PointerSpec, *, acceptance_run_id: str) -> dict[str, object]:
-    return {
+def _pointer_values(spec: PointerSpec, *, acceptance_run_id: str, binding_availability_ts_utc: str) -> dict[str, object]:
+    values: dict[str, object] = {
         "dataset_id": spec.dataset_id,
         "instrument_id": spec.instrument_id,
         "source_id": spec.source_id,
@@ -600,6 +600,9 @@ def _pointer_values(spec: PointerSpec, *, acceptance_run_id: str) -> dict[str, o
         "refresh_status": "succeeded",
         "acceptance_contract_id": CONTRACT_ID,
     }
+    if spec.dataset_id in {"futures_raw_5m", "futures_open_interest_raw_5m"}:
+        values["binding_availability_ts_utc"] = binding_availability_ts_utc
+    return values
 
 
 def _stage_json(path: Path, values: Mapping[str, object]) -> Path:
@@ -667,13 +670,21 @@ def _transactional_json_replace(records: Sequence[tuple[Path, Mapping[str, objec
 def promote_step3_pilot(*, run_id: str) -> dict[str, object]:
     checked_run = _require_token(run_id, "run_id")
     evidence_path = pilot_evidence_path(checked_run)
-    specs = validate_pilot_evidence(_load_json(evidence_path, "pilot_evidence"), run_id=checked_run)
+    evidence_values = _load_json(evidence_path, "pilot_evidence")
+    specs = validate_pilot_evidence(evidence_values, run_id=checked_run)
+    binding_availability_ts_utc = _require_utc_timestamp(
+        evidence_values.get("reference_observed_at_utc"), "reference_observed_at_utc"
+    )
 
     pointer_records: list[dict[str, object]] = []
     pointer_writes: list[tuple[Path, Mapping[str, object]]] = []
     for spec in specs:
         path = _pointer_path(spec)
-        pointer_values = _pointer_values(spec, acceptance_run_id=checked_run)
+        pointer_values = _pointer_values(
+            spec,
+            acceptance_run_id=checked_run,
+            binding_availability_ts_utc=binding_availability_ts_utc,
+        )
         pointer_writes.append((path, pointer_values))
         pointer_records.append({
             "dataset_id": spec.dataset_id,
@@ -729,3 +740,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
