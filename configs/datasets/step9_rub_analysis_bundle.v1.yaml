@@ -52,7 +52,10 @@ pointer_policy:
   rooted_ref_prefix: "${MOEX_DATA_ROOT}/"
   root_escape_allowed: false
   referenced_file_symlink_allowed: false
-  sha256_revalidated_when_pointer_supplies_hash: true
+  trusted_sha256_required_for_manifest: true
+  trusted_sha256_required_for_quality_report: true
+  trusted_sha256_required_for_partition: true
+  missing_trusted_sha256_fail_closed: true
   quality_status_pass_required: true
   duplicate_json_object_members_rejected: true
 
