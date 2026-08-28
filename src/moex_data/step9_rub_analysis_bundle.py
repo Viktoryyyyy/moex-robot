@@ -318,12 +318,13 @@ def _validate_pointer_provenance(pointer: Mapping[str, Any], spec: PointerSpec) 
         3: "step3_canonical_raw_acceptance.v1",
         4: "step4_rub_basis_carry_acceptance.v1",
         5: "step5_futoi_positioning_acceptance.v1",
+        7: "step7_rub_native_d1_w1_technical_acceptance.v1",
     }
     expected = expected_contracts.get(spec.stage)
     if expected is not None and acceptance_contract_id != expected:
         _fail(spec.block_id + " pointer acceptance_contract_id mismatch")
-    if expected is None and not acceptance_contract_id.startswith("step" + str(spec.stage) + "_"):
-        _fail(spec.block_id + " pointer acceptance_contract_id is not stage-appropriate")
+    if expected is None:
+        _fail(spec.block_id + " has no declared acceptance contract")
     return run_id, acceptance_run_id, acceptance_contract_id
 
 
