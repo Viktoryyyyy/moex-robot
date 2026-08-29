@@ -1,0 +1,21 @@
+{
+  "project": "MOEX_Bot",
+  "evidence_id": "futoi_incremental_acceptance_implementation_v1",
+  "status": "IMPLEMENTATION_PENDING_RUNTIME_ACCEPTANCE",
+  "source_of_truth_branch": "research/rub-intelligence/futoi-live-incremental-acceptance-v1",
+  "base_main_sha": "9f21ce818b544960eb8aff6098d6c035b202cdab",
+  "scope": [
+    "si_futures_family",
+    "cr_futures_family"
+  ],
+  "source_id": "moex_algopack_futoi",
+  "historical_stage2_baseline_mutated": false,
+  "incremental_acceptance_contract_ref": "contracts/datasets/futures_futoi_raw_incremental_acceptance.v1.yaml",
+  "implementation_ref": "src/moex_data/futures/futoi_raw_incremental_acceptance.py",
+  "tests_ref": "tests/unit/test_futoi_raw_incremental_acceptance.py",
+  "runtime_acceptance_passed": false,
+  "stage5_live_integration_passed": false,
+  "recurring_freshness_passed": false,
+  "directional_signal_authority": false,
+  "trading_action_authority": false
+}
