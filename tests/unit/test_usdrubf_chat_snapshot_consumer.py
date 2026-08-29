@@ -20,6 +20,7 @@ def _snapshot() -> dict[str, object]:
             "project": "MOEX_Bot",
             "generated_at_utc": "2026-08-29T15:37:34+00:00",
         },
+        "refresh_policy": {"snapshot_stale_after_seconds": 1200},
         "read_freshness": {
             "read_at_utc": "2026-08-29T15:38:00+00:00",
             "snapshot_age_seconds": 26,
@@ -70,6 +71,15 @@ def test_validate_analysis_chat_snapshot_rejects_missing_reader_freshness() -> N
     value.pop("read_freshness")
 
     with pytest.raises(ChatSnapshotConsumerError, match="read_freshness must be an object"):
+        validate_analysis_chat_snapshot(value)
+
+
+@pytest.mark.parametrize("stale_after", [None, -1, True, 1.5, "1200"])
+def test_validate_analysis_chat_snapshot_rejects_invalid_stale_threshold(stale_after) -> None:
+    value = _snapshot()
+    value["refresh_policy"] = {"snapshot_stale_after_seconds": stale_after}
+
+    with pytest.raises(ChatSnapshotConsumerError, match="snapshot_stale_after_seconds is invalid"):
         validate_analysis_chat_snapshot(value)
 
 
