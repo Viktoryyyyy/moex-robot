@@ -14,14 +14,14 @@ The server publishes data/context only. Analysis chats interpret that context. T
 
 For current market/news/macro facts, the snapshot supplied to the chat is the only allowed factual source.
 
-Preferred form:
-- canonical reader-enriched snapshot including `read_freshness`.
-
-Raw `current.json` is allowed only when the chat can independently establish current UTC wall-clock time and recompute freshness from:
+The snapshot may be supplied as raw `current.json` or through the canonical reader. In either form, the chat MUST recompute freshness at the actual analysis time from:
+- current UTC time;
 - `identity.generated_at_utc`;
 - `refresh_policy.snapshot_stale_after_seconds`.
 
-If freshness cannot be verified, it must not be assumed.
+Any supplied `read_freshness` is diagnostic metadata from an earlier read only. It cannot make a cached payload remain `FRESH` after time has passed.
+
+If the current time, generation timestamp, or stale threshold cannot be verified, freshness is `UNKNOWN`; `snapshot_age_seconds` is `null`; freshness must not be assumed.
 
 ## Component status semantics
 
@@ -60,22 +60,29 @@ Do not cite unavailable/blocked data as factual evidence.
 
 ## Freshness rule
 
-A snapshot is `FRESH` only when freshness is positively established either by canonical reader metadata or by a wall-clock age calculation against the persisted stale threshold.
+At analysis start, compute:
 
-Absence of `read_freshness` is not evidence of freshness.
+`snapshot_age_seconds = max(0, current_utc_time - identity.generated_at_utc)`
+
+A snapshot is `FRESH` only when that current-time age is less than or equal to `refresh_policy.snapshot_stale_after_seconds`. Otherwise it is `STALE`.
+
+If the calculation cannot be performed truthfully, status is `UNKNOWN` and age is JSON `null`.
+
+`read_freshness.status` never overrides this current-time calculation.
 
 ## Weekly-to-Daily handoff rule
 
 Standalone `weekly_context_for_daily_chat` must contain:
-- context generation timestamp;
-- source snapshot generation timestamp;
-- source snapshot freshness;
-- explicit Moscow-date validity interval;
+- `weekly_context_generated_at_utc`;
+- `source_snapshot_generated_at_utc`;
+- `source_snapshot_freshness`;
+- `valid_from_moscow_date`;
+- `valid_through_moscow_date`;
 - regime/directional context;
 - key levels/catalysts/risk flags;
 - qualitative confidence.
 
-The Daily Chat must reject or degrade a weekly context whose provenance or validity cannot be verified.
+The Daily Chat must reject or degrade a weekly context whose provenance or Moscow-date validity cannot be verified.
 
 ## Execution boundary
 
