@@ -11,7 +11,7 @@
     "source_contract_ref": "contracts/sources/futures/moex_algopack_futoi.v1.yaml",
     "raw_dataset_ref": "contracts/datasets/futures_futoi_raw.v1.yaml",
     "stage5_positioning_ref": "configs/datasets/step5_futoi_positioning.v1.yaml",
-    "analysis_bundle_ref": "src/moex_data/step9_analysis_bundle.py",
+    "analysis_bundle_ref": "src/moex_data/step9_rub_analysis_bundle.py",
     "snapshot_producer_ref": "src/moex_research/runners/usdrubf_s7_3_chat_analysis_snapshot.py",
     "live_bridge_ref": "src/moex_research/intelligence/usdrubf_live_shadow_bridge.py",
     "legacy_phase8_7a_contract_ref": "contracts/experiments/usdrubf_phase8_7a_futoi_si_source_and_feature_contract_v1.json",
@@ -25,85 +25,16 @@
     "buy_sell_authority_before_live_acceptance": false
   },
   "gates": [
-    {
-      "gate_id": "registered_source",
-      "required": true,
-      "status": "PASS",
-      "evidence": "contracts/sources/futures/moex_algopack_futoi.v1.yaml status active_stage2_proven"
-    },
-    {
-      "gate_id": "deterministic_adapter",
-      "required": true,
-      "status": "PASS",
-      "evidence": "canonical explicit-date authenticated APIM materializer/backfill with fallback and latest autodetect forbidden"
-    },
-    {
-      "gate_id": "provenance",
-      "required": true,
-      "status": "PASS",
-      "evidence": "canonical raw dataset retains source identity, source record identifiers, event/publication/availability timestamps and accepted lineage"
-    },
-    {
-      "gate_id": "historical_pit_semantics",
-      "required": true,
-      "status": "PASS",
-      "evidence": "canonical contract separates tradedate+tradetime event timestamp from archival/publication systime and Stage 5 consumes content-attested history causally"
-    },
-    {
-      "gate_id": "historical_quality_and_coverage",
-      "required": true,
-      "status": "PASS",
-      "evidence": "Si history 2020-01-03 through 2026-08-17 physically validated; Stage 5 accepted EOD and positioning outputs"
-    },
-    {
-      "gate_id": "license_access_and_derived_use",
-      "required": true,
-      "status": "BLOCKED",
-      "blocker": "derived_use_authority_not_proven",
-      "evidence": {
-        "provider": "MOEX AlgoPack",
-        "official_terms_url": "https://www.moex.com/files/43sepmkqqv48p5et6mhhv58155",
-        "official_terms_document_approved_at": "2025-12-24",
-        "observed_standard_full_product_rule": "FUTOI is included in the full AlgoPack internal-use option, while creation of derivative information from that received information is not granted under that option.",
-        "account_specific_or_special_permission_proven": false,
-        "api_key_or_successful_fetch_treated_as_permission": false
-      }
-    },
-    {
-      "gate_id": "canonical_live_smoke",
-      "required": true,
-      "status": "BLOCKED",
-      "blocker": "recent_fetch_evidence_not_promoted_to_canonical_live_acceptance",
-      "observed_applied_state_evidence": {
-        "trade_date_min": "2026-08-17",
-        "trade_date_max": "2026-08-25",
-        "source_requests": 9,
-        "rows": 9,
-        "trade_dates": 9,
-        "format": "one_row_per_trade_date",
-        "rule": "daily_latest_aligned_FIZ_and_YUR_wide"
-      }
-    },
-    {
-      "gate_id": "recurring_live_quality_and_freshness",
-      "required": true,
-      "status": "BLOCKED",
-      "blocker": "stage5_scheduler_and_research_readiness_not_accepted",
-      "evidence": "Stage 5 implementation/pilot/pointers are accepted while scheduler_ready and research_ready remain false"
-    },
-    {
-      "gate_id": "typed_integration",
-      "required": true,
-      "status": "PASS",
-      "evidence": "Stage 5 blocks are typed into the analysis bundle and FUTOI DirectionalContext enters DecisionInput only under explicit quality semantics"
-    },
-    {
-      "gate_id": "snapshot_live_enable",
-      "required": true,
-      "status": "BLOCKED",
-      "blocker": "live_futoi_not_explicitly_enabled",
-      "evidence": "S7.3 snapshot producer invokes load_futoi_context with enabled=False"
-    }
+    {"gate_id":"registered_source","required":true,"status":"PASS","evidence":"contracts/sources/futures/moex_algopack_futoi.v1.yaml status active_stage2_proven"},
+    {"gate_id":"deterministic_adapter","required":true,"status":"PASS","evidence":"canonical explicit-date authenticated APIM materializer/backfill with fallback and latest autodetect forbidden"},
+    {"gate_id":"provenance","required":true,"status":"PASS","evidence":"canonical raw dataset retains source identity, source record identifiers, event/publication/availability timestamps and accepted lineage"},
+    {"gate_id":"historical_pit_semantics","required":true,"status":"PASS","evidence":"canonical contract separates tradedate+tradetime event timestamp from archival/publication systime and Stage 5 consumes content-attested history causally"},
+    {"gate_id":"historical_quality_and_coverage","required":true,"status":"PASS","evidence":"Si history 2020-01-03 through 2026-08-17 physically validated; Stage 5 accepted EOD and positioning outputs"},
+    {"gate_id":"license_access_and_derived_use","required":true,"status":"BLOCKED","blocker":"derived_use_authority_not_proven","evidence":{"provider":"MOEX AlgoPack","official_terms_url":"https://www.moex.com/files/43sepmkqqv48p5et6mhhv58155","official_terms_document_approved_at":"2025-12-24","observed_standard_full_product_rule":"FUTOI is included in the full AlgoPack internal-use option, while creation of derivative information from that received information is not granted under that option.","account_specific_or_special_permission_proven":false,"api_key_or_successful_fetch_treated_as_permission":false}},
+    {"gate_id":"canonical_live_smoke","required":true,"status":"BLOCKED","blocker":"recent_fetch_evidence_not_promoted_to_canonical_live_acceptance","observed_applied_state_evidence":{"trade_date_min":"2026-08-17","trade_date_max":"2026-08-25","source_requests":9,"rows":9,"trade_dates":9,"format":"one_row_per_trade_date","rule":"daily_latest_aligned_FIZ_and_YUR_wide"}},
+    {"gate_id":"recurring_live_quality_and_freshness","required":true,"status":"BLOCKED","blocker":"stage5_scheduler_and_research_readiness_not_accepted","evidence":"Stage 5 implementation/pilot/pointers are accepted while scheduler_ready and research_ready remain false"},
+    {"gate_id":"typed_integration","required":true,"status":"PASS","evidence":"Stage 5 blocks are typed into the analysis bundle and FUTOI DirectionalContext enters DecisionInput only under explicit quality semantics"},
+    {"gate_id":"snapshot_live_enable","required":true,"status":"BLOCKED","blocker":"live_futoi_not_explicitly_enabled","evidence":"S7.3 snapshot producer invokes load_futoi_context with enabled=False"}
   ],
   "authority": {
     "factual_live_authority": false,
