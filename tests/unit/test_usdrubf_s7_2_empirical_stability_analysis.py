@@ -64,7 +64,7 @@ def _replay_rows() -> pd.DataFrame:
                 "market_regime": "R1",
                 "structure_signature": "HIGH:AWAY|LOW:UNTOUCHED",
                 "future_price_h1": 99.0,
-                "future_price_h5": 98.0,
+                "future_price_h5": 101.0,
             },
         ]
     )
