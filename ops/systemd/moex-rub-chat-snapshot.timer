@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh MOEX Bot RUB analysis chat snapshot every 10 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+AccuracySec=30s
+Unit=moex-rub-chat-snapshot.service
+
+[Install]
+WantedBy=timers.target
