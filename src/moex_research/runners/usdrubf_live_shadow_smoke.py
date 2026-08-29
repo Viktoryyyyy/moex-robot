@@ -49,6 +49,7 @@ MODE = "short_live_shadow_input_bridge"
 PROJECT_ENV_PATH = Path(__file__).resolve().parents[4] / ".env"
 _REQUIRED_CBR_MACRO_METRICS = frozenset({"cbr_ruonia_rate_pct", "cbr_key_rate_pct"})
 _DEFAULT_NEWS_MAX_EVENTS = 20
+_FUTOI_LIVE_ACCEPTANCE_STATUS = "FUTOI_GOVERNED_BLOCKED"
 
 
 def _load_project_env() -> None:
@@ -238,6 +239,11 @@ def _compose_wall_clock_decision_input(
 
 
 def run_once(args: argparse.Namespace) -> Mapping[str, object]:
+    if bool(getattr(args, "enable_futoi", False)):
+        raise RuntimeError(
+            f"FUTOI live enablement is governed blocked: {_FUTOI_LIVE_ACCEPTANCE_STATUS}"
+        )
+
     cycle_started_at = datetime.now(MOSCOW).replace(microsecond=0)
     current_trade_date = cycle_started_at.date()
     current_raw = tuple(_load_bars(SECID_KEY, current_trade_date))
@@ -261,7 +267,7 @@ def run_once(args: argparse.Namespace) -> Mapping[str, object]:
         prior_trade_date=prior_trade_date,
         current_trade_date=current_trade_date,
         fallback_available_at=market_data_as_of,
-        enabled=bool(args.enable_futoi),
+        enabled=False,
     )
     market_input = build_live_decision_input(
         current_session_bars=current_closed,
