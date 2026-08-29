@@ -1,0 +1,36 @@
+dataset_id: futures_futoi_raw_incremental_acceptance
+schema_version: futures_futoi_raw_incremental_acceptance.v1
+status: implementation_ready
+source_dataset_id: futures_futoi_raw
+source_id: moex_algopack_futoi
+scope:
+  instruments:
+    - si_futures_family
+    - cr_futures_family
+semantics:
+  purpose: fail_closed_incremental_acceptance_after_historical_stage2_baseline
+  historical_baseline_pointer_mutated: false
+  latest_autodetect_allowed: false
+  implicit_partition_discovery_allowed: false
+  source_materialization_must_be_explicit_date_bounded: true
+paths:
+  immutable_manifest_pattern: ${MOEX_DATA_ROOT}/state/accepted_manifests/futoi_raw_incremental/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}/manifest.json
+  current_pointer_pattern: ${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_futoi_raw/instrument_id={INSTRUMENT_ID}/current_incremental_accepted_manifest.json
+acceptance:
+  require_parent_accepted_state: true
+  require_parent_sha256_binding: true
+  require_contiguous_calendar_request_from_parent_end_plus_one: true
+  allow_empty_source_dates_only_when_declared_skipped: true
+  require_zero_failed_dates: true
+  require_quality_status_pass: true
+  require_zero_duplicate_keys: true
+  require_zero_null_required: true
+  require_zero_invalid_positions: true
+  require_FIZ_and_YUR_in_every_written_partition: true
+  require_partition_sha256: true
+  atomic_pointer_advance_after_full_validation_only: true
+  failed_validation_pointer_advance: false
+research_authority:
+  historical_pit_research_ready_claimed: false
+  directional_signal_authority: false
+  trading_action_authority: false
