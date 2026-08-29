@@ -6,6 +6,9 @@ import json
 from pathlib import Path
 
 from src.moex_research.intelligence.usdrubf_live_shadow_bridge import load_futoi_context
+from src.moex_research.runners.usdrubf_phase8_7a_futoi_si_source_validation import (
+    validate_license_access_evidence,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -111,21 +114,34 @@ def test_futoi_live_acceptance_is_explicitly_governed_blocked() -> None:
     assert REQUIRED_LICENSE_EVIDENCE_FIELDS <= set(evidence)
     assert evidence["project"] == "MOEX_Bot"
     assert evidence["status"] == "PASS_FOR_INTERNAL_PROJECT_USE"
-    assert evidence["provider"] == "MOEX"
+    assert evidence["provider"] == "MOEX AlgoPack FUTOI"
     assert evidence["product"] == "AlgoPack FUTOI"
+    assert evidence["account_entitlement"] is True
     assert evidence["attestor_identity"]["github_login"] == "Viktoryyyyy"
     assert evidence["attestor_identity"]["role"] == "repository_owner_and_account_owner"
-    assert evidence["account_entitlement"]["product_entitlement"] == "FUTOI"
-    assert evidence["account_entitlement"]["credential_name_only"] == "MOEX_API_KEY"
-    assert evidence["account_entitlement"]["credential_value_recorded"] is False
+    assert evidence["account_binding"]["product_entitlement"] == "FUTOI"
+    assert evidence["account_binding"]["credential_name_only"] == "MOEX_API_KEY"
+    assert evidence["account_binding"]["credential_value_recorded"] is False
     assert evidence["permitted_research_use"] is True
     assert evidence["permitted_local_raw_storage"] is True
     assert evidence["permitted_derived_feature_use"] is True
-    assert evidence["redistribution_policy"]["external_redistribution_permission_asserted"] is False
-    assert evidence["evidence_source"]["type"] == "explicit_account_owner_attestation"
-    assert evidence["evidence_source"]["owner_statement"] == "разрешено"
+    assert isinstance(evidence["redistribution_policy"], str)
+    assert "external_redistribution_permission_not_asserted" in evidence["redistribution_policy"]
+    assert isinstance(evidence["evidence_source"], str)
+    assert "разрешено" in evidence["evidence_source"]
+    assert evidence["external_redistribution_permission_asserted"] is False
     verified_at = datetime.fromisoformat(evidence["verified_at"].replace("Z", "+00:00"))
     assert verified_at.tzinfo is not None
+
+    validator_passed, normalized = validate_license_access_evidence(evidence)
+    assert validator_passed is True
+    assert normalized["status"] == "passed"
+    assert normalized["provider_identity_verified"] is True
+    assert normalized["account_entitlement"] is True
+    assert normalized["permitted_research_use"] is True
+    assert normalized["permitted_local_raw_storage"] is True
+    assert normalized["permitted_derived_feature_use"] is True
+    assert normalized["blocker"] is None
 
     assert gates["canonical_live_smoke"]["status"] == "BLOCKED"
     assert gates["recurring_live_quality_and_freshness"]["status"] == "BLOCKED"
