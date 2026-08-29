@@ -35,6 +35,13 @@ def validate_analysis_chat_snapshot(snapshot: Mapping[str, object]) -> None:
     if not isinstance(generated_at, str) or not generated_at.strip():
         raise ChatSnapshotConsumerError("snapshot identity.generated_at_utc missing")
 
+    refresh_policy = _require_mapping(snapshot.get("refresh_policy"), "refresh_policy")
+    stale_after = refresh_policy.get("snapshot_stale_after_seconds")
+    if isinstance(stale_after, bool) or not isinstance(stale_after, int) or stale_after < 0:
+        raise ChatSnapshotConsumerError(
+            "snapshot refresh_policy.snapshot_stale_after_seconds is invalid"
+        )
+
     freshness = _require_mapping(snapshot.get("read_freshness"), "read_freshness")
     if freshness.get("status") not in {"FRESH", "STALE"}:
         raise ChatSnapshotConsumerError("snapshot read_freshness.status is invalid")
