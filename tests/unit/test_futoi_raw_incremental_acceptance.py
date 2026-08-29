@@ -55,6 +55,8 @@ def _partition(
     instrument_id: str = "si_futures_family",
     groups: tuple[str, ...] = ("FIZ", "YUR"),
     invalid_position: bool = False,
+    secid: str = "SiU6",
+    drop_column: str | None = None,
 ) -> Path:
     rows: list[dict[str, object]] = []
     for index, group in enumerate(groups, start=1):
@@ -63,24 +65,32 @@ def _partition(
         pos_short = -(80 + index)
         rows.append(
             {
+                "instrument_id": instrument_id,
                 "trade_date": trade_date,
                 "ts": moment,
                 "moment": moment,
                 "systime": trade_date + " 10:00:05",
                 "sess_id": 1,
                 "seqnum": index,
-                "secid": "SiU6",
+                "secid": secid,
+                "board": "RFUD",
+                "market": "forts",
+                "engine": "futures",
+                "source_id": materializer.SOURCE_ID,
+                "source_ticker": "SI",
                 "clgroup": group,
                 "pos": pos_long + pos_short,
                 "pos_long": pos_long,
                 "pos_short": pos_short,
                 "pos_long_num": 10 + index,
                 "pos_short_num": 9 + index,
-                "instrument_id": instrument_id,
-                "source_id": materializer.SOURCE_ID,
+                "availability_ts_utc": "2026-08-29T19:40:27+00:00",
+                "ingest_ts": "2026-08-29T19:40:27+00:00",
             }
         )
     frame = pd.DataFrame(rows)
+    if drop_column is not None:
+        frame = frame.drop(columns=[drop_column])
     path = materializer._partition_path(trade_date, instrument_id, materializer.SOURCE_ID)
     path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_parquet(path, index=False)
@@ -98,6 +108,8 @@ def _backfill_evidence(
     groups: tuple[str, ...] = ("FIZ", "YUR"),
     aggregate_duplicate_key_count: int = 0,
     invalid_partition_position: bool = False,
+    partition_secid: str = "SiU6",
+    drop_partition_column: str | None = None,
     instrument_id: str = "si_futures_family",
 ) -> list[Path]:
     partitions = [
@@ -107,6 +119,8 @@ def _backfill_evidence(
             instrument_id=instrument_id,
             groups=groups,
             invalid_position=invalid_partition_position,
+            secid=partition_secid,
+            drop_column=drop_partition_column,
         )
         for value in written_dates
     ]
@@ -183,12 +197,15 @@ def test_first_increment_accepts_without_mutating_historical_pointer(data_root: 
     assert result["cumulative_partition_count"] == 1758
     assert result["cumulative_row_count"] == 597652
     assert result["accepted_partition_snapshots_immutable"] is True
+    assert result["full_raw_contract_revalidated"] is True
+    assert result["registry_binding_revalidated"] is True
     assert historical_pointer.read_bytes() == before
     pointer = json.loads(acceptance.incremental_pointer_path(data_root, "si_futures_family").read_text())
     manifest_path = data_root / pointer["manifest_ref"][len("${MOEX_DATA_ROOT}/") :]
     manifest = json.loads(manifest_path.read_text())
     assert manifest["parent_kind"] == "historical_stage2"
     assert manifest["partitions"][0]["clgroups"] == ["FIZ", "YUR"]
+    assert manifest["partitions"][0]["secid"] == "SiU6"
     accepted_partition = data_root / manifest["partitions"][0]["accepted_partition_ref"][len("${MOEX_DATA_ROOT}/") :]
     assert accepted_partition.read_bytes() == canonical_bytes
     assert manifest["directional_signal_authority"] is False
@@ -301,6 +318,38 @@ def test_recomputes_partition_quality_instead_of_trusting_aggregate_report(data_
             instrument_id="si_futures_family", backfill_run_id="invalid_position_v1", date_end="2026-08-18"
         )
     assert not acceptance.incremental_pointer_path(data_root, "si_futures_family").exists()
+
+
+def test_rejects_missing_raw_contract_column(data_root: Path) -> None:
+    _historical_state(data_root)
+    _backfill_evidence(
+        data_root,
+        run_id="missing_contract_col_v1",
+        requested_from="2026-08-18",
+        requested_till="2026-08-18",
+        written_dates=("2026-08-18",),
+        drop_partition_column="availability_ts_utc",
+    )
+    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="raw-contract required columns"):
+        acceptance.accept_incremental_backfill(
+            instrument_id="si_futures_family", backfill_run_id="missing_contract_col_v1", date_end="2026-08-18"
+        )
+
+
+def test_rejects_registry_secid_mismatch(data_root: Path) -> None:
+    _historical_state(data_root)
+    _backfill_evidence(
+        data_root,
+        run_id="wrong_secid_v1",
+        requested_from="2026-08-18",
+        requested_till="2026-08-18",
+        written_dates=("2026-08-18",),
+        partition_secid="WrongSecid",
+    )
+    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="registry binding mismatch: secid"):
+        acceptance.accept_incremental_backfill(
+            instrument_id="si_futures_family", backfill_run_id="wrong_secid_v1", date_end="2026-08-18"
+        )
 
 
 def test_rejects_symlink_partition_before_resolution(data_root: Path) -> None:
