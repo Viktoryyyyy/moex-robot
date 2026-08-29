@@ -350,6 +350,8 @@ def _validate_partition(root: Path, path_value: object, instrument_id: str, requ
     if bool(raw_ts.isna().any()) or bool(raw_moment.isna().any()) or not bool(raw_ts.eq(raw_moment).all()):
         _fail("incremental partition raw ts must equal raw moment")
     validated_frame = materializer._validate_required_source_identifiers(frame)
+    validated_frame["secid"] = validated_frame["secid"].astype(str).str.strip().str.upper()
+    validated_frame["clgroup"] = validated_frame["clgroup"].astype(str).str.strip().str.upper()
     validated_frame = materializer._enforce_publication_timestamp(validated_frame)
     counts = materializer._quality_counts(validated_frame)
     if int(counts.get("rows") or 0) <= 0:
@@ -381,6 +383,10 @@ def _validate_backfill(root: Path, instrument_id: str, run_id: str, date_end: st
     quality_path = backfill._aggregate_quality_path(date_end, run_id)
     manifest, manifest_snapshot = _load_json_snapshot(manifest_path, "incremental backfill manifest")
     quality, quality_snapshot = _load_json_snapshot(quality_path, "incremental backfill quality")
+    if manifest.get("run_id") != run_id:
+        _fail("incremental backfill manifest run_id mismatch")
+    if quality.get("run_id") != run_id:
+        _fail("incremental backfill quality run_id mismatch")
     if manifest.get("producer") != backfill.PRODUCER_ID or manifest.get("dataset_id") != DATASET_ID:
         _fail("incremental backfill manifest identity mismatch")
     if manifest.get("instrument_scope") != [instrument_id] or manifest.get("source_scope") != [SOURCE_ID]:
