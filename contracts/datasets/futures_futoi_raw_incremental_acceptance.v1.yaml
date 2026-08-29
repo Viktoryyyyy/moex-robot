@@ -26,6 +26,9 @@ acceptance:
   allow_empty_source_dates_only_when_declared_skipped: true
   require_zero_failed_dates: true
   require_quality_status_pass: true
+  require_all_futures_futoi_raw_contract_columns: true
+  revalidate_registry_secid_board_market_engine_source_ticker_binding: true
+  require_utc_availability_and_ingest_timestamps: true
   recompute_partition_quality_from_exact_snapshot: true
   require_zero_duplicate_keys: true
   require_zero_null_required: true
