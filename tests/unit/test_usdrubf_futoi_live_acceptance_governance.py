@@ -71,6 +71,7 @@ def test_futoi_live_acceptance_is_explicitly_governed_blocked() -> None:
     assert contract["acceptance_rule"]["all_required_gates_must_pass_for_live_accepted"] is True
     assert contract["acceptance_rule"]["adapter_working_is_not_live_acceptance"] is True
     assert contract["acceptance_rule"]["successful_authenticated_request_is_not_license_acceptance"] is True
+    assert contract["acceptance_rule"]["account_owner_attestation_may_satisfy_account_specific_internal_use_permission"] is True
 
     gates = {gate["gate_id"]: gate for gate in contract["gates"]}
     assert set(gates) == REQUIRED_GATES
@@ -79,10 +80,18 @@ def test_futoi_live_acceptance_is_explicitly_governed_blocked() -> None:
     assert any(gate["status"] == "BLOCKED" for gate in gates.values())
 
     license_gate = gates["license_access_and_derived_use"]
-    assert license_gate["status"] == "BLOCKED"
-    assert license_gate["blocker"] == "derived_use_authority_not_proven"
-    assert license_gate["evidence"]["account_specific_or_special_permission_proven"] is False
-    assert license_gate["evidence"]["api_key_or_successful_fetch_treated_as_permission"] is False
+    assert license_gate["status"] == "PASS"
+    evidence = license_gate["evidence"]
+    assert evidence["permission_basis"] == "explicit_account_owner_attestation"
+    assert evidence["attested_at"] == "2026-08-29"
+    assert set(evidence["attested_internal_permissions"]) == {
+        "local_storage",
+        "internal_research_analysis",
+        "derived_positioning_features",
+    }
+    assert evidence["external_redistribution_permission_asserted"] is False
+    assert evidence["independent_provider_document_verified_by_repository"] is False
+    assert evidence["api_key_or_successful_fetch_treated_as_permission"] is False
     assert gates["canonical_live_smoke"]["status"] == "BLOCKED"
     assert gates["recurring_live_quality_and_freshness"]["status"] == "BLOCKED"
     assert gates["snapshot_live_enable"]["status"] == "BLOCKED"
