@@ -54,7 +54,11 @@ def test_futoi_live_acceptance_is_explicitly_governed_blocked() -> None:
     assert all(gate["status"] in {"PASS", "BLOCKED"} for gate in gates.values())
     assert any(gate["status"] == "BLOCKED" for gate in gates.values())
 
-    assert gates["license_access_and_derived_use"]["blocker"] == "derived_use_authority_not_proven"
+    license_gate = gates["license_access_and_derived_use"]
+    assert license_gate["status"] == "BLOCKED"
+    assert license_gate["blocker"] == "derived_use_authority_not_proven"
+    assert license_gate["evidence"]["account_specific_or_special_permission_proven"] is False
+    assert license_gate["evidence"]["api_key_or_successful_fetch_treated_as_permission"] is False
     assert gates["canonical_live_smoke"]["status"] == "BLOCKED"
     assert gates["recurring_live_quality_and_freshness"]["status"] == "BLOCKED"
     assert gates["snapshot_live_enable"]["status"] == "BLOCKED"
