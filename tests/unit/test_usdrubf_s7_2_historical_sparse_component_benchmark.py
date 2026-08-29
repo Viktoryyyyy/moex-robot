@@ -86,6 +86,28 @@ def test_sparse_15m_aggregates_only_observed_rows_without_imputation() -> None:
     assert sparse["close"] == pytest.approx(80.40)
     assert sparse["volume"] == pytest.approx(200.0)
     assert sparse["source_available_at"] == bars[-1]["end"]
+    assert sparse["last_observed_at"] == bars[-1]["end"]
+
+
+def test_sparse_bucket_availability_is_nominal_close_when_final_5m_row_is_absent() -> None:
+    bars = (
+        _bar("2026-08-10", "14:00", 80.20),
+        _bar("2026-08-10", "14:05", 80.30),
+    )
+    as_of = _bar("2026-08-10", "14:15", 80.35)["end"]
+
+    aggregated = build_historical_sparse_closed_15m_bars(
+        bars,
+        as_of_timestamp=as_of,
+    )
+
+    assert len(aggregated) == 1
+    sparse = aggregated[0]
+    assert sparse["constituent_count"] == 2
+    assert sparse["last_observed_at"] == bars[-1]["end"]
+    assert sparse["source_available_at"] == pd.Timestamp(
+        "2026-08-10 14:10", tz="Europe/Moscow"
+    ).to_pydatetime()
 
 
 def test_sparse_15m_does_not_use_bucket_before_nominal_close() -> None:
@@ -124,6 +146,7 @@ def test_historical_sparse_bridge_accepts_native_gap_while_live_bridge_stays_fai
     assert details["min_constituent_count"] == 2
     assert details["missing_5m_imputation"] is False
     assert details["nominal_close_guard"] is True
+    assert details["availability_semantics"] == "nominal_bucket_close"
     assert historical.as_of_timestamp == current[-1]["end"]
 
 
