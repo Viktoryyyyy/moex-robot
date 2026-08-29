@@ -5,6 +5,10 @@ from typing import Any, Dict, Optional
 import requests
 from mcp.server.fastmcp import FastMCP
 
+from src.moex_research.runners.usdrubf_s7_3_chat_snapshot_mcp_adapter import (
+    read_rub_analysis_snapshot_for_mcp,
+)
+
 API_URL = os.getenv("MOEX_API_URL", "https://apim.moex.com").rstrip("/")
 API_KEY = os.getenv("MOEX_API_KEY", "").strip()
 USER_AGENT = os.getenv("MOEX_UA", "moex_mcp/1.0").strip() or "moex_mcp/1.0"
@@ -32,6 +36,12 @@ mcp = FastMCP("moex")
 @mcp.tool()
 def ping() -> str:
     return "pong from moex_mcp"
+
+
+@mcp.tool()
+def rub_analysis_snapshot_current() -> Dict[str, Any]:
+    """Read the canonical persisted RUB Intelligence snapshot; never refresh sources."""
+    return read_rub_analysis_snapshot_for_mcp()
 
 
 @mcp.tool()
@@ -98,7 +108,6 @@ def fo_tradestats_raw(ticker: str, tradedate: str) -> Dict[str, Any]:
 
         blk = j.get("tradestats") or j.get("data") or {}
 
-        # В некоторых ответах tradestats — это список блоков
         if not isinstance(blk, dict) and "tradestats" in j and isinstance(j["tradestats"], list) and j["tradestats"]:
             blk = j["tradestats"][0]
 
@@ -109,7 +118,6 @@ def fo_tradestats_raw(ticker: str, tradedate: str) -> Dict[str, Any]:
         cols = blk.get("columns") or []
         data = blk.get("data") or []
 
-        # Если совсем пусто — возвращаем пустой результат без ошибки
         if not cols or not data:
             return {"columns": cols, "data": data, "ticker": ticker, "tradedate": tradedate}
 
@@ -157,9 +165,8 @@ def fo_5m_day(ticker: str, tradedate: str) -> Dict[str, Any]:
         d = row[name_to_idx["tradedate"]]
         t = row[name_to_idx["tradetime"]]
 
-        # MOEX иногда отдаёт HH:MM, иногда HH:MM:SS
         t_str = str(t)
-        if len(t_str) == 5:  # "HH:MM"
+        if len(t_str) == 5:
             t_str = f"{t_str}:00"
 
         end = f"{d} {t_str}+03:00"
