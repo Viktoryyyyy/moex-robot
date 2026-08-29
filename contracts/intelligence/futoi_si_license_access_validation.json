@@ -1,0 +1,35 @@
+{
+  "project": "MOEX_Bot",
+  "schema_version": "futoi_si_license_access_validation.v1",
+  "status": "PASS_FOR_INTERNAL_PROJECT_USE",
+  "provider": "MOEX AlgoPack FUTOI",
+  "product": "AlgoPack FUTOI",
+  "account_entitlement": true,
+  "permitted_research_use": true,
+  "permitted_local_raw_storage": true,
+  "permitted_derived_feature_use": true,
+  "redistribution_policy": "internal_project_use_only; external_redistribution_permission_not_asserted; repository_publication_of_raw_payload_not_authorized_by_this_evidence",
+  "evidence_source": "explicit repository-owner/account-owner attestation: разрешено; durable approval recorded in this repository artifact",
+  "verified_at": "2026-08-29T19:14:56Z",
+  "attestor_identity": {
+    "github_login": "Viktoryyyyy",
+    "role": "repository_owner_and_account_owner"
+  },
+  "account_binding": {
+    "binding": "current connected MOEX AlgoPack account backing the canonical MOEX_API_KEY used by the accepted FUTOI source path",
+    "credential_name_only": "MOEX_API_KEY",
+    "credential_value_recorded": false,
+    "canonical_source_contract_ref": "contracts/sources/futures/moex_algopack_futoi.v1.yaml",
+    "product_entitlement": "FUTOI",
+    "technical_entitlement_evidence": "canonical Stage 2 source validation and successful authenticated FUTOI fetches recorded in repository governance evidence"
+  },
+  "derived_feature_scope": [
+    "FIZ/YUR net positioning",
+    "position changes",
+    "percentiles",
+    "z-scores"
+  ],
+  "external_redistribution_permission_asserted": false,
+  "repository_publication_of_raw_payload_authorized_by_this_evidence": false,
+  "verification_scope": "account-specific internal project permission; not independent legal opinion and not external redistribution permission"
+}

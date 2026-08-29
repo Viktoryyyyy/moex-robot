@@ -6,10 +6,14 @@ import json
 from pathlib import Path
 
 from src.moex_research.intelligence.usdrubf_live_shadow_bridge import load_futoi_context
+from src.moex_research.runners.usdrubf_phase8_7a_futoi_si_source_validation import (
+    validate_license_access_evidence,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = REPO_ROOT / "contracts/intelligence/usdrubf_futoi_live_acceptance_governance_v1.json"
+LICENSE_EVIDENCE_PATH = REPO_ROOT / "contracts/intelligence/futoi_si_license_access_validation.json"
 SNAPSHOT_PATH = REPO_ROOT / "src/moex_research/runners/usdrubf_s7_3_chat_analysis_snapshot.py"
 LIVE_SHADOW_PATH = REPO_ROOT / "src/moex_research/runners/usdrubf_live_shadow_smoke.py"
 
@@ -27,9 +31,25 @@ REQUIRED_GATES = {
     "snapshot_live_enable",
 }
 
+REQUIRED_LICENSE_EVIDENCE_FIELDS = {
+    "provider",
+    "product",
+    "account_entitlement",
+    "permitted_research_use",
+    "permitted_local_raw_storage",
+    "permitted_derived_feature_use",
+    "redistribution_policy",
+    "evidence_source",
+    "verified_at",
+}
+
 
 def _contract() -> dict[str, object]:
     return json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+
+
+def _license_evidence() -> dict[str, object]:
+    return json.loads(LICENSE_EVIDENCE_PATH.read_text(encoding="utf-8"))
 
 
 def _function(path: Path, name: str) -> ast.FunctionDef:
@@ -71,6 +91,8 @@ def test_futoi_live_acceptance_is_explicitly_governed_blocked() -> None:
     assert contract["acceptance_rule"]["all_required_gates_must_pass_for_live_accepted"] is True
     assert contract["acceptance_rule"]["adapter_working_is_not_live_acceptance"] is True
     assert contract["acceptance_rule"]["successful_authenticated_request_is_not_license_acceptance"] is True
+    assert contract["acceptance_rule"]["account_owner_attestation_may_satisfy_account_specific_internal_use_permission"] is True
+    assert contract["source_of_truth"]["license_access_evidence_ref"] == "contracts/intelligence/futoi_si_license_access_validation.json"
 
     gates = {gate["gate_id"]: gate for gate in contract["gates"]}
     assert set(gates) == REQUIRED_GATES
@@ -79,10 +101,48 @@ def test_futoi_live_acceptance_is_explicitly_governed_blocked() -> None:
     assert any(gate["status"] == "BLOCKED" for gate in gates.values())
 
     license_gate = gates["license_access_and_derived_use"]
-    assert license_gate["status"] == "BLOCKED"
-    assert license_gate["blocker"] == "derived_use_authority_not_proven"
-    assert license_gate["evidence"]["account_specific_or_special_permission_proven"] is False
-    assert license_gate["evidence"]["api_key_or_successful_fetch_treated_as_permission"] is False
+    assert license_gate["status"] == "PASS"
+    gate_evidence = license_gate["evidence"]
+    assert gate_evidence["artifact_ref"] == "contracts/intelligence/futoi_si_license_access_validation.json"
+    assert gate_evidence["permission_basis"] == "explicit_account_owner_attestation"
+    assert gate_evidence["account_bound"] is True
+    assert gate_evidence["internal_project_use_only"] is True
+    assert gate_evidence["external_redistribution_permission_asserted"] is False
+    assert gate_evidence["api_key_or_successful_fetch_treated_as_permission"] is False
+
+    evidence = _license_evidence()
+    assert REQUIRED_LICENSE_EVIDENCE_FIELDS <= set(evidence)
+    assert evidence["project"] == "MOEX_Bot"
+    assert evidence["status"] == "PASS_FOR_INTERNAL_PROJECT_USE"
+    assert evidence["provider"] == "MOEX AlgoPack FUTOI"
+    assert evidence["product"] == "AlgoPack FUTOI"
+    assert evidence["account_entitlement"] is True
+    assert evidence["attestor_identity"]["github_login"] == "Viktoryyyyy"
+    assert evidence["attestor_identity"]["role"] == "repository_owner_and_account_owner"
+    assert evidence["account_binding"]["product_entitlement"] == "FUTOI"
+    assert evidence["account_binding"]["credential_name_only"] == "MOEX_API_KEY"
+    assert evidence["account_binding"]["credential_value_recorded"] is False
+    assert evidence["permitted_research_use"] is True
+    assert evidence["permitted_local_raw_storage"] is True
+    assert evidence["permitted_derived_feature_use"] is True
+    assert isinstance(evidence["redistribution_policy"], str)
+    assert "external_redistribution_permission_not_asserted" in evidence["redistribution_policy"]
+    assert isinstance(evidence["evidence_source"], str)
+    assert "разрешено" in evidence["evidence_source"]
+    assert evidence["external_redistribution_permission_asserted"] is False
+    verified_at = datetime.fromisoformat(evidence["verified_at"].replace("Z", "+00:00"))
+    assert verified_at.tzinfo is not None
+
+    validator_passed, normalized = validate_license_access_evidence(evidence)
+    assert validator_passed is True
+    assert normalized["status"] == "passed"
+    assert normalized["provider_identity_verified"] is True
+    assert normalized["account_entitlement"] is True
+    assert normalized["permitted_research_use"] is True
+    assert normalized["permitted_local_raw_storage"] is True
+    assert normalized["permitted_derived_feature_use"] is True
+    assert normalized["blocker"] is None
+
     assert gates["canonical_live_smoke"]["status"] == "BLOCKED"
     assert gates["recurring_live_quality_and_freshness"]["status"] == "BLOCKED"
     assert gates["snapshot_live_enable"]["status"] == "BLOCKED"
