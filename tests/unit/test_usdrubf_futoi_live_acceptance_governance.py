@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import ast
+from datetime import date, datetime, timezone
 import json
 from pathlib import Path
+
+from src.moex_research.intelligence.usdrubf_live_shadow_bridge import load_futoi_context
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -96,6 +99,25 @@ def test_blocked_acceptance_has_no_hidden_factual_or_action_authority() -> None:
     assert authority["blocked_fallback_direction"] == "MIXED"
     assert authority["blocked_fallback_confidence"] == 0.0
     assert authority["blocked_quality_status"] == "BLOCKED"
+
+
+def test_disabled_loader_returns_governed_blocked_fallback() -> None:
+    contract = _contract()
+    authority = contract["authority"]
+    fallback_at = datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc)
+
+    context = load_futoi_context(
+        prior_trade_date=date(2026, 8, 28),
+        current_trade_date=date(2026, 8, 29),
+        fallback_available_at=fallback_at,
+        enabled=False,
+    )
+
+    assert context.direction == authority["blocked_fallback_direction"] == "MIXED"
+    assert context.confidence == authority["blocked_fallback_confidence"] == 0.0
+    assert context.quality_status == authority["blocked_quality_status"] == "BLOCKED"
+    assert context.available_at == fallback_at
+    assert context.details["reason"] == "live_futoi_not_explicitly_enabled"
 
 
 def test_snapshot_remains_fail_closed_while_acceptance_is_blocked() -> None:
