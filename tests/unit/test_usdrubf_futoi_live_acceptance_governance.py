@@ -8,6 +8,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = REPO_ROOT / "contracts/intelligence/usdrubf_futoi_live_acceptance_governance_v1.json"
 SNAPSHOT_PATH = REPO_ROOT / "src/moex_research/runners/usdrubf_s7_3_chat_analysis_snapshot.py"
+LIVE_SHADOW_PATH = REPO_ROOT / "src/moex_research/runners/usdrubf_live_shadow_smoke.py"
 
 
 REQUIRED_GATES = {
@@ -28,15 +29,35 @@ def _contract() -> dict[str, object]:
     return json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
 
 
-def _live_market_function() -> ast.FunctionDef:
-    tree = ast.parse(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+def _function(path: Path, name: str) -> ast.FunctionDef:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     functions = [
         node
         for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == "_live_market_component"
+        if isinstance(node, ast.FunctionDef) and node.name == name
     ]
     assert len(functions) == 1
     return functions[0]
+
+
+def _futoi_loader_call(function: ast.FunctionDef) -> ast.Call:
+    calls = [
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "load_futoi_context"
+    ]
+    assert len(calls) == 1
+    return calls[0]
+
+
+def _assert_loader_disabled(function: ast.FunctionDef) -> None:
+    call = _futoi_loader_call(function)
+    enabled_keywords = [keyword for keyword in call.keywords if keyword.arg == "enabled"]
+    assert len(enabled_keywords) == 1
+    assert isinstance(enabled_keywords[0].value, ast.Constant)
+    assert enabled_keywords[0].value.value is False
 
 
 def test_futoi_live_acceptance_is_explicitly_governed_blocked() -> None:
@@ -62,6 +83,7 @@ def test_futoi_live_acceptance_is_explicitly_governed_blocked() -> None:
     assert gates["canonical_live_smoke"]["status"] == "BLOCKED"
     assert gates["recurring_live_quality_and_freshness"]["status"] == "BLOCKED"
     assert gates["snapshot_live_enable"]["status"] == "BLOCKED"
+    assert contract["architecture_decision"]["legacy_phase8_transport_may_become_live_authority"] is False
 
 
 def test_blocked_acceptance_has_no_hidden_factual_or_action_authority() -> None:
@@ -78,20 +100,8 @@ def test_blocked_acceptance_has_no_hidden_factual_or_action_authority() -> None:
 
 def test_snapshot_remains_fail_closed_while_acceptance_is_blocked() -> None:
     assert _contract()["status"] == "FUTOI_GOVERNED_BLOCKED"
-    function = _live_market_function()
-
-    futoi_calls = [
-        node
-        for node in ast.walk(function)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "load_futoi_context"
-    ]
-    assert len(futoi_calls) == 1
-    enabled_keywords = [keyword for keyword in futoi_calls[0].keywords if keyword.arg == "enabled"]
-    assert len(enabled_keywords) == 1
-    assert isinstance(enabled_keywords[0].value, ast.Constant)
-    assert enabled_keywords[0].value.value is False
+    function = _function(SNAPSHOT_PATH, "_live_market_component")
+    _assert_loader_disabled(function)
 
     data_assignments = [
         node
@@ -118,3 +128,31 @@ def test_snapshot_remains_fail_closed_while_acceptance_is_blocked() -> None:
     assert len(action_values) == 1
     assert isinstance(action_values[0], ast.Constant)
     assert action_values[0].value is False
+
+
+def test_live_shadow_runner_cannot_bypass_governed_block() -> None:
+    assert _contract()["status"] == "FUTOI_GOVERNED_BLOCKED"
+    source = LIVE_SHADOW_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    status_assignments = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "_FUTOI_LIVE_ACCEPTANCE_STATUS"
+            for target in node.targets
+        )
+    ]
+    assert len(status_assignments) == 1
+    assert isinstance(status_assignments[0].value, ast.Constant)
+    assert status_assignments[0].value.value == "FUTOI_GOVERNED_BLOCKED"
+
+    function = _function(LIVE_SHADOW_PATH, "run_once")
+    assert function.body
+    first_statement = function.body[0]
+    assert isinstance(first_statement, ast.If)
+    assert "enable_futoi" in ast.dump(first_statement.test)
+    assert first_statement.body
+    assert isinstance(first_statement.body[0], ast.Raise)
+    _assert_loader_disabled(function)
