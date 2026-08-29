@@ -169,3 +169,48 @@ def test_rejects_semantic_duplicate_after_identifier_canonicalization(data_root:
             backfill_run_id="canonical_duplicate_v1",
             date_end="2026-08-18",
         )
+
+
+def test_rejects_semantic_duplicate_after_secid_and_clgroup_canonicalization(data_root: Path) -> None:
+    partition = _backfill_evidence(data_root, "source_key_text_duplicate_v1")
+    frame = pd.read_parquet(partition)
+    duplicate = frame.iloc[[0]].copy()
+    duplicate.loc[:, "secid"] = "SIU6"
+    duplicate.loc[:, "clgroup"] = " fiz "
+    pd.concat([frame, duplicate], ignore_index=True).to_parquet(partition, index=False)
+
+    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="duplicate_key_count"):
+        acceptance.accept_incremental_backfill(
+            instrument_id="si_futures_family",
+            backfill_run_id="source_key_text_duplicate_v1",
+            date_end="2026-08-18",
+        )
+
+
+@pytest.mark.parametrize(
+    ("artifact", "error_pattern"),
+    (("manifest", "manifest run_id mismatch"), ("quality", "quality run_id mismatch")),
+)
+def test_rejects_embedded_backfill_run_id_mismatch(
+    data_root: Path,
+    artifact: str,
+    error_pattern: str,
+) -> None:
+    run_id = "run_binding_" + artifact + "_v1"
+    _backfill_evidence(data_root, run_id)
+    trade_date = "2026-08-18"
+    target = (
+        backfill._aggregate_manifest_path(trade_date, run_id)
+        if artifact == "manifest"
+        else backfill._aggregate_quality_path(trade_date, run_id)
+    )
+    values = json.loads(target.read_text(encoding="utf-8"))
+    values["run_id"] = "different_run"
+    _write_json(target, values)
+
+    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match=error_pattern):
+        acceptance.accept_incremental_backfill(
+            instrument_id="si_futures_family",
+            backfill_run_id=run_id,
+            date_end=trade_date,
+        )
