@@ -10,9 +10,11 @@ This slice adds a fail-closed acceptance layer for canonical `futures_futoi_raw`
 
 The historical Stage 2 `current_accepted_manifest.json` is not mutated. The first incremental acceptance chains from that historical pointer. Later increments chain from `current_incremental_accepted_manifest.json`.
 
-A candidate must come from an explicit-date canonical `backfill_futoi_instrument` run. Acceptance performs no network calls and rejects gaps, source failures, quality defects, missing FIZ/YUR participation groups, duplicate source keys, non-canonical partition paths, source scope mismatch, or parent-state mutation.
+A candidate must come from an explicit-date canonical `backfill_futoi_instrument` run. Acceptance performs no network calls and rejects gaps, source failures, stale aggregate quality, missing FIZ/YUR groups, duplicate source keys, null canonical fields, invalid positions, symlink partitions, non-canonical partition paths, source scope mismatch, or parent-state mutation.
 
-Accepted incremental manifests bind the parent pointer and manifest, source backfill manifest and quality report, and every accepted parquet partition by SHA-256. The incremental pointer advances atomically only after validation.
+Each candidate parquet is opened fail-closed as a non-symlink descriptor. One exact byte snapshot is read, hashed and parsed; canonical raw quality is recomputed from that same snapshot. The validated bytes are then copied create-only into the immutable incremental acceptance run. Parent pointer/manifest and source backfill manifest/quality bytes are snapshotted into the same run.
+
+The accepted manifest therefore references immutable accepted raw snapshots and SHA-256 bindings rather than requiring later reads from mutable canonical raw partitions. The incremental pointer advances atomically only after the accepted evidence set is written and the parent state is rechecked.
 
 ## Authority
 
