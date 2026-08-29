@@ -26,6 +26,29 @@ DATASET_ID: Final[str] = materializer.DATASET_ID
 SOURCE_ID: Final[str] = materializer.SOURCE_ID
 ALLOWED_INSTRUMENTS: Final[frozenset[str]] = frozenset({"si_futures_family", "cr_futures_family"})
 ROOT_REF_PREFIX: Final[str] = "${MOEX_DATA_ROOT}/"
+RAW_REQUIRED_COLUMNS: Final[tuple[str, ...]] = (
+    "instrument_id",
+    "trade_date",
+    "ts",
+    "moment",
+    "systime",
+    "sess_id",
+    "seqnum",
+    "secid",
+    "board",
+    "market",
+    "engine",
+    "source_id",
+    "source_ticker",
+    "clgroup",
+    "pos",
+    "pos_long",
+    "pos_short",
+    "pos_long_num",
+    "pos_short_num",
+    "availability_ts_utc",
+    "ingest_ts",
+)
 
 
 class FutoiIncrementalAcceptanceError(ValueError):
@@ -241,6 +264,59 @@ def _expected_dates(start: str, end: str) -> list[str]:
     return result
 
 
+def _validate_utc_timestamp_column(frame: pd.DataFrame, field: str) -> None:
+    for value in frame[field].tolist():
+        try:
+            timestamp = pd.Timestamp(value)
+        except Exception as exc:
+            raise FutoiIncrementalAcceptanceError(field + " contains invalid timestamp: " + str(exc)) from exc
+        if pd.isna(timestamp) or timestamp.tzinfo is None or timestamp.utcoffset() != timedelta(0):
+            _fail(field + " must contain timezone-aware UTC timestamps")
+
+
+def _validate_raw_contract_and_registry(frame: pd.DataFrame, instrument_id: str) -> dict[str, object]:
+    missing = sorted(set(RAW_REQUIRED_COLUMNS).difference(frame.columns))
+    if missing:
+        _fail("incremental partition missing raw-contract required columns: " + ",".join(missing))
+    if bool(frame[list(RAW_REQUIRED_COLUMNS)].isna().any(axis=1).any()):
+        _fail("incremental partition contains null raw-contract required columns")
+    binding = materializer._registry_binding(materializer.REGISTRY_PATH, instrument_id)
+    expected = {
+        "instrument_id": instrument_id,
+        "secid": str(binding["secid"]),
+        "board": str(binding["board"]),
+        "market": str(binding["market"]),
+        "engine": str(binding["engine"]),
+        "source_id": SOURCE_ID,
+        "source_ticker": str(binding["futoi.ticker"]),
+    }
+    normalizers = {
+        "instrument_id": lambda value: str(value).strip(),
+        "secid": lambda value: str(value).strip().upper(),
+        "board": lambda value: str(value).strip().upper(),
+        "market": lambda value: str(value).strip().lower(),
+        "engine": lambda value: str(value).strip().lower(),
+        "source_id": lambda value: str(value).strip().lower(),
+        "source_ticker": lambda value: str(value).strip().lower(),
+    }
+    expected_normalized = {
+        "instrument_id": str(expected["instrument_id"]).strip(),
+        "secid": str(expected["secid"]).strip().upper(),
+        "board": str(expected["board"]).strip().upper(),
+        "market": str(expected["market"]).strip().lower(),
+        "engine": str(expected["engine"]).strip().lower(),
+        "source_id": str(expected["source_id"]).strip().lower(),
+        "source_ticker": str(expected["source_ticker"]).strip().lower(),
+    }
+    for field, normalize in normalizers.items():
+        observed = {normalize(value) for value in frame[field].tolist()}
+        if observed != {expected_normalized[field]}:
+            _fail("incremental partition registry binding mismatch: " + field)
+    _validate_utc_timestamp_column(frame, "availability_ts_utc")
+    _validate_utc_timestamp_column(frame, "ingest_ts")
+    return binding
+
+
 def _validate_partition(root: Path, path_value: object, instrument_id: str, requested_start: str, requested_end: str) -> dict[str, object]:
     path = Path(str(path_value or ""))
     if not path.is_absolute():
@@ -259,20 +335,13 @@ def _validate_partition(root: Path, path_value: object, instrument_id: str, requ
         raise FutoiIncrementalAcceptanceError("backfill partition is not readable parquet: " + str(exc)) from exc
     if frame.empty:
         _fail("accepted incremental partition must not be empty")
-    required_identity = set(materializer.SOURCE_RECORD_KEY_FIELDS) | {"instrument_id", "source_id", "clgroup"}
-    missing_identity = sorted(required_identity.difference(frame.columns))
-    if missing_identity:
-        _fail("incremental partition missing identity columns: " + ",".join(missing_identity))
+    binding = _validate_raw_contract_and_registry(frame, instrument_id)
     trade_dates = sorted(set(frame["trade_date"].astype(str)))
     if len(trade_dates) != 1:
         _fail("incremental partition must contain exactly one trade_date")
     trade_date = _iso_date(trade_dates[0], "partition trade_date")
     if trade_date < requested_start or trade_date > requested_end:
         _fail("incremental partition trade_date is outside requested range")
-    if set(frame["instrument_id"].astype(str)) != {instrument_id}:
-        _fail("incremental partition instrument_id mismatch")
-    if set(frame["source_id"].astype(str)) != {SOURCE_ID}:
-        _fail("incremental partition source_id mismatch")
     groups = set(frame["clgroup"].astype(str).str.upper().str.strip())
     if groups != {"FIZ", "YUR"}:
         _fail("incremental partition must contain exactly FIZ and YUR clgroups")
@@ -292,6 +361,8 @@ def _validate_partition(root: Path, path_value: object, instrument_id: str, requ
         "canonical_source_ref": _rooted_ref(root, path),
         "sha256": snapshot["sha256"],
         "row_count": int(counts["rows"]),
+        "secid": str(binding["secid"]),
+        "source_ticker": str(binding["futoi.ticker"]),
         "clgroups": ["FIZ", "YUR"],
         "duplicate_source_key_count": 0,
         "null_required_count": 0,
@@ -467,6 +538,8 @@ def accept_incremental_backfill(*, instrument_id: str, backfill_run_id: str, dat
                     "canonical_source_ref": source_record["canonical_source_ref"],
                     "sha256": source_record["sha256"],
                     "row_count": source_record["row_count"],
+                    "secid": source_record["secid"],
+                    "source_ticker": source_record["source_ticker"],
                     "clgroups": source_record["clgroups"],
                     "duplicate_source_key_count": 0,
                     "null_required_count": 0,
@@ -510,6 +583,8 @@ def accept_incremental_backfill(*, instrument_id: str, backfill_run_id: str, dat
             "acceptance_network_access_used": False,
             "accepted_partition_snapshots_immutable": True,
             "canonical_raw_read_after_acceptance_required": False,
+            "full_raw_contract_revalidated": True,
+            "registry_binding_revalidated": True,
             "latest_autodetect_used": False,
             "implicit_partition_discovery_used": False,
             "historical_pit_research_ready_claimed": False,
@@ -568,6 +643,8 @@ def accept_incremental_backfill(*, instrument_id: str, backfill_run_id: str, dat
             "accepted_manifest_sha256": manifest_snapshot["sha256"],
             "incremental_pointer_ref": _rooted_ref(root, pointer_path),
             "accepted_partition_snapshots_immutable": True,
+            "full_raw_contract_revalidated": True,
+            "registry_binding_revalidated": True,
             "historical_baseline_pointer_mutated": False,
             "acceptance_network_access_used": False,
             "latest_autodetect_used": False,
