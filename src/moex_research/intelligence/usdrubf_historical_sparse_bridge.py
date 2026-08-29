@@ -26,6 +26,7 @@ from .usdrubf_news_macro import MacroState, NewsEvent
 
 
 HISTORICAL_SPARSE_15M_SOURCE = "historical_sparse_15m_from_native_5m"
+HISTORICAL_COMPLETE_ONLY_15M_SOURCE = "historical_complete_only_15m_from_native_5m"
 
 
 def _market_regime(interactions: Sequence[InteractionSnapshot]) -> str:
@@ -45,19 +46,31 @@ def _market_regime(interactions: Sequence[InteractionSnapshot]) -> str:
     return "PREVIOUS_SESSION_RANGE_UNCONFIRMED"
 
 
+def _validate_min_constituents(value: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value not in {1, 3}:
+        raise LiveShadowBridgeError("historical 15m min_constituents must be 1 or 3")
+    return value
+
+
 def build_historical_sparse_closed_15m_bars(
     current_session_bars: Iterable[Mapping[str, object]],
     *,
     as_of_timestamp: datetime | str,
+    min_constituents: int = 1,
 ) -> tuple[dict[str, object], ...]:
-    """Aggregate observed native 5m rows into sparse-safe closed 15m buckets.
+    """Aggregate observed native 5m rows into historical closed 15m buckets.
 
     Historical-research semantics only. Missing native 5m rows are never
     synthesized, forward-filled, back-filled, timestamp-shifted, or inferred.
     A non-empty aligned bucket is usable only after its nominal close time
     (bucket label + 10 minutes) is observable by ``as_of_timestamp``.
+
+    ``min_constituents=1`` is the sparse-safe policy. ``min_constituents=3``
+    is a sensitivity variant that drops incomplete non-empty buckets rather
+    than repairing them. The live bridge is not changed by either policy.
     """
 
+    required = _validate_min_constituents(min_constituents)
     normalized = closed_bars(current_session_bars, as_of_timestamp=as_of_timestamp)
     trade_dates = {item["end"].astimezone(MOSCOW).date() for item in normalized}
     if len(trade_dates) != 1:
@@ -94,6 +107,8 @@ def build_historical_sparse_closed_15m_bars(
         if nominal_close > as_of:
             continue
         ordered = group.sort_values("end", kind="stable")
+        if len(ordered) < required:
+            continue
         last_observed_at = ordered.iloc[-1]["end"]
         if isinstance(last_observed_at, pd.Timestamp):
             last_observed_at = last_observed_at.to_pydatetime()
@@ -112,7 +127,7 @@ def build_historical_sparse_closed_15m_bars(
         )
 
     if not aggregates:
-        raise LiveShadowBridgeError("historical sparse 15m aggregation produced zero closed rows")
+        raise LiveShadowBridgeError("historical 15m aggregation produced zero closed rows")
     return tuple(aggregates)
 
 
@@ -120,17 +135,20 @@ def build_historical_sparse_ema_context(
     current_session_bars: Iterable[Mapping[str, object]],
     *,
     as_of_timestamp: datetime | str,
+    min_constituents: int = 1,
 ) -> DirectionalContext:
+    required = _validate_min_constituents(min_constituents)
     synthetic_15m = build_historical_sparse_closed_15m_bars(
         current_session_bars,
         as_of_timestamp=as_of_timestamp,
+        min_constituents=required,
     )
     trade_date = datetime.fromisoformat(str(synthetic_15m[0]["end"])).astimezone(MOSCOW).date().isoformat()
     state = SessionStateEma31915m(trade_date=trade_date)
     for bar in synthetic_15m:
         state = update_signal_state_on_closed_bar(state, bar)
     if state.ema_fast is None or state.ema_slow is None:
-        raise LiveShadowBridgeError("EMA state is unavailable after historical sparse 15m replay")
+        raise LiveShadowBridgeError("EMA state is unavailable after historical 15m replay")
     if state.ema_fast > state.ema_slow:
         target = 1
     elif state.ema_fast < state.ema_slow:
@@ -140,8 +158,13 @@ def build_historical_sparse_ema_context(
 
     available_at = synthetic_15m[-1]["source_available_at"]
     if not isinstance(available_at, datetime):
-        raise AssertionError("historical sparse EMA source_available_at must be datetime")
+        raise AssertionError("historical EMA source_available_at must be datetime")
     constituent_counts = [int(bar["constituent_count"]) for bar in synthetic_15m]
+    source = (
+        HISTORICAL_SPARSE_15M_SOURCE
+        if required == 1
+        else HISTORICAL_COMPLETE_ONLY_15M_SOURCE
+    )
     return ema_context_from_target_position(
         target,
         available_at=available_at,
@@ -153,8 +176,12 @@ def build_historical_sparse_ema_context(
             "sparse_bucket_count": sum(1 for value in constituent_counts if value < 3),
             "min_constituent_count": min(constituent_counts),
             "max_constituent_count": max(constituent_counts),
-            "source": HISTORICAL_SPARSE_15M_SOURCE,
+            "min_required_constituents": required,
+            "source": source,
             "missing_5m_imputation": False,
+            "incomplete_nonempty_bucket_policy": (
+                "USE_OBSERVED_ROWS" if required == 1 else "DROP_BUCKET"
+            ),
             "nominal_close_guard": True,
             "availability_semantics": "nominal_bucket_close",
         },
@@ -169,9 +196,11 @@ def build_historical_sparse_decision_input(
     futoi_context: DirectionalContext | None = None,
     news_events: Sequence[NewsEvent] = (),
     macro_state: MacroState | None = None,
+    ema_min_constituents: int = 1,
 ) -> DecisionInput:
-    """Build S7.2 historical DecisionInput without relaxing the live bridge."""
+    """Build research-only historical DecisionInput without relaxing the live bridge."""
 
+    required = _validate_min_constituents(ema_min_constituents)
     current = closed_bars(current_session_bars, as_of_timestamp=wall_clock_as_of)
     prior = closed_bars(prior_session_bars, as_of_timestamp=wall_clock_as_of)
     decision_as_of = current[-1]["end"]
@@ -187,6 +216,7 @@ def build_historical_sparse_decision_input(
     ema = build_historical_sparse_ema_context(
         current,
         as_of_timestamp=decision_as_of,
+        min_constituents=required,
     )
     futoi = futoi_context or blocked_futoi_context(
         available_at=decision_as_of,
