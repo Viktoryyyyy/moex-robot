@@ -345,9 +345,13 @@ def _validate_partition(root: Path, path_value: object, instrument_id: str, requ
     groups = set(frame["clgroup"].astype(str).str.upper().str.strip())
     if groups != {"FIZ", "YUR"}:
         _fail("incremental partition must contain exactly FIZ and YUR clgroups")
-    materializer._validate_required_source_identifiers(frame)
-    materializer._enforce_publication_timestamp(frame)
-    counts = materializer._quality_counts(frame)
+    raw_ts = pd.to_datetime(frame["ts"], errors="coerce")
+    raw_moment = pd.to_datetime(frame["moment"], errors="coerce")
+    if bool(raw_ts.isna().any()) or bool(raw_moment.isna().any()) or not bool(raw_ts.eq(raw_moment).all()):
+        _fail("incremental partition raw ts must equal raw moment")
+    validated_frame = materializer._validate_required_source_identifiers(frame)
+    validated_frame = materializer._enforce_publication_timestamp(validated_frame)
+    counts = materializer._quality_counts(validated_frame)
     if int(counts.get("rows") or 0) <= 0:
         _fail("incremental partition quality row_count is zero")
     for field in ("duplicate_key_count", "null_required_count", "invalid_position_count"):
