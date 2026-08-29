@@ -50,17 +50,23 @@ def build_historical_sparse_closed_15m_bars(
     *,
     as_of_timestamp: datetime | str,
 ) -> tuple[dict[str, object], ...]:
-    """Aggregate observed native 5m rows into sparse-safe 15m buckets.
+    """Aggregate observed native 5m rows into sparse-safe closed 15m buckets.
 
-    This is historical-research semantics only. Missing native 5m rows are never
+    Historical-research semantics only. Missing native 5m rows are never
     synthesized, forward-filled, back-filled, timestamp-shifted, or inferred.
-    Any non-empty aligned 15m bucket is aggregated from the rows actually present.
+    A non-empty aligned bucket is usable only after its nominal close time
+    (bucket label + 10 minutes) is observable by ``as_of_timestamp``.
     """
 
     normalized = closed_bars(current_session_bars, as_of_timestamp=as_of_timestamp)
     trade_dates = {item["end"].astimezone(MOSCOW).date() for item in normalized}
     if len(trade_dates) != 1:
         raise LiveShadowBridgeError("historical current session bars must belong to one Moscow trade date")
+
+    as_of = pd.Timestamp(as_of_timestamp)
+    if as_of.tzinfo is None:
+        raise LiveShadowBridgeError("historical sparse as_of_timestamp must be timezone-aware")
+    as_of = as_of.tz_convert(MOSCOW)
 
     rows = []
     for item in normalized:
@@ -69,7 +75,7 @@ def build_historical_sparse_closed_15m_bars(
             raise AssertionError("normalized bar end must be datetime")
         rows.append(
             {
-                "end": pd.Timestamp(end),
+                "end": pd.Timestamp(end).tz_convert(MOSCOW),
                 "open": float(item["open"]),
                 "high": float(item["high"]),
                 "low": float(item["low"]),
@@ -83,13 +89,16 @@ def build_historical_sparse_closed_15m_bars(
 
     aggregates: list[dict[str, object]] = []
     for label, group in frame.groupby("bucket_label", sort=True):
+        label_ts = pd.Timestamp(label)
+        if label_ts + pd.Timedelta(minutes=10) > as_of:
+            continue
         ordered = group.sort_values("end", kind="stable")
         source_available_at = ordered.iloc[-1]["end"]
         if isinstance(source_available_at, pd.Timestamp):
             source_available_at = source_available_at.to_pydatetime()
         aggregates.append(
             {
-                "end": pd.Timestamp(label).to_pydatetime().isoformat(),
+                "end": label_ts.to_pydatetime().isoformat(),
                 "open": float(ordered.iloc[0]["open"]),
                 "high": float(ordered["high"].max()),
                 "low": float(ordered["low"].min()),
@@ -101,7 +110,7 @@ def build_historical_sparse_closed_15m_bars(
         )
 
     if not aggregates:
-        raise LiveShadowBridgeError("historical sparse 15m aggregation produced zero rows")
+        raise LiveShadowBridgeError("historical sparse 15m aggregation produced zero closed rows")
     return tuple(aggregates)
 
 
@@ -144,6 +153,7 @@ def build_historical_sparse_ema_context(
             "max_constituent_count": max(constituent_counts),
             "source": HISTORICAL_SPARSE_15M_SOURCE,
             "missing_5m_imputation": False,
+            "nominal_close_guard": True,
         },
     )
 
