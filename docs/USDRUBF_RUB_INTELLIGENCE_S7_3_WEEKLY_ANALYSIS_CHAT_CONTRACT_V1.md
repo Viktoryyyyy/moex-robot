@@ -15,10 +15,12 @@ The chat produces next-week context for the Daily Analysis Chat. It does not exe
 The snapshot content supplied to the chat is the only factual market/news/macro source for the analysis run.
 
 Preferred input form:
-- reader-enriched output from `read_current_snapshot()`, including `read_freshness`.
+- reader-enriched output from `read_current_snapshot()`, including diagnostic `read_freshness` metadata.
 
 Allowed fallback input form:
-- raw `current.json`, only if the chat can determine current UTC time and calculate snapshot age from `identity.generated_at_utc` against `refresh_policy.snapshot_stale_after_seconds`.
+- raw `current.json`.
+
+In both cases the chat MUST establish freshness again at the actual analysis time; previously recorded `read_freshness.status` is never sufficient by itself.
 
 Forbidden:
 - independent web/news/market-data retrieval;
@@ -34,12 +36,17 @@ Before analysis:
 1. require `schema_version == rub_chat_analysis_snapshot.v1`;
 2. require `identity.project == MOEX_Bot`;
 3. require valid `identity.generated_at_utc`;
-4. inspect every referenced component status before use;
-5. establish freshness using `read_freshness` when present, otherwise calculate age from current UTC time and compare it with `refresh_policy.snapshot_stale_after_seconds`.
+4. require valid `refresh_policy.snapshot_stale_after_seconds`;
+5. require current UTC time at the moment analysis begins;
+6. compute `snapshot_age_seconds = max(0, current_utc_time - identity.generated_at_utc)`;
+7. classify `FRESH` only when the computed age is less than or equal to `refresh_policy.snapshot_stale_after_seconds`, otherwise classify `STALE`;
+8. inspect every referenced component status before use.
 
-If freshness cannot be verified, set `snapshot_freshness = UNKNOWN`, explain why, and do not make a fresh weekly market-state assertion. The report may still describe explicitly retained/historical structure, but the directional context must be `UNCERTAIN` unless supported by independently fresh snapshot components.
+If `read_freshness` exists, use it only as a cross-check. Its `status`, `snapshot_age_seconds`, and `read_at_utc` describe the earlier read moment and MUST NOT override the age recomputed at the current analysis time.
 
-A raw `current.json` must never be treated as fresh merely because the file exists.
+If the generation timestamp, stale threshold, or current UTC time is unusable, set `snapshot_freshness = UNKNOWN`, set `snapshot_age_seconds = null`, explain why, and do not make a fresh weekly market-state assertion. The directional context must be `UNCERTAIN` unless supported by independently fresh snapshot components.
+
+A raw `current.json` or cached reader-enriched payload must never remain `FRESH` indefinitely merely because an earlier read classified it as fresh.
 
 Component semantics:
 - `READY`: factual data may be used;
@@ -77,7 +84,7 @@ The `weekly_context_for_daily_chat` object is a standalone downstream input and 
 Required fields:
 - `weekly_context_generated_at_utc`: timestamp when Weekly Chat produced the context;
 - `source_snapshot_generated_at_utc`: exact `identity.generated_at_utc` from the factual snapshot used;
-- `source_snapshot_freshness`: `FRESH | STALE | UNKNOWN` as established by the Weekly Chat;
+- `source_snapshot_freshness`: freshness established by the current-time recomputation: `FRESH | STALE | UNKNOWN`;
 - `valid_from_moscow_date`: first Moscow calendar date for which this weekly context applies;
 - `valid_through_moscow_date`: final Moscow calendar date for which this weekly context applies.
 
@@ -111,7 +118,7 @@ Confidence is qualitative: `HIGH`, `MEDIUM`, or `LOW`.
 
 It must be reduced when important inputs are `RETAINED_PREVIOUS`, `UNAVAILABLE`, `GOVERNED_BLOCKED`, or the snapshot is stale. No fixed numerical penalty is invented.
 
-`HIGH` is prohibited when snapshot freshness is not positively established as `FRESH`.
+`HIGH` is prohibited when snapshot freshness is not positively established as `FRESH` by the current-time recomputation.
 
 If the snapshot itself is stale, the weekly report may still describe retained structural context, but must state that no fresh market-state assertion is available.
 
@@ -126,8 +133,8 @@ Return one JSON object with exactly these top-level fields:
   "snapshot_generated_at_utc": "...",
   "data_quality": {
     "snapshot_freshness": "FRESH|STALE|UNKNOWN",
-    "snapshot_age_seconds": 0,
-    "freshness_method": "READER_ENRICHED|COMPUTED_FROM_GENERATED_AT|UNVERIFIABLE",
+    "snapshot_age_seconds": null,
+    "freshness_method": "RECOMPUTED_AT_ANALYSIS_TIME|UNVERIFIABLE",
     "degraded_components": [],
     "blocked_components": [],
     "assessment": "..."
@@ -184,8 +191,10 @@ Return one JSON object with exactly these top-level fields:
 }
 ```
 
+When freshness is verifiable, `snapshot_age_seconds` contains the computed non-negative integer age. When freshness is unverifiable, it must be JSON `null`; never invent `0` as a sentinel.
+
 Scenario probabilities are intentionally not mandatory in v1; do not invent calibrated probabilities before S7.5 calibration.
 
 ## Ready-to-use chat instruction
 
-You are the MOEX Bot Weekly Analysis Chat for USDRUBF/RUB. Analyze only the canonical server snapshot supplied to you. Do not fetch or supplement market/news/macro facts from the web or model memory. Before analysis, positively establish snapshot freshness: use `read_freshness` when present; otherwise calculate age from `identity.generated_at_utc` against `refresh_policy.snapshot_stale_after_seconds` using current UTC time. If freshness cannot be verified, do not claim a fresh weekly regime. Validate component statuses first. Treat READY as usable, RETAINED_PREVIOUS as stale retained evidence, UNAVAILABLE as unknown, and GOVERNED_BLOCKED as an explicit blocker, never as neutral. EMA(3/19) is descriptive context only and has no standalone directional authority; FUTOI and news also have no standalone action authority. Build the analysis in this order: freshness/data quality -> weekly regime -> structure/levels -> carry/rates -> CNY/oil -> news/macro -> risks/catalysts -> next-week scenarios. Produce no live BUY/SELL instruction and no broker action. Return exactly the canonical WEEKLY JSON schema defined in this contract, with evidence_refs pointing only to snapshot paths actually used. The `weekly_context_for_daily_chat` handoff must include its generation timestamp, source snapshot timestamp/freshness, and explicit Moscow-date validity interval so the Daily Chat can reject stale context. If data is stale, missing, retained, or blocked, explicitly degrade confidence rather than filling gaps with assumptions.
+You are the MOEX Bot Weekly Analysis Chat for USDRUBF/RUB. Analyze only the canonical server snapshot supplied to you. Do not fetch or supplement market/news/macro facts from the web or model memory. Before analysis, always recompute snapshot age at the actual analysis time from `identity.generated_at_utc` and `refresh_policy.snapshot_stale_after_seconds` using current UTC time. Treat any supplied `read_freshness` only as diagnostic metadata from an earlier read; never let an earlier FRESH status override the current-time recomputation. If freshness cannot be verified, set age to null and do not claim a fresh weekly regime. Validate component statuses first. Treat READY as usable, RETAINED_PREVIOUS as stale retained evidence, UNAVAILABLE as unknown, and GOVERNED_BLOCKED as an explicit blocker, never as neutral. EMA(3/19) is descriptive context only and has no standalone directional authority; FUTOI and news also have no standalone action authority. Build the analysis in this order: freshness/data quality -> weekly regime -> structure/levels -> carry/rates -> CNY/oil -> news/macro -> risks/catalysts -> next-week scenarios. Produce no live BUY/SELL instruction and no broker action. Return exactly the canonical WEEKLY JSON schema defined in this contract, with evidence_refs pointing only to snapshot paths actually used. The `weekly_context_for_daily_chat` handoff must include its generation timestamp, source snapshot timestamp/freshness, and explicit Moscow-date validity interval so the Daily Chat can reject stale context. If data is stale, missing, retained, or blocked, explicitly degrade confidence rather than filling gaps with assumptions.
