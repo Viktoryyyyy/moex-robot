@@ -7,7 +7,7 @@
   "scope": "Si FUTOI participant positioning as a live contextual input to RUB Intelligence",
   "source_of_truth": {
     "repository": "Viktoryyyyy/moex-robot",
-    "audited_main_sha": "ade7767750e2234a530579e56383b55cbe09c41b",
+    "audited_main_sha": "580d5334985edadab9cef27297c6a5d1fffc075c",
     "source_contract_ref": "contracts/sources/futures/moex_algopack_futoi.v1.yaml",
     "raw_dataset_ref": "contracts/datasets/futures_futoi_raw.v1.yaml",
     "stage5_positioning_ref": "configs/datasets/step5_futoi_positioning.v1.yaml",
@@ -21,6 +21,7 @@
     "all_required_gates_must_pass_for_live_accepted": true,
     "adapter_working_is_not_live_acceptance": true,
     "successful_authenticated_request_is_not_license_acceptance": true,
+    "account_owner_attestation_may_satisfy_account_specific_internal_use_permission": true,
     "live_acceptance_status_when_any_required_gate_is_not_pass": "FUTOI_GOVERNED_BLOCKED",
     "buy_sell_authority_before_live_acceptance": false
   },
@@ -30,7 +31,7 @@
     {"gate_id":"provenance","required":true,"status":"PASS","evidence":"canonical raw dataset retains source identity, source record identifiers, event/publication/availability timestamps and accepted lineage"},
     {"gate_id":"historical_pit_semantics","required":true,"status":"PASS","evidence":"canonical contract separates tradedate+tradetime event timestamp from archival/publication systime and Stage 5 consumes content-attested history causally"},
     {"gate_id":"historical_quality_and_coverage","required":true,"status":"PASS","evidence":"Si history 2020-01-03 through 2026-08-17 physically validated; Stage 5 accepted EOD and positioning outputs"},
-    {"gate_id":"license_access_and_derived_use","required":true,"status":"BLOCKED","blocker":"derived_use_authority_not_proven","evidence":{"provider":"MOEX AlgoPack","official_terms_url":"https://www.moex.com/files/43sepmkqqv48p5et6mhhv58155","official_terms_document_approved_at":"2025-12-24","observed_standard_full_product_rule":"FUTOI is included in the full AlgoPack internal-use option, while creation of derivative information from that received information is not granted under that option.","account_specific_or_special_permission_proven":false,"api_key_or_successful_fetch_treated_as_permission":false}},
+    {"gate_id":"license_access_and_derived_use","required":true,"status":"PASS","evidence":{"provider":"MOEX AlgoPack","permission_basis":"explicit_account_owner_attestation","attested_at":"2026-08-29","attested_internal_permissions":["local_storage","internal_research_analysis","derived_positioning_features"],"derived_feature_examples":["FIZ/YUR net positioning","position changes","percentiles","z-scores"],"external_redistribution_permission_asserted":false,"independent_provider_document_verified_by_repository":false,"api_key_or_successful_fetch_treated_as_permission":false,"governance_interpretation":"Owner explicitly confirmed that the intended internal storage and derived analytical use are permitted for this account. The repository accepts that account-specific attestation for internal project use only; no external redistribution right is inferred."}},
     {"gate_id":"canonical_live_smoke","required":true,"status":"BLOCKED","blocker":"recent_fetch_evidence_not_promoted_to_canonical_live_acceptance","observed_applied_state_evidence":{"trade_date_min":"2026-08-17","trade_date_max":"2026-08-25","source_requests":9,"rows":9,"trade_dates":9,"format":"one_row_per_trade_date","rule":"daily_latest_aligned_FIZ_and_YUR_wide"}},
     {"gate_id":"recurring_live_quality_and_freshness","required":true,"status":"BLOCKED","blocker":"stage5_scheduler_and_research_readiness_not_accepted","evidence":"Stage 5 implementation/pilot/pointers are accepted while scheduler_ready and research_ready remain false"},
     {"gate_id":"typed_integration","required":true,"status":"PASS","evidence":"Stage 5 blocks are typed into the analysis bundle and FUTOI DirectionalContext enters DecisionInput only under explicit quality semantics"},
@@ -46,7 +47,6 @@
     "blocked_quality_status": "BLOCKED"
   },
   "minimum_transition_to_live_accepted": [
-    "Provide auditable account-specific or provider evidence that the intended internal storage and derived-use semantics are permitted for FUTOI, or constrain the implementation to a provider-permitted non-derived use.",
     "Run a canonical live smoke through the accepted moex_algopack_futoi -> futures_futoi_raw -> Stage 5 path and capture provenance, source availability, FIZ/YUR pairing, freshness and quality evidence.",
     "Accept the recurring canonical refresh/quality/freshness path; do not infer readiness from an ad-hoc successful fetch.",
     "Only after all required gates PASS, explicitly update the acceptance contract and enable FUTOI in the S7.3 snapshot while preserving quality/freshness/provenance and no standalone BUY/SELL rule."
