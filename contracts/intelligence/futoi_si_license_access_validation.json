@@ -1,0 +1,41 @@
+{
+  "project": "MOEX_Bot",
+  "schema_version": "futoi_si_license_access_validation.v1",
+  "status": "PASS_FOR_INTERNAL_PROJECT_USE",
+  "provider": "MOEX",
+  "product": "AlgoPack FUTOI",
+  "attestor_identity": {
+    "github_login": "Viktoryyyyy",
+    "role": "repository_owner_and_account_owner"
+  },
+  "account_entitlement": {
+    "binding": "current connected MOEX AlgoPack account backing the canonical MOEX_API_KEY used by the accepted FUTOI source path",
+    "credential_name_only": "MOEX_API_KEY",
+    "credential_value_recorded": false,
+    "canonical_source_contract_ref": "contracts/sources/futures/moex_algopack_futoi.v1.yaml",
+    "product_entitlement": "FUTOI",
+    "technical_entitlement_evidence": "canonical Stage 2 source validation and successful authenticated FUTOI fetches recorded in repository governance evidence"
+  },
+  "permitted_research_use": true,
+  "permitted_local_raw_storage": true,
+  "permitted_derived_feature_use": true,
+  "derived_feature_scope": [
+    "FIZ/YUR net positioning",
+    "position changes",
+    "percentiles",
+    "z-scores"
+  ],
+  "redistribution_policy": {
+    "external_redistribution_permission_asserted": false,
+    "repository_publication_of_raw_payload_authorized_by_this_evidence": false,
+    "scope": "internal project use only"
+  },
+  "evidence_source": {
+    "type": "explicit_account_owner_attestation",
+    "owner_statement": "разрешено",
+    "statement_context": "Owner confirmed that internal storage, internal analysis and derived FUTOI feature use are permitted for the connected AlgoPack account.",
+    "durable_approval_record": "this repository-controlled artifact and its owner-authored Git history"
+  },
+  "verified_at": "2026-08-29T19:14:56Z",
+  "verification_scope": "account-specific internal project permission; not independent legal opinion and not external redistribution permission"
+}
