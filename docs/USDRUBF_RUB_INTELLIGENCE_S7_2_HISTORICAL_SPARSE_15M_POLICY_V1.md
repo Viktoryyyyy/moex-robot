@@ -63,8 +63,11 @@ high   = max observed 5m high
 low    = min observed 5m low
 close  = last observed 5m close
 volume = sum observed 5m volume
-source_available_at = timestamp of last observed constituent
+last_observed_at = timestamp of last actual constituent
+source_available_at = nominal bucket close (label + 10 minutes)
 ```
+
+`source_available_at` is the earliest time at which the benchmark can know that the aligned bucket is closed, including the fact that a final native 5-minute row did not appear. It is availability metadata only; no market observation is created at that timestamp.
 
 No missing 5-minute row is synthesized.
 
@@ -92,7 +95,7 @@ bucket_label + 10 minutes <= as_of_timestamp
 
 This preserves the current live bridge convention that an aligned `HH:00/05/10` bucket becomes closed only at the `+10` boundary, while allowing the historical benchmark to tolerate an absent native row inside a bucket.
 
-`source_available_at` remains the last actual constituent timestamp, never an invented bucket-close timestamp.
+If the final constituent is absent, the bucket is still unavailable until the nominal close boundary. This prevents an early EMA update from an incomplete interval.
 
 ## Level / Structure Semantics
 
@@ -167,6 +170,7 @@ The sparse policy is code-accepted only when:
 ```text
 SPARSE_NATIVE_5M_AGGREGATION=yes
 NOMINAL_CLOSE_GUARD=yes
+NOMINAL_CLOSE_AVAILABILITY=yes
 MISSING_5M_IMPUTATION=no
 HISTORICAL_BAR_SYNTHESIS=no
 LEVEL_STRUCTURE_ON_NATIVE_5M=yes
