@@ -1,0 +1,12 @@
+[Unit]
+Description=MOEX Bot RUB analysis chat snapshot refresh
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=trader
+WorkingDirectory=/home/trader/moex_bot/moex-robot
+Environment=MOEX_DATA_ROOT=/home/trader/moex_bot/data
+Environment=PYTHONPATH=.:src
+ExecStart=/home/trader/moex_bot/venv/bin/python -m moex_research.runners.usdrubf_s7_3_chat_analysis_snapshot --refresh
