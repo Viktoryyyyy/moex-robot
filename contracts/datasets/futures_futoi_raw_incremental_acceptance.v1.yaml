@@ -13,7 +13,10 @@ semantics:
   latest_autodetect_allowed: false
   implicit_partition_discovery_allowed: false
   source_materialization_must_be_explicit_date_bounded: true
+  validation_reads_exact_descriptor_snapshot_bytes: true
+  accepted_raw_uses_immutable_snapshot_bytes: true
 paths:
+  immutable_run_root_pattern: ${MOEX_DATA_ROOT}/state/accepted_manifests/futoi_raw_incremental/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}
   immutable_manifest_pattern: ${MOEX_DATA_ROOT}/state/accepted_manifests/futoi_raw_incremental/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}/manifest.json
   current_pointer_pattern: ${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_futoi_raw/instrument_id={INSTRUMENT_ID}/current_incremental_accepted_manifest.json
 acceptance:
@@ -23,11 +26,15 @@ acceptance:
   allow_empty_source_dates_only_when_declared_skipped: true
   require_zero_failed_dates: true
   require_quality_status_pass: true
+  recompute_partition_quality_from_exact_snapshot: true
   require_zero_duplicate_keys: true
   require_zero_null_required: true
   require_zero_invalid_positions: true
   require_FIZ_and_YUR_in_every_written_partition: true
-  require_partition_sha256: true
+  reject_partition_symlink_before_resolution: true
+  require_partition_sha256_of_validated_bytes: true
+  freeze_validated_partition_bytes_create_only: true
+  snapshot_parent_and_source_evidence_create_only: true
   atomic_pointer_advance_after_full_validation_only: true
   failed_validation_pointer_advance: false
 research_authority:
