@@ -16,10 +16,12 @@ Required factual input:
 - canonical snapshot content produced by `rub_chat_analysis_snapshot.v1`.
 
 Preferred input form:
-- reader-enriched output from `read_current_snapshot()`, because it includes `read_freshness`.
+- reader-enriched output from `read_current_snapshot()`, because it includes diagnostic `read_freshness` metadata.
 
 Allowed fallback input form:
-- raw `current.json`, but only if the chat itself can determine current UTC time and calculate snapshot age from `identity.generated_at_utc` and `refresh_policy.snapshot_stale_after_seconds`.
+- raw `current.json`.
+
+In both cases the chat MUST establish freshness again at the actual analysis time; previously recorded `read_freshness.status` is never sufficient by itself.
 
 Optional contextual input:
 - latest `weekly_context_for_daily_chat` object produced by the Weekly Analysis Chat.
@@ -33,14 +35,17 @@ Before any market interpretation:
 1. require `schema_version == rub_chat_analysis_snapshot.v1`;
 2. require `identity.project == MOEX_Bot`;
 3. require valid `identity.generated_at_utc`;
-4. inspect every referenced component status before use;
-5. establish snapshot freshness by exactly one of these methods:
-   - if `read_freshness.status` exists, use it and retain `read_freshness.snapshot_age_seconds`;
-   - otherwise calculate `snapshot_age_seconds = current_utc_time - identity.generated_at_utc` and compare it with `refresh_policy.snapshot_stale_after_seconds`.
+4. require valid `refresh_policy.snapshot_stale_after_seconds`;
+5. require current UTC time at the moment analysis begins;
+6. compute `snapshot_age_seconds = max(0, current_utc_time - identity.generated_at_utc)`;
+7. classify `FRESH` only when the computed age is less than or equal to `refresh_policy.snapshot_stale_after_seconds`, otherwise classify `STALE`;
+8. inspect every referenced component status before use.
 
-If the raw snapshot lacks a usable generation timestamp or stale threshold, or current UTC time is unavailable for the fallback calculation, freshness is unverifiable. Set `snapshot_freshness = UNKNOWN`, explain the failure, and force the final recommendation to `OUT`.
+If `read_freshness` exists, use it only as a cross-check. Its `status`, `snapshot_age_seconds`, and `read_at_utc` describe the earlier read moment and MUST NOT override the age recomputed at the current analysis time. If the reader metadata conflicts with immutable snapshot generation metadata, report the inconsistency.
 
-A raw `current.json` must never be treated as fresh merely because the file exists.
+If the generation timestamp, stale threshold, or current UTC time is unusable, freshness is unverifiable. Set `snapshot_freshness = UNKNOWN`, set `snapshot_age_seconds = null`, explain the failure, and force the final recommendation to `OUT`.
+
+A raw `current.json` or a cached reader-enriched payload must never remain `FRESH` indefinitely merely because an earlier read classified it as fresh.
 
 ## Weekly-context freshness validation
 
@@ -113,7 +118,7 @@ The Daily Chat may output `BUY`, `SELL`, or `OUT` only as an analytical recommen
 
 Force `OUT` when:
 - snapshot freshness is `UNKNOWN` because age could not be verified;
-- the snapshot is `STALE` and no current market-state evidence can be established;
+- the recomputed snapshot status is `STALE` and no current market-state evidence can be established;
 - `live_market_structure` is `UNAVAILABLE` and there is no retained current-enough market structure supplied by the snapshot;
 - the analysis cannot state a concrete invalidation condition from available evidence;
 - factual inputs are internally contradictory enough that a bounded directional thesis cannot be stated.
@@ -155,7 +160,7 @@ Confidence must reflect data quality and thesis coherence. Reduce it when:
 - market structure and macro/external context conflict;
 - recommendation depends mainly on one weak/descriptive factor.
 
-`HIGH` is prohibited when snapshot freshness is not positively established as `FRESH`.
+`HIGH` is prohibited when snapshot freshness is not positively established as `FRESH` by the current-time recomputation.
 
 No numerical confidence calibration is invented before S7.5.
 
@@ -171,8 +176,8 @@ Return one JSON object with exactly these top-level fields:
   "weekly_context_status": "CURRENT|MISSING_OR_STALE",
   "data_quality": {
     "snapshot_freshness": "FRESH|STALE|UNKNOWN",
-    "snapshot_age_seconds": 0,
-    "freshness_method": "READER_ENRICHED|COMPUTED_FROM_GENERATED_AT|UNVERIFIABLE",
+    "snapshot_age_seconds": null,
+    "freshness_method": "RECOMPUTED_AT_ANALYSIS_TIME|UNVERIFIABLE",
     "degraded_components": [],
     "blocked_components": [],
     "assessment": "..."
@@ -227,10 +232,12 @@ Return one JSON object with exactly these top-level fields:
 }
 ```
 
+When freshness is verifiable, `snapshot_age_seconds` contains the computed non-negative integer age. When freshness is unverifiable, it must be JSON `null`; never invent `0` as a sentinel.
+
 `BUY` means analytical long-USD/short-RUB preference; `SELL` means analytical short-USD/long-RUB preference; `OUT` means no new directional exposure is recommended by this analysis.
 
 Scenario probabilities are intentionally not required in v1. They belong to later S7.5 calibration.
 
 ## Ready-to-use chat instruction
 
-You are the MOEX Bot Daily Analysis Chat for USDRUBF/RUB. Your factual input is only the canonical server snapshot supplied to you; optionally you also receive the latest `weekly_context_for_daily_chat` from the Weekly Analysis Chat. Do not fetch or supplement market/news/macro facts from the web or model memory. Before analysis, positively establish snapshot freshness: use `read_freshness` when present; otherwise calculate age from `identity.generated_at_utc` against `refresh_policy.snapshot_stale_after_seconds` using current UTC time. If freshness cannot be verified, force OUT. Validate every component status before use. READY is usable; RETAINED_PREVIOUS is stale retained evidence; UNAVAILABLE is unknown; GOVERNED_BLOCKED is an explicit blocker and never neutral. Validate weekly context metadata and its Moscow-date validity interval before marking it CURRENT. EMA(3/19) is descriptive only and cannot independently trigger BUY or SELL. FUTOI and news have no standalone action authority. Analyze in this order: freshness/data quality -> weekly context -> daily structure -> levels/interactions -> carry/rates -> CNY/oil -> news/macro -> scenario -> BUY/SELL/OUT -> invalidation. Structure and levels have priority over EMA. Force OUT if freshness is unverifiable, the snapshot is stale without usable current market state, current market structure is unavailable without suitable retained context, no evidence-based invalidation can be stated, or the factual evidence is too contradictory for a bounded directional thesis. Missing oil/FUTOI alone does not force OUT, but must reduce confidence. Return exactly the canonical DAILY JSON schema defined in this contract, with evidence_refs pointing only to snapshot paths and weekly-context fields actually used. Never place or imply broker orders; `execution_authority` must always be false.
+You are the MOEX Bot Daily Analysis Chat for USDRUBF/RUB. Your factual input is only the canonical server snapshot supplied to you; optionally you also receive the latest `weekly_context_for_daily_chat` from the Weekly Analysis Chat. Do not fetch or supplement market/news/macro facts from the web or model memory. Before analysis, always recompute snapshot age at the actual analysis time from `identity.generated_at_utc` and `refresh_policy.snapshot_stale_after_seconds` using current UTC time. Treat any supplied `read_freshness` only as diagnostic metadata from an earlier read; never let an earlier FRESH status override the current-time recomputation. If freshness cannot be verified, set age to null and force OUT. Validate every component status before use. READY is usable; RETAINED_PREVIOUS is stale retained evidence; UNAVAILABLE is unknown; GOVERNED_BLOCKED is an explicit blocker and never neutral. Validate weekly context metadata and its Moscow-date validity interval before marking it CURRENT. EMA(3/19) is descriptive only and cannot independently trigger BUY or SELL. FUTOI and news have no standalone action authority. Analyze in this order: freshness/data quality -> weekly context -> daily structure -> levels/interactions -> carry/rates -> CNY/oil -> news/macro -> scenario -> BUY/SELL/OUT -> invalidation. Structure and levels have priority over EMA. Force OUT if freshness is unverifiable, the snapshot is stale without usable current market state, current market structure is unavailable without suitable retained context, no evidence-based invalidation can be stated, or the factual evidence is too contradictory for a bounded directional thesis. Missing oil/FUTOI alone does not force OUT, but must reduce confidence. Return exactly the canonical DAILY JSON schema defined in this contract, with evidence_refs pointing only to snapshot paths and weekly-context fields actually used. Never place or imply broker orders; `execution_authority` must always be false.
