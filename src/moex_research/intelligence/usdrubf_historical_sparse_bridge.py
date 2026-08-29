@@ -90,12 +90,13 @@ def build_historical_sparse_closed_15m_bars(
     aggregates: list[dict[str, object]] = []
     for label, group in frame.groupby("bucket_label", sort=True):
         label_ts = pd.Timestamp(label)
-        if label_ts + pd.Timedelta(minutes=10) > as_of:
+        nominal_close = label_ts + pd.Timedelta(minutes=10)
+        if nominal_close > as_of:
             continue
         ordered = group.sort_values("end", kind="stable")
-        source_available_at = ordered.iloc[-1]["end"]
-        if isinstance(source_available_at, pd.Timestamp):
-            source_available_at = source_available_at.to_pydatetime()
+        last_observed_at = ordered.iloc[-1]["end"]
+        if isinstance(last_observed_at, pd.Timestamp):
+            last_observed_at = last_observed_at.to_pydatetime()
         aggregates.append(
             {
                 "end": label_ts.to_pydatetime().isoformat(),
@@ -104,7 +105,8 @@ def build_historical_sparse_closed_15m_bars(
                 "low": float(ordered["low"].min()),
                 "close": float(ordered.iloc[-1]["close"]),
                 "volume": float(ordered["volume"].sum()),
-                "source_available_at": source_available_at,
+                "source_available_at": nominal_close.to_pydatetime(),
+                "last_observed_at": last_observed_at,
                 "constituent_count": int(len(ordered)),
             }
         )
@@ -154,6 +156,7 @@ def build_historical_sparse_ema_context(
             "source": HISTORICAL_SPARSE_15M_SOURCE,
             "missing_5m_imputation": False,
             "nominal_close_guard": True,
+            "availability_semantics": "nominal_bucket_close",
         },
     )
 
