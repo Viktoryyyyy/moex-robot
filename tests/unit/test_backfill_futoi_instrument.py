@@ -122,11 +122,14 @@ def test_backfill_skips_empty_dates_and_writes_pointer_only_after_pass(tmp_path,
         )
         partition = root / "market" / "supplementary" / (trade_date + ".parquet")
         partition.parent.mkdir(parents=True, exist_ok=True)
-        partition.write_bytes(b"deterministic-test-partition")
+        published = b"deterministic-test-partition"
+        partition.write_bytes(published)
         return {
             "row_count": 2,
             "quality_report_reference": str(quality_path),
             "storage_partition_path": str(partition),
+            "publication_run_id": run_id,
+            "published_partition_sha256": hashlib.sha256(published).hexdigest(),
         }
 
     monkeypatch.setattr(backfill.materializer, "materialize_futoi_partition", fake_materialize)
@@ -160,6 +163,57 @@ def test_backfill_skips_empty_dates_and_writes_pointer_only_after_pass(tmp_path,
     assert payload["instrument_id"] == "test_futures_family"
     assert payload["quality_status"] == "pass"
     assert payload["refresh_status"] == "succeeded"
+
+
+def test_backfill_evidence_remains_bound_to_materializer_published_bytes_after_competing_replace(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "data"
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(root))
+    registry = _registry(tmp_path / "registry.yaml")
+    data_lake = _data_lake(tmp_path / "data_lake.yaml")
+    published = b"run-a-published-bytes"
+    competing = b"run-b-competing-replacement"
+
+    def fake_materialize(*, trade_date, instrument_id, run_id, registry_path, timeout, apim_base_url, require_enabled):
+        quality_path = root / "quality" / (run_id + ".json")
+        quality_path.parent.mkdir(parents=True, exist_ok=True)
+        quality_path.write_text(
+            json.dumps(
+                {
+                    "duplicate_key_count": 0,
+                    "null_required_count": 0,
+                    "invalid_position_count": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        partition = root / "market" / "supplementary" / (trade_date + ".parquet")
+        partition.parent.mkdir(parents=True, exist_ok=True)
+        partition.write_bytes(published)
+        publication_sha256 = hashlib.sha256(published).hexdigest()
+        partition.write_bytes(competing)
+        return {
+            "row_count": 2,
+            "quality_report_reference": str(quality_path),
+            "storage_partition_path": str(partition),
+            "publication_run_id": run_id,
+            "published_partition_sha256": publication_sha256,
+        }
+
+    monkeypatch.setattr(backfill.materializer, "materialize_futoi_partition", fake_materialize)
+    result = backfill.backfill_range(
+        date_start="2026-08-17",
+        date_end="2026-08-17",
+        instrument_id="test_futures_family",
+        run_id="race_test",
+        registry_path=registry,
+        data_lake_path=data_lake,
+    )
+    manifest = json.loads(Path(str(result["manifest_reference"])).read_text(encoding="utf-8"))
+    evidence = manifest["partition_evidence"][0]
+    assert evidence["subrun_id"] == "race_test_partition_20260817"
+    assert evidence["sha256"] == hashlib.sha256(published).hexdigest()
+    assert evidence["sha256"] != hashlib.sha256(competing).hexdigest()
+    assert Path(evidence["partition_path"]).read_bytes() == competing
 
 
 def test_backfill_failure_blocks_pointer(tmp_path, monkeypatch) -> None:
