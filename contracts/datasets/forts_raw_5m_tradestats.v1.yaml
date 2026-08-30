@@ -6,22 +6,25 @@ canonical_source_contract_ref: contracts/sources/futures/moex_algopack_fo_trades
 canonical_architecture_ref: contracts/architecture/moex_data_access_canon_v1.yaml
 canonical_runbook_ref: docs/data/futures_data_ingestion_runbook.md
 
-legacy_incremental_calendar_compatibility:
+legacy_incremental_date_selection:
   consumer_ref: src/moex_data/futures/refresh_forts_raw_5m_incremental_pointer.py
-  calendar_source_artifact_id: external.moex.iss.futures_calendar.v1
-  calendar_base_url_env: MOEX_CALENDAR_BASE_URL
-  calendar_cli_argument: --calendar-base-url
-  moex_api_url_calendar_base_assumption_allowed: false
-  fail_closed_errors:
-    - calendar_fetch_non_json_response
-    - calendar_response_missing_off_days_table
-  calendar_binding_status: observed_source_calendar_fallback
-  scheduler_status_note: MOEX calendar endpoint unresolved for server scheduler
-  production_incremental_mode: --incremental-mode observed-source
-  skipped_empty_source_dates_recorded: true
+  date_source_artifact_id: external.apim.fo.tradestats.v1
+  date_source_id: moex_algopack_fo_tradestats_5m
+  date_source_endpoint: /iss/datashop/algopack/fo/tradestats.json
+  date_selection_rule: observed_trade_dates_only
+  request_bounds_required:
+    - from
+    - till
+    - secid
+  source_empty_behavior: fail_closed
+  source_unavailable_behavior: fail_closed
+  weekday_inference_allowed: false
+  fabricated_trade_dates_allowed: false
+  latest_autodetect_allowed: false
+  legacy_calendar_runtime_dependency_removed: true
 
 rules:
   use_for_new_data_loading: false
   use_for_new_instrument_onboarding: false
   use_as_architecture_proof: false
-  legacy_runtime_code_removal_required_before_contract_deletion: true
+  legacy_runtime_calendar_code_removed: true
