@@ -30,6 +30,26 @@ def _tradestats_payload(rows: list[list[object]]) -> dict[str, object]:
     }
 
 
+def test_active_src_has_no_legacy_calendar_runtime_dependency() -> None:
+    forbidden = (
+        "/iss/" + "calendars",
+        "moex_iss_futures_" + "calendar",
+        "fetch_futures_" + "calendar_rows",
+        "select_completed_trading_" + "dates",
+        "_calendar_" + "map",
+        "calendar_" + "base_url",
+        "MOEX_" + "CALENDAR_BASE_URL",
+        "CALENDAR_" + "MODE",
+    )
+    violations: list[str] = []
+    for path in sorted(Path("src").rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        for token in forbidden:
+            if token in text:
+                violations.append(path.as_posix() + ":" + token)
+    assert violations == []
+
+
 def test_stage10_date_source_requests_only_algopack_tradestats(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MOEX_API_KEY", "test-key")
     calls: list[str] = []
@@ -53,7 +73,7 @@ def test_stage10_date_source_requests_only_algopack_tradestats(monkeypatch: pyte
 
     dates = step10._calendar_dates(start_date="2026-06-12", end_date="2026-06-15", timeout=1.0)
 
-    forbidden = "/iss/" + "calendars.json"
+    forbidden = "/iss/" + "calendars"
     assert dates == ["2026-06-12", "2026-06-15"]
     assert calls
     assert all(url.endswith(refresh.OBSERVED_DATE_SOURCE_ENDPOINT) for url in calls)
@@ -89,7 +109,7 @@ def test_incremental_refresh_source_loader_never_requests_calendar_endpoint(monk
         timeout=1.0,
     )
 
-    forbidden = "/iss/" + "calendars.json"
+    forbidden = "/iss/" + "calendars"
     assert dates == ["2026-06-12", "2026-06-15", "2026-06-17"]
     assert calls
     assert all(url.endswith(refresh.OBSERVED_DATE_SOURCE_ENDPOINT) for url in calls)
