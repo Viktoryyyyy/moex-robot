@@ -19,6 +19,7 @@ import pandas as pd
 
 from . import backfill_futoi_instrument as backfill
 from . import materialize_futoi_instrument as materializer
+from . import refresh_forts_raw_5m_incremental as futures_calendar
 
 CONTRACT_REF: Final[str] = "contracts/datasets/futures_futoi_raw_incremental_acceptance.v1.yaml"
 SCHEMA_VERSION: Final[str] = "futures_futoi_raw_incremental_acceptance.v1"
@@ -475,6 +476,48 @@ def _validated_partition_evidence(value: object, written: Sequence[object], run_
     return result
 
 
+def _validated_calendar_evidence(
+    root: Path,
+    manifest: Mapping[str, object],
+    quality: Mapping[str, object],
+    *,
+    run_id: str,
+    requested_start: str,
+    requested_end: str,
+) -> dict[str, object]:
+    manifest_ref = manifest.get("calendar_evidence_ref")
+    if quality.get("calendar_evidence_ref") != manifest_ref:
+        _fail("calendar evidence reference mismatch between manifest and quality")
+    manifest_sha = str(manifest.get("calendar_evidence_sha256") or "").strip().lower()
+    if quality.get("calendar_evidence_sha256") != manifest_sha:
+        _fail("calendar evidence SHA mismatch between manifest and quality")
+    if len(manifest_sha) != 64 or any(char not in "0123456789abcdef" for char in manifest_sha):
+        _fail("calendar evidence sha256 invalid")
+    path = _resolve_ref(root, manifest_ref, "calendar_evidence_ref")
+    values, snapshot = _load_json_snapshot(path, "calendar evidence artifact")
+    if snapshot["sha256"] != manifest_sha:
+        _fail("calendar evidence artifact SHA mismatch")
+    if values.get("schema_version") != backfill.CALENDAR_EVIDENCE_SCHEMA or values.get("producer") != backfill.PRODUCER_ID:
+        _fail("calendar evidence artifact identity mismatch")
+    if values.get("run_id") != run_id or values.get("dataset_id") != DATASET_ID:
+        _fail("calendar evidence artifact run scope mismatch")
+    if values.get("requested_from") != requested_start or values.get("requested_till") != requested_end:
+        _fail("calendar evidence artifact requested range mismatch")
+    if values.get("calendar_source_id") != backfill.CALENDAR_SOURCE_ID or values.get("calendar_endpoint") != backfill.CALENDAR_ENDPOINT:
+        _fail("calendar evidence artifact source identity mismatch")
+    rows = values.get("rows")
+    if not isinstance(rows, list):
+        _fail("calendar evidence artifact rows must be a list")
+    row_count = _nonnegative_int(manifest.get("calendar_evidence_row_count"), "manifest calendar_evidence_row_count")
+    if _nonnegative_int(quality.get("calendar_evidence_row_count"), "quality calendar_evidence_row_count") != row_count or len(rows) != row_count:
+        _fail("calendar evidence artifact row_count mismatch")
+    try:
+        calendar = futures_calendar._calendar_map(rows)
+    except (TypeError, ValueError) as exc:
+        raise FutoiIncrementalAcceptanceError("calendar evidence artifact is invalid: " + str(exc)) from exc
+    return {"path": path, "snapshot": snapshot, "calendar": calendar}
+
+
 def _validate_backfill(root: Path, instrument_id: str, run_id: str, date_end: str, parent_end: str) -> dict[str, object]:
     expected_start = (date.fromisoformat(parent_end) + timedelta(days=1)).isoformat()
     manifest_path = backfill._aggregate_manifest_path(date_end, run_id)
@@ -525,6 +568,20 @@ def _validate_backfill(root: Path, instrument_id: str, run_id: str, date_end: st
     quality_non_trading = _validated_date_list(quality.get("skipped_non_trading_dates"), "quality skipped_non_trading_dates")
     if manifest_non_trading != skipped_dates or quality_non_trading != skipped_dates:
         _fail("incremental skipped dates are not bound to calendar-validated non-trading evidence")
+    calendar_evidence = None
+    if skipped_dates:
+        calendar_evidence = _validated_calendar_evidence(
+            root, manifest, quality, run_id=run_id, requested_start=requested_start, requested_end=requested_end
+        )
+        for skipped_date in skipped_dates:
+            try:
+                is_trading = futures_calendar._require_calendar_date(
+                    calendar_evidence["calendar"], date.fromisoformat(skipped_date)
+                )
+            except (TypeError, ValueError) as exc:
+                raise FutoiIncrementalAcceptanceError("skipped date calendar coverage invalid: " + str(exc)) from exc
+            if is_trading:
+                _fail("skipped date is a canonical trading day")
     records = [_validate_partition(root, value, instrument_id, requested_start, requested_end) for value in written]
     for record, evidence_row in zip(records, evidence, strict=True):
         if record["trade_date"] != evidence_row["trade_date"]:
@@ -555,6 +612,7 @@ def _validate_backfill(root: Path, instrument_id: str, run_id: str, date_end: st
         "requested_till": requested_end,
         "records": records,
         "skipped_dates": skipped_dates,
+        "calendar_evidence": calendar_evidence,
         "partition_count": len(records),
         "row_count": row_count,
     }
@@ -647,6 +705,12 @@ def accept_incremental_backfill(*, instrument_id: str, backfill_run_id: str, dat
         _write_bytes_create_only(parent_manifest_snapshot_path, bytes(parent["manifest_snapshot"]["raw"]))
         _write_bytes_create_only(source_manifest_snapshot_path, bytes(source["manifest_snapshot"]["raw"]))
         _write_bytes_create_only(source_quality_snapshot_path, bytes(source["quality_snapshot"]["raw"]))
+        calendar_snapshot_path = None
+        if source["calendar_evidence"] is not None:
+            calendar_snapshot_path = run_root / "source" / "calendar_evidence.json"
+            _write_bytes_create_only(
+                calendar_snapshot_path, bytes(source["calendar_evidence"]["snapshot"]["raw"])
+            )
 
         accepted_records: list[dict[str, object]] = []
         for source_record in source["records"]:
@@ -701,6 +765,8 @@ def accept_incremental_backfill(*, instrument_id: str, backfill_run_id: str, dat
             "skipped_dates_calendar_validated": True,
             "calendar_source_id": backfill.CALENDAR_SOURCE_ID,
             "calendar_endpoint": backfill.CALENDAR_ENDPOINT,
+            "calendar_evidence_snapshot_ref": None if calendar_snapshot_path is None else _rooted_ref(root, calendar_snapshot_path),
+            "calendar_evidence_sha256": None if source["calendar_evidence"] is None else source["calendar_evidence"]["snapshot"]["sha256"],
             "partitions": accepted_records,
             "cumulative_from": parent["start"],
             "cumulative_till": source["requested_till"],
