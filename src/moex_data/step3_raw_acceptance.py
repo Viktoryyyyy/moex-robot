@@ -359,8 +359,8 @@ def _validate_bindings(values: Mapping[str, object], *, trade_date: str, as_of_d
         secids.add(secid)
         if row.get("source_id") != BINDING_SOURCE_ID:
             _fail("binding source_id mismatch")
-        if _require_date(row.get("as_of_date"), "binding.as_of_date") != as_of_date:
-            _fail("binding as_of_date mismatch")
+        if _require_date(row.get("as_of_date"), "binding.as_of_date") != trade_date:
+            _fail("binding as_of_date must equal pilot trade_date")
         last_trade_date = _require_date(row.get("last_trade_date"), "binding.last_trade_date")
         if last_trade_date < trade_date:
             _fail("binding last_trade_date precedes trade_date")
@@ -517,8 +517,8 @@ def validate_pilot_evidence(values: Mapping[str, object], *, run_id: str) -> tup
 
     trade_date = _require_date(values.get("trade_date"), "pilot.trade_date")
     as_of_date = _require_date(values.get("as_of_date"), "pilot.as_of_date")
-    if trade_date != as_of_date:
-        _fail("pilot trade_date must equal as_of_date for the unversioned current FORTS binding")
+    if trade_date > as_of_date:
+        _fail("pilot trade_date must not be later than as_of_date")
     run_root = _validate_materialization_root(values, checked_run)
 
     counts = values.get("counts")
