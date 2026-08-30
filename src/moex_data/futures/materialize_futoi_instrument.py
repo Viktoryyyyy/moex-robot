@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import tempfile
@@ -192,12 +193,14 @@ def _write_json_atomic(path: Path, values: Mapping[str, object]) -> None:
     Path(temporary_name).replace(path)
 
 
-def _write_parquet_atomic(path: Path, frame: pd.DataFrame, run_id: str) -> None:
+def _write_parquet_atomic(path: Path, frame: pd.DataFrame, run_id: str) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_name("." + path.name + "." + run_id + ".tmp")
     try:
         frame.to_parquet(temp_path, index=False)
+        publication_sha256 = hashlib.sha256(temp_path.read_bytes()).hexdigest()
         temp_path.replace(path)
+        return publication_sha256
     finally:
         if temp_path.exists():
             temp_path.unlink()
@@ -357,7 +360,6 @@ def _deduplicate_exact_source_duplicates(frame: pd.DataFrame) -> tuple[pd.DataFr
     duplicate_mask = frame.duplicated(subset=list(SOURCE_RECORD_KEY_FIELDS), keep=False)
     if not bool(duplicate_mask.any()):
         return frame.copy().reset_index(drop=True), 0
-
     duplicate_rows = frame.loc[duplicate_mask].copy()
     comparison_fields = [
         field
@@ -551,7 +553,9 @@ def materialize_futoi_partition(
         _write_json_atomic(quality_path, quality)
         _write_json_atomic(manifest_path, manifest)
         _fail("FUTOI quality failed: " + ",".join(quality["failure_reasons"]))
-    _write_parquet_atomic(partition_path, normalized, checked_run_id)
+    publication_sha256 = _write_parquet_atomic(partition_path, normalized, checked_run_id)
+    manifest["publication_run_id"] = checked_run_id
+    manifest["published_partition_sha256"] = publication_sha256
     _write_json_atomic(quality_path, quality)
     _write_json_atomic(manifest_path, manifest)
     return {
@@ -565,6 +569,8 @@ def materialize_futoi_partition(
         "row_count": int(quality["row_count"]),
         "quality_status": quality["quality_status"],
         "storage_partition_path": partition_path.as_posix(),
+        "publication_run_id": checked_run_id,
+        "published_partition_sha256": publication_sha256,
         "quality_report_reference": quality_path.as_posix(),
         "manifest_reference": manifest_path.as_posix(),
         "accepted_manifest_pointer_reference": None,

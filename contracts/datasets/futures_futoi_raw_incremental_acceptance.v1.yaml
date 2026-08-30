@@ -1,0 +1,80 @@
+dataset_id: futures_futoi_raw_incremental_acceptance
+schema_version: futures_futoi_raw_incremental_acceptance.v1
+status: implementation_ready
+source_dataset_id: futures_futoi_raw
+source_id: moex_algopack_futoi
+scope:
+  instruments:
+    - si_futures_family
+    - cr_futures_family
+semantics:
+  purpose: fail_closed_incremental_acceptance_after_historical_stage2_baseline
+  historical_baseline_pointer_mutated: false
+  latest_autodetect_allowed: false
+  implicit_partition_discovery_allowed: false
+  source_materialization_must_be_explicit_date_bounded: true
+  validation_reads_exact_descriptor_snapshot_bytes: true
+  accepted_raw_uses_immutable_snapshot_bytes: true
+  backfill_partition_evidence_is_run_bound: true
+  backfill_partition_evidence_uses_materializer_publication_sha256: true
+  materializer_publication_sha256_captured_before_atomic_replace: true
+  completed_source_date_policy: conservative_next_calendar_day_europe_moscow
+  skipped_empty_source_date_policy: canonical_moex_futures_calendar_non_trading_only
+  skipped_date_calendar_source_id: moex_iss_futures_calendar
+  skipped_date_calendar_endpoint: /iss/calendars.json
+  skipped_date_calendar_evidence_run_bound_create_only: true
+paths:
+  immutable_run_root_pattern: ${MOEX_DATA_ROOT}/state/accepted_manifests/futoi_raw_incremental/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}
+  immutable_manifest_pattern: ${MOEX_DATA_ROOT}/state/accepted_manifests/futoi_raw_incremental/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}/manifest.json
+  current_pointer_pattern: ${MOEX_DATA_ROOT}/state/datasets/dataset_id=futures_futoi_raw/instrument_id={INSTRUMENT_ID}/current_incremental_accepted_manifest.json
+acceptance:
+  require_parent_accepted_state: true
+  require_parent_sha256_binding: true
+  require_contiguous_calendar_request_from_parent_end_plus_one: true
+  require_date_end_strictly_before_current_europe_moscow_date: true
+  allow_empty_source_dates_only_when_canonical_calendar_marks_non_trading: true
+  reject_empty_source_on_canonical_trading_day: true
+  reject_empty_source_when_calendar_coverage_missing_or_invalid: true
+  require_skipped_dates_calendar_validated_in_manifest_and_quality: true
+  require_skipped_non_trading_dates_equal_partitions_skipped: true
+  require_calendar_source_identity_match_canonical_moex_futures_calendar: true
+  require_manifest_and_quality_same_calendar_evidence_ref_and_sha256: true
+  require_calendar_evidence_stable_non_symlink_snapshot: true
+  require_calendar_evidence_run_range_source_endpoint_and_rows_validation: true
+  recompute_skipped_dates_offline_with_canonical_calendar_helpers: true
+  require_every_skipped_date_explicitly_non_trading: true
+  freeze_validated_calendar_evidence_bytes_create_only: true
+  bind_accepted_calendar_evidence_snapshot_ref_and_sha256: true
+  acceptance_calendar_network_access_required: false
+  require_zero_failed_dates: true
+  require_quality_status_pass: true
+  require_backfill_manifest_and_quality_run_id_match_requested_run: true
+  require_partition_evidence_for_every_written_partition: true
+  require_partition_evidence_trade_date_subrun_path_sha256_row_count_binding: true
+  require_partition_evidence_sha256_from_materializer_publication: true
+  require_all_futures_futoi_raw_contract_columns: true
+  revalidate_registry_secid_board_market_engine_source_ticker_binding: true
+  require_raw_ts_equal_raw_moment: true
+  require_nonnegative_canonical_seqnum: true
+  require_finite_position_numerics: true
+  require_nonnegative_integer_participant_counts: true
+  require_net_position_identity_pos_equals_long_plus_short: true
+  require_utc_availability_and_ingest_timestamps: true
+  require_publication_availability_ingest_chronology: true
+  recompute_partition_quality_from_exact_snapshot: true
+  canonicalize_source_key_equivalence_before_duplicate_check: true
+  require_zero_duplicate_keys: true
+  require_zero_null_required: true
+  require_zero_invalid_positions: true
+  require_FIZ_and_YUR_in_every_written_partition: true
+  reject_partition_symlink_before_resolution: true
+  require_partition_sha256_of_validated_bytes: true
+  require_partition_sha256_match_run_bound_backfill_evidence: true
+  freeze_validated_partition_bytes_create_only: true
+  snapshot_parent_and_source_evidence_create_only: true
+  atomic_pointer_advance_after_full_validation_only: true
+  failed_validation_pointer_advance: false
+research_authority:
+  historical_pit_research_ready_claimed: false
+  directional_signal_authority: false
+  trading_action_authority: false
