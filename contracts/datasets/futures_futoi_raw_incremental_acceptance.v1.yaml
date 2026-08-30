@@ -16,6 +16,7 @@ semantics:
   validation_reads_exact_descriptor_snapshot_bytes: true
   accepted_raw_uses_immutable_snapshot_bytes: true
   backfill_partition_evidence_is_run_bound: true
+  completed_source_date_policy: conservative_next_calendar_day_europe_moscow
 paths:
   immutable_run_root_pattern: ${MOEX_DATA_ROOT}/state/accepted_manifests/futoi_raw_incremental/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}
   immutable_manifest_pattern: ${MOEX_DATA_ROOT}/state/accepted_manifests/futoi_raw_incremental/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}/manifest.json
@@ -24,6 +25,7 @@ acceptance:
   require_parent_accepted_state: true
   require_parent_sha256_binding: true
   require_contiguous_calendar_request_from_parent_end_plus_one: true
+  require_date_end_strictly_before_current_europe_moscow_date: true
   allow_empty_source_dates_only_when_declared_skipped: true
   require_zero_failed_dates: true
   require_quality_status_pass: true
