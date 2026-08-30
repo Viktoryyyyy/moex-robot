@@ -60,6 +60,7 @@ def _augment_manifest(result: dict[str, object], futoi_result: dict[str, object]
     manifest_path = root / "runs" / "step10_rub_daily_refresh" / ("run_id=" + run_id) / "run_manifest.json"
     if manifest_path.is_symlink() or not manifest_path.is_file():
         raise step10.Step10RefreshError("Stage 10 run manifest missing before entrypoint augmentation")
+    result["entrypoint_schema_version"] = SCHEMA_VERSION
     result["futoi_factual_refresh"] = futoi_result
     result["futoi_factual_refresh_blocks_stage7"] = False
     order = result.get("deterministic_refresh_order")
@@ -101,7 +102,6 @@ def run_refresh(
         now_utc=now,
     )
     _augment_manifest(result, futoi_result)
-    result["entrypoint_schema_version"] = SCHEMA_VERSION
     return result
 
 
