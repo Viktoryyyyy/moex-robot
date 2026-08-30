@@ -322,7 +322,12 @@ def _validate_position_invariants(frame: pd.DataFrame) -> None:
     fields = ("pos", "pos_long", "pos_short", "pos_long_num", "pos_short_num")
     values: dict[str, pd.Series] = {}
     for field in fields:
-        numeric = pd.to_numeric(frame[field], errors="coerce")
+        source_values = frame[field]
+        if pd.api.types.is_bool_dtype(source_values.dtype) or any(
+            isinstance(value, (bool, np.bool_)) for value in source_values.tolist()
+        ):
+            _fail("incremental partition position/count field must not contain boolean values: " + field)
+        numeric = pd.to_numeric(source_values, errors="coerce")
         if bool(numeric.isna().any()) or not bool(np.isfinite(numeric.to_numpy(dtype="float64")).all()):
             _fail("incremental partition contains invalid or non-finite numeric value: " + field)
         values[field] = numeric
