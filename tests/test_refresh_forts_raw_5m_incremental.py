@@ -51,10 +51,6 @@ def write_base_manifest(path, *, instrument_id="forts.usdrubf", secid="USDRUBF",
     )
 
 
-def calendar(*dates):
-    return [{"trade_date": item[0], "is_trading_day": item[1]} for item in dates]
-
-
 def test_no_op_when_base_manifest_is_current(tmp_path, monkeypatch):
     monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
     registry = tmp_path / "registry.yaml"
@@ -72,7 +68,7 @@ def test_no_op_when_base_manifest_is_current(tmp_path, monkeypatch):
         artifact_version="refresh_noop_v1",
         registry_path=registry,
         as_of_date="2026-06-10",
-        calendar_rows=calendar(("2026-06-09", True)),
+        observed_dates=["2026-06-09"],
         runner=runner,
     )
 
@@ -80,11 +76,13 @@ def test_no_op_when_base_manifest_is_current(tmp_path, monkeypatch):
     assert summary.payload["quality_status"] == "passed"
     assert summary.payload["incremental_requested_dates"] == []
     assert summary.payload["last_completed_valid_trading_day"] == "2026-06-09"
+    assert summary.payload["date_source_id"] == refresh.OBSERVED_DATE_SOURCE_ID
+    assert summary.payload["date_selection_rule"] == "observed_trade_dates_only"
     assert summary.manifest_path.exists()
     assert summary.quality_report_path.exists()
 
 
-def test_one_missing_valid_trading_day_refresh(tmp_path, monkeypatch):
+def test_one_missing_observed_trading_day_refresh(tmp_path, monkeypatch):
     monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
     registry = tmp_path / "registry.yaml"
     base_manifest = tmp_path / "base_manifest.json"
@@ -112,7 +110,7 @@ def test_one_missing_valid_trading_day_refresh(tmp_path, monkeypatch):
         artifact_version="refresh_one_day_v1",
         registry_path=registry,
         as_of_date="2026-06-11",
-        calendar_rows=calendar(("2026-06-09", True), ("2026-06-10", True)),
+        observed_dates=["2026-06-09", "2026-06-10"],
         runner=runner,
     )
 
@@ -141,7 +139,7 @@ def test_registry_mismatch_rejection_uses_top_level_identity(tmp_path, monkeypat
             artifact_version="refresh_reject_v1",
             registry_path=registry,
             date_end="2026-06-10",
-            calendar_rows=calendar(("2026-06-09", True), ("2026-06-10", True)),
+            observed_dates=["2026-06-09", "2026-06-10"],
         )
 
 
@@ -175,7 +173,7 @@ def test_explicit_base_manifest_used_no_autodetect(tmp_path, monkeypatch):
         artifact_version="refresh_explicit_v1",
         registry_path=registry,
         date_end="2026-06-10",
-        calendar_rows=calendar(("2026-06-09", True), ("2026-06-10", True)),
+        observed_dates=["2026-06-09", "2026-06-10"],
         runner=runner,
     )
 
@@ -201,7 +199,7 @@ def test_failed_date_keeps_quality_status_failed(tmp_path, monkeypatch):
         artifact_version="refresh_failed_v1",
         registry_path=registry,
         date_end="2026-06-10",
-        calendar_rows=calendar(("2026-06-09", True), ("2026-06-10", True)),
+        observed_dates=["2026-06-09", "2026-06-10"],
         runner=runner,
     )
 
@@ -211,3 +209,65 @@ def test_failed_date_keeps_quality_status_failed(tmp_path, monkeypatch):
     assert summary.payload["failed_dates"] == [{"trade_date": "2026-06-10", "error": "network down"}]
     assert quality["quality_status"] == "failed"
     assert quality["failed_dates_count"] == 1
+
+
+def test_weekend_is_not_fabricated_from_date_range(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
+    registry = tmp_path / "registry.yaml"
+    base_manifest = tmp_path / "base_manifest.json"
+    write_registry(registry)
+    write_base_manifest(base_manifest, last_valid="2026-06-12")
+
+    summary = refresh.refresh_incremental(
+        instrument_id="forts.usdrubf",
+        secid="USDRUBF",
+        base_manifest=base_manifest,
+        artifact_version="refresh_weekend_v1",
+        registry_path=registry,
+        date_end="2026-06-14",
+        observed_dates=["2026-06-12"],
+        runner=lambda **_kwargs: (_ for _ in ()).throw(AssertionError("weekend must not be requested")),
+    )
+
+    assert summary.payload["status"] == "no_op"
+    assert summary.payload["incremental_requested_dates"] == []
+    assert summary.payload["last_completed_valid_trading_day"] == "2026-06-12"
+
+
+def test_observed_dates_are_the_only_refresh_candidates(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
+    registry = tmp_path / "registry.yaml"
+    base_manifest = tmp_path / "base_manifest.json"
+    write_registry(registry)
+    write_base_manifest(base_manifest, last_valid="2026-06-12")
+    calls = []
+
+    def runner(**kwargs):
+        calls.append(kwargs["trade_date"])
+        return FakeResult(
+            payload={
+                "storage_partition_path": "/data/" + kwargs["trade_date"] + ".parquet",
+                "content_hash": "hash-" + kwargs["trade_date"],
+                "data_start": kwargs["trade_date"],
+                "data_end": kwargs["trade_date"],
+                "last_valid_trade_date": kwargs["trade_date"],
+                "row_count": 1,
+            }
+        )
+
+    summary = refresh.refresh_incremental(
+        instrument_id="forts.usdrubf",
+        secid="USDRUBF",
+        base_manifest=base_manifest,
+        artifact_version="refresh_observed_v1",
+        registry_path=registry,
+        date_end="2026-06-17",
+        observed_dates=["2026-06-12", "2026-06-15", "2026-06-17"],
+        runner=runner,
+    )
+
+    assert calls == ["2026-06-15", "2026-06-17"]
+    assert summary.payload["incremental_requested_dates"] == ["2026-06-15", "2026-06-17"]
+    assert "2026-06-13" not in calls
+    assert "2026-06-14" not in calls
+    assert "2026-06-16" not in calls
