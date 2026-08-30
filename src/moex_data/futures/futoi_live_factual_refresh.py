@@ -37,7 +37,9 @@ def _fail(message: str) -> None:
 
 def _safe_token(value: object, field: str) -> str:
     text = str(value or "").strip()
-    if not text or text in {".", ".."} or any(marker in text for marker in ("/", "\\", "*", "?", "[", "]", "{", "}", "$(", "`")):
+    if not text or text in {".", ".."} or any(
+        marker in text for marker in ("/", "\\", "*", "?", "[", "]", "{", "}", "$(", "`")
+    ):
         _fail(field + " must be an explicit safe token")
     return text
 
@@ -83,14 +85,23 @@ def _sha256_file(path: Path) -> str:
 
 
 def _current_path(root: Path) -> Path:
-    return root / "state" / "datasets" / ("dataset_id=" + DATASET_ID) / ("instrument_id=" + INSTRUMENT_ID) / "current.json"
+    return (
+        root
+        / "state"
+        / "datasets"
+        / ("dataset_id=" + DATASET_ID)
+        / ("instrument_id=" + INSTRUMENT_ID)
+        / "current.json"
+    )
 
 
 def _atomic_json(path: Path, payload: Mapping[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and path.is_symlink():
         _fail("factual current artifact must not be a symlink")
-    serialized = (json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2, default=str) + "\n").encode("utf-8")
+    serialized = (
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2, default=str) + "\n"
+    ).encode("utf-8")
     with tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False, suffix=".tmp") as handle:
         handle.write(serialized)
         handle.flush()
@@ -105,7 +116,9 @@ def _atomic_json(path: Path, payload: Mapping[str, object]) -> None:
 def _latest_completed_trading_date(through_date: str, *, timeout: float) -> str:
     end = date.fromisoformat(_iso_date(through_date, "through_date"))
     start = end - timedelta(days=CALENDAR_LOOKBACK_DAYS)
-    rows = futures_calendar.fetch_futures_calendar_rows(start.isoformat(), end.isoformat(), timeout=timeout)
+    rows = futures_calendar.fetch_futures_calendar_rows(
+        start.isoformat(), end.isoformat(), timeout=timeout
+    )
     calendar = futures_calendar._calendar_map(rows)
     trading = sorted(day for day, is_trading in calendar.items() if day <= end and is_trading)
     if not trading:
@@ -125,8 +138,27 @@ def _as_int(value: object, field: str) -> int:
     return int(number)
 
 
+def _market_timestamp_to_utc(value: object, field: str) -> pd.Timestamp:
+    try:
+        parsed = pd.Timestamp(value)
+    except Exception as exc:
+        raise FutoiLiveFactualRefreshError(field + " must be a valid timestamp") from exc
+    if pd.isna(parsed):
+        _fail(field + " must be a valid timestamp")
+    try:
+        if parsed.tzinfo is None:
+            parsed = parsed.tz_localize(MARKET_TZ)
+        else:
+            parsed = parsed.tz_convert(MARKET_TZ)
+    except Exception as exc:
+        raise FutoiLiveFactualRefreshError(field + " cannot be localized to " + MARKET_TZ) from exc
+    return parsed.tz_convert("UTC")
+
+
 def _resolved_group(frame: pd.DataFrame, group: str, ts: pd.Timestamp) -> pd.Series:
-    rows = frame.loc[(frame["clgroup"].astype(str).str.upper() == group) & (frame["_parsed_ts"] == ts)].copy()
+    rows = frame.loc[
+        (frame["clgroup"].astype(str).str.upper() == group) & (frame["_parsed_ts"] == ts)
+    ].copy()
     if rows.empty:
         _fail("latest aligned FUTOI snapshot is missing " + group)
     sessions = set(_as_int(value, group + ".sess_id") for value in rows["sess_id"].tolist())
@@ -140,7 +172,9 @@ def _resolved_group(frame: pd.DataFrame, group: str, ts: pd.Timestamp) -> pd.Ser
     return selected.iloc[0]
 
 
-def latest_aligned_factual(frame: pd.DataFrame, *, expected_trade_date: str) -> dict[str, object]:
+def latest_aligned_factual(
+    frame: pd.DataFrame, *, expected_trade_date: str
+) -> dict[str, object]:
     required = {
         "trade_date",
         "ts",
@@ -175,13 +209,24 @@ def latest_aligned_factual(frame: pd.DataFrame, *, expected_trade_date: str) -> 
     work["_parsed_ts"] = pd.to_datetime(work["ts"], errors="coerce")
     if bool(work["_parsed_ts"].isna().any()):
         _fail("accepted FUTOI partition contains invalid ts")
-    groups_by_ts = work.groupby("_parsed_ts")["clgroup"].agg(lambda values: set(str(value).upper() for value in values))
+    groups_by_ts = work.groupby("_parsed_ts")["clgroup"].agg(
+        lambda values: set(str(value).upper() for value in values)
+    )
     aligned = [ts for ts, groups in groups_by_ts.items() if groups == {"FIZ", "YUR"}]
     if not aligned:
         _fail("accepted FUTOI partition has no exact aligned FIZ/YUR snapshot")
     selected_ts = max(aligned)
     fiz = _resolved_group(work, "FIZ", selected_ts)
     yur = _resolved_group(work, "YUR", selected_ts)
+
+    fiz_sess_id = _as_int(fiz["sess_id"], "FIZ.sess_id")
+    yur_sess_id = _as_int(yur["sess_id"], "YUR.sess_id")
+    if fiz_sess_id != yur_sess_id:
+        _fail("latest aligned FUTOI FIZ/YUR snapshot must share sess_id")
+    if str(fiz["source_ticker"]) != str(yur["source_ticker"]):
+        _fail("latest aligned FUTOI FIZ/YUR snapshot source_ticker mismatch")
+    if str(fiz["secid"]) != str(yur["secid"]):
+        _fail("latest aligned FUTOI FIZ/YUR snapshot secid mismatch")
 
     def side(row: pd.Series, label: str) -> dict[str, int]:
         long_value = _as_int(row["pos_long"], label + ".pos_long")
@@ -210,39 +255,75 @@ def latest_aligned_factual(frame: pd.DataFrame, *, expected_trade_date: str) -> 
     if total_long != total_short:
         _fail("FIZ/YUR total long and short open interest do not balance")
 
-    publication = max(pd.to_datetime([fiz["systime"], yur["systime"]], errors="raise"))
-    availability = max(pd.to_datetime([fiz["availability_ts_utc"], yur["availability_ts_utc"]], utc=True, errors="raise"))
-    ingest = max(pd.to_datetime([fiz["ingest_ts"], yur["ingest_ts"]], utc=True, errors="raise"))
+    snapshot_utc = _market_timestamp_to_utc(selected_ts, "snapshot_ts")
+    publication_utc = max(
+        _market_timestamp_to_utc(fiz["systime"], "FIZ.systime"),
+        _market_timestamp_to_utc(yur["systime"], "YUR.systime"),
+    )
+    availability = max(
+        pd.to_datetime(
+            [fiz["availability_ts_utc"], yur["availability_ts_utc"]],
+            utc=True,
+            errors="raise",
+        )
+    )
+    ingest = max(
+        pd.to_datetime([fiz["ingest_ts"], yur["ingest_ts"]], utc=True, errors="raise")
+    )
+    if availability < publication_utc:
+        _fail("FUTOI availability timestamp precedes source publication timestamp")
+    if ingest < availability:
+        _fail("FUTOI ingest timestamp precedes availability timestamp")
+
     return {
         "trade_date": expected_trade_date,
-        "snapshot_ts": selected_ts.isoformat(),
-        "source_publication_time": publication.isoformat(),
+        "snapshot_ts": snapshot_utc.isoformat(),
+        "source_publication_time": publication_utc.isoformat(),
         "availability_ts_utc": availability.isoformat(),
         "ingest_ts_utc": ingest.isoformat(),
         "source_ticker": str(fiz["source_ticker"]),
         "secid": str(fiz["secid"]),
+        "sess_id": fiz_sess_id,
         "fiz": fiz_values,
         "yur": yur_values,
         "total_open_interest": total_long,
         "short_semantics": "absolute_contract_count",
-        "fiz_yur_alignment": "latest_exact_shared_source_event_ts_after_max_seqnum_revision_resolution",
+        "timestamp_semantics": "source_event_and_publication_localized_from_Europe/Moscow_to_UTC",
+        "fiz_yur_alignment": (
+            "latest_exact_shared_source_event_ts_and_sess_id_after_max_seqnum_revision_resolution"
+        ),
     }
 
 
-def _load_current_incremental(root: Path, *, expected_trade_date: str) -> tuple[dict[str, object], dict[str, object], Path, dict[str, object]]:
+def _load_current_incremental(
+    root: Path, *, expected_trade_date: str
+) -> tuple[dict[str, object], dict[str, object], Path, dict[str, object]]:
     pointer_path = incremental.incremental_pointer_path(root, INSTRUMENT_ID)
-    pointer, pointer_snapshot = incremental._load_json_snapshot(pointer_path, "FUTOI incremental pointer")
-    if pointer.get("schema_version") != incremental.SCHEMA_VERSION or pointer.get("producer") != incremental.PRODUCER_ID:
+    pointer, pointer_snapshot = incremental._load_json_snapshot(
+        pointer_path, "FUTOI incremental pointer"
+    )
+    if (
+        pointer.get("schema_version") != incremental.SCHEMA_VERSION
+        or pointer.get("producer") != incremental.PRODUCER_ID
+    ):
         _fail("FUTOI incremental pointer identity mismatch")
     if pointer.get("acceptance_status") != "pass" or pointer.get("quality_status") != "pass":
         _fail("FUTOI incremental pointer is not accepted")
-    if pointer.get("dataset_id") != incremental.DATASET_ID or pointer.get("instrument_id") != INSTRUMENT_ID or pointer.get("source_id") != SOURCE_ID:
+    if (
+        pointer.get("dataset_id") != incremental.DATASET_ID
+        or pointer.get("instrument_id") != INSTRUMENT_ID
+        or pointer.get("source_id") != SOURCE_ID
+    ):
         _fail("FUTOI incremental pointer scope mismatch")
     if pointer.get("cumulative_till") != expected_trade_date:
         _fail("FUTOI incremental pointer is not fresh through expected latest trading date")
 
-    manifest_path = incremental._resolve_ref(root, pointer.get("manifest_ref"), "FUTOI incremental manifest_ref")
-    manifest, manifest_snapshot = incremental._load_json_snapshot(manifest_path, "FUTOI incremental manifest")
+    manifest_path = incremental._resolve_ref(
+        root, pointer.get("manifest_ref"), "FUTOI incremental manifest_ref"
+    )
+    manifest, manifest_snapshot = incremental._load_json_snapshot(
+        manifest_path, "FUTOI incremental manifest"
+    )
     if pointer.get("manifest_sha256") != manifest_snapshot["sha256"]:
         _fail("FUTOI incremental manifest SHA mismatch")
     if manifest.get("acceptance_status") != "pass" or manifest.get("quality_status") != "pass":
@@ -255,11 +336,22 @@ def _load_current_incremental(root: Path, *, expected_trade_date: str) -> tuple[
     if len(matching) != 1:
         _fail("FUTOI incremental manifest must contain exactly one latest accepted partition")
     record = dict(matching[0])
-    partition_path = incremental._resolve_ref(root, record.get("accepted_partition_ref"), "FUTOI accepted partition_ref")
+    partition_path = incremental._resolve_ref(
+        root, record.get("accepted_partition_ref"), "FUTOI accepted partition_ref"
+    )
     expected_sha = str(record.get("sha256") or "").strip().lower()
     if len(expected_sha) != 64 or _sha256_file(partition_path) != expected_sha:
         _fail("FUTOI latest accepted partition SHA mismatch")
-    return pointer, manifest, partition_path, {"pointer_sha256": pointer_snapshot["sha256"], "manifest_sha256": manifest_snapshot["sha256"], "partition_sha256": expected_sha}
+    return (
+        pointer,
+        manifest,
+        partition_path,
+        {
+            "pointer_sha256": pointer_snapshot["sha256"],
+            "manifest_sha256": manifest_snapshot["sha256"],
+            "partition_sha256": expected_sha,
+        },
+    )
 
 
 def run_refresh(*, through_date: str, run_id: str, timeout: float = 60.0) -> dict[str, object]:
@@ -308,7 +400,10 @@ def run_refresh(*, through_date: str, run_id: str, timeout: float = 60.0) -> dic
     else:
         refresh = {"status": "no_op_already_current", "date_end": target_trade_date}
 
-    pointer, manifest, partition_path, hashes = _load_current_incremental(root, expected_trade_date=target_trade_date)
+    pointer, manifest, partition_path, hashes = _load_current_incremental(
+        root, expected_trade_date=target_trade_date
+    )
+    del manifest
     frame = pd.read_parquet(partition_path)
     factual = latest_aligned_factual(frame, expected_trade_date=target_trade_date)
     completed_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -325,7 +420,9 @@ def run_refresh(*, through_date: str, run_id: str, timeout: float = 60.0) -> dic
         "last_success_at": completed_at,
         "freshness": {
             "status": "FRESH",
-            "policy": "latest_accepted_trade_date_must_equal_canonical_latest_completed_moex_futures_trade_date",
+            "policy": (
+                "latest_accepted_trade_date_must_equal_canonical_latest_completed_moex_futures_trade_date"
+            ),
             "expected_trade_date": target_trade_date,
             "accepted_trade_date": factual["trade_date"],
         },
@@ -333,9 +430,14 @@ def run_refresh(*, through_date: str, run_id: str, timeout: float = 60.0) -> dic
         "acceptance_status": "PASS",
         "factual": factual,
         "provenance": {
-            "incremental_pointer_ref": _rooted_ref(root, incremental.incremental_pointer_path(root, INSTRUMENT_ID)),
+            "incremental_pointer_ref": _rooted_ref(
+                root, incremental.incremental_pointer_path(root, INSTRUMENT_ID)
+            ),
             "incremental_pointer_sha256": hashes["pointer_sha256"],
-            "incremental_manifest_ref": _rooted_ref(root, incremental._resolve_ref(root, pointer.get("manifest_ref"), "manifest_ref")),
+            "incremental_manifest_ref": _rooted_ref(
+                root,
+                incremental._resolve_ref(root, pointer.get("manifest_ref"), "manifest_ref"),
+            ),
             "incremental_manifest_sha256": hashes["manifest_sha256"],
             "accepted_partition_ref": _rooted_ref(root, partition_path),
             "accepted_partition_sha256": hashes["partition_sha256"],
@@ -356,7 +458,12 @@ def run_refresh(*, through_date: str, run_id: str, timeout: float = 60.0) -> dic
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Refresh and validate canonical Si FUTOI as factual-only live context without Stage 5 full-mode promotion.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Refresh and validate canonical Si FUTOI as factual-only live context without "
+            "Stage 5 full-mode promotion."
+        )
+    )
     parser.add_argument("--through-date", required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--env-file", default=None)
@@ -368,9 +475,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         materializer.load_env_file(args.env_file)
-        result = run_refresh(through_date=args.through_date, run_id=args.run_id, timeout=args.timeout)
+        result = run_refresh(
+            through_date=args.through_date,
+            run_id=args.run_id,
+            timeout=args.timeout,
+        )
     except Exception as exc:
-        print(json.dumps({"project": PROJECT, "schema_version": SCHEMA_VERSION, "status": "BLOCKED", "error": str(exc), "factual_authority": False, "directional_authority": False, "action_authority": False}, ensure_ascii=False, sort_keys=True))
+        print(
+            json.dumps(
+                {
+                    "project": PROJECT,
+                    "schema_version": SCHEMA_VERSION,
+                    "status": "BLOCKED",
+                    "error": str(exc),
+                    "factual_authority": False,
+                    "directional_authority": False,
+                    "action_authority": False,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
         return 1
     print(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
     return 0
