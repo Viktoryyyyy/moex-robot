@@ -60,10 +60,14 @@ dependencies:
     instrument: si_futures_family
     source_id: moex_algopack_futoi
     raw_producer: moex_data.futures.materialize_futoi_instrument.v1
-    incremental_acceptance: futures_futoi_raw_incremental_acceptance.v1
-    refresh_runner: moex_data.futures.futoi_live_factual_refresh.v1
+    historical_incremental_acceptance: futures_futoi_raw_incremental_acceptance.v1
+    cumulative_incremental_acceptance_required_for_current_factual_context: false
+    refresh_runner: moex_data.futures.futoi_live_factual_refresh_source_native.v1
     output_dataset: futoi_live_factual_context
-    freshness_rule: accepted_trade_date_equals_canonical_latest_completed_moex_futures_trade_date
+    freshness_rule: bounded_exact_date_source_scan_weekend_empty_only
+    calendar_dependency: false
+    exact_date_requests_only: true
+    weekday_empty_source: fail_closed
     stage5_full_mode_required: false
     stage5_pointer_promotion_allowed: false
     directional_authority: false
@@ -100,6 +104,7 @@ rolling_semantics:
   cross_stage5_stage7_base_date_alignment_required_when_full_stage10_runs: true
   cross_stage5_stage7_alignment_not_required_in_futoi_blocked_stage7_only_mode: true
   catch_up_uses_moex_futures_calendar: true
+  futoi_factual_freshness_uses_moex_futures_calendar: false
   raw_inputs_frozen_into_run_scope_before_derived_build: true
   derived_outputs_are_full_history_snapshots: true
   historical_pit_research_ready_claimed: false

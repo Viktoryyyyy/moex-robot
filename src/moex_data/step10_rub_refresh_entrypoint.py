@@ -8,7 +8,7 @@ from pathlib import Path
 
 from moex_data import step10_rub_refresh_dispatcher as dispatcher
 from moex_data import step10_rub_refresh_scheduler as step10
-from moex_data.futures import futoi_live_factual_refresh as futoi_factual
+from moex_data.futures import futoi_live_factual_refresh_source_native as futoi_factual
 
 
 PROJECT = "MOEX_Bot"
