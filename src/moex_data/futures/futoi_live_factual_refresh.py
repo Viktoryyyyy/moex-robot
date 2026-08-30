@@ -121,6 +121,14 @@ def _latest_completed_trading_date(through_date: str, *, timeout: float) -> str:
         start.isoformat(), end.isoformat(), timeout=timeout
     )
     calendar = futures_calendar._calendar_map(rows)
+    current = start
+    while current <= end:
+        if current not in calendar:
+            _fail(
+                "canonical MOEX futures calendar coverage incomplete: missing date "
+                + current.isoformat()
+            )
+        current = current + timedelta(days=1)
     trading = sorted(day for day, is_trading in calendar.items() if day <= end and is_trading)
     if not trading:
         _fail("canonical MOEX futures calendar contains no completed trading date in lookback window")
