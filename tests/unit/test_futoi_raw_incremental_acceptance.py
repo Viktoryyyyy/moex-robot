@@ -112,6 +112,7 @@ def _backfill_evidence(
     partition_secid: str = "SiU6",
     drop_partition_column: str | None = None,
     instrument_id: str = "si_futures_family",
+    calendar_validated: bool = True,
 ) -> list[Path]:
     partitions = [
         _partition(
@@ -140,6 +141,10 @@ def _backfill_evidence(
         "invalid_position_count": 0,
         "partition_count": len(partitions),
         "skipped_empty_source_dates": list(skipped_dates),
+        "skipped_non_trading_dates": list(skipped_dates),
+        "skipped_dates_calendar_validated": calendar_validated,
+        "calendar_source_id": backfill.CALENDAR_SOURCE_ID,
+        "calendar_endpoint": backfill.CALENDAR_ENDPOINT,
         "failed_dates": [],
     }
     manifest = {
@@ -162,6 +167,10 @@ def _backfill_evidence(
             for trade_date, path in zip(written_dates, partitions, strict=True)
         ],
         "partitions_skipped": list(skipped_dates),
+        "skipped_non_trading_dates": list(skipped_dates),
+        "skipped_dates_calendar_validated": calendar_validated,
+        "calendar_source_id": backfill.CALENDAR_SOURCE_ID,
+        "calendar_endpoint": backfill.CALENDAR_ENDPOINT,
         "quality_report_ref": quality_path.as_posix(),
         "refresh_status": "succeeded",
         "failed_dates": [],
@@ -210,17 +219,42 @@ def test_first_increment_accepts_without_mutating_historical_pointer(data_root: 
     assert result["accepted_partition_snapshots_immutable"] is True
     assert result["full_raw_contract_revalidated"] is True
     assert result["registry_binding_revalidated"] is True
+    assert result["skipped_dates_calendar_validated"] is True
     assert historical_pointer.read_bytes() == before
     pointer = json.loads(acceptance.incremental_pointer_path(data_root, "si_futures_family").read_text())
     manifest_path = data_root / pointer["manifest_ref"][len("${MOEX_DATA_ROOT}/") :]
     manifest = json.loads(manifest_path.read_text())
     assert manifest["parent_kind"] == "historical_stage2"
+    assert manifest["skipped_non_trading_dates"] == ["2026-08-19"]
+    assert manifest["skipped_dates_calendar_validated"] is True
+    assert manifest["calendar_source_id"] == backfill.CALENDAR_SOURCE_ID
+    assert manifest["calendar_endpoint"] == backfill.CALENDAR_ENDPOINT
     assert manifest["partitions"][0]["clgroups"] == ["FIZ", "YUR"]
     assert manifest["partitions"][0]["secid"] == "SiU6"
     accepted_partition = data_root / manifest["partitions"][0]["accepted_partition_ref"][len("${MOEX_DATA_ROOT}/") :]
     assert accepted_partition.read_bytes() == canonical_bytes
     assert manifest["directional_signal_authority"] is False
     assert manifest["trading_action_authority"] is False
+
+
+def test_rejects_skipped_date_without_calendar_validation_evidence(data_root: Path) -> None:
+    _historical_state(data_root)
+    _backfill_evidence(
+        data_root,
+        run_id="missing_calendar_evidence",
+        requested_from="2026-08-18",
+        requested_till="2026-08-19",
+        written_dates=("2026-08-18",),
+        skipped_dates=("2026-08-19",),
+        calendar_validated=False,
+    )
+    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="lack canonical calendar validation"):
+        acceptance.accept_incremental_backfill(
+            instrument_id="si_futures_family",
+            backfill_run_id="missing_calendar_evidence",
+            date_end="2026-08-19",
+        )
+    assert not acceptance.incremental_pointer_path(data_root, "si_futures_family").exists()
 
 
 def test_accepted_snapshot_survives_later_canonical_replacement(data_root: Path) -> None:
