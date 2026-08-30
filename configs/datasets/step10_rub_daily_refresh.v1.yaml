@@ -18,10 +18,11 @@ execution:
   current_pointer_rollback_on_failure: true
   network_calls_date_bounded: true
   dispatcher_selects_mode_from_repo_governance: true
+  independent_stage5_full_mode_readiness_gate_required: true
 
 refresh_modes:
   FUTOI_PROMOTION_ALLOWED_FULL_STAGE10:
-    condition: all_required_futoi_gates_PASS_and_factual_live_authority_true
+    condition: all_required_futoi_gates_PASS_and_factual_live_authority_true_and_stage5_full_mode_ready_true
     refresh_order:
       - futures_calendar
       - stage5_futoi_raw_and_rolling_derived
@@ -31,9 +32,10 @@ refresh_modes:
       - governed_derived_pointer_promotion
       - stage9_daily_weekly_post_refresh_smoke
   FUTOI_GOVERNED_BLOCKED_STAGE7_ONLY:
-    condition: futoi_stage5_promotion_not_allowed
+    condition: futoi_stage5_promotion_not_allowed_or_stage5_full_mode_not_ready
     refresh_order:
       - futoi_governance
+      - stage5_full_mode_readiness
       - futures_calendar
       - stage7_perpetual_raw_and_rolling_derived
       - stage3_current_raw_pilot_and_promotion
@@ -52,6 +54,9 @@ dependencies:
     historical_baseline_pointer: stage5_current_accepted_pointer
     rolling_features: futures_futoi_positioning_features_d1
     promotion_requires_futoi_factual_live_authority: true
+    promotion_requires_independent_full_mode_readiness: true
+    current_full_mode_readiness: false
+    current_full_mode_blocker: full_history_base_plus_delta_lineage_not_yet_accepted
   stage7:
     source: futures_raw_5m
     instruments: [usdrubf_futures_family, cnyrubf_futures_family]
@@ -84,6 +89,7 @@ promotion:
   full_mode_stage5_stage7_promotion_transactional: true
   blocked_mode_stage7_promotion_transactional: true
   blocked_mode_stage5_pointer_count: 0
+  stage5_full_mode_requires_code_reviewed_readiness_flip: true
   sha256_manifest_required: true
   sha256_quality_report_required: true
   sha256_partition_required: true
@@ -92,6 +98,7 @@ observability:
   run_manifest: ${MOEX_DATA_ROOT}/runs/step10_rub_daily_refresh/run_id={RUN_ID}/run_manifest.json
   reports_dispatcher_mode: true
   reports_futoi_governance: true
+  reports_stage5_full_mode_readiness: true
   reports_new_trading_dates: true
   reports_source_refresh_status: true
   reports_stage5_stage7_output_counts: true
@@ -111,6 +118,8 @@ readiness:
   scheduler_ready_after_exact_head_ci_and_review: true
   futoi_live_authority_required_for_stage7_refresh: false
   futoi_live_authority_required_for_stage5_promotion: true
+  stage5_full_mode_ready: false
+  stage5_full_mode_activation_requires_separate_code_change: true
   broker_write_access: false
   trade_recommendation_generation: false
   scenario_probability_generation: false
