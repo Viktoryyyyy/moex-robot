@@ -16,7 +16,7 @@ def test_rejects_current_and_future_moscow_date_before_state_access(monkeypatch,
 
     with pytest.raises(
         acceptance.FutoiIncrementalAcceptanceError,
-        match="date_end must be earlier than current Europe/Moscow calendar date",
+        match="date_end must be earlier than current Europe/Moscow date",
     ):
         acceptance.accept_incremental_backfill(
             instrument_id="si_futures_family",
