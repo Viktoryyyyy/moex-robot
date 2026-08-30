@@ -6,7 +6,7 @@ Stage 10 defines the rolling production refresh route for the server-core eviden
 
 The historical Stage 2 content attestation, Stage 5 pilot and Stage 7 pilot remain immutable historical proof. Stage 10 does not rewrite their fixed historical expectations or claim that those historical pilots are themselves schedulers.
 
-The canonical service entrypoint is `moex_data.step10_rub_refresh_dispatcher`. The dispatcher reads the repository FUTOI governance contract before choosing the refresh mode. The lower-level `step10_rub_refresh_scheduler` remains the full Stage 5+7 implementation and is entered only when both FUTOI promotion and the independent Stage 5 full-mode readiness gate are explicitly allowed.
+The canonical service and manual/recovery entrypoint is `moex_data.step10_rub_refresh_entrypoint`. The entrypoint runs the independent factual-only Si FUTOI raw refresh first and then invokes `moex_data.step10_rub_refresh_dispatcher`, which reads the repository FUTOI governance contract before choosing the Stage 10 refresh mode. Operators must not invoke the dispatcher directly for canonical Stage 10 service, manual, or recovery runs because doing so bypasses the factual FUTOI refresh. The lower-level `step10_rub_refresh_scheduler` remains the full Stage 5+7 implementation and is entered only when both FUTOI promotion and the independent Stage 5 full-mode readiness gate are explicitly allowed.
 
 ## Execution boundary
 
@@ -93,7 +93,7 @@ Dedicated units:
 - `ops/systemd/moex-rub-stage10-daily-refresh.service`
 - `ops/systemd/moex-rub-stage10-daily-refresh.timer`
 
-The timer targets 00:30 Europe/Moscow each day and passes the previous Moscow calendar date to the dispatcher. This is intentionally separate from the pre-existing generic all-universe futures refresh timer.
+The timer targets 00:30 Europe/Moscow each day and passes the previous Moscow calendar date to `moex_data.step10_rub_refresh_entrypoint`. This is intentionally separate from the pre-existing generic all-universe futures refresh timer.
 
 A single `flock` protects Stage 10 from overlapping runs.
 

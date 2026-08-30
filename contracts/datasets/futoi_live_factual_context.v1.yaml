@@ -1,0 +1,111 @@
+dataset_id: futoi_live_factual_context
+schema_version: futoi_live_factual_refresh.v1
+status: implementation_ready_runtime_acceptance_pending
+producer: moex_data.futures.futoi_live_factual_refresh.v1
+source_id: moex_algopack_futoi
+instrument_id: si_futures_family
+source_dataset_ref: contracts/datasets/futures_futoi_raw.v1.yaml
+incremental_acceptance_ref: contracts/datasets/futures_futoi_raw_incremental_acceptance.v1.yaml
+source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v1.yaml
+path: ${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/instrument_id=si_futures_family/current.json
+
+semantics:
+  purpose: factual_only_live_context_for_rub_analysis_snapshot
+  stage5_full_mode_required: false
+  stage5_pointer_promotion_allowed: false
+  directional_interpretation_allowed: false
+  action_generation_allowed: false
+  missing_or_failed_source_interpreted_as_neutral: false
+  source_short_positions_are_signed_negative: true
+  exposed_short_positions_are_absolute_contract_counts: true
+  exact_fiz_yur_alignment_required: true
+  shared_fiz_yur_sess_id_required: true
+  alignment_rule: latest_exact_shared_source_event_ts_and_sess_id_after_max_seqnum_revision_resolution
+  multi_sess_id_same_group_event: fail_closed
+  cross_sess_id_fiz_yur_pair: fail_closed
+  ambiguous_max_seqnum: fail_closed
+  fiz_yur_net_must_balance_zero: true
+  total_long_must_equal_total_short_abs: true
+  source_event_timezone: Europe/Moscow
+  snapshot_ts_representation: UTC_ISO8601_offset_aware
+  source_publication_time_representation: UTC_ISO8601_offset_aware
+  availability_ts_representation: UTC_ISO8601_offset_aware
+  ingest_ts_representation: UTC_ISO8601_offset_aware
+  data_as_of_equals_factual_snapshot_ts: true
+
+freshness:
+  calendar_source_id: moex_iss_futures_calendar
+  calendar_endpoint: /iss/calendars.json
+  policy: accepted_trade_date_must_equal_canonical_latest_completed_moex_futures_trade_date
+  requested_range_full_date_coverage_required: true
+  incomplete_calendar_coverage: fail_closed
+  implicit_weekday_inference_allowed: false
+  stale_as_neutral_allowed: false
+
+required_top_level_fields:
+  - schema_version
+  - project
+  - status
+  - source_id
+  - instrument_id
+  - run_id
+  - through_date
+  - expected_latest_completed_trade_date
+  - data_as_of
+  - last_success_at
+  - freshness
+  - quality_status
+  - acceptance_status
+  - factual
+  - provenance
+  - factual_authority
+  - directional_authority
+  - action_authority
+
+factual_fields:
+  required:
+    - trade_date
+    - snapshot_ts
+    - source_publication_time
+    - availability_ts_utc
+    - ingest_ts_utc
+    - source_ticker
+    - secid
+    - sess_id
+    - fiz
+    - yur
+    - total_open_interest
+    - short_semantics
+    - timestamp_semantics
+    - fiz_yur_alignment
+  side_fields:
+    - long
+    - short
+    - net
+    - long_participants
+    - short_participants
+
+provenance:
+  accepted_state_kind_required: true
+  allowed_accepted_state_kinds:
+    - incremental
+    - historical_content_attested
+  immutable_accepted_partition_sha256_required: true
+  source_contract_ref_required: true
+  raw_contract_ref_required: true
+  incremental_acceptance_contract_ref_required: true
+  incremental_state:
+    incremental_pointer_sha256_required: true
+    incremental_manifest_sha256_required: true
+  historical_content_attested_state:
+    marker_sha256_required: true
+    manifest_sha256_required: true
+    partition_content_set_sha256_required: true
+  unaccepted_canonical_raw_fallback_allowed: false
+
+failure_semantics:
+  raw_refresh_or_acceptance_failure: fail_component_only
+  stage7_refresh_blocked_by_futoi_failure: false
+  factual_authority_before_governance_live_acceptance: false
+  directional_authority: false
+  action_authority: false

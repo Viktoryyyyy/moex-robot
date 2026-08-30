@@ -17,6 +17,34 @@ FULL_MODE: Final[str] = "FUTOI_PROMOTION_ALLOWED_FULL_STAGE10"
 # Independent code gate: FUTOI governance becoming LIVE_ACCEPTED must not by itself
 # enable Stage 5 full-history publication before base+delta lineage is accepted.
 STAGE5_FULL_MODE_READY: Final[bool] = False
+_RESULT_CONTEXT_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "entrypoint_schema_version",
+        "futoi_factual_refresh",
+        "futoi_factual_refresh_blocks_stage7",
+    }
+)
+
+
+def _validated_result_context(value: Mapping[str, object] | None) -> dict[str, object]:
+    if value is None:
+        return {}
+    extras = set(value).difference(_RESULT_CONTEXT_KEYS)
+    if extras:
+        step10._fail("Stage 10 result_context contains unsupported keys: " + ",".join(sorted(extras)))
+    schema_version = str(value.get("entrypoint_schema_version") or "").strip()
+    if not schema_version:
+        step10._fail("Stage 10 result_context missing entrypoint_schema_version")
+    futoi_result = value.get("futoi_factual_refresh")
+    if not isinstance(futoi_result, Mapping):
+        step10._fail("Stage 10 result_context futoi_factual_refresh must be an object")
+    if value.get("futoi_factual_refresh_blocks_stage7") is not False:
+        step10._fail("Stage 10 factual FUTOI refresh must remain non-blocking for Stage 7")
+    return {
+        "entrypoint_schema_version": schema_version,
+        "futoi_factual_refresh": dict(futoi_result),
+        "futoi_factual_refresh_blocks_stage7": False,
+    }
 
 
 def _blocked_stage7_refresh(
@@ -28,6 +56,7 @@ def _blocked_stage7_refresh(
     timeout: float,
     now_utc: datetime,
     governance: Mapping[str, object],
+    result_context: Mapping[str, object],
 ) -> dict[str, object]:
     root = step10._data_root()
     repo = step10._repo_root(repo_root)
@@ -116,6 +145,18 @@ def _blocked_stage7_refresh(
             if governance_allows_stage5 and not STAGE5_FULL_MODE_READY
             else "FUTOI factual live authority is not accepted"
         )
+        refresh_order = [
+            "futoi_governance",
+            "stage5_full_mode_readiness",
+            "calendar",
+            "stage7_raw_and_derived",
+            "stage3",
+            "stage4",
+            "stage7_pointer_promotion",
+            "stage9_smoke",
+        ]
+        if result_context:
+            refresh_order.insert(refresh_order.index("calendar"), "futoi_raw_factual_refresh")
         result: dict[str, object] = {
             "schema_version": SCHEMA_VERSION,
             "project": "MOEX_Bot",
@@ -144,16 +185,7 @@ def _blocked_stage7_refresh(
                 "canonical_pointer_promotion": stage7_pointer_promotion,
             },
             "stage9_smoke": smoke,
-            "deterministic_refresh_order": [
-                "futoi_governance",
-                "stage5_full_mode_readiness",
-                "calendar",
-                "stage7_raw_and_derived",
-                "stage3",
-                "stage4",
-                "stage7_pointer_promotion",
-                "stage9_smoke",
-            ],
+            "deterministic_refresh_order": refresh_order,
             "futoi_block_does_not_block_stage7": True,
             "pointer_rollback_on_failure": True,
             "implicit_latest_used": False,
@@ -162,6 +194,7 @@ def _blocked_stage7_refresh(
             "started_at_utc": started,
             "finished_at_utc": finished,
         }
+        result.update(dict(result_context))
         manifest_path = run_root / "run_manifest.json"
         step10._atomic_json(manifest_path, result)
         result["run_manifest_ref"] = step10._rooted_ref(root, manifest_path)
@@ -189,6 +222,7 @@ def _blocked_stage7_refresh(
             "started_at_utc": started,
             "finished_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         }
+        failure.update(dict(result_context))
         try:
             step10._atomic_json(run_root / "run_manifest.json", failure)
         except Exception:
@@ -206,9 +240,11 @@ def run_refresh(
     env_file: str | None = step10.CANONICAL_ENV_PATH,
     timeout: float = 60.0,
     now_utc: datetime | None = None,
+    result_context: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     checked_through = step10._iso_date(through_date, "through_date")
     checked_run = step10._safe_token(run_id, "run_id")
+    checked_context = _validated_result_context(result_context)
     step10.load_env_file(env_file)
     repo = step10._repo_root(repo_root)
     now = now_utc or datetime.now(timezone.utc)
@@ -218,6 +254,11 @@ def run_refresh(
     governance = step10._futoi_stage5_promotion_governance(repo)
 
     if bool(governance.get("promotion_allowed")) and STAGE5_FULL_MODE_READY:
+        if checked_context:
+            step10._fail(
+                "canonical entrypoint full-mode transactional context binding is not ready; "
+                "STAGE5_FULL_MODE_READY must remain false until integrated"
+            )
         result = step10.run_refresh(
             through_date=checked_through,
             run_id=checked_run,
@@ -239,6 +280,7 @@ def run_refresh(
         timeout=timeout,
         now_utc=now,
         governance=governance,
+        result_context=checked_context,
     )
 
 

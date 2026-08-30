@@ -3,7 +3,8 @@ project: MOEX_Bot
 stage: 10
 status: rolling_scheduler_candidate
 contract_id: step10_rub_daily_refresh_acceptance.v1
-runner: src/moex_data/step10_rub_refresh_dispatcher.py
+runner: src/moex_data/step10_rub_refresh_entrypoint.py
+dispatcher: src/moex_data/step10_rub_refresh_dispatcher.py
 full_runner: src/moex_data/step10_rub_refresh_scheduler.py
 futoi_governance_contract: contracts/intelligence/usdrubf_futoi_live_acceptance_governance_v1.json
 
@@ -19,12 +20,16 @@ execution:
   network_calls_date_bounded: true
   dispatcher_selects_mode_from_repo_governance: true
   independent_stage5_full_mode_readiness_gate_required: true
+  futoi_factual_refresh_failure_must_not_block_stage7: true
+  entrypoint_futoi_context_bound_inside_dispatcher_transaction: true
+  post_dispatch_manifest_augmentation_allowed: false
 
 refresh_modes:
   FUTOI_PROMOTION_ALLOWED_FULL_STAGE10:
     condition: all_required_futoi_gates_PASS_and_factual_live_authority_true_and_stage5_full_mode_ready_true
     refresh_order:
       - futures_calendar
+      - futoi_raw_factual_refresh
       - stage5_futoi_raw_and_rolling_derived
       - stage7_perpetual_raw_and_rolling_derived
       - stage3_current_raw_pilot_and_promotion
@@ -36,17 +41,33 @@ refresh_modes:
     refresh_order:
       - futoi_governance
       - stage5_full_mode_readiness
+      - futoi_raw_factual_refresh
       - futures_calendar
       - stage7_perpetual_raw_and_rolling_derived
       - stage3_current_raw_pilot_and_promotion
       - stage4_basis_carry_pilot_and_promotion
       - stage7_pointer_promotion
       - stage9_daily_weekly_post_refresh_smoke
+    futoi_raw_factual_refresh_allowed: true
+    futoi_raw_factual_refresh_failure_blocks_stage7: false
     stage5_materialization_allowed: false
     stage5_pointer_promotion_allowed: false
     stage7_refresh_continues: true
 
 dependencies:
+  futoi_factual:
+    source: futures_futoi_raw
+    instrument: si_futures_family
+    source_id: moex_algopack_futoi
+    raw_producer: moex_data.futures.materialize_futoi_instrument.v1
+    incremental_acceptance: futures_futoi_raw_incremental_acceptance.v1
+    refresh_runner: moex_data.futures.futoi_live_factual_refresh.v1
+    output_dataset: futoi_live_factual_context
+    freshness_rule: accepted_trade_date_equals_canonical_latest_completed_moex_futures_trade_date
+    stage5_full_mode_required: false
+    stage5_pointer_promotion_allowed: false
+    directional_authority: false
+    action_authority: false
   stage5:
     source: futures_futoi_raw
     instruments: [si_futures_family, cr_futures_family]
@@ -88,6 +109,7 @@ promotion:
   stage7_pointer_count_when_refreshed: 8
   full_mode_stage5_stage7_promotion_transactional: true
   blocked_mode_stage7_promotion_transactional: true
+  entrypoint_futoi_context_manifest_write_inside_pointer_rollback_boundary: true
   blocked_mode_stage5_pointer_count: 0
   stage5_full_mode_requires_code_reviewed_readiness_flip: true
   sha256_manifest_required: true
@@ -98,6 +120,7 @@ observability:
   run_manifest: ${MOEX_DATA_ROOT}/runs/step10_rub_daily_refresh/run_id={RUN_ID}/run_manifest.json
   reports_dispatcher_mode: true
   reports_futoi_governance: true
+  reports_futoi_factual_refresh: true
   reports_stage5_full_mode_readiness: true
   reports_new_trading_dates: true
   reports_source_refresh_status: true
@@ -112,10 +135,12 @@ systemd:
   through_date_rule: previous_Moscow_calendar_date
   persistent: true
   lock: '%h/moex_bot/data/locks/moex-rub-stage10-daily-refresh.lock'
-  entrypoint: moex_data.step10_rub_refresh_dispatcher
+  entrypoint: moex_data.step10_rub_refresh_entrypoint
 
 readiness:
   scheduler_ready_after_exact_head_ci_and_review: true
+  futoi_factual_refresh_implementation_ready: true
+  futoi_factual_runtime_acceptance_passed: false
   futoi_live_authority_required_for_stage7_refresh: false
   futoi_live_authority_required_for_stage5_promotion: true
   stage5_full_mode_ready: false
