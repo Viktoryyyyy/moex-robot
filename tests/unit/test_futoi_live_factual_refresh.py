@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 import pandas as pd
 import pytest
 
@@ -111,3 +113,42 @@ def test_latest_aligned_fiz_yur_fails_closed_without_exact_pair() -> None:
 
     with pytest.raises(factual.FutoiLiveFactualRefreshError, match="no exact aligned FIZ/YUR"):
         factual.latest_aligned_factual(frame, expected_trade_date="2026-08-28")
+
+
+def test_load_current_historical_uses_content_attested_baseline(tmp_path, monkeypatch) -> None:
+    marker = tmp_path / "marker.json"
+    manifest = tmp_path / "manifest.json"
+    partition = tmp_path / "part.parquet"
+    marker.write_text("{}\n", encoding="utf-8")
+    manifest.write_text("{}\n", encoding="utf-8")
+    partition.write_bytes(b"accepted-futoi-partition")
+    partition_sha = hashlib.sha256(partition.read_bytes()).hexdigest()
+
+    monkeypatch.setattr(
+        factual.historical_attestation,
+        "resolve_content_attested_history",
+        lambda **kwargs: {
+            "requested_till": "2026-08-28",
+            "marker_path": marker.as_posix(),
+            "marker_sha256": "a" * 64,
+            "manifest_path": manifest.as_posix(),
+            "manifest_sha256": "b" * 64,
+            "partition_content_set_sha256": "c" * 64,
+            "records": (
+                {
+                    "trade_date": "2026-08-28",
+                    "snapshot_path": partition.as_posix(),
+                    "sha256": partition_sha,
+                },
+            ),
+        },
+    )
+
+    path, provenance = factual._load_current_historical(
+        tmp_path, expected_trade_date="2026-08-28"
+    )
+
+    assert path == partition
+    assert provenance["accepted_state_kind"] == "historical_content_attested"
+    assert provenance["accepted_partition_sha256"] == partition_sha
+    assert provenance["historical_content_attestation_marker_ref"].endswith("marker.json")
