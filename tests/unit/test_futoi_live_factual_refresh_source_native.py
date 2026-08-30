@@ -73,7 +73,6 @@ def test_source_native_freshness_uses_exact_through_date_when_data_exists(monkey
         return _raw_frame(trade_date), "https://apim.example/futoi/si.json"
 
     monkeypatch.setattr(factual.materializer, "_fetch_exact", fetch)
-    monkeypatch.setattr(factual.pd.Timestamp, "now", lambda tz=None: pd.Timestamp("2026-08-30", tz=tz))
 
     target, observations = factual.discover_latest_source_trade_date("2026-08-28", timeout=1.0)
 
@@ -99,7 +98,6 @@ def test_source_native_freshness_skips_only_explicit_weekend_empty(monkeypatch) 
         return _raw_frame(trade_date), "https://apim.example/futoi/si.json"
 
     monkeypatch.setattr(factual.materializer, "_fetch_exact", fetch)
-    monkeypatch.setattr(factual.pd.Timestamp, "now", lambda tz=None: pd.Timestamp("2026-08-30", tz=tz))
 
     target, observations = factual.discover_latest_source_trade_date("2026-08-29", timeout=1.0)
 
@@ -116,10 +114,9 @@ def test_source_native_freshness_fails_closed_on_weekday_empty(monkeypatch) -> N
         raise factual.materializer.FutoiMaterializationError(factual.EXPLICIT_EMPTY_ERROR)
 
     monkeypatch.setattr(factual.materializer, "_fetch_exact", fetch)
-    monkeypatch.setattr(factual.pd.Timestamp, "now", lambda tz=None: pd.Timestamp("2026-09-02", tz=tz))
 
-    with pytest.raises(factual.FutoiSourceNativeRefreshError, match="empty on weekday 2026-09-01"):
-        factual.discover_latest_source_trade_date("2026-09-01", timeout=1.0)
+    with pytest.raises(factual.FutoiSourceNativeRefreshError, match="empty on weekday 2026-08-28"):
+        factual.discover_latest_source_trade_date("2026-08-28", timeout=1.0)
 
 
 def test_source_native_freshness_fails_closed_on_probe_error(monkeypatch) -> None:
@@ -130,7 +127,6 @@ def test_source_native_freshness_fails_closed_on_probe_error(monkeypatch) -> Non
         raise RuntimeError("transport failure")
 
     monkeypatch.setattr(factual.materializer, "_fetch_exact", fetch)
-    monkeypatch.setattr(factual.pd.Timestamp, "now", lambda tz=None: pd.Timestamp("2026-08-30", tz=tz))
 
     with pytest.raises(factual.FutoiSourceNativeRefreshError, match="transport failure"):
         factual.discover_latest_source_trade_date("2026-08-29", timeout=1.0)
