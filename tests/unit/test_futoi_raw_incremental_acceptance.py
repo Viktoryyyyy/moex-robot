@@ -113,6 +113,7 @@ def _backfill_evidence(
     drop_partition_column: str | None = None,
     instrument_id: str = "si_futures_family",
     calendar_validated: bool = True,
+    calendar_rows: list[dict[str, object]] | None = None,
 ) -> list[Path]:
     partitions = [
         _partition(
@@ -129,6 +130,17 @@ def _backfill_evidence(
     row_count = len(written_dates) * len(groups)
     quality_path = backfill._aggregate_quality_path(requested_till, run_id)
     manifest_path = backfill._aggregate_manifest_path(requested_till, run_id)
+    calendar_evidence = None
+    if skipped_dates:
+        rows = calendar_rows if calendar_rows is not None else [
+            {"date": skipped_date, "futures": 0} for skipped_date in skipped_dates
+        ]
+        calendar_evidence = backfill._persist_calendar_evidence(
+            date_start=requested_from,
+            date_end=requested_till,
+            run_id=run_id,
+            rows=rows,
+        )
     quality = {
         "run_id": run_id,
         "dataset_id": materializer.DATASET_ID,
@@ -145,6 +157,9 @@ def _backfill_evidence(
         "skipped_dates_calendar_validated": calendar_validated,
         "calendar_source_id": backfill.CALENDAR_SOURCE_ID,
         "calendar_endpoint": backfill.CALENDAR_ENDPOINT,
+        "calendar_evidence_ref": None if calendar_evidence is None else calendar_evidence["path"],
+        "calendar_evidence_sha256": None if calendar_evidence is None else calendar_evidence["sha256"],
+        "calendar_evidence_row_count": 0 if calendar_evidence is None else calendar_evidence["row_count"],
         "failed_dates": [],
     }
     manifest = {
@@ -171,6 +186,9 @@ def _backfill_evidence(
         "skipped_dates_calendar_validated": calendar_validated,
         "calendar_source_id": backfill.CALENDAR_SOURCE_ID,
         "calendar_endpoint": backfill.CALENDAR_ENDPOINT,
+        "calendar_evidence_ref": None if calendar_evidence is None else calendar_evidence["path"],
+        "calendar_evidence_sha256": None if calendar_evidence is None else calendar_evidence["sha256"],
+        "calendar_evidence_row_count": 0 if calendar_evidence is None else calendar_evidence["row_count"],
         "quality_report_ref": quality_path.as_posix(),
         "refresh_status": "succeeded",
         "failed_dates": [],
@@ -229,6 +247,9 @@ def test_first_increment_accepts_without_mutating_historical_pointer(data_root: 
     assert manifest["skipped_dates_calendar_validated"] is True
     assert manifest["calendar_source_id"] == backfill.CALENDAR_SOURCE_ID
     assert manifest["calendar_endpoint"] == backfill.CALENDAR_ENDPOINT
+    assert manifest["calendar_evidence_snapshot_ref"].endswith("/source/calendar_evidence.json")
+    calendar_snapshot = data_root / manifest["calendar_evidence_snapshot_ref"][len("${MOEX_DATA_ROOT}/") :]
+    assert hashlib.sha256(calendar_snapshot.read_bytes()).hexdigest() == manifest["calendar_evidence_sha256"]
     assert manifest["partitions"][0]["clgroups"] == ["FIZ", "YUR"]
     assert manifest["partitions"][0]["secid"] == "SiU6"
     accepted_partition = data_root / manifest["partitions"][0]["accepted_partition_ref"][len("${MOEX_DATA_ROOT}/") :]
@@ -252,6 +273,89 @@ def test_rejects_skipped_date_without_calendar_validation_evidence(data_root: Pa
         acceptance.accept_incremental_backfill(
             instrument_id="si_futures_family",
             backfill_run_id="missing_calendar_evidence",
+            date_end="2026-08-19",
+        )
+    assert not acceptance.incremental_pointer_path(data_root, "si_futures_family").exists()
+
+
+def test_rejects_self_asserted_skip_when_calendar_artifact_marks_trading(data_root: Path) -> None:
+    _historical_state(data_root)
+    _backfill_evidence(
+        data_root,
+        run_id="calendar_trading_v1",
+        requested_from="2026-08-18",
+        requested_till="2026-08-19",
+        written_dates=("2026-08-18",),
+        skipped_dates=("2026-08-19",),
+        calendar_rows=[{"date": "2026-08-19", "futures": 1}],
+    )
+    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="canonical trading day"):
+        acceptance.accept_incremental_backfill(
+            instrument_id="si_futures_family",
+            backfill_run_id="calendar_trading_v1",
+            date_end="2026-08-19",
+        )
+    assert not acceptance.incremental_pointer_path(data_root, "si_futures_family").exists()
+
+
+def test_rejects_calendar_artifact_sha_mismatch(data_root: Path) -> None:
+    _historical_state(data_root)
+    run_id = "calendar_sha_v1"
+    _backfill_evidence(
+        data_root,
+        run_id=run_id,
+        requested_from="2026-08-18",
+        requested_till="2026-08-19",
+        written_dates=("2026-08-18",),
+        skipped_dates=("2026-08-19",),
+    )
+    manifest_path = backfill._aggregate_manifest_path("2026-08-19", run_id)
+    quality_path = backfill._aggregate_quality_path("2026-08-19", run_id)
+    manifest = json.loads(manifest_path.read_text())
+    quality = json.loads(quality_path.read_text())
+    fake_sha = "0" * 64
+    manifest["calendar_evidence_sha256"] = fake_sha
+    quality["calendar_evidence_sha256"] = fake_sha
+    _write_json(manifest_path, manifest)
+    _write_json(quality_path, quality)
+
+    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="artifact SHA mismatch"):
+        acceptance.accept_incremental_backfill(
+            instrument_id="si_futures_family",
+            backfill_run_id=run_id,
+            date_end="2026-08-19",
+        )
+    assert not acceptance.incremental_pointer_path(data_root, "si_futures_family").exists()
+
+
+@pytest.mark.parametrize(
+    "calendar_rows",
+    [
+        [{"date": "2026-08-18", "futures": 1}],
+        [
+            {"date": "2026-08-19", "futures": 0},
+            {"date": "2026-08-19", "futures": 0},
+        ],
+    ],
+)
+def test_rejects_missing_or_malformed_calendar_coverage(
+    data_root: Path,
+    calendar_rows: list[dict[str, object]],
+) -> None:
+    _historical_state(data_root)
+    _backfill_evidence(
+        data_root,
+        run_id="calendar_bad_coverage_v1",
+        requested_from="2026-08-18",
+        requested_till="2026-08-19",
+        written_dates=("2026-08-18",),
+        skipped_dates=("2026-08-19",),
+        calendar_rows=calendar_rows,
+    )
+    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="calendar"):
+        acceptance.accept_incremental_backfill(
+            instrument_id="si_futures_family",
+            backfill_run_id="calendar_bad_coverage_v1",
             date_end="2026-08-19",
         )
     assert not acceptance.incremental_pointer_path(data_root, "si_futures_family").exists()
