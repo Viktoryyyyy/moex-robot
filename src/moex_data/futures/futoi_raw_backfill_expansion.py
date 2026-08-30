@@ -16,7 +16,6 @@ import pandas as pd
 
 from moex_data.futures import futoi_raw_loader as base_loader
 from moex_data.futures import liquidity_history_metrics_probe as base
-from moex_data.futures import liquidity_history_metrics_probe_apim_calendar as apim_calendar
 from moex_data.futures.slice1_common import DEFAULT_EXCLUDED
 from moex_data.futures.slice1_common import DEFAULT_WHITELIST
 from moex_data.futures.slice1_common import parse_list
@@ -252,9 +251,16 @@ def main():
         ends.append(date_till)
     calendar_from = min(starts)
     calendar_till = max(ends)
-    expected_calendar, calendar_status = apim_calendar.fetch_futures_calendar(calendar_from, calendar_till, float(args.timeout), "")
-    if expected_calendar is None or calendar_status != "canonical_apim_futures_xml":
-        raise RuntimeError("APIM futures calendar validation failed: " + str(calendar_status))
+    reference_secid = base._reference_secid(selected)
+    expected_calendar, calendar_status = base.fetch_observed_trading_dates(
+        calendar_from,
+        calendar_till,
+        reference_secid,
+        float(args.timeout),
+        str(args.apim_base_url),
+    )
+    if expected_calendar is None or calendar_status != base.OBSERVED_DATE_STATUS:
+        raise RuntimeError("authoritative observed TradeStats date validation failed: " + str(calendar_status))
     run_id = "futures_futoi_raw_backfill_" + run_date + "_" + stable_id([snapshot_date, eligibility_path, utc_now_iso(), DATASET_STAGE])
     manifests = []
     outputs = []
@@ -262,10 +268,16 @@ def main():
         chunk_visibility = [x for x in visibility if x.get("family_code") == family_code]
         chunk_id = "futoi_raw_" + stable_id([snapshot_date, family_code, calendar_from, calendar_till, ",".join(frame["secid"].astype(str).tolist()), DATASET_STAGE])
         manifest, _quality, out = run_family_chunk(args, data_root, frame, chunk_visibility, expected_calendar, calendar_status, run_id, snapshot_date, run_date, chunk_id)
+        manifest["calendar_validation_summary"].update({
+            "date_source_reference_secid": reference_secid,
+            "date_source_id": base.observed_date_source.OBSERVED_DATE_SOURCE_ID,
+            "date_source_endpoint": base.observed_date_source.OBSERVED_DATE_SOURCE_ENDPOINT,
+        })
+        dump_json(out["manifest"], manifest)
         manifests.append(manifest)
         outputs.append(out)
     aggregate_status = "partial_failed" if any(x.get("status") in ["partial_failed", "failed"] for x in manifests) else "succeeded"
-    print(json.dumps({"selection_mode": MODE_RFUD, "dataset_stage": DATASET_STAGE, "eligibility_snapshot": eligibility_path, "selected_universe": {"family_count": len(chunk_groups(selected)), "secid_count": int(len(selected)), "secids": selected["secid"].astype(str).tolist()}, "chunk_status": aggregate_status, "chunk_manifests": [x.get("output_artifacts", {}).get("manifest") for x in manifests], "quality_reports": [x.get("output_artifacts", {}).get("quality_report") for x in manifests], "forbidden_scope_checks": {"raw_5m_prejoin": False, "raw_d1_derivation": False, "continuous_build": False, "w1_build": False}}, ensure_ascii=False, sort_keys=True, default=str))
+    print(json.dumps({"selection_mode": MODE_RFUD, "dataset_stage": DATASET_STAGE, "eligibility_snapshot": eligibility_path, "selected_universe": {"family_count": len(chunk_groups(selected)), "secid_count": int(len(selected)), "secids": selected["secid"].astype(str).tolist()}, "date_source": {"status": calendar_status, "reference_secid": reference_secid, "source_id": base.observed_date_source.OBSERVED_DATE_SOURCE_ID, "endpoint": base.observed_date_source.OBSERVED_DATE_SOURCE_ENDPOINT}, "chunk_status": aggregate_status, "chunk_manifests": [x.get("output_artifacts", {}).get("manifest") for x in manifests], "quality_reports": [x.get("output_artifacts", {}).get("quality_report") for x in manifests], "forbidden_scope_checks": {"raw_5m_prejoin": False, "raw_d1_derivation": False, "continuous_build": False, "w1_build": False}}, ensure_ascii=False, sort_keys=True, default=str))
     return 0 if aggregate_status in ["succeeded", "partial_failed"] else 1
 
 
