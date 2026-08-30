@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+
+import pytest
 
 from moex_data import step10_rub_refresh_dispatcher as dispatcher
 from moex_data import step10_rub_refresh_entrypoint as entrypoint
@@ -87,6 +90,79 @@ def test_augment_manifest_persists_entrypoint_schema_version(tmp_path, monkeypat
     assert persisted["entrypoint_schema_version"] == entrypoint.SCHEMA_VERSION
     assert persisted["futoi_factual_refresh"] == {"status": "PASS"}
     assert persisted["futoi_factual_refresh_blocks_stage7"] is False
+
+
+def test_dispatcher_failure_preserves_futoi_result_in_manifest_and_exception(
+    tmp_path, monkeypatch
+) -> None:
+    run_id = "stage10_failure_test"
+    manifest_path = (
+        tmp_path
+        / "runs"
+        / "step10_rub_daily_refresh"
+        / ("run_id=" + run_id)
+        / "run_manifest.json"
+    )
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(
+        json.dumps({"status": "failed", "run_id": run_id}) + "\n",
+        encoding="utf-8",
+    )
+    futoi_result = {"status": "PASS", "trade_date": "2026-08-28"}
+
+    monkeypatch.setattr(entrypoint.step10, "_data_root", lambda: tmp_path)
+    monkeypatch.setattr(entrypoint.step10, "load_env_file", lambda value: None)
+    monkeypatch.setattr(
+        entrypoint,
+        "_run_futoi_factual_non_blocking",
+        lambda **kwargs: dict(futoi_result),
+    )
+
+    def dispatcher_failure(**kwargs):
+        del kwargs
+        raise RuntimeError("stage7 smoke failed")
+
+    monkeypatch.setattr(entrypoint.dispatcher, "run_refresh", dispatcher_failure)
+
+    with pytest.raises(entrypoint.Step10EntrypointError, match="stage7 smoke failed") as exc_info:
+        entrypoint.run_refresh(
+            through_date="2026-08-28",
+            run_id=run_id,
+            timeout=1.0,
+            now_utc=datetime(2026, 8, 30, 8, 0, tzinfo=timezone.utc),
+        )
+
+    assert exc_info.value.futoi_result == futoi_result
+    assert exc_info.value.dispatcher_failure_manifest_augmented is True
+    persisted = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert persisted["status"] == "failed"
+    assert persisted["entrypoint_schema_version"] == entrypoint.SCHEMA_VERSION
+    assert persisted["futoi_factual_refresh"] == futoi_result
+    assert persisted["futoi_factual_refresh_blocks_stage7"] is False
+
+
+def test_main_reports_futoi_result_on_dispatcher_failure(monkeypatch, capsys) -> None:
+    futoi_result = {"status": "FAILED_NON_BLOCKING", "error": "futoi unavailable"}
+
+    def fail(**kwargs):
+        del kwargs
+        raise entrypoint.Step10EntrypointError(
+            "stage7 failed",
+            futoi_result=futoi_result,
+            dispatcher_failure_manifest_augmented=True,
+        )
+
+    monkeypatch.setattr(entrypoint, "run_refresh", fail)
+    status = entrypoint.main(
+        ["--through-date", "2026-08-28", "--run-id", "stage10_main_failure"]
+    )
+
+    assert status == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"] == "stage7 failed"
+    assert payload["futoi_factual_refresh"] == futoi_result
+    assert payload["futoi_factual_refresh_blocks_stage7"] is False
+    assert payload["dispatcher_failure_manifest_augmented"] is True
 
 
 def test_stage10_contract_declares_independent_futoi_factual_refresh() -> None:
