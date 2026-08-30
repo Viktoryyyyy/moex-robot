@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -117,6 +119,15 @@ def _backfill_evidence(root: Path, run_id: str) -> Path:
             "requested_from": trade_date,
             "requested_till": trade_date,
             "partitions_written": [partition.as_posix()],
+            "partition_evidence": [
+                {
+                    "trade_date": trade_date,
+                    "subrun_id": backfill._subrun_id(run_id, trade_date),
+                    "partition_path": partition.as_posix(),
+                    "sha256": hashlib.sha256(partition.read_bytes()).hexdigest(),
+                    "row_count": 2,
+                }
+            ],
             "partitions_skipped": [],
             "quality_report_ref": quality_path.as_posix(),
             "refresh_status": "succeeded",
@@ -213,4 +224,91 @@ def test_rejects_embedded_backfill_run_id_mismatch(
             instrument_id="si_futures_family",
             backfill_run_id=run_id,
             date_end=trade_date,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error_pattern"),
+    (
+        ("pos", np.inf, "non-finite numeric value"),
+        ("pos_long_num", 10.5, "participant counts must be non-negative integers"),
+        ("pos", 21, "net position must equal pos_long plus pos_short"),
+    ),
+)
+def test_rejects_complete_position_invariant_defects(
+    data_root: Path,
+    field: str,
+    value: object,
+    error_pattern: str,
+) -> None:
+    run_id = "position_invariant_" + field + "_v1"
+    partition = _backfill_evidence(data_root, run_id)
+    frame = pd.read_parquet(partition)
+    frame.loc[0, field] = value
+    frame.to_parquet(partition, index=False)
+
+    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match=error_pattern):
+        acceptance.accept_incremental_backfill(
+            instrument_id="si_futures_family",
+            backfill_run_id=run_id,
+            date_end="2026-08-18",
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error_pattern"),
+    (
+        ("availability_ts_utc", "2026-08-18T06:00:00+00:00", "availability timestamp precedes source publication timestamp"),
+        ("ingest_ts", "2026-08-18T06:30:00+00:00", "ingest timestamp precedes availability timestamp"),
+    ),
+)
+def test_rejects_invalid_provenance_chronology(
+    data_root: Path,
+    field: str,
+    value: str,
+    error_pattern: str,
+) -> None:
+    run_id = "chronology_" + field + "_v1"
+    partition = _backfill_evidence(data_root, run_id)
+    frame = pd.read_parquet(partition)
+    if field == "ingest_ts":
+        frame.loc[:, "availability_ts_utc"] = "2026-08-18T07:30:00+00:00"
+    frame.loc[:, field] = value
+    frame.to_parquet(partition, index=False)
+
+    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match=error_pattern):
+        acceptance.accept_incremental_backfill(
+            instrument_id="si_futures_family",
+            backfill_run_id=run_id,
+            date_end="2026-08-18",
+        )
+
+
+def test_rejects_negative_canonical_seqnum(data_root: Path) -> None:
+    run_id = "negative_seqnum_v1"
+    partition = _backfill_evidence(data_root, run_id)
+    frame = pd.read_parquet(partition)
+    frame.loc[0, "seqnum"] = -1
+    frame.to_parquet(partition, index=False)
+
+    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="seqnum must be non-negative"):
+        acceptance.accept_incremental_backfill(
+            instrument_id="si_futures_family",
+            backfill_run_id=run_id,
+            date_end="2026-08-18",
+        )
+
+
+def test_rejects_partition_bytes_overwritten_after_run_evidence(data_root: Path) -> None:
+    run_id = "run_bytes_binding_v1"
+    partition = _backfill_evidence(data_root, run_id)
+    frame = pd.read_parquet(partition)
+    frame.loc[:, "ingest_ts"] = "2026-08-29T19:40:28+00:00"
+    frame.to_parquet(partition, index=False)
+
+    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="bytes differ from run-bound evidence"):
+        acceptance.accept_incremental_backfill(
+            instrument_id="si_futures_family",
+            backfill_run_id=run_id,
+            date_end="2026-08-18",
         )
