@@ -49,7 +49,7 @@ def test_stage10_date_source_requests_only_algopack_tradestats(monkeypatch: pyte
         return FakeResponse(_tradestats_payload([]), str(url))
 
     monkeypatch.setattr(refresh.requests, "get", fake_get)
-    monkeypatch.setenv("MOEX_API_URL", "https://apim.test")
+    monkeypatch.setenv("MOEX_API_URL", "https://apim.moex.com")
 
     dates = step10._calendar_dates(start_date="2026-06-12", end_date="2026-06-15", timeout=1.0)
 
@@ -62,7 +62,7 @@ def test_stage10_date_source_requests_only_algopack_tradestats(monkeypatch: pyte
 
 def test_incremental_refresh_source_loader_never_requests_calendar_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MOEX_API_KEY", "test-key")
-    monkeypatch.setenv("MOEX_API_URL", "https://apim.test")
+    monkeypatch.setenv("MOEX_API_URL", "https://apim.moex.com")
     calls: list[str] = []
 
     def fake_get(url, *, params, headers, timeout):
@@ -98,7 +98,7 @@ def test_incremental_refresh_source_loader_never_requests_calendar_endpoint(monk
 
 def test_observed_source_absence_is_contextual_and_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MOEX_API_KEY", "test-key")
-    monkeypatch.setenv("MOEX_API_URL", "https://apim.test")
+    monkeypatch.setenv("MOEX_API_URL", "https://apim.moex.com")
     monkeypatch.setattr(
         refresh.requests,
         "get",
