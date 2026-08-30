@@ -39,54 +39,42 @@ def _row(
     }
 
 
-def test_latest_completed_trading_date_requires_complete_calendar_coverage(monkeypatch) -> None:
+def test_latest_completed_trading_date_uses_authoritative_observed_tradestats_dates(monkeypatch) -> None:
     end = date(2026, 8, 30)
-    start = end - timedelta(days=factual.CALENDAR_LOOKBACK_DAYS)
-    calendar = {
-        start + timedelta(days=offset): False
-        for offset in range(factual.CALENDAR_LOOKBACK_DAYS)
-    }
-    calendar[date(2026, 8, 28)] = True
+    start = end - timedelta(days=factual.OBSERVED_DATE_LOOKBACK_DAYS)
+    calls = []
 
-    monkeypatch.setattr(
-        factual.futures_calendar,
-        "fetch_futures_calendar_rows",
-        lambda *args, **kwargs: [{"date": "placeholder"}],
-    )
-    monkeypatch.setattr(
-        factual.futures_calendar,
-        "_calendar_map",
-        lambda rows: calendar,
-    )
+    def observed(date_start, date_end, *, instrument_id, timeout):
+        calls.append((date_start, date_end, instrument_id, timeout))
+        return ["2026-08-27", "2026-08-28"]
+
+    monkeypatch.setattr(factual.observed_dates, "observed_dates", observed)
+
+    assert factual._latest_completed_trading_date("2026-08-30", timeout=1.0) == "2026-08-28"
+    assert calls == [(start.isoformat(), end.isoformat(), factual.INSTRUMENT_ID, 1.0)]
+
+
+def test_latest_completed_trading_date_fails_closed_when_observed_source_fails(monkeypatch) -> None:
+    def observed(*args, **kwargs):
+        raise ValueError("TradeStats unavailable")
+
+    monkeypatch.setattr(factual.observed_dates, "observed_dates", observed)
 
     with pytest.raises(
         factual.FutoiLiveFactualRefreshError,
-        match="calendar coverage incomplete: missing date 2026-08-30",
+        match="authoritative observed TradeStats date source failed.*TradeStats unavailable",
     ):
         factual._latest_completed_trading_date("2026-08-30", timeout=1.0)
 
 
-def test_latest_completed_trading_date_accepts_complete_weekend_calendar(monkeypatch) -> None:
-    end = date(2026, 8, 30)
-    start = end - timedelta(days=factual.CALENDAR_LOOKBACK_DAYS)
-    calendar = {
-        start + timedelta(days=offset): False
-        for offset in range(factual.CALENDAR_LOOKBACK_DAYS + 1)
-    }
-    calendar[date(2026, 8, 28)] = True
+def test_latest_completed_trading_date_fails_closed_when_observed_source_is_empty(monkeypatch) -> None:
+    monkeypatch.setattr(factual.observed_dates, "observed_dates", lambda *args, **kwargs: [])
 
-    monkeypatch.setattr(
-        factual.futures_calendar,
-        "fetch_futures_calendar_rows",
-        lambda *args, **kwargs: [{"date": "placeholder"}],
-    )
-    monkeypatch.setattr(
-        factual.futures_calendar,
-        "_calendar_map",
-        lambda rows: calendar,
-    )
-
-    assert factual._latest_completed_trading_date("2026-08-30", timeout=1.0) == "2026-08-28"
+    with pytest.raises(
+        factual.FutoiLiveFactualRefreshError,
+        match="authoritative observed TradeStats date source returned no completed trade date",
+    ):
+        factual._latest_completed_trading_date("2026-08-30", timeout=1.0)
 
 
 def test_latest_aligned_fiz_yur_uses_latest_shared_timestamp_session_and_max_seqnum() -> None:
