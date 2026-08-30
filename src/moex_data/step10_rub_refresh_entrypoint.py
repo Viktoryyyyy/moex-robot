@@ -15,6 +15,19 @@ PROJECT = "MOEX_Bot"
 SCHEMA_VERSION = "step10_rub_refresh_entrypoint.v1"
 
 
+class Step10EntrypointError(step10.Step10RefreshError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        futoi_result: dict[str, object],
+        dispatcher_failure_manifest_augmented: bool,
+    ) -> None:
+        super().__init__(message)
+        self.futoi_result = futoi_result
+        self.dispatcher_failure_manifest_augmented = dispatcher_failure_manifest_augmented
+
+
 def _run_futoi_factual_non_blocking(*, through_date: str, run_id: str, timeout: float) -> dict[str, object]:
     try:
         return futoi_factual.run_refresh(
@@ -52,12 +65,16 @@ def _insert_futoi_refresh_order(order: list[object], dispatcher_mode: object) ->
     raise step10.Step10RefreshError("unknown Stage 10 dispatcher_mode during FUTOI manifest augmentation")
 
 
+def _manifest_path(root: Path, run_id: str) -> Path:
+    return root / "runs" / "step10_rub_daily_refresh" / ("run_id=" + run_id) / "run_manifest.json"
+
+
 def _augment_manifest(result: dict[str, object], futoi_result: dict[str, object]) -> None:
     root = step10._data_root()
     run_id = str(result.get("run_id") or "").strip()
     if not run_id:
         raise step10.Step10RefreshError("Stage 10 result missing run_id")
-    manifest_path = root / "runs" / "step10_rub_daily_refresh" / ("run_id=" + run_id) / "run_manifest.json"
+    manifest_path = _manifest_path(root, run_id)
     if manifest_path.is_symlink() or not manifest_path.is_file():
         raise step10.Step10RefreshError("Stage 10 run manifest missing before entrypoint augmentation")
     result["entrypoint_schema_version"] = SCHEMA_VERSION
@@ -69,6 +86,26 @@ def _augment_manifest(result: dict[str, object], futoi_result: dict[str, object]
     else:
         raise step10.Step10RefreshError("Stage 10 result missing deterministic_refresh_order")
     step10._atomic_json(manifest_path, result)
+
+
+def _persist_dispatcher_failure_context(
+    *, run_id: str, futoi_result: dict[str, object]
+) -> bool:
+    try:
+        root = step10._data_root()
+        manifest_path = _manifest_path(root, run_id)
+        if manifest_path.is_symlink() or not manifest_path.is_file():
+            return False
+        values = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(values, dict):
+            return False
+        values["entrypoint_schema_version"] = SCHEMA_VERSION
+        values["futoi_factual_refresh"] = futoi_result
+        values["futoi_factual_refresh_blocks_stage7"] = False
+        step10._atomic_json(manifest_path, values)
+        return True
+    except Exception:
+        return False
 
 
 def run_refresh(
@@ -93,14 +130,25 @@ def run_refresh(
         run_id=checked_run,
         timeout=timeout,
     )
-    result = dispatcher.run_refresh(
-        through_date=checked_through,
-        run_id=checked_run,
-        repo_root=repo_root,
-        env_file=env_file,
-        timeout=timeout,
-        now_utc=now,
-    )
+    try:
+        result = dispatcher.run_refresh(
+            through_date=checked_through,
+            run_id=checked_run,
+            repo_root=repo_root,
+            env_file=env_file,
+            timeout=timeout,
+            now_utc=now,
+        )
+    except Exception as exc:
+        augmented = _persist_dispatcher_failure_context(
+            run_id=checked_run,
+            futoi_result=futoi_result,
+        )
+        raise Step10EntrypointError(
+            str(exc),
+            futoi_result=futoi_result,
+            dispatcher_failure_manifest_augmented=augmented,
+        ) from exc
     _augment_manifest(result, futoi_result)
     return result
 
@@ -127,6 +175,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             env_file=args.env_file,
             timeout=args.timeout,
         )
+    except Step10EntrypointError as exc:
+        print(
+            json.dumps(
+                {
+                    "project": PROJECT,
+                    "schema_version": SCHEMA_VERSION,
+                    "status": "failed",
+                    "error": str(exc),
+                    "futoi_factual_refresh": exc.futoi_result,
+                    "futoi_factual_refresh_blocks_stage7": False,
+                    "dispatcher_failure_manifest_augmented": exc.dispatcher_failure_manifest_augmented,
+                    "implicit_latest_used": False,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                default=str,
+            )
+        )
+        return 1
     except Exception as exc:
         print(
             json.dumps(
