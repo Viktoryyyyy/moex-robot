@@ -8,12 +8,15 @@ from pathlib import Path
 from typing import Final, Sequence
 
 from . import materialize_futoi_instrument as materializer
+from . import refresh_forts_raw_5m_incremental as futures_calendar
 
 DATASET_ID: Final[str] = materializer.DATASET_ID
 SOURCE_ID: Final[str] = materializer.SOURCE_ID
 REGISTRY_PATH: Final[str] = materializer.REGISTRY_PATH
 DATA_LAKE_PATH: Final[str] = "configs/datasets/futures_data_lake.v1.yaml"
 PRODUCER_ID: Final[str] = "moex_data.futures.backfill_futoi_instrument.v1"
+CALENDAR_SOURCE_ID: Final[str] = "moex_iss_futures_calendar"
+CALENDAR_ENDPOINT: Final[str] = "/iss/calendars.json"
 
 
 class FutoiBackfillError(ValueError):
@@ -203,6 +206,7 @@ def backfill_range(
     data_lake_path: str | Path = DATA_LAKE_PATH,
     timeout: float = 60.0,
     apim_base_url: str | None = None,
+    calendar_base_url: str | None = None,
     create_accepted_pointer: bool = False,
     progress_every: int = 0,
 ) -> dict[str, object]:
@@ -225,6 +229,7 @@ def backfill_range(
     null_total = 0
     invalid_total = 0
     dates = _date_range(start, end)
+    calendar: dict[date, bool] | None = None
 
     if progress_every:
         _emit_progress(
@@ -267,7 +272,33 @@ def backfill_range(
         except Exception as exc:
             message = str(exc)
             if _empty_source_error(message):
-                skipped.append(trade_date)
+                try:
+                    if calendar is None:
+                        rows = futures_calendar.fetch_futures_calendar_rows(
+                            start.isoformat(),
+                            end.isoformat(),
+                            timeout=timeout,
+                            calendar_base_url=calendar_base_url,
+                        )
+                        calendar = futures_calendar._calendar_map(rows)
+                    is_trading_day = futures_calendar._require_calendar_date(calendar, current)
+                except Exception as calendar_exc:
+                    failures.append(
+                        {
+                            "trade_date": trade_date,
+                            "error": "canonical futures calendar validation failed: " + str(calendar_exc),
+                        }
+                    )
+                else:
+                    if is_trading_day:
+                        failures.append(
+                            {
+                                "trade_date": trade_date,
+                                "error": "empty FUTOI source on canonical futures trading day",
+                            }
+                        )
+                    else:
+                        skipped.append(trade_date)
             else:
                 failures.append({"trade_date": trade_date, "error": message})
 
@@ -289,6 +320,7 @@ def backfill_range(
     refresh_status = "succeeded" if quality_status == "pass" else ("partial" if successes else "failed")
     quality_path = _aggregate_quality_path(end.isoformat(), checked_run_id)
     manifest_path = _aggregate_manifest_path(end.isoformat(), checked_run_id)
+    skipped_calendar_validated = True
     quality_values = {
         "run_id": checked_run_id,
         "dataset_id": DATASET_ID,
@@ -308,6 +340,10 @@ def backfill_range(
         "probe_status": str(binding["futoi.probe_status"]),
         "partition_count": len(successes),
         "skipped_empty_source_dates": skipped,
+        "skipped_non_trading_dates": skipped,
+        "skipped_dates_calendar_validated": skipped_calendar_validated,
+        "calendar_source_id": CALENDAR_SOURCE_ID,
+        "calendar_endpoint": CALENDAR_ENDPOINT,
         "failed_dates": failures,
     }
     manifest_values = {
@@ -321,6 +357,10 @@ def backfill_range(
         "partitions_written": [str(item["storage_partition_path"]) for item in successes],
         "partition_evidence": partition_evidence,
         "partitions_skipped": skipped,
+        "skipped_non_trading_dates": skipped,
+        "skipped_dates_calendar_validated": skipped_calendar_validated,
+        "calendar_source_id": CALENDAR_SOURCE_ID,
+        "calendar_endpoint": CALENDAR_ENDPOINT,
         "quality_report_ref": quality_path.as_posix(),
         "accepted_manifest_ref": _accepted_ref(checked_instrument),
         "refresh_status": refresh_status,
@@ -356,6 +396,10 @@ def backfill_range(
         "row_count": row_count,
         "partition_count": len(successes),
         "skipped_empty_source_dates": skipped,
+        "skipped_non_trading_dates": skipped,
+        "skipped_dates_calendar_validated": skipped_calendar_validated,
+        "calendar_source_id": CALENDAR_SOURCE_ID,
+        "calendar_endpoint": CALENDAR_ENDPOINT,
         "failed_dates": failures,
         "quality_report_reference": quality_path.as_posix(),
         "manifest_reference": manifest_path.as_posix(),
@@ -377,6 +421,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--env-file", default=None)
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--apim-base-url", default=None)
+    parser.add_argument("--calendar-base-url", default=None)
     parser.add_argument("--progress-every", type=int, default=25)
     parser.add_argument("--create-accepted-pointer", action="store_true")
     return parser.parse_args(argv)
@@ -395,6 +440,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             data_lake_path=args.data_lake_path,
             timeout=args.timeout,
             apim_base_url=args.apim_base_url,
+            calendar_base_url=args.calendar_base_url,
             create_accepted_pointer=args.create_accepted_pointer,
             progress_every=args.progress_every,
         )
