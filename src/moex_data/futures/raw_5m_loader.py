@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path.cwd() / "src"))
 import pandas as pd
 
 from moex_data.futures import liquidity_history_metrics_probe as base
-from moex_data.futures import liquidity_history_metrics_probe_apim_calendar as apim_calendar
 
 from moex_data.futures.slice1_common import DEFAULT_EXCLUDED
 from moex_data.futures.slice1_common import DEFAULT_WHITELIST
@@ -27,7 +26,6 @@ SCHEMA_MANIFEST = "futures_raw_5m_loader_manifest.v1"
 PRIMARY_KEY = ["trade_date", "ts", "secid"]
 MARKET_VALUE_COLUMNS = ["open", "high", "low", "close", "volume", "value", "num_trades"]
 SOURCE_IDENTITY_COLUMNS = ["secid", "SECID"]
-
 
 
 def output_paths(data_root, run_date):
@@ -305,9 +303,9 @@ def quality_counts(frame, expected_calendar):
 def status_from_counts(counts, fetch_status, calendar_status, history_status, short_history_flag):
     if fetch_status != "completed" or int(counts.get("rows") or 0) == 0:
         return "fail", "source fetch failed or produced zero rows"
-    if calendar_status != "canonical_apim_futures_xml":
-        return "fail", "calendar denominator is not canonical_apim_futures_xml"
-    for key, note in [("duplicate_ts_count", "conflicting duplicate primary timestamp rows detected before partition write"), ("null_ohlc_count", "null OHLC values detected"), ("invalid_ohlc_count", "invalid OHLC ordering detected"), ("off_calendar_date_count", "loaded trade dates outside APIM futures calendar")]:
+    if calendar_status != base.OBSERVED_DATE_STATUS:
+        return "fail", "trading-date denominator is not authoritative observed AlgoPack TradeStats"
+    for key, note in [("duplicate_ts_count", "conflicting duplicate primary timestamp rows detected before partition write"), ("null_ohlc_count", "null OHLC values detected"), ("invalid_ohlc_count", "invalid OHLC ordering detected"), ("off_calendar_date_count", "loaded trade dates outside authoritative observed TradeStats dates")]:
         if counts.get(key) is not None and int(counts.get(key) or 0) > 0:
             return "fail", note
     if short_history_flag:
@@ -369,9 +367,16 @@ def main():
         ends.append(end)
     calendar_from = min(starts)
     calendar_till = max(ends)
-    expected_calendar, calendar_status = apim_calendar.fetch_futures_calendar(calendar_from, calendar_till, float(args.timeout), str(args.iss_base_url))
-    if expected_calendar is None or calendar_status != "canonical_apim_futures_xml":
-        raise RuntimeError("APIM futures calendar validation failed: " + str(calendar_status))
+    reference_secid = base._reference_secid(instruments)
+    expected_calendar, calendar_status = base.fetch_observed_trading_dates(
+        calendar_from,
+        calendar_till,
+        reference_secid,
+        float(args.timeout),
+        str(args.apim_base_url),
+    )
+    if expected_calendar is None or calendar_status != base.OBSERVED_DATE_STATUS:
+        raise RuntimeError("authoritative observed TradeStats date validation failed: " + str(calendar_status))
 
     outputs = output_paths(data_root, run_date)
     partition_paths = []
@@ -470,7 +475,7 @@ def main():
         },
         "duplicate_summary": duplicate_summary,
         "duplicate_diagnostics": duplicate_diagnostics,
-        "calendar_validation_summary": {"calendar_denominator_status": calendar_status, "calendar_from": calendar_from, "calendar_till": calendar_till, "expected_trading_days": len(expected_calendar)},
+        "calendar_validation_summary": {"calendar_denominator_status": calendar_status, "calendar_from": calendar_from, "calendar_till": calendar_till, "expected_trading_days": len(expected_calendar), "date_source_reference_secid": reference_secid, "date_source_id": base.observed_date_source.OBSERVED_DATE_SOURCE_ID, "date_source_endpoint": base.observed_date_source.OBSERVED_DATE_SOURCE_ENDPOINT},
         "short_history_handling": {"SiU7": summaries.get("SiU7")},
         "loader_result_verdict": "pass" if quality_status_counts.get("fail", 0) == 0 else "fail",
     }
