@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -150,6 +151,16 @@ def _backfill_evidence(
         "requested_from": requested_from,
         "requested_till": requested_till,
         "partitions_written": [value.as_posix() for value in partitions],
+        "partition_evidence": [
+            {
+                "trade_date": trade_date,
+                "subrun_id": backfill._subrun_id(run_id, trade_date),
+                "partition_path": path.as_posix(),
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "row_count": len(groups),
+            }
+            for trade_date, path in zip(written_dates, partitions, strict=True)
+        ],
         "partitions_skipped": list(skipped_dates),
         "quality_report_ref": quality_path.as_posix(),
         "refresh_status": "succeeded",
