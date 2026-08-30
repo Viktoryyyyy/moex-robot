@@ -6,14 +6,23 @@ import pytest
 from moex_data.futures import futoi_live_factual_refresh as factual
 
 
-def _row(ts: str, group: str, *, seqnum: int, long: int, short: int, net: int) -> dict[str, object]:
+def _row(
+    ts: str,
+    group: str,
+    *,
+    seqnum: int,
+    long: int,
+    short: int,
+    net: int,
+    sess_id: int = 1,
+) -> dict[str, object]:
     return {
         "trade_date": "2026-08-28",
         "ts": ts,
         "systime": "2026-08-28 23:55:10",
         "availability_ts_utc": "2026-08-28T20:56:00+00:00",
         "ingest_ts": "2026-08-28T20:56:00+00:00",
-        "sess_id": 1,
+        "sess_id": sess_id,
         "seqnum": seqnum,
         "clgroup": group,
         "pos": net,
@@ -27,7 +36,7 @@ def _row(ts: str, group: str, *, seqnum: int, long: int, short: int, net: int) -
     }
 
 
-def test_latest_aligned_fiz_yur_uses_latest_shared_timestamp_and_max_seqnum() -> None:
+def test_latest_aligned_fiz_yur_uses_latest_shared_timestamp_session_and_max_seqnum() -> None:
     frame = pd.DataFrame(
         [
             _row("2026-08-28 23:45:00", "FIZ", seqnum=1, long=100, short=-80, net=20),
@@ -40,7 +49,9 @@ def test_latest_aligned_fiz_yur_uses_latest_shared_timestamp_and_max_seqnum() ->
 
     result = factual.latest_aligned_factual(frame, expected_trade_date="2026-08-28")
 
-    assert result["snapshot_ts"].startswith("2026-08-28T23:50:00")
+    assert result["snapshot_ts"] == "2026-08-28T20:50:00+00:00"
+    assert result["source_publication_time"] == "2026-08-28T20:55:10+00:00"
+    assert result["sess_id"] == 1
     assert result["fiz"] == {
         "long": 110,
         "short": 80,
@@ -51,6 +62,34 @@ def test_latest_aligned_fiz_yur_uses_latest_shared_timestamp_and_max_seqnum() ->
     assert result["yur"]["net"] == -30
     assert result["total_open_interest"] == 190
     assert result["short_semantics"] == "absolute_contract_count"
+
+
+def test_latest_aligned_fiz_yur_fails_closed_on_cross_session_pair() -> None:
+    frame = pd.DataFrame(
+        [
+            _row(
+                "2026-08-28 23:50:00",
+                "FIZ",
+                seqnum=2,
+                long=110,
+                short=-80,
+                net=30,
+                sess_id=1,
+            ),
+            _row(
+                "2026-08-28 23:50:00",
+                "YUR",
+                seqnum=2,
+                long=80,
+                short=-110,
+                net=-30,
+                sess_id=2,
+            ),
+        ]
+    )
+
+    with pytest.raises(factual.FutoiLiveFactualRefreshError, match="share sess_id"):
+        factual.latest_aligned_factual(frame, expected_trade_date="2026-08-28")
 
 
 def test_latest_aligned_fiz_yur_fails_closed_on_unbalanced_net() -> None:
