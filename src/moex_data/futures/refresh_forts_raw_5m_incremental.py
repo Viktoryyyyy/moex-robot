@@ -10,13 +10,17 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Final
 
+import requests
+
 from . import materialize_forts_raw_5m_instrument as materializer
 
 ARTIFACT_ID: Final[str] = "dataset.forts.raw_5m.tradestats.v1"
 SOURCE_ARTIFACT_ID: Final[str] = "external.apim.fo.tradestats.v1"
-PRODUCER_ID: Final[str] = "moex_data.futures.refresh_forts_raw_5m_incremental.v1"
+PRODUCER_ID: Final[str] = "moex_data.futures.refresh_forts_raw_5m_incremental.v2"
 REGISTRY_PATH: Final[str] = "configs/instruments/forts_instrument_registry.v1.yaml"
-DEFAULT_MOEX_ISS_BASE_URL: Final[str] = "https://iss.moex.com"
+OBSERVED_DATE_SOURCE_ID: Final[str] = materializer.SOURCE_ID
+OBSERVED_DATE_SOURCE_ENDPOINT: Final[str] = materializer.SOURCE_ENDPOINT
+MAX_APIM_PAGES: Final[int] = 500
 
 
 @dataclass(frozen=True)
@@ -182,149 +186,121 @@ def _require_base_manifest(base_manifest: Mapping[str, object], instrument_id: s
     return _require_date(str(last_valid or ""), "base_manifest.last_valid_trade_date")
 
 
-def _calendar_row_date(row: Mapping[str, object]) -> date:
-    value = row.get("trade_date")
-    if value is None:
-        value = row.get("date")
-    return _coerce_date(value, "calendar trade_date")
+def _source_error(*, secid: str, date_start: str, date_end: str, detail: str) -> ValueError:
+    return ValueError(
+        "fetch_observed_tradestats_dates source="
+        + SOURCE_ARTIFACT_ID
+        + " endpoint="
+        + OBSERVED_DATE_SOURCE_ENDPOINT
+        + " secid="
+        + secid
+        + " range="
+        + date_start
+        + ".."
+        + date_end
+        + ": "
+        + detail
+    )
 
 
-def _calendar_row_is_trading(row: Mapping[str, object]) -> bool:
-    value = row.get("is_trading_day")
-    if value is None:
-        value = row.get("futures_")
-    if value is None:
-        value = row.get("futures")
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int):
-        if value in (0, 1):
-            return value == 1
-    if isinstance(value, str):
-        text = value.strip().lower()
-        if text in ("1", "true", "t", "yes"):
-            return True
-        if text in ("0", "false", "f", "no", ""):
-            return False
-    raise ValueError("futures calendar row must contain boolean is_trading_day or futures_ 0/1 status")
+def _page_signature(frame: object) -> tuple[object, ...]:
+    if not hasattr(frame, "empty") or bool(frame.empty):
+        return (0,)
+    first_row = tuple(str(value) for value in frame.iloc[0].tolist())
+    last_row = tuple(str(value) for value in frame.iloc[-1].tolist())
+    return (int(len(frame.index)), first_row, last_row)
 
 
-def _calendar_map(rows: Sequence[Mapping[str, object]]) -> dict[date, bool]:
-    calendar: dict[date, bool] = {}
-    for row in rows:
-        trade_date = _calendar_row_date(row)
-        if trade_date in calendar:
-            raise ValueError("duplicate futures calendar date")
-        calendar[trade_date] = _calendar_row_is_trading(row)
-    if not calendar:
-        raise ValueError("futures calendar is empty")
-    return calendar
-
-
-def _next_cursor_start(cursor_table: object) -> int | None:
-    if not isinstance(cursor_table, Mapping):
-        return None
-    columns = cursor_table.get("columns")
-    data = cursor_table.get("data")
-    if not isinstance(columns, list) or not isinstance(data, list) or not data:
-        return None
-    first = data[0]
-    if not isinstance(first, list):
-        return None
-    values = dict(zip([str(item).lower() for item in columns], first, strict=False))
-    try:
-        index = int(values.get("index", 0))
-        total = int(values.get("total", 0))
-        page_size = int(values.get("pagesize", 0))
-    except (TypeError, ValueError):
-        return None
-    next_start = index + page_size
-    if page_size <= 0 or next_start >= total:
-        return None
-    return next_start
-
-
-def fetch_futures_calendar_rows(
+def fetch_observed_tradestats_dates(
     date_start: str,
     date_end: str,
     *,
+    secid: str,
     timeout: float = 30.0,
-    calendar_base_url: str | None = None,
-) -> list[dict[str, object]]:
-    import requests
-
+    apim_base_url: str | None = None,
+) -> list[str]:
     start_date = _coerce_date(date_start, "date_start")
     end_date = _coerce_date(date_end, "date_end")
+    checked_secid = _require_token(secid, "secid")
     if start_date > end_date:
         raise ValueError("date_start must be <= date_end")
-    base_url = (calendar_base_url or DEFAULT_MOEX_ISS_BASE_URL).rstrip("/")
-    endpoint = base_url + "/iss/calendars.json"
-    rows: list[dict[str, object]] = []
-    for year in range(start_date.year, end_date.year + 1):
-        year_start = max(start_date, date(year, 1, 1))
-        year_end = min(end_date, date(year, 12, 31))
-        cursor_start = 0
-        while True:
+    base_url = materializer.core._apim_base_url(apim_base_url, None)
+    endpoint = materializer.core._source_url(base_url, OBSERVED_DATE_SOURCE_ENDPOINT)
+    headers = materializer._auth_headers_with_bearer(None)
+    observed: set[str] = set()
+    seen_signatures: set[tuple[object, ...]] = set()
+    start = 0
+    try:
+        for _ in range(MAX_APIM_PAGES):
             params = {
-                "from": year_start.isoformat(),
-                "till": year_end.isoformat(),
-                "iss.only": "off_days",
-                "show_all_days": "1",
-                "start": str(cursor_start),
+                "from": start_date.isoformat(),
+                "till": end_date.isoformat(),
+                "secid": checked_secid,
+                "start": start,
+                "iss.meta": "off",
+                "iss.only": "tradestats",
             }
-            response = requests.get(endpoint, params=params, timeout=timeout)
+            response = requests.get(endpoint, params=params, headers=headers, timeout=timeout)
             response.raise_for_status()
             payload = response.json()
-            table = payload.get("off_days")
-            if not isinstance(table, Mapping):
-                raise ValueError("MOEX calendar response missing off_days table")
-            columns = table.get("columns")
-            data = table.get("data")
-            if not isinstance(columns, list) or not isinstance(data, list):
-                raise ValueError("MOEX calendar off_days table has invalid shape")
-            for item in data:
-                if isinstance(item, list):
-                    rows.append(dict(zip([str(column) for column in columns], item, strict=False)))
-            next_start = _next_cursor_start(payload.get("off_days.cursor"))
-            if next_start is None or next_start <= cursor_start:
+            if not isinstance(payload, Mapping):
+                raise ValueError("response JSON root is not an object")
+            frame = materializer.core._block_to_frame(payload)
+            if frame.empty:
                 break
-            cursor_start = next_start
-    return rows
+            signature = _page_signature(frame)
+            if signature in seen_signatures:
+                raise ValueError("pagination did not advance")
+            seen_signatures.add(signature)
+            secid_col = materializer.core._canonical_column(frame, ("secid",))
+            date_col = materializer.core._canonical_column(frame, ("tradedate", "date"))
+            if secid_col is None or date_col is None:
+                raise ValueError("tradestats response missing secid/tradedate columns")
+            scoped = frame.loc[frame[secid_col].astype(str).str.strip().str.upper() == checked_secid.upper()]
+            for raw_value in scoped[date_col].tolist():
+                parsed = materializer.core._parse_trade_date(raw_value)
+                if parsed is None:
+                    raise ValueError("tradestats response contains invalid trade date")
+                parsed_date = date.fromisoformat(parsed)
+                if start_date <= parsed_date <= end_date:
+                    observed.add(parsed)
+            start += int(len(frame.index))
+        else:
+            raise ValueError("pagination exceeded max_pages guard")
+    except Exception as exc:
+        if isinstance(exc, ValueError) and str(exc).startswith("fetch_observed_tradestats_dates source="):
+            raise
+        raise _source_error(
+            secid=checked_secid,
+            date_start=start_date.isoformat(),
+            date_end=end_date.isoformat(),
+            detail=str(exc),
+        ) from exc
+    if not observed:
+        raise _source_error(
+            secid=checked_secid,
+            date_start=start_date.isoformat(),
+            date_end=end_date.isoformat(),
+            detail="authoritative AlgoPack TradeStats source returned no observed trade dates",
+        )
+    return sorted(observed)
 
 
-def _require_calendar_date(calendar: Mapping[date, bool], value: date) -> bool:
-    if value not in calendar:
-        raise ValueError("futures calendar missing date " + value.isoformat())
-    return bool(calendar[value])
-
-
-def _previous_trading_day_on_or_before(calendar: Mapping[date, bool], value: date) -> date:
-    lower = min(calendar)
-    current = value
-    while current >= lower:
-        if _require_calendar_date(calendar, current):
-            return current
-        current = current - timedelta(days=1)
-    raise ValueError("no completed futures trading day in calendar range")
-
-
-def _next_trading_day_after(calendar: Mapping[date, bool], value: date, end_date: date) -> date | None:
-    current = value + timedelta(days=1)
-    while current <= end_date:
-        if _require_calendar_date(calendar, current):
-            return current
-        current = current + timedelta(days=1)
-    return None
-
-
-def _trading_days_between(calendar: Mapping[date, bool], start_date: date, end_date: date) -> list[str]:
-    result: list[str] = []
-    current = start_date
-    while current <= end_date:
-        if _require_calendar_date(calendar, current):
-            result.append(current.isoformat())
-        current = current + timedelta(days=1)
-    return result
+def _normalize_observed_dates(values: Sequence[str], *, date_start: date, date_end: date) -> list[str]:
+    normalized: set[str] = set()
+    for raw_value in values:
+        value = _coerce_date(raw_value, "observed trade date")
+        if value < date_start or value > date_end:
+            raise ValueError("observed trade date escaped requested source range: " + value.isoformat())
+        normalized.add(value.isoformat())
+    if not normalized:
+        raise ValueError(
+            "observed TradeStats date source is empty for requested range "
+            + date_start.isoformat()
+            + ".."
+            + date_end.isoformat()
+        )
+    return sorted(normalized)
 
 
 def _partition_version(run_id: str, trade_date: str, instrument_id: str, secid: str) -> str:
@@ -398,7 +374,10 @@ def _build_manifest(
         "partition_count": base_partition_count + len(successes),
         "added_row_count": added_row_count,
         "added_partition_count": len(successes),
-        "calendar_contract": "moex_iss_futures_calendar",
+        "date_source_artifact_id": SOURCE_ARTIFACT_ID,
+        "date_source_id": OBSERVED_DATE_SOURCE_ID,
+        "date_source_endpoint": OBSERVED_DATE_SOURCE_ENDPOINT,
+        "date_selection_rule": "observed_trade_dates_only",
         "session_binding": "explicit_trade_date_session",
         "storage_pattern": materializer.STORAGE_PATTERN,
         "partition_hashes": partition_hashes,
@@ -437,6 +416,9 @@ def _quality_payload(artifact_version: str, manifest: Mapping[str, object]) -> d
         "added_partition_count": manifest["added_partition_count"],
         "failed_dates_count": len(failures),
         "failure_reasons": failures,
+        "date_source_artifact_id": manifest["date_source_artifact_id"],
+        "date_source_id": manifest["date_source_id"],
+        "date_selection_rule": manifest["date_selection_rule"],
         "latest_autodetect_used": False,
         "hardcoded_server_path_used": False,
         "checked_at": _utc_now(),
@@ -454,9 +436,8 @@ def refresh_incremental(
     date_end: str | None = None,
     timeout: float = 60.0,
     apim_base_url: str | None = None,
-    calendar_base_url: str | None = None,
-    calendar_rows: Sequence[Mapping[str, object]] | None = None,
-    calendar_loader: Callable[..., Sequence[Mapping[str, object]]] = fetch_futures_calendar_rows,
+    observed_dates: Sequence[str] | None = None,
+    source_date_loader: Callable[..., Sequence[str]] = fetch_observed_tradestats_dates,
     runner: Callable[..., object] = materializer.materialize_instrument_partition,
 ) -> RefreshSummary:
     checked_instrument = _require_token(instrument_id, "instrument_id")
@@ -475,27 +456,23 @@ def refresh_incremental(
     else:
         effective_as_of = _coerce_date(as_of_date, "as_of_date") if as_of_date else datetime.now(timezone.utc).date()
         upper_bound = effective_as_of - timedelta(days=1)
-    calendar_start = min(base_last, upper_bound)
-    calendar_end = max(base_last, upper_bound)
-    rows = list(calendar_rows) if calendar_rows is not None else list(
-        calendar_loader(
-            calendar_start.isoformat(),
-            calendar_end.isoformat(),
+    if upper_bound < base_last:
+        raise ValueError("requested upper bound is older than base_manifest.last_valid_trade_date")
+    source_start = base_last
+    source_end = upper_bound
+    raw_dates = list(observed_dates) if observed_dates is not None else list(
+        source_date_loader(
+            source_start.isoformat(),
+            source_end.isoformat(),
+            secid=checked_secid,
             timeout=timeout,
-            calendar_base_url=calendar_base_url,
+            apim_base_url=apim_base_url,
         )
     )
-    calendar = _calendar_map(rows)
-    if upper_bound < min(calendar):
-        raise ValueError("futures calendar does not cover requested upper bound")
-    last_completed = _previous_trading_day_on_or_before(calendar, upper_bound)
-    if last_completed <= base_last:
-        requested_dates: list[str] = []
-        incremental_start = None
-    else:
-        next_start = _next_trading_day_after(calendar, base_last, last_completed)
-        incremental_start = next_start.isoformat() if next_start is not None else None
-        requested_dates = [] if next_start is None else _trading_days_between(calendar, next_start, last_completed)
+    source_dates = _normalize_observed_dates(raw_dates, date_start=source_start, date_end=source_end)
+    requested_dates = [value for value in source_dates if value > base_last.isoformat()]
+    incremental_start = requested_dates[0] if requested_dates else None
+    last_completed = date.fromisoformat(requested_dates[-1]) if requested_dates else base_last
     paths = build_refresh_paths(checked_version)
     build_started_at = _utc_now()
     successes: list[Mapping[str, object]] = []
@@ -541,7 +518,7 @@ def refresh_incremental(
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Incrementally refresh FORTS raw 5m tradestats from an explicit base manifest.")
+    parser = argparse.ArgumentParser(description="Incrementally refresh FORTS raw 5m tradestats from an explicit base manifest using observed source dates only.")
     parser.add_argument("--instrument-id", required=True)
     parser.add_argument("--secid", required=True)
     parser.add_argument("--base-manifest", required=True)
@@ -552,7 +529,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--date-end", default=None)
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--apim-base-url", default=None)
-    parser.add_argument("--calendar-base-url", default=None)
     return parser.parse_args(argv)
 
 
@@ -570,7 +546,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             date_end=args.date_end,
             timeout=args.timeout,
             apim_base_url=args.apim_base_url,
-            calendar_base_url=args.calendar_base_url,
         )
     except Exception as exc:
         print(json.dumps({"status": "failed", "error": str(exc), "latest_autodetect_used": False}, ensure_ascii=False, sort_keys=True))
