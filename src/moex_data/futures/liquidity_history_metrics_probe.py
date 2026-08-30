@@ -12,11 +12,14 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import requests
 
+from moex_data.futures import refresh_forts_raw_5m_incremental as observed_date_source
+
 TZ_MSK = ZoneInfo("Europe/Moscow")
 DEFAULT_ISS_BASE_URL = "https://iss.moex.com"
 DEFAULT_APIM_BASE_URL = "https://apim.moex.com"
 SCHEMA_LIQUIDITY_SCREEN = "futures_liquidity_screen.v1"
 SCHEMA_HISTORY_DEPTH_SCREEN = "futures_history_depth_screen.v1"
+OBSERVED_DATE_STATUS = "authoritative_observed_algopack_tradestats"
 
 REQUIRED_CONTRACTS = [
     "contracts/datasets/futures_normalized_instrument_registry_contract.md",
@@ -161,11 +164,11 @@ def fetch_paged_frame(base_url: str, path: str, params: Dict[str, Any], block: s
         query = dict(params)
         query["start"] = start
         data = request_json(base_url, path, query, timeout, use_apim)
-        frame = block_to_frame(data, [block, "data", "tradestats", "off_days", "securities"])
+        frame = block_to_frame(data, [block, "data", "tradestats", "securities"])
         if frame.empty:
             break
         frames.append(frame)
-        cursor = data.get(block + ".cursor") or data.get("data.cursor") or data.get("tradestats.cursor") or data.get("off_days.cursor") or {}
+        cursor = data.get(block + ".cursor") or data.get("data.cursor") or data.get("tradestats.cursor") or {}
         if not isinstance(cursor, dict):
             break
         ccols = cursor.get("columns") or []
@@ -253,6 +256,43 @@ def selected_instruments_from_artifacts(normalized: pd.DataFrame, availability: 
         selected["asset_class"] = None
     selected = selected.sort_values(["family_code", "secid"]).reset_index(drop=True)
     return selected
+
+
+def _reference_secid(instruments: pd.DataFrame) -> str:
+    if instruments.empty or "secid" not in instruments.columns:
+        raise RuntimeError("Cannot resolve observed-date reference secid from empty instrument scope")
+    values = [str(value).strip() for value in instruments["secid"].tolist() if str(value).strip()]
+    by_upper = {value.upper(): value for value in values}
+    if "USDRUBF" in by_upper:
+        return by_upper["USDRUBF"]
+    if not values:
+        raise RuntimeError("Cannot resolve observed-date reference secid from instrument scope")
+    return sorted(set(values), key=lambda value: value.upper())[0]
+
+
+def fetch_observed_trading_dates(
+    screen_from: str,
+    screen_till: str,
+    reference_secid: str,
+    timeout: float,
+    apim_base_url: str,
+) -> Tuple[Optional[Set[str]], str]:
+    secid = str(reference_secid or "").strip()
+    if not secid:
+        return None, "unresolved: observed TradeStats reference secid is required"
+    try:
+        dates = observed_date_source.fetch_observed_tradestats_dates(
+            screen_from,
+            screen_till,
+            secid=secid,
+            timeout=timeout,
+            apim_base_url=apim_base_url,
+        )
+    except Exception as exc:
+        return None, "unresolved: " + exc.__class__.__name__ + ": " + str(exc)[:300]
+    if not dates:
+        return None, "unresolved: authoritative observed TradeStats date source returned zero dates"
+    return set(dates), OBSERVED_DATE_STATUS
 
 
 def fetch_tradestats(secid: str, screen_from: str, screen_till: str, timeout: float, apim_base_url: str, iss_base_url: str) -> Tuple[pd.DataFrame, str, str, str]:
@@ -351,42 +391,6 @@ def year_chunks(screen_from: str, screen_till: str) -> List[Tuple[str, str]]:
     return chunks
 
 
-def fetch_futures_calendar(screen_from: str, screen_till: str, timeout: float, iss_base_url: str) -> Tuple[Optional[Set[str]], str]:
-    frames = []
-    try:
-        for chunk_from, chunk_till in year_chunks(screen_from, screen_till):
-            params = {"from": chunk_from, "till": chunk_till, "iss.only": "off_days", "show_all_days": "1"}
-            frame = fetch_paged_frame(iss_base_url, "/iss/calendars.json", params, "off_days", timeout, False)
-            if not frame.empty:
-                frames.append(frame)
-    except Exception as exc:
-        return None, exc.__class__.__name__ + ": " + str(exc)[:300]
-    if not frames:
-        return None, "calendar_empty_response"
-    calendar = pd.concat(frames, ignore_index=True)
-    date_col = canonical_column(calendar, ["date", "DATE", "tradedate", "TRADEDATE"])
-    status_col = canonical_column(calendar, ["futures_workday", "FUTURES_WORKDAY", "futures", "FUTURES", "futures_", "FUTURES_", "is_traded", "IS_TRADED", "workday", "WORKDAY", "is_workday", "IS_WORKDAY"])
-    if not date_col or not status_col:
-        return None, "calendar_required_columns_not_found"
-    out: Set[str] = set()
-    for _, row in calendar.iterrows():
-        dt = parse_iso_date(row.get(date_col))
-        if not dt:
-            continue
-        value = row.get(status_col)
-        if pd.isna(value):
-            continue
-        try:
-            is_open = int(float(value)) == 1
-        except Exception:
-            is_open = str(value).strip().lower() in ["1", "true", "t", "yes", "y"]
-        if is_open:
-            out.add(dt)
-    if not out:
-        return None, "calendar_no_trading_days_detected"
-    return out, ""
-
-
 def median_or_none(series: pd.Series) -> Optional[float]:
     values = pd.to_numeric(series, errors="coerce").dropna()
     if values.empty:
@@ -463,9 +467,9 @@ def compute_one_metrics(
         missing_day_diagnostics = json.dumps({"first_20_missing_days": missing_set[:20], "missing_days_total": len(missing_set)}, ensure_ascii=False, sort_keys=True)
         calendar_status = "computed"
     elif expected_calendar is None:
-        missing_day_diagnostics = json.dumps({"calendar_status": "not_computed", "reason": calendar_note}, ensure_ascii=False, sort_keys=True)
+        missing_day_diagnostics = json.dumps({"date_source_status": "not_computed", "reason": calendar_note}, ensure_ascii=False, sort_keys=True)
     else:
-        missing_day_diagnostics = json.dumps({"calendar_status": "not_computed", "reason": "no_first_available_date"}, ensure_ascii=False, sort_keys=True)
+        missing_day_diagnostics = json.dumps({"date_source_status": "not_computed", "reason": "no_first_available_date"}, ensure_ascii=False, sort_keys=True)
 
     min_active_days = liquidity_profile.get("min_active_days")
     min_available_days = history_profile.get("min_available_trading_days")
@@ -507,7 +511,7 @@ def compute_one_metrics(
         history_review = "available_trading_days below threshold"
     elif expected_calendar is None:
         history_status = "review_required"
-        history_review = "calendar denominator not safely computed; " + calendar_note
+        history_review = "observed TradeStats trading-date denominator not safely computed; " + calendar_note
     elif coverage_ratio is None or coverage_ratio < 0.95:
         history_status = "review_required"
         history_review = "coverage ratio below review threshold or unavailable"
@@ -519,7 +523,7 @@ def compute_one_metrics(
         history_review = "bounded history probe only; full historical depth not proven"
     else:
         history_status = "pass"
-        history_review = "history metrics computed from actual TradeStats rows and calendar denominator"
+        history_review = "history metrics computed from actual TradeStats rows and observed TradeStats trading-date denominator"
 
     common = {
         "snapshot_date": None,
@@ -650,8 +654,15 @@ def main() -> int:
     normalized = pd.read_parquet(normalized_path)
     availability = pd.read_parquet(availability_path)
     instruments = selected_instruments_from_artifacts(normalized, availability)
+    reference_secid = _reference_secid(instruments)
+    expected_calendar, calendar_note = fetch_observed_trading_dates(
+        screen_from,
+        screen_till,
+        reference_secid,
+        float(args.timeout),
+        str(args.apim_base_url),
+    )
 
-    expected_calendar, calendar_note = fetch_futures_calendar(screen_from, screen_till, float(args.timeout), str(args.iss_base_url))
     liquidity_rows = []
     history_rows = []
     for _, instrument in instruments.iterrows():
@@ -692,8 +703,11 @@ def main() -> int:
         "screen_till": screen_till,
         "history_lookback_days": int(args.history_lookback_days),
         "full_history_proven": bool(args.full_history_proven),
-        "calendar_status": "computed" if expected_calendar is not None else "unavailable",
-        "calendar_note": calendar_note or None,
+        "date_source_status": "computed" if expected_calendar is not None else "unavailable",
+        "date_source_note": calendar_note or None,
+        "date_source_reference_secid": reference_secid,
+        "date_source_id": observed_date_source.OBSERVED_DATE_SOURCE_ID,
+        "date_source_endpoint": observed_date_source.OBSERVED_DATE_SOURCE_ENDPOINT,
     }
 
     print_json_line("output_artifacts_created", output_paths)
