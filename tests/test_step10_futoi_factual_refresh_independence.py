@@ -29,6 +29,38 @@ def test_stage5_full_mode_remains_fail_closed() -> None:
     assert dispatcher.STAGE5_FULL_MODE_READY is False
 
 
+def test_futoi_refresh_order_is_before_calendar_in_blocked_mode() -> None:
+    order: list[object] = [
+        "futoi_governance",
+        "stage5_full_mode_readiness",
+        "calendar",
+        "stage7_raw_and_derived",
+    ]
+    entrypoint._insert_futoi_refresh_order(order, dispatcher.BLOCKED_MODE)
+    assert order == [
+        "futoi_governance",
+        "stage5_full_mode_readiness",
+        "futoi_raw_factual_refresh",
+        "calendar",
+        "stage7_raw_and_derived",
+    ]
+
+
+def test_futoi_refresh_order_is_between_calendar_and_stage5_in_full_mode() -> None:
+    order: list[object] = [
+        "calendar",
+        "stage5_raw_and_derived",
+        "stage7_raw_and_derived",
+    ]
+    entrypoint._insert_futoi_refresh_order(order, dispatcher.FULL_MODE)
+    assert order == [
+        "calendar",
+        "futoi_raw_factual_refresh",
+        "stage5_raw_and_derived",
+        "stage7_raw_and_derived",
+    ]
+
+
 def test_stage10_contract_declares_independent_futoi_factual_refresh() -> None:
     text = Path("configs/datasets/step10_rub_daily_refresh.v1.yaml").read_text(encoding="utf-8")
     assert "futoi_raw_factual_refresh_allowed: true" in text
