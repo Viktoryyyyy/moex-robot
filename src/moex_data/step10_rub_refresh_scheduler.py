@@ -30,6 +30,8 @@ from moex_data.futures import refresh_forts_raw_5m_incremental as futures_calend
 CONTRACT_ID: Final[str] = "step10_rub_daily_refresh_acceptance.v1"
 STAGE5_ACCEPTANCE_CONTRACT_ID: Final[str] = "step5_futoi_positioning_acceptance.v1"
 STAGE7_ACCEPTANCE_CONTRACT_ID: Final[str] = "step7_rub_native_d1_w1_technical_acceptance.v1"
+FUTOI_GOVERNANCE_CONTRACT_ID: Final[str] = "usdrubf_futoi_live_acceptance_governance_v1"
+FUTOI_GOVERNANCE_RELATIVE_PATH: Final[Path] = Path("contracts/intelligence/usdrubf_futoi_live_acceptance_governance_v1.json")
 SCHEMA_VERSION: Final[str] = "step10_rub_daily_refresh_run.v1"
 CANONICAL_ENV_PATH: Final[str] = "/home/trader/moex_bot/.env"
 MARKET_TZ: Final[str] = "Europe/Moscow"
@@ -105,6 +107,69 @@ def _repo_root(value: str | Path) -> Path:
     if not required.is_file():
         _fail("repo_root is not the canonical MOEX Bot repository checkout")
     return root
+
+
+def _futoi_stage5_promotion_governance(repo: Path) -> dict[str, object]:
+    path = repo / FUTOI_GOVERNANCE_RELATIVE_PATH
+    if path.is_symlink() or not path.is_file():
+        return {
+            "contract_ref": FUTOI_GOVERNANCE_RELATIVE_PATH.as_posix(),
+            "status": "MISSING_OR_INVALID",
+            "all_required_gates_pass": False,
+            "factual_live_authority": False,
+            "promotion_allowed": False,
+            "blocked_gate_ids": ["governance_contract_missing"],
+        }
+    try:
+        values = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {
+            "contract_ref": FUTOI_GOVERNANCE_RELATIVE_PATH.as_posix(),
+            "status": "MISSING_OR_INVALID",
+            "all_required_gates_pass": False,
+            "factual_live_authority": False,
+            "promotion_allowed": False,
+            "blocked_gate_ids": ["governance_contract_invalid_json"],
+        }
+    if not isinstance(values, Mapping):
+        _fail("FUTOI governance contract must contain a JSON object")
+    if values.get("project") != "MOEX_Bot" or values.get("contract_id") != FUTOI_GOVERNANCE_CONTRACT_ID:
+        _fail("FUTOI governance contract identity mismatch")
+    gates = values.get("gates")
+    if isinstance(gates, (str, bytes)) or not isinstance(gates, Sequence) or not gates:
+        _fail("FUTOI governance gates must be a non-empty array")
+    required_gate_ids: list[str] = []
+    blocked_gate_ids: list[str] = []
+    seen: set[str] = set()
+    for raw_gate in gates:
+        if not isinstance(raw_gate, Mapping):
+            _fail("FUTOI governance gate must be an object")
+        gate_id = str(raw_gate.get("gate_id") or "").strip()
+        if not gate_id or gate_id in seen:
+            _fail("FUTOI governance gate_id must be unique and non-empty")
+        seen.add(gate_id)
+        if raw_gate.get("required") is not True:
+            _fail("FUTOI governance gates must explicitly declare required=true")
+        required_gate_ids.append(gate_id)
+        if raw_gate.get("status") != "PASS":
+            blocked_gate_ids.append(gate_id)
+    authority = values.get("authority")
+    if not isinstance(authority, Mapping):
+        _fail("FUTOI governance authority must be an object")
+    factual_live_authority = authority.get("factual_live_authority") is True
+    all_required_gates_pass = not blocked_gate_ids
+    promotion_allowed = all_required_gates_pass and factual_live_authority
+    return {
+        "contract_ref": FUTOI_GOVERNANCE_RELATIVE_PATH.as_posix(),
+        "status": str(values.get("status") or ""),
+        "required_gate_ids": required_gate_ids,
+        "blocked_gate_ids": blocked_gate_ids,
+        "all_required_gates_pass": all_required_gates_pass,
+        "factual_live_authority": factual_live_authority,
+        "directional_authority": authority.get("directional_authority") is True,
+        "action_authority": authority.get("action_authority") is True,
+        "promotion_allowed": promotion_allowed,
+    }
 
 
 def _rooted_ref(root: Path, path: str | Path) -> str:
@@ -911,6 +976,7 @@ def run_refresh(
     try:
         pointer_snapshot = _snapshot_pointers(root)
         rollback_expected.update(pointer_snapshot)
+        futoi_governance = _futoi_stage5_promotion_governance(repo)
 
         def capture_promoted_pointers(stage: int) -> None:
             rollback_expected.update(_capture_pointer_state(root, {stage}))
@@ -973,20 +1039,41 @@ def run_refresh(
         pointer_records: list[tuple[Path, Mapping[str, object]]] = []
         for output in [*stage5_outputs, *stage7_outputs]:
             pointer_records.append(_pointer_from_output(root, output, checked_run))
+        needs_derived_promotion = bool(new_dates) or weekly_boundary_completed
         if new_dates:
             if len(stage5_outputs) != 4 or len(stage7_outputs) != 8 or len(pointer_records) != 12:
                 _fail("Stage 10 derived pointer set incomplete")
-            _transactional_pointer_replace(pointer_records)
-            rollback_expected.update(_capture_written_pointer_state(pointer_records))
         elif weekly_boundary_completed:
             if stage5_outputs or len(stage7_outputs) != 8 or len(pointer_records) != 8:
                 _fail("Stage 10 weekly-boundary coherent Stage 7 pointer set incomplete")
+
+        if needs_derived_promotion and bool(futoi_governance["promotion_allowed"]):
             _transactional_pointer_replace(pointer_records)
             rollback_expected.update(_capture_written_pointer_state(pointer_records))
+            derived_pointer_promotion = {
+                "status": "promoted",
+                "pointer_count": len(pointer_records),
+                "futoi_factual_live_authority_required": True,
+            }
+        elif needs_derived_promotion:
+            derived_pointer_promotion = {
+                "status": "blocked_by_futoi_governance",
+                "pointer_count": 0,
+                "prepared_pointer_count": len(pointer_records),
+                "futoi_factual_live_authority_required": True,
+                "reason": "Stage 5 and Stage 7 remain one aligned canonical promotion cohort while FUTOI factual live authority is blocked",
+            }
+        else:
+            derived_pointer_promotion = {
+                "status": "no_op",
+                "pointer_count": 0,
+                "futoi_factual_live_authority_required": True,
+            }
 
         smoke_as_of = datetime.now(timezone.utc)
         smoke = _stage9_smoke(smoke_as_of)
         finished = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        prepared_not_promoted = needs_derived_promotion and not bool(futoi_governance["promotion_allowed"])
         result: dict[str, object] = {
             "schema_version": SCHEMA_VERSION,
             "project": "MOEX_Bot",
@@ -1000,10 +1087,18 @@ def run_refresh(
             "new_trading_dates": new_dates,
             "new_trading_date_count": len(new_dates),
             "source_refresh": source_refresh,
-            "stage5": {"status": "refreshed" if new_dates else "no_op", "output_count": len(stage5_outputs)},
-            "stage7": {"status": "refreshed" if (new_dates or weekly_boundary_completed) else "no_op", "output_count": len(stage7_outputs)},
+            "futoi_governance": futoi_governance,
+            "derived_pointer_promotion": derived_pointer_promotion,
+            "stage5": {
+                "status": "prepared_not_promoted" if prepared_not_promoted and new_dates else ("refreshed" if new_dates else "no_op"),
+                "output_count": len(stage5_outputs),
+            },
+            "stage7": {
+                "status": "prepared_not_promoted" if prepared_not_promoted else ("refreshed" if (new_dates or weekly_boundary_completed) else "no_op"),
+                "output_count": len(stage7_outputs),
+            },
             "stage9_smoke": smoke,
-            "deterministic_refresh_order": ["calendar", "stage5_raw_and_derived", "stage7_raw_and_derived", "stage3", "stage4", "derived_pointer_promotion", "stage9_smoke"],
+            "deterministic_refresh_order": ["calendar", "stage5_raw_and_derived", "stage7_raw_and_derived", "stage3", "stage4", "governed_derived_pointer_promotion", "stage9_smoke"],
             "pointer_rollback_on_failure": True,
             "implicit_latest_used": False,
             "network_sources_explicitly_bounded_by_date": True,
