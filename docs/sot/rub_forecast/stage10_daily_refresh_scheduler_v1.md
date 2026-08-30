@@ -6,7 +6,7 @@ Stage 10 defines the rolling production refresh route for the server-core eviden
 
 The historical Stage 2 content attestation, Stage 5 pilot and Stage 7 pilot remain immutable historical proof. Stage 10 does not rewrite their fixed historical expectations or claim that those historical pilots are themselves schedulers.
 
-The canonical service entrypoint is `moex_data.step10_rub_refresh_dispatcher`. The dispatcher reads the repository FUTOI governance contract before choosing the refresh mode. The lower-level `step10_rub_refresh_scheduler` remains the full Stage 5+7 implementation and is entered only when FUTOI promotion is explicitly allowed.
+The canonical service entrypoint is `moex_data.step10_rub_refresh_dispatcher`. The dispatcher reads the repository FUTOI governance contract before choosing the refresh mode. The lower-level `step10_rub_refresh_scheduler` remains the full Stage 5+7 implementation and is entered only when both FUTOI promotion and the independent Stage 5 full-mode readiness gate are explicitly allowed.
 
 ## Execution boundary
 
@@ -23,15 +23,23 @@ No implicit latest dataset/path selection is allowed.
 
 The dispatcher reads `contracts/intelligence/usdrubf_futoi_live_acceptance_governance_v1.json` from the repository Source of Truth.
 
+A second independent code gate, `STAGE5_FULL_MODE_READY`, protects Stage 5 publication. It is currently `False`. This is intentional because the rolling Stage 5 full-history base+delta lineage is not yet accepted. Changing the FUTOI governance contract to LIVE_ACCEPTED therefore cannot by itself activate Stage 5 publication.
+
 ### Full Stage 10 mode
 
-`FUTOI_PROMOTION_ALLOWED_FULL_STAGE10` is allowed only when all required FUTOI gates are `PASS` and `authority.factual_live_authority=true`.
+`FUTOI_PROMOTION_ALLOWED_FULL_STAGE10` is allowed only when all of the following hold:
 
-In that mode Stage 10 may refresh and transactionally promote the complete Stage 5/7 derived set.
+1. all required FUTOI gates are `PASS`;
+2. `authority.factual_live_authority=true`;
+3. `STAGE5_FULL_MODE_READY=true` after a separate code-reviewed readiness change.
+
+Only then may Stage 10 refresh and transactionally promote the complete Stage 5/7 derived set.
 
 ### Current governed-blocked mode
 
-While FUTOI remains governed blocked, the canonical route is `FUTOI_GOVERNED_BLOCKED_STAGE7_ONLY`:
+The current canonical route is `FUTOI_GOVERNED_BLOCKED_STAGE7_ONLY`. The dispatcher also remains on this safe route if FUTOI governance later becomes accepted but the independent Stage 5 readiness gate remains false.
+
+In this route:
 
 1. FUTOI Stage 5 materialization is not run.
 2. Stage 5 current accepted pointers are not changed.
@@ -39,7 +47,7 @@ While FUTOI remains governed blocked, the canonical route is `FUTOI_GOVERNED_BLO
 4. Stage 3 current raw evidence and Stage 4 basis/carry continue to refresh when needed.
 5. Stage 9 daily/weekly smoke runs against the resulting state.
 
-This prevents fresh FUTOI from gaining hidden factual authority through Stage 9 while also preventing the FUTOI blocker from freezing unrelated RUB market data.
+This prevents fresh FUTOI from gaining hidden factual authority through Stage 9 while also preventing the FUTOI blocker or Stage 5 lineage blocker from freezing unrelated RUB market data.
 
 ## Deterministic full-mode refresh order
 
@@ -76,7 +84,7 @@ Stage 7 rolling D1 lineage binds the exact accepted base-frame snapshot and the 
 
 New raw inputs are exact-date and run-frozen before derived computation. Catch-up availability does not create a claim of historical point-in-time research readiness. `historical_pit_research_ready_claimed=false` remains explicit.
 
-Stage 5 remains non-authoritative and non-published in the current FUTOI governed-blocked dispatcher mode. Any future transition to full Stage 5 publication requires the repository governance contract to permit factual live authority and must preserve complete auditable lineage.
+Stage 5 remains non-authoritative and non-published in the current dispatcher mode. A future transition to full Stage 5 publication requires both the FUTOI governance contract to permit factual live authority and a separate code-reviewed readiness change after complete Stage 5 full-history base+delta lineage is implemented and accepted.
 
 ## Scheduling
 
@@ -101,4 +109,5 @@ Stage 10 does not:
 - silently scan for newest files or directories;
 - mutate Stage 2 historical attestation expectations;
 - promote FUTOI Stage 5 data while factual live authority is blocked;
+- promote Stage 5 full mode before the independent lineage-readiness gate is explicitly enabled;
 - treat failed/partial refreshes as accepted current state.
