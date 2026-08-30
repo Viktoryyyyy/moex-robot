@@ -244,6 +244,7 @@ def test_rejects_complete_position_invariant_defects(
     run_id = "position_invariant_" + field + "_v1"
     partition = _backfill_evidence(data_root, run_id)
     frame = pd.read_parquet(partition)
+    frame[field] = frame[field].astype(float)
     frame.loc[0, field] = value
     frame.to_parquet(partition, index=False)
 
