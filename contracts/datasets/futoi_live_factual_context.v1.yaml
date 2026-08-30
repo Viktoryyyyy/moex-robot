@@ -1,11 +1,10 @@
 dataset_id: futoi_live_factual_context
-schema_version: futoi_live_factual_refresh.v1
+schema_version: futoi_live_factual_refresh_source_native.v1
 status: implementation_ready_runtime_acceptance_pending
-producer: moex_data.futures.futoi_live_factual_refresh.v1
+producer: moex_data.futures.futoi_live_factual_refresh_source_native.v1
 source_id: moex_algopack_futoi
 instrument_id: si_futures_family
 source_dataset_ref: contracts/datasets/futures_futoi_raw.v1.yaml
-incremental_acceptance_ref: contracts/datasets/futures_futoi_raw_incremental_acceptance.v1.yaml
 source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v1.yaml
 path: ${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/instrument_id=si_futures_family/current.json
 
@@ -34,12 +33,16 @@ semantics:
   data_as_of_equals_factual_snapshot_ts: true
 
 freshness:
-  calendar_source_id: moex_iss_futures_calendar
-  calendar_endpoint: /iss/calendars.json
-  policy: accepted_trade_date_must_equal_canonical_latest_completed_moex_futures_trade_date
-  requested_range_full_date_coverage_required: true
-  incomplete_calendar_coverage: fail_closed
-  implicit_weekday_inference_allowed: false
+  calendar_dependency: false
+  source_native_exact_date_scan: true
+  source_lookback_days: 14
+  policy: bounded_exact_date_source_scan_weekend_empty_only
+  exact_date_requests_only: true
+  implicit_latest_endpoint_semantics_allowed: false
+  explicit_empty_weekend_dates_may_be_skipped: true
+  explicit_empty_weekday_date: fail_closed
+  transport_auth_parse_error: fail_closed
+  malformed_nonempty_source_date: fail_closed
   stale_as_neutral_allowed: false
 
 required_top_level_fields:
@@ -50,10 +53,11 @@ required_top_level_fields:
   - instrument_id
   - run_id
   - through_date
-  - expected_latest_completed_trade_date
+  - expected_latest_source_trade_date
   - data_as_of
   - last_success_at
   - freshness
+  - source_date_observations
   - quality_status
   - acceptance_status
   - factual
@@ -88,23 +92,20 @@ factual_fields:
 provenance:
   accepted_state_kind_required: true
   allowed_accepted_state_kinds:
-    - incremental
-    - historical_content_attested
-  immutable_accepted_partition_sha256_required: true
+    - source_native_exact_date_raw_quality_pass
+  immutable_raw_partition_sha256_required: true
+  raw_quality_report_sha256_required: true
+  raw_refresh_manifest_sha256_required: true
   source_contract_ref_required: true
   raw_contract_ref_required: true
-  incremental_acceptance_contract_ref_required: true
-  incremental_state:
-    incremental_pointer_sha256_required: true
-    incremental_manifest_sha256_required: true
-  historical_content_attested_state:
-    marker_sha256_required: true
-    manifest_sha256_required: true
-    partition_content_set_sha256_required: true
-  unaccepted_canonical_raw_fallback_allowed: false
+  raw_producer_required: true
+  cumulative_incremental_acceptance_required_for_current_factual_context: false
+  historical_stage5_promotion_required: false
 
 failure_semantics:
-  raw_refresh_or_acceptance_failure: fail_component_only
+  raw_refresh_or_quality_failure: fail_component_only
+  weekday_empty_source: fail_component_only
+  source_probe_transport_auth_parse_failure: fail_component_only
   stage7_refresh_blocked_by_futoi_failure: false
   factual_authority_before_governance_live_acceptance: false
   directional_authority: false
