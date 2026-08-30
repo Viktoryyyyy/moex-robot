@@ -274,6 +274,15 @@ def _expected_dates(start: str, end: str) -> list[str]:
     return result
 
 
+def _validated_date_list(value: object, field: str) -> list[str]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        _fail(field + " must be a list")
+    result = [_iso_date(item, field + " item") for item in value]
+    if result != sorted(set(result)):
+        _fail(field + " must be sorted and unique")
+    return result
+
+
 def _validate_utc_timestamp_column(frame: pd.DataFrame, field: str) -> None:
     for value in frame[field].tolist():
         try:
@@ -505,9 +514,17 @@ def _validate_backfill(root: Path, instrument_id: str, run_id: str, date_end: st
     if isinstance(skipped, (str, bytes)) or not isinstance(skipped, Sequence):
         _fail("incremental backfill partitions_skipped must be a list")
     evidence = _validated_partition_evidence(manifest.get("partition_evidence"), written, run_id)
-    skipped_dates = [_iso_date(value, "skipped date") for value in skipped]
-    if skipped_dates != sorted(set(skipped_dates)):
-        _fail("incremental skipped dates must be sorted and unique")
+    skipped_dates = _validated_date_list(skipped, "incremental skipped dates")
+    if manifest.get("skipped_dates_calendar_validated") is not True or quality.get("skipped_dates_calendar_validated") is not True:
+        _fail("incremental skipped dates lack canonical calendar validation")
+    if manifest.get("calendar_source_id") != backfill.CALENDAR_SOURCE_ID or quality.get("calendar_source_id") != backfill.CALENDAR_SOURCE_ID:
+        _fail("incremental skipped-date calendar source identity mismatch")
+    if manifest.get("calendar_endpoint") != backfill.CALENDAR_ENDPOINT or quality.get("calendar_endpoint") != backfill.CALENDAR_ENDPOINT:
+        _fail("incremental skipped-date calendar endpoint mismatch")
+    manifest_non_trading = _validated_date_list(manifest.get("skipped_non_trading_dates"), "manifest skipped_non_trading_dates")
+    quality_non_trading = _validated_date_list(quality.get("skipped_non_trading_dates"), "quality skipped_non_trading_dates")
+    if manifest_non_trading != skipped_dates or quality_non_trading != skipped_dates:
+        _fail("incremental skipped dates are not bound to calendar-validated non-trading evidence")
     records = [_validate_partition(root, value, instrument_id, requested_start, requested_end) for value in written]
     for record, evidence_row in zip(records, evidence, strict=True):
         if record["trade_date"] != evidence_row["trade_date"]:
@@ -527,7 +544,7 @@ def _validate_backfill(root: Path, instrument_id: str, run_id: str, date_end: st
         _fail("incremental backfill partition_count mismatch")
     if _positive_int(quality.get("row_count"), "quality row_count") != row_count:
         _fail("incremental backfill row_count mismatch")
-    if list(quality.get("skipped_empty_source_dates") or []) != skipped_dates:
+    if _validated_date_list(quality.get("skipped_empty_source_dates"), "quality skipped_empty_source_dates") != skipped_dates:
         _fail("incremental backfill skipped dates mismatch between manifest and quality")
     return {
         "manifest_path": Path(manifest_snapshot["path"]),
@@ -680,6 +697,10 @@ def accept_incremental_backfill(*, instrument_id: str, backfill_run_id: str, dat
             "incremental_partition_count": source["partition_count"],
             "incremental_row_count": source["row_count"],
             "skipped_empty_source_dates": source["skipped_dates"],
+            "skipped_non_trading_dates": source["skipped_dates"],
+            "skipped_dates_calendar_validated": True,
+            "calendar_source_id": backfill.CALENDAR_SOURCE_ID,
+            "calendar_endpoint": backfill.CALENDAR_ENDPOINT,
             "partitions": accepted_records,
             "cumulative_from": parent["start"],
             "cumulative_till": source["requested_till"],
@@ -752,6 +773,7 @@ def accept_incremental_backfill(*, instrument_id: str, backfill_run_id: str, dat
             "accepted_partition_snapshots_immutable": True,
             "full_raw_contract_revalidated": True,
             "registry_binding_revalidated": True,
+            "skipped_dates_calendar_validated": True,
             "historical_baseline_pointer_mutated": False,
             "acceptance_network_access_used": False,
             "latest_autodetect_used": False,
