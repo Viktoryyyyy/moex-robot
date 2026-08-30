@@ -11,4 +11,4 @@ Environment=MOEX_DATA_ROOT=/home/trader/moex_bot/data
 Environment=PYTHONPATH=src
 Environment=MOEX_ENV_FILE=/home/trader/moex_bot/.env
 ExecStartPre=/usr/bin/install -d -o trader -g trader -m 0750 /home/trader/moex_bot/data/locks
-ExecStart=/usr/bin/flock -n /home/trader/moex_bot/data/locks/moex-rub-stage10-daily-refresh.lock /bin/bash -lc 'through_date="$(TZ=Europe/Moscow date -d yesterday +%%F)"; run_id="step10_daily_$(TZ=Europe/Moscow date +%%Y%%m%%d)_$(date -u +%%H%%M%%S)"; exec /home/trader/moex_bot/venv/bin/python -m moex_data.step10_rub_refresh_scheduler --through-date "$through_date" --run-id "$run_id" --repo-root /home/trader/moex_bot/moex-robot --env-file "$MOEX_ENV_FILE"'
+ExecStart=/usr/bin/flock -n /home/trader/moex_bot/data/locks/moex-rub-stage10-daily-refresh.lock /bin/bash -lc 'through_date="$(TZ=Europe/Moscow date -d yesterday +%%F)"; run_id="step10_daily_$(TZ=Europe/Moscow date +%%Y%%m%%d)_$(date -u +%%H%%M%%S)"; exec /home/trader/moex_bot/venv/bin/python -m moex_data.step10_rub_refresh_dispatcher --through-date "$through_date" --run-id "$run_id" --repo-root /home/trader/moex_bot/moex-robot --env-file "$MOEX_ENV_FILE"'
