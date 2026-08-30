@@ -105,6 +105,10 @@ def _backfill_evidence(root: Path, run_id: str) -> Path:
             "invalid_position_count": 0,
             "partition_count": 1,
             "skipped_empty_source_dates": [],
+            "skipped_non_trading_dates": [],
+            "skipped_dates_calendar_validated": True,
+            "calendar_source_id": backfill.CALENDAR_SOURCE_ID,
+            "calendar_endpoint": backfill.CALENDAR_ENDPOINT,
             "failed_dates": [],
         },
     )
@@ -129,6 +133,10 @@ def _backfill_evidence(root: Path, run_id: str) -> Path:
                 }
             ],
             "partitions_skipped": [],
+            "skipped_non_trading_dates": [],
+            "skipped_dates_calendar_validated": True,
+            "calendar_source_id": backfill.CALENDAR_SOURCE_ID,
+            "calendar_endpoint": backfill.CALENDAR_ENDPOINT,
             "quality_report_ref": quality_path.as_posix(),
             "refresh_status": "succeeded",
             "failed_dates": [],
