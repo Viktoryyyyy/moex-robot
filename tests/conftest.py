@@ -57,6 +57,19 @@ def _stage10_legacy_governance_fixture_adapter(request: pytest.FixtureRequest, m
 
 
 @pytest.fixture(autouse=True)
+def _stage10_dispatcher_full_mode_fixture(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
+    """Only the explicit delegation unit test may bypass the production Stage 5 readiness block."""
+    if Path(str(request.fspath)).name != "test_step10_rub_refresh_dispatcher.py":
+        return
+    if request.node.name != "test_allowed_futoi_delegates_to_full_stage10":
+        return
+
+    from moex_data import step10_rub_refresh_dispatcher as dispatcher
+
+    monkeypatch.setattr(dispatcher, "STAGE5_FULL_MODE_READY", True)
+
+
+@pytest.fixture(autouse=True)
 def _stage5_legacy_fixture_adapter(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
     """Adapt the pre-#386 Stage 5 synthetic fixture; never changes production fallback behavior."""
     if Path(str(request.fspath)).name != "test_step5_futoi_positioning_acceptance.py":
