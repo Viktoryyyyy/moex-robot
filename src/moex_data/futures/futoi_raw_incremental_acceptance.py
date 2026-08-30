@@ -14,6 +14,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Final
 
+import numpy as np
 import pandas as pd
 
 from . import backfill_futoi_instrument as backfill
@@ -26,6 +27,7 @@ DATASET_ID: Final[str] = materializer.DATASET_ID
 SOURCE_ID: Final[str] = materializer.SOURCE_ID
 ALLOWED_INSTRUMENTS: Final[frozenset[str]] = frozenset({"si_futures_family", "cr_futures_family"})
 ROOT_REF_PREFIX: Final[str] = "${MOEX_DATA_ROOT}/"
+MOEX_SOURCE_TIMEZONE: Final[str] = "Europe/Moscow"
 RAW_REQUIRED_COLUMNS: Final[tuple[str, ...]] = (
     "instrument_id",
     "trade_date",
@@ -274,6 +276,46 @@ def _validate_utc_timestamp_column(frame: pd.DataFrame, field: str) -> None:
             _fail(field + " must contain timezone-aware UTC timestamps")
 
 
+def _moex_publication_utc(values: pd.Series) -> pd.Series:
+    parsed = pd.to_datetime(values, errors="coerce")
+    if bool(parsed.isna().any()):
+        _fail("incremental partition contains invalid publication systime")
+    try:
+        if parsed.dt.tz is None:
+            return parsed.dt.tz_localize(MOEX_SOURCE_TIMEZONE, ambiguous="raise", nonexistent="raise").dt.tz_convert("UTC")
+        return parsed.dt.tz_convert("UTC")
+    except Exception as exc:
+        raise FutoiIncrementalAcceptanceError("incremental partition contains invalid publication systime timezone: " + str(exc)) from exc
+
+
+def _validate_provenance_chronology(frame: pd.DataFrame) -> None:
+    publication_utc = _moex_publication_utc(frame["systime"])
+    availability_utc = pd.to_datetime(frame["availability_ts_utc"], errors="coerce", utc=True)
+    ingest_utc = pd.to_datetime(frame["ingest_ts"], errors="coerce", utc=True)
+    if bool(publication_utc.isna().any()) or bool(availability_utc.isna().any()) or bool(ingest_utc.isna().any()):
+        _fail("incremental partition contains invalid publication/availability/ingest timestamp")
+    if bool((availability_utc < publication_utc).any()):
+        _fail("incremental partition availability timestamp precedes source publication timestamp")
+    if bool((ingest_utc < availability_utc).any()):
+        _fail("incremental partition ingest timestamp precedes availability timestamp")
+
+
+def _validate_position_invariants(frame: pd.DataFrame) -> None:
+    fields = ("pos", "pos_long", "pos_short", "pos_long_num", "pos_short_num")
+    values: dict[str, pd.Series] = {}
+    for field in fields:
+        numeric = pd.to_numeric(frame[field], errors="coerce")
+        if bool(numeric.isna().any()) or not bool(np.isfinite(numeric.to_numpy(dtype="float64")).all()):
+            _fail("incremental partition contains invalid or non-finite numeric value: " + field)
+        values[field] = numeric
+    for field in ("pos_long_num", "pos_short_num"):
+        participant_counts = values[field].to_numpy(dtype="float64")
+        if bool((participant_counts < 0).any()) or not bool(np.equal(participant_counts, np.floor(participant_counts)).all()):
+            _fail("incremental partition participant counts must be non-negative integers")
+    if not bool(values["pos"].eq(values["pos_long"] + values["pos_short"]).all()):
+        _fail("incremental partition net position must equal pos_long plus pos_short")
+
+
 def _validate_raw_contract_and_registry(frame: pd.DataFrame, instrument_id: str) -> dict[str, object]:
     missing = sorted(set(RAW_REQUIRED_COLUMNS).difference(frame.columns))
     if missing:
@@ -314,6 +356,8 @@ def _validate_raw_contract_and_registry(frame: pd.DataFrame, instrument_id: str)
             _fail("incremental partition registry binding mismatch: " + field)
     _validate_utc_timestamp_column(frame, "availability_ts_utc")
     _validate_utc_timestamp_column(frame, "ingest_ts")
+    _validate_provenance_chronology(frame)
+    _validate_position_invariants(frame)
     return binding
 
 
@@ -350,6 +394,8 @@ def _validate_partition(root: Path, path_value: object, instrument_id: str, requ
     if bool(raw_ts.isna().any()) or bool(raw_moment.isna().any()) or not bool(raw_ts.eq(raw_moment).all()):
         _fail("incremental partition raw ts must equal raw moment")
     validated_frame = materializer._validate_required_source_identifiers(frame)
+    if bool((validated_frame["seqnum"] < 0).any()):
+        _fail("incremental partition seqnum must be non-negative")
     validated_frame["secid"] = validated_frame["secid"].astype(str).str.strip().str.upper()
     validated_frame["clgroup"] = validated_frame["clgroup"].astype(str).str.strip().str.upper()
     validated_frame = materializer._enforce_publication_timestamp(validated_frame)
@@ -375,6 +421,41 @@ def _validate_partition(root: Path, path_value: object, instrument_id: str, requ
         "invalid_position_count": 0,
         "_raw_bytes": snapshot["raw"],
     }
+
+
+def _validated_partition_evidence(value: object, written: Sequence[object], run_id: str) -> list[dict[str, object]]:
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        _fail("incremental backfill partition_evidence must be a list")
+    if len(value) != len(written):
+        _fail("incremental backfill partition_evidence count mismatch")
+    result: list[dict[str, object]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, Mapping):
+            _fail("incremental backfill partition_evidence item must be an object")
+        trade_date = _iso_date(item.get("trade_date"), "partition evidence trade_date")
+        expected_subrun = backfill._subrun_id(run_id, trade_date)
+        if item.get("subrun_id") != expected_subrun:
+            _fail("incremental backfill partition evidence subrun_id mismatch")
+        path_text = str(item.get("partition_path") or "")
+        if path_text != str(written[index]):
+            _fail("incremental backfill partition evidence path mismatch")
+        sha256 = str(item.get("sha256") or "").strip().lower()
+        if len(sha256) != 64 or any(char not in "0123456789abcdef" for char in sha256):
+            _fail("incremental backfill partition evidence sha256 invalid")
+        row_count = _positive_int(item.get("row_count"), "partition evidence row_count")
+        result.append(
+            {
+                "trade_date": trade_date,
+                "subrun_id": expected_subrun,
+                "partition_path": path_text,
+                "sha256": sha256,
+                "row_count": row_count,
+            }
+        )
+    dates = [str(item["trade_date"]) for item in result]
+    if dates != sorted(set(dates)):
+        _fail("incremental backfill partition evidence dates must be sorted and unique")
+    return result
 
 
 def _validate_backfill(root: Path, instrument_id: str, run_id: str, date_end: str, parent_end: str) -> dict[str, object]:
@@ -415,10 +496,18 @@ def _validate_backfill(root: Path, instrument_id: str, run_id: str, date_end: st
         _fail("incremental backfill partitions_written must be a list")
     if isinstance(skipped, (str, bytes)) or not isinstance(skipped, Sequence):
         _fail("incremental backfill partitions_skipped must be a list")
+    evidence = _validated_partition_evidence(manifest.get("partition_evidence"), written, run_id)
     skipped_dates = [_iso_date(value, "skipped date") for value in skipped]
     if skipped_dates != sorted(set(skipped_dates)):
         _fail("incremental skipped dates must be sorted and unique")
     records = [_validate_partition(root, value, instrument_id, requested_start, requested_end) for value in written]
+    for record, evidence_row in zip(records, evidence, strict=True):
+        if record["trade_date"] != evidence_row["trade_date"]:
+            _fail("incremental backfill partition evidence trade_date mismatch")
+        if record["sha256"] != evidence_row["sha256"]:
+            _fail("incremental backfill partition bytes differ from run-bound evidence")
+        if int(record["row_count"]) != int(evidence_row["row_count"]):
+            _fail("incremental backfill partition evidence row_count mismatch")
     trade_dates = [str(row["trade_date"]) for row in records]
     if trade_dates != sorted(set(trade_dates)):
         _fail("incremental written partition dates must be sorted and unique")
