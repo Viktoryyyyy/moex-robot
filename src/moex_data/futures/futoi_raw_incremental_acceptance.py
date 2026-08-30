@@ -79,6 +79,14 @@ def _iso_date(value: object, field: str) -> str:
     return text
 
 
+def _require_completed_source_date(value: object) -> str:
+    checked = _iso_date(value, "date_end")
+    current_moscow_date = pd.Timestamp.now(tz=MOEX_SOURCE_TIMEZONE).date()
+    if date.fromisoformat(checked) >= current_moscow_date:
+        _fail("date_end must be earlier than current Europe/Moscow calendar date")
+    return checked
+
+
 def _data_root() -> Path:
     raw = str(os.environ.get("MOEX_DATA_ROOT", "")).strip()
     if not raw:
@@ -601,7 +609,7 @@ def accept_incremental_backfill(*, instrument_id: str, backfill_run_id: str, dat
     if checked_instrument not in ALLOWED_INSTRUMENTS:
         _fail("instrument_id is outside canonical Stage 5 FUTOI scope")
     checked_run = _safe_token(backfill_run_id, "backfill_run_id")
-    checked_end = _iso_date(date_end, "date_end")
+    checked_end = _require_completed_source_date(date_end)
     root = _data_root()
     with _publication_lock(root, checked_instrument):
         parent = _parent_state(root, checked_instrument)
