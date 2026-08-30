@@ -21,6 +21,8 @@ execution:
   dispatcher_selects_mode_from_repo_governance: true
   independent_stage5_full_mode_readiness_gate_required: true
   futoi_factual_refresh_failure_must_not_block_stage7: true
+  entrypoint_futoi_context_bound_inside_dispatcher_transaction: true
+  post_dispatch_manifest_augmentation_allowed: false
 
 refresh_modes:
   FUTOI_PROMOTION_ALLOWED_FULL_STAGE10:
@@ -107,6 +109,7 @@ promotion:
   stage7_pointer_count_when_refreshed: 8
   full_mode_stage5_stage7_promotion_transactional: true
   blocked_mode_stage7_promotion_transactional: true
+  entrypoint_futoi_context_manifest_write_inside_pointer_rollback_boundary: true
   blocked_mode_stage5_pointer_count: 0
   stage5_full_mode_requires_code_reviewed_readiness_flip: true
   sha256_manifest_required: true
