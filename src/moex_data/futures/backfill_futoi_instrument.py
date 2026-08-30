@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import os
-import stat
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -98,37 +95,26 @@ def _aggregate_manifest_path(date_end: str, run_id: str) -> Path:
     return materializer._manifest_path(date_end, run_id)
 
 
-def _stable_partition_evidence(path: Path, *, trade_date: str, subrun_id: str, row_count: int) -> dict[str, object]:
+def _materializer_partition_evidence(
+    payload: dict[str, object], *, trade_date: str, subrun_id: str
+) -> dict[str, object]:
+    if payload.get("publication_run_id") != subrun_id:
+        raise FutoiBackfillError("materializer publication run_id mismatch")
+    path = Path(str(payload.get("storage_partition_path") or ""))
     if not path.is_absolute():
         raise FutoiBackfillError("materialized FUTOI partition path must be absolute")
-    if path.is_symlink():
-        raise FutoiBackfillError("materialized FUTOI partition must not be a symlink")
-    flags = os.O_RDONLY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    try:
-        descriptor = os.open(path, flags)
-    except OSError as exc:
-        raise FutoiBackfillError("cannot snapshot materialized FUTOI partition: " + str(exc)) from exc
-    try:
-        before = os.fstat(descriptor)
-        if not stat.S_ISREG(before.st_mode):
-            raise FutoiBackfillError("materialized FUTOI partition must be a regular file")
-        with os.fdopen(descriptor, "rb", closefd=False) as handle:
-            raw = handle.read()
-        after = os.fstat(descriptor)
-    finally:
-        os.close(descriptor)
-    identity_before = (int(before.st_dev), int(before.st_ino), int(before.st_size), int(before.st_mtime_ns))
-    identity_after = (int(after.st_dev), int(after.st_ino), int(after.st_size), int(after.st_mtime_ns))
-    if identity_before != identity_after or len(raw) != int(before.st_size):
-        raise FutoiBackfillError("materialized FUTOI partition changed while run evidence was captured")
+    sha256 = str(payload.get("published_partition_sha256") or "").strip().lower()
+    if len(sha256) != 64 or any(char not in "0123456789abcdef" for char in sha256):
+        raise FutoiBackfillError("materializer published partition sha256 invalid")
+    row_count = int(payload.get("row_count") or 0)
+    if row_count <= 0:
+        raise FutoiBackfillError("materializer published partition row_count must be positive")
     return {
         "trade_date": trade_date,
         "subrun_id": subrun_id,
         "partition_path": path.as_posix(),
-        "sha256": hashlib.sha256(raw).hexdigest(),
-        "row_count": int(row_count),
+        "sha256": sha256,
+        "row_count": row_count,
     }
 
 
@@ -267,11 +253,10 @@ def backfill_range(
                 apim_base_url=apim_base_url,
                 require_enabled=False,
             )
-            evidence = _stable_partition_evidence(
-                Path(str(payload["storage_partition_path"])),
+            evidence = _materializer_partition_evidence(
+                payload,
                 trade_date=trade_date,
                 subrun_id=subrun_id,
-                row_count=int(payload.get("row_count") or 0),
             )
             successes.append(payload)
             partition_evidence.append(evidence)
