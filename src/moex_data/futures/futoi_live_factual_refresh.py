@@ -16,6 +16,7 @@ from . import backfill_futoi_instrument as backfill
 from . import futoi_raw_incremental_acceptance as incremental
 from . import materialize_futoi_instrument as materializer
 from . import refresh_forts_raw_5m_incremental as futures_calendar
+from . import stage2_raw_history_content_reattestation as historical_attestation
 
 PROJECT: Final[str] = "MOEX_Bot"
 SCHEMA_VERSION: Final[str] = "futoi_live_factual_refresh.v1"
@@ -354,6 +355,81 @@ def _load_current_incremental(
     )
 
 
+def _load_current_historical(
+    root: Path, *, expected_trade_date: str
+) -> tuple[Path, dict[str, object]]:
+    repo_root = Path(__file__).resolve().parents[3]
+    history = historical_attestation.resolve_content_attested_history(
+        dataset_id=incremental.DATASET_ID,
+        instrument_id=INSTRUMENT_ID,
+        repo_root=repo_root,
+    )
+    if history.get("requested_till") != expected_trade_date:
+        _fail("content-attested historical FUTOI baseline is not current through expected trade date")
+    records = history.get("records")
+    if isinstance(records, (str, bytes)) or not isinstance(records, Sequence):
+        _fail("content-attested historical FUTOI records are invalid")
+    matching = [
+        value
+        for value in records
+        if isinstance(value, Mapping) and value.get("trade_date") == expected_trade_date
+    ]
+    if len(matching) != 1:
+        _fail("content-attested historical FUTOI must contain exactly one current partition")
+    record = dict(matching[0])
+    partition_path = Path(str(record.get("snapshot_path") or ""))
+    if not partition_path.is_absolute():
+        _fail("content-attested historical FUTOI snapshot_path must be absolute")
+    expected_sha = str(record.get("sha256") or "").strip().lower()
+    if len(expected_sha) != 64 or _sha256_file(partition_path) != expected_sha:
+        _fail("content-attested historical FUTOI current partition SHA mismatch")
+    marker_path = Path(str(history.get("marker_path") or ""))
+    manifest_path = Path(str(history.get("manifest_path") or ""))
+    provenance = {
+        "accepted_state_kind": "historical_content_attested",
+        "historical_content_attestation_marker_ref": _rooted_ref(root, marker_path),
+        "historical_content_attestation_marker_sha256": str(history.get("marker_sha256") or ""),
+        "historical_content_attestation_manifest_ref": _rooted_ref(root, manifest_path),
+        "historical_content_attestation_manifest_sha256": str(history.get("manifest_sha256") or ""),
+        "historical_partition_content_set_sha256": str(
+            history.get("partition_content_set_sha256") or ""
+        ),
+        "accepted_partition_ref": _rooted_ref(root, partition_path),
+        "accepted_partition_sha256": expected_sha,
+        "source_contract_ref": materializer.SOURCE_CONTRACT_REF,
+        "raw_contract_ref": materializer.RAW_CONTRACT_REF,
+        "incremental_acceptance_contract_ref": incremental.CONTRACT_REF,
+    }
+    return partition_path, provenance
+
+
+def _load_current_accepted(
+    root: Path, *, expected_trade_date: str
+) -> tuple[Path, dict[str, object]]:
+    pointer_path = incremental.incremental_pointer_path(root, INSTRUMENT_ID)
+    if pointer_path.exists() or pointer_path.is_symlink():
+        pointer, manifest, partition_path, hashes = _load_current_incremental(
+            root, expected_trade_date=expected_trade_date
+        )
+        del manifest
+        return partition_path, {
+            "accepted_state_kind": "incremental",
+            "incremental_pointer_ref": _rooted_ref(root, pointer_path),
+            "incremental_pointer_sha256": hashes["pointer_sha256"],
+            "incremental_manifest_ref": _rooted_ref(
+                root,
+                incremental._resolve_ref(root, pointer.get("manifest_ref"), "manifest_ref"),
+            ),
+            "incremental_manifest_sha256": hashes["manifest_sha256"],
+            "accepted_partition_ref": _rooted_ref(root, partition_path),
+            "accepted_partition_sha256": hashes["partition_sha256"],
+            "source_contract_ref": materializer.SOURCE_CONTRACT_REF,
+            "raw_contract_ref": materializer.RAW_CONTRACT_REF,
+            "incremental_acceptance_contract_ref": incremental.CONTRACT_REF,
+        }
+    return _load_current_historical(root, expected_trade_date=expected_trade_date)
+
+
 def run_refresh(*, through_date: str, run_id: str, timeout: float = 60.0) -> dict[str, object]:
     checked_through = _iso_date(through_date, "through_date")
     checked_run = _safe_token(run_id, "run_id")
@@ -400,10 +476,9 @@ def run_refresh(*, through_date: str, run_id: str, timeout: float = 60.0) -> dic
     else:
         refresh = {"status": "no_op_already_current", "date_end": target_trade_date}
 
-    pointer, manifest, partition_path, hashes = _load_current_incremental(
+    partition_path, provenance = _load_current_accepted(
         root, expected_trade_date=target_trade_date
     )
-    del manifest
     frame = pd.read_parquet(partition_path)
     factual = latest_aligned_factual(frame, expected_trade_date=target_trade_date)
     completed_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
@@ -429,22 +504,7 @@ def run_refresh(*, through_date: str, run_id: str, timeout: float = 60.0) -> dic
         "quality_status": "PASS",
         "acceptance_status": "PASS",
         "factual": factual,
-        "provenance": {
-            "incremental_pointer_ref": _rooted_ref(
-                root, incremental.incremental_pointer_path(root, INSTRUMENT_ID)
-            ),
-            "incremental_pointer_sha256": hashes["pointer_sha256"],
-            "incremental_manifest_ref": _rooted_ref(
-                root,
-                incremental._resolve_ref(root, pointer.get("manifest_ref"), "manifest_ref"),
-            ),
-            "incremental_manifest_sha256": hashes["manifest_sha256"],
-            "accepted_partition_ref": _rooted_ref(root, partition_path),
-            "accepted_partition_sha256": hashes["partition_sha256"],
-            "source_contract_ref": materializer.SOURCE_CONTRACT_REF,
-            "raw_contract_ref": materializer.RAW_CONTRACT_REF,
-            "incremental_acceptance_contract_ref": incremental.CONTRACT_REF,
-        },
+        "provenance": provenance,
         "refresh": refresh,
         "factual_authority": False,
         "directional_authority": False,
