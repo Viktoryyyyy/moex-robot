@@ -14,6 +14,9 @@ from moex_data import step10_rub_refresh_scheduler as step10
 SCHEMA_VERSION: Final[str] = "step10_rub_daily_refresh_dispatch.v1"
 BLOCKED_MODE: Final[str] = "FUTOI_GOVERNED_BLOCKED_STAGE7_ONLY"
 FULL_MODE: Final[str] = "FUTOI_PROMOTION_ALLOWED_FULL_STAGE10"
+# Independent code gate: FUTOI governance becoming LIVE_ACCEPTED must not by itself
+# enable Stage 5 full-history publication before base+delta lineage is accepted.
+STAGE5_FULL_MODE_READY: Final[bool] = False
 
 
 def _blocked_stage7_refresh(
@@ -107,6 +110,12 @@ def _blocked_stage7_refresh(
         smoke_as_of = datetime.now(timezone.utc)
         smoke = step10._stage9_smoke(smoke_as_of)
         finished = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        governance_allows_stage5 = bool(governance.get("promotion_allowed"))
+        stage5_block_reason = (
+            "Stage 5 full-history base+delta lineage readiness is not accepted"
+            if governance_allows_stage5 and not STAGE5_FULL_MODE_READY
+            else "FUTOI factual live authority is not accepted"
+        )
         result: dict[str, object] = {
             "schema_version": SCHEMA_VERSION,
             "project": "MOEX_Bot",
@@ -122,11 +131,12 @@ def _blocked_stage7_refresh(
             "new_trading_date_count": len(stage7_new_dates),
             "source_refresh": source_refresh,
             "futoi_governance": dict(governance),
+            "stage5_full_mode_ready": STAGE5_FULL_MODE_READY,
             "stage5": {
                 "status": "governed_blocked_not_run",
                 "output_count": 0,
                 "canonical_pointer_promotion": False,
-                "reason": "FUTOI factual live authority is not accepted",
+                "reason": stage5_block_reason,
             },
             "stage7": {
                 "status": "refreshed" if needs_stage7_promotion else "no_op",
@@ -136,6 +146,7 @@ def _blocked_stage7_refresh(
             "stage9_smoke": smoke,
             "deterministic_refresh_order": [
                 "futoi_governance",
+                "stage5_full_mode_readiness",
                 "calendar",
                 "stage7_raw_and_derived",
                 "stage3",
@@ -206,7 +217,7 @@ def run_refresh(
     now = now.astimezone(timezone.utc)
     governance = step10._futoi_stage5_promotion_governance(repo)
 
-    if bool(governance.get("promotion_allowed")):
+    if bool(governance.get("promotion_allowed")) and STAGE5_FULL_MODE_READY:
         result = step10.run_refresh(
             through_date=checked_through,
             run_id=checked_run,
@@ -217,6 +228,7 @@ def run_refresh(
         )
         result["dispatcher_mode"] = FULL_MODE
         result["dispatcher_futoi_governance_checked"] = True
+        result["stage5_full_mode_ready"] = True
         return result
 
     return _blocked_stage7_refresh(
