@@ -19,11 +19,19 @@ semantics:
   source_short_positions_are_signed_negative: true
   exposed_short_positions_are_absolute_contract_counts: true
   exact_fiz_yur_alignment_required: true
-  alignment_rule: latest_exact_shared_source_event_ts_after_max_seqnum_revision_resolution
+  shared_fiz_yur_sess_id_required: true
+  alignment_rule: latest_exact_shared_source_event_ts_and_sess_id_after_max_seqnum_revision_resolution
   multi_sess_id_same_group_event: fail_closed
+  cross_sess_id_fiz_yur_pair: fail_closed
   ambiguous_max_seqnum: fail_closed
   fiz_yur_net_must_balance_zero: true
   total_long_must_equal_total_short_abs: true
+  source_event_timezone: Europe/Moscow
+  snapshot_ts_representation: UTC_ISO8601_offset_aware
+  source_publication_time_representation: UTC_ISO8601_offset_aware
+  availability_ts_representation: UTC_ISO8601_offset_aware
+  ingest_ts_representation: UTC_ISO8601_offset_aware
+  data_as_of_equals_factual_snapshot_ts: true
 
 freshness:
   calendar_source_id: moex_iss_futures_calendar
@@ -61,10 +69,12 @@ factual_fields:
     - ingest_ts_utc
     - source_ticker
     - secid
+    - sess_id
     - fiz
     - yur
     - total_open_interest
     - short_semantics
+    - timestamp_semantics
     - fiz_yur_alignment
   side_fields:
     - long
