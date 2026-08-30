@@ -37,6 +37,8 @@ freshness:
   calendar_source_id: moex_iss_futures_calendar
   calendar_endpoint: /iss/calendars.json
   policy: accepted_trade_date_must_equal_canonical_latest_completed_moex_futures_trade_date
+  requested_range_full_date_coverage_required: true
+  incomplete_calendar_coverage: fail_closed
   implicit_weekday_inference_allowed: false
   stale_as_neutral_allowed: false
 
