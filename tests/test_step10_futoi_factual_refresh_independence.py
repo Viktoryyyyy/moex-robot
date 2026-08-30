@@ -33,84 +33,79 @@ def test_stage5_full_mode_remains_fail_closed() -> None:
     assert dispatcher.STAGE5_FULL_MODE_READY is False
 
 
-def test_futoi_refresh_order_is_before_calendar_in_blocked_mode() -> None:
-    order: list[object] = [
-        "futoi_governance",
-        "stage5_full_mode_readiness",
-        "calendar",
-        "stage7_raw_and_derived",
-    ]
-    entrypoint._insert_futoi_refresh_order(order, dispatcher.BLOCKED_MODE)
-    assert order == [
-        "futoi_governance",
-        "stage5_full_mode_readiness",
-        "futoi_raw_factual_refresh",
-        "calendar",
-        "stage7_raw_and_derived",
-    ]
-
-
-def test_futoi_refresh_order_is_between_calendar_and_stage5_in_full_mode() -> None:
-    order: list[object] = [
-        "calendar",
-        "stage5_raw_and_derived",
-        "stage7_raw_and_derived",
-    ]
-    entrypoint._insert_futoi_refresh_order(order, dispatcher.FULL_MODE)
-    assert order == [
-        "calendar",
-        "futoi_raw_factual_refresh",
-        "stage5_raw_and_derived",
-        "stage7_raw_and_derived",
-    ]
-
-
-def test_augment_manifest_persists_entrypoint_schema_version(tmp_path, monkeypatch) -> None:
-    run_id = "stage10_manifest_test"
-    manifest_path = (
-        tmp_path
-        / "runs"
-        / "step10_rub_daily_refresh"
-        / ("run_id=" + run_id)
-        / "run_manifest.json"
+def test_dispatcher_validates_transaction_result_context() -> None:
+    context = dispatcher._validated_result_context(
+        {
+            "entrypoint_schema_version": entrypoint.SCHEMA_VERSION,
+            "futoi_factual_refresh": {"status": "PASS"},
+            "futoi_factual_refresh_blocks_stage7": False,
+        }
     )
-    manifest_path.parent.mkdir(parents=True)
-    manifest_path.write_text("{}\n", encoding="utf-8")
-    monkeypatch.setattr(entrypoint.step10, "_data_root", lambda: tmp_path)
+    assert context["entrypoint_schema_version"] == entrypoint.SCHEMA_VERSION
+    assert context["futoi_factual_refresh"] == {"status": "PASS"}
+    assert context["futoi_factual_refresh_blocks_stage7"] is False
 
-    result: dict[str, object] = {
-        "run_id": run_id,
-        "dispatcher_mode": dispatcher.BLOCKED_MODE,
-        "deterministic_refresh_order": ["calendar", "stage7_raw_and_derived"],
-    }
-    entrypoint._augment_manifest(result, {"status": "PASS"})
+    with pytest.raises(
+        entrypoint.step10.Step10RefreshError,
+        match="must remain non-blocking for Stage 7",
+    ):
+        dispatcher._validated_result_context(
+            {
+                "entrypoint_schema_version": entrypoint.SCHEMA_VERSION,
+                "futoi_factual_refresh": {"status": "PASS"},
+                "futoi_factual_refresh_blocks_stage7": True,
+            }
+        )
 
-    persisted = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert result["entrypoint_schema_version"] == entrypoint.SCHEMA_VERSION
-    assert persisted["entrypoint_schema_version"] == entrypoint.SCHEMA_VERSION
-    assert persisted["futoi_factual_refresh"] == {"status": "PASS"}
-    assert persisted["futoi_factual_refresh_blocks_stage7"] is False
 
-
-def test_dispatcher_failure_preserves_futoi_result_in_manifest_and_exception(
-    tmp_path, monkeypatch
-) -> None:
-    run_id = "stage10_failure_test"
-    manifest_path = (
-        tmp_path
-        / "runs"
-        / "step10_rub_daily_refresh"
-        / ("run_id=" + run_id)
-        / "run_manifest.json"
-    )
-    manifest_path.parent.mkdir(parents=True)
-    manifest_path.write_text(
-        json.dumps({"status": "failed", "run_id": run_id}) + "\n",
-        encoding="utf-8",
-    )
+def test_entrypoint_passes_futoi_context_inside_dispatcher_transaction(monkeypatch) -> None:
     futoi_result = {"status": "PASS", "trade_date": "2026-08-28"}
+    captured: dict[str, object] = {}
 
-    monkeypatch.setattr(entrypoint.step10, "_data_root", lambda: tmp_path)
+    monkeypatch.setattr(entrypoint.step10, "load_env_file", lambda value: None)
+    monkeypatch.setattr(
+        entrypoint,
+        "_run_futoi_factual_non_blocking",
+        lambda **kwargs: dict(futoi_result),
+    )
+
+    def fake_dispatcher(**kwargs):
+        captured.update(kwargs)
+        context = dict(kwargs["result_context"])
+        return {
+            "status": "succeeded",
+            "entrypoint_schema_version": context["entrypoint_schema_version"],
+            "futoi_factual_refresh": context["futoi_factual_refresh"],
+            "futoi_factual_refresh_blocks_stage7": context[
+                "futoi_factual_refresh_blocks_stage7"
+            ],
+        }
+
+    monkeypatch.setattr(entrypoint.dispatcher, "run_refresh", fake_dispatcher)
+
+    result = entrypoint.run_refresh(
+        through_date="2026-08-28",
+        run_id="stage10_transaction_context_test",
+        timeout=1.0,
+        now_utc=datetime(2026, 8, 30, 8, 0, tzinfo=timezone.utc),
+    )
+
+    assert captured["result_context"] == {
+        "entrypoint_schema_version": entrypoint.SCHEMA_VERSION,
+        "futoi_factual_refresh": futoi_result,
+        "futoi_factual_refresh_blocks_stage7": False,
+    }
+    assert result["entrypoint_schema_version"] == entrypoint.SCHEMA_VERSION
+    assert result["futoi_factual_refresh"] == futoi_result
+    assert result["futoi_factual_refresh_blocks_stage7"] is False
+    assert not hasattr(entrypoint, "_augment_manifest")
+    assert not hasattr(entrypoint, "_persist_dispatcher_failure_context")
+
+
+def test_entrypoint_failure_preserves_futoi_result_in_error(monkeypatch) -> None:
+    futoi_result = {"status": "PASS", "trade_date": "2026-08-28"}
+    captured: dict[str, object] = {}
+
     monkeypatch.setattr(entrypoint.step10, "load_env_file", lambda value: None)
     monkeypatch.setattr(
         entrypoint,
@@ -119,7 +114,7 @@ def test_dispatcher_failure_preserves_futoi_result_in_manifest_and_exception(
     )
 
     def dispatcher_failure(**kwargs):
-        del kwargs
+        captured.update(kwargs)
         raise RuntimeError("stage7 smoke failed")
 
     monkeypatch.setattr(entrypoint.dispatcher, "run_refresh", dispatcher_failure)
@@ -127,18 +122,17 @@ def test_dispatcher_failure_preserves_futoi_result_in_manifest_and_exception(
     with pytest.raises(entrypoint.Step10EntrypointError, match="stage7 smoke failed") as exc_info:
         entrypoint.run_refresh(
             through_date="2026-08-28",
-            run_id=run_id,
+            run_id="stage10_failure_test",
             timeout=1.0,
             now_utc=datetime(2026, 8, 30, 8, 0, tzinfo=timezone.utc),
         )
 
     assert exc_info.value.futoi_result == futoi_result
-    assert exc_info.value.dispatcher_failure_manifest_augmented is True
-    persisted = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert persisted["status"] == "failed"
-    assert persisted["entrypoint_schema_version"] == entrypoint.SCHEMA_VERSION
-    assert persisted["futoi_factual_refresh"] == futoi_result
-    assert persisted["futoi_factual_refresh_blocks_stage7"] is False
+    assert captured["result_context"] == {
+        "entrypoint_schema_version": entrypoint.SCHEMA_VERSION,
+        "futoi_factual_refresh": futoi_result,
+        "futoi_factual_refresh_blocks_stage7": False,
+    }
 
 
 def test_main_reports_futoi_result_on_dispatcher_failure(monkeypatch, capsys) -> None:
@@ -149,7 +143,6 @@ def test_main_reports_futoi_result_on_dispatcher_failure(monkeypatch, capsys) ->
         raise entrypoint.Step10EntrypointError(
             "stage7 failed",
             futoi_result=futoi_result,
-            dispatcher_failure_manifest_augmented=True,
         )
 
     monkeypatch.setattr(entrypoint, "run_refresh", fail)
@@ -162,7 +155,7 @@ def test_main_reports_futoi_result_on_dispatcher_failure(monkeypatch, capsys) ->
     assert payload["error"] == "stage7 failed"
     assert payload["futoi_factual_refresh"] == futoi_result
     assert payload["futoi_factual_refresh_blocks_stage7"] is False
-    assert payload["dispatcher_failure_manifest_augmented"] is True
+    assert payload["dispatcher_transaction_context_bound"] is True
 
 
 def test_stage10_contract_declares_independent_futoi_factual_refresh() -> None:
