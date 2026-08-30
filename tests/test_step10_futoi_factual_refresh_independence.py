@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from moex_data import step10_rub_refresh_dispatcher as dispatcher
@@ -59,6 +60,33 @@ def test_futoi_refresh_order_is_between_calendar_and_stage5_in_full_mode() -> No
         "stage5_raw_and_derived",
         "stage7_raw_and_derived",
     ]
+
+
+def test_augment_manifest_persists_entrypoint_schema_version(tmp_path, monkeypatch) -> None:
+    run_id = "stage10_manifest_test"
+    manifest_path = (
+        tmp_path
+        / "runs"
+        / "step10_rub_daily_refresh"
+        / ("run_id=" + run_id)
+        / "run_manifest.json"
+    )
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(entrypoint.step10, "_data_root", lambda: tmp_path)
+
+    result: dict[str, object] = {
+        "run_id": run_id,
+        "dispatcher_mode": dispatcher.BLOCKED_MODE,
+        "deterministic_refresh_order": ["calendar", "stage7_raw_and_derived"],
+    }
+    entrypoint._augment_manifest(result, {"status": "PASS"})
+
+    persisted = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert result["entrypoint_schema_version"] == entrypoint.SCHEMA_VERSION
+    assert persisted["entrypoint_schema_version"] == entrypoint.SCHEMA_VERSION
+    assert persisted["futoi_factual_refresh"] == {"status": "PASS"}
+    assert persisted["futoi_factual_refresh_blocks_stage7"] is False
 
 
 def test_stage10_contract_declares_independent_futoi_factual_refresh() -> None:
