@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -120,6 +121,8 @@ def test_backfill_skips_empty_dates_and_writes_pointer_only_after_pass(tmp_path,
             encoding="utf-8",
         )
         partition = root / "market" / "supplementary" / (trade_date + ".parquet")
+        partition.parent.mkdir(parents=True, exist_ok=True)
+        partition.write_bytes(b"deterministic-test-partition")
         return {
             "row_count": 2,
             "quality_report_reference": str(quality_path),
@@ -142,6 +145,14 @@ def test_backfill_skips_empty_dates_and_writes_pointer_only_after_pass(tmp_path,
     assert result["row_count"] == 2
     assert result["partition_count"] == 1
     assert result["skipped_empty_source_dates"] == ["2026-08-16"]
+    manifest = json.loads(Path(str(result["manifest_reference"])).read_text(encoding="utf-8"))
+    evidence = manifest["partition_evidence"]
+    assert len(evidence) == 1
+    assert evidence[0]["trade_date"] == "2026-08-17"
+    assert evidence[0]["subrun_id"] == "test_run_partition_20260817"
+    partition_path = Path(evidence[0]["partition_path"])
+    assert evidence[0]["sha256"] == hashlib.sha256(partition_path.read_bytes()).hexdigest()
+    assert evidence[0]["row_count"] == 2
     pointer = Path(str(result["accepted_manifest_pointer_reference"]))
     assert pointer.exists()
     payload = json.loads(pointer.read_text(encoding="utf-8"))
