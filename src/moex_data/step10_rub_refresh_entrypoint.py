@@ -36,6 +36,22 @@ def _run_futoi_factual_non_blocking(*, through_date: str, run_id: str, timeout: 
         }
 
 
+def _insert_futoi_refresh_order(order: list[object], dispatcher_mode: object) -> None:
+    if "futoi_raw_factual_refresh" in order:
+        return
+    if dispatcher_mode == dispatcher.FULL_MODE:
+        if "stage5_raw_and_derived" not in order:
+            raise step10.Step10RefreshError("full-mode Stage 10 order missing stage5_raw_and_derived")
+        order.insert(order.index("stage5_raw_and_derived"), "futoi_raw_factual_refresh")
+        return
+    if dispatcher_mode == dispatcher.BLOCKED_MODE:
+        if "calendar" not in order:
+            raise step10.Step10RefreshError("blocked-mode Stage 10 order missing calendar")
+        order.insert(order.index("calendar"), "futoi_raw_factual_refresh")
+        return
+    raise step10.Step10RefreshError("unknown Stage 10 dispatcher_mode during FUTOI manifest augmentation")
+
+
 def _augment_manifest(result: dict[str, object], futoi_result: dict[str, object]) -> None:
     root = step10._data_root()
     run_id = str(result.get("run_id") or "").strip()
@@ -47,9 +63,10 @@ def _augment_manifest(result: dict[str, object], futoi_result: dict[str, object]
     result["futoi_factual_refresh"] = futoi_result
     result["futoi_factual_refresh_blocks_stage7"] = False
     order = result.get("deterministic_refresh_order")
-    if isinstance(order, list) and "futoi_raw_factual_refresh" not in order:
-        insertion = 2 if len(order) >= 2 else len(order)
-        order.insert(insertion, "futoi_raw_factual_refresh")
+    if isinstance(order, list):
+        _insert_futoi_refresh_order(order, result.get("dispatcher_mode"))
+    else:
+        raise step10.Step10RefreshError("Stage 10 result missing deterministic_refresh_order")
     step10._atomic_json(manifest_path, result)
 
 
