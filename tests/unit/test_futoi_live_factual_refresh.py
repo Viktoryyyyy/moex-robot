@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import date, timedelta
 
 import pandas as pd
 import pytest
@@ -36,6 +37,56 @@ def _row(
         "source_ticker": "si",
         "secid": "SiU6",
     }
+
+
+def test_latest_completed_trading_date_requires_complete_calendar_coverage(monkeypatch) -> None:
+    end = date(2026, 8, 30)
+    start = end - timedelta(days=factual.CALENDAR_LOOKBACK_DAYS)
+    calendar = {
+        start + timedelta(days=offset): False
+        for offset in range(factual.CALENDAR_LOOKBACK_DAYS)
+    }
+    calendar[date(2026, 8, 28)] = True
+
+    monkeypatch.setattr(
+        factual.futures_calendar,
+        "fetch_futures_calendar_rows",
+        lambda *args, **kwargs: [{"date": "placeholder"}],
+    )
+    monkeypatch.setattr(
+        factual.futures_calendar,
+        "_calendar_map",
+        lambda rows: calendar,
+    )
+
+    with pytest.raises(
+        factual.FutoiLiveFactualRefreshError,
+        match="calendar coverage incomplete: missing date 2026-08-30",
+    ):
+        factual._latest_completed_trading_date("2026-08-30", timeout=1.0)
+
+
+def test_latest_completed_trading_date_accepts_complete_weekend_calendar(monkeypatch) -> None:
+    end = date(2026, 8, 30)
+    start = end - timedelta(days=factual.CALENDAR_LOOKBACK_DAYS)
+    calendar = {
+        start + timedelta(days=offset): False
+        for offset in range(factual.CALENDAR_LOOKBACK_DAYS + 1)
+    }
+    calendar[date(2026, 8, 28)] = True
+
+    monkeypatch.setattr(
+        factual.futures_calendar,
+        "fetch_futures_calendar_rows",
+        lambda *args, **kwargs: [{"date": "placeholder"}],
+    )
+    monkeypatch.setattr(
+        factual.futures_calendar,
+        "_calendar_map",
+        lambda rows: calendar,
+    )
+
+    assert factual._latest_completed_trading_date("2026-08-30", timeout=1.0) == "2026-08-28"
 
 
 def test_latest_aligned_fiz_yur_uses_latest_shared_timestamp_session_and_max_seqnum() -> None:
