@@ -84,12 +84,22 @@ factual_fields:
     - short_participants
 
 provenance:
-  immutable_incremental_pointer_binding_required: true
-  immutable_incremental_manifest_sha256_required: true
+  accepted_state_kind_required: true
+  allowed_accepted_state_kinds:
+    - incremental
+    - historical_content_attested
   immutable_accepted_partition_sha256_required: true
   source_contract_ref_required: true
   raw_contract_ref_required: true
   incremental_acceptance_contract_ref_required: true
+  incremental_state:
+    incremental_pointer_sha256_required: true
+    incremental_manifest_sha256_required: true
+  historical_content_attested_state:
+    marker_sha256_required: true
+    manifest_sha256_required: true
+    partition_content_set_sha256_required: true
+  unaccepted_canonical_raw_fallback_allowed: false
 
 failure_semantics:
   raw_refresh_or_acceptance_failure: fail_component_only
