@@ -18,21 +18,6 @@ class FakeResult:
     payload: dict[str, object]
 
 
-class FakeCalendarResponse:
-    def __init__(self, *, content_type, payload=None, json_error=None):
-        self.headers = {"content-type": content_type}
-        self._payload = payload
-        self._json_error = json_error
-
-    def raise_for_status(self):
-        return None
-
-    def json(self):
-        if self._json_error is not None:
-            raise self._json_error
-        return self._payload
-
-
 def write_registry(path):
     path.write_text(
         "registry_id: forts_instrument_registry.v1\n"
@@ -49,7 +34,13 @@ def write_registry(path):
     )
 
 
-def write_base_manifest(path, *, instrument_id=USDRUBF_INSTRUMENT_ID, secid=USDRUBF_SECID, last_valid="2026-06-09"):
+def write_base_manifest(
+    path,
+    *,
+    instrument_id=USDRUBF_INSTRUMENT_ID,
+    secid=USDRUBF_SECID,
+    last_valid="2026-06-09",
+):
     path.write_text(
         json.dumps(
             {
@@ -92,18 +83,6 @@ def write_pointer(path, manifest_path, *, instrument_id=USDRUBF_INSTRUMENT_ID, s
     )
 
 
-def usdrubf_pointer_path():
-    return refresh.build_accepted_manifest_pointer_path(USDRUBF_INSTRUMENT_ID, USDRUBF_SECID)
-
-
-def sberf_pointer_path():
-    return refresh.build_accepted_manifest_pointer_path(SBERF_INSTRUMENT_ID, SBERF_SECID)
-
-
-def calendar(*dates):
-    return [{"trade_date": item[0], "is_trading_day": item[1]} for item in dates]
-
-
 def result_for_trade_date(trade_date, row_count=1):
     return FakeResult(
         payload={
@@ -117,18 +96,15 @@ def result_for_trade_date(trade_date, row_count=1):
     )
 
 
-def test_calendar_source_contract_is_declared():
-    contract_text = Path("contracts/datasets/forts_raw_5m_tradestats.v1.yaml").read_text(encoding="utf-8")
-    assert "external.moex.iss.futures_calendar.v1" in contract_text
-    assert "MOEX_CALENDAR_BASE_URL" in contract_text
-    assert "--calendar-base-url" in contract_text
-    assert "moex_api_url_calendar_base_assumption_allowed: false" in contract_text
-    assert "calendar_fetch_non_json_response" in contract_text
-    assert "calendar_response_missing_off_days_table" in contract_text
-    assert "calendar_binding_status: observed_source_calendar_fallback" in contract_text
-    assert "MOEX calendar endpoint unresolved for server scheduler" in contract_text
-    assert "--incremental-mode observed-source" in contract_text
-    assert "skipped_empty_source_dates" in contract_text
+def prepare_usdrubf(tmp_path, monkeypatch):
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
+    registry = tmp_path / "registry.yaml"
+    accepted_base = tmp_path / "accepted_base.json"
+    write_registry(registry)
+    write_base_manifest(accepted_base)
+    pointer_path = refresh.build_accepted_manifest_pointer_path(USDRUBF_INSTRUMENT_ID, USDRUBF_SECID)
+    write_pointer(pointer_path, accepted_base)
+    return registry, accepted_base, pointer_path
 
 
 def test_per_instrument_pointer_path_contains_instrument_and_secid(tmp_path, monkeypatch):
@@ -142,16 +118,25 @@ def test_per_instrument_pointer_path_contains_instrument_and_secid(tmp_path, mon
     )
 
 
-def test_stable_pointer_path_is_used_as_base_manifest_source(tmp_path, monkeypatch):
+def test_missing_stable_pointer_fails_closed(tmp_path, monkeypatch):
     monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
     registry = tmp_path / "registry.yaml"
-    accepted_base = tmp_path / "accepted_base.json"
-    unrelated_latest = tmp_path / "unrelated_latest_manifest.json"
     write_registry(registry)
-    write_base_manifest(accepted_base, last_valid="2026-06-09")
-    write_base_manifest(unrelated_latest, last_valid="2026-06-10")
-    pointer_path = usdrubf_pointer_path()
-    write_pointer(pointer_path, accepted_base)
+
+    with pytest.raises(ValueError, match="accepted_manifest_pointer does not exist"):
+        refresh.refresh_incremental(
+            instrument_id=SBERF_INSTRUMENT_ID,
+            secid=SBERF_SECID,
+            artifact_version="missing_pointer_v1",
+            registry_path=registry,
+            date_end="2026-06-10",
+            observed_dates=["2026-06-09", "2026-06-10"],
+            runner=lambda **kwargs: result_for_trade_date(kwargs["trade_date"]),
+        )
+
+
+def test_stable_pointer_is_base_and_only_observed_new_dates_are_materialized(tmp_path, monkeypatch):
+    registry, accepted_base, pointer_path = prepare_usdrubf(tmp_path, monkeypatch)
     calls = []
 
     def runner(**kwargs):
@@ -161,40 +146,99 @@ def test_stable_pointer_path_is_used_as_base_manifest_source(tmp_path, monkeypat
     summary = refresh.refresh_incremental(
         instrument_id=USDRUBF_INSTRUMENT_ID,
         secid=USDRUBF_SECID,
-        artifact_version="refresh_pointer_v1",
+        artifact_version="observed_dates_v1",
         registry_path=registry,
-        date_end="2026-06-10",
-        calendar_rows=calendar(("2026-06-09", True), ("2026-06-10", True)),
+        date_end="2026-06-12",
+        observed_dates=["2026-06-09", "2026-06-10", "2026-06-12"],
         runner=runner,
     )
 
-    assert calls == ["2026-06-10"]
+    assert calls == ["2026-06-10", "2026-06-12"]
+    assert summary.payload["incremental_requested_dates"] == ["2026-06-10", "2026-06-12"]
     assert summary.payload["base_manifest_pointer_reference"] == pointer_path.as_posix()
     assert summary.payload["base_manifest_reference"] == accepted_base.as_posix()
     assert summary.payload["latest_autodetect_used"] is False
-    assert unrelated_latest.as_posix() not in json.dumps(summary.payload, sort_keys=True)
 
 
-def test_passed_quality_atomically_advances_pointer_to_new_manifest(tmp_path, monkeypatch):
-    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
-    registry = tmp_path / "registry.yaml"
-    accepted_base = tmp_path / "accepted_base.json"
-    write_registry(registry)
-    write_base_manifest(accepted_base, last_valid="2026-06-09")
-    pointer_path = usdrubf_pointer_path()
-    write_pointer(pointer_path, accepted_base)
+def test_authoritative_source_loader_is_used_when_dates_not_injected(tmp_path, monkeypatch):
+    registry, _, _ = prepare_usdrubf(tmp_path, monkeypatch)
+    source_calls = []
+    materialized = []
+
+    def source_loader(date_start, date_end, *, secid, timeout, apim_base_url):
+        source_calls.append((date_start, date_end, secid, timeout, apim_base_url))
+        return ["2026-06-09", "2026-06-11"]
 
     def runner(**kwargs):
-        return result_for_trade_date(kwargs["trade_date"], row_count=17)
+        materialized.append(kwargs["trade_date"])
+        return result_for_trade_date(kwargs["trade_date"])
+
+    refresh.refresh_incremental(
+        instrument_id=USDRUBF_INSTRUMENT_ID,
+        secid=USDRUBF_SECID,
+        artifact_version="source_loader_v1",
+        registry_path=registry,
+        date_end="2026-06-11",
+        timeout=7.0,
+        apim_base_url="https://apim.example",
+        source_date_loader=source_loader,
+        runner=runner,
+    )
+
+    assert source_calls == [("2026-06-09", "2026-06-11", USDRUBF_SECID, 7.0, "https://apim.example")]
+    assert materialized == ["2026-06-11"]
+
+
+def test_source_loader_failure_fails_closed_without_pointer_mutation(tmp_path, monkeypatch):
+    registry, _, pointer_path = prepare_usdrubf(tmp_path, monkeypatch)
+    before = pointer_path.read_text(encoding="utf-8")
+
+    def source_loader(*args, **kwargs):
+        raise ValueError("authoritative TradeStats unavailable")
+
+    with pytest.raises(ValueError, match="authoritative TradeStats unavailable"):
+        refresh.refresh_incremental(
+            instrument_id=USDRUBF_INSTRUMENT_ID,
+            secid=USDRUBF_SECID,
+            artifact_version="source_failure_v1",
+            registry_path=registry,
+            date_end="2026-06-10",
+            source_date_loader=source_loader,
+            runner=lambda **kwargs: result_for_trade_date(kwargs["trade_date"]),
+        )
+
+    assert pointer_path.read_text(encoding="utf-8") == before
+
+
+def test_observed_date_outside_requested_range_fails_without_pointer_mutation(tmp_path, monkeypatch):
+    registry, _, pointer_path = prepare_usdrubf(tmp_path, monkeypatch)
+    before = pointer_path.read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError, match="observed trade date escaped requested source range"):
+        refresh.refresh_incremental(
+            instrument_id=USDRUBF_INSTRUMENT_ID,
+            secid=USDRUBF_SECID,
+            artifact_version="bad_observed_date_v1",
+            registry_path=registry,
+            date_end="2026-06-10",
+            observed_dates=["2026-06-09", "2026-06-11"],
+            runner=lambda **kwargs: result_for_trade_date(kwargs["trade_date"]),
+        )
+
+    assert pointer_path.read_text(encoding="utf-8") == before
+
+
+def test_passed_quality_atomically_advances_pointer_with_observed_date_metadata(tmp_path, monkeypatch):
+    registry, accepted_base, pointer_path = prepare_usdrubf(tmp_path, monkeypatch)
 
     summary = refresh.refresh_incremental(
         instrument_id=USDRUBF_INSTRUMENT_ID,
         secid=USDRUBF_SECID,
-        artifact_version="refresh_pointer_passed_v1",
+        artifact_version="pointer_passed_v1",
         registry_path=registry,
         date_end="2026-06-10",
-        calendar_rows=calendar(("2026-06-09", True), ("2026-06-10", True)),
-        runner=runner,
+        observed_dates=["2026-06-09", "2026-06-10"],
+        runner=lambda **kwargs: result_for_trade_date(kwargs["trade_date"], row_count=17),
     )
 
     pointer_payload = json.loads(pointer_path.read_text(encoding="utf-8"))
@@ -203,35 +247,78 @@ def test_passed_quality_atomically_advances_pointer_to_new_manifest(tmp_path, mo
     assert pointer_payload["accepted_manifest_reference"] == summary.manifest_path.as_posix()
     assert pointer_payload["accepted_quality_report_reference"] == summary.quality_report_path.as_posix()
     assert pointer_payload["previous_accepted_manifest_reference"] == accepted_base.as_posix()
+    assert pointer_payload["date_source_artifact_id"] == refresh.SOURCE_ARTIFACT_ID
+    assert pointer_payload["date_source_id"] == refresh.base_refresh.OBSERVED_DATE_SOURCE_ID
+    assert pointer_payload["date_source_endpoint"] == refresh.base_refresh.OBSERVED_DATE_SOURCE_ENDPOINT
+    assert pointer_payload["date_selection_rule"] == "observed_trade_dates_only"
+    assert pointer_payload["session_binding"] == "explicit_trade_date_session"
     assert pointer_payload["atomic_update_rule"] == "write_temp_file_in_pointer_directory_then_replace"
-    assert pointer_payload["calendar_source_artifact_id"] == refresh.CALENDAR_SOURCE_ARTIFACT_ID
-    assert pointer_payload["calendar_contract"] == refresh.CALENDAR_CONTRACT_ID
     assert pointer_payload["pointer_scope_strategy"] == "per_instrument"
-    assert pointer_payload["legacy_artifact_level_pointer_compatibility_used"] is False
+    assert pointer_payload["latest_autodetect_used"] is False
 
 
-def test_pointer_no_op_date_end_equal_base_last_skips_calendar_and_runner(tmp_path, monkeypatch):
-    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
-    registry = tmp_path / "registry.yaml"
-    accepted_base = tmp_path / "accepted_base.json"
-    write_registry(registry)
-    write_base_manifest(accepted_base, last_valid="2026-06-09")
-    pointer_path = usdrubf_pointer_path()
-    write_pointer(pointer_path, accepted_base)
-
-    def calendar_loader(*args, **kwargs):
-        raise AssertionError("calendar loader must not be called for pointer no_op")
+def test_failed_partition_quality_does_not_advance_pointer(tmp_path, monkeypatch):
+    registry, _, pointer_path = prepare_usdrubf(tmp_path, monkeypatch)
+    before = pointer_path.read_text(encoding="utf-8")
 
     def runner(**kwargs):
-        raise AssertionError("runner must not be called for pointer no_op")
+        raise RuntimeError("partition failure")
 
     summary = refresh.refresh_incremental(
         instrument_id=USDRUBF_INSTRUMENT_ID,
         secid=USDRUBF_SECID,
-        artifact_version="refresh_pointer_noop_v1",
+        artifact_version="pointer_failed_quality_v1",
+        registry_path=registry,
+        date_end="2026-06-10",
+        observed_dates=["2026-06-09", "2026-06-10"],
+        runner=runner,
+    )
+
+    assert summary.payload["status"] == "failed"
+    assert summary.payload["quality_status"] == "failed"
+    assert summary.payload["accepted_manifest_pointer_updated"] is False
+    assert pointer_path.read_text(encoding="utf-8") == before
+
+
+def test_atomic_pointer_write_failure_leaves_previous_pointer_unchanged(tmp_path, monkeypatch):
+    registry, _, pointer_path = prepare_usdrubf(tmp_path, monkeypatch)
+    before = pointer_path.read_text(encoding="utf-8")
+    original_write = refresh.base_refresh._write_json_atomic
+
+    def flaky_write(path, values):
+        if Path(path) == pointer_path:
+            raise OSError("pointer replace failed")
+        return original_write(path, values)
+
+    monkeypatch.setattr(refresh.base_refresh, "_write_json_atomic", flaky_write)
+
+    with pytest.raises(OSError, match="pointer replace failed"):
+        refresh.refresh_incremental(
+            instrument_id=USDRUBF_INSTRUMENT_ID,
+            secid=USDRUBF_SECID,
+            artifact_version="atomic_failure_v1",
+            registry_path=registry,
+            date_end="2026-06-10",
+            observed_dates=["2026-06-09", "2026-06-10"],
+            runner=lambda **kwargs: result_for_trade_date(kwargs["trade_date"]),
+        )
+
+    assert pointer_path.read_text(encoding="utf-8") == before
+
+
+def test_no_new_observed_date_is_no_op_and_does_not_run_partition(tmp_path, monkeypatch):
+    registry, _, pointer_path = prepare_usdrubf(tmp_path, monkeypatch)
+
+    def runner(**kwargs):
+        raise AssertionError("partition runner must not be called when no new observed date exists")
+
+    summary = refresh.refresh_incremental(
+        instrument_id=USDRUBF_INSTRUMENT_ID,
+        secid=USDRUBF_SECID,
+        artifact_version="no_new_date_v1",
         registry_path=registry,
         date_end="2026-06-09",
-        calendar_loader=calendar_loader,
+        observed_dates=["2026-06-09"],
         runner=runner,
     )
 
@@ -239,436 +326,64 @@ def test_pointer_no_op_date_end_equal_base_last_skips_calendar_and_runner(tmp_pa
     assert summary.payload["status"] == "no_op"
     assert summary.payload["quality_status"] == "passed"
     assert summary.payload["incremental_requested_dates"] == []
-    assert summary.payload["incremental_requested_date_count"] == 0
     assert summary.payload["accepted_manifest_pointer_updated"] is True
-    assert pointer_payload["accepted_manifest_reference"] == summary.manifest_path.as_posix()
-    assert pointer_payload["quality_status"] == "passed"
+    assert pointer_payload["last_valid_trade_date"] == "2026-06-09"
 
 
-def test_usdrubf_legacy_pointer_compatibility_when_per_instrument_pointer_missing(tmp_path, monkeypatch):
+def test_usdrubf_legacy_pointer_fallback_is_preserved(tmp_path, monkeypatch):
     monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
     registry = tmp_path / "registry.yaml"
     accepted_base = tmp_path / "accepted_base.json"
     write_registry(registry)
-    write_base_manifest(accepted_base, last_valid="2026-06-09")
-    per_instrument_pointer = usdrubf_pointer_path()
+    write_base_manifest(accepted_base)
     legacy_pointer = refresh.build_legacy_usdrubf_accepted_manifest_pointer_path()
+    per_instrument_pointer = refresh.build_accepted_manifest_pointer_path(USDRUBF_INSTRUMENT_ID, USDRUBF_SECID)
     write_pointer(legacy_pointer, accepted_base)
     assert not per_instrument_pointer.exists()
-
-    def runner(**kwargs):
-        return result_for_trade_date(kwargs["trade_date"], row_count=19)
 
     summary = refresh.refresh_incremental(
         instrument_id=USDRUBF_INSTRUMENT_ID,
         secid=USDRUBF_SECID,
-        artifact_version="refresh_pointer_legacy_usdrubf_v1",
+        artifact_version="legacy_pointer_v1",
         registry_path=registry,
         date_end="2026-06-10",
-        calendar_rows=calendar(("2026-06-09", True), ("2026-06-10", True)),
-        runner=runner,
+        observed_dates=["2026-06-09", "2026-06-10"],
+        runner=lambda **kwargs: result_for_trade_date(kwargs["trade_date"]),
     )
 
     pointer_payload = json.loads(legacy_pointer.read_text(encoding="utf-8"))
     assert summary.accepted_manifest_pointer_path == legacy_pointer
-    assert summary.payload["base_manifest_pointer_reference"] == legacy_pointer.as_posix()
-    assert summary.payload["accepted_manifest_pointer_reference"] == legacy_pointer.as_posix()
-    assert summary.payload["legacy_artifact_level_pointer_compatibility_used"] is True
-    assert pointer_payload["accepted_manifest_reference"] == summary.manifest_path.as_posix()
     assert pointer_payload["legacy_artifact_level_pointer_compatibility_used"] is True
     assert not per_instrument_pointer.exists()
 
 
-def test_calendar_base_url_uses_env_and_cli_override(tmp_path, monkeypatch):
-    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
-    monkeypatch.setenv("MOEX_CALENDAR_BASE_URL", "https://env-calendar.example")
-    monkeypatch.setenv("MOEX_API_URL", "https://wrong-apim.example")
-    registry = tmp_path / "registry.yaml"
-    accepted_base = tmp_path / "accepted_base.json"
-    write_registry(registry)
-    write_base_manifest(accepted_base, last_valid="2026-06-09")
-    pointer_path = usdrubf_pointer_path()
-    write_pointer(pointer_path, accepted_base)
-    seen_calendar_base_urls = []
-
-    def calendar_loader(*args, **kwargs):
-        seen_calendar_base_urls.append(kwargs["calendar_base_url"])
-        return calendar(("2026-06-09", True), ("2026-06-10", True))
-
-    def runner(**kwargs):
-        return result_for_trade_date(kwargs["trade_date"])
-
-    refresh.refresh_incremental(
-        instrument_id=USDRUBF_INSTRUMENT_ID,
-        secid=USDRUBF_SECID,
-        artifact_version="refresh_pointer_env_calendar_v1",
-        registry_path=registry,
-        date_end="2026-06-10",
-        calendar_loader=calendar_loader,
-        runner=runner,
-    )
-    write_pointer(pointer_path, accepted_base)
-    refresh.refresh_incremental(
-        instrument_id=USDRUBF_INSTRUMENT_ID,
-        secid=USDRUBF_SECID,
-        artifact_version="refresh_pointer_cli_calendar_v1",
-        registry_path=registry,
-        date_end="2026-06-10",
-        calendar_base_url="https://cli-calendar.example",
-        calendar_loader=calendar_loader,
-        runner=runner,
-    )
-
-    assert seen_calendar_base_urls == ["https://env-calendar.example", "https://cli-calendar.example"]
-
-
-def test_new_instrument_uses_per_instrument_pointer(tmp_path, monkeypatch):
+def test_new_instrument_prefers_per_instrument_pointer_and_never_mutates_legacy(tmp_path, monkeypatch):
     monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
     registry = tmp_path / "registry.yaml"
     sberf_base = tmp_path / "sberf_base.json"
     usdrubf_base = tmp_path / "usdrubf_base.json"
     write_registry(registry)
-    write_base_manifest(sberf_base, instrument_id=SBERF_INSTRUMENT_ID, secid=SBERF_SECID, last_valid="2026-06-09")
-    write_base_manifest(usdrubf_base, instrument_id=USDRUBF_INSTRUMENT_ID, secid=USDRUBF_SECID, last_valid="2026-06-09")
-    pointer_path = sberf_pointer_path()
+    write_base_manifest(sberf_base, instrument_id=SBERF_INSTRUMENT_ID, secid=SBERF_SECID)
+    write_base_manifest(usdrubf_base)
+    sberf_pointer = refresh.build_accepted_manifest_pointer_path(SBERF_INSTRUMENT_ID, SBERF_SECID)
     legacy_pointer = refresh.build_legacy_usdrubf_accepted_manifest_pointer_path()
-    write_pointer(pointer_path, sberf_base, instrument_id=SBERF_INSTRUMENT_ID, secid=SBERF_SECID)
+    write_pointer(sberf_pointer, sberf_base, instrument_id=SBERF_INSTRUMENT_ID, secid=SBERF_SECID)
     write_pointer(legacy_pointer, usdrubf_base)
-    original_legacy_pointer_text = legacy_pointer.read_text(encoding="utf-8")
-
-    def runner(**kwargs):
-        return result_for_trade_date(kwargs["trade_date"], row_count=23)
+    legacy_before = legacy_pointer.read_text(encoding="utf-8")
 
     summary = refresh.refresh_incremental(
         instrument_id=SBERF_INSTRUMENT_ID,
         secid=SBERF_SECID,
-        artifact_version="refresh_pointer_sberf_v1",
+        artifact_version="sberf_pointer_v1",
         registry_path=registry,
         date_end="2026-06-10",
-        calendar_rows=calendar(("2026-06-09", True), ("2026-06-10", True)),
-        runner=runner,
+        observed_dates=["2026-06-09", "2026-06-10"],
+        runner=lambda **kwargs: result_for_trade_date(kwargs["trade_date"], row_count=23),
     )
 
-    pointer_payload = json.loads(pointer_path.read_text(encoding="utf-8"))
-    assert summary.accepted_manifest_pointer_path == pointer_path
-    assert summary.payload["base_manifest_pointer_reference"] == pointer_path.as_posix()
-    assert "instrument_id=forts.sberf/secid=SBERF" in summary.payload["accepted_manifest_pointer_reference"]
+    pointer_payload = json.loads(sberf_pointer.read_text(encoding="utf-8"))
+    assert summary.accepted_manifest_pointer_path == sberf_pointer
     assert pointer_payload["instrument_id_scope"] == [SBERF_INSTRUMENT_ID]
     assert pointer_payload["secid_scope"] == [SBERF_SECID]
     assert pointer_payload["legacy_artifact_level_pointer_compatibility_used"] is False
-    assert legacy_pointer.read_text(encoding="utf-8") == original_legacy_pointer_text
-
-
-def test_two_instruments_cannot_collide(tmp_path, monkeypatch):
-    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
-    registry = tmp_path / "registry.yaml"
-    usdrubf_base = tmp_path / "usdrubf_base.json"
-    sberf_base = tmp_path / "sberf_base.json"
-    write_registry(registry)
-    write_base_manifest(usdrubf_base, instrument_id=USDRUBF_INSTRUMENT_ID, secid=USDRUBF_SECID, last_valid="2026-06-09")
-    write_base_manifest(sberf_base, instrument_id=SBERF_INSTRUMENT_ID, secid=SBERF_SECID, last_valid="2026-06-09")
-    usdrubf_pointer = usdrubf_pointer_path()
-    sberf_pointer = sberf_pointer_path()
-    write_pointer(usdrubf_pointer, usdrubf_base)
-    write_pointer(sberf_pointer, sberf_base, instrument_id=SBERF_INSTRUMENT_ID, secid=SBERF_SECID)
-    original_usdrubf_pointer_text = usdrubf_pointer.read_text(encoding="utf-8")
-    original_sberf_pointer_text = sberf_pointer.read_text(encoding="utf-8")
-
-    def runner(**kwargs):
-        return result_for_trade_date(kwargs["trade_date"], row_count=31)
-
-    summary = refresh.refresh_incremental(
-        instrument_id=SBERF_INSTRUMENT_ID,
-        secid=SBERF_SECID,
-        artifact_version="refresh_pointer_collision_sberf_v1",
-        registry_path=registry,
-        date_end="2026-06-10",
-        calendar_rows=calendar(("2026-06-09", True), ("2026-06-10", True)),
-        runner=runner,
-    )
-
-    assert usdrubf_pointer != sberf_pointer
-    assert summary.accepted_manifest_pointer_path == sberf_pointer
-    assert usdrubf_pointer.read_text(encoding="utf-8") == original_usdrubf_pointer_text
-    assert sberf_pointer.read_text(encoding="utf-8") != original_sberf_pointer_text
-
-
-def test_observed_source_mode_does_not_call_calendar_endpoint(tmp_path, monkeypatch):
-    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
-    registry = tmp_path / "registry.yaml"
-    accepted_base = tmp_path / "accepted_base.json"
-    write_registry(registry)
-    write_base_manifest(accepted_base, last_valid="2026-06-09")
-    pointer_path = usdrubf_pointer_path()
-    write_pointer(pointer_path, accepted_base)
-    calls = []
-
-    def calendar_loader(*args, **kwargs):
-        raise AssertionError("calendar loader must not be called in observed-source mode")
-
-    def runner(**kwargs):
-        calls.append(kwargs["trade_date"])
-        return result_for_trade_date(kwargs["trade_date"], row_count=3)
-
-    summary = refresh.refresh_incremental(
-        instrument_id=USDRUBF_INSTRUMENT_ID,
-        secid=USDRUBF_SECID,
-        artifact_version="refresh_pointer_observed_no_calendar_v1",
-        registry_path=registry,
-        date_end="2026-06-10",
-        incremental_mode=refresh.OBSERVED_SOURCE_MODE,
-        calendar_loader=calendar_loader,
-        runner=runner,
-    )
-
-    assert calls == ["2026-06-10"]
-    assert summary.payload["quality_status"] == "passed"
-    assert summary.payload["calendar_binding_status"] == refresh.OBSERVED_SOURCE_CALENDAR_BINDING_STATUS
-    assert summary.payload["calendar_endpoint_call_allowed"] is False
-    assert summary.payload["accepted_manifest_pointer_updated"] is True
-
-
-def test_observed_source_empty_date_is_skipped_not_failed(tmp_path, monkeypatch):
-    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
-    registry = tmp_path / "registry.yaml"
-    accepted_base = tmp_path / "accepted_base.json"
-    write_registry(registry)
-    write_base_manifest(accepted_base, last_valid="2026-06-09")
-    pointer_path = usdrubf_pointer_path()
-    write_pointer(pointer_path, accepted_base)
-    calls = []
-
-    def runner(**kwargs):
-        calls.append(kwargs["trade_date"])
-        if kwargs["trade_date"] == "2026-06-10":
-            raise ValueError("APIM tradestats response returned no rows")
-        return result_for_trade_date(kwargs["trade_date"], row_count=5)
-
-    summary = refresh.refresh_incremental(
-        instrument_id=USDRUBF_INSTRUMENT_ID,
-        secid=USDRUBF_SECID,
-        artifact_version="refresh_pointer_observed_skip_v1",
-        registry_path=registry,
-        date_end="2026-06-11",
-        incremental_mode=refresh.OBSERVED_SOURCE_MODE,
-        runner=runner,
-    )
-
-    pointer_payload = json.loads(pointer_path.read_text(encoding="utf-8"))
-    assert calls == ["2026-06-10", "2026-06-11"]
-    assert summary.payload["skipped_empty_source_dates"] == ["2026-06-10"]
-    assert summary.payload["incremental_succeeded_dates"] == ["2026-06-11"]
-    assert summary.payload["failed_dates"] == []
-    assert summary.payload["quality_status"] == "passed"
-    assert summary.payload["accepted_manifest_pointer_updated"] is True
-    assert pointer_payload["skipped_empty_source_dates"] == ["2026-06-10"]
-    assert pointer_payload["last_valid_trade_date"] == "2026-06-11"
-
-
-def test_observed_source_successful_new_date_advances_pointer(tmp_path, monkeypatch):
-    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
-    registry = tmp_path / "registry.yaml"
-    accepted_base = tmp_path / "accepted_base.json"
-    write_registry(registry)
-    write_base_manifest(accepted_base, last_valid="2026-06-09")
-    pointer_path = usdrubf_pointer_path()
-    write_pointer(pointer_path, accepted_base)
-    original_pointer_text = pointer_path.read_text(encoding="utf-8")
-
-    def runner(**kwargs):
-        return result_for_trade_date(kwargs["trade_date"], row_count=11)
-
-    summary = refresh.refresh_incremental(
-        instrument_id=USDRUBF_INSTRUMENT_ID,
-        secid=USDRUBF_SECID,
-        artifact_version="refresh_pointer_observed_success_v1",
-        registry_path=registry,
-        date_end="2026-06-10",
-        incremental_mode=refresh.OBSERVED_SOURCE_MODE,
-        runner=runner,
-    )
-
-    pointer_payload = json.loads(pointer_path.read_text(encoding="utf-8"))
-    assert pointer_path.read_text(encoding="utf-8") != original_pointer_text
-    assert summary.payload["quality_status"] == "passed"
-    assert summary.payload["incremental_requested_dates"] == ["2026-06-10"]
-    assert summary.payload["incremental_succeeded_dates"] == ["2026-06-10"]
-    assert summary.payload["accepted_manifest_pointer_updated"] is True
-    assert pointer_payload["accepted_manifest_reference"] == summary.manifest_path.as_posix()
-    assert pointer_payload["incremental_mode"] == refresh.OBSERVED_SOURCE_MODE
-    assert pointer_payload["calendar_binding_status"] == refresh.OBSERVED_SOURCE_CALENDAR_BINDING_STATUS
-
-
-def test_observed_source_advances_only_that_instrument_pointer(tmp_path, monkeypatch):
-    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
-    registry = tmp_path / "registry.yaml"
-    usdrubf_base = tmp_path / "usdrubf_base.json"
-    sberf_base = tmp_path / "sberf_base.json"
-    write_registry(registry)
-    write_base_manifest(usdrubf_base, instrument_id=USDRUBF_INSTRUMENT_ID, secid=USDRUBF_SECID, last_valid="2026-06-09")
-    write_base_manifest(sberf_base, instrument_id=SBERF_INSTRUMENT_ID, secid=SBERF_SECID, last_valid="2026-06-09")
-    usdrubf_pointer = usdrubf_pointer_path()
-    sberf_pointer = sberf_pointer_path()
-    write_pointer(usdrubf_pointer, usdrubf_base)
-    write_pointer(sberf_pointer, sberf_base, instrument_id=SBERF_INSTRUMENT_ID, secid=SBERF_SECID)
-    original_usdrubf_pointer_text = usdrubf_pointer.read_text(encoding="utf-8")
-    original_sberf_pointer_text = sberf_pointer.read_text(encoding="utf-8")
-
-    def calendar_loader(*args, **kwargs):
-        raise AssertionError("calendar loader must not be called in observed-source mode")
-
-    def runner(**kwargs):
-        return result_for_trade_date(kwargs["trade_date"], row_count=41)
-
-    summary = refresh.refresh_incremental(
-        instrument_id=USDRUBF_INSTRUMENT_ID,
-        secid=USDRUBF_SECID,
-        artifact_version="refresh_pointer_observed_usdrubf_only_v1",
-        registry_path=registry,
-        date_end="2026-06-10",
-        incremental_mode=refresh.OBSERVED_SOURCE_MODE,
-        calendar_loader=calendar_loader,
-        runner=runner,
-    )
-
-    assert summary.accepted_manifest_pointer_path == usdrubf_pointer
-    assert usdrubf_pointer.read_text(encoding="utf-8") != original_usdrubf_pointer_text
-    assert sberf_pointer.read_text(encoding="utf-8") == original_sberf_pointer_text
-
-
-def test_observed_source_failure_does_not_advance_pointer(tmp_path, monkeypatch):
-    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
-    registry = tmp_path / "registry.yaml"
-    accepted_base = tmp_path / "accepted_base.json"
-    write_registry(registry)
-    write_base_manifest(accepted_base, last_valid="2026-06-09")
-    pointer_path = usdrubf_pointer_path()
-    write_pointer(pointer_path, accepted_base)
-    original_pointer_text = pointer_path.read_text(encoding="utf-8")
-
-    def calendar_loader(*args, **kwargs):
-        raise AssertionError("calendar loader must not be called in observed-source mode")
-
-    def runner(**kwargs):
-        raise RuntimeError("schema mismatch")
-
-    summary = refresh.refresh_incremental(
-        instrument_id=USDRUBF_INSTRUMENT_ID,
-        secid=USDRUBF_SECID,
-        artifact_version="refresh_pointer_observed_failure_v1",
-        registry_path=registry,
-        date_end="2026-06-10",
-        incremental_mode=refresh.OBSERVED_SOURCE_MODE,
-        calendar_loader=calendar_loader,
-        runner=runner,
-    )
-
-    assert summary.payload["status"] == "failed"
-    assert summary.payload["quality_status"] == "failed"
-    assert summary.payload["accepted_manifest_pointer_updated"] is False
-    assert summary.payload["failed_dates"] == [{"trade_date": "2026-06-10", "error": "schema mismatch"}]
-    assert pointer_path.read_text(encoding="utf-8") == original_pointer_text
-
-
-def test_calendar_html_response_is_classified(monkeypatch):
-    import requests
-
-    calls = []
-
-    def fake_get(url, params, timeout):
-        calls.append((url, params, timeout))
-        return FakeCalendarResponse(
-            content_type="text/html; charset=utf-8",
-            json_error=json.JSONDecodeError("Expecting value", "<html>", 0),
-        )
-
-    monkeypatch.setattr(requests, "get", fake_get)
-
-    with pytest.raises(ValueError, match="calendar_fetch_non_json_response") as excinfo:
-        refresh.fetch_futures_calendar_rows(
-            "2026-06-10",
-            "2026-06-10",
-            timeout=7,
-            calendar_base_url="https://calendar.example",
-        )
-
-    assert "JSONDecodeError" not in str(excinfo.value)
-    assert calls[0][0] == "https://calendar.example/iss/calendars.json"
-    assert calls[0][1]["iss.only"] == "off_days"
-    assert calls[0][2] == 7
-
-
-def test_calendar_response_without_off_days_is_classified(monkeypatch):
-    import requests
-
-    def fake_get(url, params, timeout):
-        return FakeCalendarResponse(content_type="application/json; charset=utf-8", payload={"not_off_days": {}})
-
-    monkeypatch.setattr(requests, "get", fake_get)
-
-    with pytest.raises(ValueError, match="calendar_response_missing_off_days_table"):
-        refresh.fetch_futures_calendar_rows(
-            "2026-06-10",
-            "2026-06-10",
-            calendar_base_url="https://calendar.example",
-        )
-
-
-def test_failed_quality_does_not_advance_pointer(tmp_path, monkeypatch):
-    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
-    registry = tmp_path / "registry.yaml"
-    accepted_base = tmp_path / "accepted_base.json"
-    write_registry(registry)
-    write_base_manifest(accepted_base, last_valid="2026-06-09")
-    pointer_path = usdrubf_pointer_path()
-    write_pointer(pointer_path, accepted_base)
-    original_pointer_text = pointer_path.read_text(encoding="utf-8")
-
-    def runner(**kwargs):
-        raise RuntimeError("network down")
-
-    summary = refresh.refresh_incremental(
-        instrument_id=USDRUBF_INSTRUMENT_ID,
-        secid=USDRUBF_SECID,
-        artifact_version="refresh_pointer_failed_v1",
-        registry_path=registry,
-        date_end="2026-06-10",
-        calendar_rows=calendar(("2026-06-09", True), ("2026-06-10", True)),
-        runner=runner,
-    )
-
-    assert summary.payload["status"] == "failed"
-    assert summary.payload["quality_status"] == "failed"
-    assert summary.payload["accepted_manifest_pointer_updated"] is False
-    assert pointer_path.read_text(encoding="utf-8") == original_pointer_text
-
-
-def test_non_json_calendar_failure_is_classified_and_does_not_advance_pointer(tmp_path, monkeypatch):
-    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
-    registry = tmp_path / "registry.yaml"
-    accepted_base = tmp_path / "accepted_base.json"
-    write_registry(registry)
-    write_base_manifest(accepted_base, last_valid="2026-06-09")
-    pointer_path = usdrubf_pointer_path()
-    write_pointer(pointer_path, accepted_base)
-    original_pointer_text = pointer_path.read_text(encoding="utf-8")
-
-    def calendar_loader(*args, **kwargs):
-        raise json.JSONDecodeError("Expecting value", "", 0)
-
-    def runner(**kwargs):
-        raise AssertionError("runner must not be called when calendar fetch fails")
-
-    with pytest.raises(ValueError, match="calendar_fetch_non_json_response") as excinfo:
-        refresh.refresh_incremental(
-            instrument_id=USDRUBF_INSTRUMENT_ID,
-            secid=USDRUBF_SECID,
-            artifact_version="refresh_pointer_calendar_failure_v1",
-            registry_path=registry,
-            date_end="2026-06-10",
-            calendar_loader=calendar_loader,
-            runner=runner,
-        )
-
-    assert "JSONDecodeError" not in str(excinfo.value)
-    assert pointer_path.read_text(encoding="utf-8") == original_pointer_text
+    assert legacy_pointer.read_text(encoding="utf-8") == legacy_before
