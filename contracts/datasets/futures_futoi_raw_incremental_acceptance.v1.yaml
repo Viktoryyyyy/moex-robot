@@ -22,6 +22,7 @@ semantics:
   skipped_empty_source_date_policy: canonical_moex_futures_calendar_non_trading_only
   skipped_date_calendar_source_id: moex_iss_futures_calendar
   skipped_date_calendar_endpoint: /iss/calendars.json
+  skipped_date_calendar_evidence_run_bound_create_only: true
 paths:
   immutable_run_root_pattern: ${MOEX_DATA_ROOT}/state/accepted_manifests/futoi_raw_incremental/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}
   immutable_manifest_pattern: ${MOEX_DATA_ROOT}/state/accepted_manifests/futoi_raw_incremental/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}/manifest.json
@@ -37,6 +38,13 @@ acceptance:
   require_skipped_dates_calendar_validated_in_manifest_and_quality: true
   require_skipped_non_trading_dates_equal_partitions_skipped: true
   require_calendar_source_identity_match_canonical_moex_futures_calendar: true
+  require_manifest_and_quality_same_calendar_evidence_ref_and_sha256: true
+  require_calendar_evidence_stable_non_symlink_snapshot: true
+  require_calendar_evidence_run_range_source_endpoint_and_rows_validation: true
+  recompute_skipped_dates_offline_with_canonical_calendar_helpers: true
+  require_every_skipped_date_explicitly_non_trading: true
+  freeze_validated_calendar_evidence_bytes_create_only: true
+  bind_accepted_calendar_evidence_snapshot_ref_and_sha256: true
   acceptance_calendar_network_access_required: false
   require_zero_failed_dates: true
   require_quality_status_pass: true
