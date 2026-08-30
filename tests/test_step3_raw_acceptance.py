@@ -239,9 +239,9 @@ def test_transaction_rolls_back_existing_pointer(tmp_path: Path, monkeypatch: py
     assert json.loads(pointer.read_text()) == {"sentinel": "old"}
 
 
-def test_pilot_rejects_trade_date_different_from_as_of_before_source_access() -> None:
-    with pytest.raises(pilot_runner.Step3PilotError, match="trade_date must equal as_of_date"):
-        pilot_runner.run_pilot(trade_date="2026-08-21", as_of_date=TRADE_DATE, artifact_version="mismatch")
+def test_pilot_rejects_trade_date_later_than_as_of_before_source_access() -> None:
+    with pytest.raises(pilot_runner.Step3PilotError, match="trade_date must not be later than as_of_date"):
+        pilot_runner.run_pilot(trade_date="2026-08-25", as_of_date=TRADE_DATE, artifact_version="mismatch")
 
 
 def test_pilot_run_id_cannot_be_reused(tmp_path: Path) -> None:

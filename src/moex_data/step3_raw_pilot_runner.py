@@ -47,10 +47,8 @@ def _require_date(value: object, field_name: str) -> str:
 def _require_causal_dates(trade_date: object, as_of_date: object) -> tuple[str, str]:
     checked_trade_date = _require_date(trade_date, "trade_date")
     checked_as_of_date = _require_date(as_of_date, "as_of_date")
-    if checked_trade_date != checked_as_of_date:
-        raise Step3PilotError(
-            "trade_date must equal as_of_date while front/next binding uses the unversioned current FORTS reference"
-        )
+    if checked_trade_date > checked_as_of_date:
+        raise Step3PilotError("trade_date must not be later than as_of_date")
     return checked_trade_date, checked_as_of_date
 
 
@@ -123,14 +121,14 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
     bindings = binding.bind_front_next(
         reference_frame,
         root="Si",
-        as_of_date=checked_as_of_date,
+        as_of_date=checked_trade_date,
         availability_ts_utc=reference_observed_at_utc,
     )
     bindings.extend(
         binding.bind_front_next(
             reference_frame,
             root="CR",
-            as_of_date=checked_as_of_date,
+            as_of_date=checked_trade_date,
             availability_ts_utc=reference_observed_at_utc,
         )
     )

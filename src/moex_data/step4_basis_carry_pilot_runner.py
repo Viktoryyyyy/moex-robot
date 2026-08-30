@@ -142,8 +142,8 @@ def _lineage(payload: Mapping[str, object]) -> dict[str, object]:
 def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_file: str = CANONICAL_ENV_PATH, timeout: float = 60.0) -> dict[str, object]:
     checked_trade_date = _require_date(trade_date, "trade_date")
     checked_as_of_date = _require_date(as_of_date, "as_of_date")
-    if checked_trade_date != checked_as_of_date:
-        raise Step4PilotError("trade_date must equal as_of_date for the unversioned current FORTS reference")
+    if checked_trade_date > checked_as_of_date:
+        raise Step4PilotError("trade_date must not be later than as_of_date")
     base_artifact = _require_token(artifact_version, "artifact_version")
     quotes.load_env_file(env_file)
     if not str(os.environ.get("MOEX_API_KEY", "")).strip():
@@ -157,7 +157,7 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
     bindings = binding.bind_front_next(
         reference_frame,
         root="Si",
-        as_of_date=checked_as_of_date,
+        as_of_date=checked_trade_date,
         availability_ts_utc=observed_at,
         minimum_days_to_expiry=FRONT_NEXT_MINIMUM_DAYS_TO_EXPIRY,
     )
@@ -165,7 +165,7 @@ def run_pilot(*, trade_date: str, as_of_date: str, artifact_version: str, env_fi
         binding.bind_front_next(
             reference_frame,
             root="CR",
-            as_of_date=checked_as_of_date,
+            as_of_date=checked_trade_date,
             availability_ts_utc=observed_at,
             minimum_days_to_expiry=FRONT_NEXT_MINIMUM_DAYS_TO_EXPIRY,
         )

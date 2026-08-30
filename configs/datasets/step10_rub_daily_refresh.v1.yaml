@@ -1,0 +1,125 @@
+version: 1
+project: MOEX_Bot
+stage: 10
+status: rolling_scheduler_candidate
+contract_id: step10_rub_daily_refresh_acceptance.v1
+runner: src/moex_data/step10_rub_refresh_dispatcher.py
+full_runner: src/moex_data/step10_rub_refresh_scheduler.py
+futoi_governance_contract: contracts/intelligence/usdrubf_futoi_live_acceptance_governance_v1.json
+
+execution:
+  explicit_through_date_required: true
+  explicit_run_id_required: true
+  through_date_semantics: completed_Moscow_calendar_date_strictly_before_runner_today
+  market_timezone: Europe/Moscow
+  implicit_latest_allowed: false
+  run_id_reuse_allowed: false
+  fail_closed: true
+  current_pointer_rollback_on_failure: true
+  network_calls_date_bounded: true
+  dispatcher_selects_mode_from_repo_governance: true
+  independent_stage5_full_mode_readiness_gate_required: true
+
+refresh_modes:
+  FUTOI_PROMOTION_ALLOWED_FULL_STAGE10:
+    condition: all_required_futoi_gates_PASS_and_factual_live_authority_true_and_stage5_full_mode_ready_true
+    refresh_order:
+      - futures_calendar
+      - stage5_futoi_raw_and_rolling_derived
+      - stage7_perpetual_raw_and_rolling_derived
+      - stage3_current_raw_pilot_and_promotion
+      - stage4_basis_carry_pilot_and_promotion
+      - governed_derived_pointer_promotion
+      - stage9_daily_weekly_post_refresh_smoke
+  FUTOI_GOVERNED_BLOCKED_STAGE7_ONLY:
+    condition: futoi_stage5_promotion_not_allowed_or_stage5_full_mode_not_ready
+    refresh_order:
+      - futoi_governance
+      - stage5_full_mode_readiness
+      - futures_calendar
+      - stage7_perpetual_raw_and_rolling_derived
+      - stage3_current_raw_pilot_and_promotion
+      - stage4_basis_carry_pilot_and_promotion
+      - stage7_pointer_promotion
+      - stage9_daily_weekly_post_refresh_smoke
+    stage5_materialization_allowed: false
+    stage5_pointer_promotion_allowed: false
+    stage7_refresh_continues: true
+
+dependencies:
+  stage5:
+    source: futures_futoi_raw
+    instruments: [si_futures_family, cr_futures_family]
+    raw_producer: moex_data.futures.materialize_futoi_instrument.v1
+    historical_baseline_pointer: stage5_current_accepted_pointer
+    rolling_features: futures_futoi_positioning_features_d1
+    promotion_requires_futoi_factual_live_authority: true
+    promotion_requires_independent_full_mode_readiness: true
+    current_full_mode_readiness: false
+    current_full_mode_blocker: full_history_base_plus_delta_lineage_not_yet_accepted
+  stage7:
+    source: futures_raw_5m
+    instruments: [usdrubf_futures_family, cnyrubf_futures_family]
+    raw_producer: moex_data.futures.materialize_forts_raw_5m_instrument.v2
+    historical_baseline_pointer: stage7_current_accepted_pointer
+    outputs: [rub_native_ohlcv_htf, rub_technical_features_htf]
+    publication_independent_of_futoi_when_governed_blocked: true
+  stage3:
+    contract: step3_canonical_raw_acceptance.v1
+  stage4:
+    contract: step4_rub_basis_carry_acceptance.v1
+  stage9:
+    daily_expected_block_count: 20
+    weekly_expected_block_count: 24
+
+rolling_semantics:
+  preserve_stage2_historical_attestation: true
+  preserve_stage5_historical_pilot: true
+  preserve_stage7_historical_pilot: true
+  cross_stage5_stage7_base_date_alignment_required_when_full_stage10_runs: true
+  cross_stage5_stage7_alignment_not_required_in_futoi_blocked_stage7_only_mode: true
+  catch_up_uses_moex_futures_calendar: true
+  raw_inputs_frozen_into_run_scope_before_derived_build: true
+  derived_outputs_are_full_history_snapshots: true
+  historical_pit_research_ready_claimed: false
+
+promotion:
+  stage5_pointer_count_when_refreshed: 4
+  stage7_pointer_count_when_refreshed: 8
+  full_mode_stage5_stage7_promotion_transactional: true
+  blocked_mode_stage7_promotion_transactional: true
+  blocked_mode_stage5_pointer_count: 0
+  stage5_full_mode_requires_code_reviewed_readiness_flip: true
+  sha256_manifest_required: true
+  sha256_quality_report_required: true
+  sha256_partition_required: true
+
+observability:
+  run_manifest: ${MOEX_DATA_ROOT}/runs/step10_rub_daily_refresh/run_id={RUN_ID}/run_manifest.json
+  reports_dispatcher_mode: true
+  reports_futoi_governance: true
+  reports_stage5_full_mode_readiness: true
+  reports_new_trading_dates: true
+  reports_source_refresh_status: true
+  reports_stage5_stage7_output_counts: true
+  reports_stage9_smoke: true
+  reports_pointer_rollback_status_on_failure: true
+
+systemd:
+  service: ops/systemd/moex-rub-stage10-daily-refresh.service
+  timer: ops/systemd/moex-rub-stage10-daily-refresh.timer
+  target_time_msk: '00:30'
+  through_date_rule: previous_Moscow_calendar_date
+  persistent: true
+  lock: '%h/moex_bot/data/locks/moex-rub-stage10-daily-refresh.lock'
+  entrypoint: moex_data.step10_rub_refresh_dispatcher
+
+readiness:
+  scheduler_ready_after_exact_head_ci_and_review: true
+  futoi_live_authority_required_for_stage7_refresh: false
+  futoi_live_authority_required_for_stage5_promotion: true
+  stage5_full_mode_ready: false
+  stage5_full_mode_activation_requires_separate_code_change: true
+  broker_write_access: false
+  trade_recommendation_generation: false
+  scenario_probability_generation: false

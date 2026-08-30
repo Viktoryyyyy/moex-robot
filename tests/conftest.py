@@ -32,6 +32,44 @@ def _dates(start: str, end: str, missing: set[str]) -> tuple[str, ...]:
 
 
 @pytest.fixture(autouse=True)
+def _stage10_legacy_governance_fixture_adapter(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
+    """Keep pre-governance Stage 10 unit scenarios explicit; production governance stays fail-closed."""
+    if Path(str(request.fspath)).name != "test_step10_rub_refresh_scheduler.py":
+        return
+
+    from moex_data import step10_rub_refresh_scheduler as step10
+
+    monkeypatch.setattr(
+        step10,
+        "_futoi_stage5_promotion_governance",
+        lambda _repo: {
+            "contract_ref": "test_fixture",
+            "status": "LIVE_ACCEPTED_TEST_FIXTURE",
+            "required_gate_ids": ["test_fixture"],
+            "blocked_gate_ids": [],
+            "all_required_gates_pass": True,
+            "factual_live_authority": True,
+            "directional_authority": False,
+            "action_authority": False,
+            "promotion_allowed": True,
+        },
+    )
+
+
+@pytest.fixture(autouse=True)
+def _stage10_dispatcher_full_mode_fixture(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
+    """Only the explicit delegation unit test may bypass the production Stage 5 readiness block."""
+    if Path(str(request.fspath)).name != "test_step10_rub_refresh_dispatcher.py":
+        return
+    if request.node.name != "test_allowed_futoi_delegates_to_full_stage10":
+        return
+
+    from moex_data import step10_rub_refresh_dispatcher as dispatcher
+
+    monkeypatch.setattr(dispatcher, "STAGE5_FULL_MODE_READY", True)
+
+
+@pytest.fixture(autouse=True)
 def _stage5_legacy_fixture_adapter(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
     """Adapt the pre-#386 Stage 5 synthetic fixture; never changes production fallback behavior."""
     if Path(str(request.fspath)).name != "test_step5_futoi_positioning_acceptance.py":
