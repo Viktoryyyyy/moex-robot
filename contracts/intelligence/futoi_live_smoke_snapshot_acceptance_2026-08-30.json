@@ -1,0 +1,53 @@
+{
+  "project": "MOEX_Bot",
+  "schema_version": "futoi_live_smoke_snapshot_acceptance.v1",
+  "recorded_at": "2026-08-30",
+  "source_of_truth_main_sha": "5075ad0f6b6727c44480ab3b4b573f2e86522d35",
+  "canonical_live_smoke": {
+    "status": "PASS",
+    "run_id": "futoi_live_smoke_20260830_141353",
+    "source_id": "moex_algopack_futoi",
+    "instrument_id": "si_futures_family",
+    "trade_date": "2026-08-29",
+    "source_row_count": 218,
+    "data_as_of": "2026-08-29T16:00:00+00:00",
+    "last_success_at": "2026-08-30T14:13:54+00:00",
+    "quality_status": "PASS",
+    "acceptance_status": "PASS",
+    "freshness_status": "FRESH",
+    "fiz_yur_alignment": "latest_exact_shared_source_event_ts_and_sess_id_after_max_seqnum_revision_resolution",
+    "fiz_net": 1175869,
+    "yur_net": -1175869,
+    "total_open_interest": 5770264,
+    "raw_partition_ref": "${MOEX_DATA_ROOT}/market/supplementary/dataset_id=futures_futoi_raw/instrument_id=si_futures_family/trade_date=2026-08-29/source=moex_algopack_futoi/part.parquet",
+    "raw_partition_sha256": "09156a2ef8ea3a0979279dd29acb57995e85a56eabb7d3a1853de699af57ea9a",
+    "raw_quality_report_sha256": "57ca168faf8d1a3cafdb336750dcf9e2aa0dba2989510ea1d6969714760d4690",
+    "raw_refresh_manifest_sha256": "0512ecfca2751089507dc3e8b5e701dc34b32fe03af4f2f5c76e1a8f22005246",
+    "factual_authority_at_smoke": false,
+    "directional_authority": false,
+    "action_authority": false
+  },
+  "snapshot_integration_smoke": {
+    "status": "PASS",
+    "snapshot_generated_at_utc": "2026-08-30T14:15:05.340820+00:00",
+    "component_id": "futoi_live",
+    "component_status": "GOVERNED_BLOCKED",
+    "candidate_status": "PASS",
+    "candidate_data_as_of": "2026-08-29T16:00:00+00:00",
+    "candidate_quality_status": "PASS",
+    "candidate_acceptance_status": "PASS",
+    "consumer_factual_use_allowed": false,
+    "factual_authority": false,
+    "directional_authority": false,
+    "action_authority": false,
+    "missing_or_blocked_must_not_be_interpreted_as_neutral": true,
+    "result": "canonical persisted FUTOI factual artifact is exposed in rub_chat_analysis_snapshot.v1 through the governed factual-only component without enabling consumer factual use before governance acceptance"
+  },
+  "remaining_acceptance_blocker": "recurring_live_quality_and_freshness",
+  "authority_after_this_evidence": {
+    "factual_live_authority": false,
+    "directional_authority": false,
+    "action_authority": false,
+    "buy_sell_authority": false
+  }
+}

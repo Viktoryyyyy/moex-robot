@@ -14,6 +14,7 @@ from src.moex_research.runners.usdrubf_phase8_7a_futoi_si_source_validation impo
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = REPO_ROOT / "contracts/intelligence/usdrubf_futoi_live_acceptance_governance_v1.json"
 LICENSE_EVIDENCE_PATH = REPO_ROOT / "contracts/intelligence/futoi_si_license_access_validation.json"
+LIVE_ACCEPTANCE_EVIDENCE_PATH = REPO_ROOT / "contracts/intelligence/futoi_live_smoke_snapshot_acceptance_2026-08-30.json"
 SNAPSHOT_PATH = REPO_ROOT / "src/moex_research/runners/usdrubf_s7_3_chat_analysis_snapshot.py"
 LIVE_SHADOW_PATH = REPO_ROOT / "src/moex_research/runners/usdrubf_live_shadow_smoke.py"
 
@@ -52,6 +53,10 @@ def _license_evidence() -> dict[str, object]:
     return json.loads(LICENSE_EVIDENCE_PATH.read_text(encoding="utf-8"))
 
 
+def _live_acceptance_evidence() -> dict[str, object]:
+    return json.loads(LIVE_ACCEPTANCE_EVIDENCE_PATH.read_text(encoding="utf-8"))
+
+
 def _function(path: Path, name: str) -> ast.FunctionDef:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     functions = [
@@ -83,7 +88,7 @@ def _assert_loader_disabled(function: ast.FunctionDef) -> None:
     assert enabled_keywords[0].value.value is False
 
 
-def test_futoi_live_acceptance_is_explicitly_governed_blocked() -> None:
+def test_futoi_live_acceptance_is_blocked_only_by_recurring_freshness() -> None:
     contract = _contract()
 
     assert contract["project"] == "MOEX_Bot"
@@ -92,13 +97,18 @@ def test_futoi_live_acceptance_is_explicitly_governed_blocked() -> None:
     assert contract["acceptance_rule"]["adapter_working_is_not_live_acceptance"] is True
     assert contract["acceptance_rule"]["successful_authenticated_request_is_not_license_acceptance"] is True
     assert contract["acceptance_rule"]["account_owner_attestation_may_satisfy_account_specific_internal_use_permission"] is True
+    assert contract["acceptance_rule"]["factual_live_authority_requires_all_required_gates_pass"] is True
+    assert contract["acceptance_rule"]["directional_and_action_authority_require_separate_predictive_validation"] is True
     assert contract["source_of_truth"]["license_access_evidence_ref"] == "contracts/intelligence/futoi_si_license_access_validation.json"
+    assert contract["source_of_truth"]["live_smoke_snapshot_evidence_ref"] == "contracts/intelligence/futoi_live_smoke_snapshot_acceptance_2026-08-30.json"
 
     gates = {gate["gate_id"]: gate for gate in contract["gates"]}
     assert set(gates) == REQUIRED_GATES
     assert all(gate["required"] is True for gate in gates.values())
     assert all(gate["status"] in {"PASS", "BLOCKED"} for gate in gates.values())
-    assert any(gate["status"] == "BLOCKED" for gate in gates.values())
+    assert {gate_id for gate_id, gate in gates.items() if gate["status"] == "BLOCKED"} == {
+        "recurring_live_quality_and_freshness"
+    }
 
     license_gate = gates["license_access_and_derived_use"]
     assert license_gate["status"] == "PASS"
@@ -143,9 +153,28 @@ def test_futoi_live_acceptance_is_explicitly_governed_blocked() -> None:
     assert normalized["permitted_derived_feature_use"] is True
     assert normalized["blocker"] is None
 
-    assert gates["canonical_live_smoke"]["status"] == "BLOCKED"
+    live_evidence = _live_acceptance_evidence()
+    assert live_evidence["project"] == "MOEX_Bot"
+    assert live_evidence["canonical_live_smoke"]["status"] == "PASS"
+    assert live_evidence["canonical_live_smoke"]["run_id"] == "futoi_live_smoke_20260830_141353"
+    assert live_evidence["canonical_live_smoke"]["source_id"] == "moex_algopack_futoi"
+    assert live_evidence["canonical_live_smoke"]["trade_date"] == "2026-08-29"
+    assert live_evidence["canonical_live_smoke"]["source_row_count"] == 218
+    assert live_evidence["canonical_live_smoke"]["quality_status"] == "PASS"
+    assert live_evidence["canonical_live_smoke"]["acceptance_status"] == "PASS"
+    assert live_evidence["canonical_live_smoke"]["freshness_status"] == "FRESH"
+    assert live_evidence["canonical_live_smoke"]["fiz_net"] + live_evidence["canonical_live_smoke"]["yur_net"] == 0
+    assert live_evidence["snapshot_integration_smoke"]["status"] == "PASS"
+    assert live_evidence["snapshot_integration_smoke"]["component_status"] == "GOVERNED_BLOCKED"
+    assert live_evidence["snapshot_integration_smoke"]["candidate_status"] == "PASS"
+    assert live_evidence["snapshot_integration_smoke"]["consumer_factual_use_allowed"] is False
+
+    assert gates["canonical_live_smoke"]["status"] == "PASS"
     assert gates["recurring_live_quality_and_freshness"]["status"] == "BLOCKED"
-    assert gates["snapshot_live_enable"]["status"] == "BLOCKED"
+    assert gates["snapshot_live_enable"]["status"] == "PASS"
+    assert contract["acceptance_progress"]["required_gate_count"] == 10
+    assert contract["acceptance_progress"]["passed_gate_count"] == 9
+    assert contract["acceptance_progress"]["blocked_gate_ids"] == ["recurring_live_quality_and_freshness"]
     assert contract["architecture_decision"]["legacy_phase8_transport_may_become_live_authority"] is False
 
 
@@ -180,7 +209,7 @@ def test_disabled_loader_returns_governed_blocked_fallback() -> None:
     assert context.details["reason"] == "live_futoi_not_explicitly_enabled"
 
 
-def test_snapshot_remains_fail_closed_while_acceptance_is_blocked() -> None:
+def test_snapshot_market_bridge_remains_fail_closed_while_factual_acceptance_is_blocked() -> None:
     assert _contract()["status"] == "FUTOI_GOVERNED_BLOCKED"
     function = _function(SNAPSHOT_PATH, "_live_market_component")
     _assert_loader_disabled(function)
