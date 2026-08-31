@@ -148,7 +148,6 @@ class RubFactualSnapshotHTTPBridge:
 
 
 _bridge: RubFactualSnapshotHTTPBridge | None = None
-mcp = FastMCP("moex-rub-factual-snapshot")
 
 
 def configure_bridge(environ: Mapping[str, str] | None = None) -> RubFactualSnapshotHTTPBridge:
@@ -165,7 +164,6 @@ def _configured_bridge() -> RubFactualSnapshotHTTPBridge:
     return _bridge
 
 
-@mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def get_rub_factual_snapshot() -> dict[str, Any]:
     """Return the canonical RUB factual snapshot exactly as supplied by the factual API.
 
@@ -176,7 +174,6 @@ def get_rub_factual_snapshot() -> dict[str, Any]:
     return _configured_bridge().get_snapshot()
 
 
-@mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def get_rub_snapshot_readiness() -> dict[str, Any]:
     """Return canonical factual snapshot readiness/freshness state from the factual API.
 
@@ -185,6 +182,30 @@ def get_rub_snapshot_readiness() -> dict[str, Any]:
     """
 
     return _configured_bridge().get_readiness()
+
+
+def build_mcp_server(
+    *,
+    host: str = DEFAULT_MCP_HTTP_HOST,
+    port: int = DEFAULT_MCP_HTTP_PORT,
+) -> FastMCP:
+    """Build the same two-tool MCP surface with SDK-1.x transport settings."""
+
+    bound_host, bound_port = _validated_http_origin(host, port)
+    server = FastMCP(
+        "moex-rub-factual-snapshot",
+        host=bound_host,
+        port=bound_port,
+        streamable_http_path=MCP_HTTP_PATH,
+        stateless_http=True,
+        json_response=True,
+    )
+    server.tool(annotations=READ_ONLY_ANNOTATIONS)(get_rub_factual_snapshot)
+    server.tool(annotations=READ_ONLY_ANNOTATIONS)(get_rub_snapshot_readiness)
+    return server
+
+
+mcp = build_mcp_server()
 
 
 def run_mcp(
@@ -202,14 +223,8 @@ def run_mcp(
 
     bound_host, bound_port = _validated_http_origin(host, port)
     configure_bridge()
-    mcp.run(
-        transport="streamable-http",
-        host=bound_host,
-        port=bound_port,
-        streamable_http_path=MCP_HTTP_PATH,
-        stateless_http=True,
-        json_response=True,
-    )
+    http_mcp = build_mcp_server(host=bound_host, port=bound_port)
+    http_mcp.run(transport="streamable-http")
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
