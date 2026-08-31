@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,10 @@ SNAPSHOT_PATH = "/v1/rub/factual-snapshot"
 READINESS_PATH = "/readyz"
 CONNECT_TIMEOUT_SECONDS = 2.0
 READ_TIMEOUT_SECONDS = 5.0
+DEFAULT_MCP_HTTP_HOST = "127.0.0.1"
+DEFAULT_MCP_HTTP_PORT = 8766
+MCP_HTTP_PATH = "/mcp"
+SUPPORTED_TRANSPORTS = ("stdio", "streamable-http")
 READ_ONLY_ANNOTATIONS = ToolAnnotations(
     readOnlyHint=True,
     destructiveHint=False,
@@ -53,6 +58,16 @@ def _validated_token(value: object, *, source: str) -> str:
             f"{TOKEN_ENV} in {source} must not contain whitespace"
         )
     return value
+
+
+def _validated_http_origin(host: str, port: int) -> tuple[str, int]:
+    if host != DEFAULT_MCP_HTTP_HOST:
+        raise RubSnapshotBridgeConfigurationError(
+            f"streamable HTTP MCP must bind only to {DEFAULT_MCP_HTTP_HOST}"
+        )
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        raise RubSnapshotBridgeConfigurationError("streamable HTTP MCP port must be 1..65535")
+    return host, port
 
 
 def load_api_token(environ: Mapping[str, str] | None = None) -> str:
@@ -133,7 +148,6 @@ class RubFactualSnapshotHTTPBridge:
 
 
 _bridge: RubFactualSnapshotHTTPBridge | None = None
-mcp = FastMCP("moex-rub-factual-snapshot")
 
 
 def configure_bridge(environ: Mapping[str, str] | None = None) -> RubFactualSnapshotHTTPBridge:
@@ -150,7 +164,6 @@ def _configured_bridge() -> RubFactualSnapshotHTTPBridge:
     return _bridge
 
 
-@mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def get_rub_factual_snapshot() -> dict[str, Any]:
     """Return the canonical RUB factual snapshot exactly as supplied by the factual API.
 
@@ -161,7 +174,6 @@ def get_rub_factual_snapshot() -> dict[str, Any]:
     return _configured_bridge().get_snapshot()
 
 
-@mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def get_rub_snapshot_readiness() -> dict[str, Any]:
     """Return canonical factual snapshot readiness/freshness state from the factual API.
 
@@ -172,9 +184,60 @@ def get_rub_snapshot_readiness() -> dict[str, Any]:
     return _configured_bridge().get_readiness()
 
 
-def main() -> int:
+def build_mcp_server(
+    *,
+    host: str = DEFAULT_MCP_HTTP_HOST,
+    port: int = DEFAULT_MCP_HTTP_PORT,
+) -> FastMCP:
+    """Build the same two-tool MCP surface with SDK-1.x transport settings."""
+
+    bound_host, bound_port = _validated_http_origin(host, port)
+    server = FastMCP(
+        "moex-rub-factual-snapshot",
+        host=bound_host,
+        port=bound_port,
+        streamable_http_path=MCP_HTTP_PATH,
+        stateless_http=True,
+        json_response=True,
+    )
+    server.tool(annotations=READ_ONLY_ANNOTATIONS)(get_rub_factual_snapshot)
+    server.tool(annotations=READ_ONLY_ANNOTATIONS)(get_rub_snapshot_readiness)
+    return server
+
+
+mcp = build_mcp_server()
+
+
+def run_mcp(
+    *,
+    transport: str = "stdio",
+    host: str = DEFAULT_MCP_HTTP_HOST,
+    port: int = DEFAULT_MCP_HTTP_PORT,
+) -> None:
+    if transport == "stdio":
+        configure_bridge()
+        mcp.run(transport="stdio")
+        return
+    if transport != "streamable-http":
+        raise RubSnapshotBridgeConfigurationError(f"unsupported MCP transport: {transport}")
+
+    bound_host, bound_port = _validated_http_origin(host, port)
     configure_bridge()
-    mcp.run(transport="stdio")
+    http_mcp = build_mcp_server(host=bound_host, port=bound_port)
+    http_mcp.run(transport="streamable-http")
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="MOEX Bot read-only RUB factual snapshot MCP bridge")
+    parser.add_argument("--transport", choices=SUPPORTED_TRANSPORTS, default="stdio")
+    parser.add_argument("--host", default=DEFAULT_MCP_HTTP_HOST)
+    parser.add_argument("--port", type=int, default=DEFAULT_MCP_HTTP_PORT)
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_arg_parser().parse_args(argv)
+    run_mcp(transport=args.transport, host=args.host, port=args.port)
     return 0
 
 

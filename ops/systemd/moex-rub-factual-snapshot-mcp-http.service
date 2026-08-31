@@ -1,0 +1,28 @@
+[Unit]
+Description=MOEX Bot RUB factual snapshot read-only MCP Streamable HTTP origin
+After=network-online.target moex-rub-factual-snapshot-api.service
+Wants=network-online.target moex-rub-factual-snapshot-api.service
+
+[Service]
+Type=simple
+User=trader
+WorkingDirectory=/home/trader/moex_bot/moex-robot
+Environment=PYTHONPATH=.:src
+Environment=MOEX_ENV_FILE=/home/trader/moex_bot/.env
+ExecStart=/home/trader/moex_bot/venv/bin/python -m misc.mcp_rub_factual_snapshot_bridge --transport streamable-http --host 127.0.0.1 --port 8766
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
