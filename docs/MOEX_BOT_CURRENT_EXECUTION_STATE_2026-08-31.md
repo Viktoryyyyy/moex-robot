@@ -188,9 +188,9 @@ stage5.output_count=0
 
 Stage 5 must remain disabled unless separately authorized through the project governance process.
 
-## 9. Stage 9 smoke state and known context gap
+## 9. Stage 9, news/macro and chat snapshot boundary
 
-Validated live smoke:
+Validated Stage 9 smoke from the successful Stage 10 run:
 
 ```text
 stage9_smoke.status=passed
@@ -200,11 +200,58 @@ daily_bundle_status=partial_external_context_required_position_risk_not_supplied
 weekly_bundle_status=partial_external_context_and_policy_gaps_position_risk_not_supplied
 ```
 
-Therefore the currently validated market-data pipeline must not be described as a complete news/macro/position-risk analysis bundle. The live Stage 9 result explicitly records missing external context and position-risk inputs.
+Therefore Stage 9 by itself must not be described as a complete news/macro/position-risk bundle.
 
-At the date of this handoff, no separate news/macro feed is claimed here as an accepted active runtime input. Historical branches or files are not proof of active `main` state.
+Separately, current `main` contains a dedicated persisted S7.3 chat-analysis snapshot layer. Its canonical producer set explicitly includes:
 
-## 10. Operational systemd state
+```text
+stage9_daily
+stage9_weekly
+live_market_structure
+cbr_macro
+official_news
+cnyrub_spot_live
+cnyrubf_live
+```
+
+The snapshot also carries a governed-blocked oil component until an oil source is `LIVE_ACCEPTED`. The persisted snapshot schema is `rub_chat_analysis_snapshot.v1`; the repository-defined relative state path is:
+
+```text
+state/rub_intelligence/chat_analysis_snapshot/current.json
+```
+
+under `MOEX_DATA_ROOT`.
+
+The `official_news` component is built from the repository live official-news pipeline and is explicitly bounded as:
+
+```text
+mode=LIVE_RSS_DETERMINISTIC_NEUTRAL
+directional_action_authority=false
+```
+
+The `cbr_macro` component is read as factual live CBR macro state with `action_authority=false`.
+
+This means news/macro collection code is present on current `main` and is part of the chat-snapshot producer architecture. The successful Stage 10 evidence above does not by itself prove that every current chat-snapshot component is live/READY at this exact moment; that must be established by the fresh snapshot refresh/read validation performed after this documentation merge.
+
+## 10. Existing read-only chat consumer boundary
+
+Current `main` already contains a fail-closed read-only consumer:
+
+```text
+src/moex_research/consumers/usdrubf_chat_snapshot_consumer.py
+```
+
+It reads only the canonical persisted chat snapshot, validates schema/project/freshness/readiness/authority boundaries, and does not fetch arbitrary market/news data on behalf of a chat.
+
+There is also an MCP server adapter:
+
+```text
+src/misc/mcp_rub_analysis_snapshot_server.py
+```
+
+Its only tool is `rub_analysis_snapshot()`, which returns the validated canonical persisted snapshot through the consumer above. It intentionally exposes no direct MOEX/news/macro fetch, scenario generation, BUY/SELL/OUT, broker, or Telegram action. The current adapter runs MCP over `stdio`; it is not yet the server-network API requested for remote chat access.
+
+## 11. Operational systemd state
 
 The server-applied Stage 10 timer/service were directly verified after the successful runtime repair.
 
@@ -229,9 +276,11 @@ MOEX_ENV_FILE=/home/trader/moex_bot/.env
 
 Execution uses a filesystem lock under the canonical data root and runs the repository entrypoint through `/home/trader/moex_bot/venv/bin/python`. The service explicitly computes the Moscow-date `through_date` and passes it to Stage 10. Stage 10 then resolves usable source dates from actual bounded source observations.
 
-## 11. Implemented repair history
+The server timer inventory also directly showed `moex-rub-chat-snapshot.timer` / `moex-rub-chat-snapshot.service`. Exact service command/configuration must be read from the unit before it is used as deployment evidence; the unit name alone is not architectural proof.
 
-The current working runtime was restored through the following merged changes:
+## 12. Implemented repair history
+
+The current working Stage 10 runtime was restored through the following merged changes:
 
 ```text
 PR #413 — remove MOEX Calendar API runtime dependency
@@ -248,26 +297,27 @@ Validated server-applied main SHA before this documentation change:
 
 A new documentation merge will supersede that repository SHA without changing the runtime semantics described above. Server Applied State must always be compared to the then-current merged GitHub SHA.
 
-## 12. Next implementation boundary: active-data read API
+## 13. Next implementation boundary: server-network active-data API
 
-The next planned implementation is a read-only API for chats/consumers to read the canonical active state without inspecting arbitrary server files.
+The next planned implementation is not a second data pipeline. It is a network-readable, read-only exposure of the existing canonical chat snapshot consumer so authorized chats/consumers can read active state without inspecting arbitrary server files.
 
-Required boundary for that API:
+Required boundary:
 
 - repository implementation first; server deployment second;
-- read-only endpoints only;
-- no order placement, position mutation, sizing, or trading actions;
-- expose only canonical/accepted active state and explicitly governed factual state;
-- do not treat arbitrary server files as canonical pointers;
-- include source/as-of date, freshness, provenance, quality/acceptance state, and authority flags in responses;
-- fail closed on missing, stale, schema-invalid, or internally inconsistent required state;
+- reuse `load_analysis_chat_snapshot()` as the canonical data-read boundary;
+- do not duplicate Stage 9/news/macro/market calculation logic inside the API;
+- read-only endpoints/tools only;
+- no order placement, position mutation, sizing, scenario generation, BUY/SELL/OUT, Telegram, or trading actions;
+- expose source/as-of date, read freshness, component readiness, provenance where present, and authority flags already carried by the snapshot;
+- fail closed on missing, stale where freshness is required, schema-invalid, or authority-inconsistent state;
 - preserve `stage5_full_mode_ready=false`;
-- preserve FUTOI `directional_authority=false` and `action_authority=false`;
-- do not claim a complete news/macro context until such an input is separately implemented, validated, accepted, and present in the active bundle.
+- preserve FUTOI directional/action authority false;
+- preserve news directional/action authority false;
+- define authentication and network exposure explicitly before binding a remote/public interface.
 
-API networking/authentication/service exposure must be defined explicitly before any public or remote exposure. A local read path is not evidence that a public endpoint is safe to expose.
+The existing `stdio` MCP adapter is useful reusable code, but it is not evidence of a remotely reachable API.
 
-## 13. Resume protocol
+## 14. Resume protocol
 
 Before the next mutation or server apply:
 
@@ -277,4 +327,5 @@ Before the next mutation or server apply:
 4. merge through GitHub; do not write directly to `main`;
 5. server-apply only the exact merged SHA to a clean `main` working tree;
 6. run a fresh uniquely identified Stage 10 refresh after apply;
-7. use the resulting accepted active state as the evidence base for the read-only API implementation.
+7. run and read a fresh S7.3 chat snapshot, recording component statuses and freshness;
+8. use that validated canonical snapshot consumer as the sole data source for the server-network read API.
