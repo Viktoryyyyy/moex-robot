@@ -40,6 +40,10 @@ def _validated_token(value: object, *, source: str) -> str:
         raise SnapshotAPIConfigurationError(
             f"{TOKEN_ENV} in {source} must not contain surrounding whitespace"
         )
+    if not value.isascii():
+        raise SnapshotAPIConfigurationError(f"{TOKEN_ENV} in {source} must be ASCII")
+    if any(char.isspace() for char in value):
+        raise SnapshotAPIConfigurationError(f"{TOKEN_ENV} in {source} must not contain whitespace")
     return value
 
 
@@ -88,14 +92,18 @@ class SnapshotRequestHandler(BaseHTTPRequestHandler):
     server_version = "MOEXBotSnapshotAPI/1"
     sys_version = ""
 
-    def _send_json(self, status_code: int, payload: object) -> None:
-        body = json.dumps(
+    @staticmethod
+    def _encode_json(payload: object) -> bytes:
+        return json.dumps(
             payload,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
             allow_nan=False,
         ).encode("utf-8")
+
+    def _send_json(self, status_code: int, payload: object) -> None:
+        body = self._encode_json(payload)
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -115,11 +123,7 @@ class SnapshotRequestHandler(BaseHTTPRequestHandler):
     def _require_authorization(self) -> bool:
         if self._authorized():
             return True
-        body = json.dumps(
-            {"error": "unauthorized"},
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
+        body = self._encode_json({"error": "unauthorized"})
         self.send_response(401)
         self.send_header("WWW-Authenticate", "Bearer")
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -134,6 +138,7 @@ class SnapshotRequestHandler(BaseHTTPRequestHandler):
             snapshot = self.server.snapshot_loader()
             if not isinstance(snapshot, dict):
                 raise RuntimeError("governed snapshot consumer returned a non-object")
+            self._encode_json(snapshot)
             return snapshot
         except Exception:
             self.log_error("canonical snapshot read/validation failed")
@@ -144,11 +149,7 @@ class SnapshotRequestHandler(BaseHTTPRequestHandler):
         if snapshot is None:
             self._send_json(503, {"error": "snapshot_unavailable"})
             return
-        try:
-            self._send_json(200, snapshot)
-        except (TypeError, ValueError):
-            self.log_error("canonical snapshot is not strict-JSON serializable")
-            self._send_json(503, {"error": "snapshot_unavailable"})
+        self._send_json(200, snapshot)
 
     def _serve_readiness(self) -> None:
         snapshot = self._load_snapshot()
