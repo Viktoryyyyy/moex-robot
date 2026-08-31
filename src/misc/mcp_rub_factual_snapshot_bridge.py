@@ -9,6 +9,7 @@ from typing import Any
 import requests
 from dotenv import dotenv_values
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 
 PROJECT = "MOEX_Bot"
@@ -20,6 +21,12 @@ SNAPSHOT_PATH = "/v1/rub/factual-snapshot"
 READINESS_PATH = "/readyz"
 CONNECT_TIMEOUT_SECONDS = 2.0
 READ_TIMEOUT_SECONDS = 5.0
+READ_ONLY_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=False,
+)
 
 HTTPGet = Callable[..., requests.Response]
 
@@ -143,7 +150,7 @@ def _configured_bridge() -> RubFactualSnapshotHTTPBridge:
     return _bridge
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def get_rub_factual_snapshot() -> dict[str, Any]:
     """Return the canonical RUB factual snapshot exactly as supplied by the factual API.
 
@@ -154,7 +161,7 @@ def get_rub_factual_snapshot() -> dict[str, Any]:
     return _configured_bridge().get_snapshot()
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ_ONLY_ANNOTATIONS)
 def get_rub_snapshot_readiness() -> dict[str, Any]:
     """Return canonical factual snapshot readiness/freshness state from the factual API.
 
