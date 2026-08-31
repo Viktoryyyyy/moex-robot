@@ -9,6 +9,7 @@ from typing import Final
 from zoneinfo import ZoneInfo
 
 from moex_data import step10_rub_refresh_scheduler as step10
+from moex_data.currency import cets_observed_dates
 
 
 SCHEMA_VERSION: Final[str] = "step10_rub_daily_refresh_dispatch.v1"
@@ -45,6 +46,23 @@ def _validated_result_context(value: Mapping[str, object] | None) -> dict[str, o
         "futoi_factual_refresh": dict(futoi_result),
         "futoi_factual_refresh_blocks_stage7": False,
     }
+
+
+def _stage3_stage4_target_date(
+    *,
+    current_trade_date: str,
+    forts_observed_dates: Sequence[str],
+    timeout: float,
+) -> tuple[str, list[str]]:
+    candidates = [value for value in forts_observed_dates if value > current_trade_date]
+    if not candidates:
+        return current_trade_date, []
+    try:
+        common_dates = cets_observed_dates.observed_common_dates(candidates, timeout=timeout)
+    except Exception as exc:
+        raise step10.Step10RefreshError("Stage 10 CETS observed date source failed: " + str(exc)) from exc
+    target = max(common_dates) if common_dates else current_trade_date
+    return target, common_dates
 
 
 def _blocked_stage7_refresh(
@@ -90,7 +108,7 @@ def _blocked_stage7_refresh(
             timeout=timeout,
         )
         if not trading_dates_all:
-            step10._fail("MOEX futures calendar produced no completed trading date")
+            step10._fail("Stage 10 observed TradeStats source produced no completed trading date")
         latest_trade_date = max(trading_dates_all)
         stage7_new_dates = [value for value in trading_dates_all if value > stage7_base_date]
         weekly_boundary_completed = date.fromisoformat(through_date).weekday() == 6
@@ -111,9 +129,16 @@ def _blocked_stage7_refresh(
             step10._fail("Stage 3/4 current accepted trade dates are not aligned")
         if stage3_date > latest_trade_date:
             step10._fail("Stage 3/4 current accepted date is ahead of scheduler latest completed trading date")
-        if stage3_date < latest_trade_date:
+        stage34_target_date, common_source_dates = _stage3_stage4_target_date(
+            current_trade_date=stage3_date,
+            forts_observed_dates=trading_dates_all,
+            timeout=timeout,
+        )
+        if stage34_target_date > latest_trade_date:
+            step10._fail("Stage 3/4 common observed target is ahead of latest FORTS observed date")
+        if stage3_date < stage34_target_date:
             source_refresh = step10._run_stage3_stage4(
-                latest_trade_date=latest_trade_date,
+                latest_trade_date=stage34_target_date,
                 reference_date=market_today.isoformat(),
                 run_id=run_id,
                 env_file=str(env_file or ""),
@@ -121,7 +146,12 @@ def _blocked_stage7_refresh(
                 after_promotion=capture_promoted_pointers,
             )
         else:
-            source_refresh = {"status": "no_op", "trade_date": latest_trade_date}
+            source_refresh = {
+                "status": "no_op",
+                "trade_date": stage3_date,
+                "latest_forts_trade_date": latest_trade_date,
+                "reason": "no newer date observed jointly in FORTS TradeStats and both canonical CETS TOM sources",
+            }
 
         pointer_records = [step10._pointer_from_output(root, output, run_id) for output in stage7_outputs]
         needs_stage7_promotion = bool(stage7_new_dates) or weekly_boundary_completed
@@ -148,15 +178,16 @@ def _blocked_stage7_refresh(
         refresh_order = [
             "futoi_governance",
             "stage5_full_mode_readiness",
-            "calendar",
+            "observed_forts_dates",
             "stage7_raw_and_derived",
+            "observed_cets_common_dates",
             "stage3",
             "stage4",
             "stage7_pointer_promotion",
             "stage9_smoke",
         ]
         if result_context:
-            refresh_order.insert(refresh_order.index("calendar"), "futoi_raw_factual_refresh")
+            refresh_order.insert(refresh_order.index("observed_forts_dates"), "futoi_raw_factual_refresh")
         result: dict[str, object] = {
             "schema_version": SCHEMA_VERSION,
             "project": "MOEX_Bot",
@@ -170,6 +201,10 @@ def _blocked_stage7_refresh(
             "stage7_base_trade_date": stage7_base_date,
             "new_trading_dates": stage7_new_dates,
             "new_trading_date_count": len(stage7_new_dates),
+            "stage3_stage4_current_trade_date": stage3_date,
+            "stage3_stage4_target_trade_date": stage34_target_date,
+            "stage3_stage4_common_observed_dates": common_source_dates,
+            "stage3_stage4_date_selection_rule": "latest_common_observed_fo_tradestats_and_both_cets_tom_sources",
             "source_refresh": source_refresh,
             "futoi_governance": dict(governance),
             "stage5_full_mode_ready": STAGE5_FULL_MODE_READY,
