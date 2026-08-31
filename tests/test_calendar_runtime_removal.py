@@ -60,8 +60,8 @@ def test_stage10_date_source_requests_only_algopack_tradestats(monkeypatch: pyte
             return FakeResponse(
                 _tradestats_payload(
                     [
-                        ["USDRUBF", "2026-06-12"],
-                        ["USDRUBF", "2026-06-15"],
+                        ["SiU6", "2026-06-12"],
+                        ["SiU6", "2026-06-15"],
                     ]
                 ),
                 str(url),
@@ -147,7 +147,7 @@ def test_weekends_and_gaps_are_not_fabricated_by_stage10_date_source(monkeypatch
     def source_loader(date_start, date_end, *, secid, timeout, apim_base_url=None):
         assert date_start == "2026-06-12"
         assert date_end == "2026-06-17"
-        assert secid == "USDRUBF"
+        assert secid == "SiU6"
         return observed
 
     monkeypatch.setattr(step10.forts_incremental, "fetch_observed_tradestats_dates", source_loader)
