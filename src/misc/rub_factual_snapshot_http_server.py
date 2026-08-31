@@ -8,7 +8,6 @@ import os
 from collections.abc import Callable, Mapping, Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, cast
 from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
@@ -41,8 +40,6 @@ def _validated_token(value: object, *, source: str) -> str:
         raise SnapshotAPIConfigurationError(
             f"{TOKEN_ENV} in {source} must not contain surrounding whitespace"
         )
-    if not value:
-        raise SnapshotAPIConfigurationError(f"{TOKEN_ENV} is blank in {source}")
     return value
 
 
@@ -62,8 +59,8 @@ def load_api_token(environ: Mapping[str, str] | None = None) -> str:
     env_path = Path(raw_env_file)
     if not env_path.is_absolute():
         raise SnapshotAPIConfigurationError(f"{ENV_FILE_ENV} must be an absolute path")
-    if env_path.is_symlink() or not env_path.is_file():
-        raise SnapshotAPIConfigurationError(f"{ENV_FILE_ENV} must reference a regular non-symlink file")
+    if not env_path.is_file():
+        raise SnapshotAPIConfigurationError(f"{ENV_FILE_ENV} must reference a regular file")
 
     configured = dotenv_values(env_path).get(TOKEN_ENV)
     return _validated_token(configured, source=ENV_FILE_ENV)
@@ -88,6 +85,8 @@ class SnapshotHTTPServer(ThreadingHTTPServer):
 
 class SnapshotRequestHandler(BaseHTTPRequestHandler):
     server: SnapshotHTTPServer
+    server_version = "MOEXBotSnapshotAPI/1"
+    sys_version = ""
 
     def _send_json(self, status_code: int, payload: object) -> None:
         body = json.dumps(
@@ -145,7 +144,11 @@ class SnapshotRequestHandler(BaseHTTPRequestHandler):
         if snapshot is None:
             self._send_json(503, {"error": "snapshot_unavailable"})
             return
-        self._send_json(200, snapshot)
+        try:
+            self._send_json(200, snapshot)
+        except (TypeError, ValueError):
+            self.log_error("canonical snapshot is not strict-JSON serializable")
+            self._send_json(503, {"error": "snapshot_unavailable"})
 
     def _serve_readiness(self) -> None:
         snapshot = self._load_snapshot()
@@ -197,7 +200,6 @@ class SnapshotRequestHandler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:  # noqa: N802 - stdlib handler contract
         self._send_json(405, {"error": "method_not_allowed"})
-
 
 
 def create_server(
