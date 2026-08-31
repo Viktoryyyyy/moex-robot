@@ -88,64 +88,84 @@ def _canonical_partition(trade_date: str) -> Path:
 
 def _backfill_evidence(root: Path, run_id: str) -> Path:
     trade_date = "2026-08-18"
+    instrument_id = "si_futures_family"
+    reference_secid = "SiU6"
     partition = _canonical_partition(trade_date)
     quality_path = backfill._aggregate_quality_path(trade_date, run_id)
     manifest_path = backfill._aggregate_manifest_path(trade_date, run_id)
-    _write_json(
-        quality_path,
-        {
-            "run_id": run_id,
-            "dataset_id": materializer.DATASET_ID,
-            "instrument_id": "si_futures_family",
-            "source_id": materializer.SOURCE_ID,
-            "quality_status": "pass",
-            "row_count": 2,
-            "duplicate_key_count": 0,
-            "null_required_count": 0,
-            "invalid_position_count": 0,
-            "partition_count": 1,
-            "skipped_empty_source_dates": [],
-            "skipped_non_trading_dates": [],
-            "skipped_dates_calendar_validated": True,
-            "calendar_source_id": backfill.CALENDAR_SOURCE_ID,
-            "calendar_endpoint": backfill.CALENDAR_ENDPOINT,
-            "failed_dates": [],
-        },
-    )
-    _write_json(
-        manifest_path,
-        {
-            "run_id": run_id,
-            "run_date": trade_date,
-            "dataset_id": materializer.DATASET_ID,
-            "instrument_scope": ["si_futures_family"],
-            "source_scope": [materializer.SOURCE_ID],
-            "requested_from": trade_date,
-            "requested_till": trade_date,
-            "partitions_written": [partition.as_posix()],
-            "partition_evidence": [
-                {
-                    "trade_date": trade_date,
-                    "subrun_id": backfill._subrun_id(run_id, trade_date),
-                    "partition_path": partition.as_posix(),
-                    "sha256": hashlib.sha256(partition.read_bytes()).hexdigest(),
-                    "row_count": 2,
-                }
-            ],
-            "partitions_skipped": [],
-            "skipped_non_trading_dates": [],
-            "skipped_dates_calendar_validated": True,
-            "calendar_source_id": backfill.CALENDAR_SOURCE_ID,
-            "calendar_endpoint": backfill.CALENDAR_ENDPOINT,
-            "quality_report_ref": quality_path.as_posix(),
-            "refresh_status": "succeeded",
-            "failed_dates": [],
-            "latest_autodetect_used": False,
-            "hardcoded_server_path_used": False,
-            "producer": backfill.PRODUCER_ID,
-            "stage2_controlled_backfill": True,
-        },
-    )
+    observed_path = backfill._observed_date_evidence_path(trade_date, run_id)
+    observed_values = {
+        "schema_version": backfill.OBSERVED_DATE_EVIDENCE_SCHEMA,
+        "producer": backfill.PRODUCER_ID,
+        "run_id": run_id,
+        "dataset_id": materializer.DATASET_ID,
+        "instrument_id": instrument_id,
+        "date_source_artifact_id": backfill.DATE_SOURCE_ARTIFACT_ID,
+        "date_source_id": backfill.DATE_SOURCE_ID,
+        "date_source_endpoint": backfill.DATE_SOURCE_ENDPOINT,
+        "date_selection_rule": backfill.DATE_SELECTION_RULE,
+        "reference_secid": reference_secid,
+        "requested_from": trade_date,
+        "requested_till": trade_date,
+        "observed_dates": [trade_date],
+        "observed_date_count": 1,
+    }
+    _write_json(observed_path, observed_values)
+    observed_sha = hashlib.sha256(observed_path.read_bytes()).hexdigest()
+    date_source = {
+        "date_source_artifact_id": backfill.DATE_SOURCE_ARTIFACT_ID,
+        "date_source_id": backfill.DATE_SOURCE_ID,
+        "date_source_endpoint": backfill.DATE_SOURCE_ENDPOINT,
+        "date_selection_rule": backfill.DATE_SELECTION_RULE,
+        "reference_secid": reference_secid,
+        "observed_date_evidence_ref": observed_path.as_posix(),
+        "observed_date_evidence_sha256": observed_sha,
+        "observed_date_count": 1,
+        "observed_trade_dates": [trade_date],
+    }
+    quality_values = {
+        "run_id": run_id,
+        "dataset_id": materializer.DATASET_ID,
+        "instrument_id": instrument_id,
+        "source_id": materializer.SOURCE_ID,
+        "quality_status": "pass",
+        "row_count": 2,
+        "duplicate_key_count": 0,
+        "null_required_count": 0,
+        "invalid_position_count": 0,
+        "partition_count": 1,
+        "failed_dates": [],
+        **date_source,
+    }
+    _write_json(quality_path, quality_values)
+    manifest_values = {
+        "run_id": run_id,
+        "run_date": trade_date,
+        "dataset_id": materializer.DATASET_ID,
+        "instrument_scope": [instrument_id],
+        "source_scope": [materializer.SOURCE_ID],
+        "requested_from": trade_date,
+        "requested_till": trade_date,
+        "partitions_written": [partition.as_posix()],
+        "partition_evidence": [
+            {
+                "trade_date": trade_date,
+                "subrun_id": backfill._subrun_id(run_id, trade_date),
+                "partition_path": partition.as_posix(),
+                "sha256": hashlib.sha256(partition.read_bytes()).hexdigest(),
+                "row_count": 2,
+            }
+        ],
+        "quality_report_ref": quality_path.as_posix(),
+        "refresh_status": "succeeded",
+        "failed_dates": [],
+        "latest_autodetect_used": False,
+        "hardcoded_server_path_used": False,
+        "producer": backfill.PRODUCER_ID,
+        "stage2_controlled_backfill": True,
+        **date_source,
+    }
+    _write_json(manifest_path, manifest_values)
     return partition
 
 

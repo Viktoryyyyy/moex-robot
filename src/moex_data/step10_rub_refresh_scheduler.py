@@ -24,7 +24,7 @@ from moex_data.futures import materialize_forts_raw_5m_instrument as forts_raw
 from moex_data.futures import materialize_futoi_eod as futoi_eod
 from moex_data.futures import materialize_futoi_instrument as futoi_raw
 from moex_data.futures import materialize_futoi_positioning_features_d1 as futoi_features
-from moex_data.futures import refresh_forts_raw_5m_incremental as futures_calendar
+from moex_data.futures import refresh_forts_raw_5m_incremental as forts_incremental
 
 
 CONTRACT_ID: Final[str] = "step10_rub_daily_refresh_acceptance.v1"
@@ -382,13 +382,15 @@ def _load_stage7_base(root: Path, as_of: datetime) -> tuple[str, dict[str, pd.Da
 
 
 def _calendar_dates(*, start_date: str, end_date: str, timeout: float) -> list[str]:
-    rows = futures_calendar.fetch_futures_calendar_rows(start_date, end_date, timeout=timeout)
-    calendar = futures_calendar._calendar_map(rows)
-    return futures_calendar._trading_days_between(
-        calendar,
-        date.fromisoformat(start_date),
-        date.fromisoformat(end_date),
-    )
+    try:
+        return forts_incremental.fetch_observed_tradestats_dates(
+            start_date,
+            end_date,
+            secid=STAGE7_INSTRUMENTS["usdrubf_futures_family"],
+            timeout=timeout,
+        )
+    except Exception as exc:
+        raise Step10RefreshError("Stage 10 observed TradeStats date source failed: " + str(exc)) from exc
 
 
 def _latest_source_dates(root: Path, as_of: datetime) -> tuple[str, str]:
@@ -988,13 +990,13 @@ def run_refresh(
         if date.fromisoformat(stage5_base_date) > date.fromisoformat(checked_through):
             _fail("through_date is older than current Stage 5/7 accepted history")
 
-        calendar_start = min(
+        source_date_start = min(
             date.fromisoformat(stage5_base_date) + timedelta(days=1),
             date.fromisoformat(checked_through) - timedelta(days=14),
         ).isoformat()
-        trading_dates_all = _calendar_dates(start_date=calendar_start, end_date=checked_through, timeout=timeout)
+        trading_dates_all = _calendar_dates(start_date=source_date_start, end_date=checked_through, timeout=timeout)
         if not trading_dates_all:
-            _fail("MOEX futures calendar produced no completed trading date")
+            _fail("Stage 10 observed TradeStats date source produced no trade dates")
         latest_trade_date = max(trading_dates_all)
         new_dates = [value for value in trading_dates_all if value > stage5_base_date]
         weekly_boundary_completed = date.fromisoformat(checked_through).weekday() == 6
@@ -1023,7 +1025,7 @@ def run_refresh(
         if stage3_date != stage4_date:
             _fail("Stage 3/4 current accepted trade dates are not aligned")
         if stage3_date > latest_trade_date:
-            _fail("Stage 3/4 current accepted date is ahead of scheduler latest completed trading date")
+            _fail("Stage 3/4 current accepted date is ahead of scheduler latest observed TradeStats date")
         if stage3_date < latest_trade_date:
             source_refresh = _run_stage3_stage4(
                 latest_trade_date=latest_trade_date,
@@ -1086,6 +1088,10 @@ def run_refresh(
             "base_trade_date": stage5_base_date,
             "new_trading_dates": new_dates,
             "new_trading_date_count": len(new_dates),
+            "date_source_artifact_id": forts_incremental.SOURCE_ARTIFACT_ID,
+            "date_source_id": forts_incremental.OBSERVED_DATE_SOURCE_ID,
+            "date_source_endpoint": forts_incremental.OBSERVED_DATE_SOURCE_ENDPOINT,
+            "date_selection_rule": "observed_trade_dates_only",
             "source_refresh": source_refresh,
             "futoi_governance": futoi_governance,
             "derived_pointer_promotion": derived_pointer_promotion,
@@ -1098,7 +1104,7 @@ def run_refresh(
                 "output_count": len(stage7_outputs),
             },
             "stage9_smoke": smoke,
-            "deterministic_refresh_order": ["calendar", "stage5_raw_and_derived", "stage7_raw_and_derived", "stage3", "stage4", "governed_derived_pointer_promotion", "stage9_smoke"],
+            "deterministic_refresh_order": ["observed_market_dates", "stage5_raw_and_derived", "stage7_raw_and_derived", "stage3", "stage4", "governed_derived_pointer_promotion", "stage9_smoke"],
             "pointer_rollback_on_failure": True,
             "implicit_latest_used": False,
             "network_sources_explicitly_bounded_by_date": True,

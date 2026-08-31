@@ -20,7 +20,7 @@ SCHEMA_VERSION: Final[str] = ARTIFACT_ID
 MANIFEST_ARTIFACT_ID: Final[str] = "manifest.data_asset.v1"
 QUALITY_REPORT_ARTIFACT_ID: Final[str] = "reports.data_asset.quality.v1"
 SOURCE_ENDPOINT: Final[str] = "/iss/datashop/algopack/fo/tradestats.json"
-PRODUCER_ID: Final[str] = "moex_data.futures.materialize_forts_raw_5m_tradestats.v1"
+PRODUCER_ID: Final[str] = "moex_data.futures.materialize_forts_raw_5m_tradestats.v2"
 STORAGE_PATTERN: Final[str] = (
     "${MOEX_DATA_ROOT}/forts/raw_5m/tradestats/"
     "trade_date={YYYY-MM-DD}/family={FAMILY}/secid={SECID}/part.parquet"
@@ -219,7 +219,7 @@ def _manifest(
         "row_count": metrics["rows"],
         "family_scope": [family],
         "secid_scope": [secid],
-        "calendar_contract": "moex_iss_futures_calendar",
+        "date_selection_rule": "explicit_trade_date_session",
         "session_binding": "explicit_trade_date_session",
         "storage_pattern": STORAGE_PATTERN,
         "partition_hashes": {paths.partition_path.as_posix(): content_hash},
@@ -254,7 +254,7 @@ def _quality_report(artifact_version: str, metrics: Mapping[str, object], family
         "row_count": metrics["rows"],
         "family_scope": [family],
         "secid_scope": [secid],
-        "calendar_contract": "moex_iss_futures_calendar",
+        "date_selection_rule": "explicit_trade_date_session",
         "session_binding": "explicit_trade_date_session",
     }
 
@@ -322,7 +322,8 @@ def result_payload(result: MaterializationResult) -> dict[str, object]:
         "family_scope": [result.family],
         "secid_scope": [result.secid],
         "schema_version": SCHEMA_VERSION,
-        "calendar_session_binding": "moex_iss_futures_calendar/explicit_trade_date_session",
+        "date_selection_rule": "explicit_trade_date_session",
+        "session_binding": "explicit_trade_date_session",
         "latest_autodetect_used": False,
         "hardcoded_server_path_used": False,
         "content_hash": result.content_hash,

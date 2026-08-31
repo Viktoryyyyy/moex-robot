@@ -5,21 +5,23 @@ import hashlib
 import json
 import os
 import sys
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 from typing import Final, Sequence
 
 from . import materialize_futoi_instrument as materializer
-from . import refresh_forts_raw_5m_incremental as futures_calendar
+from . import observed_tradestats_dates as trade_dates
 
 DATASET_ID: Final[str] = materializer.DATASET_ID
 SOURCE_ID: Final[str] = materializer.SOURCE_ID
 REGISTRY_PATH: Final[str] = materializer.REGISTRY_PATH
 DATA_LAKE_PATH: Final[str] = "configs/datasets/futures_data_lake.v1.yaml"
-PRODUCER_ID: Final[str] = "moex_data.futures.backfill_futoi_instrument.v1"
-CALENDAR_SOURCE_ID: Final[str] = "moex_iss_futures_calendar"
-CALENDAR_ENDPOINT: Final[str] = "/iss/calendars.json"
-CALENDAR_EVIDENCE_SCHEMA: Final[str] = "futoi_backfill_calendar_evidence.v1"
+PRODUCER_ID: Final[str] = "moex_data.futures.backfill_futoi_instrument.v2"
+DATE_SOURCE_ARTIFACT_ID: Final[str] = trade_dates.SOURCE_ARTIFACT_ID
+DATE_SOURCE_ID: Final[str] = trade_dates.SOURCE_ID
+DATE_SOURCE_ENDPOINT: Final[str] = trade_dates.SOURCE_ENDPOINT
+DATE_SELECTION_RULE: Final[str] = trade_dates.SELECTION_RULE
+OBSERVED_DATE_EVIDENCE_SCHEMA: Final[str] = "futoi_backfill_observed_date_evidence.v1"
 
 
 class FutoiBackfillError(ValueError):
@@ -38,15 +40,6 @@ def _require_token(value: str, field_name: str) -> str:
     if not text or any(marker in text for marker in ("/", "\\", "*", "{", "}", "`", "$(")):
         raise FutoiBackfillError(field_name + " must be an explicit safe token")
     return text
-
-
-def _date_range(start: date, end: date) -> list[date]:
-    result: list[date] = []
-    current = start
-    while current <= end:
-        result.append(current)
-        current += timedelta(days=1)
-    return result
 
 
 def _section(text: str, header: str) -> str:
@@ -76,19 +69,6 @@ def _stage2_backfill_ready(data_lake_path: str | Path = DATA_LAKE_PATH) -> bool:
     )
 
 
-def _empty_source_error(message: str) -> bool:
-    lowered = message.lower()
-    return any(
-        marker in lowered
-        for marker in (
-            "returned no rows",
-            "contains no rows for explicit trade_date",
-            "contains no rows",
-            "source contains no rows",
-        )
-    )
-
-
 def _subrun_id(run_id: str, trade_date: str) -> str:
     return run_id + "_partition_" + trade_date.replace("-", "")
 
@@ -101,8 +81,8 @@ def _aggregate_manifest_path(date_end: str, run_id: str) -> Path:
     return materializer._manifest_path(date_end, run_id)
 
 
-def _calendar_evidence_path(date_end: str, run_id: str) -> Path:
-    return _aggregate_manifest_path(date_end, run_id).with_name("calendar_evidence.json")
+def _observed_date_evidence_path(date_end: str, run_id: str) -> Path:
+    return _aggregate_manifest_path(date_end, run_id).with_name("observed_date_evidence.json")
 
 
 def _json_bytes(values: dict[str, object]) -> bytes:
@@ -112,41 +92,48 @@ def _json_bytes(values: dict[str, object]) -> bytes:
 def _write_bytes_create_only(path: Path, payload: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() or path.is_symlink():
-        raise FutoiBackfillError("immutable calendar evidence artifact already exists")
+        raise FutoiBackfillError("immutable observed-date evidence artifact already exists")
     try:
         with path.open("xb") as handle:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
     except FileExistsError as exc:
-        raise FutoiBackfillError("immutable calendar evidence artifact appeared concurrently") from exc
+        raise FutoiBackfillError("immutable observed-date evidence artifact appeared concurrently") from exc
 
 
-def _persist_calendar_evidence(
+def _persist_observed_date_evidence(
     *,
     date_start: str,
     date_end: str,
     run_id: str,
-    rows: list[dict[str, object]],
+    instrument_id: str,
+    reference_secid: str,
+    observed: Sequence[str],
 ) -> dict[str, object]:
-    path = _calendar_evidence_path(date_end, run_id)
+    path = _observed_date_evidence_path(date_end, run_id)
     values: dict[str, object] = {
-        "schema_version": CALENDAR_EVIDENCE_SCHEMA,
+        "schema_version": OBSERVED_DATE_EVIDENCE_SCHEMA,
         "producer": PRODUCER_ID,
         "run_id": run_id,
         "dataset_id": DATASET_ID,
-        "calendar_source_id": CALENDAR_SOURCE_ID,
-        "calendar_endpoint": CALENDAR_ENDPOINT,
+        "instrument_id": instrument_id,
+        "date_source_artifact_id": DATE_SOURCE_ARTIFACT_ID,
+        "date_source_id": DATE_SOURCE_ID,
+        "date_source_endpoint": DATE_SOURCE_ENDPOINT,
+        "date_selection_rule": DATE_SELECTION_RULE,
+        "reference_secid": reference_secid,
         "requested_from": date_start,
         "requested_till": date_end,
-        "rows": rows,
+        "observed_dates": list(observed),
+        "observed_date_count": len(observed),
     }
     payload = _json_bytes(values)
     _write_bytes_create_only(path, payload)
     return {
         "path": path.as_posix(),
         "sha256": hashlib.sha256(payload).hexdigest(),
-        "row_count": len(rows),
+        "row_count": len(observed),
     }
 
 
@@ -222,7 +209,6 @@ def _emit_progress(
     total_dates: int,
     trade_date: str | None,
     partition_count: int,
-    skipped_count: int,
     failure_count: int,
     event: str = "progress",
 ) -> None:
@@ -237,7 +223,6 @@ def _emit_progress(
                 "total_dates": total_dates,
                 "trade_date": trade_date,
                 "partition_count": partition_count,
-                "skipped_empty_source_dates": skipped_count,
                 "failure_count": failure_count,
             },
             ensure_ascii=False,
@@ -258,7 +243,7 @@ def backfill_range(
     data_lake_path: str | Path = DATA_LAKE_PATH,
     timeout: float = 60.0,
     apim_base_url: str | None = None,
-    calendar_base_url: str | None = None,
+    observed_trade_dates: Sequence[str] | None = None,
     create_accepted_pointer: bool = False,
     progress_every: int = 0,
 ) -> dict[str, object]:
@@ -273,16 +258,55 @@ def backfill_range(
     binding = materializer._registry_binding(registry_path, checked_instrument)
     _authorize(binding, data_lake_path)
 
+    reference_secid = trade_dates.reference_secid(checked_instrument, registry_path)
+    if observed_trade_dates is None:
+        try:
+            dates = trade_dates.observed_dates(
+                start.isoformat(),
+                end.isoformat(),
+                instrument_id=checked_instrument,
+                registry_path=registry_path,
+                timeout=timeout,
+                apim_base_url=apim_base_url,
+            )
+        except Exception as exc:
+            raise FutoiBackfillError(
+                "authoritative observed TradeStats date source failed for instrument_id="
+                + checked_instrument
+                + " reference_secid="
+                + reference_secid
+                + " range="
+                + start.isoformat()
+                + ".."
+                + end.isoformat()
+                + ": "
+                + str(exc)
+            ) from exc
+    else:
+        try:
+            dates = trade_dates.normalize_observed_dates(
+                observed_trade_dates,
+                start.isoformat(),
+                end.isoformat(),
+            )
+        except Exception as exc:
+            raise FutoiBackfillError("observed_trade_dates are invalid: " + str(exc)) from exc
+
+    evidence = _persist_observed_date_evidence(
+        date_start=start.isoformat(),
+        date_end=end.isoformat(),
+        run_id=checked_run_id,
+        instrument_id=checked_instrument,
+        reference_secid=reference_secid,
+        observed=dates,
+    )
+
     successes: list[dict[str, object]] = []
     partition_evidence: list[dict[str, object]] = []
-    skipped: list[str] = []
     failures: list[dict[str, str]] = []
     duplicate_total = 0
     null_total = 0
     invalid_total = 0
-    dates = _date_range(start, end)
-    calendar: dict[date, bool] | None = None
-    calendar_rows: list[dict[str, object]] | None = None
 
     if progress_every:
         _emit_progress(
@@ -293,13 +317,11 @@ def backfill_range(
             total_dates=len(dates),
             trade_date=None,
             partition_count=0,
-            skipped_count=0,
             failure_count=0,
             event="start",
         )
 
-    for processed_dates, current in enumerate(dates, start=1):
-        trade_date = current.isoformat()
+    for processed_dates, trade_date in enumerate(dates, start=1):
         subrun_id = _subrun_id(checked_run_id, trade_date)
         try:
             payload = materializer.materialize_futoi_partition(
@@ -311,50 +333,19 @@ def backfill_range(
                 apim_base_url=apim_base_url,
                 require_enabled=False,
             )
-            evidence = _materializer_partition_evidence(
+            partition_record = _materializer_partition_evidence(
                 payload,
                 trade_date=trade_date,
                 subrun_id=subrun_id,
             )
             successes.append(payload)
-            partition_evidence.append(evidence)
+            partition_evidence.append(partition_record)
             quality = json.loads(Path(str(payload["quality_report_reference"])).read_text(encoding="utf-8"))
             duplicate_total += int(quality.get("duplicate_key_count") or 0)
             null_total += int(quality.get("null_required_count") or 0)
             invalid_total += int(quality.get("invalid_position_count") or 0)
         except Exception as exc:
-            message = str(exc)
-            if _empty_source_error(message):
-                try:
-                    if calendar is None:
-                        fetched_rows = futures_calendar.fetch_futures_calendar_rows(
-                            start.isoformat(),
-                            end.isoformat(),
-                            timeout=timeout,
-                            calendar_base_url=calendar_base_url,
-                        )
-                        calendar = futures_calendar._calendar_map(fetched_rows)
-                        calendar_rows = [dict(row) for row in fetched_rows]
-                    is_trading_day = futures_calendar._require_calendar_date(calendar, current)
-                except Exception as calendar_exc:
-                    failures.append(
-                        {
-                            "trade_date": trade_date,
-                            "error": "canonical futures calendar validation failed: " + str(calendar_exc),
-                        }
-                    )
-                else:
-                    if is_trading_day:
-                        failures.append(
-                            {
-                                "trade_date": trade_date,
-                                "error": "empty FUTOI source on canonical futures trading day",
-                            }
-                        )
-                    else:
-                        skipped.append(trade_date)
-            else:
-                failures.append({"trade_date": trade_date, "error": message})
+            failures.append({"trade_date": trade_date, "error": str(exc)})
 
         if progress_every and (processed_dates % progress_every == 0 or processed_dates == len(dates)):
             _emit_progress(
@@ -365,26 +356,32 @@ def backfill_range(
                 total_dates=len(dates),
                 trade_date=trade_date,
                 partition_count=len(successes),
-                skipped_count=len(skipped),
                 failure_count=len(failures),
             )
 
     row_count = sum(int(item.get("row_count") or 0) for item in successes)
-    quality_status = "pass" if successes and not failures and duplicate_total == 0 and null_total == 0 and invalid_total == 0 else "fail"
+    quality_status = (
+        "pass"
+        if len(successes) == len(dates)
+        and not failures
+        and duplicate_total == 0
+        and null_total == 0
+        and invalid_total == 0
+        else "fail"
+    )
     refresh_status = "succeeded" if quality_status == "pass" else ("partial" if successes else "failed")
     quality_path = _aggregate_quality_path(end.isoformat(), checked_run_id)
     manifest_path = _aggregate_manifest_path(end.isoformat(), checked_run_id)
-    calendar_evidence: dict[str, object] | None = None
-    if calendar_rows is not None:
-        calendar_evidence = _persist_calendar_evidence(
-            date_start=start.isoformat(),
-            date_end=end.isoformat(),
-            run_id=checked_run_id,
-            rows=calendar_rows,
-        )
-    if skipped and calendar_evidence is None:
-        raise FutoiBackfillError("calendar evidence artifact is required for skipped FUTOI dates")
-    skipped_calendar_validated = True
+    common_date_source = {
+        "date_source_artifact_id": DATE_SOURCE_ARTIFACT_ID,
+        "date_source_id": DATE_SOURCE_ID,
+        "date_source_endpoint": DATE_SOURCE_ENDPOINT,
+        "date_selection_rule": DATE_SELECTION_RULE,
+        "reference_secid": reference_secid,
+        "observed_date_evidence_ref": evidence["path"],
+        "observed_date_evidence_sha256": evidence["sha256"],
+        "observed_date_count": evidence["row_count"],
+    }
     quality_values = {
         "run_id": checked_run_id,
         "dataset_id": DATASET_ID,
@@ -403,15 +400,9 @@ def backfill_range(
         "availability_status": str(binding["futoi.availability_status"]),
         "probe_status": str(binding["futoi.probe_status"]),
         "partition_count": len(successes),
-        "skipped_empty_source_dates": skipped,
-        "skipped_non_trading_dates": skipped,
-        "skipped_dates_calendar_validated": skipped_calendar_validated,
-        "calendar_source_id": CALENDAR_SOURCE_ID,
-        "calendar_endpoint": CALENDAR_ENDPOINT,
-        "calendar_evidence_ref": None if calendar_evidence is None else calendar_evidence["path"],
-        "calendar_evidence_sha256": None if calendar_evidence is None else calendar_evidence["sha256"],
-        "calendar_evidence_row_count": 0 if calendar_evidence is None else calendar_evidence["row_count"],
+        "observed_trade_dates": list(dates),
         "failed_dates": failures,
+        **common_date_source,
     }
     manifest_values = {
         "run_id": checked_run_id,
@@ -423,14 +414,7 @@ def backfill_range(
         "requested_till": end.isoformat(),
         "partitions_written": [str(item["storage_partition_path"]) for item in successes],
         "partition_evidence": partition_evidence,
-        "partitions_skipped": skipped,
-        "skipped_non_trading_dates": skipped,
-        "skipped_dates_calendar_validated": skipped_calendar_validated,
-        "calendar_source_id": CALENDAR_SOURCE_ID,
-        "calendar_endpoint": CALENDAR_ENDPOINT,
-        "calendar_evidence_ref": None if calendar_evidence is None else calendar_evidence["path"],
-        "calendar_evidence_sha256": None if calendar_evidence is None else calendar_evidence["sha256"],
-        "calendar_evidence_row_count": 0 if calendar_evidence is None else calendar_evidence["row_count"],
+        "observed_trade_dates": list(dates),
         "quality_report_ref": quality_path.as_posix(),
         "accepted_manifest_ref": _accepted_ref(checked_instrument),
         "refresh_status": refresh_status,
@@ -445,6 +429,7 @@ def backfill_range(
         "hardcoded_server_path_used": False,
         "producer": PRODUCER_ID,
         "stage2_controlled_backfill": True,
+        **common_date_source,
     }
     materializer._write_json_atomic(quality_path, quality_values)
     materializer._write_json_atomic(manifest_path, manifest_values)
@@ -453,7 +438,12 @@ def backfill_range(
     if create_accepted_pointer:
         if quality_status != "pass" or refresh_status != "succeeded":
             raise FutoiBackfillError("accepted pointer cannot be created unless full backfill passes")
-        pointer_reference = _write_pointer(checked_instrument, checked_run_id, manifest_path, quality_path).as_posix()
+        pointer_reference = _write_pointer(
+            checked_instrument,
+            checked_run_id,
+            manifest_path,
+            quality_path,
+        ).as_posix()
 
     return {
         "status": refresh_status,
@@ -465,13 +455,7 @@ def backfill_range(
         "quality_status": quality_status,
         "row_count": row_count,
         "partition_count": len(successes),
-        "skipped_empty_source_dates": skipped,
-        "skipped_non_trading_dates": skipped,
-        "skipped_dates_calendar_validated": skipped_calendar_validated,
-        "calendar_source_id": CALENDAR_SOURCE_ID,
-        "calendar_endpoint": CALENDAR_ENDPOINT,
-        "calendar_evidence_ref": None if calendar_evidence is None else calendar_evidence["path"],
-        "calendar_evidence_sha256": None if calendar_evidence is None else calendar_evidence["sha256"],
+        "observed_trade_dates": list(dates),
         "failed_dates": failures,
         "quality_report_reference": quality_path.as_posix(),
         "manifest_reference": manifest_path.as_posix(),
@@ -479,11 +463,17 @@ def backfill_range(
         "latest_autodetect_used": False,
         "hardcoded_server_path_used": False,
         "stage2_controlled_backfill": True,
+        **common_date_source,
     }
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Controlled Stage 2 backfill for canonical FUTOI supplementary data after pilot acceptance.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Controlled Stage 2 backfill for canonical FUTOI supplementary data using only "
+            "trade dates observed from the authoritative TradeStats source."
+        )
+    )
     parser.add_argument("--date-start", required=True)
     parser.add_argument("--date-end", required=True)
     parser.add_argument("--instrument-id", required=True)
@@ -493,7 +483,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--env-file", default=None)
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--apim-base-url", default=None)
-    parser.add_argument("--calendar-base-url", default=None)
     parser.add_argument("--progress-every", type=int, default=25)
     parser.add_argument("--create-accepted-pointer", action="store_true")
     return parser.parse_args(argv)
@@ -512,12 +501,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             data_lake_path=args.data_lake_path,
             timeout=args.timeout,
             apim_base_url=args.apim_base_url,
-            calendar_base_url=args.calendar_base_url,
             create_accepted_pointer=args.create_accepted_pointer,
             progress_every=args.progress_every,
         )
     except Exception as exc:
-        print(json.dumps({"status": "failed", "dataset_id": DATASET_ID, "error": str(exc), "latest_autodetect_used": False}, ensure_ascii=False, sort_keys=True))
+        print(
+            json.dumps(
+                {
+                    "status": "failed",
+                    "dataset_id": DATASET_ID,
+                    "error": str(exc),
+                    "latest_autodetect_used": False,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
         return 1
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
     return 0 if payload["status"] == "succeeded" else 1

@@ -19,11 +19,10 @@ import pandas as pd
 
 from . import backfill_futoi_instrument as backfill
 from . import materialize_futoi_instrument as materializer
-from . import refresh_forts_raw_5m_incremental as futures_calendar
 
 CONTRACT_REF: Final[str] = "contracts/datasets/futures_futoi_raw_incremental_acceptance.v1.yaml"
 SCHEMA_VERSION: Final[str] = "futures_futoi_raw_incremental_acceptance.v1"
-PRODUCER_ID: Final[str] = "moex_data.futures.futoi_raw_incremental_acceptance.v1"
+PRODUCER_ID: Final[str] = "moex_data.futures.futoi_raw_incremental_acceptance.v2"
 DATASET_ID: Final[str] = materializer.DATASET_ID
 SOURCE_ID: Final[str] = materializer.SOURCE_ID
 ALLOWED_INSTRUMENTS: Final[frozenset[str]] = frozenset({"si_futures_family", "cr_futures_family"})
@@ -84,7 +83,7 @@ def _require_completed_source_date(value: object) -> str:
     checked = _iso_date(value, "date_end")
     current_moscow_date = pd.Timestamp.now(tz=MOEX_SOURCE_TIMEZONE).date()
     if date.fromisoformat(checked) >= current_moscow_date:
-        _fail("date_end must be earlier than current Europe/Moscow calendar date")
+        _fail("date_end must be earlier than current Europe/Moscow date")
     return checked
 
 
@@ -260,19 +259,6 @@ def _parent_state(root: Path, instrument_id: str) -> dict[str, object]:
         "partition_count": parent_partitions,
         "row_count": parent_rows,
     }
-
-
-def _expected_dates(start: str, end: str) -> list[str]:
-    first = date.fromisoformat(start)
-    last = date.fromisoformat(end)
-    if first > last:
-        _fail("incremental requested range is inverted")
-    result: list[str] = []
-    current = first
-    while current <= last:
-        result.append(current.isoformat())
-        current += timedelta(days=1)
-    return result
 
 
 def _validated_date_list(value: object, field: str) -> list[str]:
@@ -481,46 +467,66 @@ def _validated_partition_evidence(value: object, written: Sequence[object], run_
     return result
 
 
-def _validated_calendar_evidence(
+def _validated_observed_date_evidence(
     root: Path,
     manifest: Mapping[str, object],
     quality: Mapping[str, object],
     *,
     run_id: str,
+    instrument_id: str,
     requested_start: str,
     requested_end: str,
 ) -> dict[str, object]:
-    manifest_ref = manifest.get("calendar_evidence_ref")
-    if quality.get("calendar_evidence_ref") != manifest_ref:
-        _fail("calendar evidence reference mismatch between manifest and quality")
-    manifest_sha = str(manifest.get("calendar_evidence_sha256") or "").strip().lower()
-    if quality.get("calendar_evidence_sha256") != manifest_sha:
-        _fail("calendar evidence SHA mismatch between manifest and quality")
+    manifest_ref = manifest.get("observed_date_evidence_ref")
+    if quality.get("observed_date_evidence_ref") != manifest_ref:
+        _fail("observed-date evidence reference mismatch between manifest and quality")
+    manifest_sha = str(manifest.get("observed_date_evidence_sha256") or "").strip().lower()
+    if quality.get("observed_date_evidence_sha256") != manifest_sha:
+        _fail("observed-date evidence SHA mismatch between manifest and quality")
     if len(manifest_sha) != 64 or any(char not in "0123456789abcdef" for char in manifest_sha):
-        _fail("calendar evidence sha256 invalid")
-    path = _resolve_ref(root, manifest_ref, "calendar_evidence_ref")
-    values, snapshot = _load_json_snapshot(path, "calendar evidence artifact")
+        _fail("observed-date evidence sha256 invalid")
+    path = _resolve_ref(root, manifest_ref, "observed_date_evidence_ref")
+    values, snapshot = _load_json_snapshot(path, "observed-date evidence artifact")
     if snapshot["sha256"] != manifest_sha:
-        _fail("calendar evidence artifact SHA mismatch")
-    if values.get("schema_version") != backfill.CALENDAR_EVIDENCE_SCHEMA or values.get("producer") != backfill.PRODUCER_ID:
-        _fail("calendar evidence artifact identity mismatch")
-    if values.get("run_id") != run_id or values.get("dataset_id") != DATASET_ID:
-        _fail("calendar evidence artifact run scope mismatch")
+        _fail("observed-date evidence artifact SHA mismatch")
+    if values.get("schema_version") != backfill.OBSERVED_DATE_EVIDENCE_SCHEMA or values.get("producer") != backfill.PRODUCER_ID:
+        _fail("observed-date evidence artifact identity mismatch")
+    if values.get("run_id") != run_id or values.get("dataset_id") != DATASET_ID or values.get("instrument_id") != instrument_id:
+        _fail("observed-date evidence artifact run scope mismatch")
     if values.get("requested_from") != requested_start or values.get("requested_till") != requested_end:
-        _fail("calendar evidence artifact requested range mismatch")
-    if values.get("calendar_source_id") != backfill.CALENDAR_SOURCE_ID or values.get("calendar_endpoint") != backfill.CALENDAR_ENDPOINT:
-        _fail("calendar evidence artifact source identity mismatch")
-    rows = values.get("rows")
-    if not isinstance(rows, list):
-        _fail("calendar evidence artifact rows must be a list")
-    row_count = _nonnegative_int(manifest.get("calendar_evidence_row_count"), "manifest calendar_evidence_row_count")
-    if _nonnegative_int(quality.get("calendar_evidence_row_count"), "quality calendar_evidence_row_count") != row_count or len(rows) != row_count:
-        _fail("calendar evidence artifact row_count mismatch")
-    try:
-        calendar = futures_calendar._calendar_map(rows)
-    except (TypeError, ValueError) as exc:
-        raise FutoiIncrementalAcceptanceError("calendar evidence artifact is invalid: " + str(exc)) from exc
-    return {"path": path, "snapshot": snapshot, "calendar": calendar}
+        _fail("observed-date evidence artifact requested range mismatch")
+    expected_source = {
+        "date_source_artifact_id": backfill.DATE_SOURCE_ARTIFACT_ID,
+        "date_source_id": backfill.DATE_SOURCE_ID,
+        "date_source_endpoint": backfill.DATE_SOURCE_ENDPOINT,
+        "date_selection_rule": backfill.DATE_SELECTION_RULE,
+    }
+    for field, expected in expected_source.items():
+        if values.get(field) != expected or manifest.get(field) != expected or quality.get(field) != expected:
+            _fail("observed-date evidence source identity mismatch: " + field)
+    reference_secid = _safe_token(values.get("reference_secid"), "observed-date reference_secid")
+    if manifest.get("reference_secid") != reference_secid or quality.get("reference_secid") != reference_secid:
+        _fail("observed-date evidence reference_secid mismatch")
+    observed = _validated_date_list(values.get("observed_dates"), "observed-date evidence dates")
+    if not observed:
+        _fail("observed-date evidence must contain at least one trade date")
+    if any(value < requested_start or value > requested_end for value in observed):
+        _fail("observed-date evidence contains date outside requested range")
+    row_count = _positive_int(manifest.get("observed_date_count"), "manifest observed_date_count")
+    if _positive_int(quality.get("observed_date_count"), "quality observed_date_count") != row_count:
+        _fail("observed-date evidence count mismatch between manifest and quality")
+    if _positive_int(values.get("observed_date_count"), "evidence observed_date_count") != row_count or len(observed) != row_count:
+        _fail("observed-date evidence row_count mismatch")
+    if _validated_date_list(manifest.get("observed_trade_dates"), "manifest observed_trade_dates") != observed:
+        _fail("manifest observed trade dates differ from immutable evidence")
+    if _validated_date_list(quality.get("observed_trade_dates"), "quality observed_trade_dates") != observed:
+        _fail("quality observed trade dates differ from immutable evidence")
+    return {
+        "path": path,
+        "snapshot": snapshot,
+        "observed_dates": observed,
+        "reference_secid": reference_secid,
+    }
 
 
 def _validate_backfill(root: Path, instrument_id: str, run_id: str, date_end: str, parent_end: str) -> dict[str, object]:
@@ -544,7 +550,7 @@ def _validate_backfill(root: Path, instrument_id: str, run_id: str, date_end: st
     requested_start = _iso_date(manifest.get("requested_from"), "backfill requested_from")
     requested_end = _iso_date(manifest.get("requested_till"), "backfill requested_till")
     if requested_start != expected_start or requested_end != date_end:
-        _fail("incremental backfill must start at parent end plus one calendar day and end at explicit date_end")
+        _fail("incremental backfill must start at parent end plus one date and end at explicit date_end")
     if quality.get("dataset_id") != DATASET_ID or quality.get("instrument_id") != instrument_id or quality.get("source_id") != SOURCE_ID:
         _fail("incremental backfill quality scope mismatch")
     if quality.get("quality_status") != "pass" or quality.get("failed_dates") != []:
@@ -556,37 +562,18 @@ def _validate_backfill(root: Path, instrument_id: str, run_id: str, date_end: st
     if quality_ref != Path(quality_snapshot["path"]):
         _fail("incremental backfill manifest quality_report_ref mismatch")
     written = manifest.get("partitions_written")
-    skipped = manifest.get("partitions_skipped")
     if isinstance(written, (str, bytes)) or not isinstance(written, Sequence):
         _fail("incremental backfill partitions_written must be a list")
-    if isinstance(skipped, (str, bytes)) or not isinstance(skipped, Sequence):
-        _fail("incremental backfill partitions_skipped must be a list")
     evidence = _validated_partition_evidence(manifest.get("partition_evidence"), written, run_id)
-    skipped_dates = _validated_date_list(skipped, "incremental skipped dates")
-    if manifest.get("skipped_dates_calendar_validated") is not True or quality.get("skipped_dates_calendar_validated") is not True:
-        _fail("incremental skipped dates lack canonical calendar validation")
-    if manifest.get("calendar_source_id") != backfill.CALENDAR_SOURCE_ID or quality.get("calendar_source_id") != backfill.CALENDAR_SOURCE_ID:
-        _fail("incremental skipped-date calendar source identity mismatch")
-    if manifest.get("calendar_endpoint") != backfill.CALENDAR_ENDPOINT or quality.get("calendar_endpoint") != backfill.CALENDAR_ENDPOINT:
-        _fail("incremental skipped-date calendar endpoint mismatch")
-    manifest_non_trading = _validated_date_list(manifest.get("skipped_non_trading_dates"), "manifest skipped_non_trading_dates")
-    quality_non_trading = _validated_date_list(quality.get("skipped_non_trading_dates"), "quality skipped_non_trading_dates")
-    if manifest_non_trading != skipped_dates or quality_non_trading != skipped_dates:
-        _fail("incremental skipped dates are not bound to calendar-validated non-trading evidence")
-    calendar_evidence = None
-    if skipped_dates:
-        calendar_evidence = _validated_calendar_evidence(
-            root, manifest, quality, run_id=run_id, requested_start=requested_start, requested_end=requested_end
-        )
-        for skipped_date in skipped_dates:
-            try:
-                is_trading = futures_calendar._require_calendar_date(
-                    calendar_evidence["calendar"], date.fromisoformat(skipped_date)
-                )
-            except (TypeError, ValueError) as exc:
-                raise FutoiIncrementalAcceptanceError("skipped date calendar coverage invalid: " + str(exc)) from exc
-            if is_trading:
-                _fail("skipped date is a canonical trading day")
+    date_evidence = _validated_observed_date_evidence(
+        root,
+        manifest,
+        quality,
+        run_id=run_id,
+        instrument_id=instrument_id,
+        requested_start=requested_start,
+        requested_end=requested_end,
+    )
     records = [_validate_partition(root, value, instrument_id, requested_start, requested_end) for value in written]
     for record, evidence_row in zip(records, evidence, strict=True):
         if record["trade_date"] != evidence_row["trade_date"]:
@@ -598,16 +585,13 @@ def _validate_backfill(root: Path, instrument_id: str, run_id: str, date_end: st
     trade_dates = [str(row["trade_date"]) for row in records]
     if trade_dates != sorted(set(trade_dates)):
         _fail("incremental written partition dates must be sorted and unique")
-    expected = _expected_dates(requested_start, requested_end)
-    if sorted(trade_dates + skipped_dates) != expected or set(trade_dates) & set(skipped_dates):
-        _fail("incremental backfill coverage must exactly partition requested calendar dates into written and skipped")
+    if trade_dates != date_evidence["observed_dates"]:
+        _fail("incremental written partitions must exactly match authoritative observed trade dates")
     row_count = sum(int(row["row_count"]) for row in records)
     if _positive_int(quality.get("partition_count"), "quality partition_count") != len(records):
         _fail("incremental backfill partition_count mismatch")
     if _positive_int(quality.get("row_count"), "quality row_count") != row_count:
         _fail("incremental backfill row_count mismatch")
-    if _validated_date_list(quality.get("skipped_empty_source_dates"), "quality skipped_empty_source_dates") != skipped_dates:
-        _fail("incremental backfill skipped dates mismatch between manifest and quality")
     return {
         "manifest_path": Path(manifest_snapshot["path"]),
         "manifest_snapshot": manifest_snapshot,
@@ -616,8 +600,9 @@ def _validate_backfill(root: Path, instrument_id: str, run_id: str, date_end: st
         "requested_from": requested_start,
         "requested_till": requested_end,
         "records": records,
-        "skipped_dates": skipped_dates,
-        "calendar_evidence": calendar_evidence,
+        "observed_dates": date_evidence["observed_dates"],
+        "observed_date_evidence": date_evidence,
+        "reference_secid": date_evidence["reference_secid"],
         "partition_count": len(records),
         "row_count": row_count,
     }
@@ -706,16 +691,15 @@ def accept_incremental_backfill(*, instrument_id: str, backfill_run_id: str, dat
         parent_manifest_snapshot_path = run_root / "parent" / "manifest.json"
         source_manifest_snapshot_path = run_root / "source" / "backfill_manifest.json"
         source_quality_snapshot_path = run_root / "source" / "backfill_quality.json"
+        observed_date_snapshot_path = run_root / "source" / "observed_date_evidence.json"
         _write_bytes_create_only(parent_pointer_snapshot_path, bytes(parent["pointer_snapshot"]["raw"]))
         _write_bytes_create_only(parent_manifest_snapshot_path, bytes(parent["manifest_snapshot"]["raw"]))
         _write_bytes_create_only(source_manifest_snapshot_path, bytes(source["manifest_snapshot"]["raw"]))
         _write_bytes_create_only(source_quality_snapshot_path, bytes(source["quality_snapshot"]["raw"]))
-        calendar_snapshot_path = None
-        if source["calendar_evidence"] is not None:
-            calendar_snapshot_path = run_root / "source" / "calendar_evidence.json"
-            _write_bytes_create_only(
-                calendar_snapshot_path, bytes(source["calendar_evidence"]["snapshot"]["raw"])
-            )
+        _write_bytes_create_only(
+            observed_date_snapshot_path,
+            bytes(source["observed_date_evidence"]["snapshot"]["raw"]),
+        )
 
         accepted_records: list[dict[str, object]] = []
         for source_record in source["records"]:
@@ -765,13 +749,14 @@ def accept_incremental_backfill(*, instrument_id: str, backfill_run_id: str, dat
             "incremental_till": source["requested_till"],
             "incremental_partition_count": source["partition_count"],
             "incremental_row_count": source["row_count"],
-            "skipped_empty_source_dates": source["skipped_dates"],
-            "skipped_non_trading_dates": source["skipped_dates"],
-            "skipped_dates_calendar_validated": True,
-            "calendar_source_id": backfill.CALENDAR_SOURCE_ID,
-            "calendar_endpoint": backfill.CALENDAR_ENDPOINT,
-            "calendar_evidence_snapshot_ref": None if calendar_snapshot_path is None else _rooted_ref(root, calendar_snapshot_path),
-            "calendar_evidence_sha256": None if source["calendar_evidence"] is None else source["calendar_evidence"]["snapshot"]["sha256"],
+            "date_source_artifact_id": backfill.DATE_SOURCE_ARTIFACT_ID,
+            "date_source_id": backfill.DATE_SOURCE_ID,
+            "date_source_endpoint": backfill.DATE_SOURCE_ENDPOINT,
+            "date_selection_rule": backfill.DATE_SELECTION_RULE,
+            "reference_secid": source["reference_secid"],
+            "observed_trade_dates": source["observed_dates"],
+            "observed_date_evidence_snapshot_ref": _rooted_ref(root, observed_date_snapshot_path),
+            "observed_date_evidence_sha256": source["observed_date_evidence"]["snapshot"]["sha256"],
             "partitions": accepted_records,
             "cumulative_from": parent["start"],
             "cumulative_till": source["requested_till"],
@@ -816,7 +801,12 @@ def accept_incremental_backfill(*, instrument_id: str, backfill_run_id: str, dat
             "cumulative_till": source["requested_till"],
             "cumulative_partition_count": manifest_values["cumulative_partition_count"],
             "cumulative_row_count": manifest_values["cumulative_row_count"],
-            "promotion_basis": "validated_explicit_date_futoi_backfill_increment",
+            "date_source_artifact_id": backfill.DATE_SOURCE_ARTIFACT_ID,
+            "date_source_id": backfill.DATE_SOURCE_ID,
+            "date_source_endpoint": backfill.DATE_SOURCE_ENDPOINT,
+            "date_selection_rule": backfill.DATE_SELECTION_RULE,
+            "reference_secid": source["reference_secid"],
+            "promotion_basis": "validated_observed_tradestats_date_futoi_backfill_increment",
             "historical_baseline_pointer_mutated": False,
             "latest_autodetect_used": False,
             "historical_pit_research_ready_claimed": False,
@@ -838,13 +828,18 @@ def accept_incremental_backfill(*, instrument_id: str, backfill_run_id: str, dat
             "cumulative_till": manifest_values["cumulative_till"],
             "cumulative_partition_count": manifest_values["cumulative_partition_count"],
             "cumulative_row_count": manifest_values["cumulative_row_count"],
+            "date_source_artifact_id": backfill.DATE_SOURCE_ARTIFACT_ID,
+            "date_source_id": backfill.DATE_SOURCE_ID,
+            "date_source_endpoint": backfill.DATE_SOURCE_ENDPOINT,
+            "date_selection_rule": backfill.DATE_SELECTION_RULE,
+            "reference_secid": source["reference_secid"],
+            "observed_trade_dates": source["observed_dates"],
             "accepted_manifest_ref": _rooted_ref(root, manifest_path),
             "accepted_manifest_sha256": manifest_snapshot["sha256"],
             "incremental_pointer_ref": _rooted_ref(root, pointer_path),
             "accepted_partition_snapshots_immutable": True,
             "full_raw_contract_revalidated": True,
             "registry_binding_revalidated": True,
-            "skipped_dates_calendar_validated": True,
             "historical_baseline_pointer_mutated": False,
             "acceptance_network_access_used": False,
             "latest_autodetect_used": False,
@@ -854,7 +849,12 @@ def accept_incremental_backfill(*, instrument_id: str, backfill_run_id: str, dat
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Accept an explicit canonical FUTOI backfill increment without mutating the historical Stage 2 baseline pointer.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Accept an explicit canonical FUTOI backfill increment bound to immutable observed "
+            "TradeStats date evidence without mutating the historical Stage 2 baseline pointer."
+        )
+    )
     parser.add_argument("--instrument-id", required=True)
     parser.add_argument("--backfill-run-id", required=True)
     parser.add_argument("--date-end", required=True)
@@ -872,7 +872,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             date_end=args.date_end,
         )
     except Exception as exc:
-        print(json.dumps({"status": "failed", "dataset_id": DATASET_ID, "error": str(exc), "incremental_pointer_updated": False, "latest_autodetect_used": False}, ensure_ascii=False, sort_keys=True))
+        print(
+            json.dumps(
+                {
+                    "status": "failed",
+                    "dataset_id": DATASET_ID,
+                    "error": str(exc),
+                    "incremental_pointer_updated": False,
+                    "latest_autodetect_used": False,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
         return 1
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0

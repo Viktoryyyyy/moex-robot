@@ -21,6 +21,8 @@ def _registry(path: Path, *, evidence: str = "pilot_passed", enabled: bool = Fal
                 "    board: RFUD",
                 "    market: forts",
                 "    engine: futures",
+                "    source_artifact_id: external.apim.fo.tradestats.v1",
+                "    source_id: moex_algopack_fo_tradestats_5m",
                 "    evidence_status: " + evidence,
                 "    supplementary_sources:",
                 "      futures_futoi_raw:",
@@ -56,8 +58,33 @@ def _data_lake(path: Path, *, ready: bool = True) -> Path:
     return path
 
 
-def _calendar_rows(*rows: tuple[str, int]) -> list[dict[str, object]]:
-    return [{"date": trade_date, "futures": is_trading} for trade_date, is_trading in rows]
+def _materializer(root: Path, *, published: bytes = b"deterministic-test-partition"):
+    def fake_materialize(*, trade_date, instrument_id, run_id, registry_path, timeout, apim_base_url, require_enabled):
+        assert require_enabled is False
+        quality_path = root / "quality" / (run_id + ".json")
+        quality_path.parent.mkdir(parents=True, exist_ok=True)
+        quality_path.write_text(
+            json.dumps(
+                {
+                    "duplicate_key_count": 0,
+                    "null_required_count": 0,
+                    "invalid_position_count": 0,
+                }
+            ),
+            encoding="utf-8",
+        )
+        partition = root / "market" / "supplementary" / (trade_date + ".parquet")
+        partition.parent.mkdir(parents=True, exist_ok=True)
+        partition.write_bytes(published)
+        return {
+            "row_count": 2,
+            "quality_report_reference": str(quality_path),
+            "storage_partition_path": str(partition),
+            "publication_run_id": run_id,
+            "published_partition_sha256": hashlib.sha256(published).hexdigest(),
+        }
+
+    return fake_materialize
 
 
 def test_backfill_requires_stage2_pilot_evidence_and_keeps_global_flag_false(tmp_path, monkeypatch) -> None:
@@ -73,6 +100,7 @@ def test_backfill_requires_stage2_pilot_evidence_and_keeps_global_flag_false(tmp
             run_id="test_run",
             registry_path=missing_evidence,
             data_lake_path=data_lake,
+            observed_trade_dates=["2026-08-17"],
         )
 
     globally_enabled = _registry(tmp_path / "enabled.yaml", enabled=True)
@@ -84,6 +112,7 @@ def test_backfill_requires_stage2_pilot_evidence_and_keeps_global_flag_false(tmp
             run_id="test_run",
             registry_path=globally_enabled,
             data_lake_path=data_lake,
+            observed_trade_dates=["2026-08-17"],
         )
 
 
@@ -91,6 +120,7 @@ def test_backfill_requires_stage2_backfill_readiness(tmp_path, monkeypatch) -> N
     monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
     registry = _registry(tmp_path / "registry.yaml")
     data_lake = _data_lake(tmp_path / "data_lake.yaml", ready=False)
+
     with pytest.raises(backfill.FutoiBackfillError, match="readiness is not enabled"):
         backfill.backfill_range(
             date_start="2026-08-17",
@@ -99,50 +129,23 @@ def test_backfill_requires_stage2_backfill_readiness(tmp_path, monkeypatch) -> N
             run_id="test_run",
             registry_path=registry,
             data_lake_path=data_lake,
+            observed_trade_dates=["2026-08-17"],
         )
 
 
-def test_backfill_skips_only_calendar_validated_non_trading_empty_date_and_writes_pointer(tmp_path, monkeypatch) -> None:
+def test_backfill_materializes_only_observed_dates_and_writes_immutable_date_evidence(tmp_path, monkeypatch) -> None:
     root = tmp_path / "data"
     monkeypatch.setenv("MOEX_DATA_ROOT", str(root))
     registry = _registry(tmp_path / "registry.yaml")
     data_lake = _data_lake(tmp_path / "data_lake.yaml")
+    calls = []
+    fake = _materializer(root)
 
-    def fake_calendar(date_start, date_end, *, timeout, calendar_base_url):
-        assert date_start == "2026-08-16"
-        assert date_end == "2026-08-17"
-        return _calendar_rows(("2026-08-16", 0), ("2026-08-17", 1))
+    def materialize(**kwargs):
+        calls.append(kwargs["trade_date"])
+        return fake(**kwargs)
 
-    def fake_materialize(*, trade_date, instrument_id, run_id, registry_path, timeout, apim_base_url, require_enabled):
-        assert require_enabled is False
-        if trade_date == "2026-08-16":
-            raise ValueError("normalized FUTOI source contains no rows for explicit trade_date")
-        quality_path = root / "quality" / (run_id + ".json")
-        quality_path.parent.mkdir(parents=True, exist_ok=True)
-        quality_path.write_text(
-            json.dumps(
-                {
-                    "duplicate_key_count": 0,
-                    "null_required_count": 0,
-                    "invalid_position_count": 0,
-                }
-            ),
-            encoding="utf-8",
-        )
-        partition = root / "market" / "supplementary" / (trade_date + ".parquet")
-        partition.parent.mkdir(parents=True, exist_ok=True)
-        published = b"deterministic-test-partition"
-        partition.write_bytes(published)
-        return {
-            "row_count": 2,
-            "quality_report_reference": str(quality_path),
-            "storage_partition_path": str(partition),
-            "publication_run_id": run_id,
-            "published_partition_sha256": hashlib.sha256(published).hexdigest(),
-        }
-
-    monkeypatch.setattr(backfill.futures_calendar, "fetch_futures_calendar_rows", fake_calendar)
-    monkeypatch.setattr(backfill.materializer, "materialize_futoi_partition", fake_materialize)
+    monkeypatch.setattr(backfill.materializer, "materialize_futoi_partition", materialize)
     result = backfill.backfill_range(
         date_start="2026-08-16",
         date_end="2026-08-17",
@@ -150,23 +153,25 @@ def test_backfill_skips_only_calendar_validated_non_trading_empty_date_and_write
         run_id="test_run",
         registry_path=registry,
         data_lake_path=data_lake,
+        observed_trade_dates=["2026-08-17"],
         create_accepted_pointer=True,
     )
+
+    assert calls == ["2026-08-17"]
     assert result["status"] == "succeeded"
     assert result["quality_status"] == "pass"
     assert result["stage2_controlled_backfill"] is True
     assert result["row_count"] == 2
     assert result["partition_count"] == 1
-    assert result["skipped_empty_source_dates"] == ["2026-08-16"]
-    assert result["skipped_non_trading_dates"] == ["2026-08-16"]
-    assert result["skipped_dates_calendar_validated"] is True
-    assert result["calendar_source_id"] == "moex_iss_futures_calendar"
-    assert result["calendar_endpoint"] == "/iss/calendars.json"
+    assert result["observed_trade_dates"] == ["2026-08-17"]
+    assert result["date_source_artifact_id"] == backfill.DATE_SOURCE_ARTIFACT_ID
+    assert result["date_source_id"] == backfill.DATE_SOURCE_ID
+    assert result["date_source_endpoint"] == backfill.DATE_SOURCE_ENDPOINT
+    assert result["date_selection_rule"] == "observed_trade_dates_only"
+    assert result["reference_secid"] == "TEST"
+
     manifest = json.loads(Path(str(result["manifest_reference"])).read_text(encoding="utf-8"))
-    assert manifest["skipped_non_trading_dates"] == ["2026-08-16"]
-    assert manifest["skipped_dates_calendar_validated"] is True
-    assert manifest["calendar_source_id"] == "moex_iss_futures_calendar"
-    assert manifest["calendar_endpoint"] == "/iss/calendars.json"
+    assert manifest["observed_trade_dates"] == ["2026-08-17"]
     evidence = manifest["partition_evidence"]
     assert len(evidence) == 1
     assert evidence[0]["trade_date"] == "2026-08-17"
@@ -174,8 +179,20 @@ def test_backfill_skips_only_calendar_validated_non_trading_empty_date_and_write
     partition_path = Path(evidence[0]["partition_path"])
     assert evidence[0]["sha256"] == hashlib.sha256(partition_path.read_bytes()).hexdigest()
     assert evidence[0]["row_count"] == 2
+
+    evidence_path = Path(str(result["observed_date_evidence_ref"]))
+    evidence_bytes = evidence_path.read_bytes()
+    assert hashlib.sha256(evidence_bytes).hexdigest() == result["observed_date_evidence_sha256"]
+    date_evidence = json.loads(evidence_bytes)
+    assert date_evidence["schema_version"] == backfill.OBSERVED_DATE_EVIDENCE_SCHEMA
+    assert date_evidence["producer"] == backfill.PRODUCER_ID
+    assert date_evidence["reference_secid"] == "TEST"
+    assert date_evidence["requested_from"] == "2026-08-16"
+    assert date_evidence["requested_till"] == "2026-08-17"
+    assert date_evidence["observed_dates"] == ["2026-08-17"]
+    assert date_evidence["observed_date_count"] == 1
+
     pointer = Path(str(result["accepted_manifest_pointer_reference"]))
-    assert pointer.exists()
     payload = json.loads(pointer.read_text(encoding="utf-8"))
     assert payload["dataset_id"] == "futures_futoi_raw"
     assert payload["instrument_id"] == "test_futures_family"
@@ -183,17 +200,11 @@ def test_backfill_skips_only_calendar_validated_non_trading_empty_date_and_write
     assert payload["refresh_status"] == "succeeded"
 
 
-def test_backfill_empty_source_on_calendar_trading_day_fails_closed(tmp_path, monkeypatch) -> None:
+def test_backfill_failure_on_observed_date_is_not_reclassified_as_non_trading(tmp_path, monkeypatch) -> None:
     root = tmp_path / "data"
     monkeypatch.setenv("MOEX_DATA_ROOT", str(root))
     registry = _registry(tmp_path / "registry.yaml")
     data_lake = _data_lake(tmp_path / "data_lake.yaml")
-
-    monkeypatch.setattr(
-        backfill.futures_calendar,
-        "fetch_futures_calendar_rows",
-        lambda *args, **kwargs: _calendar_rows(("2026-08-17", 1)),
-    )
     monkeypatch.setattr(
         backfill.materializer,
         "materialize_futoi_partition",
@@ -204,54 +215,66 @@ def test_backfill_empty_source_on_calendar_trading_day_fails_closed(tmp_path, mo
         date_start="2026-08-17",
         date_end="2026-08-17",
         instrument_id="test_futures_family",
-        run_id="trading_empty",
+        run_id="observed_empty",
         registry_path=registry,
         data_lake_path=data_lake,
+        observed_trade_dates=["2026-08-17"],
     )
+
     assert result["status"] == "failed"
     assert result["quality_status"] == "fail"
-    assert result["skipped_empty_source_dates"] == []
+    assert result["observed_trade_dates"] == ["2026-08-17"]
     assert result["failed_dates"] == [
-        {
-            "trade_date": "2026-08-17",
-            "error": "empty FUTOI source on canonical futures trading day",
-        }
+        {"trade_date": "2026-08-17", "error": "FUTOI APIM exact source returned no rows"}
     ]
     assert result["accepted_manifest_pointer_reference"] is None
 
 
-def test_backfill_empty_source_with_missing_calendar_coverage_fails_closed(tmp_path, monkeypatch) -> None:
+def test_backfill_observed_source_failure_fails_closed_before_materialization(tmp_path, monkeypatch) -> None:
     root = tmp_path / "data"
     monkeypatch.setenv("MOEX_DATA_ROOT", str(root))
     registry = _registry(tmp_path / "registry.yaml")
     data_lake = _data_lake(tmp_path / "data_lake.yaml")
-
     monkeypatch.setattr(
-        backfill.futures_calendar,
-        "fetch_futures_calendar_rows",
-        lambda *args, **kwargs: _calendar_rows(("2026-08-16", 0)),
+        backfill.trade_dates,
+        "observed_dates",
+        lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("TradeStats unavailable")),
     )
     monkeypatch.setattr(
         backfill.materializer,
         "materialize_futoi_partition",
-        lambda **kwargs: (_ for _ in ()).throw(ValueError("FUTOI APIM exact source returned no rows")),
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("materializer must not run")),
     )
 
-    result = backfill.backfill_range(
-        date_start="2026-08-17",
-        date_end="2026-08-17",
-        instrument_id="test_futures_family",
-        run_id="missing_calendar",
-        registry_path=registry,
-        data_lake_path=data_lake,
-    )
-    assert result["status"] == "failed"
-    assert result["quality_status"] == "fail"
-    assert result["skipped_empty_source_dates"] == []
-    assert len(result["failed_dates"]) == 1
-    assert result["failed_dates"][0]["trade_date"] == "2026-08-17"
-    assert "canonical futures calendar validation failed" in result["failed_dates"][0]["error"]
-    assert "futures calendar missing date 2026-08-17" in result["failed_dates"][0]["error"]
+    with pytest.raises(
+        backfill.FutoiBackfillError,
+        match="authoritative observed TradeStats date source failed.*reference_secid=TEST.*TradeStats unavailable",
+    ):
+        backfill.backfill_range(
+            date_start="2026-08-17",
+            date_end="2026-08-17",
+            instrument_id="test_futures_family",
+            run_id="source_failure",
+            registry_path=registry,
+            data_lake_path=data_lake,
+        )
+
+
+def test_backfill_rejects_empty_observed_date_injection(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path / "data"))
+    registry = _registry(tmp_path / "registry.yaml")
+    data_lake = _data_lake(tmp_path / "data_lake.yaml")
+
+    with pytest.raises(backfill.FutoiBackfillError, match="observed_trade_dates are invalid"):
+        backfill.backfill_range(
+            date_start="2026-08-17",
+            date_end="2026-08-17",
+            instrument_id="test_futures_family",
+            run_id="empty_dates",
+            registry_path=registry,
+            data_lake_path=data_lake,
+            observed_trade_dates=[],
+        )
 
 
 def test_backfill_evidence_remains_bound_to_materializer_published_bytes_after_competing_replace(tmp_path, monkeypatch) -> None:
@@ -296,6 +319,7 @@ def test_backfill_evidence_remains_bound_to_materializer_published_bytes_after_c
         run_id="race_test",
         registry_path=registry,
         data_lake_path=data_lake,
+        observed_trade_dates=["2026-08-17"],
     )
     manifest = json.loads(Path(str(result["manifest_reference"])).read_text(encoding="utf-8"))
     evidence = manifest["partition_evidence"][0]
@@ -323,7 +347,15 @@ def test_backfill_failure_blocks_pointer(tmp_path, monkeypatch) -> None:
             run_id="test_failure",
             registry_path=registry,
             data_lake_path=data_lake,
+            observed_trade_dates=["2026-08-17"],
             create_accepted_pointer=True,
         )
-    pointer = root / "state" / "datasets" / "dataset_id=futures_futoi_raw" / "instrument_id=test_futures_family" / "current_accepted_manifest.json"
+    pointer = (
+        root
+        / "state"
+        / "datasets"
+        / "dataset_id=futures_futoi_raw"
+        / "instrument_id=test_futures_family"
+        / "current_accepted_manifest.json"
+    )
     assert not pointer.exists()

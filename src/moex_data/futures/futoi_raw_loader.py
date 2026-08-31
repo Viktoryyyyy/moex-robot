@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path.cwd() / "src"))
 import pandas as pd
 
 from moex_data.futures import liquidity_history_metrics_probe as base
-from moex_data.futures import liquidity_history_metrics_probe_apim_calendar as apim_calendar
 from moex_data.futures.slice1_common import DEFAULT_EXCLUDED
 from moex_data.futures.slice1_common import DEFAULT_WHITELIST
 from moex_data.futures.slice1_common import SHORT_HISTORY_ALLOWED
@@ -319,7 +318,7 @@ def data_gap_status(counts):
     missing = counts.get("missing_expected_trading_days")
     if missing is None:
         return "not_computed"
-    return "no_calendar_gaps" if int(missing or 0) == 0 else "calendar_gaps_detected:" + str(int(missing or 0))
+    return "no_observed_date_gaps" if int(missing or 0) == 0 else "observed_date_gaps_detected:" + str(int(missing or 0))
 
 
 def status_from_counts(counts, fetch_status, calendar_status, futoi_availability_status, futoi_probe_status):
@@ -327,9 +326,9 @@ def status_from_counts(counts, fetch_status, calendar_status, futoi_availability
         return "fail", "source fetch failed or produced zero rows"
     if futoi_availability_status != "available" or futoi_probe_status != "completed":
         return "fail", "FUTOI availability artifact is not completed/available"
-    if calendar_status != "canonical_apim_futures_xml":
-        return "fail", "calendar denominator is not canonical_apim_futures_xml"
-    for key, note in [("duplicate_key_count", "duplicate primary-key rows detected before partition write"), ("null_required_count", "null required FUTOI values detected"), ("invalid_position_count", "invalid FUTOI position sign/count values detected"), ("off_calendar_date_count", "loaded trade dates outside APIM futures calendar")]:
+    if calendar_status != base.OBSERVED_DATE_STATUS:
+        return "fail", "trading-date denominator is not authoritative observed AlgoPack TradeStats"
+    for key, note in [("duplicate_key_count", "duplicate primary-key rows detected before partition write"), ("null_required_count", "null required FUTOI values detected"), ("invalid_position_count", "invalid FUTOI position sign/count values detected"), ("off_calendar_date_count", "loaded trade dates outside authoritative observed TradeStats dates")]:
         if counts.get(key) is not None and int(counts.get(key) or 0) > 0:
             return "fail", note
     return "pass", "FUTOI raw partition load completed"
@@ -380,9 +379,16 @@ def main():
         ranges[secid] = {"from": start, "till": end}
         starts.append(start)
         ends.append(end)
-    expected_calendar, calendar_status = apim_calendar.fetch_futures_calendar(min(starts), max(ends), float(args.timeout), "")
-    if expected_calendar is None or calendar_status != "canonical_apim_futures_xml":
-        raise RuntimeError("APIM futures calendar validation failed: " + str(calendar_status))
+    reference_secid = base._reference_secid(instruments)
+    expected_calendar, calendar_status = base.fetch_observed_trading_dates(
+        min(starts),
+        max(ends),
+        reference_secid,
+        float(args.timeout),
+        str(args.apim_base_url),
+    )
+    if expected_calendar is None or calendar_status != base.OBSERVED_DATE_STATUS:
+        raise RuntimeError("authoritative observed TradeStats date validation failed: " + str(calendar_status))
     outputs = output_paths(data_root, run_date)
     partition_paths = []
     quality_rows = []
@@ -411,7 +417,7 @@ def main():
     Path(outputs["quality_report"]).parent.mkdir(parents=True, exist_ok=True)
     quality.to_parquet(outputs["quality_report"], index=False)
     quality_status_counts = {str(k): int(v) for k, v in quality["quality_status"].astype(str).value_counts(dropna=False).to_dict().items()}
-    manifest = {"schema_version": SCHEMA_MANIFEST, "run_id": run_id, "run_date": run_date, "snapshot_date": snapshot_date, "ingest_ts": ingest_ts, "loader_whitelist_applied": whitelist, "excluded_instruments_confirmed": excluded, "input_artifacts": input_paths, "output_artifacts": outputs, "partition_paths_created": partition_paths, "instrument_summaries": summaries, "quality_status_counts": quality_status_counts, "calendar_validation_summary": {"calendar_denominator_status": calendar_status, "calendar_from": min(starts), "calendar_till": max(ends), "expected_trading_days": len(expected_calendar)}, "futoi_source_scope_note": {"by_instrument": source_scope_values, "family_aggregate_futoi": "FUTOI source ticker may be family-level for expiring Si contracts."}, "short_history_handling": {"SiU7": summaries.get("SiU7")}, "loader_result_verdict": "pass" if quality_status_counts.get("fail", 0) == 0 else "fail"}
+    manifest = {"schema_version": SCHEMA_MANIFEST, "run_id": run_id, "run_date": run_date, "snapshot_date": snapshot_date, "ingest_ts": ingest_ts, "loader_whitelist_applied": whitelist, "excluded_instruments_confirmed": excluded, "input_artifacts": input_paths, "output_artifacts": outputs, "partition_paths_created": partition_paths, "instrument_summaries": summaries, "quality_status_counts": quality_status_counts, "calendar_validation_summary": {"calendar_denominator_status": calendar_status, "calendar_from": min(starts), "calendar_till": max(ends), "expected_trading_days": len(expected_calendar), "date_source_reference_secid": reference_secid, "date_source_id": base.observed_date_source.OBSERVED_DATE_SOURCE_ID, "date_source_endpoint": base.observed_date_source.OBSERVED_DATE_SOURCE_ENDPOINT}, "futoi_source_scope_note": {"by_instrument": source_scope_values, "family_aggregate_futoi": "FUTOI source ticker may be family-level for expiring Si contracts."}, "short_history_handling": {"SiU7": summaries.get("SiU7")}, "loader_result_verdict": "pass" if quality_status_counts.get("fail", 0) == 0 else "fail"}
     Path(outputs["manifest"]).parent.mkdir(parents=True, exist_ok=True)
     Path(outputs["manifest"]).write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
     print_json_line("loader_whitelist_applied", whitelist)

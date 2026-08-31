@@ -15,7 +15,7 @@ import pandas as pd
 from . import backfill_futoi_instrument as backfill
 from . import futoi_raw_incremental_acceptance as incremental
 from . import materialize_futoi_instrument as materializer
-from . import refresh_forts_raw_5m_incremental as futures_calendar
+from . import observed_tradestats_dates as observed_dates
 from . import stage2_raw_history_content_reattestation as historical_attestation
 
 PROJECT: Final[str] = "MOEX_Bot"
@@ -25,7 +25,7 @@ SOURCE_ID: Final[str] = materializer.SOURCE_ID
 INSTRUMENT_ID: Final[str] = "si_futures_family"
 MARKET_TZ: Final[str] = "Europe/Moscow"
 ROOT_REF_PREFIX: Final[str] = "${MOEX_DATA_ROOT}/"
-CALENDAR_LOOKBACK_DAYS: Final[int] = 31
+OBSERVED_DATE_LOOKBACK_DAYS: Final[int] = 31
 
 
 class FutoiLiveFactualRefreshError(ValueError):
@@ -116,23 +116,28 @@ def _atomic_json(path: Path, payload: Mapping[str, object]) -> None:
 
 def _latest_completed_trading_date(through_date: str, *, timeout: float) -> str:
     end = date.fromisoformat(_iso_date(through_date, "through_date"))
-    start = end - timedelta(days=CALENDAR_LOOKBACK_DAYS)
-    rows = futures_calendar.fetch_futures_calendar_rows(
-        start.isoformat(), end.isoformat(), timeout=timeout
-    )
-    calendar = futures_calendar._calendar_map(rows)
-    current = start
-    while current <= end:
-        if current not in calendar:
-            _fail(
-                "canonical MOEX futures calendar coverage incomplete: missing date "
-                + current.isoformat()
-            )
-        current = current + timedelta(days=1)
-    trading = sorted(day for day, is_trading in calendar.items() if day <= end and is_trading)
-    if not trading:
-        _fail("canonical MOEX futures calendar contains no completed trading date in lookback window")
-    return trading[-1].isoformat()
+    start = end - timedelta(days=OBSERVED_DATE_LOOKBACK_DAYS)
+    try:
+        dates = observed_dates.observed_dates(
+            start.isoformat(),
+            end.isoformat(),
+            instrument_id=INSTRUMENT_ID,
+            timeout=timeout,
+        )
+    except Exception as exc:
+        raise FutoiLiveFactualRefreshError(
+            "authoritative observed TradeStats date source failed for instrument_id="
+            + INSTRUMENT_ID
+            + " range="
+            + start.isoformat()
+            + ".."
+            + end.isoformat()
+            + ": "
+            + str(exc)
+        ) from exc
+    if not dates:
+        _fail("authoritative observed TradeStats date source returned no completed trade date")
+    return dates[-1]
 
 
 def _as_int(value: object, field: str) -> int:
@@ -443,7 +448,7 @@ def run_refresh(*, through_date: str, run_id: str, timeout: float = 60.0) -> dic
     checked_run = _safe_token(run_id, "run_id")
     current_moscow_date = pd.Timestamp.now(tz=MARKET_TZ).date()
     if date.fromisoformat(checked_through) >= current_moscow_date:
-        _fail("through_date must be a completed Europe/Moscow calendar date")
+        _fail("through_date must be a completed Europe/Moscow date")
     target_trade_date = _latest_completed_trading_date(checked_through, timeout=timeout)
     root = _data_root()
     parent = incremental._parent_state(root, INSTRUMENT_ID)
@@ -503,9 +508,7 @@ def run_refresh(*, through_date: str, run_id: str, timeout: float = 60.0) -> dic
         "last_success_at": completed_at,
         "freshness": {
             "status": "FRESH",
-            "policy": (
-                "latest_accepted_trade_date_must_equal_canonical_latest_completed_moex_futures_trade_date"
-            ),
+            "policy": "latest_accepted_trade_date_must_equal_latest_observed_authoritative_tradestats_trade_date",
             "expected_trade_date": target_trade_date,
             "accepted_trade_date": factual["trade_date"],
         },

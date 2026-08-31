@@ -14,7 +14,10 @@ from moex_data.futures import materialize_futoi_instrument as materializer
 
 def _write_json(path: Path, values: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(values, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(values, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _root_ref(root: Path, path: Path) -> str:
@@ -22,7 +25,14 @@ def _root_ref(root: Path, path: Path) -> str:
 
 
 def _historical_state(root: Path, instrument_id: str = "si_futures_family") -> Path:
-    manifest = root / "state" / "accepted_manifests" / "raw_history" / ("instrument_id=" + instrument_id) / "manifest.json"
+    manifest = (
+        root
+        / "state"
+        / "accepted_manifests"
+        / "raw_history"
+        / ("instrument_id=" + instrument_id)
+        / "manifest.json"
+    )
     _write_json(
         manifest,
         {
@@ -36,7 +46,14 @@ def _historical_state(root: Path, instrument_id: str = "si_futures_family") -> P
             "row_count": 597650,
         },
     )
-    pointer = root / "state" / "datasets" / ("dataset_id=" + materializer.DATASET_ID) / ("instrument_id=" + instrument_id) / "current_accepted_manifest.json"
+    pointer = (
+        root
+        / "state"
+        / "datasets"
+        / ("dataset_id=" + materializer.DATASET_ID)
+        / ("instrument_id=" + instrument_id)
+        / "current_accepted_manifest.json"
+    )
     _write_json(
         pointer,
         {
@@ -105,16 +122,16 @@ def _backfill_evidence(
     requested_from: str,
     requested_till: str,
     written_dates: tuple[str, ...],
-    skipped_dates: tuple[str, ...] = (),
+    observed_dates: tuple[str, ...] | None = None,
     groups: tuple[str, ...] = ("FIZ", "YUR"),
     aggregate_duplicate_key_count: int = 0,
     invalid_partition_position: bool = False,
     partition_secid: str = "SiU6",
     drop_partition_column: str | None = None,
     instrument_id: str = "si_futures_family",
-    calendar_validated: bool = True,
-    calendar_rows: list[dict[str, object]] | None = None,
+    reference_secid: str = "SiU6",
 ) -> list[Path]:
+    observed = written_dates if observed_dates is None else observed_dates
     partitions = [
         _partition(
             root,
@@ -130,17 +147,24 @@ def _backfill_evidence(
     row_count = len(written_dates) * len(groups)
     quality_path = backfill._aggregate_quality_path(requested_till, run_id)
     manifest_path = backfill._aggregate_manifest_path(requested_till, run_id)
-    calendar_evidence = None
-    if skipped_dates:
-        rows = calendar_rows if calendar_rows is not None else [
-            {"date": skipped_date, "futures": 0} for skipped_date in skipped_dates
-        ]
-        calendar_evidence = backfill._persist_calendar_evidence(
-            date_start=requested_from,
-            date_end=requested_till,
-            run_id=run_id,
-            rows=rows,
-        )
+    date_evidence = backfill._persist_observed_date_evidence(
+        date_start=requested_from,
+        date_end=requested_till,
+        run_id=run_id,
+        instrument_id=instrument_id,
+        reference_secid=reference_secid,
+        observed=observed,
+    )
+    date_source = {
+        "date_source_artifact_id": backfill.DATE_SOURCE_ARTIFACT_ID,
+        "date_source_id": backfill.DATE_SOURCE_ID,
+        "date_source_endpoint": backfill.DATE_SOURCE_ENDPOINT,
+        "date_selection_rule": backfill.DATE_SELECTION_RULE,
+        "reference_secid": reference_secid,
+        "observed_date_evidence_ref": date_evidence["path"],
+        "observed_date_evidence_sha256": date_evidence["sha256"],
+        "observed_date_count": date_evidence["row_count"],
+    }
     quality = {
         "run_id": run_id,
         "dataset_id": materializer.DATASET_ID,
@@ -152,15 +176,9 @@ def _backfill_evidence(
         "null_required_count": 0,
         "invalid_position_count": 0,
         "partition_count": len(partitions),
-        "skipped_empty_source_dates": list(skipped_dates),
-        "skipped_non_trading_dates": list(skipped_dates),
-        "skipped_dates_calendar_validated": calendar_validated,
-        "calendar_source_id": backfill.CALENDAR_SOURCE_ID,
-        "calendar_endpoint": backfill.CALENDAR_ENDPOINT,
-        "calendar_evidence_ref": None if calendar_evidence is None else calendar_evidence["path"],
-        "calendar_evidence_sha256": None if calendar_evidence is None else calendar_evidence["sha256"],
-        "calendar_evidence_row_count": 0 if calendar_evidence is None else calendar_evidence["row_count"],
+        "observed_trade_dates": list(observed),
         "failed_dates": [],
+        **date_source,
     }
     manifest = {
         "run_id": run_id,
@@ -181,14 +199,7 @@ def _backfill_evidence(
             }
             for trade_date, path in zip(written_dates, partitions, strict=True)
         ],
-        "partitions_skipped": list(skipped_dates),
-        "skipped_non_trading_dates": list(skipped_dates),
-        "skipped_dates_calendar_validated": calendar_validated,
-        "calendar_source_id": backfill.CALENDAR_SOURCE_ID,
-        "calendar_endpoint": backfill.CALENDAR_ENDPOINT,
-        "calendar_evidence_ref": None if calendar_evidence is None else calendar_evidence["path"],
-        "calendar_evidence_sha256": None if calendar_evidence is None else calendar_evidence["sha256"],
-        "calendar_evidence_row_count": 0 if calendar_evidence is None else calendar_evidence["row_count"],
+        "observed_trade_dates": list(observed),
         "quality_report_ref": quality_path.as_posix(),
         "refresh_status": "succeeded",
         "failed_dates": [],
@@ -196,6 +207,7 @@ def _backfill_evidence(
         "hardcoded_server_path_used": False,
         "producer": backfill.PRODUCER_ID,
         "stage2_controlled_backfill": True,
+        **date_source,
     }
     _write_json(quality_path, quality)
     _write_json(manifest_path, manifest)
@@ -210,7 +222,7 @@ def data_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return root
 
 
-def test_first_increment_accepts_without_mutating_historical_pointer(data_root: Path) -> None:
+def test_first_increment_accepts_observed_dates_without_mutating_historical_pointer(data_root: Path) -> None:
     historical_pointer = _historical_state(data_root)
     before = historical_pointer.read_bytes()
     canonical_partitions = _backfill_evidence(
@@ -219,7 +231,6 @@ def test_first_increment_accepts_without_mutating_historical_pointer(data_root: 
         requested_from="2026-08-18",
         requested_till="2026-08-19",
         written_dates=("2026-08-18",),
-        skipped_dates=("2026-08-19",),
     )
     canonical_bytes = canonical_partitions[0].read_bytes()
 
@@ -234,131 +245,124 @@ def test_first_increment_accepts_without_mutating_historical_pointer(data_root: 
     assert result["incremental_row_count"] == 2
     assert result["cumulative_partition_count"] == 1758
     assert result["cumulative_row_count"] == 597652
+    assert result["observed_trade_dates"] == ["2026-08-18"]
+    assert result["date_source_artifact_id"] == backfill.DATE_SOURCE_ARTIFACT_ID
+    assert result["date_source_id"] == backfill.DATE_SOURCE_ID
+    assert result["date_source_endpoint"] == backfill.DATE_SOURCE_ENDPOINT
+    assert result["date_selection_rule"] == backfill.DATE_SELECTION_RULE
+    assert result["reference_secid"] == "SiU6"
     assert result["accepted_partition_snapshots_immutable"] is True
     assert result["full_raw_contract_revalidated"] is True
     assert result["registry_binding_revalidated"] is True
-    assert result["skipped_dates_calendar_validated"] is True
+    assert result["directional_signal_authority"] is False
+    assert result["trading_action_authority"] is False
     assert historical_pointer.read_bytes() == before
-    pointer = json.loads(acceptance.incremental_pointer_path(data_root, "si_futures_family").read_text())
+
+    pointer = json.loads(
+        acceptance.incremental_pointer_path(data_root, "si_futures_family").read_text()
+    )
     manifest_path = data_root / pointer["manifest_ref"][len("${MOEX_DATA_ROOT}/") :]
     manifest = json.loads(manifest_path.read_text())
     assert manifest["parent_kind"] == "historical_stage2"
-    assert manifest["skipped_non_trading_dates"] == ["2026-08-19"]
-    assert manifest["skipped_dates_calendar_validated"] is True
-    assert manifest["calendar_source_id"] == backfill.CALENDAR_SOURCE_ID
-    assert manifest["calendar_endpoint"] == backfill.CALENDAR_ENDPOINT
-    assert manifest["calendar_evidence_snapshot_ref"].endswith("/source/calendar_evidence.json")
-    calendar_snapshot = data_root / manifest["calendar_evidence_snapshot_ref"][len("${MOEX_DATA_ROOT}/") :]
-    assert hashlib.sha256(calendar_snapshot.read_bytes()).hexdigest() == manifest["calendar_evidence_sha256"]
+    assert manifest["observed_trade_dates"] == ["2026-08-18"]
+    assert manifest["observed_date_evidence_snapshot_ref"].endswith(
+        "/source/observed_date_evidence.json"
+    )
+    date_snapshot = data_root / manifest["observed_date_evidence_snapshot_ref"][
+        len("${MOEX_DATA_ROOT}/") :
+    ]
+    assert hashlib.sha256(date_snapshot.read_bytes()).hexdigest() == manifest[
+        "observed_date_evidence_sha256"
+    ]
     assert manifest["partitions"][0]["clgroups"] == ["FIZ", "YUR"]
     assert manifest["partitions"][0]["secid"] == "SiU6"
-    accepted_partition = data_root / manifest["partitions"][0]["accepted_partition_ref"][len("${MOEX_DATA_ROOT}/") :]
+    accepted_partition = data_root / manifest["partitions"][0]["accepted_partition_ref"][
+        len("${MOEX_DATA_ROOT}/") :
+    ]
     assert accepted_partition.read_bytes() == canonical_bytes
     assert manifest["directional_signal_authority"] is False
     assert manifest["trading_action_authority"] is False
 
 
-def test_rejects_skipped_date_without_calendar_validation_evidence(data_root: Path) -> None:
+def test_rejects_observed_date_evidence_sha_mismatch(data_root: Path) -> None:
+    _historical_state(data_root)
+    run_id = "observed_sha_v1"
+    _backfill_evidence(
+        data_root,
+        run_id=run_id,
+        requested_from="2026-08-18",
+        requested_till="2026-08-18",
+        written_dates=("2026-08-18",),
+    )
+    manifest_path = backfill._aggregate_manifest_path("2026-08-18", run_id)
+    quality_path = backfill._aggregate_quality_path("2026-08-18", run_id)
+    manifest = json.loads(manifest_path.read_text())
+    quality = json.loads(quality_path.read_text())
+    fake_sha = "0" * 64
+    manifest["observed_date_evidence_sha256"] = fake_sha
+    quality["observed_date_evidence_sha256"] = fake_sha
+    _write_json(manifest_path, manifest)
+    _write_json(quality_path, quality)
+
+    with pytest.raises(
+        acceptance.FutoiIncrementalAcceptanceError,
+        match="observed-date evidence artifact SHA mismatch",
+    ):
+        acceptance.accept_incremental_backfill(
+            instrument_id="si_futures_family",
+            backfill_run_id=run_id,
+            date_end="2026-08-18",
+        )
+    assert not acceptance.incremental_pointer_path(data_root, "si_futures_family").exists()
+
+
+def test_rejects_written_partitions_that_do_not_exactly_match_observed_dates(data_root: Path) -> None:
     _historical_state(data_root)
     _backfill_evidence(
         data_root,
-        run_id="missing_calendar_evidence",
+        run_id="observed_mismatch_v1",
         requested_from="2026-08-18",
         requested_till="2026-08-19",
         written_dates=("2026-08-18",),
-        skipped_dates=("2026-08-19",),
-        calendar_validated=False,
+        observed_dates=("2026-08-18", "2026-08-19"),
     )
-    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="lack canonical calendar validation"):
+
+    with pytest.raises(
+        acceptance.FutoiIncrementalAcceptanceError,
+        match="written partitions must exactly match authoritative observed trade dates",
+    ):
         acceptance.accept_incremental_backfill(
             instrument_id="si_futures_family",
-            backfill_run_id="missing_calendar_evidence",
+            backfill_run_id="observed_mismatch_v1",
             date_end="2026-08-19",
         )
     assert not acceptance.incremental_pointer_path(data_root, "si_futures_family").exists()
 
 
-def test_rejects_self_asserted_skip_when_calendar_artifact_marks_trading(data_root: Path) -> None:
+def test_rejects_manifest_observed_dates_that_differ_from_immutable_evidence(data_root: Path) -> None:
     _historical_state(data_root)
-    _backfill_evidence(
-        data_root,
-        run_id="calendar_trading_v1",
-        requested_from="2026-08-18",
-        requested_till="2026-08-19",
-        written_dates=("2026-08-18",),
-        skipped_dates=("2026-08-19",),
-        calendar_rows=[{"date": "2026-08-19", "futures": 1}],
-    )
-    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="canonical trading day"):
-        acceptance.accept_incremental_backfill(
-            instrument_id="si_futures_family",
-            backfill_run_id="calendar_trading_v1",
-            date_end="2026-08-19",
-        )
-    assert not acceptance.incremental_pointer_path(data_root, "si_futures_family").exists()
-
-
-def test_rejects_calendar_artifact_sha_mismatch(data_root: Path) -> None:
-    _historical_state(data_root)
-    run_id = "calendar_sha_v1"
+    run_id = "manifest_dates_mismatch_v1"
     _backfill_evidence(
         data_root,
         run_id=run_id,
         requested_from="2026-08-18",
         requested_till="2026-08-19",
         written_dates=("2026-08-18",),
-        skipped_dates=("2026-08-19",),
     )
     manifest_path = backfill._aggregate_manifest_path("2026-08-19", run_id)
-    quality_path = backfill._aggregate_quality_path("2026-08-19", run_id)
     manifest = json.loads(manifest_path.read_text())
-    quality = json.loads(quality_path.read_text())
-    fake_sha = "0" * 64
-    manifest["calendar_evidence_sha256"] = fake_sha
-    quality["calendar_evidence_sha256"] = fake_sha
+    manifest["observed_trade_dates"] = ["2026-08-19"]
     _write_json(manifest_path, manifest)
-    _write_json(quality_path, quality)
 
-    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="artifact SHA mismatch"):
+    with pytest.raises(
+        acceptance.FutoiIncrementalAcceptanceError,
+        match="manifest observed trade dates differ from immutable evidence",
+    ):
         acceptance.accept_incremental_backfill(
             instrument_id="si_futures_family",
             backfill_run_id=run_id,
             date_end="2026-08-19",
         )
-    assert not acceptance.incremental_pointer_path(data_root, "si_futures_family").exists()
-
-
-@pytest.mark.parametrize(
-    "calendar_rows",
-    [
-        [{"date": "2026-08-18", "futures": 1}],
-        [
-            {"date": "2026-08-19", "futures": 0},
-            {"date": "2026-08-19", "futures": 0},
-        ],
-    ],
-)
-def test_rejects_missing_or_malformed_calendar_coverage(
-    data_root: Path,
-    calendar_rows: list[dict[str, object]],
-) -> None:
-    _historical_state(data_root)
-    _backfill_evidence(
-        data_root,
-        run_id="calendar_bad_coverage_v1",
-        requested_from="2026-08-18",
-        requested_till="2026-08-19",
-        written_dates=("2026-08-18",),
-        skipped_dates=("2026-08-19",),
-        calendar_rows=calendar_rows,
-    )
-    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="calendar"):
-        acceptance.accept_incremental_backfill(
-            instrument_id="si_futures_family",
-            backfill_run_id="calendar_bad_coverage_v1",
-            date_end="2026-08-19",
-        )
-    assert not acceptance.incremental_pointer_path(data_root, "si_futures_family").exists()
 
 
 def test_accepted_snapshot_survives_later_canonical_replacement(data_root: Path) -> None:
@@ -372,12 +376,18 @@ def test_accepted_snapshot_survives_later_canonical_replacement(data_root: Path)
     )
     original = partitions[0].read_bytes()
     acceptance.accept_incremental_backfill(
-        instrument_id="si_futures_family", backfill_run_id="snapshot_v1", date_end="2026-08-18"
+        instrument_id="si_futures_family",
+        backfill_run_id="snapshot_v1",
+        date_end="2026-08-18",
     )
-    pointer = json.loads(acceptance.incremental_pointer_path(data_root, "si_futures_family").read_text())
+    pointer = json.loads(
+        acceptance.incremental_pointer_path(data_root, "si_futures_family").read_text()
+    )
     manifest_path = data_root / pointer["manifest_ref"][len("${MOEX_DATA_ROOT}/") :]
     manifest = json.loads(manifest_path.read_text())
-    accepted_partition = data_root / manifest["partitions"][0]["accepted_partition_ref"][len("${MOEX_DATA_ROOT}/") :]
+    accepted_partition = data_root / manifest["partitions"][0]["accepted_partition_ref"][
+        len("${MOEX_DATA_ROOT}/") :
+    ]
 
     partitions[0].write_bytes(b"replacement")
 
@@ -395,7 +405,9 @@ def test_second_increment_chains_from_previous_increment(data_root: Path) -> Non
         written_dates=("2026-08-18",),
     )
     acceptance.accept_incremental_backfill(
-        instrument_id="si_futures_family", backfill_run_id="inc_v1", date_end="2026-08-18"
+        instrument_id="si_futures_family",
+        backfill_run_id="inc_v1",
+        date_end="2026-08-18",
     )
     _backfill_evidence(
         data_root,
@@ -403,16 +415,19 @@ def test_second_increment_chains_from_previous_increment(data_root: Path) -> Non
         requested_from="2026-08-19",
         requested_till="2026-08-20",
         written_dates=("2026-08-20",),
-        skipped_dates=("2026-08-19",),
     )
 
     result = acceptance.accept_incremental_backfill(
-        instrument_id="si_futures_family", backfill_run_id="inc_v2", date_end="2026-08-20"
+        instrument_id="si_futures_family",
+        backfill_run_id="inc_v2",
+        date_end="2026-08-20",
     )
 
     assert result["cumulative_till"] == "2026-08-20"
     assert result["cumulative_partition_count"] == 1759
-    pointer = json.loads(acceptance.incremental_pointer_path(data_root, "si_futures_family").read_text())
+    pointer = json.loads(
+        acceptance.incremental_pointer_path(data_root, "si_futures_family").read_text()
+    )
     manifest_path = data_root / pointer["manifest_ref"][len("${MOEX_DATA_ROOT}/") :]
     manifest = json.loads(manifest_path.read_text())
     assert manifest["parent_kind"] == "incremental"
@@ -428,9 +443,14 @@ def test_rejects_gap_from_parent_end(data_root: Path) -> None:
         requested_till="2026-08-19",
         written_dates=("2026-08-19",),
     )
-    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="parent end plus one"):
+    with pytest.raises(
+        acceptance.FutoiIncrementalAcceptanceError,
+        match="parent end plus one",
+    ):
         acceptance.accept_incremental_backfill(
-            instrument_id="si_futures_family", backfill_run_id="gap_v1", date_end="2026-08-19"
+            instrument_id="si_futures_family",
+            backfill_run_id="gap_v1",
+            date_end="2026-08-19",
         )
     assert not acceptance.incremental_pointer_path(data_root, "si_futures_family").exists()
 
@@ -447,7 +467,9 @@ def test_rejects_partition_without_both_groups(data_root: Path) -> None:
     )
     with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="FIZ and YUR"):
         acceptance.accept_incremental_backfill(
-            instrument_id="si_futures_family", backfill_run_id="bad_groups_v1", date_end="2026-08-18"
+            instrument_id="si_futures_family",
+            backfill_run_id="bad_groups_v1",
+            date_end="2026-08-18",
         )
     assert not acceptance.incremental_pointer_path(data_root, "si_futures_family").exists()
 
@@ -462,9 +484,14 @@ def test_recomputes_partition_quality_instead_of_trusting_aggregate_report(data_
         written_dates=("2026-08-18",),
         invalid_partition_position=True,
     )
-    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="invalid_position_count"):
+    with pytest.raises(
+        acceptance.FutoiIncrementalAcceptanceError,
+        match="invalid_position_count",
+    ):
         acceptance.accept_incremental_backfill(
-            instrument_id="si_futures_family", backfill_run_id="invalid_position_v1", date_end="2026-08-18"
+            instrument_id="si_futures_family",
+            backfill_run_id="invalid_position_v1",
+            date_end="2026-08-18",
         )
     assert not acceptance.incremental_pointer_path(data_root, "si_futures_family").exists()
 
@@ -479,9 +506,14 @@ def test_rejects_missing_raw_contract_column(data_root: Path) -> None:
         written_dates=("2026-08-18",),
         drop_partition_column="availability_ts_utc",
     )
-    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="raw-contract required columns"):
+    with pytest.raises(
+        acceptance.FutoiIncrementalAcceptanceError,
+        match="raw-contract required columns",
+    ):
         acceptance.accept_incremental_backfill(
-            instrument_id="si_futures_family", backfill_run_id="missing_contract_col_v1", date_end="2026-08-18"
+            instrument_id="si_futures_family",
+            backfill_run_id="missing_contract_col_v1",
+            date_end="2026-08-18",
         )
 
 
@@ -495,9 +527,14 @@ def test_rejects_registry_secid_mismatch(data_root: Path) -> None:
         written_dates=("2026-08-18",),
         partition_secid="WrongSecid",
     )
-    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="registry binding mismatch: secid"):
+    with pytest.raises(
+        acceptance.FutoiIncrementalAcceptanceError,
+        match="registry binding mismatch: secid",
+    ):
         acceptance.accept_incremental_backfill(
-            instrument_id="si_futures_family", backfill_run_id="wrong_secid_v1", date_end="2026-08-18"
+            instrument_id="si_futures_family",
+            backfill_run_id="wrong_secid_v1",
+            date_end="2026-08-18",
         )
 
 
@@ -515,9 +552,14 @@ def test_rejects_symlink_partition_before_resolution(data_root: Path) -> None:
     target.write_bytes(canonical.read_bytes())
     canonical.unlink()
     canonical.symlink_to(target)
-    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="must not be a symlink"):
+    with pytest.raises(
+        acceptance.FutoiIncrementalAcceptanceError,
+        match="must not be a symlink",
+    ):
         acceptance.accept_incremental_backfill(
-            instrument_id="si_futures_family", backfill_run_id="symlink_v1", date_end="2026-08-18"
+            instrument_id="si_futures_family",
+            backfill_run_id="symlink_v1",
+            date_end="2026-08-18",
         )
 
 
@@ -531,7 +573,9 @@ def test_failed_second_increment_leaves_pointer_unchanged(data_root: Path) -> No
         written_dates=("2026-08-18",),
     )
     acceptance.accept_incremental_backfill(
-        instrument_id="si_futures_family", backfill_run_id="inc_v1", date_end="2026-08-18"
+        instrument_id="si_futures_family",
+        backfill_run_id="inc_v1",
+        date_end="2026-08-18",
     )
     pointer_path = acceptance.incremental_pointer_path(data_root, "si_futures_family")
     before = pointer_path.read_bytes()
@@ -543,8 +587,13 @@ def test_failed_second_increment_leaves_pointer_unchanged(data_root: Path) -> No
         written_dates=("2026-08-19",),
         aggregate_duplicate_key_count=1,
     )
-    with pytest.raises(acceptance.FutoiIncrementalAcceptanceError, match="quality defect"):
+    with pytest.raises(
+        acceptance.FutoiIncrementalAcceptanceError,
+        match="quality defect",
+    ):
         acceptance.accept_incremental_backfill(
-            instrument_id="si_futures_family", backfill_run_id="inc_bad_v2", date_end="2026-08-19"
+            instrument_id="si_futures_family",
+            backfill_run_id="inc_bad_v2",
+            date_end="2026-08-19",
         )
     assert pointer_path.read_bytes() == before

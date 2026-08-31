@@ -16,7 +16,6 @@ def test_emit_progress_writes_machine_readable_stderr(capsys) -> None:
         total_dates=100,
         trade_date="2020-01-27",
         partition_count=17,
-        skipped_count=8,
         failure_count=0,
     )
     captured = capsys.readouterr()
@@ -30,7 +29,6 @@ def test_emit_progress_writes_machine_readable_stderr(capsys) -> None:
         "partition_count": 17,
         "processed_dates": 25,
         "secid": "SiU6",
-        "skipped_empty_source_dates": 8,
         "total_dates": 100,
         "trade_date": "2020-01-27",
     }

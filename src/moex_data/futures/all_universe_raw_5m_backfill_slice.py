@@ -16,8 +16,8 @@ except Exception:
 
 import pandas as pd
 from moex_data.futures import liquidity_history_metrics_probe as base
-from moex_data.futures import liquidity_history_metrics_probe_apim_calendar as apim_calendar
 from moex_data.futures import raw_5m_loader
+from moex_data.futures import refresh_forts_raw_5m_incremental as observed_date_source
 
 TZ_MSK = ZoneInfo("Europe/Moscow")
 SCHEMA_REGISTRY = "futures_all_universe_snapshot.v1"
@@ -36,6 +36,7 @@ NOT_APPLICABLE_FIRST_SLICE = "not_applicable_pm_l3_2_raw_5m_slice"
 EXPLICIT_PM_EXCLUSION = "explicit_pm_exclusion"
 FIRST_SLICE_NOTES = "PM L3-2 bounded raw 5m first executable slice"
 L3_3_NOTES = "PM L3-3 RFUD included raw 5m universe"
+OBSERVED_DATE_STATUS = base.OBSERVED_DATE_STATUS
 
 
 def now_utc():
@@ -138,15 +139,22 @@ def build_registry(frame, snapshot_date, source_path, run_id, config):
     return pd.DataFrame(rows)
 
 
-def recent_dates(snapshot_date, count, timeout, iss_base_url):
+def recent_dates(snapshot_date, count, timeout, apim_base_url, reference_secid):
     end = datetime.strptime(snapshot_date, "%Y-%m-%d").date()
     start = end - timedelta(days=30)
-    dates, status = apim_calendar.fetch_futures_calendar(start.isoformat(), end.isoformat(), timeout, iss_base_url)
-    if dates is None or status != "canonical_apim_futures_xml":
-        raise RuntimeError("futures calendar unavailable: " + str(status))
+    try:
+        dates = observed_date_source.fetch_observed_tradestats_dates(
+            start.isoformat(),
+            end.isoformat(),
+            secid=str(reference_secid),
+            timeout=timeout,
+            apim_base_url=apim_base_url,
+        )
+    except Exception as exc:
+        raise RuntimeError("authoritative observed TradeStats dates unavailable: " + exc.__class__.__name__ + ": " + str(exc)) from exc
     selected = sorted([x for x in dates if x <= snapshot_date])[-int(count):]
     if len(selected) < int(count):
-        raise RuntimeError("Not enough recent futures trading dates")
+        raise RuntimeError("Not enough authoritative observed TradeStats dates")
     return selected
 
 
@@ -181,6 +189,22 @@ def choose(registry, config):
     if c.empty:
         raise RuntimeError("No first-slice RFUD candidates after exclusions")
     return c["secid"].astype(str).tolist(), str(c["family_code"].iloc[0])
+
+
+def observed_reference_secid(registry, selected_ids, config, mode):
+    if selected_ids:
+        return str(selected_ids[0])
+    fs = config.get("first_executable_slice") or {}
+    excluded = {str(x).upper() for x in fs.get("excluded_secids", [])}
+    l33 = config.get("l3_3_raw_5m_included_universe") or {}
+    target_board = str(l33.get("board", "RFUD")).upper() if mode == MODE_L3_3 else str(fs.get("board", "RFUD")).upper()
+    candidates = registry.loc[
+        (registry["board"].astype(str).str.upper() == target_board)
+        & (~registry["secid"].astype(str).str.upper().isin(excluded))
+    ].copy()
+    if candidates.empty:
+        raise RuntimeError("No registry-bound reference secid for authoritative observed TradeStats dates")
+    return str(candidates.sort_values(["family_code", "secid"]).iloc[0]["secid"])
 
 
 def classify_l3_2(secid, board, family_code, in_slice, explicitly_excluded, supported):
@@ -334,8 +358,8 @@ def qrow(run_id, chunk_id, erow, registry_snapshot_id, date_from, date_till, raw
         "null_ohlc_count": null_ohlc,
         "invalid_ohlc_count": invalid,
         "futoi_missing_count": None,
-        "calendar_status": "canonical_apim_futures_xml",
-        "session_calendar_status": "canonical_apim_futures_xml",
+        "calendar_status": OBSERVED_DATE_STATUS,
+        "session_calendar_status": OBSERVED_DATE_STATUS,
         "source_payload_status": fetch_status,
         "partition_status": "written" if status == "pass" else "not_written",
         "quality_status": status,
@@ -363,10 +387,10 @@ def run_chunk(args, root, selected, dates, run_id, registry_snapshot_id, chunk_i
         raw = pd.DataFrame()
         failure = ""
         try:
-            raw, meta = raw_5m_loader.normalize_tradestats(frame, secid, fam, board, source_url, now_utc(), False, "canonical_apim_futures_xml")
+            raw, meta = raw_5m_loader.normalize_tradestats(frame, secid, fam, board, source_url, now_utc(), False, OBSERVED_DATE_STATUS)
             raw, duplicate_diag = raw_5m_loader.duplicate_timestamp_policy(raw)
             counts = raw_5m_loader.quality_counts(raw, set(dates))
-            qstatus, notes = raw_5m_loader.status_from_counts(counts, fetch_status, "canonical_apim_futures_xml", "pass", False)
+            qstatus, notes = raw_5m_loader.status_from_counts(counts, fetch_status, OBSERVED_DATE_STATUS, "pass", False)
             if qstatus == "fail":
                 failure = notes or fetch_error or "raw_5m_quality_failed"
             else:
@@ -477,7 +501,8 @@ def main():
         selected_ids = []
         fam = "ALL_RFUD_INCLUDED"
         recent_count = int((config.get("l3_3_raw_5m_included_universe") or {}).get("recent_trading_dates", 3))
-    dates = recent_dates(args.snapshot_date, recent_count, float(args.timeout), str(args.iss_base_url))
+    reference_secid = observed_reference_secid(registry, selected_ids, config, mode)
+    dates = recent_dates(args.snapshot_date, recent_count, float(args.timeout), str(args.apim_base_url), reference_secid)
     eligibility = build_eligibility(registry, selected_ids, dates, config, registry_snapshot_id, mode)
     selected = selected_universe(eligibility)
     out = paths(root, args.snapshot_date, "registry_eligibility_" + base.stable_id([registry_snapshot_id, mode]))
@@ -493,11 +518,13 @@ def main():
         write_parquet(chunk_out["quality_report"], quality)
         dump_json(chunk_out["chunk_manifest"], manifest)
         report = aggregate(registry, eligibility, [manifest])
+        report["date_source"] = {"status": OBSERVED_DATE_STATUS, "reference_secid": reference_secid, "source_id": observed_date_source.OBSERVED_DATE_SOURCE_ID, "endpoint": observed_date_source.OBSERVED_DATE_SOURCE_ENDPOINT}
         dump_json(chunk_out["aggregate_report"], report)
         manifests.append(manifest)
         quality_frames.append(quality)
         chunk_outputs.append(chunk_out)
     aggregate_report = aggregate(registry, eligibility, manifests)
+    aggregate_report["date_source"] = {"status": OBSERVED_DATE_STATUS, "reference_secid": reference_secid, "source_id": observed_date_source.OBSERVED_DATE_SOURCE_ID, "endpoint": observed_date_source.OBSERVED_DATE_SOURCE_ENDPOINT}
     print(json.dumps({
         "outputs": {"registry_snapshot": out["registry_snapshot"], "eligibility_snapshot": out["eligibility_snapshot"], "chunks": chunk_outputs},
         "selection_mode": mode,

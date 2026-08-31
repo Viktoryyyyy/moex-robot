@@ -17,7 +17,7 @@ except Exception:
 import pandas as pd
 
 from moex_data.futures import liquidity_history_metrics_probe as base
-from moex_data.futures import liquidity_history_metrics_probe_apim_calendar as apim_calendar
+from moex_data.futures import refresh_forts_raw_5m_incremental as observed_date_source
 from moex_data.futures.slice1_common import DEFAULT_EXCLUDED
 from moex_data.futures.slice1_common import DEFAULT_WHITELIST
 from moex_data.futures.slice1_common import parse_list
@@ -33,8 +33,8 @@ REQUIRED_CONTRACTS = [CONTRACT_EXPIRATION_MAP, CONTRACT_ROLL_MAP]
 ROLL_POLICY_ID = "expiration_minus_1_trading_session_v1"
 ADJUSTMENT_POLICY_ID = "unadjusted_v1"
 ADJUSTMENT_FACTOR = 1.0
-CALENDAR_STATUS = "canonical_apim_futures_xml"
-CALENDAR_SOURCE = "MOEX_APIM_XML:/iss/calendars"
+CALENDAR_STATUS = "authoritative_observed_algopack_tradestats"
+CALENDAR_SOURCE = observed_date_source.OBSERVED_DATE_SOURCE_ID + ":" + observed_date_source.OBSERVED_DATE_SOURCE_ENDPOINT
 PERPETUAL_IDENTITIES = {"USDRUBF"}
 SI_FAMILY_CODE = "Si"
 SI_CHAIN_SCOPE = ["SiM6", "SiU6", "SiZ6", "SiU7"]
@@ -161,14 +161,50 @@ def calendar_window(expiration_map: pd.DataFrame, snapshot_date: str, data_root:
     return {"from": start_dt.isoformat(), "till": end_dt.isoformat()}
 
 
-def fetch_canonical_sessions(expiration_map: pd.DataFrame, snapshot_date: str, timeout: float, iss_base_url: str, data_root: Optional[Path] = None, whitelist: Optional[List[str]] = None, excluded: Optional[List[str]] = None) -> List[str]:
+def fetch_canonical_sessions(expiration_map: pd.DataFrame, snapshot_date: str, timeout: float, apim_base_url: str, data_root: Optional[Path] = None, whitelist: Optional[List[str]] = None, excluded: Optional[List[str]] = None) -> List[str]:
     window = calendar_window(expiration_map, snapshot_date, data_root, whitelist, excluded)
-    sessions, status = apim_calendar.fetch_futures_calendar(window["from"], window["till"], timeout, iss_base_url)
-    if sessions is None or status != CALENDAR_STATUS:
-        raise RuntimeError("Canonical futures calendar cannot be resolved: " + str(status))
-    ordered = sorted([str(x) for x in sessions])
+    if "secid" not in expiration_map.columns:
+        raise RuntimeError("expiration map missing secid column for observed TradeStats date source")
+    allowed_upper = {str(x).upper() for x in (whitelist or [])}
+    excluded_upper = {str(x).upper() for x in (excluded or [])}
+    scoped = expiration_map.copy()
+    if allowed_upper:
+        scoped = scoped.loc[scoped["secid"].astype(str).str.upper().isin(allowed_upper)].copy()
+    secids = sorted(
+        {
+            str(value).strip()
+            for value in scoped["secid"].tolist()
+            if str(value).strip() and str(value).strip().upper() not in excluded_upper
+        },
+        key=str.upper,
+    )
+    if not secids:
+        raise RuntimeError("No explicit secids available for authoritative observed TradeStats date source")
+    sessions: set[str] = set()
+    failures: list[str] = []
+    for secid in secids:
+        try:
+            dates = observed_date_source.fetch_observed_tradestats_dates(
+                window["from"],
+                window["till"],
+                secid=secid,
+                timeout=timeout,
+                apim_base_url=apim_base_url,
+            )
+        except Exception as exc:
+            failures.append(secid + ":" + exc.__class__.__name__ + ":" + str(exc)[:160])
+            continue
+        sessions.update(str(value) for value in dates)
+    ordered = sorted(sessions)
     if not ordered:
-        raise RuntimeError("Canonical futures calendar returned zero sessions")
+        raise RuntimeError(
+            "Authoritative observed TradeStats sessions cannot be resolved for range "
+            + window["from"]
+            + ".."
+            + window["till"]
+            + "; failures="
+            + "|".join(failures)
+        )
     return ordered
 
 
@@ -583,7 +619,7 @@ def main() -> int:
     parser.add_argument("--snapshot-date", default=today_msk())
     parser.add_argument("--run-date", default=today_msk())
     parser.add_argument("--data-root", default="")
-    parser.add_argument("--iss-base-url", default=os.getenv("MOEX_ISS_BASE_URL", base.DEFAULT_ISS_BASE_URL))
+    parser.add_argument("--apim-base-url", "--iss-base-url", dest="apim_base_url", default=os.getenv("MOEX_API_URL", base.DEFAULT_APIM_BASE_URL))
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--whitelist", default=",".join(DEFAULT_WHITELIST))
     parser.add_argument("--excluded", default=",".join(DEFAULT_EXCLUDED))
@@ -604,7 +640,7 @@ def main() -> int:
         raise FileNotFoundError("Missing expiration map artifact: " + str(expiration_map_path))
 
     expiration_map = pd.read_parquet(expiration_map_path)
-    ordered_sessions = fetch_canonical_sessions(expiration_map, snapshot_date, float(args.timeout), str(args.iss_base_url), data_root, whitelist, excluded)
+    ordered_sessions = fetch_canonical_sessions(expiration_map, snapshot_date, float(args.timeout), str(args.apim_base_url), data_root, whitelist, excluded)
     roll_map = build_roll_map(expiration_map, snapshot_date, whitelist, excluded, ordered_sessions, run_id, data_root)
     blockers = validate_roll_map(roll_map, whitelist, excluded, ordered_sessions)
     write_parquet(roll_map, output_path)

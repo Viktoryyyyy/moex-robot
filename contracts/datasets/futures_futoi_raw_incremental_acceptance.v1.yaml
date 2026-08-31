@@ -18,11 +18,14 @@ semantics:
   backfill_partition_evidence_is_run_bound: true
   backfill_partition_evidence_uses_materializer_publication_sha256: true
   materializer_publication_sha256_captured_before_atomic_replace: true
-  completed_source_date_policy: conservative_next_calendar_day_europe_moscow
-  skipped_empty_source_date_policy: canonical_moex_futures_calendar_non_trading_only
-  skipped_date_calendar_source_id: moex_iss_futures_calendar
-  skipped_date_calendar_endpoint: /iss/calendars.json
-  skipped_date_calendar_evidence_run_bound_create_only: true
+  completed_source_date_policy: explicit_date_end_strictly_before_current_europe_moscow_date
+  date_source_artifact_id: external.apim.fo.tradestats.v1
+  date_source_id: moex_algopack_fo_tradestats_5m
+  date_source_endpoint: /iss/datashop/algopack/fo/tradestats.json
+  date_selection_rule: observed_trade_dates_only
+  observed_date_evidence_run_bound_create_only: true
+  weekday_inference_allowed: false
+  fabricated_trade_dates_allowed: false
 paths:
   immutable_run_root_pattern: ${MOEX_DATA_ROOT}/state/accepted_manifests/futoi_raw_incremental/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}
   immutable_manifest_pattern: ${MOEX_DATA_ROOT}/state/accepted_manifests/futoi_raw_incremental/instrument_id={INSTRUMENT_ID}/run_id={RUN_ID}/manifest.json
@@ -30,22 +33,18 @@ paths:
 acceptance:
   require_parent_accepted_state: true
   require_parent_sha256_binding: true
-  require_contiguous_calendar_request_from_parent_end_plus_one: true
+  require_contiguous_requested_range_from_parent_end_plus_one: true
   require_date_end_strictly_before_current_europe_moscow_date: true
-  allow_empty_source_dates_only_when_canonical_calendar_marks_non_trading: true
-  reject_empty_source_on_canonical_trading_day: true
-  reject_empty_source_when_calendar_coverage_missing_or_invalid: true
-  require_skipped_dates_calendar_validated_in_manifest_and_quality: true
-  require_skipped_non_trading_dates_equal_partitions_skipped: true
-  require_calendar_source_identity_match_canonical_moex_futures_calendar: true
-  require_manifest_and_quality_same_calendar_evidence_ref_and_sha256: true
-  require_calendar_evidence_stable_non_symlink_snapshot: true
-  require_calendar_evidence_run_range_source_endpoint_and_rows_validation: true
-  recompute_skipped_dates_offline_with_canonical_calendar_helpers: true
-  require_every_skipped_date_explicitly_non_trading: true
-  freeze_validated_calendar_evidence_bytes_create_only: true
-  bind_accepted_calendar_evidence_snapshot_ref_and_sha256: true
-  acceptance_calendar_network_access_required: false
+  require_authoritative_observed_date_evidence: true
+  require_manifest_and_quality_same_observed_date_evidence_ref_and_sha256: true
+  require_observed_date_evidence_stable_non_symlink_snapshot: true
+  require_observed_date_evidence_run_range_source_endpoint_reference_secid_validation: true
+  require_observed_date_evidence_sorted_unique_nonempty: true
+  require_observed_dates_within_requested_range: true
+  require_written_partition_trade_dates_exactly_equal_observed_trade_dates: true
+  freeze_validated_observed_date_evidence_bytes_create_only: true
+  bind_accepted_observed_date_evidence_snapshot_ref_and_sha256: true
+  acceptance_network_access_required: false
   require_zero_failed_dates: true
   require_quality_status_pass: true
   require_backfill_manifest_and_quality_run_id_match_requested_run: true
