@@ -52,20 +52,16 @@ def test_active_src_has_no_legacy_calendar_runtime_dependency() -> None:
 
 def test_stage10_date_source_requests_only_algopack_tradestats(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MOEX_API_KEY", "test-key")
-    calls: list[str] = []
+    calls: list[tuple[str, dict[str, object]]] = []
+    data_dates = {"2026-06-12", "2026-06-15"}
 
     def fake_get(url, *, params, headers, timeout):
-        calls.append(str(url))
-        if int(params["start"]) == 0:
-            return FakeResponse(
-                _tradestats_payload(
-                    [
-                        ["SiU6", "2026-06-12"],
-                        ["SiU6", "2026-06-15"],
-                    ]
-                ),
-                str(url),
-            )
+        calls.append((str(url), dict(params)))
+        request_date = str(params["date"])
+        if int(params["start"]) > 0:
+            return FakeResponse(_tradestats_payload([]), str(url))
+        if request_date in data_dates:
+            return FakeResponse(_tradestats_payload([["SiU6", request_date]]), str(url))
         return FakeResponse(_tradestats_payload([]), str(url))
 
     monkeypatch.setattr(refresh.requests, "get", fake_get)
@@ -76,8 +72,17 @@ def test_stage10_date_source_requests_only_algopack_tradestats(monkeypatch: pyte
     forbidden = "/iss/" + "calendars"
     assert dates == ["2026-06-12", "2026-06-15"]
     assert calls
-    assert all(url.endswith(refresh.OBSERVED_DATE_SOURCE_ENDPOINT) for url in calls)
-    assert all(forbidden not in url for url in calls)
+    assert all(url.endswith(refresh.OBSERVED_DATE_SOURCE_ENDPOINT) for url, _params in calls)
+    assert all(forbidden not in url for url, _params in calls)
+    first_requests = [params for _url, params in calls if int(params["start"]) == 0]
+    assert [str(params["date"]) for params in first_requests] == [
+        "2026-06-12",
+        "2026-06-13",
+        "2026-06-14",
+        "2026-06-15",
+    ]
+    assert all(params["date"] == params["from"] == params["till"] for params in first_requests)
+    assert all(params["secid"] == "SiU6" for params in first_requests)
 
 
 def test_incremental_refresh_source_loader_never_requests_calendar_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -144,13 +149,16 @@ def test_observed_source_absence_is_contextual_and_fail_closed(monkeypatch: pyte
 def test_weekends_and_gaps_are_not_fabricated_by_stage10_date_source(monkeypatch: pytest.MonkeyPatch) -> None:
     observed = ["2026-06-12", "2026-06-15", "2026-06-17"]
 
-    def source_loader(date_start, date_end, *, secid, timeout, apim_base_url=None):
+    def source_loader(date_start, date_end, *, instrument_id, registry_path=None, timeout, apim_base_url=None):
         assert date_start == "2026-06-12"
         assert date_end == "2026-06-17"
-        assert secid == "SiU6"
+        assert instrument_id == "si_futures_family"
+        assert registry_path is None
+        assert timeout == 1.0
+        assert apim_base_url is None
         return observed
 
-    monkeypatch.setattr(step10.forts_incremental, "fetch_observed_tradestats_dates", source_loader)
+    monkeypatch.setattr(step10.observed_dates, "observed_dates", source_loader)
 
     result = step10._calendar_dates(start_date="2026-06-12", end_date="2026-06-17", timeout=1.0)
 
