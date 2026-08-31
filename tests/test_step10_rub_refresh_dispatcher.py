@@ -81,6 +81,11 @@ def test_blocked_futoi_still_promotes_stage7_and_never_runs_stage5(tmp_path: Pat
         ),
     )
     monkeypatch.setattr(step10, "_calendar_dates", lambda **_kwargs: ["2026-08-18", "2026-08-19"])
+    monkeypatch.setattr(
+        dispatcher.cets_observed_dates,
+        "observed_common_dates",
+        lambda candidate_dates, **_kwargs: list(candidate_dates),
+    )
 
     def fake_stage7(**kwargs):
         calls.append("stage7")
@@ -133,8 +138,75 @@ def test_blocked_futoi_still_promotes_stage7_and_never_runs_stage5(tmp_path: Pat
     assert result["stage5"]["canonical_pointer_promotion"] is False
     assert result["stage7"]["status"] == "refreshed"
     assert result["futoi_block_does_not_block_stage7"] is True
+    assert result["stage3_stage4_target_trade_date"] == "2026-08-19"
     assert promoted == [8]
     assert calls == ["stage7", "stage3_stage4", "promote_stage7", "smoke"]
+
+
+def test_blocked_futoi_fo_only_date_does_not_force_cets_stage3_refresh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tmp_path / "data"
+    root.mkdir()
+    repo = _repo(tmp_path)
+    monkeypatch.setenv("MOEX_DATA_ROOT", root.as_posix())
+    pointer = root / "state" / "dummy.json"
+    pointer.parent.mkdir(parents=True)
+    pointer.write_bytes(b"old")
+
+    monkeypatch.setattr(step10, "_futoi_stage5_promotion_governance", lambda _repo: _blocked_governance())
+    monkeypatch.setattr(step10, "_snapshot_pointers", lambda _root: {pointer: b"old"})
+    monkeypatch.setattr(
+        step10,
+        "_load_stage7_base",
+        lambda _root, _as_of: (
+            "2026-08-29",
+            {name: _stage7_base(name, "2026-08-29") for name in step10.STAGE7_INSTRUMENTS},
+        ),
+    )
+    monkeypatch.setattr(step10, "_calendar_dates", lambda **_kwargs: ["2026-08-29", "2026-08-30"])
+    monkeypatch.setattr(
+        dispatcher.cets_observed_dates,
+        "observed_common_dates",
+        lambda candidate_dates, **_kwargs: [] if list(candidate_dates) == ["2026-08-30"] else (_ for _ in ()).throw(AssertionError("unexpected candidates")),
+    )
+
+    def fake_stage7(**kwargs):
+        assert kwargs["trading_dates"] == ["2026-08-30"]
+        assert kwargs["rebuild_weekly"] is True
+        return [{"id": i} for i in range(8)]
+
+    monkeypatch.setattr(step10, "_stage7_refresh", fake_stage7)
+    monkeypatch.setattr(step10, "_latest_source_dates", lambda _root, _as_of: ("2026-08-29", "2026-08-29"))
+    monkeypatch.setattr(
+        step10,
+        "_run_stage3_stage4",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("FO-only date must not be forced into Stage 3/4")),
+    )
+    monkeypatch.setattr(
+        step10,
+        "_pointer_from_output",
+        lambda _root, output, _run: (root / "state" / ("fo_only_" + str(output["id"])), {"id": output["id"]}),
+    )
+    promoted: list[int] = []
+    monkeypatch.setattr(step10, "_transactional_pointer_replace", lambda records: promoted.append(len(records)))
+    monkeypatch.setattr(step10, "_capture_written_pointer_state", lambda _records: {})
+    monkeypatch.setattr(step10, "_stage9_smoke", lambda _as_of: {"status": "passed", "daily_block_count": 20, "weekly_block_count": 24})
+
+    result = dispatcher.run_refresh(
+        through_date="2026-08-30",
+        run_id="dispatcher_fo_only_date",
+        repo_root=repo,
+        env_file=None,
+        now_utc=datetime(2026, 8, 31, 6, 0, tzinfo=timezone.utc),
+    )
+
+    assert promoted == [8]
+    assert result["latest_completed_trading_date"] == "2026-08-30"
+    assert result["new_trading_dates"] == ["2026-08-30"]
+    assert result["stage3_stage4_current_trade_date"] == "2026-08-29"
+    assert result["stage3_stage4_target_trade_date"] == "2026-08-29"
+    assert result["source_refresh"]["status"] == "no_op"
+    assert result["source_refresh"]["latest_forts_trade_date"] == "2026-08-30"
+    assert result["stage7"]["status"] == "refreshed"
 
 
 def test_blocked_futoi_sunday_boundary_promotes_stage7_weekly_without_new_trade_date(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -193,6 +265,7 @@ def test_blocked_futoi_sunday_boundary_promotes_stage7_weekly_without_new_trade_
 def test_allowed_futoi_delegates_to_full_stage10(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _repo(tmp_path)
     monkeypatch.setattr(step10, "_futoi_stage5_promotion_governance", lambda _repo: _allowed_governance())
+    monkeypatch.setattr(dispatcher, "STAGE5_FULL_MODE_READY", True)
     observed: dict[str, object] = {}
 
     def fake_full(**kwargs):
