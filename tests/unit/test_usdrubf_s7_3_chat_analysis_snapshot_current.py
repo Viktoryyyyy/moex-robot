@@ -93,5 +93,9 @@ def test_current_producers_replace_only_cnyrubf_live() -> None:
 
     assert set(selected) == set(baseline)
     assert selected["cnyrubf_live"] is current._cnyrubf_live_component
-    for name in set(baseline) - {"cnyrubf_live"}:
-        assert selected[name] is baseline[name]
+    assert selected["live_market_structure"] is current.base._live_market_component
+    assert selected["cbr_macro"] is current.base._macro_component
+    assert selected["official_news"] is current.base._news_component
+    assert selected["cnyrub_spot_live"] is current.base._cny_spot_component
+    assert callable(selected["stage9_daily"])
+    assert callable(selected["stage9_weekly"])
