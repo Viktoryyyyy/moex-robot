@@ -183,6 +183,20 @@ def test_malformed_snapshot_is_rejected_by_governed_consumer_validation() -> Non
     assert body == {"error": "snapshot_unavailable"}
 
 
+def test_non_strict_json_snapshot_fails_predictably_for_data_and_readiness() -> None:
+    malformed = _snapshot()
+    malformed["components"]["official_news"]["data"]["invalid"] = float("nan")  # type: ignore[index]
+
+    with _running_server(lambda: malformed) as port:
+        status, _, body = _request(port, api.SNAPSHOT_PATH)
+        ready_status, _, ready_body = _request(port, api.READINESS_PATH)
+
+    assert status == 503
+    assert body == {"error": "snapshot_unavailable"}
+    assert ready_status == 503
+    assert ready_body == {"status": "NOT_READY", "reason": "snapshot_unavailable"}
+
+
 @pytest.mark.parametrize("token", [None, "wrong-token", " test-bearer-token", "test-bearer-token "])
 def test_snapshot_endpoint_requires_exact_bearer_token(token: str | None) -> None:
     calls = 0
@@ -269,6 +283,8 @@ def test_load_api_token_reads_only_governed_env_file(tmp_path: Path) -> None:
         {api.TOKEN_ENV: ""},
         {api.TOKEN_ENV: " token"},
         {api.TOKEN_ENV: "token "},
+        {api.TOKEN_ENV: "token with space"},
+        {api.TOKEN_ENV: "tökën"},
         {api.ENV_FILE_ENV: "relative.env"},
     ],
 )
@@ -280,3 +296,8 @@ def test_load_api_token_fails_closed_for_invalid_configuration(environ: dict[str
 def test_create_server_refuses_non_loopback_binding() -> None:
     with pytest.raises(api.SnapshotAPIConfigurationError, match="must bind to loopback"):
         api.create_server(api_token=TOKEN, host="0.0.0.0", port=8765)
+
+
+def test_create_server_rejects_non_ascii_token_before_binding() -> None:
+    with pytest.raises(api.SnapshotAPIConfigurationError, match="must be ASCII"):
+        api.create_server(api_token="tökën", port=8765)
