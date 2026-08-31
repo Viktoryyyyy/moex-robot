@@ -24,6 +24,7 @@ from moex_data.futures import materialize_forts_raw_5m_instrument as forts_raw
 from moex_data.futures import materialize_futoi_eod as futoi_eod
 from moex_data.futures import materialize_futoi_instrument as futoi_raw
 from moex_data.futures import materialize_futoi_positioning_features_d1 as futoi_features
+from moex_data.futures import observed_tradestats_dates as observed_dates
 from moex_data.futures import refresh_forts_raw_5m_incremental as forts_incremental
 
 
@@ -37,6 +38,7 @@ CANONICAL_ENV_PATH: Final[str] = "/home/trader/moex_bot/.env"
 MARKET_TZ: Final[str] = "Europe/Moscow"
 REGISTRY_PATH: Final[str] = "configs/instruments/forts_instrument_registry.v1.yaml"
 ROOT_REF_PREFIX: Final[str] = "${MOEX_DATA_ROOT}/"
+OBSERVED_DATE_REFERENCE_INSTRUMENT_ID: Final[str] = "si_futures_family"
 STAGE5_INSTRUMENTS: Final[tuple[str, ...]] = ("si_futures_family", "cr_futures_family")
 STAGE7_INSTRUMENTS: Final[dict[str, str]] = {
     "usdrubf_futures_family": "USDRUBF",
@@ -383,10 +385,10 @@ def _load_stage7_base(root: Path, as_of: datetime) -> tuple[str, dict[str, pd.Da
 
 def _calendar_dates(*, start_date: str, end_date: str, timeout: float) -> list[str]:
     try:
-        return forts_incremental.fetch_observed_tradestats_dates(
+        return observed_dates.observed_dates(
             start_date,
             end_date,
-            secid=STAGE7_INSTRUMENTS["usdrubf_futures_family"],
+            instrument_id=OBSERVED_DATE_REFERENCE_INSTRUMENT_ID,
             timeout=timeout,
         )
     except Exception as exc:
