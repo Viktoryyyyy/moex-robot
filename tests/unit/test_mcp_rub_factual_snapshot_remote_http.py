@@ -115,18 +115,19 @@ def test_cli_defaults_preserve_existing_stdio_transport() -> None:
 
 def test_streamable_http_transport_is_loopback_only(monkeypatch) -> None:
     configured = False
-    ran = False
+    built = False
 
     def configure(*args: object, **kwargs: object) -> None:
         nonlocal configured
         configured = True
 
-    def run(*args: object, **kwargs: object) -> None:
-        nonlocal ran
-        ran = True
+    def build(*args: object, **kwargs: object) -> object:
+        nonlocal built
+        built = True
+        return object()
 
     monkeypatch.setattr(bridge, "configure_bridge", configure)
-    monkeypatch.setattr(bridge.mcp, "run", run)
+    monkeypatch.setattr(bridge, "build_mcp_server", build)
 
     with pytest.raises(
         bridge.RubSnapshotBridgeConfigurationError,
@@ -135,7 +136,7 @@ def test_streamable_http_transport_is_loopback_only(monkeypatch) -> None:
         bridge.run_mcp(transport="streamable-http", host="0.0.0.0", port=8766)
 
     assert configured is False
-    assert ran is False
+    assert built is False
 
 
 @pytest.mark.parametrize("port", [0, 65536, -1])
@@ -156,27 +157,41 @@ def test_streamable_http_transport_rejects_invalid_port_before_runtime(
     assert configured is False
 
 
-def test_streamable_http_run_uses_exact_read_only_origin_contract(monkeypatch) -> None:
-    calls: list[dict[str, object]] = []
-    monkeypatch.setattr(bridge, "configure_bridge", lambda: None)
+def test_streamable_http_server_has_exact_sdk_1x_origin_settings() -> None:
+    server = bridge.build_mcp_server(host="127.0.0.1", port=8766)
 
-    def run(**kwargs: object) -> None:
-        calls.append(kwargs)
+    assert server.settings.host == "127.0.0.1"
+    assert server.settings.port == 8766
+    assert server.settings.streamable_http_path == "/mcp"
+    assert server.settings.stateless_http is True
+    assert server.settings.json_response is True
 
-    monkeypatch.setattr(bridge.mcp, "run", run)
 
-    bridge.run_mcp(transport="streamable-http", port=8766)
+def test_streamable_http_run_builds_bounded_server_then_uses_transport(monkeypatch) -> None:
+    configured = False
+    built: list[tuple[str, int]] = []
+    run_calls: list[str] = []
 
-    assert calls == [
-        {
-            "transport": "streamable-http",
-            "host": "127.0.0.1",
-            "port": 8766,
-            "streamable_http_path": "/mcp",
-            "stateless_http": True,
-            "json_response": True,
-        }
-    ]
+    class StubServer:
+        def run(self, transport: str) -> None:
+            run_calls.append(transport)
+
+    def configure(*args: object, **kwargs: object) -> None:
+        nonlocal configured
+        configured = True
+
+    def build(*, host: str, port: int) -> StubServer:
+        built.append((host, port))
+        return StubServer()
+
+    monkeypatch.setattr(bridge, "configure_bridge", configure)
+    monkeypatch.setattr(bridge, "build_mcp_server", build)
+
+    bridge.run_mcp(transport="streamable-http", host="127.0.0.1", port=8766)
+
+    assert configured is True
+    assert built == [("127.0.0.1", 8766)]
+    assert run_calls == ["streamable-http"]
 
 
 def test_streamable_http_surface_still_has_only_two_read_only_tools() -> None:
