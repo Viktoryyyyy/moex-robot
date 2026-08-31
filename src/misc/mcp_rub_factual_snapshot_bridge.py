@@ -193,14 +193,15 @@ def run_mcp(
     host: str = DEFAULT_MCP_HTTP_HOST,
     port: int = DEFAULT_MCP_HTTP_PORT,
 ) -> None:
-    configure_bridge()
     if transport == "stdio":
+        configure_bridge()
         mcp.run(transport="stdio")
         return
     if transport != "streamable-http":
         raise RubSnapshotBridgeConfigurationError(f"unsupported MCP transport: {transport}")
 
     bound_host, bound_port = _validated_http_origin(host, port)
+    configure_bridge()
     mcp.run(
         transport="streamable-http",
         host=bound_host,
