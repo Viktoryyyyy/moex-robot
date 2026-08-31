@@ -127,7 +127,7 @@ The repository-governed service sets:
 MOEX_ENV_FILE=/home/trader/moex_bot/.env
 ```
 
-Missing, blank, whitespace-corrupted, relative, symlinked, or non-file configuration fails closed before the HTTP server starts.
+Missing, blank, whitespace-corrupted, relative, or non-file configuration fails closed before the HTTP server starts.
 
 Requests use:
 
@@ -152,7 +152,7 @@ The HTTP layer does not fabricate fallback data and does not trigger refresh on 
 
 ## Read-only authority boundary
 
-The network service imports the governed consumer and standard-library HTTP/configuration code only. It contains no MOEX, CBR, news, oil, calendar, broker, Telegram, external-data, analysis, scenario, recommendation, B/S/OUT, or snapshot-refresh adapter.
+The network service imports the governed consumer, `python-dotenv` only for the governed secret-file read, and Python standard-library HTTP/configuration primitives. It contains no MOEX, CBR, news, oil, calendar, broker, Telegram, external-data, analysis, scenario, recommendation, B/S/OUT, or snapshot-refresh adapter.
 
 The canonical authority fields remain authoritative. This task does not change Stage 3/4/5/7/9/10 semantics, FUTOI governance, trading-day governance, source selection, or the 10-minute snapshot producer cadence.
 
