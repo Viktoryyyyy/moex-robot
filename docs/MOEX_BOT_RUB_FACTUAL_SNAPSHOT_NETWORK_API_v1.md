@@ -73,6 +73,8 @@ Consequently, existing fields remain visible exactly under their canonical names
 
 A valid `PARTIAL`, `STALE`, `GOVERNED_BLOCKED`, retained, unavailable, or other governed component state is not hidden or upgraded by the API. A valid degraded snapshot is still retrievable with HTTP `200` so an authorized factual consumer can inspect the actual state.
 
+Before any response is committed, the loaded snapshot must also be serializable as strict JSON (`allow_nan=False`). A non-JSON value such as `NaN` is treated as an invalid snapshot and never results in a partial `200` response.
+
 The response includes `Cache-Control: no-store`.
 
 ### `GET /readyz`
@@ -89,6 +91,8 @@ read_freshness.status == FRESH
 ```
 
 Otherwise it returns HTTP `503` and reports the canonical readiness/freshness values. It also keeps snapshot generation time and governed read time distinct.
+
+A snapshot that cannot be serialized as strict JSON is treated as unavailable here as well and returns `503`, never `READY`.
 
 No additional application health endpoint is required.
 
@@ -127,7 +131,7 @@ The repository-governed service sets:
 MOEX_ENV_FILE=/home/trader/moex_bot/.env
 ```
 
-Missing, blank, whitespace-corrupted, relative, or non-file configuration fails closed before the HTTP server starts.
+The token must be non-empty ASCII without whitespace. Missing, blank, whitespace-corrupted, non-ASCII, relative-path, or non-file configuration fails closed before the HTTP server starts.
 
 Requests use:
 
@@ -145,8 +149,9 @@ Comparison uses `hmac.compare_digest`. Invalid or missing credentials receive HT
 | Valid `PARTIAL` snapshot | `200`, canonical payload with state preserved | `503`, `NOT_READY` |
 | Valid `STALE` snapshot | `200`, canonical payload with state preserved | `503`, `NOT_READY` |
 | Missing persisted snapshot | `503 snapshot_unavailable` | `503 snapshot_unavailable` |
-| Malformed/invalid snapshot | `503 snapshot_unavailable` | `503 snapshot_unavailable` |
+| Malformed/invalid/non-strict-JSON snapshot | `503 snapshot_unavailable` | `503 snapshot_unavailable` |
 | Missing/wrong Bearer token | `401 unauthorized` | `401 unauthorized` |
+| Invalid configured Bearer token | service fails closed before bind | service fails closed before bind |
 
 The HTTP layer does not fabricate fallback data and does not trigger refresh on any failure.
 
