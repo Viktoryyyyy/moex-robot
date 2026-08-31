@@ -133,5 +133,5 @@ def test_stage8_is_marked_wip_not_accepted_or_applied() -> None:
 
 def test_current_pointer_targets_dated_state() -> None:
     lines = _exact_lines(POINTER.read_text(encoding="utf-8"))
-    assert "current_execution_state: `docs/MOEX_BOT_CURRENT_EXECUTION_STATE_2026-08-27.md`" in lines
+    assert "current_execution_state: `docs/MOEX_BOT_CURRENT_EXECUTION_STATE_2026-08-31.md`" in lines
     assert any("does not override the management canon" in line for line in lines)
