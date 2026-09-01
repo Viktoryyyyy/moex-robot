@@ -48,6 +48,29 @@ _PDF_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 _ET = ZoneInfo("America/New_York")
+_ENGLISH_MONTHS = {
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "april": 4,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
+}
+_ENGLISH_WEEKDAYS = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+}
 
 
 @dataclass(frozen=True)
@@ -192,8 +215,13 @@ def _discover_latest_release_urls(index_html: bytes) -> dict[str, str]:
         spec = by_prefix.get(match.group("prefix").casefold())
         if spec is None:
             continue
+        raw_date = match.group("date")
         try:
-            release_date = datetime.strptime(match.group("date"), "%m%d%Y")
+            release_date = datetime(
+                int(raw_date[4:8]),
+                int(raw_date[0:2]),
+                int(raw_date[2:4]),
+            )
         except ValueError:
             continue
         candidates[spec.source_id].append((release_date, absolute))
@@ -241,27 +269,37 @@ def _release_timestamp(first_page_text: str) -> datetime:
             "TIMESTAMP_UNPROVABLE",
             "BLS release embargo/publication timestamp is not present in DOL mirror PDF",
         )
-    try:
-        month = datetime.strptime(match.group("month"), "%B").month
-        meridiem = match.group("meridiem").replace(".", "").upper()
-        clock = datetime.strptime(
-            f"{match.group('clock')} {meridiem}",
-            "%I:%M %p",
+    month = _ENGLISH_MONTHS.get(match.group("month").casefold())
+    weekday = _ENGLISH_WEEKDAYS.get(match.group("weekday").casefold())
+    if month is None or weekday is None:
+        raise RssAcquisitionError(
+            "TIMESTAMP_UNPROVABLE",
+            "BLS release embargo/publication timestamp contains an unknown English date token",
         )
+    try:
+        hour_text, minute_text = match.group("clock").split(":", 1)
+        hour = int(hour_text)
+        minute = int(minute_text)
+        if not 1 <= hour <= 12 or not 0 <= minute <= 59:
+            raise ValueError("invalid 12-hour clock")
+        meridiem = match.group("meridiem").replace(".", "").casefold()
+        if meridiem not in {"am", "pm"}:
+            raise ValueError("invalid meridiem")
+        hour_24 = hour % 12 + (12 if meridiem == "pm" else 0)
         local = datetime(
             int(match.group("year")),
             month,
             int(match.group("day")),
-            clock.hour,
-            clock.minute,
+            hour_24,
+            minute,
             tzinfo=_ET,
         )
-    except ValueError as exc:
+    except (TypeError, ValueError) as exc:
         raise RssAcquisitionError(
             "TIMESTAMP_UNPROVABLE",
             "BLS release embargo/publication timestamp is malformed",
         ) from exc
-    if local.strftime("%A").casefold() != match.group("weekday").casefold():
+    if local.weekday() != weekday:
         raise RssAcquisitionError(
             "TIMESTAMP_UNPROVABLE",
             "BLS release weekday does not match release date",
