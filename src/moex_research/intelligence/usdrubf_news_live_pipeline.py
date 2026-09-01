@@ -10,6 +10,10 @@ from .usdrubf_news_classifier_agent import (
     ClassifierAgent,
     stage12b3_news_classifier,
 )
+from .usdrubf_news_live_bls_dol import (
+    BLS_DOL_SOURCE_IDS,
+    fetch_bls_dol_mirror_batch,
+)
 from .usdrubf_news_live_rss import (
     LIVE_RSS_SOURCE_IDS,
     SOURCE_REGISTRY_PATH,
@@ -17,6 +21,18 @@ from .usdrubf_news_live_rss import (
     fetch_official_rss_batch,
 )
 from .usdrubf_news_macro import NewsPipelineResult, process_news_batch
+
+
+_BLS_RSS_SOURCE_IDS = frozenset(
+    {
+        "bls_employment_situation_rss",
+        "bls_cpi_rss",
+    }
+)
+LIVE_OFFICIAL_SOURCE_IDS = (
+    tuple(source_id for source_id in LIVE_RSS_SOURCE_IDS if source_id not in _BLS_RSS_SOURCE_IDS)
+    + BLS_DOL_SOURCE_IDS
+)
 
 
 @dataclass(frozen=True)
@@ -102,11 +118,57 @@ def _filter_acquisition_by_ingestion(
     return RssBatchResult(tuple(filtered_results))
 
 
+def _acquire_official_sources(
+    *,
+    registry_path: Path | str,
+    source_ids: Iterable[str],
+    opener: Callable[..., object],
+    now_fn: Callable[[], datetime],
+    timeout_seconds: float,
+) -> RssBatchResult:
+    requested = tuple(source_ids)
+    if len(requested) != len(set(requested)):
+        raise ValueError("duplicate live News source_id requested")
+
+    dol_ids = tuple(source_id for source_id in requested if source_id in BLS_DOL_SOURCE_IDS)
+    rss_ids = tuple(source_id for source_id in requested if source_id not in BLS_DOL_SOURCE_IDS)
+
+    rss = (
+        fetch_official_rss_batch(
+            registry_path=registry_path,
+            source_ids=rss_ids,
+            opener=opener,
+            now_fn=now_fn,
+            timeout_seconds=timeout_seconds,
+        )
+        if rss_ids
+        else RssBatchResult(())
+    )
+    dol = (
+        fetch_bls_dol_mirror_batch(
+            source_ids=dol_ids,
+            opener=opener,
+            now_fn=now_fn,
+            timeout_seconds=timeout_seconds,
+        )
+        if dol_ids
+        else RssBatchResult(())
+    )
+
+    by_id = {
+        item.source_id: item
+        for item in rss.source_results + dol.source_results
+    }
+    if set(by_id) != set(requested):
+        raise RuntimeError("live News acquisition did not return exactly the requested source set")
+    return RssBatchResult(tuple(by_id[source_id] for source_id in requested))
+
+
 def run_live_official_news_pipeline(
     *,
     classifier_agent: ClassifierAgent,
     registry_path: Path | str = SOURCE_REGISTRY_PATH,
-    source_ids: Iterable[str] = LIVE_RSS_SOURCE_IDS,
+    source_ids: Iterable[str] = LIVE_OFFICIAL_SOURCE_IDS,
     opener: Callable[..., object] = urlopen,
     now_fn: Callable[[], datetime] | None = None,
     as_of_timestamp: datetime | None = None,
@@ -115,19 +177,22 @@ def run_live_official_news_pipeline(
     prior_event_history: Mapping[str, Sequence[Mapping[str, object]]] | None = None,
     similarity_threshold: float = 0.72,
 ) -> LiveNewsPipelineResult:
-    """Acquire official RSS records and run the bounded Stage 12B.3 classifier path.
+    """Acquire official records and run the bounded Stage 12B.3 classifier path.
 
-    The caller supplies only the external classifier transport/callable. This live
-    composition always wraps it with stage12b3_news_classifier() before any
-    cluster reaches process_news_batch(), so callers cannot accidentally bypass
-    the Stage 12B.3 PIT/input/output guard through this API.
+    The default composition keeps healthy official RSS sources and replaces the
+    production-blocked BLS RSS routes with bounded official DOL-hosted BLS
+    release mirrors. The caller supplies only the external classifier
+    transport/callable. This live composition always wraps it with
+    stage12b3_news_classifier() before any cluster reaches process_news_batch(),
+    so callers cannot accidentally bypass the Stage 12B.3 PIT/input/output
+    guard through this API.
 
     Acquisition failures remain visible while healthy records continue through
     the deterministic News Pipeline. For current-live use, successful source
     records are conservatively restamped at batch completion so HTTP latency can
-    never be represented as pre-response ingestion. An explicit historical as-of
-    additionally excludes records whose conservative ingestion stamp is later
-    than that cutoff.
+    never be represented as pre-response ingestion. An explicit historical
+    as-of additionally excludes records whose conservative ingestion stamp is
+    later than that cutoff.
     """
 
     if not callable(classifier_agent):
@@ -143,7 +208,7 @@ def run_live_official_news_pipeline(
     if explicit_as_of is not None and explicit_as_of > started_at:
         raise ValueError("as_of_timestamp may not be later than acquisition time")
 
-    acquisition = fetch_official_rss_batch(
+    acquisition = _acquire_official_sources(
         registry_path=registry_path,
         source_ids=source_ids,
         opener=opener,
