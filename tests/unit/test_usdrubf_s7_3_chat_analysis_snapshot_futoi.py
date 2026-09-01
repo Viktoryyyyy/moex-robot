@@ -10,6 +10,8 @@ from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_futoi 
 NOW = datetime(2026, 8, 30, 10, 0, tzinfo=timezone.utc)
 SI = snapshot.futoi_source.SI_INSTRUMENT_ID
 CR = snapshot.futoi_source.CR_INSTRUMENT_ID
+ACCEPTED_STATUS = "FUTOI_LIVE_ACCEPTED_FACTUAL_CONTEXT_ONLY"
+BLOCKED_STATUS = "FUTOI_GOVERNED_BLOCKED"
 
 
 def _simple(name: str):
@@ -56,12 +58,40 @@ def _producers():
     }
 
 
-def _governance(*, si_accepted: bool = False, cr_accepted: bool = False) -> dict[str, object]:
-    all_pass = si_accepted or cr_accepted
+def _instrument_governance(
+    *,
+    accepted: bool,
+    factual_authority: bool | None = None,
+    smoke_accepted: bool | None = None,
+    local_blockers: list[str] | None = None,
+) -> dict[str, object]:
+    factual = accepted if factual_authority is None else factual_authority
+    smoke = accepted if smoke_accepted is None else smoke_accepted
+    blockers = ([] if accepted else ["instrument_not_accepted"]) if local_blockers is None else local_blockers
+    return {
+        "status": ACCEPTED_STATUS if accepted else BLOCKED_STATUS,
+        "canonical_live_smoke_accepted": smoke,
+        "factual_live_authority": factual,
+        "directional_authority": False,
+        "action_authority": False,
+        "standalone_buy_sell_authority": False,
+        "local_blockers": blockers,
+    }
+
+
+def _governance(
+    *,
+    si_accepted: bool = False,
+    cr_accepted: bool = False,
+    cr_factual_authority: bool | None = None,
+    cr_smoke_accepted: bool | None = None,
+    cr_local_blockers: list[str] | None = None,
+) -> dict[str, object]:
+    all_pass = si_accepted or cr_accepted or cr_factual_authority is True
     return {
         "project": "MOEX_Bot",
         "contract_id": "usdrubf_futoi_live_acceptance_governance_v1",
-        "status": "FUTOI_GOVERNED_BLOCKED",
+        "status": BLOCKED_STATUS,
         "instrument_scope": [SI, CR],
         "gates": [
             {"gate_id": "g1", "required": True, "status": "PASS"},
@@ -73,22 +103,13 @@ def _governance(*, si_accepted: bool = False, cr_accepted: bool = False) -> dict
             "action_authority": False,
         },
         "instrument_acceptance": {
-            SI: {
-                "status": "FUTOI_GOVERNED_BLOCKED",
-                "factual_live_authority": si_accepted,
-                "directional_authority": False,
-                "action_authority": False,
-                "standalone_buy_sell_authority": False,
-                "local_blockers": [] if si_accepted else ["g2"],
-            },
-            CR: {
-                "status": "FUTOI_GOVERNED_BLOCKED",
-                "factual_live_authority": cr_accepted,
-                "directional_authority": False,
-                "action_authority": False,
-                "standalone_buy_sell_authority": False,
-                "local_blockers": [] if cr_accepted else ["cr_smoke"],
-            },
+            SI: _instrument_governance(accepted=si_accepted),
+            CR: _instrument_governance(
+                accepted=cr_accepted,
+                factual_authority=cr_factual_authority,
+                smoke_accepted=cr_smoke_accepted,
+                local_blockers=cr_local_blockers,
+            ),
         },
     }
 
@@ -184,6 +205,31 @@ def test_cr_cannot_inherit_si_factual_authority(monkeypatch, tmp_path: Path) -> 
     assert result["authority"]["futoi_by_instrument"][CR]["directional_authority"] is False
     assert result["authority"]["futoi_by_instrument"][CR]["action_authority"] is False
     assert result["authority"]["futoi_by_instrument"][CR]["standalone_buy_sell_authority"] is False
+
+
+def test_cr_local_smoke_and_blockers_are_required_even_if_global_gates_and_factual_flag_pass(
+    monkeypatch, tmp_path: Path
+) -> None:
+    governance = _governance(
+        si_accepted=True,
+        cr_accepted=False,
+        cr_factual_authority=True,
+        cr_smoke_accepted=False,
+        cr_local_blockers=["cr_canonical_live_smoke_not_yet_accepted"],
+    )
+    monkeypatch.setattr(snapshot, "_load_governance", lambda: governance)
+    _patch_candidates(monkeypatch)
+
+    result = snapshot.build_snapshot(now=NOW, producers=_producers(), data_root=tmp_path)
+    cr = result["components"]["futoi_live_cr"]
+
+    assert cr["status"] == "GOVERNED_BLOCKED"
+    assert cr["data"]["governance"]["all_required_gates_pass"] is True
+    assert cr["data"]["governance"]["factual_live_authority"] is True
+    assert cr["data"]["governance"]["canonical_live_smoke_accepted"] is False
+    assert cr["data"]["governance"]["instrument_local_acceptance_pass"] is False
+    assert cr["data"]["consumer_factual_use_allowed"] is False
+    assert cr["data"]["factual_authority"] is False
 
 
 def test_accepted_governance_retains_previous_factual_context_per_instrument(monkeypatch, tmp_path: Path) -> None:
