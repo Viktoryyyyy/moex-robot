@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Mapping
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -40,7 +39,9 @@ def _load_previous(root: Path, instrument_id: str) -> dict[str, object] | None:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
-        raise FutoiIntradayContextError("FUTOI intraday context artifact is not valid JSON") from exc
+        raise FutoiIntradayContextError(
+            "FUTOI intraday context artifact is not valid JSON"
+        ) from exc
     if not isinstance(value, dict):
         _fail("FUTOI intraday context artifact must contain a JSON object")
     if value.get("project") != PROJECT or value.get("instrument_id") != instrument_id:
@@ -86,8 +87,6 @@ def _resolve_observed_trade_dates(
     if not observed:
         _fail("authoritative observed TradeStats date selection returned no dates")
 
-    # Trading-date authority comes only from the observed source response. The
-    # bounded date range above is a query window, never a trading calendar.
     if checked in observed:
         current_trade_date: str | None = checked
         index = observed.index(checked)
@@ -202,7 +201,7 @@ def _materialize_record(
     run_id: str,
     timeout: float,
     attempted_at: str,
-    completed_at: str,
+    now_fn: Callable[[], datetime],
 ) -> dict[str, object]:
     identity = source.source_identity(instrument_id)
     binding = source._binding(instrument_id)
@@ -231,6 +230,7 @@ def _materialize_record(
         expected_source_ticker=identity["source_ticker"],
         expected_secid=identity["secid"],
     )
+    completed_at = _iso_utc(now_fn())
     return {
         "role": role,
         "status": "FRESH",
@@ -261,8 +261,8 @@ def _record_with_failure_semantics(
     run_id: str,
     timeout: float,
     attempted_at: str,
-    completed_at: str,
     prior: Mapping[str, object] | None,
+    now_fn: Callable[[], datetime],
 ) -> dict[str, object]:
     if trade_date is None:
         retained = _retained_record(
@@ -295,7 +295,7 @@ def _record_with_failure_semantics(
             run_id=run_id,
             timeout=timeout,
             attempted_at=attempted_at,
-            completed_at=completed_at,
+            now_fn=now_fn,
         )
     except Exception as exc:
         require_same = role == PREVIOUS_ROLE
@@ -310,7 +310,11 @@ def _record_with_failure_semantics(
         )
         if retained is not None:
             return retained
-        status = "PENDING" if "pending on authoritative observed TradeStats date" in str(exc) else "ERROR"
+        status = (
+            "PENDING"
+            if "pending on authoritative observed TradeStats date" in str(exc)
+            else "ERROR"
+        )
         return _empty_record(
             role=role,
             expected_trade_date=trade_date,
@@ -334,9 +338,7 @@ def run_refresh(
     checked_run = source._safe_token(run_id, "run_id")
     root = source._data_root()
     prior = _load_previous(root, checked_instrument)
-    now = now_fn()
-    attempted_at = _iso_utc(now)
-    completed_at = attempted_at
+    attempted_at = _iso_utc(now_fn())
     observed, current_date, previous_date = _resolve_observed_trade_dates(
         checked_through,
         instrument_id=checked_instrument,
@@ -353,8 +355,8 @@ def run_refresh(
         run_id=checked_run,
         timeout=timeout,
         attempted_at=attempted_at,
-        completed_at=completed_at,
         prior=prior_current if isinstance(prior_current, Mapping) else None,
+        now_fn=now_fn,
     )
     previous = _record_with_failure_semantics(
         root=root,
@@ -364,8 +366,8 @@ def run_refresh(
         run_id=checked_run,
         timeout=timeout,
         attempted_at=attempted_at,
-        completed_at=completed_at,
         prior=prior_previous if isinstance(prior_previous, Mapping) else None,
+        now_fn=now_fn,
     )
 
     both_fresh = current["status"] == "FRESH" and previous["status"] == "FRESH"
@@ -452,7 +454,12 @@ def _failed_instrument_result(
     return {
         "schema_version": SCHEMA_VERSION,
         "project": PROJECT,
-        "status": "PARTIAL" if isinstance(current.get("factual"), Mapping) or isinstance(previous.get("factual"), Mapping) else "FAILED",
+        "status": (
+            "PARTIAL"
+            if isinstance(current.get("factual"), Mapping)
+            or isinstance(previous.get("factual"), Mapping)
+            else "FAILED"
+        ),
         "source_id": source.SOURCE_ID,
         "instrument_id": instrument_id,
         "through_date": through_date,
@@ -498,7 +505,7 @@ def run_refresh_all(
                 instrument_id=instrument_id,
                 run_id=checked_run + "_" + instrument_id,
                 timeout=timeout,
-                now_fn=lambda value=datetime.fromisoformat(attempted_at): value,
+                now_fn=now_fn,
             )
         except Exception as exc:
             try:
@@ -516,7 +523,11 @@ def run_refresh_all(
         results[instrument_id] = result
         if result.get("status") != "PASS":
             failed.append(instrument_id)
-    aggregate = "PASS" if not failed else ("FAILED" if len(failed) == len(source.LIVE_INSTRUMENT_IDS) else "PARTIAL")
+    aggregate = (
+        "PASS"
+        if not failed
+        else ("FAILED" if len(failed) == len(source.LIVE_INSTRUMENT_IDS) else "PARTIAL")
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "project": PROJECT,
