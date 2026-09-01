@@ -6,7 +6,7 @@ import json
 import os
 import tempfile
 from collections.abc import Mapping, Sequence
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Final
 
@@ -18,7 +18,11 @@ PROJECT: Final[str] = "MOEX_Bot"
 SCHEMA_VERSION: Final[str] = "futoi_live_factual_refresh_source_native.v1"
 DATASET_ID: Final[str] = "futoi_live_factual_context"
 SOURCE_ID: Final[str] = materializer.SOURCE_ID
-INSTRUMENT_ID: Final[str] = "si_futures_family"
+SI_INSTRUMENT_ID: Final[str] = "si_futures_family"
+CR_INSTRUMENT_ID: Final[str] = "cr_futures_family"
+LIVE_INSTRUMENT_IDS: Final[tuple[str, ...]] = (SI_INSTRUMENT_ID, CR_INSTRUMENT_ID)
+# Compatibility alias for legacy Si-only importers. New refresh calls must pass instrument_id explicitly.
+INSTRUMENT_ID: Final[str] = SI_INSTRUMENT_ID
 MARKET_TZ: Final[str] = "Europe/Moscow"
 ROOT_REF_PREFIX: Final[str] = "${MOEX_DATA_ROOT}/"
 SOURCE_LOOKBACK_DAYS: Final[int] = 14
@@ -40,6 +44,13 @@ def _safe_token(value: object, field: str) -> str:
     ):
         _fail(field + " must be an explicit safe token")
     return text
+
+
+def _instrument_id(value: object) -> str:
+    checked = _safe_token(value, "instrument_id")
+    if checked not in LIVE_INSTRUMENT_IDS:
+        _fail("instrument_id is not enabled for live factual FUTOI context")
+    return checked
 
 
 def _iso_date(value: object, field: str) -> str:
@@ -94,13 +105,14 @@ def _load_json(path: Path, field: str) -> dict[str, object]:
     return values
 
 
-def _current_path(root: Path) -> Path:
+def _current_path(root: Path, instrument_id: str) -> Path:
+    checked_instrument = _instrument_id(instrument_id)
     return (
         root
         / "state"
         / "datasets"
         / ("dataset_id=" + DATASET_ID)
-        / ("instrument_id=" + INSTRUMENT_ID)
+        / ("instrument_id=" + checked_instrument)
         / "current.json"
     )
 
@@ -169,7 +181,14 @@ def _resolved_group(frame: pd.DataFrame, group: str, ts: pd.Timestamp) -> pd.Ser
     return selected.iloc[0]
 
 
-def latest_aligned_factual(frame: pd.DataFrame, *, expected_trade_date: str) -> dict[str, object]:
+def latest_aligned_factual(
+    frame: pd.DataFrame,
+    *,
+    expected_trade_date: str,
+    expected_instrument_id: str,
+    expected_source_ticker: str,
+    expected_secid: str,
+) -> dict[str, object]:
     required = {
         "trade_date",
         "ts",
@@ -185,6 +204,7 @@ def latest_aligned_factual(frame: pd.DataFrame, *, expected_trade_date: str) -> 
         "pos_long_num",
         "pos_short_num",
         "source_id",
+        "instrument_id",
         "source_ticker",
         "secid",
     }
@@ -193,12 +213,22 @@ def latest_aligned_factual(frame: pd.DataFrame, *, expected_trade_date: str) -> 
         _fail("accepted FUTOI partition missing columns: " + ",".join(missing))
     if frame.empty:
         _fail("accepted FUTOI partition is empty")
+    checked_instrument = _instrument_id(expected_instrument_id)
     dates = set(str(value) for value in frame["trade_date"].tolist())
     if dates != {expected_trade_date}:
         _fail("accepted FUTOI partition trade_date mismatch")
     sources = set(str(value) for value in frame["source_id"].tolist())
     if sources != {SOURCE_ID}:
         _fail("accepted FUTOI partition source_id mismatch")
+    instruments = set(str(value) for value in frame["instrument_id"].tolist())
+    if instruments != {checked_instrument}:
+        _fail("accepted FUTOI partition instrument_id mismatch")
+    tickers = set(str(value).strip().lower() for value in frame["source_ticker"].tolist())
+    if tickers != {str(expected_source_ticker).strip().lower()}:
+        _fail("accepted FUTOI partition source_ticker mismatch")
+    secids = set(str(value).strip() for value in frame["secid"].tolist())
+    if secids != {str(expected_secid).strip()}:
+        _fail("accepted FUTOI partition secid mismatch")
 
     work = frame.copy()
     work["_parsed_ts"] = pd.to_datetime(work["ts"], errors="coerce")
@@ -218,7 +248,7 @@ def latest_aligned_factual(frame: pd.DataFrame, *, expected_trade_date: str) -> 
     yur_sess_id = _as_int(yur["sess_id"], "YUR.sess_id")
     if fiz_sess_id != yur_sess_id:
         _fail("latest aligned FUTOI FIZ/YUR snapshot must share sess_id")
-    if str(fiz["source_ticker"]) != str(yur["source_ticker"]):
+    if str(fiz["source_ticker"]).strip().lower() != str(yur["source_ticker"]).strip().lower():
         _fail("latest aligned FUTOI FIZ/YUR snapshot source_ticker mismatch")
     if str(fiz["secid"]) != str(yur["secid"]):
         _fail("latest aligned FUTOI FIZ/YUR snapshot secid mismatch")
@@ -290,31 +320,45 @@ def latest_aligned_factual(frame: pd.DataFrame, *, expected_trade_date: str) -> 
     }
 
 
-def _binding() -> dict[str, object]:
-    binding = materializer._registry_binding(materializer.REGISTRY_PATH, INSTRUMENT_ID)
+def _binding(instrument_id: str) -> dict[str, object]:
+    checked_instrument = _instrument_id(instrument_id)
+    binding = materializer._registry_binding(materializer.REGISTRY_PATH, checked_instrument)
     if binding.get("futoi.source_id") != SOURCE_ID:
         _fail("registry FUTOI source_id mismatch")
+    if str(binding.get("futoi.ticker") or "").strip() == "":
+        _fail("registry FUTOI ticker is missing")
+    if str(binding.get("secid") or "").strip() == "":
+        _fail("registry FUTOI secid is missing")
     return binding
+
+
+def source_identity(instrument_id: str) -> dict[str, str]:
+    binding = _binding(instrument_id)
+    return {
+        "instrument_id": str(binding["instrument_id"]),
+        "source_id": SOURCE_ID,
+        "source_ticker": str(binding["futoi.ticker"]),
+        "secid": str(binding["secid"]),
+    }
 
 
 def _is_explicit_empty_source(exc: Exception) -> bool:
     return isinstance(exc, materializer.FutoiMaterializationError) and str(exc) == EXPLICIT_EMPTY_ERROR
 
 
-def _probe_exact_date(binding: Mapping[str, object], candidate: date, *, timeout: float) -> dict[str, object]:
+def _probe_exact_date(
+    binding: Mapping[str, object], candidate: date, *, timeout: float
+) -> dict[str, object]:
     trade_date = candidate.isoformat()
     ticker = str(binding["futoi.ticker"])
     try:
         frame, source_url = materializer._fetch_exact(ticker, trade_date, timeout, None)
     except Exception as exc:
         if _is_explicit_empty_source(exc):
-            if candidate.weekday() < 5:
-                _fail(
-                    "FUTOI exact source is empty on weekday "
-                    + trade_date
-                    + "; freshness cannot be established without a trading calendar"
-                )
-            return {"trade_date": trade_date, "status": "EMPTY_WEEKEND"}
+            return {
+                "trade_date": trade_date,
+                "status": "EMPTY_UNPROVEN_TRADING_STATUS",
+            }
         raise FutoiSourceNativeRefreshError(
             "FUTOI exact-date probe failed for " + trade_date + ": " + str(exc)
         ) from exc
@@ -331,28 +375,41 @@ def _probe_exact_date(binding: Mapping[str, object], candidate: date, *, timeout
     }
 
 
-def discover_latest_source_trade_date(through_date: str, *, timeout: float) -> tuple[str, list[dict[str, object]]]:
+def discover_latest_source_trade_date(
+    through_date: str, *, instrument_id: str, timeout: float
+) -> tuple[str, list[dict[str, object]]]:
     checked = _iso_date(through_date, "through_date")
+    checked_instrument = _instrument_id(instrument_id)
     end = date.fromisoformat(checked)
     current_moscow_date = pd.Timestamp.now(tz=MARKET_TZ).date()
     if end >= current_moscow_date:
         _fail("through_date must be a completed Europe/Moscow calendar date")
-    binding = _binding()
-    observations: list[dict[str, object]] = []
-    for offset in range(SOURCE_LOOKBACK_DAYS):
-        candidate = end - timedelta(days=offset)
-        observation = _probe_exact_date(binding, candidate, timeout=timeout)
-        observations.append(observation)
-        if observation["status"] == "DATA":
-            return candidate.isoformat(), observations
-    _fail("FUTOI source-native freshness scan found no data within bounded lookback")
+    binding = _binding(checked_instrument)
+    observation = _probe_exact_date(binding, end, timeout=timeout)
+    observations = [observation]
+    if observation["status"] == "DATA":
+        return end.isoformat(), observations
+    _fail(
+        "FUTOI exact source is empty on "
+        + checked
+        + "; trading-day status cannot be proven from the approved source path, so freshness fails closed"
+    )
 
 
-def _materialize_target(root: Path, target_trade_date: str, run_id: str, *, timeout: float) -> tuple[Path, dict[str, object]]:
+def _materialize_target(
+    root: Path,
+    target_trade_date: str,
+    run_id: str,
+    *,
+    instrument_id: str,
+    timeout: float,
+) -> tuple[Path, dict[str, object]]:
+    checked_instrument = _instrument_id(instrument_id)
+    identity = source_identity(checked_instrument)
     raw_run_id = run_id + "_raw_" + target_trade_date.replace("-", "")
     result = materializer.materialize_futoi_partition(
         trade_date=target_trade_date,
-        instrument_id=INSTRUMENT_ID,
+        instrument_id=checked_instrument,
         run_id=raw_run_id,
         timeout=timeout,
         require_enabled=False,
@@ -363,6 +420,14 @@ def _materialize_target(root: Path, target_trade_date: str, run_id: str, *, time
         or result.get("trade_date") != target_trade_date
     ):
         _fail("canonical exact-date FUTOI materialization did not pass")
+    if result.get("instrument_id") != checked_instrument:
+        _fail("canonical FUTOI materialization instrument_id mismatch")
+    if result.get("source_id") != SOURCE_ID:
+        _fail("canonical FUTOI materialization source_id mismatch")
+    if str(result.get("futoi_ticker") or "").strip().lower() != identity["source_ticker"].lower():
+        _fail("canonical FUTOI materialization ticker mismatch")
+    if str(result.get("secid") or "").strip() != identity["secid"]:
+        _fail("canonical FUTOI materialization secid mismatch")
     partition_path = Path(str(result.get("storage_partition_path") or ""))
     quality_path = Path(str(result.get("quality_report_reference") or ""))
     manifest_path = Path(str(result.get("manifest_reference") or ""))
@@ -373,10 +438,18 @@ def _materialize_target(root: Path, target_trade_date: str, run_id: str, *, time
     manifest = _load_json(manifest_path, "FUTOI raw refresh manifest")
     if quality.get("quality_status") != "pass" or int(quality.get("row_count") or 0) <= 0:
         _fail("FUTOI raw quality report is not pass")
+    if quality.get("instrument_id") != checked_instrument:
+        _fail("FUTOI raw quality report instrument_id mismatch")
+    if str(quality.get("futoi_ticker") or "").strip().lower() != identity["source_ticker"].lower():
+        _fail("FUTOI raw quality report ticker mismatch")
+    if str(quality.get("secid") or "").strip() != identity["secid"]:
+        _fail("FUTOI raw quality report secid mismatch")
     if manifest.get("refresh_status") != "succeeded":
         _fail("FUTOI raw refresh manifest is not succeeded")
     if manifest.get("publication_run_id") != raw_run_id:
         _fail("FUTOI raw refresh manifest publication run_id mismatch")
+    if manifest.get("instrument_scope") != [checked_instrument]:
+        _fail("FUTOI raw refresh manifest instrument scope mismatch")
     if manifest.get("published_partition_sha256") != expected_partition_sha:
         _fail("FUTOI raw refresh manifest partition SHA mismatch")
     return partition_path, {
@@ -393,28 +466,45 @@ def _materialize_target(root: Path, target_trade_date: str, run_id: str, *, time
     }
 
 
-def run_refresh(*, through_date: str, run_id: str, timeout: float = 60.0) -> dict[str, object]:
+def run_refresh(
+    *,
+    through_date: str,
+    instrument_id: str,
+    run_id: str,
+    timeout: float = 60.0,
+) -> dict[str, object]:
     checked_through = _iso_date(through_date, "through_date")
+    checked_instrument = _instrument_id(instrument_id)
     checked_run = _safe_token(run_id, "run_id")
+    identity = source_identity(checked_instrument)
     target_trade_date, observations = discover_latest_source_trade_date(
-        checked_through, timeout=timeout
+        checked_through,
+        instrument_id=checked_instrument,
+        timeout=timeout,
     )
     root = _data_root()
     partition_path, provenance = _materialize_target(
-        root, target_trade_date, checked_run, timeout=timeout
+        root,
+        target_trade_date,
+        checked_run,
+        instrument_id=checked_instrument,
+        timeout=timeout,
     )
     frame = pd.read_parquet(partition_path)
-    factual = latest_aligned_factual(frame, expected_trade_date=target_trade_date)
+    factual = latest_aligned_factual(
+        frame,
+        expected_trade_date=target_trade_date,
+        expected_instrument_id=checked_instrument,
+        expected_source_ticker=identity["source_ticker"],
+        expected_secid=identity["secid"],
+    )
     completed_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    weekend_empty_dates = [
-        str(item["trade_date"]) for item in observations if item.get("status") == "EMPTY_WEEKEND"
-    ]
     payload: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "project": PROJECT,
         "status": "PASS",
         "source_id": SOURCE_ID,
-        "instrument_id": INSTRUMENT_ID,
+        "instrument_id": checked_instrument,
         "run_id": checked_run,
         "through_date": checked_through,
         "expected_latest_source_trade_date": target_trade_date,
@@ -422,11 +512,11 @@ def run_refresh(*, through_date: str, run_id: str, timeout: float = 60.0) -> dic
         "last_success_at": completed_at,
         "freshness": {
             "status": "FRESH",
-            "policy": "bounded_exact_date_source_scan_weekend_empty_only",
-            "source_lookback_days": SOURCE_LOOKBACK_DAYS,
+            "policy": "exact_completed_date_source_observation_fail_closed_on_empty",
+            "source_lookback_days_bound": SOURCE_LOOKBACK_DAYS,
             "accepted_trade_date": factual["trade_date"],
-            "weekend_empty_dates_after_latest_data": weekend_empty_dates,
-            "weekday_empty_source_policy": "FAIL_CLOSED",
+            "empty_source_policy": "FAIL_CLOSED_WHEN_TRADING_STATUS_UNPROVEN",
+            "weekday_weekend_inference": False,
             "calendar_dependency": False,
         },
         "source_date_observations": observations,
@@ -437,22 +527,84 @@ def run_refresh(*, through_date: str, run_id: str, timeout: float = 60.0) -> dic
         "factual_authority": False,
         "directional_authority": False,
         "action_authority": False,
+        "standalone_buy_sell_authority": False,
         "stage5_full_mode_required": False,
+        "stage5_full_mode_ready": False,
         "stage5_pointer_promotion_performed": False,
         "historical_pit_research_ready_claimed": False,
     }
-    _atomic_json(_current_path(root), payload)
+    _atomic_json(_current_path(root, checked_instrument), payload)
     return payload
+
+
+def _failed_instrument_result(instrument_id: str, exc: Exception) -> dict[str, object]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "project": PROJECT,
+        "status": "FAILED",
+        "source_id": SOURCE_ID,
+        "instrument_id": instrument_id,
+        "error_class": exc.__class__.__name__,
+        "error": str(exc),
+        "factual_authority": False,
+        "directional_authority": False,
+        "action_authority": False,
+        "standalone_buy_sell_authority": False,
+        "stage5_full_mode_ready": False,
+        "stage5_pointer_promotion_performed": False,
+    }
+
+
+def run_refresh_all(
+    *, through_date: str, run_id: str, timeout: float = 60.0
+) -> dict[str, object]:
+    checked_through = _iso_date(through_date, "through_date")
+    checked_run = _safe_token(run_id, "run_id")
+    results: dict[str, object] = {}
+    failed: list[str] = []
+    for instrument_id in LIVE_INSTRUMENT_IDS:
+        instrument_run_id = checked_run + "_" + instrument_id
+        try:
+            result = run_refresh(
+                through_date=checked_through,
+                instrument_id=instrument_id,
+                run_id=instrument_run_id,
+                timeout=timeout,
+            )
+        except Exception as exc:
+            result = _failed_instrument_result(instrument_id, exc)
+        results[instrument_id] = result
+        if result.get("status") != "PASS":
+            failed.append(instrument_id)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "project": PROJECT,
+        "status": "PASS" if not failed else "PARTIAL_FAILURE",
+        "run_id": checked_run,
+        "through_date": checked_through,
+        "instrument_ids": list(LIVE_INSTRUMENT_IDS),
+        "instrument_results": results,
+        "failed_instrument_ids": failed,
+        "factual_authority": False,
+        "directional_authority": False,
+        "action_authority": False,
+        "standalone_buy_sell_authority": False,
+        "stage5_full_mode_ready": False,
+        "stage5_pointer_promotion_performed": False,
+    }
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Refresh canonical Si FUTOI factual-only live context from bounded exact-date "
+            "Refresh canonical Si/CR FUTOI factual-only live context from explicit completed-date "
             "AlgoPack source observations without a trading-calendar dependency."
         )
     )
     parser.add_argument("--through-date", required=True)
+    selection = parser.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--instrument-id", choices=LIVE_INSTRUMENT_IDS)
+    selection.add_argument("--all-instruments", action="store_true")
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--env-file", default=None)
     parser.add_argument("--timeout", type=float, default=60.0)
@@ -463,11 +615,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         materializer.load_env_file(args.env_file)
-        result = run_refresh(
-            through_date=args.through_date,
-            run_id=args.run_id,
-            timeout=args.timeout,
-        )
+        if args.all_instruments:
+            result = run_refresh_all(
+                through_date=args.through_date,
+                run_id=args.run_id,
+                timeout=args.timeout,
+            )
+            if result["status"] != "PASS":
+                print(json.dumps(result, ensure_ascii=False, sort_keys=True, default=str))
+                return 1
+        else:
+            result = run_refresh(
+                through_date=args.through_date,
+                instrument_id=args.instrument_id,
+                run_id=args.run_id,
+                timeout=args.timeout,
+            )
     except Exception as exc:
         print(
             json.dumps(
@@ -479,6 +642,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "factual_authority": False,
                     "directional_authority": False,
                     "action_authority": False,
+                    "standalone_buy_sell_authority": False,
+                    "stage5_full_mode_ready": False,
+                    "stage5_pointer_promotion_performed": False,
                 },
                 ensure_ascii=False,
                 sort_keys=True,
