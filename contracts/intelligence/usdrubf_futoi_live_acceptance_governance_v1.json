@@ -2,12 +2,43 @@
   "project": "MOEX_Bot",
   "contract_id": "usdrubf_futoi_live_acceptance_governance_v1",
   "schema_version": "futoi_live_acceptance_governance.v1",
-  "recorded_at": "2026-08-30",
+  "recorded_at": "2026-09-01",
   "status": "FUTOI_GOVERNED_BLOCKED",
-  "scope": "Si FUTOI participant positioning as a live factual contextual input to RUB Intelligence",
+  "scope": "Si and CR FUTOI participant positioning as factual live contextual inputs to RUB Intelligence",
+  "instrument_scope": [
+    "si_futures_family",
+    "cr_futures_family"
+  ],
+  "instrument_acceptance": {
+    "si_futures_family": {
+      "status": "FUTOI_GOVERNED_BLOCKED",
+      "collection_allowed": true,
+      "canonical_live_smoke_accepted": true,
+      "factual_live_authority": false,
+      "directional_authority": false,
+      "action_authority": false,
+      "standalone_buy_sell_authority": false,
+      "local_blockers": [
+        "recurring_live_quality_and_freshness"
+      ]
+    },
+    "cr_futures_family": {
+      "status": "FUTOI_GOVERNED_BLOCKED",
+      "collection_allowed": true,
+      "canonical_live_smoke_accepted": false,
+      "factual_live_authority": false,
+      "directional_authority": false,
+      "action_authority": false,
+      "standalone_buy_sell_authority": false,
+      "local_blockers": [
+        "cr_canonical_live_smoke_not_yet_accepted",
+        "recurring_live_quality_and_freshness"
+      ]
+    }
+  },
   "source_of_truth": {
     "repository": "Viktoryyyyy/moex-robot",
-    "audited_main_sha": "5075ad0f6b6727c44480ab3b4b573f2e86522d35",
+    "audited_main_sha": "6ea33c0f0c11d84fab1525852e49a59a45285a56",
     "source_contract_ref": "contracts/sources/futures/moex_algopack_futoi.v1.yaml",
     "raw_dataset_ref": "contracts/datasets/futures_futoi_raw.v1.yaml",
     "stage5_positioning_ref": "configs/datasets/step5_futoi_positioning.v1.yaml",
@@ -27,19 +58,21 @@
     "live_acceptance_status_when_any_required_gate_is_not_pass": "FUTOI_GOVERNED_BLOCKED",
     "buy_sell_authority_before_live_acceptance": false,
     "factual_live_authority_requires_all_required_gates_pass": true,
-    "directional_and_action_authority_require_separate_predictive_validation": true
+    "directional_and_action_authority_require_separate_predictive_validation": true,
+    "instrument_collection_does_not_grant_instrument_authority": true,
+    "instrument_authority_must_be_explicit_per_instrument": true
   },
   "gates": [
-    {"gate_id":"registered_source","required":true,"status":"PASS","evidence":"contracts/sources/futures/moex_algopack_futoi.v1.yaml status active_stage2_proven"},
+    {"gate_id":"registered_source","required":true,"status":"PASS","evidence":"contracts/sources/futures/moex_algopack_futoi.v1.yaml status active_stage2_proven; registry contains explicit Si and CR FUTOI bindings"},
     {"gate_id":"deterministic_adapter","required":true,"status":"PASS","evidence":"canonical authenticated explicit-date AlgoPack APIM materializer/source-native factual refresh; implicit latest and hidden source substitution forbidden"},
     {"gate_id":"provenance","required":true,"status":"PASS","evidence":"canonical raw factual artifact retains source identity, source timestamps, immutable partition SHA, quality report SHA and refresh manifest SHA"},
     {"gate_id":"historical_pit_semantics","required":true,"status":"PASS","evidence":"canonical contract separates tradedate+tradetime event timestamp from archival/publication systime and Stage 5 consumes content-attested history causally"},
-    {"gate_id":"historical_quality_and_coverage","required":true,"status":"PASS","evidence":"Si history 2020-01-03 through 2026-08-17 physically validated; Stage 5 accepted EOD and positioning outputs"},
+    {"gate_id":"historical_quality_and_coverage","required":true,"status":"PASS","evidence":"accepted Stage 5 physical pilot validates Si history from 2020-01-03 and CR history from 2022-04-21 through 2026-08-17 under the same source semantics"},
     {"gate_id":"license_access_and_derived_use","required":true,"status":"PASS","evidence":{"artifact_ref":"contracts/intelligence/futoi_si_license_access_validation.json","permission_basis":"explicit_account_owner_attestation","account_bound":true,"internal_project_use_only":true,"external_redistribution_permission_asserted":false,"api_key_or_successful_fetch_treated_as_permission":false}},
-    {"gate_id":"canonical_live_smoke","required":true,"status":"PASS","evidence":{"artifact_ref":"contracts/intelligence/futoi_live_smoke_snapshot_acceptance_2026-08-30.json","run_id":"futoi_live_smoke_20260830_141353","trade_date":"2026-08-29","source_id":"moex_algopack_futoi","source_row_count":218,"quality_status":"PASS","acceptance_status":"PASS","freshness_status":"FRESH","raw_partition_sha256":"09156a2ef8ea3a0979279dd29acb57995e85a56eabb7d3a1853de699af57ea9a"}},
+    {"gate_id":"canonical_live_smoke","required":true,"status":"PASS","evidence":{"artifact_ref":"contracts/intelligence/futoi_live_smoke_snapshot_acceptance_2026-08-30.json","instrument_id":"si_futures_family","run_id":"futoi_live_smoke_20260830_141353","trade_date":"2026-08-29","source_id":"moex_algopack_futoi","source_row_count":218,"quality_status":"PASS","acceptance_status":"PASS","freshness_status":"FRESH","raw_partition_sha256":"09156a2ef8ea3a0979279dd29acb57995e85a56eabb7d3a1853de699af57ea9a","cr_smoke_not_claimed_by_this_evidence":true}},
     {"gate_id":"recurring_live_quality_and_freshness","required":true,"status":"BLOCKED","blocker":"recurring_automatic_factual_refresh_evidence_not_yet_accepted","evidence":"Stage 10 timer and factual-only source-native refresh path are implemented, but an automatic scheduled run with fresh accepted FUTOI evidence has not yet been promoted into this governance contract"},
-    {"gate_id":"typed_integration","required":true,"status":"PASS","evidence":"historical Stage 5 FUTOI blocks are typed into the analysis bundle; S7.3 additionally exposes a separate governed factual-only futoi_live component without changing DecisionInput"},
-    {"gate_id":"snapshot_live_enable","required":true,"status":"PASS","evidence":{"artifact_ref":"contracts/intelligence/futoi_live_smoke_snapshot_acceptance_2026-08-30.json","snapshot_generated_at_utc":"2026-08-30T14:15:05.340820+00:00","component_id":"futoi_live","component_status_during_governance_block":"GOVERNED_BLOCKED","candidate_status":"PASS","consumer_factual_use_allowed":false,"directional_authority":false,"action_authority":false}}
+    {"gate_id":"typed_integration","required":true,"status":"PASS","evidence":"historical Stage 5 FUTOI blocks are typed into the analysis bundle; S7.3 factual components remain separate from DecisionInput and carry no directional/action authority"},
+    {"gate_id":"snapshot_live_enable","required":true,"status":"PASS","evidence":{"artifact_ref":"contracts/intelligence/futoi_live_smoke_snapshot_acceptance_2026-08-30.json","instrument_id":"si_futures_family","snapshot_generated_at_utc":"2026-08-30T14:15:05.340820+00:00","component_id":"futoi_live","component_status_during_governance_block":"GOVERNED_BLOCKED","candidate_status":"PASS","consumer_factual_use_allowed":false,"directional_authority":false,"action_authority":false,"cr_snapshot_smoke_not_claimed_by_this_evidence":true}}
   ],
   "authority": {
     "factual_live_authority": false,
@@ -54,18 +87,20 @@
     "required_gate_count": 10,
     "passed_gate_count": 9,
     "blocked_gate_ids": ["recurring_live_quality_and_freshness"],
-    "next_transition_if_recurring_gate_passes": "FUTOI_LIVE_ACCEPTED_FACTUAL_CONTEXT_ONLY"
+    "next_transition_if_recurring_gate_passes": "FUTOI_LIVE_ACCEPTED_FACTUAL_CONTEXT_ONLY_FOR_EXPLICITLY_ACCEPTED_INSTRUMENTS"
   },
   "minimum_transition_to_live_accepted": [
-    "Capture at least one canonical automatic Stage 10 scheduled FUTOI factual refresh after the accepted manual live smoke and verify PASS quality, accepted source trade date, freshness, provenance hashes and no Stage 5 full-mode promotion.",
-    "Promote recurring_live_quality_and_freshness to PASS only from that scheduled-run evidence.",
-    "Then set status to FUTOI_LIVE_ACCEPTED_FACTUAL_CONTEXT_ONLY and factual_live_authority=true while preserving directional_authority=false, action_authority=false and buy_sell_authority=false."
+    "Capture canonical automatic Stage 10 scheduled factual refresh evidence and verify PASS quality, accepted source trade date, freshness, provenance hashes and no Stage 5 full-mode promotion.",
+    "Accept CR canonical live smoke separately before setting cr_futures_family factual_live_authority=true.",
+    "Promote recurring_live_quality_and_freshness to PASS only from scheduled-run evidence.",
+    "Any future factual_live_authority transition must be explicit per instrument while preserving directional_authority=false, action_authority=false and standalone_buy_sell_authority=false."
   ],
   "architecture_decision": {
     "new_architecture_required": false,
-    "decision": "close_acceptance_gap_on_existing canonical factual-only source-native refresh plus governed S7.3 snapshot component",
+    "decision": "generalize the existing canonical factual-only source-native refresh and expose separate Si/CR S7.3 components",
     "legacy_phase8_transport_may_become_live_authority": false,
     "stage5_full_mode_required_for_factual_context": false,
-    "production_source_pipeline_changed_by_this_contract": false
+    "production_source_pipeline_changed_by_this_contract": false,
+    "historical_stage5_outputs_may_supply_live_factual_authority": false
   }
 }

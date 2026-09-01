@@ -23,7 +23,7 @@ class Step10EntrypointError(step10.Step10RefreshError):
 
 def _run_futoi_factual_non_blocking(*, through_date: str, run_id: str, timeout: float) -> dict[str, object]:
     try:
-        return futoi_factual.run_refresh(
+        return futoi_factual.run_refresh_all(
             through_date=through_date,
             run_id=run_id + "_futoi_factual",
             timeout=timeout,
@@ -35,9 +35,12 @@ def _run_futoi_factual_non_blocking(*, through_date: str, run_id: str, timeout: 
             "status": "FAILED_NON_BLOCKING",
             "error_class": exc.__class__.__name__,
             "error": str(exc),
+            "instrument_ids": list(futoi_factual.LIVE_INSTRUMENT_IDS),
             "factual_authority": False,
             "directional_authority": False,
             "action_authority": False,
+            "standalone_buy_sell_authority": False,
+            "stage5_full_mode_ready": False,
             "stage5_pointer_promotion_performed": False,
         }
 
@@ -85,7 +88,7 @@ def run_refresh(
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run canonical Stage 10 refresh with independent factual-only Si FUTOI raw refresh."
+        description="Run canonical Stage 10 refresh with independent factual-only Si/CR FUTOI raw refresh."
     )
     parser.add_argument("--through-date", required=True)
     parser.add_argument("--run-id", required=True)

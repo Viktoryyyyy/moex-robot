@@ -15,7 +15,7 @@ def test_futoi_factual_failure_is_explicit_and_non_blocking(monkeypatch) -> None
         del kwargs
         raise RuntimeError("futoi unavailable")
 
-    monkeypatch.setattr(entrypoint.futoi_factual, "run_refresh", fail)
+    monkeypatch.setattr(entrypoint.futoi_factual, "run_refresh_all", fail)
     result = entrypoint._run_futoi_factual_non_blocking(
         through_date="2026-08-28",
         run_id="stage10_test",
@@ -23,10 +23,42 @@ def test_futoi_factual_failure_is_explicit_and_non_blocking(monkeypatch) -> None
     )
 
     assert result["status"] == "FAILED_NON_BLOCKING"
+    assert result["instrument_ids"] == ["si_futures_family", "cr_futures_family"]
     assert result["factual_authority"] is False
     assert result["directional_authority"] is False
     assert result["action_authority"] is False
+    assert result["standalone_buy_sell_authority"] is False
+    assert result["stage5_full_mode_ready"] is False
     assert result["stage5_pointer_promotion_performed"] is False
+
+
+def test_stage10_calls_aggregate_si_cr_factual_refresh(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def refresh_all(**kwargs):
+        captured.update(kwargs)
+        return {
+            "status": "PASS",
+            "instrument_ids": ["si_futures_family", "cr_futures_family"],
+            "instrument_results": {
+                "si_futures_family": {"status": "PASS", "instrument_id": "si_futures_family"},
+                "cr_futures_family": {"status": "PASS", "instrument_id": "cr_futures_family"},
+            },
+            "stage5_full_mode_ready": False,
+            "stage5_pointer_promotion_performed": False,
+        }
+
+    monkeypatch.setattr(entrypoint.futoi_factual, "run_refresh_all", refresh_all)
+    result = entrypoint._run_futoi_factual_non_blocking(
+        through_date="2026-08-28",
+        run_id="stage10_test",
+        timeout=1.0,
+    )
+
+    assert captured["through_date"] == "2026-08-28"
+    assert captured["run_id"] == "stage10_test_futoi_factual"
+    assert result["status"] == "PASS"
+    assert set(result["instrument_results"]) == {"si_futures_family", "cr_futures_family"}
 
 
 def test_stage5_full_mode_remains_fail_closed() -> None:
@@ -59,7 +91,10 @@ def test_dispatcher_validates_transaction_result_context() -> None:
 
 
 def test_entrypoint_passes_futoi_context_inside_dispatcher_transaction(monkeypatch) -> None:
-    futoi_result = {"status": "PASS", "trade_date": "2026-08-28"}
+    futoi_result = {
+        "status": "PASS",
+        "instrument_ids": ["si_futures_family", "cr_futures_family"],
+    }
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(entrypoint.step10, "load_env_file", lambda value: None)
@@ -103,7 +138,10 @@ def test_entrypoint_passes_futoi_context_inside_dispatcher_transaction(monkeypat
 
 
 def test_entrypoint_failure_preserves_futoi_result_in_error(monkeypatch) -> None:
-    futoi_result = {"status": "PASS", "trade_date": "2026-08-28"}
+    futoi_result = {
+        "status": "PASS",
+        "instrument_ids": ["si_futures_family", "cr_futures_family"],
+    }
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(entrypoint.step10, "load_env_file", lambda value: None)

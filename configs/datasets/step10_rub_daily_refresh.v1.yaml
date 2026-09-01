@@ -11,7 +11,8 @@ futoi_governance_contract: contracts/intelligence/usdrubf_futoi_live_acceptance_
 execution:
   explicit_through_date_required: true
   explicit_run_id_required: true
-  through_date_semantics: completed_Moscow_calendar_date_strictly_before_runner_today
+  through_date_semantics: completed_Moscow_calendar_date_strictly_before_runner_today_upper_bound_only
+  through_date_is_trading_day_claim: false
   market_timezone: Europe/Moscow
   implicit_latest_allowed: false
   run_id_reuse_allowed: false
@@ -28,7 +29,7 @@ refresh_modes:
   FUTOI_PROMOTION_ALLOWED_FULL_STAGE10:
     condition: all_required_futoi_gates_PASS_and_factual_live_authority_true_and_stage5_full_mode_ready_true
     refresh_order:
-      - futures_calendar
+      - observed_tradestats_date_selection
       - futoi_raw_factual_refresh
       - stage5_futoi_raw_and_rolling_derived
       - stage7_perpetual_raw_and_rolling_derived
@@ -42,7 +43,7 @@ refresh_modes:
       - futoi_governance
       - stage5_full_mode_readiness
       - futoi_raw_factual_refresh
-      - futures_calendar
+      - observed_tradestats_date_selection
       - stage7_perpetual_raw_and_rolling_derived
       - stage3_current_raw_pilot_and_promotion
       - stage4_basis_carry_pilot_and_promotion
@@ -57,21 +58,29 @@ refresh_modes:
 dependencies:
   futoi_factual:
     source: futures_futoi_raw
-    instrument: si_futures_family
+    instruments: [si_futures_family, cr_futures_family]
     source_id: moex_algopack_futoi
+    source_identity_registry_ref: configs/instruments/forts_instrument_registry.v1.yaml
     raw_producer: moex_data.futures.materialize_futoi_instrument.v1
     historical_incremental_acceptance: futures_futoi_raw_incremental_acceptance.v1
     cumulative_incremental_acceptance_required_for_current_factual_context: false
     refresh_runner: moex_data.futures.futoi_live_factual_refresh_source_native.v1
     output_dataset: futoi_live_factual_context
-    freshness_rule: bounded_exact_date_source_scan_weekend_empty_only
+    output_contract: contracts/datasets/futoi_live_factual_context.v1.yaml
+    freshness_rule: bounded_observed_tradestats_dates_then_exact_futoi
+    trading_date_authority: moex_algopack_fo_tradestats_5m
+    observed_date_resolver: moex_data.futures.observed_tradestats_dates.observed_dates
     calendar_dependency: false
+    moex_calendar_api_allowed: false
     exact_date_requests_only: true
-    weekday_empty_source: fail_closed
+    weekday_weekend_inference_allowed: false
+    empty_futoi_on_observed_trade_date: fail_closed
     stage5_full_mode_required: false
+    stage5_full_mode_ready: false
     stage5_pointer_promotion_allowed: false
     directional_authority: false
     action_authority: false
+    standalone_buy_sell_authority: false
   stage5:
     source: futures_futoi_raw
     instruments: [si_futures_family, cr_futures_family]
@@ -103,8 +112,9 @@ rolling_semantics:
   preserve_stage7_historical_pilot: true
   cross_stage5_stage7_base_date_alignment_required_when_full_stage10_runs: true
   cross_stage5_stage7_alignment_not_required_in_futoi_blocked_stage7_only_mode: true
-  catch_up_uses_moex_futures_calendar: true
-  futoi_factual_freshness_uses_moex_futures_calendar: false
+  catch_up_uses_observed_tradestats_dates: true
+  moex_calendar_api_dependency: false
+  futoi_factual_freshness_uses_observed_tradestats_dates: true
   raw_inputs_frozen_into_run_scope_before_derived_build: true
   derived_outputs_are_full_history_snapshots: true
   historical_pit_research_ready_claimed: false
@@ -137,7 +147,8 @@ systemd:
   service: ops/systemd/moex-rub-stage10-daily-refresh.service
   timer: ops/systemd/moex-rub-stage10-daily-refresh.timer
   target_time_msk: '00:30'
-  through_date_rule: previous_Moscow_calendar_date
+  through_date_rule: previous_Moscow_calendar_date_as_upper_bound_only
+  observed_trade_date_resolution: bounded_authoritative_AlgoPack_TradeStats
   persistent: true
   lock: '%h/moex_bot/data/locks/moex-rub-stage10-daily-refresh.lock'
   entrypoint: moex_data.step10_rub_refresh_entrypoint
