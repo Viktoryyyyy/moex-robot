@@ -33,6 +33,7 @@ _USER_AGENT = (
 )
 _RELEASE_TIME_RE = re.compile(
     r"embargoed\s+until\s+"
+    r"(?:USDL-\d{2}-\d{4}\s+)?"
     r"(?P<clock>\d{1,2}:\d{2})\s+"
     r"(?P<meridiem>a\.m\.|p\.m\.)\s+"
     r"\(ET\)\s+"
