@@ -28,6 +28,15 @@
   "stage5_full_mode_ready": false,
   "stage5_pointer_promotion_performed": false,
   "futoi_failure_blocks_stage7": false,
+  "legacy_aggregate_alias_scope": "si_futures_family_only",
+  "runtime_live_smoke_passed": true,
+  "snapshot_component_enabled": true,
+  "snapshot_component_current_governed_status": "GOVERNED_BLOCKED",
+  "snapshot_candidate_factual_evidence_available": true,
+  "recurring_runtime_proof_passed": false,
+  "consumer_factual_use_allowed": false,
+  "factual_live_authority": false,
+  "remaining_blocked_gate": "recurring_live_quality_and_freshness",
   "instrument_runtime_acceptance": {
     "si_futures_family": {
       "canonical_live_smoke_passed": true,
