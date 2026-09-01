@@ -23,8 +23,10 @@ The export directory is Applied State storage for manual transfers only. It is n
 Run on the RF server as `trader`:
 
 ```bash
-SRC=/home/trader/moex_bot/data/state/rub_intelligence/chat_analysis_snapshot/current.json; DIR=/home/trader/moex_bot/exports/rub_snapshots; mkdir -p "$DIR"; chmod 700 "$DIR"; TS="$(jq -r '.identity.generated_at_utc' "$SRC")"; NAME="$(TZ=Europe/Moscow date -d "$TS" '+%Y-%m-%d_%H-%M-%S_MSK')_rub_snapshot.json"; install -m 600 "$SRC" "$DIR/$NAME"; printf 'PROJECT=MOEX_Bot\nfile=%s\n' "$DIR/$NAME"
+SRC=/home/trader/moex_bot/data/state/rub_intelligence/chat_analysis_snapshot/current.json && DIR=/home/trader/moex_bot/exports/rub_snapshots && mkdir -p "$DIR" && chmod 700 "$DIR" && TS="$(jq -er '.identity.generated_at_utc' "$SRC")" && NAME="$(TZ=Europe/Moscow date -d "$TS" '+%Y-%m-%d_%H-%M-%S_MSK')_rub_snapshot.json" && install -m 600 "$SRC" "$DIR/$NAME" && printf 'PROJECT=MOEX_Bot\nfile=%s\n' "$DIR/$NAME"
 ```
+
+The command is fail-fast: if the source is missing or unreadable, the timestamp is absent, or any dependent export step fails, it does not print a false success path.
 
 ## Result
 
