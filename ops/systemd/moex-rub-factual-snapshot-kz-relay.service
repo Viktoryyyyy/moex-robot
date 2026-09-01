@@ -1,0 +1,25 @@
+[Unit]
+Description=MOEX Bot RUB factual snapshot reverse relay to KZ edge
+After=network-online.target moex-rub-factual-snapshot-mcp-http.service
+Wants=network-online.target moex-rub-factual-snapshot-mcp-http.service
+
+[Service]
+Type=simple
+User=trader
+ExecStart=/usr/bin/ssh -N -i /home/trader/.ssh/moex_kz_relay_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/home/trader/.ssh/known_hosts -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -R 127.0.0.1:18766:127.0.0.1:8766 moexrelay@194.32.142.88
+Restart=always
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
