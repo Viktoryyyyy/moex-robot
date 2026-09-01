@@ -41,6 +41,17 @@ _ALLOWED_STATUS = {"OK", "SOURCE_UNAVAILABLE", "SOURCE_INVALID", "TIMESTAMP_UNPR
 _TAG_RE = re.compile(r"<[^>]+>")
 _SPACE_RE = re.compile(r"\s+")
 _ATOM_NAMESPACE = "http://www.w3.org/2005/Atom"
+_DEFAULT_USER_AGENT = "MOEX_Bot/rub-intelligence-stage12b1"
+_BLS_SOURCE_IDS = frozenset(
+    {
+        "bls_employment_situation_rss",
+        "bls_cpi_rss",
+    }
+)
+_BLS_CONTACT_USER_AGENT = (
+    "MOEX_Bot/rub-intelligence-stage12b1 "
+    "(+https://github.com/Viktoryyyyy/moex-robot)"
+)
 
 
 class RssAcquisitionError(ValueError):
@@ -403,6 +414,12 @@ def _parse_rss_records(
     return tuple(records), future_items
 
 
+def _request_user_agent(binding: RssFeedBinding) -> str:
+    if binding.source_id in _BLS_SOURCE_IDS:
+        return _BLS_CONTACT_USER_AGENT
+    return _DEFAULT_USER_AGENT
+
+
 def fetch_rss_source(
     binding: RssFeedBinding,
     *,
@@ -423,7 +440,7 @@ def fetch_rss_source(
     request = Request(
         binding.feed_url,
         headers={
-            "User-Agent": "MOEX_Bot/rub-intelligence-stage12b1",
+            "User-Agent": _request_user_agent(binding),
             "Accept": "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.1",
         },
         method="GET",
