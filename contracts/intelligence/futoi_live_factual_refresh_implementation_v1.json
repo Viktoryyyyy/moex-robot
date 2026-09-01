@@ -2,9 +2,13 @@
   "project": "MOEX_Bot",
   "evidence_id": "futoi_live_factual_refresh_implementation_v1",
   "status": "IMPLEMENTATION_READY_RECURRING_ACCEPTANCE_PENDING",
-  "base_main_sha": "5075ad0f6b6727c44480ab3b4b573f2e86522d35",
+  "base_main_sha": "6ea33c0f0c11d84fab1525852e49a59a45285a56",
   "source_id": "moex_algopack_futoi",
-  "instrument_id": "si_futures_family",
+  "instrument_ids": [
+    "si_futures_family",
+    "cr_futures_family"
+  ],
+  "source_identity_registry_ref": "configs/instruments/forts_instrument_registry.v1.yaml",
   "factual_context_contract_ref": "contracts/datasets/futoi_live_factual_context.v1.yaml",
   "refresh_runner_ref": "src/moex_data/futures/futoi_live_factual_refresh_source_native.py",
   "stage10_entrypoint_ref": "src/moex_data/step10_rub_refresh_entrypoint.py",
@@ -13,21 +17,40 @@
   "snapshot_runner_ref": "src/moex_research/runners/usdrubf_s7_3_chat_analysis_snapshot_futoi.py",
   "current_factual_context_requires_cumulative_incremental_acceptance": false,
   "systemd_service_ref": "ops/systemd/moex-rub-stage10-daily-refresh.service",
-  "freshness_policy": "bounded_exact_date_source_scan_weekend_empty_only",
+  "freshness_policy": "bounded_observed_tradestats_dates_then_exact_futoi",
+  "trading_date_authority_source_id": "moex_algopack_fo_tradestats_5m",
+  "observed_date_resolver": "moex_data.futures.observed_tradestats_dates.observed_dates",
   "calendar_dependency_for_futoi_factual_refresh": false,
-  "weekday_empty_source_policy": "FAIL_CLOSED",
+  "moex_calendar_api_allowed": false,
+  "weekday_weekend_inference_allowed": false,
+  "empty_futoi_on_authoritative_observed_trade_date_policy": "FAIL_CLOSED",
   "stage5_full_mode_required": false,
   "stage5_full_mode_ready": false,
   "stage5_pointer_promotion_performed": false,
   "futoi_failure_blocks_stage7": false,
-  "runtime_live_smoke_passed": true,
-  "recurring_runtime_proof_passed": false,
-  "snapshot_component_enabled": true,
-  "snapshot_component_current_governed_status": "GOVERNED_BLOCKED",
-  "snapshot_candidate_factual_evidence_available": true,
-  "consumer_factual_use_allowed": false,
-  "factual_live_authority": false,
+  "instrument_runtime_acceptance": {
+    "si_futures_family": {
+      "canonical_live_smoke_passed": true,
+      "recurring_runtime_proof_passed": false,
+      "snapshot_component_ref": "futoi_live",
+      "snapshot_component_current_governed_status": "GOVERNED_BLOCKED",
+      "snapshot_candidate_factual_evidence_available": true,
+      "consumer_factual_use_allowed": false,
+      "factual_live_authority": false
+    },
+    "cr_futures_family": {
+      "canonical_live_smoke_passed": false,
+      "recurring_runtime_proof_passed": false,
+      "snapshot_component_ref": "futoi_live_cr",
+      "snapshot_component_current_governed_status": "GOVERNED_BLOCKED",
+      "snapshot_candidate_factual_evidence_available": false,
+      "consumer_factual_use_allowed": false,
+      "factual_live_authority": false
+    }
+  },
   "directional_authority": false,
   "action_authority": false,
-  "remaining_blocked_gate": "recurring_live_quality_and_freshness"
+  "standalone_buy_sell_authority": false,
+  "remaining_global_blocked_gate": "recurring_live_quality_and_freshness",
+  "cr_local_blocker": "cr_canonical_live_smoke_not_yet_accepted"
 }
