@@ -315,7 +315,7 @@ def _fetch_one_release(
         source_tier="OFFICIAL_SECONDARY",
         source_reference=release_url,
         published_at=published_at,
-        available_at=published_at,
+        available_at=now,
         ingested_at=now,
         headline=f"{spec.headline} - {published_at.date().isoformat()}",
         body=first_page_text[:max_body_chars],
