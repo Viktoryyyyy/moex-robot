@@ -6,13 +6,14 @@ import json
 import os
 import tempfile
 from collections.abc import Mapping, Sequence
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Final
 
 import pandas as pd
 
 from . import materialize_futoi_instrument as materializer
+from . import observed_tradestats_dates as observed_dates
 
 PROJECT: Final[str] = "MOEX_Bot"
 SCHEMA_VERSION: Final[str] = "futoi_live_factual_refresh_source_native.v1"
@@ -357,7 +358,7 @@ def _probe_exact_date(
         if _is_explicit_empty_source(exc):
             return {
                 "trade_date": trade_date,
-                "status": "EMPTY_UNPROVEN_TRADING_STATUS",
+                "status": "EMPTY_FUTOI_ON_OBSERVED_TRADE_DATE",
             }
         raise FutoiSourceNativeRefreshError(
             "FUTOI exact-date probe failed for " + trade_date + ": " + str(exc)
@@ -369,7 +370,7 @@ def _probe_exact_date(
         _fail("FUTOI exact-date probe must contain exactly FIZ and YUR on " + trade_date)
     return {
         "trade_date": trade_date,
-        "status": "DATA",
+        "status": "FUTOI_DATA",
         "row_count": int(len(validated)),
         "source_url": source_url,
     }
@@ -384,16 +385,52 @@ def discover_latest_source_trade_date(
     current_moscow_date = pd.Timestamp.now(tz=MARKET_TZ).date()
     if end >= current_moscow_date:
         _fail("through_date must be a completed Europe/Moscow calendar date")
+    start = end - timedelta(days=SOURCE_LOOKBACK_DAYS - 1)
+    try:
+        raw_observed = observed_dates.observed_dates(
+            start.isoformat(),
+            end.isoformat(),
+            instrument_id=checked_instrument,
+            timeout=timeout,
+        )
+        authoritative_dates = observed_dates.normalize_observed_dates(
+            raw_observed,
+            start.isoformat(),
+            end.isoformat(),
+        )
+    except Exception as exc:
+        raise FutoiSourceNativeRefreshError(
+            "FUTOI authoritative observed TradeStats date selection failed for "
+            + checked_instrument
+            + ": "
+            + str(exc)
+        ) from exc
+    if not authoritative_dates:
+        _fail("FUTOI observed TradeStats date selection returned no authoritative dates")
+    target_trade_date = authoritative_dates[-1]
+    observations: list[dict[str, object]] = [
+        {
+            "trade_date": value,
+            "status": "OBSERVED_TRADESTATS_DATE",
+            "date_authority_source_id": observed_dates.SOURCE_ID,
+        }
+        for value in authoritative_dates
+    ]
     binding = _binding(checked_instrument)
-    observation = _probe_exact_date(binding, end, timeout=timeout)
-    observations = [observation]
-    if observation["status"] == "DATA":
-        return end.isoformat(), observations
-    _fail(
-        "FUTOI exact source is empty on "
-        + checked
-        + "; trading-day status cannot be proven from the approved source path, so freshness fails closed"
+    futoi_observation = _probe_exact_date(
+        binding,
+        date.fromisoformat(target_trade_date),
+        timeout=timeout,
     )
+    observations.append(futoi_observation)
+    if futoi_observation["status"] != "FUTOI_DATA":
+        _fail(
+            "FUTOI exact source is empty on authoritative observed TradeStats date "
+            + target_trade_date
+            + " for "
+            + checked_instrument
+        )
+    return target_trade_date, observations
 
 
 def _materialize_target(
@@ -512,10 +549,10 @@ def run_refresh(
         "last_success_at": completed_at,
         "freshness": {
             "status": "FRESH",
-            "policy": "exact_completed_date_source_observation_fail_closed_on_empty",
-            "source_lookback_days_bound": SOURCE_LOOKBACK_DAYS,
+            "policy": "bounded_observed_tradestats_dates_then_exact_futoi",
+            "source_lookback_days": SOURCE_LOOKBACK_DAYS,
             "accepted_trade_date": factual["trade_date"],
-            "empty_source_policy": "FAIL_CLOSED_WHEN_TRADING_STATUS_UNPROVEN",
+            "trading_date_authority_source_id": observed_dates.SOURCE_ID,
             "weekday_weekend_inference": False,
             "calendar_dependency": False,
         },
@@ -576,10 +613,16 @@ def run_refresh_all(
         results[instrument_id] = result
         if result.get("status") != "PASS":
             failed.append(instrument_id)
+    if not failed:
+        aggregate_status = "PASS"
+    elif len(failed) == len(LIVE_INSTRUMENT_IDS):
+        aggregate_status = "FAILED"
+    else:
+        aggregate_status = "PARTIAL_FAILURE"
     return {
         "schema_version": SCHEMA_VERSION,
         "project": PROJECT,
-        "status": "PASS" if not failed else "PARTIAL_FAILURE",
+        "status": aggregate_status,
         "run_id": checked_run,
         "through_date": checked_through,
         "instrument_ids": list(LIVE_INSTRUMENT_IDS),
@@ -597,8 +640,8 @@ def run_refresh_all(
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Refresh canonical Si/CR FUTOI factual-only live context from explicit completed-date "
-            "AlgoPack source observations without a trading-calendar dependency."
+            "Refresh canonical Si/CR FUTOI factual-only live context using authoritative observed "
+            "AlgoPack FO TradeStats dates followed by an exact-date FUTOI read."
         )
     )
     parser.add_argument("--through-date", required=True)
