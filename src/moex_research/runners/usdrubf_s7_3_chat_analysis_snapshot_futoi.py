@@ -96,22 +96,32 @@ def _governance_state(values: Mapping[str, object], instrument_id: str) -> dict[
     all_required_pass = not blocked
     if directional or action or standalone:
         raise FutoiSnapshotComponentError("FUTOI factual governance must not grant directional/action authority")
-    local_blockers = raw_instrument.get("local_blockers")
-    if isinstance(local_blockers, (str, bytes)) or not isinstance(local_blockers, Sequence):
+    local_blockers_raw = raw_instrument.get("local_blockers")
+    if isinstance(local_blockers_raw, (str, bytes)) or not isinstance(local_blockers_raw, Sequence):
         raise FutoiSnapshotComponentError("FUTOI instrument local_blockers must be an array")
+    local_blockers = [str(value) for value in local_blockers_raw]
+    canonical_live_smoke_accepted = raw_instrument.get("canonical_live_smoke_accepted") is True
+    instrument_status = str(raw_instrument.get("status") or values.get("status") or "")
+    instrument_local_acceptance_pass = (
+        canonical_live_smoke_accepted
+        and not local_blockers
+        and instrument_status == "FUTOI_LIVE_ACCEPTED_FACTUAL_CONTEXT_ONLY"
+    )
     return {
         "contract_ref": FUTOI_GOVERNANCE_RELATIVE_PATH.as_posix(),
-        "status": str(raw_instrument.get("status") or values.get("status") or ""),
+        "status": instrument_status,
         "instrument_id": instrument_id,
         "required_gate_ids": required,
         "blocked_gate_ids": blocked,
-        "local_blockers": [str(value) for value in local_blockers],
+        "local_blockers": local_blockers,
+        "canonical_live_smoke_accepted": canonical_live_smoke_accepted,
+        "instrument_local_acceptance_pass": instrument_local_acceptance_pass,
         "all_required_gates_pass": all_required_pass,
         "factual_live_authority": factual,
         "directional_authority": False,
         "action_authority": False,
         "standalone_buy_sell_authority": False,
-        "factual_use_allowed": all_required_pass and factual,
+        "factual_use_allowed": all_required_pass and instrument_local_acceptance_pass and factual,
     }
 
 
