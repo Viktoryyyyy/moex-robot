@@ -19,7 +19,12 @@ from .usdrubf_decision_engine import (
     build_market_state,
 )
 from .usdrubf_level_structure import InteractionSnapshot, LevelZone
-from .usdrubf_news_macro import MacroObservation, MacroState, NewsEvent
+from .usdrubf_news_macro import (
+    MacroObservation,
+    MacroState,
+    NewsEvent,
+    NewsSourceProvenance,
+)
 
 
 _ALLOWED_FINAL_BIAS = {"BULLISH_USD", "NEUTRAL", "BEARISH_USD"}
@@ -44,6 +49,16 @@ _ALLOWED_NEWS_QUALITY = {
     "STALE",
 }
 _ALLOWED_MACRO_DIRECTIONS = _ALLOWED_NEWS_DIRECTIONS
+_NEWS_PROVENANCE_FIELDS = {
+    "source_id",
+    "source_tier",
+    "source_reference",
+    "published_at",
+    "available_at",
+    "ingested_at",
+    "content_hash",
+}
+_MAX_NEWS_SOURCE_PROVENANCE = 16
 _POINTER_VERSION = 1
 
 
@@ -76,6 +91,12 @@ def _number(value: object, field: str) -> float:
     if not isfinite(numeric):
         raise ShadowRuntimeError(f"{field} must be finite")
     return numeric
+
+
+def _nonnegative_int(value: object, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ShadowRuntimeError(f"{field} must be a non-negative integer")
+    return value
 
 
 def _probability(value: object, field: str) -> float:
@@ -146,6 +167,32 @@ def _directional_context(raw: object, field: str) -> DirectionalContext:
     )
 
 
+def _news_source_provenance(raw: object, field: str) -> NewsSourceProvenance:
+    item = _mapping(raw, field)
+    if set(item) != _NEWS_PROVENANCE_FIELDS:
+        raise ShadowRuntimeError(f"{field} has unexpected fields")
+    source_tier = _text(item.get("source_tier"), f"{field}.source_tier")
+    if source_tier not in _ALLOWED_NEWS_TIERS:
+        raise ShadowRuntimeError(f"invalid {field}.source_tier")
+    published = _aware_datetime(item.get("published_at"), f"{field}.published_at")
+    available = _aware_datetime(item.get("available_at"), f"{field}.available_at")
+    ingested = _aware_datetime(item.get("ingested_at"), f"{field}.ingested_at")
+    if published > available or available > ingested:
+        raise ShadowRuntimeError(f"invalid {field} timestamp ordering")
+    content_hash = _text(item.get("content_hash"), f"{field}.content_hash")
+    if len(content_hash) != 64 or any(ch not in "0123456789abcdef" for ch in content_hash):
+        raise ShadowRuntimeError(f"invalid {field}.content_hash")
+    return NewsSourceProvenance(
+        source_id=_text(item.get("source_id"), f"{field}.source_id"),
+        source_tier=source_tier,
+        source_reference=_text(item.get("source_reference"), f"{field}.source_reference"),
+        published_at=published.isoformat(),
+        available_at=available.isoformat(),
+        ingested_at=ingested.isoformat(),
+        content_hash=content_hash,
+    )
+
+
 def _news_event(raw: object, index: int) -> NewsEvent:
     field = f"news_state[{index}]"
     item = _mapping(raw, field)
@@ -179,6 +226,42 @@ def _news_event(raw: object, index: int) -> NewsEvent:
         _text(value, f"{field}.entities")
         for value in _sequence(item.get("entities", ()), f"{field}.entities")
     )
+
+    provenance_keys = {
+        "source_provenance",
+        "source_provenance_total_count",
+        "source_provenance_truncated",
+    }
+    present_provenance_keys = provenance_keys.intersection(item)
+    if present_provenance_keys and present_provenance_keys != provenance_keys:
+        raise ShadowRuntimeError(f"{field} provenance metadata field set is incomplete")
+    if present_provenance_keys:
+        source_provenance = tuple(
+            _news_source_provenance(value, f"{field}.source_provenance[{prov_index}]")
+            for prov_index, value in enumerate(
+                _sequence(item.get("source_provenance"), f"{field}.source_provenance")
+            )
+        )
+        if len(source_provenance) > _MAX_NEWS_SOURCE_PROVENANCE:
+            raise ShadowRuntimeError(f"{field}.source_provenance exceeds persisted bound")
+        source_provenance_total_count = _nonnegative_int(
+            item.get("source_provenance_total_count"),
+            f"{field}.source_provenance_total_count",
+        )
+        source_provenance_truncated = item.get("source_provenance_truncated")
+        if not isinstance(source_provenance_truncated, bool):
+            raise ShadowRuntimeError(f"{field}.source_provenance_truncated must be boolean")
+        if source_provenance_total_count < len(source_provenance):
+            raise ShadowRuntimeError(f"{field}.source_provenance_total_count is inconsistent")
+        if source_provenance_truncated != (
+            source_provenance_total_count > len(source_provenance)
+        ):
+            raise ShadowRuntimeError(f"{field}.source_provenance_truncated is inconsistent")
+    else:
+        source_provenance = ()
+        source_provenance_total_count = 0
+        source_provenance_truncated = False
+
     return NewsEvent(
         event_id=_text(item.get("event_id"), f"{field}.event_id"),
         cluster_id=_text(item.get("cluster_id"), f"{field}.cluster_id"),
@@ -199,6 +282,9 @@ def _news_event(raw: object, index: int) -> NewsEvent:
         confidence=_probability(item.get("confidence"), f"{field}.confidence"),
         mechanism=_text(item.get("mechanism"), f"{field}.mechanism"),
         quality_status=quality,
+        source_provenance=source_provenance,
+        source_provenance_total_count=source_provenance_total_count,
+        source_provenance_truncated=source_provenance_truncated,
     )
 
 

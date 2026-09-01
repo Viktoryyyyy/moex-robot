@@ -49,6 +49,7 @@ _MACRO_INTERPRETER_OUTPUT_FIELDS = {
     "dominant_drivers",
 }
 _TOKEN_RE = re.compile(r"[0-9A-Za-zА-Яа-яЁё]+")
+_MAX_EVENT_SOURCE_PROVENANCE = 16
 
 
 class ClassifierOutputError(ValueError):
@@ -110,6 +111,15 @@ def _source_rank(tier: str) -> int:
     }[tier]
 
 
+def _record_order_key(item: NewsSourceRecord) -> tuple[object, ...]:
+    return (
+        item.available_at,
+        _source_rank(item.source_tier),
+        item.source_id,
+        item.source_reference,
+    )
+
+
 def _enum_string(value: object, allowed: set[str], field: str) -> str:
     if not isinstance(value, str) or value not in allowed:
         raise ClassifierOutputError(f"invalid {field}")
@@ -156,6 +166,17 @@ class NewsSourceRecord:
 
 
 @dataclass(frozen=True)
+class NewsSourceProvenance:
+    source_id: str
+    source_tier: str
+    source_reference: str
+    published_at: str
+    available_at: str
+    ingested_at: str
+    content_hash: str
+
+
+@dataclass(frozen=True)
 class NewsEvent:
     event_id: str
     cluster_id: str
@@ -176,10 +197,29 @@ class NewsEvent:
     confidence: float
     mechanism: str
     quality_status: str = "OK"
+    source_provenance: tuple[NewsSourceProvenance, ...] = ()
+    source_provenance_total_count: int = 0
+    source_provenance_truncated: bool = False
 
     def __post_init__(self) -> None:
         if self.quality_status not in _ALLOWED_NEWS_QUALITY:
             raise ValueError("invalid news quality_status")
+        if not isinstance(self.source_provenance, tuple) or not all(
+            isinstance(item, NewsSourceProvenance) for item in self.source_provenance
+        ):
+            raise ValueError("source_provenance must be a tuple of NewsSourceProvenance")
+        if (
+            isinstance(self.source_provenance_total_count, bool)
+            or not isinstance(self.source_provenance_total_count, int)
+            or self.source_provenance_total_count < len(self.source_provenance)
+        ):
+            raise ValueError("invalid source_provenance_total_count")
+        if not isinstance(self.source_provenance_truncated, bool):
+            raise ValueError("source_provenance_truncated must be boolean")
+        if self.source_provenance_truncated != (
+            self.source_provenance_total_count > len(self.source_provenance)
+        ):
+            raise ValueError("source_provenance_truncated does not match provenance count")
 
 
 @dataclass(frozen=True)
@@ -313,6 +353,38 @@ def _assign_clusters(
     return clusters
 
 
+def _build_source_provenance(
+    members: Sequence[NewsSourceRecord],
+    exact_records_by_hash: Mapping[str, Sequence[NewsSourceRecord]],
+) -> tuple[tuple[NewsSourceProvenance, ...], int, bool]:
+    expanded = [
+        source_record
+        for member in members
+        for source_record in exact_records_by_hash.get(member.content_hash, (member,))
+    ]
+    seen: set[tuple[str, str, str]] = set()
+    provenance: list[NewsSourceProvenance] = []
+    for record in sorted(expanded, key=_record_order_key):
+        key = (record.source_id, record.source_reference, record.content_hash)
+        if key in seen:
+            continue
+        seen.add(key)
+        provenance.append(
+            NewsSourceProvenance(
+                source_id=record.source_id,
+                source_tier=record.source_tier,
+                source_reference=record.source_reference,
+                published_at=record.published_at.isoformat(),
+                available_at=record.available_at.isoformat(),
+                ingested_at=record.ingested_at.isoformat(),
+                content_hash=record.content_hash,
+            )
+        )
+    total_count = len(provenance)
+    bounded = tuple(provenance[:_MAX_EVENT_SOURCE_PROVENANCE])
+    return bounded, total_count, total_count > len(bounded)
+
+
 def process_news_batch(
     records: Iterable[NewsSourceRecord],
     *,
@@ -325,11 +397,9 @@ def process_news_batch(
     """PIT-filter, deduplicate, cluster, and classify with transient cluster content."""
 
     as_of = _dt(as_of_timestamp, "as_of_timestamp")
-    ordered = sorted(
-        tuple(records),
-        key=lambda item: (item.available_at, _source_rank(item.source_tier), item.source_id, item.source_reference),
-    )
+    ordered = sorted(tuple(records), key=_record_order_key)
     eligible: list[NewsSourceRecord] = []
+    exact_records_by_hash: dict[str, list[NewsSourceRecord]] = {}
     future_filtered = 0
     duplicate_count = 0
     seen_hashes: set[str] = set()
@@ -337,6 +407,7 @@ def process_news_batch(
         if record.available_at > as_of:
             future_filtered += 1
             continue
+        exact_records_by_hash.setdefault(record.content_hash, []).append(record)
         if record.content_hash in seen_hashes:
             duplicate_count += 1
             continue
@@ -391,6 +462,9 @@ def process_news_batch(
             representative.published_at.isoformat(),
             representative.content_hash,
         )
+        source_provenance, source_provenance_total_count, source_provenance_truncated = (
+            _build_source_provenance(members, exact_records_by_hash)
+        )
         events.append(
             NewsEvent(
                 event_id=event_id,
@@ -411,6 +485,9 @@ def process_news_batch(
                 horizon=bounded["horizon"],
                 confidence=bounded["confidence"],
                 mechanism=bounded["mechanism"],
+                source_provenance=source_provenance,
+                source_provenance_total_count=source_provenance_total_count,
+                source_provenance_truncated=source_provenance_truncated,
             )
         )
     return NewsPipelineResult(
