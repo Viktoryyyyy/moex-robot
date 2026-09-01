@@ -14,12 +14,16 @@ PROJECT = base.PROJECT
 MODE = base.MODE
 SCHEMA_VERSION = base.SCHEMA_VERSION
 FUTOI_COMPONENT = "futoi_live"
+FUTOI_CR_COMPONENT = "futoi_live_cr"
+FUTOI_COMPONENT_BY_INSTRUMENT = {
+    futoi_source.SI_INSTRUMENT_ID: FUTOI_COMPONENT,
+    futoi_source.CR_INSTRUMENT_ID: FUTOI_CR_COMPONENT,
+}
 FUTOI_GOVERNANCE_RELATIVE_PATH = Path(
     "contracts/intelligence/usdrubf_futoi_live_acceptance_governance_v1.json"
 )
-FUTOI_CURRENT_RELATIVE_PATH = Path(
-    "state/datasets/dataset_id=futoi_live_factual_context/"
-    "instrument_id=si_futures_family/current.json"
+FUTOI_CURRENT_BASE_RELATIVE_PATH = Path(
+    "state/datasets/dataset_id=futoi_live_factual_context"
 )
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -52,10 +56,22 @@ def _load_governance() -> dict[str, object]:
     authority = values.get("authority")
     if not isinstance(authority, Mapping):
         raise FutoiSnapshotComponentError("FUTOI governance authority must be an object")
+    instrument_scope = values.get("instrument_scope")
+    if isinstance(instrument_scope, (str, bytes)) or not isinstance(instrument_scope, Sequence):
+        raise FutoiSnapshotComponentError("FUTOI governance instrument_scope must be an array")
+    if set(str(value) for value in instrument_scope) != set(FUTOI_COMPONENT_BY_INSTRUMENT):
+        raise FutoiSnapshotComponentError("FUTOI governance instrument_scope mismatch")
+    instrument_acceptance = values.get("instrument_acceptance")
+    if not isinstance(instrument_acceptance, Mapping):
+        raise FutoiSnapshotComponentError("FUTOI governance instrument_acceptance must be an object")
+    if set(str(value) for value in instrument_acceptance) != set(FUTOI_COMPONENT_BY_INSTRUMENT):
+        raise FutoiSnapshotComponentError("FUTOI governance instrument_acceptance scope mismatch")
     return values
 
 
-def _governance_state(values: Mapping[str, object]) -> dict[str, object]:
+def _governance_state(values: Mapping[str, object], instrument_id: str) -> dict[str, object]:
+    if instrument_id not in FUTOI_COMPONENT_BY_INSTRUMENT:
+        raise FutoiSnapshotComponentError("unsupported FUTOI governance instrument_id")
     gates = values["gates"]
     blocked: list[str] = []
     required: list[str] = []
@@ -69,26 +85,45 @@ def _governance_state(values: Mapping[str, object]) -> dict[str, object]:
             required.append(gate_id)
             if raw.get("status") != "PASS":
                 blocked.append(gate_id)
-    authority = values["authority"]
-    factual = authority.get("factual_live_authority") is True
-    directional = authority.get("directional_authority") is True
-    action = authority.get("action_authority") is True
+    instrument_acceptance = values["instrument_acceptance"]
+    raw_instrument = instrument_acceptance.get(instrument_id)
+    if not isinstance(raw_instrument, Mapping):
+        raise FutoiSnapshotComponentError("FUTOI instrument governance entry is missing")
+    factual = raw_instrument.get("factual_live_authority") is True
+    directional = raw_instrument.get("directional_authority") is True
+    action = raw_instrument.get("action_authority") is True
+    standalone = raw_instrument.get("standalone_buy_sell_authority") is True
     all_required_pass = not blocked
+    if directional or action or standalone:
+        raise FutoiSnapshotComponentError("FUTOI factual governance must not grant directional/action authority")
+    local_blockers = raw_instrument.get("local_blockers")
+    if isinstance(local_blockers, (str, bytes)) or not isinstance(local_blockers, Sequence):
+        raise FutoiSnapshotComponentError("FUTOI instrument local_blockers must be an array")
     return {
         "contract_ref": FUTOI_GOVERNANCE_RELATIVE_PATH.as_posix(),
-        "status": str(values.get("status") or ""),
+        "status": str(raw_instrument.get("status") or values.get("status") or ""),
+        "instrument_id": instrument_id,
         "required_gate_ids": required,
         "blocked_gate_ids": blocked,
+        "local_blockers": [str(value) for value in local_blockers],
         "all_required_gates_pass": all_required_pass,
         "factual_live_authority": factual,
-        "directional_authority": directional,
-        "action_authority": action,
+        "directional_authority": False,
+        "action_authority": False,
+        "standalone_buy_sell_authority": False,
         "factual_use_allowed": all_required_pass and factual,
     }
 
 
-def _load_candidate(root: Path) -> dict[str, object]:
-    path = root / FUTOI_CURRENT_RELATIVE_PATH
+def _candidate_path(root: Path, instrument_id: str) -> Path:
+    if instrument_id not in FUTOI_COMPONENT_BY_INSTRUMENT:
+        raise FutoiSnapshotComponentError("unsupported FUTOI candidate instrument_id")
+    return FUTOI_CURRENT_BASE_RELATIVE_PATH / ("instrument_id=" + instrument_id) / "current.json"
+
+
+def _load_candidate(root: Path, instrument_id: str) -> dict[str, object]:
+    identity = futoi_source.source_identity(instrument_id)
+    path = root / _candidate_path(root, instrument_id)
     value = _load_json(path, "FUTOI factual current artifact")
     if value.get("project") != PROJECT:
         raise FutoiSnapshotComponentError("FUTOI factual artifact project mismatch")
@@ -96,7 +131,7 @@ def _load_candidate(root: Path) -> dict[str, object]:
         raise FutoiSnapshotComponentError("FUTOI factual artifact schema mismatch")
     if value.get("source_id") != futoi_source.SOURCE_ID:
         raise FutoiSnapshotComponentError("FUTOI factual artifact source mismatch")
-    if value.get("instrument_id") != futoi_source.INSTRUMENT_ID:
+    if value.get("instrument_id") != instrument_id:
         raise FutoiSnapshotComponentError("FUTOI factual artifact instrument mismatch")
     if value.get("status") != "PASS" or value.get("quality_status") != "PASS":
         raise FutoiSnapshotComponentError("FUTOI factual artifact quality/status is not PASS")
@@ -104,8 +139,16 @@ def _load_candidate(root: Path) -> dict[str, object]:
         raise FutoiSnapshotComponentError("FUTOI factual artifact acceptance_status is not PASS")
     if value.get("factual_authority") is not False:
         raise FutoiSnapshotComponentError("FUTOI source artifact must not self-grant factual authority")
-    if value.get("directional_authority") is not False or value.get("action_authority") is not False:
+    if (
+        value.get("directional_authority") is not False
+        or value.get("action_authority") is not False
+        or value.get("standalone_buy_sell_authority") is not False
+    ):
         raise FutoiSnapshotComponentError("FUTOI source artifact must keep directional/action authority false")
+    if value.get("stage5_full_mode_ready") is not False:
+        raise FutoiSnapshotComponentError("FUTOI source artifact must keep Stage5 full mode disabled")
+    if value.get("stage5_pointer_promotion_performed") is not False:
+        raise FutoiSnapshotComponentError("FUTOI source artifact must not promote a Stage5 pointer")
     factual = value.get("factual")
     provenance = value.get("provenance")
     freshness = value.get("freshness")
@@ -113,6 +156,10 @@ def _load_candidate(root: Path) -> dict[str, object]:
         raise FutoiSnapshotComponentError("FUTOI factual/provenance payload is missing")
     if not isinstance(freshness, Mapping) or freshness.get("status") != "FRESH":
         raise FutoiSnapshotComponentError("FUTOI factual artifact is not source-fresh")
+    if str(factual.get("source_ticker") or "").strip().lower() != identity["source_ticker"].lower():
+        raise FutoiSnapshotComponentError("FUTOI factual payload source_ticker mismatch")
+    if str(factual.get("secid") or "").strip() != identity["secid"]:
+        raise FutoiSnapshotComponentError("FUTOI factual payload secid mismatch")
     data_as_of = value.get("data_as_of")
     if not isinstance(data_as_of, str):
         raise FutoiSnapshotComponentError("FUTOI factual data_as_of is missing")
@@ -122,17 +169,24 @@ def _load_candidate(root: Path) -> dict[str, object]:
     return value
 
 
-def _previous_ready_futoi(previous: Mapping[str, object] | None) -> Mapping[str, object] | None:
+def _previous_ready_futoi(
+    previous: Mapping[str, object] | None,
+    *,
+    component_name: str,
+    instrument_id: str,
+) -> Mapping[str, object] | None:
     if previous is None:
         return None
     components = previous.get("components")
     if not isinstance(components, Mapping):
         return None
-    value = components.get(FUTOI_COMPONENT)
+    value = components.get(component_name)
     if not isinstance(value, Mapping):
         return None
     data = value.get("data")
     if not isinstance(data, Mapping) or data.get("factual_authority") is not True:
+        return None
+    if data.get("instrument_id") != instrument_id:
         return None
     if value.get("status") not in {"READY", "RETAINED_PREVIOUS"}:
         return None
@@ -144,17 +198,23 @@ def _futoi_component(
     root: Path,
     now: datetime,
     previous: Mapping[str, object] | None,
+    governance_values: Mapping[str, object],
+    instrument_id: str,
+    component_name: str,
 ) -> dict[str, object]:
     attempted_at = base._iso(now)
-    governance_values = _load_governance()
-    governance = _governance_state(governance_values)
+    governance = _governance_state(governance_values, instrument_id)
     allowed = governance["factual_use_allowed"] is True
 
     try:
-        candidate = _load_candidate(root)
+        candidate = _load_candidate(root, instrument_id)
     except Exception as exc:
         if allowed:
-            prior = _previous_ready_futoi(previous)
+            prior = _previous_ready_futoi(
+                previous,
+                component_name=component_name,
+                instrument_id=instrument_id,
+            )
             if prior is not None:
                 return {
                     "status": "RETAINED_PREVIOUS",
@@ -183,13 +243,16 @@ def _futoi_component(
             "refresh_error": str(exc),
             "data": {
                 "source_id": futoi_source.SOURCE_ID,
-                "instrument_id": futoi_source.INSTRUMENT_ID,
+                "instrument_id": instrument_id,
                 "candidate_status": "UNAVAILABLE",
                 "governance": governance,
                 "factual_authority": False,
                 "consumer_factual_use_allowed": False,
                 "directional_authority": False,
                 "action_authority": False,
+                "standalone_buy_sell_authority": False,
+                "stage5_full_mode_ready": False,
+                "stage5_pointer_promotion_performed": False,
                 "missing_or_blocked_must_not_be_interpreted_as_neutral": True,
             },
         }
@@ -210,6 +273,7 @@ def _futoi_component(
         "action_authority": False,
         "standalone_buy_sell_authority": False,
         "stage5_full_mode_required": False,
+        "stage5_full_mode_ready": False,
         "stage5_pointer_promotion_performed": False,
         "missing_or_blocked_must_not_be_interpreted_as_neutral": True,
     }
@@ -237,6 +301,20 @@ def _recompute_readiness(snapshot: dict[str, object]) -> None:
     }
 
 
+def _workflow_entry(instrument_id: str, component_name: str) -> dict[str, object]:
+    return {
+        "consumer": "SEPARATE_ANALYSIS_CHAT",
+        "instrument_id": instrument_id,
+        "component_ref": component_name,
+        "factual_use_requires": (
+            "components." + component_name + ".status=READY and data.factual_authority=true"
+        ),
+        "directional_authority": False,
+        "action_authority": False,
+        "standalone_buy_sell_authority": False,
+    }
+
+
 def build_snapshot(
     *,
     now: datetime,
@@ -247,26 +325,49 @@ def build_snapshot(
     now_utc = base._aware(now, "now")
     result = base.build_snapshot(now=now_utc, previous=previous, producers=producers)
     root = data_root if data_root is not None else base._data_root()
-    result["components"][FUTOI_COMPONENT] = _futoi_component(
-        root=root,
-        now=now_utc,
-        previous=previous,
-    )
+    governance_values = _load_governance()
+    for instrument_id, component_name in FUTOI_COMPONENT_BY_INSTRUMENT.items():
+        result["components"][component_name] = _futoi_component(
+            root=root,
+            now=now_utc,
+            previous=previous,
+            governance_values=governance_values,
+            instrument_id=instrument_id,
+            component_name=component_name,
+        )
+
+    # Backward-compatible Si alias remains unchanged; explicit map adds CR without ambiguity.
     result["analysis_views"]["futoi_component_ref"] = FUTOI_COMPONENT
-    result["analysis_workflow"]["futoi_positioning"] = {
-        "consumer": "SEPARATE_ANALYSIS_CHAT",
-        "component_ref": FUTOI_COMPONENT,
-        "factual_use_requires": "components.futoi_live.status=READY and data.factual_authority=true",
-        "directional_authority": False,
-        "action_authority": False,
-    }
-    futoi_data = result["components"][FUTOI_COMPONENT].get("data")
-    factual_authority = bool(
-        isinstance(futoi_data, Mapping) and futoi_data.get("factual_authority") is True
+    result["analysis_views"]["futoi_component_refs"] = dict(FUTOI_COMPONENT_BY_INSTRUMENT)
+    result["analysis_workflow"]["futoi_positioning"] = _workflow_entry(
+        futoi_source.SI_INSTRUMENT_ID,
+        FUTOI_COMPONENT,
     )
-    result["authority"]["futoi_factual_authority"] = factual_authority
+    result["analysis_workflow"]["futoi_positioning_by_instrument"] = {
+        instrument_id: _workflow_entry(instrument_id, component_name)
+        for instrument_id, component_name in FUTOI_COMPONENT_BY_INSTRUMENT.items()
+    }
+
+    authority_by_instrument: dict[str, object] = {}
+    for instrument_id, component_name in FUTOI_COMPONENT_BY_INSTRUMENT.items():
+        futoi_data = result["components"][component_name].get("data")
+        factual_authority = bool(
+            isinstance(futoi_data, Mapping) and futoi_data.get("factual_authority") is True
+        )
+        authority_by_instrument[instrument_id] = {
+            "component_ref": component_name,
+            "factual_authority": factual_authority,
+            "directional_authority": False,
+            "action_authority": False,
+            "standalone_buy_sell_authority": False,
+        }
+
+    # Preserve legacy futoi_* authority semantics as the Si component only.
+    si_authority = authority_by_instrument[futoi_source.SI_INSTRUMENT_ID]
+    result["authority"]["futoi_factual_authority"] = si_authority["factual_authority"]
     result["authority"]["futoi_directional_authority"] = False
     result["authority"]["futoi_action_authority"] = False
+    result["authority"]["futoi_by_instrument"] = authority_by_instrument
     _recompute_readiness(result)
     return result
 
@@ -303,7 +404,7 @@ def read_current_snapshot(
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Publish/read S7.3 chat snapshot with governed factual-only FUTOI component"
+        description="Publish/read S7.3 chat snapshot with governed factual-only Si/CR FUTOI components"
     )
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--refresh", action="store_true")
