@@ -1,0 +1,53 @@
+{
+  "contract_id": "usdrubf_news_bls_dol_mirror_source_contract.v1",
+  "version": "1.0",
+  "status": "live_fallback_route_contract",
+  "project": "MOEX_Bot",
+  "lane": "rub_intelligence",
+  "instrument": "USDRUBF",
+  "source_of_truth": "GitHub",
+  "base_registry": "contracts/intelligence/usdrubf_news_macro_source_registry_v1.json",
+  "purpose": "Govern the production fallback from BLS-hosted routes blocked by HTTP 403 to official Department of Labor hosted post-release copies of BLS Employment Situation and CPI releases.",
+  "governance": {
+    "bls_hosted_routes_remain_official_primary": true,
+    "dol_hosted_bls_copies_are_official_secondary": true,
+    "dol_index_discovery_required": true,
+    "filename_date_is_not_availability_proof": true,
+    "scheduled_release_time_is_not_availability_proof": true,
+    "pdf_embargo_timestamp_is_required": true,
+    "ingestion_time_must_not_replace_publication_time": true,
+    "directional_action_authority": false
+  },
+  "index": {
+    "url": "https://www.dol.gov/newsroom/economicdata",
+    "allowed_host": "www.dol.gov",
+    "transport": "HTML_INDEX",
+    "max_bytes": 1000000
+  },
+  "sources": [
+    {
+      "source_id": "bls_employment_situation_dol_mirror",
+      "replaces_live_route": "bls_employment_situation_rss",
+      "group": "US_MACRO_OFFICIAL",
+      "tier": "OFFICIAL_SECONDARY",
+      "transport": "DOL_PDF_MIRROR",
+      "pdf_prefix": "empsit",
+      "pdf_path_pattern": "/newsroom/economicdata/empsit_YYYYMMDD.pdf",
+      "topics": ["NFP", "UNEMPLOYMENT", "WAGES"],
+      "stage12b_status": "READY_CANDIDATE",
+      "available_at_policy": "Use only the BLS embargo/publication timestamp printed inside the mirrored BLS release PDF and interpreted in America/New_York. Filename date, DOL ingestion time, and scheduled calendar time never prove availability."
+    },
+    {
+      "source_id": "bls_cpi_dol_mirror",
+      "replaces_live_route": "bls_cpi_rss",
+      "group": "US_MACRO_OFFICIAL",
+      "tier": "OFFICIAL_SECONDARY",
+      "transport": "DOL_PDF_MIRROR",
+      "pdf_prefix": "cpi",
+      "pdf_path_pattern": "/newsroom/economicdata/cpi_YYYYMMDD.pdf",
+      "topics": ["US_CPI", "US_INFLATION"],
+      "stage12b_status": "READY_CANDIDATE",
+      "available_at_policy": "Use only the BLS embargo/publication timestamp printed inside the mirrored BLS release PDF and interpreted in America/New_York. Filename date, DOL ingestion time, and scheduled calendar time never prove availability."
+    }
+  ]
+}
