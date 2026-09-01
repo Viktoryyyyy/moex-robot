@@ -3,17 +3,26 @@ schema_version: futoi_live_factual_refresh_source_native.v1
 status: implementation_ready_runtime_acceptance_pending
 producer: moex_data.futures.futoi_live_factual_refresh_source_native.v1
 source_id: moex_algopack_futoi
-instrument_id: si_futures_family
+instrument_ids:
+  - si_futures_family
+  - cr_futures_family
+source_identity_registry_ref: configs/instruments/forts_instrument_registry.v1.yaml
 source_dataset_ref: contracts/datasets/futures_futoi_raw.v1.yaml
 source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v1.yaml
-path: ${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/instrument_id=si_futures_family/current.json
+paths:
+  si_futures_family: ${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/instrument_id=si_futures_family/current.json
+  cr_futures_family: ${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/instrument_id=cr_futures_family/current.json
 
 semantics:
   purpose: factual_only_live_context_for_rub_analysis_snapshot
+  per_instrument_artifacts_required: true
+  cross_instrument_substitution_allowed: false
   stage5_full_mode_required: false
+  stage5_full_mode_ready: false
   stage5_pointer_promotion_allowed: false
   directional_interpretation_allowed: false
   action_generation_allowed: false
+  standalone_buy_sell_authority_allowed: false
   missing_or_failed_source_interpreted_as_neutral: false
   source_short_positions_are_signed_negative: true
   exposed_short_positions_are_absolute_contract_counts: true
@@ -34,13 +43,16 @@ semantics:
 
 freshness:
   calendar_dependency: false
-  source_native_exact_date_scan: true
+  moex_calendar_api_allowed: false
+  trading_date_authority: moex_algopack_fo_tradestats_5m
+  observed_date_resolver: moex_data.futures.observed_tradestats_dates.observed_dates
   source_lookback_days: 14
-  policy: bounded_exact_date_source_scan_weekend_empty_only
+  policy: bounded_observed_tradestats_dates_then_exact_futoi
   exact_date_requests_only: true
   implicit_latest_endpoint_semantics_allowed: false
-  explicit_empty_weekend_dates_may_be_skipped: true
-  explicit_empty_weekday_date: fail_closed
+  weekday_weekend_inference_allowed: false
+  empty_futoi_on_observed_trade_date: fail_closed
+  observed_date_source_failure: fail_closed
   transport_auth_parse_error: fail_closed
   malformed_nonempty_source_date: fail_closed
   stale_as_neutral_allowed: false
@@ -65,6 +77,9 @@ required_top_level_fields:
   - factual_authority
   - directional_authority
   - action_authority
+  - standalone_buy_sell_authority
+  - stage5_full_mode_ready
+  - stage5_pointer_promotion_performed
 
 factual_fields:
   required:
@@ -103,10 +118,13 @@ provenance:
   historical_stage5_promotion_required: false
 
 failure_semantics:
-  raw_refresh_or_quality_failure: fail_component_only
-  weekday_empty_source: fail_component_only
-  source_probe_transport_auth_parse_failure: fail_component_only
+  raw_refresh_or_quality_failure: fail_instrument_component_only
+  empty_futoi_on_authoritative_observed_trade_date: fail_instrument_component_only
+  source_probe_transport_auth_parse_failure: fail_instrument_component_only
+  all_instrument_failures_aggregate_status: FAILED
+  mixed_instrument_results_aggregate_status: PARTIAL_FAILURE
   stage7_refresh_blocked_by_futoi_failure: false
   factual_authority_before_governance_live_acceptance: false
   directional_authority: false
   action_authority: false
+  standalone_buy_sell_authority: false
