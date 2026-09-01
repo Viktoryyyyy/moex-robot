@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -145,6 +144,19 @@ def _patch_binding(monkeypatch) -> None:
     monkeypatch.setattr(factual, "_binding", binding)
 
 
+def _patch_observed_dates(monkeypatch, dates: list[str] | None = None) -> None:
+    monkeypatch.setattr(
+        factual.observed_dates,
+        "observed_dates",
+        lambda start, end, instrument_id, timeout: list(dates or [end]),
+    )
+    monkeypatch.setattr(
+        factual.observed_dates,
+        "normalize_observed_dates",
+        lambda values, start, end: list(values),
+    )
+
+
 def _patch_validation_passthrough(monkeypatch) -> None:
     monkeypatch.setattr(
         factual.materializer,
@@ -169,8 +181,9 @@ def test_cr_registry_binding_resolves_expected_futoi_source_identity() -> None:
     }
 
 
-def test_explicit_si_and_cr_source_native_probe_works(monkeypatch) -> None:
+def test_explicit_si_and_cr_source_native_probe_uses_observed_tradestats_date(monkeypatch) -> None:
     _patch_binding(monkeypatch)
+    _patch_observed_dates(monkeypatch)
     _patch_validation_passthrough(monkeypatch)
 
     def fetch(ticker, trade_date, timeout, apim_base_url):
@@ -186,12 +199,42 @@ def test_explicit_si_and_cr_source_native_probe_works(monkeypatch) -> None:
             timeout=1.0,
         )
         assert target == "2026-08-28"
-        assert observations[0]["status"] == "DATA"
-        assert observations[0]["row_count"] == 2
+        assert observations[0] == {
+            "trade_date": "2026-08-28",
+            "status": "OBSERVED_TRADESTATS_DATE",
+            "date_authority_source_id": factual.observed_dates.SOURCE_ID,
+        }
+        assert observations[-1]["status"] == "FUTOI_DATA"
+        assert observations[-1]["row_count"] == 2
 
 
-def test_empty_exact_source_fails_closed_without_weekday_or_weekend_inference(monkeypatch) -> None:
+def test_weekend_upper_bound_uses_latest_observed_trade_date_without_weekday_inference(monkeypatch) -> None:
     _patch_binding(monkeypatch)
+    _patch_observed_dates(monkeypatch, ["2026-08-28"])
+    _patch_validation_passthrough(monkeypatch)
+    requested: list[str] = []
+
+    def fetch(ticker, trade_date, timeout, apim_base_url):
+        del timeout, apim_base_url
+        requested.append(trade_date)
+        return _raw_frame(trade_date, ticker), "https://apim.example/futoi/" + ticker + ".json"
+
+    monkeypatch.setattr(factual.materializer, "_fetch_exact", fetch)
+
+    target, observations = factual.discover_latest_source_trade_date(
+        "2026-08-29",
+        instrument_id=factual.SI_INSTRUMENT_ID,
+        timeout=1.0,
+    )
+
+    assert target == "2026-08-28"
+    assert requested == ["2026-08-28"]
+    assert observations[-1]["status"] == "FUTOI_DATA"
+
+
+def test_empty_futoi_on_authoritative_observed_trade_date_fails_closed(monkeypatch) -> None:
+    _patch_binding(monkeypatch)
+    _patch_observed_dates(monkeypatch)
 
     def fetch(ticker, trade_date, timeout, apim_base_url):
         del ticker, trade_date, timeout, apim_base_url
@@ -199,20 +242,40 @@ def test_empty_exact_source_fails_closed_without_weekday_or_weekend_inference(mo
 
     monkeypatch.setattr(factual.materializer, "_fetch_exact", fetch)
 
-    for trade_date in ("2026-08-28", "2026-08-29"):
-        with pytest.raises(
-            factual.FutoiSourceNativeRefreshError,
-            match="trading-day status cannot be proven",
-        ):
-            factual.discover_latest_source_trade_date(
-                trade_date,
-                instrument_id=factual.SI_INSTRUMENT_ID,
-                timeout=1.0,
-            )
+    with pytest.raises(
+        factual.FutoiSourceNativeRefreshError,
+        match="empty on authoritative observed TradeStats date",
+    ):
+        factual.discover_latest_source_trade_date(
+            "2026-08-28",
+            instrument_id=factual.SI_INSTRUMENT_ID,
+            timeout=1.0,
+        )
+
+
+def test_observed_tradestats_date_source_failure_fails_closed(monkeypatch) -> None:
+    _patch_binding(monkeypatch)
+
+    def fail(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError("TradeStats unavailable")
+
+    monkeypatch.setattr(factual.observed_dates, "observed_dates", fail)
+
+    with pytest.raises(
+        factual.FutoiSourceNativeRefreshError,
+        match="authoritative observed TradeStats date selection failed",
+    ):
+        factual.discover_latest_source_trade_date(
+            "2026-08-28",
+            instrument_id=factual.CR_INSTRUMENT_ID,
+            timeout=1.0,
+        )
 
 
 def test_source_native_probe_error_fails_closed(monkeypatch) -> None:
     _patch_binding(monkeypatch)
+    _patch_observed_dates(monkeypatch)
 
     def fetch(ticker, trade_date, timeout, apim_base_url):
         del ticker, trade_date, timeout, apim_base_url
@@ -311,7 +374,10 @@ def test_si_and_cr_refresh_write_separate_current_artifacts(monkeypatch, tmp_pat
     monkeypatch.setattr(
         factual,
         "discover_latest_source_trade_date",
-        lambda through_date, instrument_id, timeout: (through_date, [{"trade_date": through_date, "status": "DATA"}]),
+        lambda through_date, instrument_id, timeout: (
+            through_date,
+            [{"trade_date": through_date, "status": "FUTOI_DATA"}],
+        ),
     )
 
     def materialize(root, target_trade_date, run_id, *, instrument_id, timeout):
@@ -335,6 +401,7 @@ def test_si_and_cr_refresh_write_separate_current_artifacts(monkeypatch, tmp_pat
         )
         assert result["status"] == "PASS"
         assert result["instrument_id"] == instrument_id
+        assert result["freshness"]["trading_date_authority_source_id"] == factual.observed_dates.SOURCE_ID
         assert result["directional_authority"] is False
         assert result["action_authority"] is False
         assert result["standalone_buy_sell_authority"] is False
@@ -371,9 +438,53 @@ def test_refresh_all_reports_one_instrument_failure_without_substitution(monkeyp
     assert result["stage5_pointer_promotion_performed"] is False
 
 
-def test_no_moex_calendar_api_dependency_is_introduced() -> None:
+def test_refresh_all_reports_complete_failure_distinctly(monkeypatch) -> None:
+    def fail(**kwargs):
+        raise RuntimeError("shared failure for " + str(kwargs["instrument_id"]))
+
+    monkeypatch.setattr(factual, "run_refresh", fail)
+    result = factual.run_refresh_all(
+        through_date="2026-08-28",
+        run_id="aggregate_all_failed",
+        timeout=1.0,
+    )
+
+    assert result["status"] == "FAILED"
+    assert result["failed_instrument_ids"] == list(factual.LIVE_INSTRUMENT_IDS)
+    assert all(
+        result["instrument_results"][instrument_id]["status"] == "FAILED"
+        for instrument_id in factual.LIVE_INSTRUMENT_IDS
+    )
+
+
+def test_live_factual_contracts_register_si_and_cr_and_observed_date_authority() -> None:
+    dataset_contract = Path("contracts/datasets/futoi_live_factual_context.v1.yaml").read_text(
+        encoding="utf-8"
+    )
+    step10_contract = Path("configs/datasets/step10_rub_daily_refresh.v1.yaml").read_text(
+        encoding="utf-8"
+    )
+
+    for instrument_id in factual.LIVE_INSTRUMENT_IDS:
+        assert instrument_id in dataset_contract
+        assert instrument_id in step10_contract
+    assert "bounded_observed_tradestats_dates_then_exact_futoi" in dataset_contract
+    assert "bounded_observed_tradestats_dates_then_exact_futoi" in step10_contract
+    assert "moex_data.futures.observed_tradestats_dates.observed_dates" in dataset_contract
+    assert "moex_data.futures.observed_tradestats_dates.observed_dates" in step10_contract
+    assert "weekday_weekend_inference_allowed: false" in dataset_contract
+    assert "weekday_weekend_inference_allowed: false" in step10_contract
+
+
+def test_no_moex_calendar_api_or_weekday_dependency_is_introduced() -> None:
     source = Path(factual.__file__).read_text(encoding="utf-8")
-    assert "/iss/calendars.json" not in source
-    assert "/iss/calendars" not in source
+    dataset_contract = Path("contracts/datasets/futoi_live_factual_context.v1.yaml").read_text(
+        encoding="utf-8"
+    )
+    step10_contract = Path("configs/datasets/step10_rub_daily_refresh.v1.yaml").read_text(
+        encoding="utf-8"
+    )
+    combined = source + dataset_contract + step10_contract
+    assert "/iss/calendars.json" not in combined
+    assert "/iss/calendars" not in combined
     assert ".weekday()" not in source
-    assert date.fromisoformat("2026-08-29").weekday() == 5
