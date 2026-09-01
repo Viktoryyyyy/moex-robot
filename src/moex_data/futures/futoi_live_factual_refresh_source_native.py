@@ -443,7 +443,13 @@ def _materialize_target(
 ) -> tuple[Path, dict[str, object]]:
     checked_instrument = _instrument_id(instrument_id)
     identity = source_identity(checked_instrument)
-    raw_run_id = run_id + "_raw_" + target_trade_date.replace("-", "")
+    raw_run_id = (
+        run_id
+        + "_"
+        + checked_instrument
+        + "_raw_"
+        + target_trade_date.replace("-", "")
+    )
     result = materializer.materialize_futoi_partition(
         trade_date=target_trade_date,
         instrument_id=checked_instrument,
