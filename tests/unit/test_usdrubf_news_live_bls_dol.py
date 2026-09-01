@@ -106,6 +106,8 @@ def test_dol_mirror_contract_is_explicitly_official_secondary_and_non_directiona
     )
     assert contract["governance"]["directional_action_authority"] is False
     assert contract["governance"]["pdf_embargo_timestamp_is_required"] is True
+    assert contract["governance"]["published_at_comes_from_bls_release_timestamp"] is True
+    assert contract["governance"]["available_at_is_first_successful_dol_acquisition"] is True
     by_id = {item["source_id"]: item for item in contract["sources"]}
     assert set(by_id) == set(BLS_DOL_SOURCE_IDS)
     assert all(item["tier"] == "OFFICIAL_SECONDARY" for item in by_id.values())
@@ -131,14 +133,14 @@ def test_dol_mirror_acquires_both_releases_with_pdf_publication_time_and_provena
     assert employment.source_tier == "OFFICIAL_SECONDARY"
     assert employment.source_reference == EMPLOYMENT_URL
     assert employment.published_at.isoformat() == "2026-08-07T08:30:00-04:00"
-    assert employment.available_at == employment.published_at
+    assert employment.available_at == now
     assert employment.ingested_at == now
 
     cpi = by_id[CPI_ID]
     assert cpi.source_tier == "OFFICIAL_SECONDARY"
     assert cpi.source_reference == CPI_URL
     assert cpi.published_at.isoformat() == "2026-08-12T08:30:00-04:00"
-    assert cpi.available_at == cpi.published_at
+    assert cpi.available_at == now
     assert cpi.ingested_at == now
 
 
