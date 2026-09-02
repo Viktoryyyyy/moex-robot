@@ -1,0 +1,57 @@
+{
+  "contract_id": "usdrubf_news_russian_government_live_source_contract.v1",
+  "version": "1.0",
+  "status": "production_secure_route_blocker_contract",
+  "project": "MOEX_Bot",
+  "lane": "rub_intelligence",
+  "instrument": "USDRUBF",
+  "source_of_truth": "GitHub",
+  "purpose": "Freeze the Stage 12B production decision for the official Russian Government news feed without weakening HTTPS-only factual acquisition.",
+  "governance": {
+    "official_sources_only": true,
+    "https_required_for_factual_live_acquisition": true,
+    "http_downgrade_forbidden": true,
+    "publication_timestamp_must_be_timezone_aware": true,
+    "one_source_failure_must_not_poison_batch": true,
+    "directional_action_authority": false
+  },
+  "source": {
+    "source_id": "russian_government_all_rss",
+    "group": "RU_GOVERNMENT",
+    "tier": "OFFICIAL_PRIMARY",
+    "transport": "RSS",
+    "canonical_https_candidate": "https://government.ru/all/rss/",
+    "observed_http_route": "http://government.ru/all/rss/",
+    "topics": [
+      "RUSSIA_POLICY",
+      "FISCAL_POLICY",
+      "ENERGY_POLICY",
+      "SANCTIONS_RESPONSE",
+      "GOVERNMENT_DECISIONS"
+    ],
+    "stage12b_status": "BLOCKED_PENDING_PRODUCTION_REACHABLE_HTTPS_ROUTE",
+    "live_adapter_enabled": false,
+    "registry_binding": "Do not add this source to the live READY registry until a production-reachable HTTPS route is proven. This blocker contract is the canonical TASK4 decision record.",
+    "available_at_policy": "When a secure route is proven, use the timezone-aware RSS pubDate as published_at and available_at; ingestion must not precede acquisition completion.",
+    "production_probe": {
+      "verified_on": "2026-09-02",
+      "canonical_https_candidate_result": "CONNECT_TIMEOUT",
+      "http_route_result": "HTTP_200",
+      "http_content_type": "application/xml; charset=UTF-8",
+      "http_item_count_observed": 20,
+      "timezone_aware_pubdate_found": true,
+      "sample_item": {
+        "source_reference": "http://government.ru/news/59764/",
+        "published_at": "Wed, 02 Sep 2026 12:00:00 +0300"
+      },
+      "result": "TIMESTAMP_PROVABLE_BUT_SECURE_TRANSPORT_UNPROVABLE"
+    },
+    "unblock_conditions": [
+      "Prove a stable production-reachable HTTPS official Government RSS or equivalent official route.",
+      "Validate the final redirect target and allowed host over HTTPS.",
+      "Retain bounded timeout and response-size limits.",
+      "Retain stable item provenance and timezone-aware publication timestamps.",
+      "Do not change classifier, dedupe, clustering, or directional/action authority semantics."
+    ]
+  }
+}
