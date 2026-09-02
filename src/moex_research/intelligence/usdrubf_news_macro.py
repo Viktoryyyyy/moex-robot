@@ -381,7 +381,29 @@ def _build_source_provenance(
             )
         )
     total_count = len(provenance)
-    bounded = tuple(provenance[:_MAX_EVENT_SOURCE_PROVENANCE])
+    if total_count <= _MAX_EVENT_SOURCE_PROVENANCE:
+        bounded = tuple(provenance)
+    else:
+        selected: list[NewsSourceProvenance] = []
+        selected_keys: set[tuple[str, str, str]] = set()
+        selected_sources: set[str] = set()
+        for item in provenance:
+            if item.source_id in selected_sources:
+                continue
+            selected_sources.add(item.source_id)
+            selected.append(item)
+            selected_keys.add((item.source_id, item.source_reference, item.content_hash))
+            if len(selected) == _MAX_EVENT_SOURCE_PROVENANCE:
+                break
+        if len(selected) < _MAX_EVENT_SOURCE_PROVENANCE:
+            for item in provenance:
+                key = (item.source_id, item.source_reference, item.content_hash)
+                if key in selected_keys:
+                    continue
+                selected.append(item)
+                if len(selected) == _MAX_EVENT_SOURCE_PROVENANCE:
+                    break
+        bounded = tuple(selected)
     return bounded, total_count, total_count > len(bounded)
 
 

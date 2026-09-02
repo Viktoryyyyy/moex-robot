@@ -118,6 +118,44 @@ def test_provenance_order_is_deterministic_and_bound_is_explicit() -> None:
     assert forward.source_provenance_truncated is True
 
 
+def test_truncated_provenance_preserves_distinct_source_before_filling_extra_records() -> None:
+    dominant = [
+        _record(
+            "official_a",
+            f"https://a.example/release/{index:02d}",
+            "Same crowded release",
+        )
+        for index in range(20)
+    ]
+    secondary = _record(
+        "official_b",
+        "https://b.example/release",
+        "Same crowded release",
+        available_at=T2,
+    )
+
+    forward = process_news_batch(
+        [*dominant, secondary],
+        as_of_timestamp=T2,
+        classifier=lambda _payload: _classification(),
+    ).events[0]
+    reverse = process_news_batch(
+        reversed([*dominant, secondary]),
+        as_of_timestamp=T2,
+        classifier=lambda _payload: _classification(),
+    ).events[0]
+
+    assert len(forward.source_provenance) == 16
+    assert {item.source_id for item in forward.source_provenance} == {
+        "official_a",
+        "official_b",
+    }
+    assert sum(item.source_id == "official_b" for item in forward.source_provenance) == 1
+    assert forward.source_provenance == reverse.source_provenance
+    assert forward.source_provenance_total_count == 21
+    assert forward.source_provenance_truncated is True
+
+
 def test_snapshot_serializes_provenance_without_raw_content(tmp_path) -> None:
     event = process_news_batch(
         [
