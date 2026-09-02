@@ -12,6 +12,8 @@ from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_curren
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_futoi as futoi
 
 
+current_context.context = fast_context
+
 PROJECT = current_context.PROJECT
 MODE = current_context.MODE
 COMPONENT = "synchronized_live_market_oi"
@@ -152,7 +154,7 @@ def refresh_snapshot(
         now = base._aware(now_fn(), "clock")
         through_date = now.astimezone(base.MOSCOW).date().isoformat()
         run_id = "s7_3_futoi_context_live_market_oi_" + now.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        refresh_bundle = fast_context.run_refresh_all(
+        refresh_bundle = current_context.context.run_refresh_all(
             through_date=through_date,
             run_id=run_id,
             now_fn=lambda: now,
