@@ -30,7 +30,8 @@
       "publication_timestamp_binding": "detail semantic publication field field--name-field-news-publication-date > time[datetime]",
       "available_at_policy": "Use the timezone-aware Treasury publication timestamp from the semantic release publication field as published_at and available_at. Ingestion is conservatively restamped no earlier than batch completion by the common live pipeline.",
       "bounds": {
-        "timeout_seconds_default": 10.0,
+        "adapter_timeout_seconds_default": 10.0,
+        "live_pipeline_timeout_floor_seconds": 30.0,
         "max_response_bytes_default": 2000000,
         "max_candidate_pages_default": 40,
         "max_persisted_detail_records_default": 10
@@ -39,7 +40,10 @@
         "verified_on": "2026-09-02",
         "sample_detail_url": "https://home.treasury.gov/news/press-releases/sb0620",
         "sample_semantic_datetime": "2026-09-01T06:20:00-04:00",
-        "result": "TIMESTAMP_PROVABLE"
+        "index_route_http_status": 200,
+        "observed_index_response_seconds": 9.2,
+        "ten_second_live_timeout_failed": true,
+        "result": "TIMESTAMP_PROVABLE_ROUTE_REACHABLE_WITH_SOURCE_SPECIFIC_TIMEOUT_BUDGET"
       }
     },
     {
