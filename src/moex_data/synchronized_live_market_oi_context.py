@@ -26,6 +26,7 @@ CETS_ENDPOINT: Final[str] = "/iss/engines/currency/markets/selt/boards/CETS/secu
 MAX_SKEW_SECONDS: Final[int] = 60
 MAX_FRESHNESS_SECONDS: Final[int] = 60
 MAX_FUTURE_CLOCK_SKEW_SECONDS: Final[int] = 5
+MAX_FORTS_PAGES: Final[int] = 100
 MOSCOW: Final[ZoneInfo] = ZoneInfo("Europe/Moscow")
 
 FUTURES_SECURITY_COLUMNS: Final[tuple[str, ...]] = (
@@ -125,7 +126,12 @@ def _source_event_time(value: object, field: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _table_frame(payload: Mapping[str, object], block_name: str) -> pd.DataFrame:
+def _table_parts(
+    payload: Mapping[str, object],
+    block_name: str,
+    *,
+    allow_empty: bool,
+) -> tuple[list[str], list[list[object]]]:
     block = payload.get(block_name)
     if not isinstance(block, Mapping):
         raise SynchronizedLiveMarketOIError(f"MOEX ISS response missing {block_name} block")
@@ -133,12 +139,16 @@ def _table_frame(payload: Mapping[str, object], block_name: str) -> pd.DataFrame
     rows = block.get("data")
     if not isinstance(columns, list) or not all(isinstance(column, str) for column in columns):
         raise SynchronizedLiveMarketOIError(f"{block_name} columns are invalid")
-    if not isinstance(rows, list):
+    if not isinstance(rows, list) or not all(isinstance(row, list) for row in rows):
         raise SynchronizedLiveMarketOIError(f"{block_name} data is invalid")
-    frame = pd.DataFrame(rows, columns=columns)
-    if frame.empty:
+    if not allow_empty and not rows:
         raise SynchronizedLiveMarketOIError(f"{block_name} block is empty")
-    return frame
+    return list(columns), [list(row) for row in rows]
+
+
+def _table_frame(payload: Mapping[str, object], block_name: str) -> pd.DataFrame:
+    columns, rows = _table_parts(payload, block_name, allow_empty=False)
+    return pd.DataFrame(rows, columns=columns)
 
 
 def _require_columns(frame: pd.DataFrame, required: Sequence[str], block_name: str) -> None:
@@ -417,6 +427,7 @@ def build_snapshot_from_payloads(
                 "price_and_oi_same_marketdata_row": True,
                 "wap_method": "VALTODAY/VOLTODAY/(STEPPRICE/MINSTEP)",
                 "authenticated_gateway": True,
+                "pagination_complete": True,
             },
             "cnyrub_tom": {
                 "source_id": CETS_SOURCE_ID,
@@ -472,6 +483,130 @@ def _fetch_json(
     return payload, str(getattr(response, "url", url)), received_at
 
 
+def _forts_cursor(payload: Mapping[str, object]) -> tuple[int, int, int]:
+    block = payload.get("securities.cursor")
+    if not isinstance(block, Mapping):
+        raise SynchronizedLiveMarketOIError(
+            "MOEX ISS response missing securities.cursor; RFUD pagination completeness is unproven"
+        )
+    columns = block.get("columns")
+    rows = block.get("data")
+    if not isinstance(columns, list) or not all(isinstance(column, str) for column in columns):
+        raise SynchronizedLiveMarketOIError("securities.cursor columns are invalid")
+    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], list):
+        raise SynchronizedLiveMarketOIError("securities.cursor data is invalid")
+    by_upper = {str(column).upper(): index for index, column in enumerate(columns)}
+    missing = [name for name in ("INDEX", "TOTAL", "PAGESIZE") if name not in by_upper]
+    if missing:
+        raise SynchronizedLiveMarketOIError(
+            f"securities.cursor is missing required columns: {','.join(missing)}"
+        )
+    row = rows[0]
+    try:
+        index = int(row[by_upper["INDEX"]])
+        total = int(row[by_upper["TOTAL"]])
+        page_size = int(row[by_upper["PAGESIZE"]])
+    except (IndexError, TypeError, ValueError) as exc:
+        raise SynchronizedLiveMarketOIError("securities.cursor values are invalid") from exc
+    if index < 0 or total < 0 or page_size <= 0 or index > total:
+        raise SynchronizedLiveMarketOIError("securities.cursor values are out of range")
+    return index, total, page_size
+
+
+def _merge_iss_block_by_secid(
+    aggregate: dict[str, object],
+    page: Mapping[str, object],
+    block_name: str,
+) -> None:
+    columns, rows = _table_parts(page, block_name, allow_empty=True)
+    if block_name not in aggregate:
+        aggregate[block_name] = {"columns": columns, "data": []}
+    target = aggregate[block_name]
+    if not isinstance(target, dict):
+        raise SynchronizedLiveMarketOIError(f"aggregated {block_name} block is invalid")
+    target_columns = target.get("columns")
+    target_rows = target.get("data")
+    if target_columns != columns or not isinstance(target_rows, list):
+        raise SynchronizedLiveMarketOIError(f"{block_name} columns changed across RFUD pages")
+    by_upper = {str(column).upper(): index for index, column in enumerate(columns)}
+    secid_index = by_upper.get("SECID")
+    if secid_index is None:
+        raise SynchronizedLiveMarketOIError(f"{block_name} SECID column is missing")
+
+    positions: dict[str, int] = {}
+    for position, existing in enumerate(target_rows):
+        if not isinstance(existing, list) or secid_index >= len(existing):
+            raise SynchronizedLiveMarketOIError(f"aggregated {block_name} row is invalid")
+        positions[str(existing[secid_index]).upper()] = position
+
+    for row in rows:
+        if secid_index >= len(row):
+            raise SynchronizedLiveMarketOIError(f"{block_name} row is invalid")
+        secid = str(row[secid_index]).upper()
+        if not secid:
+            raise SynchronizedLiveMarketOIError(f"{block_name} SECID value is missing")
+        if secid in positions:
+            target_rows[positions[secid]] = row
+        else:
+            positions[secid] = len(target_rows)
+            target_rows.append(row)
+
+
+def _fetch_forts_all_pages(
+    *,
+    url: str,
+    params: Mapping[str, object],
+    headers: Mapping[str, str],
+    timeout: float,
+    http_get: HTTPGet,
+    now_fn: NowFn,
+) -> tuple[dict[str, object], str, datetime]:
+    aggregate: dict[str, object] = {}
+    page_params = dict(params)
+    page_params.pop("start", None)
+    expected_start = 0
+    source_url = url
+    received_at: datetime | None = None
+
+    for page_number in range(MAX_FORTS_PAGES):
+        if expected_start:
+            page_params["start"] = expected_start
+        else:
+            page_params.pop("start", None)
+        page, page_source_url, page_received = _fetch_json(
+            url=url,
+            params=page_params,
+            headers=headers,
+            timeout=timeout,
+            http_get=http_get,
+            now_fn=now_fn,
+        )
+        index, total, page_size = _forts_cursor(page)
+        if index != expected_start:
+            raise SynchronizedLiveMarketOIError(
+                f"RFUD pagination cursor mismatch: expected INDEX={expected_start}, got {index}"
+            )
+        _merge_iss_block_by_secid(aggregate, page, "securities")
+        _merge_iss_block_by_secid(aggregate, page, "marketdata")
+        source_url = page_source_url
+        received_at = page_received
+
+        next_start = index + page_size
+        if next_start >= total:
+            aggregate["securities.cursor"] = {
+                "columns": ["INDEX", "TOTAL", "PAGESIZE"],
+                "data": [[index, total, page_size]],
+            }
+            return aggregate, source_url, received_at
+        if next_start <= index:
+            raise SynchronizedLiveMarketOIError("RFUD pagination did not advance")
+        expected_start = next_start
+
+    raise SynchronizedLiveMarketOIError(
+        f"RFUD pagination exceeded safety limit of {MAX_FORTS_PAGES} pages"
+    )
+
+
 def fetch_live_snapshot(
     *,
     timeout: float = 12.0,
@@ -487,7 +622,7 @@ def fetch_live_snapshot(
     cets_url = base + CETS_ENDPOINT
     forts_params = {
         "iss.meta": "off",
-        "iss.only": "securities,marketdata",
+        "iss.only": "securities,marketdata,securities.cursor",
         "securities.columns": ",".join(FUTURES_SECURITY_COLUMNS),
         "marketdata.columns": ",".join(FUTURES_MARKETDATA_COLUMNS),
     }
@@ -498,7 +633,7 @@ def fetch_live_snapshot(
     }
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="moex-live-snapshot") as executor:
         forts_future = executor.submit(
-            _fetch_json,
+            _fetch_forts_all_pages,
             url=forts_url,
             params=forts_params,
             headers=headers,
