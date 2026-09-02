@@ -1,0 +1,87 @@
+{
+  "contract_id": "usdrubf_news_kremlin_peskov_live_source_contract.v1",
+  "version": "1.0",
+  "status": "production_blocker_contract",
+  "project": "MOEX_Bot",
+  "lane": "rub_intelligence",
+  "instrument": "USDRUBF",
+  "source_of_truth": "GitHub",
+  "base_registry": "contracts/intelligence/usdrubf_news_macro_source_registry_v1.json",
+  "purpose": "Freeze Stage 12B live treatment of Kremlin official materials and Dmitry Peskov statements after production-route verification.",
+  "governance": {
+    "official_sources_only": true,
+    "https_required_for_live_factual_acquisition": true,
+    "http_downgrade_forbidden": true,
+    "publication_timestamp_must_be_timezone_aware": true,
+    "one_source_failure_must_not_poison_batch": true,
+    "directional_action_authority": false
+  },
+  "sources": [
+    {
+      "source_id": "kremlin_events",
+      "group": "RU_GOVERNMENT",
+      "tier": "OFFICIAL_PRIMARY",
+      "registry_status": "BLOCKED_PENDING_STABLE_ROUTE_ADAPTER",
+      "stage12b_status": "BLOCKED_PENDING_SECURE_PRODUCTION_ROUTE",
+      "live_adapter_enabled": false,
+      "candidate_routes": {
+        "president_news_index": "https://www.kremlin.ru/events/president/news",
+        "atom_feed_https": "https://kremlin.ru/events/all/feed",
+        "atom_feed_http_probe_only": "http://kremlin.ru/events/all/feed"
+      },
+      "production_probe": {
+        "verified_on": "2026-09-02",
+        "https_results": [
+          {
+            "url": "https://www.kremlin.ru/events/president/news",
+            "result": "CONNECT_TIMEOUT"
+          },
+          {
+            "url": "https://kremlin.ru/events/all/feed",
+            "result": "CONNECT_TIMEOUT"
+          },
+          {
+            "url": "https://special.kremlin.ru/events/all/feed",
+            "result": "CONNECT_TIMEOUT"
+          },
+          {
+            "url": "https://en.special.kremlin.ru/events/all/feed",
+            "result": "CONNECT_TIMEOUT"
+          }
+        ],
+        "http_atom_probe": {
+          "url": "http://kremlin.ru/events/all/feed",
+          "http_status": 200,
+          "content_type": "text/xml; charset=UTF-8",
+          "format": "ATOM",
+          "entry_count_observed": 20,
+          "stable_id_and_link_observed": true,
+          "timezone_aware_published_timestamp_observed": true,
+          "sample_entry": {
+            "title": "Ответы на вопросы СМИ",
+            "id": "http://kremlin.ru/events/president/news/80665",
+            "published": "2026-09-01T23:45:00+04:00",
+            "updated": "2026-09-02T01:43:48+04:00",
+            "link": "http://kremlin.ru/events/president/news/80665"
+          }
+        },
+        "result": "TIMESTAMP_PROVABLE_BUT_SECURE_TRANSPORT_UNAVAILABLE"
+      },
+      "available_at_policy": "If a production-reachable HTTPS official route is proven, use the source-published timezone-aware publication timestamp. Do not use HTTP Atom content for live factual evidence while secure transport is unavailable.",
+      "unblock_gate": "Prove a stable production-reachable HTTPS Kremlin feed/index/detail route with bounded acquisition, validated final redirects/host, stable provenance and timezone-aware publication timestamps."
+    },
+    {
+      "source_id": "kremlin_peskov_statements",
+      "group": "RU_GOVERNMENT",
+      "tier": "OFFICIAL_PRIMARY",
+      "stage12b_status": "BLOCKED_NO_DEDICATED_PROVEN_MACHINE_READABLE_ROUTE",
+      "live_adapter_enabled": false,
+      "official_role_reference": "https://kremlin.ru/press/service",
+      "publication_pattern": "Official Dmitry Peskov comments may be published within the general Kremlin /events/president/news/<id> namespace.",
+      "sample_official_material": "https://special.kremlin.ru/events/president/news/75796",
+      "dedicated_feed_proven": false,
+      "coverage_policy": "Do not create a separate Peskov live source from an unproven route. When secure Kremlin general-event acquisition is unblocked, Peskov materials may enter through the same official Kremlin provenance path without granting separate action authority.",
+      "unblock_gate": "Either prove a dedicated official HTTPS Peskov publication route with publication timestamps, or restore secure general Kremlin acquisition and cover Peskov statements through that source."
+    }
+  ]
+}
