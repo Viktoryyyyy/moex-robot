@@ -5,7 +5,7 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 
-from moex_data import synchronized_live_market_oi_context_apim as live_market
+from moex_data import synchronized_live_market_oi_context_partial as live_market
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as base
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_current_context as current_context
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_futoi as futoi
@@ -38,6 +38,7 @@ def _load_live_or_unavailable(live_loader: LiveLoader) -> dict[str, object]:
             "quality": {
                 "status": "FAIL",
                 "analysis_usable": False,
+                "factual_context_usable": False,
                 "fail_closed": True,
             },
             "synchronization": {
@@ -48,6 +49,21 @@ def _load_live_or_unavailable(live_loader: LiveLoader) -> dict[str, object]:
             "error_class": exc.__class__.__name__,
             "error": str(exc),
         }
+
+
+def _recompute_readiness_with_partial(snapshot: dict[str, object]) -> None:
+    components = snapshot["components"]
+    statuses = {name: str(value["status"]) for name, value in components.items()}
+    unavailable = sorted(name for name, status in statuses.items() if status == "UNAVAILABLE")
+    retained = sorted(name for name, status in statuses.items() if status == "RETAINED_PREVIOUS")
+    partial = sorted(name for name, status in statuses.items() if status == "PARTIAL")
+    snapshot["readiness"] = {
+        "status": "READY" if not unavailable and not retained and not partial else "PARTIAL",
+        "component_statuses": statuses,
+        "unavailable_components": unavailable,
+        "retained_previous_components": retained,
+        "partial_components": partial,
+    }
 
 
 def attach_live_market_oi_context(
@@ -65,23 +81,33 @@ def attach_live_market_oi_context(
 
     quality = live_snapshot.get("quality")
     synchronization = live_snapshot.get("synchronization")
-    usable = bool(
+    full_usable = bool(
         isinstance(quality, Mapping)
         and quality.get("analysis_usable") is True
         and isinstance(synchronization, Mapping)
         and synchronization.get("synchronized") is True
     )
+    factual_usable = bool(
+        full_usable
+        or (
+            isinstance(quality, Mapping)
+            and quality.get("factual_context_usable") is True
+        )
+    )
+    component_status = "READY" if full_usable else "PARTIAL" if factual_usable else "UNAVAILABLE"
     data_as_of = synchronization.get("as_of_utc") if isinstance(synchronization, Mapping) else None
+    source_error = live_snapshot.get("error")
     components[COMPONENT] = {
-        "status": "READY" if usable else "UNAVAILABLE",
+        "status": component_status,
         "refresh_attempted_at": attempted_at_utc,
-        "last_success_at": attempted_at_utc if usable else None,
+        "last_success_at": attempted_at_utc if factual_usable else None,
         "data_as_of": data_as_of,
-        "refresh_error_class": None if usable else live_snapshot.get("error_class"),
-        "refresh_error": None if usable else (
-            str(live_snapshot.get("error"))
-            if live_snapshot.get("error") is not None
-            else "live market/OI synchronization quality gate failed"
+        "refresh_error_class": live_snapshot.get("error_class") if not factual_usable else None,
+        "refresh_error": (
+            str(source_error)
+            if not factual_usable and source_error is not None
+            else None if factual_usable
+            else "live market/OI factual quality gate failed"
         ),
         "data": dict(live_snapshot),
     }
@@ -90,19 +116,24 @@ def attach_live_market_oi_context(
         "consumer": "SEPARATE_ANALYSIS_CHAT",
         "component_ref": COMPONENT,
         "factual_use_requires": (
+            f"components.{COMPONENT}.status in {{READY,PARTIAL}} and requested "
+            f"components.{COMPONENT}.data.instruments[*].price_oi_usable=true"
+        ),
+        "full_cross_market_use_requires": (
             f"components.{COMPONENT}.status=READY and "
-            f"components.{COMPONENT}.data.quality.analysis_usable=true"
+            f"components.{COMPONENT}.data.quality.analysis_usable=true and "
+            f"components.{COMPONENT}.data.synchronization.synchronized=true"
         ),
         "price_oi_same_source_row_required": True,
-        "cross_instrument_synchronization_required": True,
+        "cross_instrument_synchronization_required_for_cross_market_comparison": True,
         "directional_authority": False,
         "action_authority": False,
         "standalone_buy_sell_authority": False,
     }
-    authority["live_market_oi_factual_authority"] = usable
+    authority["live_market_oi_factual_authority"] = factual_usable
     authority["live_market_oi_directional_authority"] = False
     authority["live_market_oi_action_authority"] = False
-    futoi._recompute_readiness(snapshot)
+    _recompute_readiness_with_partial(snapshot)
 
 
 def refresh_snapshot(
