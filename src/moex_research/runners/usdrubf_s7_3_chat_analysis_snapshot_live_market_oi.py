@@ -6,10 +6,13 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 
 from moex_data import synchronized_live_market_oi_context_partial as live_market
+from moex_data.futures import futoi_intraday_previous_session_context_fast as fast_context
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as base
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_current_context as current_context
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_futoi as futoi
 
+
+current_context.context = fast_context
 
 PROJECT = current_context.PROJECT
 MODE = current_context.MODE
