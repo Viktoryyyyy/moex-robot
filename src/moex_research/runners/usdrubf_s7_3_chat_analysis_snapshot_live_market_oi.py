@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 
 from moex_data import synchronized_live_market_oi_context_partial as live_market
+from moex_data.futures import futoi_intraday_previous_session_context_fast as fast_context
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as base
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_current_context as current_context
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_futoi as futoi
@@ -151,7 +152,7 @@ def refresh_snapshot(
         now = base._aware(now_fn(), "clock")
         through_date = now.astimezone(base.MOSCOW).date().isoformat()
         run_id = "s7_3_futoi_context_live_market_oi_" + now.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        refresh_bundle = current_context.context.run_refresh_all(
+        refresh_bundle = fast_context.run_refresh_all(
             through_date=through_date,
             run_id=run_id,
             now_fn=lambda: now,
