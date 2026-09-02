@@ -21,6 +21,7 @@ SCHEMA_VERSION: Final[str] = "synchronized_live_market_oi_context.v1"
 FORTS_SOURCE_ID: Final[str] = "moex_apim_forts_rfud_live_marketdata"
 CETS_SOURCE_ID: Final[str] = "moex_apim_cets_cnyrub_tom_live_marketdata"
 DEFAULT_BASE_URL: Final[str] = "https://apim.moex.com"
+APPROVED_API_HOSTS: Final[frozenset[str]] = frozenset({"apim.moex.com"})
 API_URL_ENV: Final[str] = "MOEX_API_URL"
 API_KEY_ENV: Final[str] = "MOEX_API_KEY"
 FORTS_ENDPOINT: Final[str] = "/iss/engines/futures/markets/forts/boards/RFUD/securities.json"
@@ -204,6 +205,11 @@ def _nonnegative_price(value: object, *, secid: str, field: str) -> float | None
     return numeric
 
 
+def _price_range_tolerance(*values: float | None) -> float:
+    scale = max((abs(value) for value in values if value is not None), default=1.0)
+    return max(1e-9, scale * 1e-9)
+
+
 def _forts_session_wap(
     *,
     secid: str,
@@ -256,6 +262,8 @@ def _normalize_row(
             raise SynchronizedLiveMarketOIError(f"{secid}.{field} must not be below LOW")
     bid = _nonnegative_price(row.get("BID"), secid=secid, field="BID")
     ask = _nonnegative_price(row.get("OFFER"), secid=secid, field="OFFER")
+    if bid is not None and ask is not None and bid > ask:
+        raise SynchronizedLiveMarketOIError(f"{secid}.BID must not exceed OFFER")
     spread = ask - bid if bid is not None and ask is not None else None
     volume = _number(row.get("VOLTODAY"))
     trades = _integer(row.get("NUMTRADES"))
@@ -278,6 +286,12 @@ def _normalize_row(
     else:
         wap = _nonnegative_price(row.get("WAPRICE"), secid=secid, field="WAPRICE")
         wap_method = "WAPRICE"
+    if wap is not None:
+        tolerance = _price_range_tolerance(wap, high, low)
+        if high is not None and wap > high + tolerance:
+            raise SynchronizedLiveMarketOIError(f"{secid}.WAP must not exceed HIGH")
+        if low is not None and wap < low - tolerance:
+            raise SynchronizedLiveMarketOIError(f"{secid}.WAP must not be below LOW")
     return {
         "logical_id": logical_id,
         "label": DISPLAY_LABELS[logical_id],
@@ -513,10 +527,28 @@ def build_snapshot_from_payloads(
 
 
 def _api_base_url(base_url: str | None, env: Mapping[str, str]) -> str:
-    value = str(base_url or env.get(API_URL_ENV, DEFAULT_BASE_URL)).strip().rstrip("/")
+    value = str(base_url or env.get(API_URL_ENV, DEFAULT_BASE_URL)).strip()
     if not value:
         raise SynchronizedLiveMarketOIError(f"{API_URL_ENV} is required")
-    return value
+    parsed = urlsplit(value)
+    if parsed.scheme.lower() != "https":
+        raise SynchronizedLiveMarketOIError("MOEX API base URL must use HTTPS")
+    hostname = (parsed.hostname or "").lower()
+    if hostname not in APPROVED_API_HOSTS:
+        raise SynchronizedLiveMarketOIError("MOEX API base URL host is not approved")
+    if parsed.username is not None or parsed.password is not None:
+        raise SynchronizedLiveMarketOIError("MOEX API base URL credentials are forbidden")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise SynchronizedLiveMarketOIError("MOEX API base URL port is invalid") from exc
+    if port not in (None, 443):
+        raise SynchronizedLiveMarketOIError("MOEX API base URL port must be 443")
+    if parsed.query or parsed.fragment:
+        raise SynchronizedLiveMarketOIError("MOEX API base URL query/fragment is forbidden")
+    if parsed.path not in ("", "/"):
+        raise SynchronizedLiveMarketOIError("MOEX API base URL must be an origin")
+    return f"https://{hostname}"
 
 
 def _auth_headers(env: Mapping[str, str]) -> dict[str, str]:
