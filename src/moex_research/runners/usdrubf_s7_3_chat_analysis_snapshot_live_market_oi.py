@@ -5,7 +5,7 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 
-from moex_data import synchronized_live_market_oi_context as live_market
+from moex_data import synchronized_live_market_oi_context_apim as live_market
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as base
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_current_context as current_context
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_futoi as futoi
