@@ -14,6 +14,11 @@ from .usdrubf_news_live_bls_dol import (
     BLS_DOL_SOURCE_IDS,
     fetch_bls_dol_mirror_batch,
 )
+from .usdrubf_news_live_eia import (
+    SOURCE_ID as EIA_SOURCE_ID,
+    EiaAcquisitionError,
+    fetch_eia_wpsr,
+)
 from .usdrubf_news_live_rss import (
     LIVE_RSS_SOURCE_IDS,
     SOURCE_REGISTRY_PATH,
@@ -39,7 +44,7 @@ _TREASURY_LIVE_TIMEOUT_SECONDS = 30.0
 LIVE_OFFICIAL_SOURCE_IDS = (
     tuple(source_id for source_id in LIVE_RSS_SOURCE_IDS if source_id not in _BLS_RSS_SOURCE_IDS)
     + BLS_DOL_SOURCE_IDS
-    + (TREASURY_SOURCE_ID,)
+    + (TREASURY_SOURCE_ID, EIA_SOURCE_ID)
 )
 
 
@@ -164,6 +169,42 @@ def _acquire_treasury_source(
     )
 
 
+def _acquire_eia_source(
+    *,
+    opener: Callable[..., object],
+    now_fn: Callable[[], datetime],
+    timeout_seconds: float,
+) -> RssBatchResult:
+    try:
+        result = fetch_eia_wpsr(
+            opener=opener,
+            now_fn=now_fn,
+            timeout_seconds=timeout_seconds,
+        )
+    except EiaAcquisitionError as exc:
+        return RssBatchResult(
+            (
+                RssSourceResult(
+                    source_id=EIA_SOURCE_ID,
+                    quality_status=exc.code,
+                    records=(),
+                    error=str(exc),
+                ),
+            )
+        )
+    return RssBatchResult(
+        (
+            RssSourceResult(
+                source_id=result.source_id,
+                quality_status=result.quality_status,
+                records=result.records,
+                future_items_skipped=result.future_items_skipped,
+                error=result.error,
+            ),
+        )
+    )
+
+
 def _acquire_official_sources(
     *,
     registry_path: Path | str,
@@ -178,10 +219,13 @@ def _acquire_official_sources(
 
     dol_ids = tuple(source_id for source_id in requested if source_id in BLS_DOL_SOURCE_IDS)
     treasury_requested = TREASURY_SOURCE_ID in requested
+    eia_requested = EIA_SOURCE_ID in requested
     rss_ids = tuple(
         source_id
         for source_id in requested
-        if source_id not in BLS_DOL_SOURCE_IDS and source_id != TREASURY_SOURCE_ID
+        if source_id not in BLS_DOL_SOURCE_IDS
+        and source_id != TREASURY_SOURCE_ID
+        and source_id != EIA_SOURCE_ID
     )
 
     rss = (
@@ -215,10 +259,22 @@ def _acquire_official_sources(
         if treasury_requested
         else RssBatchResult(())
     )
+    eia = (
+        _acquire_eia_source(
+            opener=opener,
+            now_fn=now_fn,
+            timeout_seconds=timeout_seconds,
+        )
+        if eia_requested
+        else RssBatchResult(())
+    )
 
     by_id = {
         item.source_id: item
-        for item in rss.source_results + dol.source_results + treasury.source_results
+        for item in rss.source_results
+        + dol.source_results
+        + treasury.source_results
+        + eia.source_results
     }
     if set(by_id) != set(requested):
         raise RuntimeError("live News acquisition did not return exactly the requested source set")
@@ -242,14 +298,16 @@ def run_live_official_news_pipeline(
 
     The default composition keeps healthy official RSS sources, replaces the
     production-blocked BLS RSS routes with bounded official DOL-hosted BLS
-    release mirrors, and adds the bounded Treasury press-release HTML adapter.
-    Treasury uses a source-specific 30-second live timeout floor because the
-    official index has demonstrated response latency close to the common
-    10-second source timeout; all other source timeout semantics remain unchanged.
-    The caller supplies only the external classifier transport/callable. This
-    live composition always wraps it with stage12b3_news_classifier() before any
-    cluster reaches process_news_batch(), so callers cannot accidentally bypass
-    the Stage 12B.3 PIT/input/output guard through this API.
+    release mirrors, adds the bounded Treasury press-release HTML adapter, and
+    adds the official EIA Weekly Petroleum Status Report using the EIA weekly
+    index, release schedule, and summary PDF. Treasury uses a source-specific
+    30-second live timeout floor because the official index has demonstrated
+    response latency close to the common 10-second source timeout; all other
+    source timeout semantics remain unchanged. The caller supplies only the
+    external classifier transport/callable. This live composition always wraps
+    it with stage12b3_news_classifier() before any cluster reaches
+    process_news_batch(), so callers cannot accidentally bypass the Stage 12B.3
+    PIT/input/output guard through this API.
 
     Acquisition failures remain visible while healthy records continue through
     the deterministic News Pipeline. For current-live use, successful source
