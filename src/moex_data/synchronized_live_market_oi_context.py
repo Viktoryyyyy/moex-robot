@@ -25,14 +25,21 @@ MAX_SKEW_SECONDS: Final[int] = 60
 MAX_FRESHNESS_SECONDS: Final[int] = 60
 MOSCOW: Final[ZoneInfo] = ZoneInfo("Europe/Moscow")
 
+FUTURES_SECURITY_COLUMNS: Final[tuple[str, ...]] = (
+    "SECID",
+    "BOARDID",
+    "LASTTRADEDATE",
+    "MINSTEP",
+    "STEPPRICE",
+)
 FUTURES_MARKETDATA_COLUMNS: Final[tuple[str, ...]] = (
     "SECID",
     "OPEN",
     "HIGH",
     "LOW",
     "LAST",
-    "WAPRICE",
     "VOLTODAY",
+    "VALTODAY",
     "NUMTRADES",
     "OPENPOSITION",
     "BID",
@@ -140,15 +147,15 @@ def _require_columns(frame: pd.DataFrame, required: Sequence[str], block_name: s
         )
 
 
-def _row_by_secid(frame: pd.DataFrame, secid: str) -> Mapping[str, object]:
+def _row_by_secid(frame: pd.DataFrame, secid: str, *, block_name: str) -> Mapping[str, object]:
     by_upper = {str(column).upper(): column for column in frame.columns}
     secid_column = by_upper.get("SECID")
     if secid_column is None:
-        raise SynchronizedLiveMarketOIError("marketdata SECID column is missing")
+        raise SynchronizedLiveMarketOIError(f"{block_name} SECID column is missing")
     rows = frame.loc[frame[secid_column].astype(str).str.upper().eq(secid.upper())]
     if len(rows.index) != 1:
         raise SynchronizedLiveMarketOIError(
-            f"marketdata must contain exactly one row for {secid}; found {len(rows.index)}"
+            f"{block_name} must contain exactly one row for {secid}; found {len(rows.index)}"
         )
     return rows.iloc[0].to_dict()
 
@@ -171,6 +178,24 @@ def _integer(value: object) -> int | None:
     return int(numeric)
 
 
+def _forts_session_wap(
+    *,
+    secid: str,
+    marketdata_row: Mapping[str, object],
+    security_row: Mapping[str, object],
+) -> float | None:
+    volume = _number(marketdata_row.get("VOLTODAY"))
+    value_rub = _number(marketdata_row.get("VALTODAY"))
+    if volume is None or value_rub is None or volume <= 0:
+        return None
+    min_step = _number(security_row.get("MINSTEP"))
+    step_price = _number(security_row.get("STEPPRICE"))
+    if min_step is None or step_price is None or min_step <= 0 or step_price <= 0:
+        raise SynchronizedLiveMarketOIError(f"{secid} MINSTEP/STEPPRICE is invalid")
+    rub_per_quote_unit = step_price / min_step
+    return value_rub / volume / rub_per_quote_unit
+
+
 def _normalize_row(
     *,
     logical_id: str,
@@ -179,6 +204,7 @@ def _normalize_row(
     source_id: str,
     received_at_utc: datetime,
     is_future: bool,
+    security_row: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     event_time = _source_event_time(row.get("SYSTIME"), f"{secid}.SYSTIME")
     age_seconds = max(0.0, (received_at_utc - event_time).total_seconds())
@@ -186,6 +212,18 @@ def _normalize_row(
     ask = _number(row.get("OFFER"))
     spread = ask - bid if bid is not None and ask is not None else None
     oi = _integer(row.get("OPENPOSITION")) if is_future else None
+    if is_future:
+        if security_row is None:
+            raise SynchronizedLiveMarketOIError(f"{secid} security row is required")
+        wap = _forts_session_wap(
+            secid=secid,
+            marketdata_row=row,
+            security_row=security_row,
+        )
+        wap_method = "VALTODAY/VOLTODAY/(STEPPRICE/MINSTEP)"
+    else:
+        wap = _number(row.get("WAPRICE"))
+        wap_method = "WAPRICE"
     return {
         "logical_id": logical_id,
         "label": DISPLAY_LABELS[logical_id],
@@ -195,7 +233,8 @@ def _normalize_row(
         "open": _number(row.get("OPEN")),
         "high": _number(row.get("HIGH")),
         "low": _number(row.get("LOW")),
-        "wap": _number(row.get("WAPRICE")),
+        "wap": wap,
+        "wap_method": wap_method,
         "volume": _number(row.get("VOLTODAY")),
         "trades": _integer(row.get("NUMTRADES")),
         "oi": oi,
@@ -255,7 +294,7 @@ def build_snapshot_from_payloads(
     securities = _table_frame(forts_payload, "securities")
     forts_marketdata = _table_frame(forts_payload, "marketdata")
     cets_marketdata = _table_frame(cets_payload, "marketdata")
-    _require_columns(securities, ("SECID", "BOARDID", "LASTTRADEDATE"), "securities")
+    _require_columns(securities, FUTURES_SECURITY_COLUMNS, "securities")
     _require_columns(forts_marketdata, FUTURES_MARKETDATA_COLUMNS, "FORTS marketdata")
     _require_columns(cets_marketdata, CETS_MARKETDATA_COLUMNS, "CETS marketdata")
 
@@ -271,7 +310,8 @@ def build_snapshot_from_payloads(
         instruments[logical_id] = _normalize_row(
             logical_id=logical_id,
             secid=secid,
-            row=_row_by_secid(forts_marketdata, secid),
+            row=_row_by_secid(forts_marketdata, secid, block_name="FORTS marketdata"),
+            security_row=_row_by_secid(securities, secid, block_name="FORTS securities"),
             source_id=FORTS_SOURCE_ID,
             received_at_utc=forts_received,
             is_future=True,
@@ -279,7 +319,7 @@ def build_snapshot_from_payloads(
     instruments["cnyrub_tom"] = _normalize_row(
         logical_id="cnyrub_tom",
         secid="CNYRUB_TOM",
-        row=_row_by_secid(cets_marketdata, "CNYRUB_TOM"),
+        row=_row_by_secid(cets_marketdata, "CNYRUB_TOM", block_name="CETS marketdata"),
         source_id=CETS_SOURCE_ID,
         received_at_utc=cets_received,
         is_future=False,
@@ -298,9 +338,11 @@ def build_snapshot_from_payloads(
     futures_price_oi_usable: dict[str, bool] = {}
     for logical_id in FUTURES_LOGICAL_ORDER:
         item = instruments[logical_id]
+        last = item["last"]
         usable = bool(
             synchronized
-            and item["last"] is not None
+            and isinstance(last, (int, float))
+            and last > 0
             and item["oi"] is not None
             and item["stale"] is False
             and item["price_oi_same_source_row"] is True
@@ -308,9 +350,11 @@ def build_snapshot_from_payloads(
         item["price_oi_usable"] = usable
         futures_price_oi_usable[logical_id] = usable
 
+    spot_last = instruments["cnyrub_tom"]["last"]
     spot_price_usable = bool(
         synchronized
-        and instruments["cnyrub_tom"]["last"] is not None
+        and isinstance(spot_last, (int, float))
+        and spot_last > 0
         and instruments["cnyrub_tom"]["stale"] is False
     )
     analysis_usable = bool(
@@ -355,12 +399,14 @@ def build_snapshot_from_payloads(
                 "source_url": forts_source_url,
                 "received_at_utc": _iso(forts_received),
                 "price_and_oi_same_marketdata_row": True,
+                "wap_method": "VALTODAY/VOLTODAY/(STEPPRICE/MINSTEP)",
             },
             "cnyrub_tom": {
                 "source_id": CETS_SOURCE_ID,
                 "source_url": cets_source_url,
                 "received_at_utc": _iso(cets_received),
                 "oi_not_applicable": True,
+                "wap_method": "WAPRICE",
             },
         },
     }
@@ -403,7 +449,7 @@ def fetch_live_snapshot(
     forts_params = {
         "iss.meta": "off",
         "iss.only": "securities,marketdata",
-        "securities.columns": "SECID,BOARDID,LASTTRADEDATE",
+        "securities.columns": ",".join(FUTURES_SECURITY_COLUMNS),
         "marketdata.columns": ",".join(FUTURES_MARKETDATA_COLUMNS),
     }
     cets_params = {
