@@ -8,9 +8,16 @@ from moex_data import synchronized_live_market_oi_context as live
 
 
 class _Response:
-    def __init__(self, payload: dict[str, object], url: str) -> None:
+    def __init__(
+        self,
+        payload: dict[str, object],
+        url: str,
+        *,
+        status_code: int = 200,
+    ) -> None:
         self._payload = payload
         self.url = url
+        self.status_code = status_code
 
     def raise_for_status(self) -> None:
         return None
@@ -119,7 +126,15 @@ def test_forts_pagination_collects_required_secids_from_later_page() -> None:
     )
     calls: list[dict[str, object]] = []
 
-    def http_get(url: str, *, params: dict[str, object], timeout: float, headers: dict[str, str]) -> _Response:
+    def http_get(
+        url: str,
+        *,
+        params: dict[str, object],
+        timeout: float,
+        headers: dict[str, str],
+        allow_redirects: bool,
+    ) -> _Response:
+        assert allow_redirects is False
         calls.append(dict(params))
         start = int(params.get("start", 0))
         if start == 0:
@@ -174,10 +189,137 @@ def test_forts_pagination_fails_closed_without_cursor() -> None:
         "marketdata": {"columns": list(live.FUTURES_MARKETDATA_COLUMNS), "data": []},
     }
 
-    def http_get(url: str, *, params: dict[str, object], timeout: float, headers: dict[str, str]) -> _Response:
+    def http_get(
+        url: str,
+        *,
+        params: dict[str, object],
+        timeout: float,
+        headers: dict[str, str],
+        allow_redirects: bool,
+    ) -> _Response:
+        assert allow_redirects is False
         return _Response(payload, url)
 
     with pytest.raises(live.SynchronizedLiveMarketOIError, match="pagination completeness is unproven"):
+        live._fetch_forts_all_pages(
+            url="https://example.test/forts",
+            params={"iss.only": "securities,marketdata,securities.cursor"},
+            headers={"Authorization": "Bearer test"},
+            timeout=1.0,
+            http_get=http_get,
+            now_fn=lambda: datetime(2026, 9, 2, 10, 0, 20, tzinfo=timezone.utc),
+        )
+
+
+def test_authenticated_source_redirect_is_rejected() -> None:
+    def http_get(
+        url: str,
+        *,
+        params: dict[str, object],
+        timeout: float,
+        headers: dict[str, str],
+        allow_redirects: bool,
+    ) -> _Response:
+        assert allow_redirects is False
+        return _Response({}, "https://iss.moex.com/public", status_code=302)
+
+    with pytest.raises(live.SynchronizedLiveMarketOIError, match="redirect rejected"):
+        live._fetch_json(
+            url="https://apim.moex.com/iss/example.json",
+            params={},
+            headers={"Authorization": "Bearer test"},
+            timeout=1.0,
+            http_get=http_get,
+            now_fn=lambda: datetime(2026, 9, 2, 10, 0, 20, tzinfo=timezone.utc),
+        )
+
+
+def test_authenticated_source_route_change_is_rejected_even_on_200() -> None:
+    def http_get(
+        url: str,
+        *,
+        params: dict[str, object],
+        timeout: float,
+        headers: dict[str, str],
+        allow_redirects: bool,
+    ) -> _Response:
+        assert allow_redirects is False
+        return _Response({}, "https://iss.moex.com/iss/example.json")
+
+    with pytest.raises(live.SynchronizedLiveMarketOIError, match="changed route"):
+        live._fetch_json(
+            url="https://apim.moex.com/iss/example.json",
+            params={},
+            headers={"Authorization": "Bearer test"},
+            timeout=1.0,
+            http_get=http_get,
+            now_fn=lambda: datetime(2026, 9, 2, 10, 0, 20, tzinfo=timezone.utc),
+        )
+
+
+def test_forts_pagination_rejects_total_change() -> None:
+    page0 = _page(
+        index=0,
+        total=4,
+        page_size=2,
+        securities=[
+            ["A", "RFUD", "2026-09-17", 1.0, 1.0],
+            ["B", "RFUD", "2026-09-17", 1.0, 1.0],
+        ],
+        marketdata=[],
+    )
+    page2 = _page(
+        index=2,
+        total=5,
+        page_size=2,
+        securities=[
+            ["C", "RFUD", "2026-09-17", 1.0, 1.0],
+            ["D", "RFUD", "2026-09-17", 1.0, 1.0],
+        ],
+        marketdata=[],
+    )
+
+    def http_get(
+        url: str,
+        *,
+        params: dict[str, object],
+        timeout: float,
+        headers: dict[str, str],
+        allow_redirects: bool,
+    ) -> _Response:
+        return _Response(page0 if int(params.get("start", 0)) == 0 else page2, url)
+
+    with pytest.raises(live.SynchronizedLiveMarketOIError, match="TOTAL changed"):
+        live._fetch_forts_all_pages(
+            url="https://example.test/forts",
+            params={"iss.only": "securities,marketdata,securities.cursor"},
+            headers={"Authorization": "Bearer test"},
+            timeout=1.0,
+            http_get=http_get,
+            now_fn=lambda: datetime(2026, 9, 2, 10, 0, 20, tzinfo=timezone.utc),
+        )
+
+
+def test_forts_pagination_rejects_truncated_page() -> None:
+    truncated = _page(
+        index=0,
+        total=4,
+        page_size=2,
+        securities=[["A", "RFUD", "2026-09-17", 1.0, 1.0]],
+        marketdata=[],
+    )
+
+    def http_get(
+        url: str,
+        *,
+        params: dict[str, object],
+        timeout: float,
+        headers: dict[str, str],
+        allow_redirects: bool,
+    ) -> _Response:
+        return _Response(truncated, url)
+
+    with pytest.raises(live.SynchronizedLiveMarketOIError, match="page cardinality mismatch"):
         live._fetch_forts_all_pages(
             url="https://example.test/forts",
             params={"iss.only": "securities,marketdata,securities.cursor"},
