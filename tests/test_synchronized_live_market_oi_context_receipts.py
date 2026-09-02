@@ -36,6 +36,11 @@ def _page(index: int, securities: list[list[object]], marketdata: list[list[obje
 
 
 def _market_row(secid: str, systime: str = "2026-09-02 13:00:00") -> list[object]:
+    rub_per_quote_unit = (
+        1000
+        if secid.upper() in {"USDRUBF", "CNYRUBF"} or secid.upper().startswith("CR")
+        else 1
+    )
     return [
         secid,
         90.0,
@@ -43,7 +48,7 @@ def _market_row(secid: str, systime: str = "2026-09-02 13:00:00") -> list[object
         89.0,
         91.0,
         100,
-        9_100,
+        9_100 * rub_per_quote_unit,
         10,
         1000,
         90.9,
