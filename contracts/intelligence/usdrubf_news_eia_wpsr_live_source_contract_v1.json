@@ -1,0 +1,73 @@
+{
+  "contract_id": "usdrubf_news_eia_wpsr_live_source.v1",
+  "version": "1.0",
+  "status": "LIVE_READY_CANDIDATE",
+  "project": "MOEX_Bot",
+  "lane": "rub_intelligence",
+  "instrument": "USDRUBF",
+  "source": {
+    "source_id": "eia_weekly_petroleum_status_report",
+    "group": "ENERGY_OFFICIAL_OR_APPROVED_MARKET_SOURCE",
+    "tier": "OFFICIAL_PRIMARY",
+    "publisher": "U.S. Energy Information Administration",
+    "transport": "HTML_INDEX_SCHEDULE_PLUS_PDF",
+    "index_url": "https://www.eia.gov/petroleum/supply/weekly/",
+    "schedule_url": "https://www.eia.gov/petroleum/supply/weekly/schedule.php",
+    "summary_pdf_url": "https://ir.eia.gov/wpsr/wpsrsummary.pdf",
+    "topics": [
+      "OIL_STOCKS",
+      "CRUDE_OIL",
+      "GASOLINE_STOCKS",
+      "DISTILLATE_STOCKS",
+      "REFINERY_UTILIZATION",
+      "PETROLEUM_IMPORTS_EXPORTS",
+      "US_OIL_SUPPLY"
+    ]
+  },
+  "publication_time_policy": {
+    "published_at": "Use the WPSR release date exposed by the official weekly index combined with the release time from the official EIA WPSR schedule in America/New_York. Standard releases use the official Wednesday 10:30 a.m. Eastern schedule; non-Wednesday releases require an exact matching holiday-schedule row and its explicit release time.",
+    "available_at": "Use only the first successful acquisition time of the matching WPSR summary PDF version. Never backdate availability to the scheduled release time.",
+    "ingested_at": "Use acquisition time in the source adapter; the common live pipeline conservatively restamps successful records at batch completion.",
+    "revision_policy": "The current WPSR summary PDF may be revised after initial publication. A newly acquired changed version keeps the report release timestamp as published_at, but its availability is never represented earlier than the actual acquisition of that version.",
+    "http_date_is_publication_time": false,
+    "last_modified_is_publication_time": false,
+    "pdf_creation_metadata_is_publication_time": false,
+    "calendar_or_schedule_alone_proves_content_availability": false
+  },
+  "validation": {
+    "https_required": true,
+    "final_host_validation_required": true,
+    "index_and_schedule_host": "www.eia.gov",
+    "pdf_host": "ir.eia.gov",
+    "allowed_pdf_final_paths": [
+      "/wpsr/wpsrsummary.pdf",
+      "/secure/wpsr/wpsrsummary.pdf"
+    ],
+    "max_html_bytes": 1000000,
+    "max_pdf_bytes": 5000000,
+    "explicit_timeout_required": true,
+    "pdf_magic_required": true,
+    "timezone_aware_timestamp_required": true,
+    "index_pdf_week_ending_match_required": true,
+    "malformed_or_unproven_timestamp_fails_closed": true,
+    "future_release_is_skipped": true,
+    "canonical_source_reference": "https://ir.eia.gov/wpsr/wpsrsummary.pdf"
+  },
+  "governance": {
+    "directional_action_authority": false,
+    "global_news_authority": false,
+    "source_failure_must_not_poison_batch": true,
+    "classifier_semantics_unchanged": true,
+    "dedupe_semantics_unchanged": true,
+    "clustering_semantics_unchanged": true
+  },
+  "production_evidence_2026_09_02": {
+    "index_https": "HTTP 200",
+    "schedule_https": "official EIA schedule reachable",
+    "summary_pdf_https": "HTTP 200 application/pdf with PDF magic",
+    "observed_index_release_date": "August 26, 2026",
+    "observed_week_ending": "August 21, 2026",
+    "official_release_time_evidence": "EIA schedule states wpsrsummary.pdf is released after 10:30 a.m. Eastern on standard Wednesdays; EIA revision notice for August 26, 2026 states the full WPSR data and summary text were published at 10:30 a.m.",
+    "revision_evidence": "EIA revision notice states the August 26 summary text was corrected at 12:13 p.m.; therefore Last-Modified/PDF metadata are not accepted as original publication time."
+  }
+}

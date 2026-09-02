@@ -84,15 +84,15 @@ def _healthy_opener(request, timeout):
     raise AssertionError(f"unexpected URL: {request.full_url}")
 
 
-def test_default_live_source_set_replaces_bls_rss_routes_and_adds_treasury() -> None:
+def test_default_live_source_set_replaces_bls_rss_routes_and_adds_treasury_and_eia() -> None:
     legacy_bls = {"bls_employment_situation_rss", "bls_cpi_rss"}
     expected = (
         (set(LIVE_RSS_SOURCE_IDS) - legacy_bls)
         | set(BLS_DOL_SOURCE_IDS)
-        | {"us_treasury_press_releases"}
+        | {"us_treasury_press_releases", "eia_weekly_petroleum_status_report"}
     )
 
-    assert len(LIVE_OFFICIAL_SOURCE_IDS) == 12
+    assert len(LIVE_OFFICIAL_SOURCE_IDS) == 13
     assert set(LIVE_OFFICIAL_SOURCE_IDS) == expected
     assert legacy_bls.isdisjoint(LIVE_OFFICIAL_SOURCE_IDS)
     assert set(BLS_DOL_SOURCE_IDS).issubset(LIVE_OFFICIAL_SOURCE_IDS)
