@@ -95,7 +95,7 @@ def _treasury_detail(*, include_timestamp: bool = True) -> bytes:
 def test_default_live_set_adds_treasury_but_not_timestamp_unproven_ofac() -> None:
     assert TREASURY_ID in LIVE_OFFICIAL_SOURCE_IDS
     assert OFAC_ID not in LIVE_OFFICIAL_SOURCE_IDS
-    assert len(LIVE_OFFICIAL_SOURCE_IDS) == 12
+    assert len(LIVE_OFFICIAL_SOURCE_IDS) == 13
 
 
 def test_treasury_success_is_composed_with_existing_healthy_source(tmp_path: Path) -> None:
