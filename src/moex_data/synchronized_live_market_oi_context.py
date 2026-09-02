@@ -25,6 +25,7 @@ FORTS_ENDPOINT: Final[str] = "/iss/engines/futures/markets/forts/boards/RFUD/sec
 CETS_ENDPOINT: Final[str] = "/iss/engines/currency/markets/selt/boards/CETS/securities/CNYRUB_TOM.json"
 MAX_SKEW_SECONDS: Final[int] = 60
 MAX_FRESHNESS_SECONDS: Final[int] = 60
+MAX_FUTURE_CLOCK_SKEW_SECONDS: Final[int] = 5
 MOSCOW: Final[ZoneInfo] = ZoneInfo("Europe/Moscow")
 
 FUTURES_SECURITY_COLUMNS: Final[tuple[str, ...]] = (
@@ -205,11 +206,18 @@ def _normalize_row(
     row: Mapping[str, object],
     source_id: str,
     received_at_utc: datetime,
+    freshness_reference_utc: datetime,
     is_future: bool,
     security_row: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     event_time = _source_event_time(row.get("SYSTIME"), f"{secid}.SYSTIME")
-    age_seconds = max(0.0, (received_at_utc - event_time).total_seconds())
+    future_seconds = (event_time - freshness_reference_utc).total_seconds()
+    if future_seconds > MAX_FUTURE_CLOCK_SKEW_SECONDS:
+        raise SynchronizedLiveMarketOIError(
+            f"{secid}.SYSTIME is {future_seconds:.3f}s ahead of snapshot completion; "
+            f"allowed={MAX_FUTURE_CLOCK_SKEW_SECONDS}s"
+        )
+    age_seconds = max(0.0, (freshness_reference_utc - event_time).total_seconds())
     bid = _number(row.get("BID"))
     ask = _number(row.get("OFFER"))
     spread = ask - bid if bid is not None and ask is not None else None
@@ -248,7 +256,9 @@ def _normalize_row(
         "spread": spread,
         "timestamp": _iso(event_time),
         "received_at_utc": _iso(received_at_utc),
+        "freshness_reference_utc": _iso(freshness_reference_utc),
         "age_seconds": round(age_seconds, 3),
+        "future_clock_skew_seconds": round(max(0.0, future_seconds), 3),
         "stale": age_seconds > MAX_FRESHNESS_SECONDS,
         "source_id": source_id,
         "price_oi_same_source_row": bool(is_future),
@@ -303,7 +313,7 @@ def build_snapshot_from_payloads(
     bindings = _bindings_from_forts(
         securities,
         as_of_date=as_of_date,
-        availability_ts_utc=_iso(forts_received),
+        availability_ts_utc=_iso(observed_at),
     )
 
     instruments: dict[str, dict[str, object]] = {}
@@ -316,6 +326,7 @@ def build_snapshot_from_payloads(
             security_row=_row_by_secid(securities, secid, block_name="FORTS securities"),
             source_id=FORTS_SOURCE_ID,
             received_at_utc=forts_received,
+            freshness_reference_utc=observed_at,
             is_future=True,
         )
     instruments["cnyrub_tom"] = _normalize_row(
@@ -324,6 +335,7 @@ def build_snapshot_from_payloads(
         row=_row_by_secid(cets_marketdata, "CNYRUB_TOM", block_name="CETS marketdata"),
         source_id=CETS_SOURCE_ID,
         received_at_utc=cets_received,
+        freshness_reference_utc=observed_at,
         is_future=False,
     )
 
@@ -374,9 +386,11 @@ def build_snapshot_from_payloads(
             "synchronized": synchronized,
             "as_of_utc": _iso(newest),
             "oldest_timestamp_utc": _iso(oldest),
+            "freshness_reference_utc": _iso(observed_at),
             "max_skew_seconds": round(max_skew_seconds, 3),
             "max_skew_threshold_seconds": MAX_SKEW_SECONDS,
             "freshness_threshold_seconds": MAX_FRESHNESS_SECONDS,
+            "future_clock_skew_threshold_seconds": MAX_FUTURE_CLOCK_SKEW_SECONDS,
             "all_instruments_fresh": all_fresh,
         },
         "bindings": {
