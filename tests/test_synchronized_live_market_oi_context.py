@@ -108,6 +108,15 @@ def _build(forts: dict[str, object], cets: dict[str, object]) -> dict[str, objec
     )
 
 
+def test_live_source_uses_canonical_authenticated_apim_contract() -> None:
+    assert live.DEFAULT_BASE_URL == "https://apim.moex.com"
+    assert live.API_URL_ENV == "MOEX_API_URL"
+    headers = live._auth_headers({"MOEX_API_KEY": "secret-token"})
+    assert headers["Authorization"] == "Bearer secret-token"
+    with pytest.raises(live.SynchronizedLiveMarketOIError, match="MOEX_API_KEY is required"):
+        live._auth_headers({})
+
+
 def test_snapshot_maps_front_next_and_exposes_requested_fields() -> None:
     forts, cets = _payloads()
     snapshot = _build(forts, cets)
