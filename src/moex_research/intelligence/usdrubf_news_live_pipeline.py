@@ -35,6 +35,7 @@ _BLS_RSS_SOURCE_IDS = frozenset(
         "bls_cpi_rss",
     }
 )
+_TREASURY_LIVE_TIMEOUT_SECONDS = 30.0
 LIVE_OFFICIAL_SOURCE_IDS = (
     tuple(source_id for source_id in LIVE_RSS_SOURCE_IDS if source_id not in _BLS_RSS_SOURCE_IDS)
     + BLS_DOL_SOURCE_IDS
@@ -209,7 +210,7 @@ def _acquire_official_sources(
             registry_path=registry_path,
             opener=opener,
             now_fn=now_fn,
-            timeout_seconds=timeout_seconds,
+            timeout_seconds=max(timeout_seconds, _TREASURY_LIVE_TIMEOUT_SECONDS),
         )
         if treasury_requested
         else RssBatchResult(())
@@ -242,6 +243,9 @@ def run_live_official_news_pipeline(
     The default composition keeps healthy official RSS sources, replaces the
     production-blocked BLS RSS routes with bounded official DOL-hosted BLS
     release mirrors, and adds the bounded Treasury press-release HTML adapter.
+    Treasury uses a source-specific 30-second live timeout floor because the
+    official index has demonstrated response latency close to the common
+    10-second source timeout; all other source timeout semantics remain unchanged.
     The caller supplies only the external classifier transport/callable. This
     live composition always wraps it with stage12b3_news_classifier() before any
     cluster reaches process_news_batch(), so callers cannot accidentally bypass

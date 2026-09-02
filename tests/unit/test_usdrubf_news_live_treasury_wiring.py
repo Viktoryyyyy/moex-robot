@@ -128,6 +128,36 @@ def test_treasury_success_is_composed_with_existing_healthy_source(tmp_path: Pat
     assert record.ingested_at == NOW
 
 
+def test_treasury_uses_source_specific_timeout_floor_without_widening_rss_timeout(
+    tmp_path: Path,
+) -> None:
+    payloads = {
+        RSS_URL: _rss(),
+        TREASURY_INDEX: _treasury_index(),
+        TREASURY_DETAIL: _treasury_detail(),
+    }
+    calls: list[tuple[str, float]] = []
+
+    def opener(request, timeout):
+        calls.append((request.full_url, timeout))
+        return _Response(payloads[request.full_url], request.full_url)
+
+    result = _acquire_official_sources(
+        registry_path=_registry(tmp_path),
+        source_ids=(RSS_ID, TREASURY_ID),
+        opener=opener,
+        now_fn=lambda: NOW,
+        timeout_seconds=10.0,
+    )
+
+    assert result.ok_source_count == 2
+    assert calls == [
+        (RSS_URL, 10.0),
+        (TREASURY_INDEX, 30.0),
+        (TREASURY_DETAIL, 30.0),
+    ]
+
+
 def test_treasury_timestamp_failure_does_not_poison_existing_healthy_source(tmp_path: Path) -> None:
     payloads = {
         RSS_URL: _rss(),
