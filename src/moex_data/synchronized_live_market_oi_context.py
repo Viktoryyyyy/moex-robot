@@ -205,6 +205,8 @@ def _forts_session_wap(
 ) -> float | None:
     volume = _number(marketdata_row.get("VOLTODAY"))
     value_rub = _number(marketdata_row.get("VALTODAY"))
+    if value_rub is not None and value_rub < 0:
+        raise SynchronizedLiveMarketOIError(f"{secid}.VALTODAY must be nonnegative")
     if volume is None or value_rub is None or volume <= 0:
         return None
     min_step = _number(security_row.get("MINSTEP"))
@@ -227,10 +229,10 @@ def _normalize_row(
     security_row: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     event_time = _source_event_time(row.get("SYSTIME"), f"{secid}.SYSTIME")
-    future_seconds = (event_time - freshness_reference_utc).total_seconds()
+    future_seconds = (event_time - received_at_utc).total_seconds()
     if future_seconds > MAX_FUTURE_CLOCK_SKEW_SECONDS:
         raise SynchronizedLiveMarketOIError(
-            f"{secid}.SYSTIME is {future_seconds:.3f}s ahead of snapshot completion; "
+            f"{secid}.SYSTIME is {future_seconds:.3f}s ahead of row receipt; "
             f"allowed={MAX_FUTURE_CLOCK_SKEW_SECONDS}s"
         )
     age_seconds = max(0.0, (freshness_reference_utc - event_time).total_seconds())
