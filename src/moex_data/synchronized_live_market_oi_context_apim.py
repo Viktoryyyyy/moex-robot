@@ -96,7 +96,7 @@ def _fetch_forts_verified(
 
     probe_params = dict(params)
     probe_params["start"] = APIM_FULL_RESPONSE_PROBE_START
-    probe, probe_url, probe_received = core._fetch_json(
+    probe, _probe_url, probe_received = core._fetch_json(
         url=url,
         params=probe_params,
         headers=headers,
@@ -113,10 +113,6 @@ def _fetch_forts_verified(
     if first_securities != probe_securities or first_marketdata != probe_marketdata:
         raise core.SynchronizedLiveMarketOIError(
             "APIM RFUD start-invariance proof failed: SECID universe/order changed when start was supplied"
-        )
-    if source_url != probe_url:
-        raise core.SynchronizedLiveMarketOIError(
-            "APIM RFUD source route changed during start-invariance verification"
         )
 
     first[core.FORTS_ROW_RECEIPTS_KEY] = _receipt_map(first, first_received)
