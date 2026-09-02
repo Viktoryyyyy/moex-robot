@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -178,9 +179,12 @@ def _number(value: object) -> float | None:
     if value is None or pd.isna(value):
         return None
     try:
-        return float(value)
+        numeric = float(value)
     except (TypeError, ValueError) as exc:
         raise SynchronizedLiveMarketOIError(f"marketdata numeric value is invalid: {value!r}") from exc
+    if not math.isfinite(numeric):
+        raise SynchronizedLiveMarketOIError(f"marketdata numeric value is non-finite: {value!r}")
+    return numeric
 
 
 def _integer(value: object) -> int | None:
