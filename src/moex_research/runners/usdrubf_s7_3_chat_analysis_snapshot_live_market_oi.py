@@ -6,6 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 
 from moex_data import synchronized_live_market_oi_context as live_market
+from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as base
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_current_context as current_context
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_futoi as futoi
 
@@ -84,6 +85,7 @@ def load_live_analysis_snapshot(
     reader: Callable[..., tuple[dict[str, object], object]] = current_context.read_current_snapshot,
     live_loader: LiveLoader = live_market.fetch_live_snapshot,
 ) -> dict[str, object]:
+    base.load_dotenv(base.PROJECT_ENV_PATH, override=False)
     snapshot, _path = reader(now_fn=now_fn)
     attempted_at = _iso_now(now_fn)
     try:
