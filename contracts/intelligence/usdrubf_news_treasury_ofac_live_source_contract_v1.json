@@ -1,0 +1,65 @@
+{
+  "contract_id": "usdrubf_news_treasury_ofac_live_source_contract.v1",
+  "version": "1.0",
+  "status": "live_route_and_blocker_contract",
+  "project": "MOEX_Bot",
+  "lane": "rub_intelligence",
+  "instrument": "USDRUBF",
+  "source_of_truth": "GitHub",
+  "base_registry": "contracts/intelligence/usdrubf_news_macro_source_registry_v1.json",
+  "purpose": "Govern Stage 12B live treatment of U.S. Treasury press releases and the unresolved OFAC Recent Actions publication-timestamp blocker.",
+  "governance": {
+    "official_sources_only": true,
+    "publication_timestamp_must_be_timezone_aware": true,
+    "http_date_is_not_publication_time": true,
+    "last_modified_is_not_publication_time": true,
+    "calendar_date_only_is_not_sufficient": true,
+    "one_source_failure_must_not_poison_batch": true,
+    "directional_action_authority": false
+  },
+  "sources": [
+    {
+      "source_id": "us_treasury_press_releases",
+      "group": "US_TREASURY_OFAC",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "HTML_INDEX_DETAIL",
+      "index_url": "https://home.treasury.gov/news/press-releases",
+      "allowed_host": "home.treasury.gov",
+      "detail_path_prefix": "/news/press-releases/",
+      "stage12b_status": "LIVE_READY",
+      "publication_timestamp_binding": "detail semantic publication field field--name-field-news-publication-date > time[datetime]",
+      "available_at_policy": "Use the timezone-aware Treasury publication timestamp from the semantic release publication field as published_at and available_at. Ingestion is conservatively restamped no earlier than batch completion by the common live pipeline.",
+      "bounds": {
+        "timeout_seconds_default": 10.0,
+        "max_response_bytes_default": 2000000,
+        "max_candidate_pages_default": 40,
+        "max_persisted_detail_records_default": 10
+      },
+      "production_probe": {
+        "verified_on": "2026-09-02",
+        "sample_detail_url": "https://home.treasury.gov/news/press-releases/sb0620",
+        "sample_semantic_datetime": "2026-09-01T06:20:00-04:00",
+        "result": "TIMESTAMP_PROVABLE"
+      }
+    },
+    {
+      "source_id": "ofac_recent_actions",
+      "group": "US_TREASURY_OFAC",
+      "tier": "OFFICIAL_PRIMARY",
+      "transport": "HTML_INDEX_DETAIL",
+      "index_url": "https://ofac.treasury.gov/recent-actions",
+      "allowed_host": "ofac.treasury.gov",
+      "stage12b_status": "BLOCKED_PENDING_PROVABLE_PUBLICATION_TIMESTAMP",
+      "available_at_policy": "Do not create NewsSourceRecord factual evidence from OFAC Recent Actions until a stable official route exposes a provable timezone-aware publication timestamp. Do not substitute HTTP Date, ingestion time, Last-Modified, or a calendar date.",
+      "production_probe": {
+        "verified_on": "2026-09-02",
+        "sample_detail_url": "https://ofac.treasury.gov/recent-actions/20260807",
+        "http_status": 200,
+        "timezone_aware_publication_timestamp_found": false,
+        "last_modified_found": false,
+        "result": "TIMESTAMP_UNPROVABLE"
+      },
+      "live_adapter_enabled": false
+    }
+  ]
+}
