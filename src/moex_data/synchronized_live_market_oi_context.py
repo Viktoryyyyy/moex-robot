@@ -247,6 +247,13 @@ def _normalize_row(
     open_price = _nonnegative_price(row.get("OPEN"), secid=secid, field="OPEN")
     high = _nonnegative_price(row.get("HIGH"), secid=secid, field="HIGH")
     low = _nonnegative_price(row.get("LOW"), secid=secid, field="LOW")
+    if high is not None and low is not None and high < low:
+        raise SynchronizedLiveMarketOIError(f"{secid}.HIGH must be greater than or equal to LOW")
+    for field, value in (("OPEN", open_price), ("LAST", last)):
+        if value is not None and high is not None and value > high:
+            raise SynchronizedLiveMarketOIError(f"{secid}.{field} must not exceed HIGH")
+        if value is not None and low is not None and value < low:
+            raise SynchronizedLiveMarketOIError(f"{secid}.{field} must not be below LOW")
     bid = _nonnegative_price(row.get("BID"), secid=secid, field="BID")
     ask = _nonnegative_price(row.get("OFFER"), secid=secid, field="OFFER")
     spread = ask - bid if bid is not None and ask is not None else None
