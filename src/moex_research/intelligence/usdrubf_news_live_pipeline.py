@@ -18,7 +18,13 @@ from .usdrubf_news_live_rss import (
     LIVE_RSS_SOURCE_IDS,
     SOURCE_REGISTRY_PATH,
     RssBatchResult,
+    RssSourceResult,
     fetch_official_rss_batch,
+)
+from .usdrubf_news_live_treasury import (
+    SOURCE_ID as TREASURY_SOURCE_ID,
+    TreasuryAcquisitionError,
+    fetch_treasury_press_releases,
 )
 from .usdrubf_news_macro import NewsPipelineResult, process_news_batch
 
@@ -32,6 +38,7 @@ _BLS_RSS_SOURCE_IDS = frozenset(
 LIVE_OFFICIAL_SOURCE_IDS = (
     tuple(source_id for source_id in LIVE_RSS_SOURCE_IDS if source_id not in _BLS_RSS_SOURCE_IDS)
     + BLS_DOL_SOURCE_IDS
+    + (TREASURY_SOURCE_ID,)
 )
 
 
@@ -118,6 +125,44 @@ def _filter_acquisition_by_ingestion(
     return RssBatchResult(tuple(filtered_results))
 
 
+def _acquire_treasury_source(
+    *,
+    registry_path: Path | str,
+    opener: Callable[..., object],
+    now_fn: Callable[[], datetime],
+    timeout_seconds: float,
+) -> RssBatchResult:
+    try:
+        result = fetch_treasury_press_releases(
+            registry_path=registry_path,
+            opener=opener,
+            now_fn=now_fn,
+            timeout_seconds=timeout_seconds,
+        )
+    except TreasuryAcquisitionError as exc:
+        return RssBatchResult(
+            (
+                RssSourceResult(
+                    source_id=TREASURY_SOURCE_ID,
+                    quality_status=exc.code,
+                    records=(),
+                    error=str(exc),
+                ),
+            )
+        )
+    return RssBatchResult(
+        (
+            RssSourceResult(
+                source_id=result.source_id,
+                quality_status=result.quality_status,
+                records=result.records,
+                future_items_skipped=result.future_items_skipped,
+                error=result.error,
+            ),
+        )
+    )
+
+
 def _acquire_official_sources(
     *,
     registry_path: Path | str,
@@ -131,7 +176,12 @@ def _acquire_official_sources(
         raise ValueError("duplicate live News source_id requested")
 
     dol_ids = tuple(source_id for source_id in requested if source_id in BLS_DOL_SOURCE_IDS)
-    rss_ids = tuple(source_id for source_id in requested if source_id not in BLS_DOL_SOURCE_IDS)
+    treasury_requested = TREASURY_SOURCE_ID in requested
+    rss_ids = tuple(
+        source_id
+        for source_id in requested
+        if source_id not in BLS_DOL_SOURCE_IDS and source_id != TREASURY_SOURCE_ID
+    )
 
     rss = (
         fetch_official_rss_batch(
@@ -154,10 +204,20 @@ def _acquire_official_sources(
         if dol_ids
         else RssBatchResult(())
     )
+    treasury = (
+        _acquire_treasury_source(
+            registry_path=registry_path,
+            opener=opener,
+            now_fn=now_fn,
+            timeout_seconds=timeout_seconds,
+        )
+        if treasury_requested
+        else RssBatchResult(())
+    )
 
     by_id = {
         item.source_id: item
-        for item in rss.source_results + dol.source_results
+        for item in rss.source_results + dol.source_results + treasury.source_results
     }
     if set(by_id) != set(requested):
         raise RuntimeError("live News acquisition did not return exactly the requested source set")
@@ -179,13 +239,13 @@ def run_live_official_news_pipeline(
 ) -> LiveNewsPipelineResult:
     """Acquire official records and run the bounded Stage 12B.3 classifier path.
 
-    The default composition keeps healthy official RSS sources and replaces the
+    The default composition keeps healthy official RSS sources, replaces the
     production-blocked BLS RSS routes with bounded official DOL-hosted BLS
-    release mirrors. The caller supplies only the external classifier
-    transport/callable. This live composition always wraps it with
-    stage12b3_news_classifier() before any cluster reaches process_news_batch(),
-    so callers cannot accidentally bypass the Stage 12B.3 PIT/input/output
-    guard through this API.
+    release mirrors, and adds the bounded Treasury press-release HTML adapter.
+    The caller supplies only the external classifier transport/callable. This
+    live composition always wraps it with stage12b3_news_classifier() before any
+    cluster reaches process_news_batch(), so callers cannot accidentally bypass
+    the Stage 12B.3 PIT/input/output guard through this API.
 
     Acquisition failures remain visible while healthy records continue through
     the deterministic News Pipeline. For current-live use, successful source
