@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 
+import pytest
+
 from moex_data import synchronized_live_market_oi_context as live
 
 
@@ -11,8 +13,8 @@ FORTS_COLUMNS = [
     "HIGH",
     "LOW",
     "LAST",
-    "WAPRICE",
     "VOLTODAY",
+    "VALTODAY",
     "NUMTRADES",
     "OPENPOSITION",
     "BID",
@@ -34,33 +36,42 @@ CETS_COLUMNS = [
 ]
 
 
-def _forts_row(secid: str, systime: str, *, oi: int | None = 1000) -> list[object]:
-    return [secid, 90.0, 92.0, 89.0, 91.0, 90.5, 12345, 321, oi, 90.9, 91.1, systime]
+def _forts_row(
+    secid: str,
+    systime: str,
+    *,
+    oi: int | None = 1000,
+    rub_per_quote_unit: float = 1.0,
+) -> list[object]:
+    volume = 100
+    wap = 90.5
+    value_rub = int(wap * volume * rub_per_quote_unit)
+    return [secid, 90.0, 92.0, 89.0, 91.0, volume, value_rub, 321, oi, 90.9, 91.1, systime]
 
 
 def _payloads() -> tuple[dict[str, object], dict[str, object]]:
     securities = {
-        "columns": ["SECID", "BOARDID", "LASTTRADEDATE"],
+        "columns": ["SECID", "BOARDID", "LASTTRADEDATE", "MINSTEP", "STEPPRICE"],
         "data": [
-            ["USDRUBF", "RFUD", "2099-12-31"],
-            ["CNYRUBF", "RFUD", "2099-12-31"],
-            ["SiU6", "RFUD", "2026-09-17"],
-            ["SiZ6", "RFUD", "2026-12-17"],
-            ["SiH7", "RFUD", "2027-03-18"],
-            ["CRU6", "RFUD", "2026-09-17"],
-            ["CRZ6", "RFUD", "2026-12-17"],
-            ["CRH7", "RFUD", "2027-03-18"],
+            ["USDRUBF", "RFUD", "2099-12-31", 0.01, 10.0],
+            ["CNYRUBF", "RFUD", "2099-12-31", 0.001, 1.0],
+            ["SiU6", "RFUD", "2026-09-17", 1.0, 1.0],
+            ["SiZ6", "RFUD", "2026-12-17", 1.0, 1.0],
+            ["SiH7", "RFUD", "2027-03-18", 1.0, 1.0],
+            ["CRU6", "RFUD", "2026-09-17", 0.001, 1.0],
+            ["CRZ6", "RFUD", "2026-12-17", 0.001, 1.0],
+            ["CRH7", "RFUD", "2027-03-18", 0.001, 1.0],
         ],
     }
     marketdata = {
         "columns": FORTS_COLUMNS,
         "data": [
-            _forts_row("USDRUBF", "2026-09-02 13:00:00", oi=50000),
-            _forts_row("CNYRUBF", "2026-09-02 13:00:02", oi=60000),
+            _forts_row("USDRUBF", "2026-09-02 13:00:00", oi=50000, rub_per_quote_unit=1000),
+            _forts_row("CNYRUBF", "2026-09-02 13:00:02", oi=60000, rub_per_quote_unit=1000),
             _forts_row("SiU6", "2026-09-02 13:00:04", oi=70000),
             _forts_row("SiZ6", "2026-09-02 13:00:06", oi=30000),
-            _forts_row("CRU6", "2026-09-02 13:00:08", oi=40000),
-            _forts_row("CRZ6", "2026-09-02 13:00:10", oi=20000),
+            _forts_row("CRU6", "2026-09-02 13:00:08", oi=40000, rub_per_quote_unit=1000),
+            _forts_row("CRZ6", "2026-09-02 13:00:10", oi=20000, rub_per_quote_unit=1000),
         ],
     }
     cets = {
@@ -130,6 +141,10 @@ def test_snapshot_maps_front_next_and_exposes_requested_fields() -> None:
     for item in snapshot["instruments"].values():
         assert requested <= set(item)
 
+    assert snapshot["instruments"]["usdrubf"]["wap"] == pytest.approx(90.5)
+    assert snapshot["instruments"]["si_front"]["wap"] == pytest.approx(90.5)
+    assert snapshot["instruments"]["cr_front"]["wap"] == pytest.approx(90.5)
+    assert snapshot["instruments"]["usdrubf"]["wap_method"] == "VALTODAY/VOLTODAY/(STEPPRICE/MINSTEP)"
     assert snapshot["instruments"]["si_front"]["oi"] == 70000
     assert snapshot["instruments"]["si_front"]["price_oi_same_source_row"] is True
     assert snapshot["instruments"]["si_front"]["price_oi_usable"] is True
