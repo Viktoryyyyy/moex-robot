@@ -1,0 +1,57 @@
+{
+  "contract_id": "usdrubf_news_tass_live_source_contract.v1",
+  "version": "1.0",
+  "status": "blocked_route_and_rights_contract",
+  "project": "MOEX_Bot",
+  "lane": "rub_intelligence",
+  "instrument": "USDRUBF",
+  "source_of_truth": "GitHub",
+  "purpose": "Govern Stage 12B treatment of TASS as a professional news-agency source without assuming that the public website or customer delivery products are open factual-ingestion routes.",
+  "governance": {
+    "approved_or_licensed_route_required": true,
+    "public_website_scraping_fallback_allowed": false,
+    "publication_timestamp_must_be_timezone_aware": true,
+    "stable_provenance_required": true,
+    "one_source_failure_must_not_poison_batch": true,
+    "directional_action_authority": false
+  },
+  "sources": [
+    {
+      "source_id": "tass_major_agency",
+      "group": "MAJOR_NEWS_AGENCY",
+      "tier": "MAJOR_AGENCY_OR_FINANCIAL_MEDIA",
+      "transport": "LICENSED_OR_APPROVED_ROUTE_ONLY",
+      "references": [
+        "https://tass.ru/",
+        "https://b2b.tass.ru/news-services",
+        "https://terminal.tass.ru/"
+      ],
+      "topics": [
+        "RUSSIA_POLICY",
+        "RUSSIA_MACRO",
+        "SANCTIONS",
+        "GEOPOLITICS",
+        "NEGOTIATIONS",
+        "ENERGY",
+        "FX_POLICY"
+      ],
+      "stage12b_status": "BLOCKED_PENDING_APPROVED_LICENSED_ROUTE_AND_RIGHTS",
+      "live_adapter_enabled": false,
+      "available_at_policy": "Do not create factual NewsSourceRecord evidence from TASS until an approved or licensed delivery route exposes a stable source identifier/reference and provable timezone-aware publication timestamp. Do not substitute public-page crawl time, HTTP Date, or ingestion time for publication time.",
+      "evidence": {
+        "verified_on": "2026-09-02",
+        "provider_business_delivery": "TASS publicly describes its professional news feeds as information products delivered to customers through terminal, FTP, API, RSS and e-mail.",
+        "public_site_status": "Public tass.ru pages are readable, but public readability does not by itself establish automated storage, redistribution, or feed-ingestion rights for Stage 12B.",
+        "result": "ROUTE_AND_RIGHTS_UNPROVEN_FOR_LIVE_INGESTION"
+      },
+      "unblock_conditions": [
+        "approved or licensed TASS delivery route is available to the project",
+        "route access terms permit the intended automated ingestion and persistence",
+        "bounded acquisition and final-host validation are implemented",
+        "stable per-item provenance is preserved",
+        "timezone-aware publication timestamp semantics are proven",
+        "source failure remains isolated from the rest of the official_news batch"
+      ]
+    }
+  ]
+}
