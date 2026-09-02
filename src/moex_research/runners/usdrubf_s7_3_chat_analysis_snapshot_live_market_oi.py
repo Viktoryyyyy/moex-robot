@@ -28,6 +28,28 @@ def _iso_now(now_fn: Callable[[], datetime]) -> str:
     return value.astimezone(timezone.utc).replace(microsecond=0).isoformat()
 
 
+def _load_live_or_unavailable(live_loader: LiveLoader) -> dict[str, object]:
+    try:
+        return live_loader()
+    except Exception as exc:
+        return {
+            "schema_version": live_market.SCHEMA_VERSION,
+            "status": "UNAVAILABLE",
+            "quality": {
+                "status": "FAIL",
+                "analysis_usable": False,
+                "fail_closed": True,
+            },
+            "synchronization": {
+                "status": "FAIL",
+                "synchronized": False,
+                "as_of_utc": None,
+            },
+            "error_class": exc.__class__.__name__,
+            "error": str(exc),
+        }
+
+
 def attach_live_market_oi_context(
     snapshot: dict[str, object],
     live_snapshot: Mapping[str, object],
@@ -55,8 +77,12 @@ def attach_live_market_oi_context(
         "refresh_attempted_at": attempted_at_utc,
         "last_success_at": attempted_at_utc if usable else None,
         "data_as_of": data_as_of,
-        "refresh_error_class": None,
-        "refresh_error": None if usable else "live market/OI synchronization quality gate failed",
+        "refresh_error_class": None if usable else live_snapshot.get("error_class"),
+        "refresh_error": None if usable else (
+            str(live_snapshot.get("error"))
+            if live_snapshot.get("error") is not None
+            else "live market/OI synchronization quality gate failed"
+        ),
         "data": dict(live_snapshot),
     }
     analysis_views["live_market_oi_component_ref"] = COMPONENT
@@ -79,6 +105,43 @@ def attach_live_market_oi_context(
     futoi._recompute_readiness(snapshot)
 
 
+def refresh_snapshot(
+    *,
+    now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    live_loader: LiveLoader = live_market.fetch_live_snapshot,
+) -> tuple[dict[str, object], object]:
+    base.load_dotenv(base.PROJECT_ENV_PATH, override=False)
+    base.install_timestamp_policy()
+    root = base._data_root()
+    state_dir = base.snapshot_state_dir(root)
+    path = state_dir / base.CURRENT_FILENAME
+    with base._single_refresh_lock(state_dir):
+        previous = base._load_previous(path)
+        now = base._aware(now_fn(), "clock")
+        through_date = now.astimezone(base.MOSCOW).date().isoformat()
+        run_id = "s7_3_futoi_context_live_market_oi_" + now.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        refresh_bundle = current_context.context.run_refresh_all(
+            through_date=through_date,
+            run_id=run_id,
+            now_fn=lambda: now,
+        )
+        snapshot = futoi.build_snapshot(
+            now=now,
+            previous=previous,
+            producers=current_context.current.current_producers(),
+            data_root=root,
+        )
+        current_context._attach_futoi_context(snapshot, refresh_bundle)
+        live_snapshot = _load_live_or_unavailable(live_loader)
+        attach_live_market_oi_context(
+            snapshot,
+            live_snapshot,
+            attempted_at_utc=_iso_now(lambda: now),
+        )
+        base._atomic_write(path, snapshot)
+    return snapshot, path
+
+
 def load_live_analysis_snapshot(
     *,
     now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
@@ -88,25 +151,7 @@ def load_live_analysis_snapshot(
     base.load_dotenv(base.PROJECT_ENV_PATH, override=False)
     snapshot, _path = reader(now_fn=now_fn)
     attempted_at = _iso_now(now_fn)
-    try:
-        live_snapshot = live_loader()
-    except Exception as exc:
-        live_snapshot = {
-            "schema_version": live_market.SCHEMA_VERSION,
-            "status": "UNAVAILABLE",
-            "quality": {
-                "status": "FAIL",
-                "analysis_usable": False,
-                "fail_closed": True,
-            },
-            "synchronization": {
-                "status": "FAIL",
-                "synchronized": False,
-                "as_of_utc": None,
-            },
-            "error_class": exc.__class__.__name__,
-            "error": str(exc),
-        }
+    live_snapshot = _load_live_or_unavailable(live_loader)
     attach_live_market_oi_context(
         snapshot,
         live_snapshot,
@@ -117,16 +162,42 @@ def load_live_analysis_snapshot(
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Read the S7.3 analyst snapshot with synchronized live market/OI context."
+        description="Publish/read the S7.3 analyst snapshot with synchronized live market/OI context."
     )
-    parser.add_argument("--read-live", action="store_true", required=True)
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--refresh", action="store_true")
+    action.add_argument("--read-live", action="store_true")
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parse_args(argv)
+    args = parse_args(argv)
     try:
+        if args.refresh:
+            snapshot, path = refresh_snapshot()
+            readiness = snapshot["readiness"]
+            print(f"PROJECT={PROJECT}")
+            print(f"MODE={MODE}")
+            print("STATUS=COMPLETED")
+            print(f"SNAPSHOT_STATUS={readiness['status']}")
+            print(f"SNAPSHOT_PATH={path}")
+            print(f"GENERATED_AT_UTC={snapshot['identity']['generated_at_utc']}")
+            print(
+                "COMPONENT_STATUSES="
+                + json.dumps(readiness["component_statuses"], sort_keys=True)
+            )
+            return 0
         snapshot = load_live_analysis_snapshot()
+        print(
+            json.dumps(
+                snapshot,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+        )
+        return 0
     except Exception as exc:
         print(f"PROJECT={PROJECT}")
         print(f"MODE={MODE}")
@@ -134,16 +205,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"ERROR_CLASS={exc.__class__.__name__}")
         print(f"ERROR={exc}")
         return 1
-    print(
-        json.dumps(
-            snapshot,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
-    )
-    return 0
 
 
 if __name__ == "__main__":

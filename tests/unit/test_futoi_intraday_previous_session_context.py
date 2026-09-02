@@ -10,6 +10,7 @@ from moex_data.futures import futoi_intraday_previous_session_context as context
 from moex_data.futures import futoi_live_factual_refresh_source_native as source
 from src.moex_research.runners import (
     usdrubf_s7_3_chat_analysis_snapshot_current_context as runner,
+    usdrubf_s7_3_chat_analysis_snapshot_live_market_oi as live_runner,
 )
 
 
@@ -378,11 +379,16 @@ def test_17_existing_ten_minute_runtime_invokes_context_aware_refresh():
     root = Path(__file__).resolve().parents[2]
     service = (root / "ops/systemd/moex-rub-chat-snapshot.service").read_text(encoding="utf-8")
     timer = (root / "ops/systemd/moex-rub-chat-snapshot.timer").read_text(encoding="utf-8")
-    assert "usdrubf_s7_3_chat_analysis_snapshot_current_context --refresh" in service
+    assert "usdrubf_s7_3_chat_analysis_snapshot_live_market_oi --refresh" in service
     assert "OnUnitActiveSec=10min" in timer
-    refresh_body = inspect.getsource(runner.refresh_snapshot)
-    assert "context.run_refresh_all" in refresh_body
-    assert refresh_body.index("context.run_refresh_all") < refresh_body.index("futoi.build_snapshot")
+    refresh_body = inspect.getsource(live_runner.refresh_snapshot)
+    assert "current_context.context.run_refresh_all" in refresh_body
+    assert "futoi.build_snapshot" in refresh_body
+    assert "_load_live_or_unavailable" in refresh_body
+    assert "base._atomic_write" in refresh_body
+    assert refresh_body.index("current_context.context.run_refresh_all") < refresh_body.index("futoi.build_snapshot")
+    assert refresh_body.index("futoi.build_snapshot") < refresh_body.index("_load_live_or_unavailable")
+    assert refresh_body.index("_load_live_or_unavailable") < refresh_body.index("base._atomic_write")
 
 
 def test_18_19_read_current_and_export_path_do_not_trigger_refresh():
