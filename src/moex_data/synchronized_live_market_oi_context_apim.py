@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Final
 
@@ -13,6 +14,7 @@ from moex_data import synchronized_live_market_oi_context as core
 
 APIM_FULL_RESPONSE_PROBE_START: Final[int] = 1_000_000_000
 COMPLETENESS_MODE: Final[str] = "apim_full_response_start_invariant_probe"
+FORTS_WAP_STATUS: Final[str] = "unavailable_source_native"
 
 
 def _secid_sequence(payload: Mapping[str, object], block_name: str) -> tuple[str, ...]:
@@ -55,6 +57,48 @@ def _validate_apim_full_response(payload: Mapping[str, object]) -> tuple[tuple[s
 def _receipt_map(payload: Mapping[str, object], received_at_utc: datetime) -> dict[str, str]:
     marketdata = _secid_sequence(payload, "marketdata")
     return {secid: core._iso(received_at_utc) for secid in marketdata}
+
+
+def _without_unproven_forts_wap(payload: Mapping[str, object]) -> dict[str, object]:
+    copied = deepcopy(dict(payload))
+    block = copied.get("marketdata")
+    if not isinstance(block, dict):
+        raise core.SynchronizedLiveMarketOIError("FORTS marketdata block is missing")
+    columns = block.get("columns")
+    rows = block.get("data")
+    if not isinstance(columns, list) or not isinstance(rows, list):
+        raise core.SynchronizedLiveMarketOIError("FORTS marketdata block is invalid")
+    by_upper = {str(column).upper(): index for index, column in enumerate(columns)}
+    value_index = by_upper.get("VALTODAY")
+    if value_index is None:
+        raise core.SynchronizedLiveMarketOIError("FORTS marketdata VALTODAY column is missing")
+    for row in rows:
+        if not isinstance(row, list) or value_index >= len(row):
+            raise core.SynchronizedLiveMarketOIError("FORTS marketdata row is invalid")
+        row[value_index] = None
+    return copied
+
+
+def _mark_wap_semantics(snapshot: dict[str, object]) -> None:
+    instruments = snapshot.get("instruments")
+    provenance = snapshot.get("provenance")
+    if not isinstance(instruments, dict):
+        raise core.SynchronizedLiveMarketOIError("snapshot instruments are missing")
+    for logical_id in core.FUTURES_LOGICAL_ORDER:
+        item = instruments.get(logical_id)
+        if not isinstance(item, dict):
+            raise core.SynchronizedLiveMarketOIError(f"snapshot instrument {logical_id} is missing")
+        item["wap"] = None
+        item["wap_method"] = None
+        item["wap_status"] = FORTS_WAP_STATUS
+    spot = instruments.get("cnyrub_tom")
+    if not isinstance(spot, dict):
+        raise core.SynchronizedLiveMarketOIError("snapshot instrument cnyrub_tom is missing")
+    spot["wap_status"] = "available_source_native" if spot.get("wap") is not None else "missing_source_native"
+    if not isinstance(provenance, dict) or not isinstance(provenance.get("forts"), dict):
+        raise core.SynchronizedLiveMarketOIError("snapshot FORTS provenance is missing")
+    provenance["forts"]["wap_method"] = None
+    provenance["forts"]["wap_status"] = FORTS_WAP_STATUS
 
 
 def _fetch_forts_verified(
@@ -173,14 +217,16 @@ def fetch_live_snapshot(
         forts_payload, forts_source_url, forts_received, completeness = forts_future.result()
         cets_payload, cets_source_url, cets_received = cets_future.result()
 
+    normalized_forts_payload = _without_unproven_forts_wap(forts_payload)
     snapshot = core.build_snapshot_from_payloads(
-        forts_payload=forts_payload,
+        forts_payload=normalized_forts_payload,
         cets_payload=cets_payload,
         forts_received_at_utc=forts_received,
         cets_received_at_utc=cets_received,
         forts_source_url=forts_source_url,
         cets_source_url=cets_source_url,
     )
+    _mark_wap_semantics(snapshot)
     provenance = snapshot.get("provenance")
     if not isinstance(provenance, dict) or not isinstance(provenance.get("forts"), dict):
         raise core.SynchronizedLiveMarketOIError("snapshot FORTS provenance is missing")
