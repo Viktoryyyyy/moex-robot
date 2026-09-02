@@ -338,6 +338,7 @@ def _bindings_from_forts(
             root=root,
             as_of_date=as_of_date,
             availability_ts_utc=availability_ts_utc,
+            minimum_days_to_expiry=1,
         )
         by_role = {str(item["role"]): str(item["secid"]) for item in selected}
         if set(by_role) != {"front", "next"}:
