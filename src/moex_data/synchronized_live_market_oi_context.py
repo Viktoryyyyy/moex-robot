@@ -29,6 +29,7 @@ MAX_SKEW_SECONDS: Final[int] = 60
 MAX_FRESHNESS_SECONDS: Final[int] = 60
 MAX_FUTURE_CLOCK_SKEW_SECONDS: Final[int] = 5
 MAX_FORTS_PAGES: Final[int] = 100
+FORTS_ROW_RECEIPTS_KEY: Final[str] = "_marketdata_received_at_utc_by_secid"
 MOSCOW: Final[ZoneInfo] = ZoneInfo("Europe/Moscow")
 
 FUTURES_SECURITY_COLUMNS: Final[tuple[str, ...]] = (
@@ -306,6 +307,30 @@ def _bindings_from_forts(
     return bindings
 
 
+def _forts_row_receipts(
+    payload: Mapping[str, object],
+    *,
+    completion_utc: datetime,
+) -> dict[str, datetime] | None:
+    raw = payload.get(FORTS_ROW_RECEIPTS_KEY)
+    if raw is None:
+        return None
+    if not isinstance(raw, Mapping):
+        raise SynchronizedLiveMarketOIError("FORTS row receipt map is invalid")
+    receipts: dict[str, datetime] = {}
+    for raw_secid, raw_received in raw.items():
+        secid = str(raw_secid).strip().upper()
+        if not secid:
+            raise SynchronizedLiveMarketOIError("FORTS row receipt map contains empty SECID")
+        received = _aware_utc(raw_received, f"FORTS row receipt {secid}")
+        if received > completion_utc:
+            raise SynchronizedLiveMarketOIError(
+                f"FORTS row receipt {secid} is later than pagination completion"
+            )
+        receipts[secid] = received
+    return receipts
+
+
 def build_snapshot_from_payloads(
     *,
     forts_payload: Mapping[str, object],
@@ -319,6 +344,10 @@ def build_snapshot_from_payloads(
     cets_received = _aware_utc(cets_received_at_utc, "cets_received_at_utc")
     observed_at = max(forts_received, cets_received)
     as_of_date = observed_at.astimezone(MOSCOW).date().isoformat()
+    forts_row_receipts = _forts_row_receipts(
+        forts_payload,
+        completion_utc=forts_received,
+    )
 
     securities = _table_frame(forts_payload, "securities")
     forts_marketdata = _table_frame(forts_payload, "marketdata")
@@ -336,13 +365,21 @@ def build_snapshot_from_payloads(
     instruments: dict[str, dict[str, object]] = {}
     for logical_id in FUTURES_LOGICAL_ORDER:
         secid = bindings[logical_id]
+        if forts_row_receipts is None:
+            row_received = forts_received
+        else:
+            row_received = forts_row_receipts.get(secid.upper())
+            if row_received is None:
+                raise SynchronizedLiveMarketOIError(
+                    f"FORTS row receipt is missing for selected {secid}"
+                )
         instruments[logical_id] = _normalize_row(
             logical_id=logical_id,
             secid=secid,
             row=_row_by_secid(forts_marketdata, secid, block_name="FORTS marketdata"),
             security_row=_row_by_secid(securities, secid, block_name="FORTS securities"),
             source_id=FORTS_SOURCE_ID,
-            received_at_utc=forts_received,
+            received_at_utc=row_received,
             freshness_reference_utc=observed_at,
             is_future=True,
         )
@@ -435,6 +472,7 @@ def build_snapshot_from_payloads(
                 "wap_method": "VALTODAY/VOLTODAY/(STEPPRICE/MINSTEP)",
                 "authenticated_gateway": True,
                 "pagination_complete": True,
+                "row_receipt_times_preserved": forts_row_receipts is not None,
             },
             "cnyrub_tom": {
                 "source_id": CETS_SOURCE_ID,
@@ -582,6 +620,26 @@ def _merge_iss_block_by_secid(
             target_rows.append(row)
 
 
+def _record_marketdata_receipts(
+    page: Mapping[str, object],
+    *,
+    received_at_utc: datetime,
+    target: dict[str, str],
+) -> None:
+    columns, rows = _table_parts(page, "marketdata", allow_empty=True)
+    by_upper = {str(column).upper(): index for index, column in enumerate(columns)}
+    secid_index = by_upper.get("SECID")
+    if secid_index is None:
+        raise SynchronizedLiveMarketOIError("marketdata SECID column is missing")
+    for row in rows:
+        if secid_index >= len(row):
+            raise SynchronizedLiveMarketOIError("marketdata row is invalid")
+        secid = str(row[secid_index]).strip().upper()
+        if not secid:
+            raise SynchronizedLiveMarketOIError("marketdata SECID value is missing")
+        target[secid] = _iso(received_at_utc)
+
+
 def _aggregate_row_count(aggregate: Mapping[str, object], block_name: str) -> int:
     block = aggregate.get(block_name)
     if not isinstance(block, Mapping):
@@ -602,6 +660,7 @@ def _fetch_forts_all_pages(
     now_fn: NowFn,
 ) -> tuple[dict[str, object], str, datetime]:
     aggregate: dict[str, object] = {}
+    marketdata_receipts: dict[str, str] = {}
     page_params = dict(params)
     page_params.pop("start", None)
     expected_start = 0
@@ -649,6 +708,11 @@ def _fetch_forts_all_pages(
             )
 
         _merge_iss_block_by_secid(aggregate, page, "securities")
+        _record_marketdata_receipts(
+            page,
+            received_at_utc=page_received,
+            target=marketdata_receipts,
+        )
         _merge_iss_block_by_secid(aggregate, page, "marketdata")
         source_url = page_source_url
         received_at = page_received
@@ -664,6 +728,7 @@ def _fetch_forts_all_pages(
                 "columns": ["INDEX", "TOTAL", "PAGESIZE"],
                 "data": [[index, total, page_size]],
             }
+            aggregate[FORTS_ROW_RECEIPTS_KEY] = dict(marketdata_receipts)
             if received_at is None:
                 raise SynchronizedLiveMarketOIError("RFUD pagination completion timestamp is missing")
             return aggregate, source_url, received_at
