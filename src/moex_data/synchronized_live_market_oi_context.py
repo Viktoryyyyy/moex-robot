@@ -16,9 +16,11 @@ from moex_data.futures import front_next_binding
 
 
 SCHEMA_VERSION: Final[str] = "synchronized_live_market_oi_context.v1"
-FORTS_SOURCE_ID: Final[str] = "moex_iss_forts_rfud_live_marketdata"
-CETS_SOURCE_ID: Final[str] = "moex_iss_cets_cnyrub_tom_live_marketdata"
-DEFAULT_BASE_URL: Final[str] = "https://iss.moex.com"
+FORTS_SOURCE_ID: Final[str] = "moex_apim_forts_rfud_live_marketdata"
+CETS_SOURCE_ID: Final[str] = "moex_apim_cets_cnyrub_tom_live_marketdata"
+DEFAULT_BASE_URL: Final[str] = "https://apim.moex.com"
+API_URL_ENV: Final[str] = "MOEX_API_URL"
+API_KEY_ENV: Final[str] = "MOEX_API_KEY"
 FORTS_ENDPOINT: Final[str] = "/iss/engines/futures/markets/forts/boards/RFUD/securities.json"
 CETS_ENDPOINT: Final[str] = "/iss/engines/currency/markets/selt/boards/CETS/securities/CNYRUB_TOM.json"
 MAX_SKEW_SECONDS: Final[int] = 60
@@ -400,6 +402,7 @@ def build_snapshot_from_payloads(
                 "received_at_utc": _iso(forts_received),
                 "price_and_oi_same_marketdata_row": True,
                 "wap_method": "VALTODAY/VOLTODAY/(STEPPRICE/MINSTEP)",
+                "authenticated_gateway": True,
             },
             "cnyrub_tom": {
                 "source_id": CETS_SOURCE_ID,
@@ -407,8 +410,28 @@ def build_snapshot_from_payloads(
                 "received_at_utc": _iso(cets_received),
                 "oi_not_applicable": True,
                 "wap_method": "WAPRICE",
+                "authenticated_gateway": True,
             },
         },
+    }
+
+
+def _api_base_url(base_url: str | None, env: Mapping[str, str]) -> str:
+    value = str(base_url or env.get(API_URL_ENV, DEFAULT_BASE_URL)).strip().rstrip("/")
+    if not value:
+        raise SynchronizedLiveMarketOIError(f"{API_URL_ENV} is required")
+    return value
+
+
+def _auth_headers(env: Mapping[str, str]) -> dict[str, str]:
+    token = str(env.get(API_KEY_ENV, "")).strip()
+    if not token:
+        raise SynchronizedLiveMarketOIError(
+            f"{API_KEY_ENV} is required for canonical authenticated MOEX live source"
+        )
+    return {
+        "User-Agent": "moex_bot_synchronized_live_market_oi_context/1.0",
+        "Authorization": "Bearer " + token,
     }
 
 
@@ -416,6 +439,7 @@ def _fetch_json(
     *,
     url: str,
     params: Mapping[str, object],
+    headers: Mapping[str, str],
     timeout: float,
     http_get: HTTPGet,
     now_fn: NowFn,
@@ -424,12 +448,12 @@ def _fetch_json(
         url,
         params=dict(params),
         timeout=timeout,
-        headers={"User-Agent": "moex_bot_synchronized_live_market_oi_context/1.0"},
+        headers=dict(headers),
     )
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, dict):
-        raise SynchronizedLiveMarketOIError("MOEX ISS response root must be an object")
+        raise SynchronizedLiveMarketOIError("MOEX API response root must be an object")
     received_at = _aware_utc(now_fn(), "now_fn")
     return payload, str(getattr(response, "url", url)), received_at
 
@@ -440,10 +464,11 @@ def fetch_live_snapshot(
     base_url: str | None = None,
     http_get: HTTPGet = requests.get,
     now_fn: NowFn = lambda: datetime.now(timezone.utc),
+    env: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
-    base = str(base_url or os.environ.get("MOEX_ISS_URL", DEFAULT_BASE_URL)).strip().rstrip("/")
-    if not base:
-        raise SynchronizedLiveMarketOIError("MOEX ISS base URL is required")
+    active_env = os.environ if env is None else env
+    base = _api_base_url(base_url, active_env)
+    headers = _auth_headers(active_env)
     forts_url = base + FORTS_ENDPOINT
     cets_url = base + CETS_ENDPOINT
     forts_params = {
@@ -462,6 +487,7 @@ def fetch_live_snapshot(
             _fetch_json,
             url=forts_url,
             params=forts_params,
+            headers=headers,
             timeout=timeout,
             http_get=http_get,
             now_fn=now_fn,
@@ -470,6 +496,7 @@ def fetch_live_snapshot(
             _fetch_json,
             url=cets_url,
             params=cets_params,
+            headers=headers,
             timeout=timeout,
             http_get=http_get,
             now_fn=now_fn,
@@ -492,14 +519,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description="Return synchronized live USDRUBF/Si/CNYRUBF/CR/CNYRUB_TOM market+OI context."
     )
     parser.add_argument("--timeout", type=float, default=12.0)
-    parser.add_argument("--iss-base-url", default=None)
+    parser.add_argument("--api-base-url", default=None)
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        payload = fetch_live_snapshot(timeout=args.timeout, base_url=args.iss_base_url)
+        payload = fetch_live_snapshot(timeout=args.timeout, base_url=args.api_base_url)
     except Exception as exc:
         print(
             json.dumps(
