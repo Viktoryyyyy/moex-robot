@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Final
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -460,6 +461,19 @@ def _auth_headers(env: Mapping[str, str]) -> dict[str, str]:
     }
 
 
+def _validated_response_url(requested_url: str, response_url: str) -> str:
+    requested = urlsplit(requested_url)
+    received = urlsplit(response_url)
+    requested_route = (requested.scheme.lower(), requested.netloc.lower(), requested.path)
+    received_route = (received.scheme.lower(), received.netloc.lower(), received.path)
+    if requested_route != received_route:
+        raise SynchronizedLiveMarketOIError(
+            "MOEX authenticated source redirected or changed route: "
+            f"requested={requested_url} received={response_url}"
+        )
+    return response_url
+
+
 def _fetch_json(
     *,
     url: str,
@@ -474,13 +488,23 @@ def _fetch_json(
         params=dict(params),
         timeout=timeout,
         headers=dict(headers),
+        allow_redirects=False,
     )
+    try:
+        status_code = int(getattr(response, "status_code", 200))
+    except (TypeError, ValueError) as exc:
+        raise SynchronizedLiveMarketOIError("MOEX API response status is invalid") from exc
+    if 300 <= status_code < 400:
+        raise SynchronizedLiveMarketOIError(
+            f"MOEX authenticated source redirect rejected: HTTP {status_code}"
+        )
     response.raise_for_status()
+    response_url = _validated_response_url(url, str(getattr(response, "url", url)))
     payload = response.json()
     if not isinstance(payload, dict):
         raise SynchronizedLiveMarketOIError("MOEX API response root must be an object")
     received_at = _aware_utc(now_fn(), "now_fn")
-    return payload, str(getattr(response, "url", url)), received_at
+    return payload, response_url, received_at
 
 
 def _forts_cursor(payload: Mapping[str, object]) -> tuple[int, int, int]:
@@ -552,6 +576,16 @@ def _merge_iss_block_by_secid(
             target_rows.append(row)
 
 
+def _aggregate_row_count(aggregate: Mapping[str, object], block_name: str) -> int:
+    block = aggregate.get(block_name)
+    if not isinstance(block, Mapping):
+        raise SynchronizedLiveMarketOIError(f"aggregated {block_name} block is missing")
+    rows = block.get("data")
+    if not isinstance(rows, list):
+        raise SynchronizedLiveMarketOIError(f"aggregated {block_name} data is invalid")
+    return len(rows)
+
+
 def _fetch_forts_all_pages(
     *,
     url: str,
@@ -565,10 +599,12 @@ def _fetch_forts_all_pages(
     page_params = dict(params)
     page_params.pop("start", None)
     expected_start = 0
+    expected_total: int | None = None
+    expected_page_size: int | None = None
     source_url = url
     received_at: datetime | None = None
 
-    for page_number in range(MAX_FORTS_PAGES):
+    for _page_number in range(MAX_FORTS_PAGES):
         if expected_start:
             page_params["start"] = expected_start
         else:
@@ -586,6 +622,26 @@ def _fetch_forts_all_pages(
             raise SynchronizedLiveMarketOIError(
                 f"RFUD pagination cursor mismatch: expected INDEX={expected_start}, got {index}"
             )
+        if expected_total is None:
+            expected_total = total
+            expected_page_size = page_size
+        elif total != expected_total:
+            raise SynchronizedLiveMarketOIError(
+                f"RFUD pagination TOTAL changed: expected {expected_total}, got {total}"
+            )
+        elif page_size != expected_page_size:
+            raise SynchronizedLiveMarketOIError(
+                f"RFUD pagination PAGESIZE changed: expected {expected_page_size}, got {page_size}"
+            )
+
+        _security_columns, security_rows = _table_parts(page, "securities", allow_empty=True)
+        expected_rows = min(page_size, max(0, total - index))
+        if len(security_rows) != expected_rows:
+            raise SynchronizedLiveMarketOIError(
+                f"RFUD securities page cardinality mismatch at INDEX={index}: "
+                f"expected {expected_rows}, got {len(security_rows)}"
+            )
+
         _merge_iss_block_by_secid(aggregate, page, "securities")
         _merge_iss_block_by_secid(aggregate, page, "marketdata")
         source_url = page_source_url
@@ -593,10 +649,17 @@ def _fetch_forts_all_pages(
 
         next_start = index + page_size
         if next_start >= total:
+            unique_securities = _aggregate_row_count(aggregate, "securities")
+            if unique_securities != total:
+                raise SynchronizedLiveMarketOIError(
+                    f"RFUD pagination incomplete: TOTAL={total}, unique_securities={unique_securities}"
+                )
             aggregate["securities.cursor"] = {
                 "columns": ["INDEX", "TOTAL", "PAGESIZE"],
                 "data": [[index, total, page_size]],
             }
+            if received_at is None:
+                raise SynchronizedLiveMarketOIError("RFUD pagination completion timestamp is missing")
             return aggregate, source_url, received_at
         if next_start <= index:
             raise SynchronizedLiveMarketOIError("RFUD pagination did not advance")
