@@ -224,7 +224,7 @@ def test_materially_future_source_timestamp_is_rejected() -> None:
     altered = deepcopy(forts)
     altered["marketdata"]["data"][0][FORTS_COLUMNS.index("SYSTIME")] = "2026-09-02 13:01:00"
 
-    with pytest.raises(live.SynchronizedLiveMarketOIError, match="ahead of snapshot completion"):
+    with pytest.raises(live.SynchronizedLiveMarketOIError, match="ahead of row receipt"):
         _build(altered, cets)
 
 
