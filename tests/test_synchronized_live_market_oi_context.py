@@ -197,6 +197,37 @@ def test_stale_snapshot_fails_closed_even_when_rows_are_mutually_aligned() -> No
     assert snapshot["quality"]["analysis_usable"] is False
 
 
+def test_common_snapshot_completion_time_controls_freshness() -> None:
+    forts, cets = _payloads()
+    altered_forts = deepcopy(forts)
+    altered_cets = deepcopy(cets)
+    for row in altered_forts["marketdata"]["data"]:
+        row[FORTS_COLUMNS.index("SYSTIME")] = "2026-09-02 12:59:25"
+    altered_cets["marketdata"]["data"][0][CETS_COLUMNS.index("SYSTIME")] = "2026-09-02 13:00:25"
+
+    snapshot = live.build_snapshot_from_payloads(
+        forts_payload=altered_forts,
+        cets_payload=altered_cets,
+        forts_received_at_utc="2026-09-02T10:00:20+00:00",
+        cets_received_at_utc="2026-09-02T10:00:32+00:00",
+    )
+
+    assert snapshot["synchronization"]["max_skew_seconds"] == 60
+    assert snapshot["instruments"]["usdrubf"]["age_seconds"] == 67
+    assert snapshot["instruments"]["usdrubf"]["stale"] is True
+    assert snapshot["synchronization"]["synchronized"] is False
+    assert snapshot["quality"]["analysis_usable"] is False
+
+
+def test_materially_future_source_timestamp_is_rejected() -> None:
+    forts, cets = _payloads()
+    altered = deepcopy(forts)
+    altered["marketdata"]["data"][0][FORTS_COLUMNS.index("SYSTIME")] = "2026-09-02 13:01:00"
+
+    with pytest.raises(live.SynchronizedLiveMarketOIError, match="ahead of snapshot completion"):
+        _build(altered, cets)
+
+
 def test_missing_futures_oi_blocks_price_oi_without_substituting_futoi() -> None:
     forts, cets = _payloads()
     altered = deepcopy(forts)
