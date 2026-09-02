@@ -237,6 +237,8 @@ def _normalize_row(
     ask = _number(row.get("OFFER"))
     spread = ask - bid if bid is not None and ask is not None else None
     oi = _integer(row.get("OPENPOSITION")) if is_future else None
+    if is_future and oi is not None and oi < 0:
+        raise SynchronizedLiveMarketOIError(f"{secid}.OPENPOSITION must be nonnegative")
     if is_future:
         if security_row is None:
             raise SynchronizedLiveMarketOIError(f"{secid} security row is required")
