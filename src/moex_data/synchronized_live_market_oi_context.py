@@ -197,6 +197,13 @@ def _integer(value: object) -> int | None:
     return int(numeric)
 
 
+def _nonnegative_price(value: object, *, secid: str, field: str) -> float | None:
+    numeric = _number(value)
+    if numeric is not None and numeric < 0:
+        raise SynchronizedLiveMarketOIError(f"{secid}.{field} must be nonnegative")
+    return numeric
+
+
 def _forts_session_wap(
     *,
     secid: str,
@@ -236,8 +243,12 @@ def _normalize_row(
             f"allowed={MAX_FUTURE_CLOCK_SKEW_SECONDS}s"
         )
     age_seconds = max(0.0, (freshness_reference_utc - event_time).total_seconds())
-    bid = _number(row.get("BID"))
-    ask = _number(row.get("OFFER"))
+    last = _nonnegative_price(row.get("LAST"), secid=secid, field="LAST")
+    open_price = _nonnegative_price(row.get("OPEN"), secid=secid, field="OPEN")
+    high = _nonnegative_price(row.get("HIGH"), secid=secid, field="HIGH")
+    low = _nonnegative_price(row.get("LOW"), secid=secid, field="LOW")
+    bid = _nonnegative_price(row.get("BID"), secid=secid, field="BID")
+    ask = _nonnegative_price(row.get("OFFER"), secid=secid, field="OFFER")
     spread = ask - bid if bid is not None and ask is not None else None
     volume = _number(row.get("VOLTODAY"))
     trades = _integer(row.get("NUMTRADES"))
@@ -258,17 +269,17 @@ def _normalize_row(
         )
         wap_method = "VALTODAY/VOLTODAY/(STEPPRICE/MINSTEP)"
     else:
-        wap = _number(row.get("WAPRICE"))
+        wap = _nonnegative_price(row.get("WAPRICE"), secid=secid, field="WAPRICE")
         wap_method = "WAPRICE"
     return {
         "logical_id": logical_id,
         "label": DISPLAY_LABELS[logical_id],
         "secid": secid,
         "asset_type": "future" if is_future else "spot",
-        "last": _number(row.get("LAST")),
-        "open": _number(row.get("OPEN")),
-        "high": _number(row.get("HIGH")),
-        "low": _number(row.get("LOW")),
+        "last": last,
+        "open": open_price,
+        "high": high,
+        "low": low,
         "wap": wap,
         "wap_method": wap_method,
         "volume": volume,
