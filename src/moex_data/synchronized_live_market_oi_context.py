@@ -237,6 +237,12 @@ def _normalize_row(
     bid = _number(row.get("BID"))
     ask = _number(row.get("OFFER"))
     spread = ask - bid if bid is not None and ask is not None else None
+    volume = _number(row.get("VOLTODAY"))
+    trades = _integer(row.get("NUMTRADES"))
+    if volume is not None and volume < 0:
+        raise SynchronizedLiveMarketOIError(f"{secid}.VOLTODAY must be nonnegative")
+    if trades is not None and trades < 0:
+        raise SynchronizedLiveMarketOIError(f"{secid}.NUMTRADES must be nonnegative")
     oi = _integer(row.get("OPENPOSITION")) if is_future else None
     if is_future and oi is not None and oi < 0:
         raise SynchronizedLiveMarketOIError(f"{secid}.OPENPOSITION must be nonnegative")
@@ -263,8 +269,8 @@ def _normalize_row(
         "low": _number(row.get("LOW")),
         "wap": wap,
         "wap_method": wap_method,
-        "volume": _number(row.get("VOLTODAY")),
-        "trades": _integer(row.get("NUMTRADES")),
+        "volume": volume,
+        "trades": trades,
         "oi": oi,
         "oi_status": "available" if is_future and oi is not None else (
             "missing" if is_future else "not_applicable"
