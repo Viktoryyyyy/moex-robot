@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Callable, Sequence
 
+from moex_data.futures import futoi_delta_statistics_context as delta_context
 from moex_data.futures import futoi_intraday_previous_session_context as context
 from moex_data.futures import futoi_live_factual_refresh_source_native as futoi_source
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as base
@@ -28,10 +29,14 @@ def _mapping(value: object) -> dict[str, object]:
 def _attach_futoi_context(
     snapshot: dict[str, object],
     refresh_bundle: Mapping[str, object],
+    delta_bundle: Mapping[str, object],
 ) -> None:
     instrument_results = refresh_bundle.get("instrument_results")
     if not isinstance(instrument_results, Mapping):
         raise CurrentContextSnapshotError("FUTOI context refresh bundle has no instrument_results")
+    delta_results = delta_bundle.get("instrument_results")
+    if not isinstance(delta_results, Mapping):
+        raise CurrentContextSnapshotError("FUTOI delta/statistics bundle has no instrument_results")
     components = snapshot.get("components")
     authority = snapshot.get("authority")
     if not isinstance(components, dict) or not isinstance(authority, dict):
@@ -46,10 +51,17 @@ def _attach_futoi_context(
         raw_context = instrument_results.get(instrument_id)
         if not isinstance(raw_context, Mapping):
             raise CurrentContextSnapshotError("FUTOI context result is missing for " + instrument_id)
+        delta_view = delta_results.get(instrument_id)
+        if not isinstance(delta_view, Mapping):
+            raise CurrentContextSnapshotError(
+                "FUTOI delta/statistics result is missing for " + instrument_id
+            )
         current_view = raw_context.get(context.CURRENT_ROLE)
         previous_view = raw_context.get(context.PREVIOUS_ROLE)
         if not isinstance(current_view, Mapping) or not isinstance(previous_view, Mapping):
-            raise CurrentContextSnapshotError("FUTOI current/previous context is missing for " + instrument_id)
+            raise CurrentContextSnapshotError(
+                "FUTOI current/previous context is missing for " + instrument_id
+            )
         governance = futoi._governance_state(governance_values, instrument_id)
         allowed = governance.get("factual_use_allowed") is True
         current_factual = current_view.get("factual")
@@ -81,6 +93,7 @@ def _attach_futoi_context(
                 "acceptance_status": raw_context.get("acceptance_status"),
                 "current_intraday": dict(current_view),
                 "previous_completed_session": dict(previous_view),
+                "delta_statistics": dict(delta_view),
                 "factual": dict(current_factual) if current_has_factual else None,
                 "freshness": (
                     dict(current_view.get("freshness"))
@@ -158,6 +171,11 @@ def _attach_futoi_context(
         analysis_views["futoi_context_fields"] = {
             "current": "current_intraday",
             "previous": "previous_completed_session",
+            "delta_statistics": "delta_statistics",
+            "delta_1d": "delta_statistics.deltas.delta_1d",
+            "delta_5d": "delta_statistics.deltas.delta_5d",
+            "delta_20d": "delta_statistics.deltas.delta_20d",
+            "statistics": "delta_statistics.statistics",
         }
     futoi._recompute_readiness(snapshot)
 
@@ -181,13 +199,18 @@ def refresh_snapshot(
             run_id=run_id,
             now_fn=lambda: now,
         )
+        delta_bundle = delta_context.build_all(
+            root=root,
+            refresh_bundle=refresh_bundle,
+            as_of=now,
+        )
         snapshot = futoi.build_snapshot(
             now=now,
             previous=previous,
             producers=current.current_producers(),
             data_root=root,
         )
-        _attach_futoi_context(snapshot, refresh_bundle)
+        _attach_futoi_context(snapshot, refresh_bundle, delta_bundle)
         base._atomic_write(path, snapshot)
     return snapshot, path
 
@@ -202,8 +225,8 @@ def read_current_snapshot(
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Publish/read S7.3 current chat snapshot with intraday and previous-session "
-            "Si/CR FUTOI factual context"
+            "Publish/read S7.3 current chat snapshot with intraday, prior-session "
+            "and factual Si/CR FUTOI delta/statistics context"
         )
     )
     action = parser.add_mutually_exclusive_group(required=True)
