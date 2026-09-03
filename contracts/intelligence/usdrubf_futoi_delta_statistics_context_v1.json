@@ -1,0 +1,139 @@
+{
+  "project": "MOEX_Bot",
+  "task_id": "futoi_delta_block_v1",
+  "contract_id": "usdrubf_futoi_delta_statistics_context_v1",
+  "schema_version": "futoi_delta_statistics_context.v1",
+  "status": "implementation_candidate",
+  "scope": "Factual Si/CR FUTOI current, prior-observed-session deltas and statistical context for rub_chat_analysis_snapshot.v1",
+  "instrument_scope": [
+    "si_futures_family",
+    "cr_futures_family"
+  ],
+  "observed_date_semantics": {
+    "authority_source_id": "moex_algopack_fo_tradestats_5m",
+    "materialized_witness_dataset_id": "rub_native_ohlcv_htf",
+    "materialized_witness_instrument_id": "usdrubf_futures_family",
+    "materialized_witness_timeframe": "1D",
+    "selection_rule": "ordinal prior observed sessions from accepted AlgoPack FO TradeStats lineage",
+    "delta_1d_target": "1st prior observed trading session",
+    "delta_5d_target": "5th prior observed trading session",
+    "delta_20d_target": "20th prior observed trading session",
+    "calendar_dependency": false,
+    "weekday_weekend_inference": false,
+    "moex_calendar_api_allowed": false,
+    "calendar_day_substitution_allowed": false,
+    "missing_observed_target_substitution_allowed": false
+  },
+  "factual_fields": {
+    "fiz": [
+      "long",
+      "short",
+      "net",
+      "long_participants",
+      "short_participants",
+      "net_share_of_oi"
+    ],
+    "yur": [
+      "long",
+      "short",
+      "net",
+      "long_participants",
+      "short_participants",
+      "net_share_of_oi"
+    ],
+    "total": [
+      "total_open_interest"
+    ]
+  },
+  "position_semantics": {
+    "short": "absolute_contract_count",
+    "fiz_net_identity": "fiz.long - fiz.short = fiz.net",
+    "yur_net_identity": "yur.long - yur.short = yur.net",
+    "net_balance_identity": "fiz.net + yur.net = 0",
+    "open_interest_long_identity": "fiz.long + yur.long = total_open_interest",
+    "open_interest_short_identity": "fiz.short + yur.short = total_open_interest",
+    "net_share_formula": "side.net / total_open_interest",
+    "net_share_denominator": "total_open_interest",
+    "participant_long_count_source": "pos_long_num",
+    "participant_short_count_source": "pos_short_num",
+    "unique_participant_count_available": false,
+    "participant_long_plus_short_may_be_reported_as_unique": false
+  },
+  "delta_semantics": {
+    "formula": "current factual value - factual value at exact ordinal prior observed session",
+    "fields": [
+      "fiz.long",
+      "fiz.short",
+      "fiz.net",
+      "fiz.long_participants",
+      "fiz.short_participants",
+      "fiz.net_share_of_oi",
+      "yur.long",
+      "yur.short",
+      "yur.net",
+      "yur.long_participants",
+      "yur.short_participants",
+      "yur.net_share_of_oi",
+      "total_open_interest"
+    ],
+    "missing_current_policy": "UNAVAILABLE",
+    "missing_target_policy": "UNAVAILABLE",
+    "stale_current_policy": "UNAVAILABLE_with_retained_provenance",
+    "missing_or_stale_means_zero": false,
+    "missing_or_stale_means_neutral": false
+  },
+  "historical_context": {
+    "dataset_id": "futures_futoi_eod",
+    "accepted_pointer_read_allowed": true,
+    "stage5_pointer_promotion_allowed_by_this_route": false,
+    "historical_stage5_outputs_supply_live_factual_authority": false,
+    "exact_target_row_may_supply_historical_baseline_when_present": true,
+    "recent_target_fallback": "validated existing canonical futures_futoi_raw partition only",
+    "dynamic_file_scan_allowed": false,
+    "implicit_latest_allowed": false
+  },
+  "statistical_context": {
+    "variables": [
+      "fiz.net_share_of_oi",
+      "yur.net_share_of_oi",
+      "total_open_interest"
+    ],
+    "windows_observations": [
+      252,
+      504
+    ],
+    "window_source_convention": "reuse futures_futoi_positioning_features_d1 accepted convention",
+    "sample": "current plus latest accepted EOD history rows strictly before current",
+    "current_inclusive": true,
+    "zscore_formula": "(current - population_mean) / population_std",
+    "standard_deviation_ddof": 0,
+    "zero_variance_zscore": null,
+    "percentile_formula": "mean(sample_value <= current)",
+    "percentile_tie_policy": "weak_empirical_cdf_less_than_or_equal",
+    "minimum_observations": "full_window",
+    "insufficient_history_result": null,
+    "future_rows_allowed": false,
+    "accepted_history_gap_policy": "allowed_only_with_explicit_gap_reporting_and_no_claim_that_window_is_last_N_observed_sessions"
+  },
+  "source_quality": {
+    "current_requires_status": "FRESH",
+    "current_trade_date_must_equal_observed_current_trade_date": true,
+    "previous_requires_status": "FRESH",
+    "previous_trade_date_must_equal_previous_observed_trade_date": true,
+    "raw_factual_validation_requires_exact_FIZ_YUR_alignment": true,
+    "raw_factual_validation_requires_net_balance": true,
+    "raw_factual_validation_requires_total_long_short_oi_identity": true,
+    "timestamp_and_availability_validation_inherited_from": "futoi_live_factual_refresh_source_native.latest_aligned_factual"
+  },
+  "authority": {
+    "factual_authority": false,
+    "directional_authority": false,
+    "action_authority": false,
+    "standalone_buy_sell_authority": false,
+    "stage5_full_mode_ready": false,
+    "stage5_pointer_promotion_performed": false,
+    "generates_buy_sell_out": false,
+    "generates_forecast": false,
+    "trading_automation": false
+  }
+}
