@@ -160,6 +160,11 @@ def refresh_snapshot(
             run_id=run_id,
             now_fn=lambda: now,
         )
+        delta_bundle = current_context.delta_context.build_all(
+            root=root,
+            refresh_bundle=refresh_bundle,
+            as_of=now,
+        )
         producers = parallel_prefetch.prefetch_producers(
             current_context.current.current_producers(),
             now=now,
@@ -170,7 +175,7 @@ def refresh_snapshot(
             producers=producers,
             data_root=root,
         )
-        current_context._attach_futoi_context(snapshot, refresh_bundle)
+        current_context._attach_futoi_context(snapshot, refresh_bundle, delta_bundle)
         live_snapshot = _load_live_or_unavailable(live_loader)
         attach_live_market_oi_context(
             snapshot,
