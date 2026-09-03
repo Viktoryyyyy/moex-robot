@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,9 +23,12 @@ from .usdrubf_news_live_eia import (
 from .usdrubf_news_live_rss import (
     LIVE_RSS_SOURCE_IDS,
     SOURCE_REGISTRY_PATH,
+    RssAcquisitionError,
     RssBatchResult,
     RssSourceResult,
     fetch_official_rss_batch,
+    fetch_rss_source,
+    load_first_slice_bindings,
 )
 from .usdrubf_news_live_treasury import (
     SOURCE_ID as TREASURY_SOURCE_ID,
@@ -205,6 +209,52 @@ def _acquire_eia_source(
     )
 
 
+def _acquire_rss_sources_parallel(
+    *,
+    registry_path: Path | str,
+    source_ids: Sequence[str],
+    opener: Callable[..., object],
+    now_fn: Callable[[], datetime],
+    timeout_seconds: float,
+) -> RssBatchResult:
+    bindings = load_first_slice_bindings(
+        registry_path=registry_path,
+        source_ids=source_ids,
+    )
+    if not bindings:
+        return RssBatchResult(())
+
+    def fetch_one(binding):
+        try:
+            return fetch_rss_source(
+                binding,
+                opener=opener,
+                now_fn=now_fn,
+                timeout_seconds=timeout_seconds,
+            )
+        except RssAcquisitionError as exc:
+            return RssSourceResult(
+                source_id=binding.source_id,
+                quality_status=exc.code,
+                records=(),
+                error=str(exc),
+            )
+
+    with ThreadPoolExecutor(
+        max_workers=len(bindings),
+        thread_name_prefix="live-news-rss",
+    ) as executor:
+        futures = {
+            binding.source_id: executor.submit(fetch_one, binding)
+            for binding in bindings
+        }
+        by_id = {
+            binding.source_id: futures[binding.source_id].result()
+            for binding in bindings
+        }
+    return RssBatchResult(tuple(by_id[binding.source_id] for binding in bindings))
+
+
 def _acquire_official_sources(
     *,
     registry_path: Path | str,
@@ -212,6 +262,7 @@ def _acquire_official_sources(
     opener: Callable[..., object],
     now_fn: Callable[[], datetime],
     timeout_seconds: float,
+    parallel: bool = False,
 ) -> RssBatchResult:
     requested = tuple(source_ids)
     if len(requested) != len(set(requested)):
@@ -228,46 +279,85 @@ def _acquire_official_sources(
         and source_id != EIA_SOURCE_ID
     )
 
-    rss = (
-        fetch_official_rss_batch(
+    def acquire_rss() -> RssBatchResult:
+        if not rss_ids:
+            return RssBatchResult(())
+        if parallel:
+            return _acquire_rss_sources_parallel(
+                registry_path=registry_path,
+                source_ids=rss_ids,
+                opener=opener,
+                now_fn=now_fn,
+                timeout_seconds=timeout_seconds,
+            )
+        return fetch_official_rss_batch(
             registry_path=registry_path,
             source_ids=rss_ids,
             opener=opener,
             now_fn=now_fn,
             timeout_seconds=timeout_seconds,
         )
-        if rss_ids
-        else RssBatchResult(())
-    )
-    dol = (
-        fetch_bls_dol_mirror_batch(
-            source_ids=dol_ids,
-            opener=opener,
-            now_fn=now_fn,
-            timeout_seconds=timeout_seconds,
+
+    def acquire_dol() -> RssBatchResult:
+        return (
+            fetch_bls_dol_mirror_batch(
+                source_ids=dol_ids,
+                opener=opener,
+                now_fn=now_fn,
+                timeout_seconds=timeout_seconds,
+            )
+            if dol_ids
+            else RssBatchResult(())
         )
-        if dol_ids
-        else RssBatchResult(())
-    )
-    treasury = (
-        _acquire_treasury_source(
-            registry_path=registry_path,
-            opener=opener,
-            now_fn=now_fn,
-            timeout_seconds=max(timeout_seconds, _TREASURY_LIVE_TIMEOUT_SECONDS),
+
+    def acquire_treasury() -> RssBatchResult:
+        return (
+            _acquire_treasury_source(
+                registry_path=registry_path,
+                opener=opener,
+                now_fn=now_fn,
+                timeout_seconds=max(timeout_seconds, _TREASURY_LIVE_TIMEOUT_SECONDS),
+            )
+            if treasury_requested
+            else RssBatchResult(())
         )
-        if treasury_requested
-        else RssBatchResult(())
-    )
-    eia = (
-        _acquire_eia_source(
-            opener=opener,
-            now_fn=now_fn,
-            timeout_seconds=timeout_seconds,
+
+    def acquire_eia() -> RssBatchResult:
+        return (
+            _acquire_eia_source(
+                opener=opener,
+                now_fn=now_fn,
+                timeout_seconds=timeout_seconds,
+            )
+            if eia_requested
+            else RssBatchResult(())
         )
-        if eia_requested
-        else RssBatchResult(())
-    )
+
+    if parallel:
+        group_loaders = {
+            "rss": acquire_rss,
+            "dol": acquire_dol,
+            "treasury": acquire_treasury,
+            "eia": acquire_eia,
+        }
+        with ThreadPoolExecutor(
+            max_workers=len(group_loaders),
+            thread_name_prefix="live-news-group",
+        ) as executor:
+            futures = {
+                name: executor.submit(loader)
+                for name, loader in group_loaders.items()
+            }
+            groups = {name: futures[name].result() for name in group_loaders}
+        rss = groups["rss"]
+        dol = groups["dol"]
+        treasury = groups["treasury"]
+        eia = groups["eia"]
+    else:
+        rss = acquire_rss()
+        dol = acquire_dol()
+        treasury = acquire_treasury()
+        eia = acquire_eia()
 
     by_id = {
         item.source_id: item
@@ -303,11 +393,13 @@ def run_live_official_news_pipeline(
     index, release schedule, and summary PDF. Treasury uses a source-specific
     30-second live timeout floor because the official index has demonstrated
     response latency close to the common 10-second source timeout; all other
-    source timeout semantics remain unchanged. The caller supplies only the
-    external classifier transport/callable. This live composition always wraps
-    it with stage12b3_news_classifier() before any cluster reaches
-    process_news_batch(), so callers cannot accidentally bypass the Stage 12B.3
-    PIT/input/output guard through this API.
+    source timeout semantics remain unchanged. Current-live acquisition uses
+    bounded concurrency across independent official sources and source families,
+    while explicit test/research clocks retain the prior sequential behavior.
+    The caller supplies only the external classifier transport/callable. This
+    live composition always wraps it with stage12b3_news_classifier() before any
+    cluster reaches process_news_batch(), so callers cannot accidentally bypass
+    the Stage 12B.3 PIT/input/output guard through this API.
 
     Acquisition failures remain visible while healthy records continue through
     the deterministic News Pipeline. For current-live use, successful source
@@ -320,6 +412,7 @@ def run_live_official_news_pipeline(
     if not callable(classifier_agent):
         raise ValueError("classifier_agent must be callable")
 
+    production_current_live = now_fn is None
     clock = now_fn or (lambda: datetime.now(timezone.utc))
     started_at = _aware_datetime(clock(), "now_fn result")
     explicit_as_of = (
@@ -336,6 +429,7 @@ def run_live_official_news_pipeline(
         opener=opener,
         now_fn=clock,
         timeout_seconds=timeout_seconds,
+        parallel=production_current_live,
     )
 
     completed_at = _aware_datetime(clock(), "now_fn result")
