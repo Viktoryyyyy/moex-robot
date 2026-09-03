@@ -318,6 +318,8 @@ def _accepted_eod(
     required = {
         "instrument_id",
         "trade_date",
+        "snapshot_ts_utc",
+        "availability_ts_utc",
         "phys_net",
         "phys_long",
         "phys_short_abs",
@@ -340,21 +342,73 @@ def _accepted_eod(
         _fail("accepted EOD history instrument mismatch")
     if work.duplicated(subset=["instrument_id", "trade_date"]).any():
         _fail("accepted EOD history contains duplicate trade_date")
-    oi = pd.to_numeric(work["total_open_interest"], errors="coerce")
-    phys_net = pd.to_numeric(work["phys_net"], errors="coerce")
-    legal_net = pd.to_numeric(work["legal_net"], errors="coerce")
-    phys_share = pd.to_numeric(work["phys_net_share_of_oi"], errors="coerce")
-    legal_share = pd.to_numeric(work["legal_net_share_of_oi"], errors="coerce")
-    if bool(oi.isna().any()) or bool((oi <= 0).any()):
+
+    availability = pd.to_datetime(work["availability_ts_utc"], utc=True, errors="coerce")
+    if bool(availability.isna().any()):
+        _fail("accepted EOD history contains invalid availability_ts_utc")
+    as_of_ts = pd.Timestamp(as_of)
+    if as_of_ts.tzinfo is None:
+        _fail("as_of must be timezone-aware")
+    causal = availability <= as_of_ts.tz_convert("UTC")
+    work = work.loc[causal].copy().reset_index(drop=True)
+    if work.empty:
+        _fail("accepted EOD history has no causally available rows")
+
+    numeric_fields = (
+        "phys_net",
+        "phys_long",
+        "phys_short_abs",
+        "phys_long_num",
+        "phys_short_num",
+        "legal_net",
+        "legal_long",
+        "legal_short_abs",
+        "legal_long_num",
+        "legal_short_num",
+        "total_open_interest",
+        "phys_net_share_of_oi",
+        "legal_net_share_of_oi",
+    )
+    numeric = {field: pd.to_numeric(work[field], errors="coerce") for field in numeric_fields}
+    if any(bool(values.isna().any()) for values in numeric.values()):
+        _fail("accepted EOD history contains invalid numeric values")
+    oi = numeric["total_open_interest"]
+    if bool((oi <= 0).any()):
         _fail("accepted EOD history contains invalid total_open_interest")
-    if bool(phys_net.isna().any()) or bool(legal_net.isna().any()):
-        _fail("accepted EOD history contains invalid net positions")
+    for field in (
+        "phys_long",
+        "phys_short_abs",
+        "phys_long_num",
+        "phys_short_num",
+        "legal_long",
+        "legal_short_abs",
+        "legal_long_num",
+        "legal_short_num",
+    ):
+        if bool((numeric[field] < 0).any()):
+            _fail("accepted EOD history contains negative absolute position/count")
+    if not bool((numeric["phys_net"] + numeric["legal_net"] == 0).all()):
+        _fail("accepted EOD FIZ/YUR net balance failed")
+    if not bool((numeric["phys_long"] - numeric["phys_short_abs"] == numeric["phys_net"]).all()):
+        _fail("accepted EOD FIZ net identity failed")
+    if not bool((numeric["legal_long"] - numeric["legal_short_abs"] == numeric["legal_net"]).all()):
+        _fail("accepted EOD YUR net identity failed")
+    if not bool((numeric["phys_long"] + numeric["legal_long"] == oi).all()):
+        _fail("accepted EOD total long OI identity failed")
+    if not bool((numeric["phys_short_abs"] + numeric["legal_short_abs"] == oi).all()):
+        _fail("accepted EOD total short OI identity failed")
     if not np.allclose(
-        phys_share.astype(float), (phys_net / oi).astype(float), rtol=0.0, atol=1e-12
+        numeric["phys_net_share_of_oi"].astype(float),
+        (numeric["phys_net"] / oi).astype(float),
+        rtol=0.0,
+        atol=1e-12,
     ):
         _fail("accepted EOD phys_net_share_of_oi formula mismatch")
     if not np.allclose(
-        legal_share.astype(float), (legal_net / oi).astype(float), rtol=0.0, atol=1e-12
+        numeric["legal_net_share_of_oi"].astype(float),
+        (numeric["legal_net"] / oi).astype(float),
+        rtol=0.0,
+        atol=1e-12,
     ):
         _fail("accepted EOD legal_net_share_of_oi formula mismatch")
     return work, provenance
@@ -556,7 +610,8 @@ def _statistics(
                 continue
             sample = np.append(source_values.tail(needed_history).to_numpy(dtype=float), current_value)
             mean = float(np.mean(sample))
-            std = float(np.std(sample, ddof=0))
+            constant_sample = bool(np.all(sample == sample[0]))
+            std = 0.0 if constant_sample else float(np.std(sample, ddof=0))
             percentile = float(np.mean(sample <= current_value))
             zscore = None if std == 0.0 else float((current_value - mean) / std)
             if not math.isfinite(percentile) or percentile < 0.0 or percentile > 1.0:
