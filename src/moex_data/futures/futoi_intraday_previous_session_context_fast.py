@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -17,6 +17,56 @@ SOURCE_LOOKBACK_DAYS = core.SOURCE_LOOKBACK_DAYS
 CURRENT_ROLE = core.CURRENT_ROLE
 PREVIOUS_ROLE = core.PREVIOUS_ROLE
 FutoiIntradayContextError = core.FutoiIntradayContextError
+
+
+def _resolve_observed_trade_dates_fast(
+    through_date: str,
+    *,
+    instrument_id: str,
+    timeout: float,
+) -> tuple[list[str], str | None, str | None]:
+    checked = source._iso_date(through_date, "through_date")
+    checked_instrument = source._instrument_id(instrument_id)
+    end = date.fromisoformat(checked)
+    start = end - timedelta(days=SOURCE_LOOKBACK_DAYS - 1)
+    try:
+        secid = source.observed_dates.reference_secid(checked_instrument)
+        found_desc: list[str] = []
+        candidate = end
+        through_is_observed = False
+        while candidate >= start:
+            is_observed = source.observed_dates._exact_date_has_secid(
+                candidate,
+                secid=secid,
+                timeout=timeout,
+                apim_base_url=None,
+            )
+            if candidate == end:
+                through_is_observed = is_observed
+            if is_observed:
+                found_desc.append(candidate.isoformat())
+                required = 2 if through_is_observed else 1
+                if len(found_desc) >= required:
+                    break
+            candidate -= timedelta(days=1)
+    except Exception as exc:
+        raise FutoiIntradayContextError(
+            "authoritative observed TradeStats date selection failed for "
+            + checked_instrument
+            + ": "
+            + str(exc)
+        ) from exc
+
+    if not found_desc:
+        core._fail("authoritative observed TradeStats date selection returned no dates")
+
+    if through_is_observed:
+        current_trade_date: str | None = checked
+        previous_trade_date = found_desc[1] if len(found_desc) > 1 else None
+    else:
+        current_trade_date = None
+        previous_trade_date = found_desc[0]
+    return sorted(found_desc), current_trade_date, previous_trade_date
 
 
 def _materialize_record(
@@ -163,7 +213,7 @@ def run_refresh(
     root = source._data_root()
     prior = core._load_previous(root, checked_instrument)
     attempted_at = core._iso_utc(now_fn())
-    observed, current_date, previous_date = core._resolve_observed_trade_dates(
+    observed, current_date, previous_date = _resolve_observed_trade_dates_fast(
         checked_through,
         instrument_id=checked_instrument,
         timeout=timeout,
@@ -219,6 +269,7 @@ def run_refresh(
         "through_date": checked_through,
         "refresh_attempted_at": attempted_at,
         "observed_trade_dates": observed,
+        "observed_trade_dates_scope": "minimal_current_previous_witness_set",
         "observed_current_trade_date": current_date,
         "previous_observed_trade_date": previous_date,
         CURRENT_ROLE: current,
