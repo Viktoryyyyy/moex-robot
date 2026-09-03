@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from html.parser import HTMLParser
@@ -20,6 +21,7 @@ _RELEASE_PATH_PREFIX = "/news/press-releases/"
 _HUB_SLUGS = {"press-releases", "readouts", "statements-remarks", "testimonies"}
 _PUBLICATION_DATE_CLASS = "field--name-field-news-publication-date"
 _BODY_CLASS = "field--name-field-news-body"
+_DEFAULT_DETAIL_MAX_WORKERS = 8
 
 
 class TreasuryAcquisitionError(ValueError):
@@ -362,9 +364,7 @@ def fetch_treasury_press_releases(
     if not index_parser.links:
         raise TreasuryAcquisitionError("SOURCE_INVALID", "Treasury index contains no release candidates")
 
-    records: list[NewsSourceRecord] = []
-    future_items = 0
-    for detail_url in index_parser.links:
+    def load_detail(detail_url: str) -> tuple[NewsSourceRecord | None, int]:
         raw = _request_html(
             detail_url,
             opener=opener,
@@ -388,9 +388,8 @@ def fetch_treasury_press_releases(
             )
         published_at = _parse_iso_timestamp(parser.primary_datetime)
         if published_at > now:
-            future_items += 1
-            continue
-        records.append(
+            return None, 1
+        return (
             NewsSourceRecord(
                 source_id=binding.source_id,
                 source_tier=binding.source_tier,
@@ -400,9 +399,31 @@ def fetch_treasury_press_releases(
                 ingested_at=now,
                 headline=parser.title,
                 body=parser.body,
-            )
+            ),
+            0,
         )
 
+    detail_results: list[tuple[NewsSourceRecord | None, int]] = []
+    production_urlopen = opener is urlopen
+    if production_urlopen and len(index_parser.links) > 1:
+        worker_count = min(_DEFAULT_DETAIL_MAX_WORKERS, len(index_parser.links))
+        with ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="treasury-detail",
+        ) as executor:
+            futures = {
+                detail_url: executor.submit(load_detail, detail_url)
+                for detail_url in index_parser.links
+            }
+            detail_results = [
+                futures[detail_url].result()
+                for detail_url in index_parser.links
+            ]
+    else:
+        detail_results = [load_detail(detail_url) for detail_url in index_parser.links]
+
+    records = [record for record, _future in detail_results if record is not None]
+    future_items = sum(future for _record, future in detail_results)
     records.sort(key=lambda record: (record.published_at, record.source_reference), reverse=True)
     return TreasurySourceResult(
         source_id=binding.source_id,
