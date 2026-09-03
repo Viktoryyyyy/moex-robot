@@ -171,28 +171,38 @@ def run_refresh(
     prior_current = prior.get(CURRENT_ROLE) if isinstance(prior, Mapping) else None
     prior_previous = prior.get(PREVIOUS_ROLE) if isinstance(prior, Mapping) else None
 
-    current = _record_with_failure_semantics(
-        root=root,
-        instrument_id=checked_instrument,
-        trade_date=current_date,
-        role=CURRENT_ROLE,
-        run_id=checked_run,
-        timeout=timeout,
-        attempted_at=attempted_at,
-        prior=prior_current if isinstance(prior_current, Mapping) else None,
-        now_fn=now_fn,
-    )
-    previous = _record_with_failure_semantics(
-        root=root,
-        instrument_id=checked_instrument,
-        trade_date=previous_date,
-        role=PREVIOUS_ROLE,
-        run_id=checked_run,
-        timeout=timeout,
-        attempted_at=attempted_at,
-        prior=prior_previous if isinstance(prior_previous, Mapping) else None,
-        now_fn=now_fn,
-    )
+    role_inputs = {
+        CURRENT_ROLE: (
+            current_date,
+            prior_current if isinstance(prior_current, Mapping) else None,
+        ),
+        PREVIOUS_ROLE: (
+            previous_date,
+            prior_previous if isinstance(prior_previous, Mapping) else None,
+        ),
+    }
+
+    def refresh_role(role: str) -> dict[str, object]:
+        trade_date, prior_role = role_inputs[role]
+        return _record_with_failure_semantics(
+            root=root,
+            instrument_id=checked_instrument,
+            trade_date=trade_date,
+            role=role,
+            run_id=checked_run,
+            timeout=timeout,
+            attempted_at=attempted_at,
+            prior=prior_role,
+            now_fn=now_fn,
+        )
+
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="futoi-session") as executor:
+        role_futures = {
+            role: executor.submit(refresh_role, role)
+            for role in (CURRENT_ROLE, PREVIOUS_ROLE)
+        }
+        current = role_futures[CURRENT_ROLE].result()
+        previous = role_futures[PREVIOUS_ROLE].result()
 
     both_fresh = current["status"] == "FRESH" and previous["status"] == "FRESH"
     any_factual = isinstance(current.get("factual"), Mapping) or isinstance(
