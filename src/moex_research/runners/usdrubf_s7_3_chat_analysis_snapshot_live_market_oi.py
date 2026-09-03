@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from moex_data import synchronized_live_market_oi_context_partial as live_market
 from moex_data.futures import futoi_intraday_previous_session_context_fast as fast_context
+from src.moex_research.runners import s7_3_parallel_component_prefetch as parallel_prefetch
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as base
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_current_context as current_context
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_futoi as futoi
@@ -159,10 +160,14 @@ def refresh_snapshot(
             run_id=run_id,
             now_fn=lambda: now,
         )
+        producers = parallel_prefetch.prefetch_producers(
+            current_context.current.current_producers(),
+            now=now,
+        )
         snapshot = futoi.build_snapshot(
             now=now,
             previous=previous,
-            producers=current_context.current.current_producers(),
+            producers=producers,
             data_root=root,
         )
         current_context._attach_futoi_context(snapshot, refresh_bundle)
