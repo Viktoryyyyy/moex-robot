@@ -26,17 +26,36 @@ def _mapping(value: object) -> dict[str, object]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
+def _unavailable_delta_view(instrument_id: str) -> dict[str, object]:
+    return {
+        "schema_version": delta_context.SCHEMA_VERSION,
+        "project": PROJECT,
+        "status": "UNAVAILABLE",
+        "instrument_id": instrument_id,
+        "error_class": "DeltaStatisticsNotProvided",
+        "error": "delta/statistics bundle was not supplied to compatibility attach path",
+        "factual_authority": False,
+        "directional_authority": False,
+        "action_authority": False,
+        "standalone_buy_sell_authority": False,
+        "stage5_full_mode_ready": False,
+        "stage5_pointer_promotion_performed": False,
+        "calendar_dependency": False,
+        "weekday_weekend_inference": False,
+        "missing_or_stale_must_not_be_interpreted_as_zero_or_neutral": True,
+    }
+
+
 def _attach_futoi_context(
     snapshot: dict[str, object],
     refresh_bundle: Mapping[str, object],
-    delta_bundle: Mapping[str, object],
+    delta_bundle: Mapping[str, object] | None = None,
 ) -> None:
     instrument_results = refresh_bundle.get("instrument_results")
     if not isinstance(instrument_results, Mapping):
         raise CurrentContextSnapshotError("FUTOI context refresh bundle has no instrument_results")
-    delta_results = delta_bundle.get("instrument_results")
-    if not isinstance(delta_results, Mapping):
-        raise CurrentContextSnapshotError("FUTOI delta/statistics bundle has no instrument_results")
+    delta_results_raw = delta_bundle.get("instrument_results") if isinstance(delta_bundle, Mapping) else None
+    delta_results = delta_results_raw if isinstance(delta_results_raw, Mapping) else {}
     components = snapshot.get("components")
     authority = snapshot.get("authority")
     if not isinstance(components, dict) or not isinstance(authority, dict):
@@ -51,11 +70,12 @@ def _attach_futoi_context(
         raw_context = instrument_results.get(instrument_id)
         if not isinstance(raw_context, Mapping):
             raise CurrentContextSnapshotError("FUTOI context result is missing for " + instrument_id)
-        delta_view = delta_results.get(instrument_id)
-        if not isinstance(delta_view, Mapping):
-            raise CurrentContextSnapshotError(
-                "FUTOI delta/statistics result is missing for " + instrument_id
-            )
+        raw_delta_view = delta_results.get(instrument_id)
+        delta_view = (
+            dict(raw_delta_view)
+            if isinstance(raw_delta_view, Mapping)
+            else _unavailable_delta_view(instrument_id)
+        )
         current_view = raw_context.get(context.CURRENT_ROLE)
         previous_view = raw_context.get(context.PREVIOUS_ROLE)
         if not isinstance(current_view, Mapping) or not isinstance(previous_view, Mapping):
@@ -93,7 +113,7 @@ def _attach_futoi_context(
                 "acceptance_status": raw_context.get("acceptance_status"),
                 "current_intraday": dict(current_view),
                 "previous_completed_session": dict(previous_view),
-                "delta_statistics": dict(delta_view),
+                "delta_statistics": delta_view,
                 "factual": dict(current_factual) if current_has_factual else None,
                 "freshness": (
                     dict(current_view.get("freshness"))
