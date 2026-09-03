@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -273,13 +275,13 @@ def test_zero_variance_yields_null_zscore_and_weak_percentile_one() -> None:
 def test_invalid_fiz_yur_balance_fails_closed() -> None:
     factual = _factual("2026-09-03", net=400)
     factual["yur"]["net"] = -399
-    with pytest.raises(delta.FutoiDeltaStatisticsError, match="FIZ/YUR net balance failed"):
+    with pytest.raises(delta.FutoiDeltaStatisticsError, match="net identity failed"):
         delta._normalized_factual(factual, field="bad")
 
 
 def test_contract_keeps_all_authority_and_stage5_promotion_off() -> None:
-    contract = delta.step9.json.loads(
-        (delta.step9.Path(__file__).resolve().parents[1] / delta.CONTRACT_REF).read_text(encoding="utf-8")
+    contract = json.loads(
+        (Path(__file__).resolve().parents[1] / delta.CONTRACT_REF).read_text(encoding="utf-8")
     )
     assert contract["observed_date_semantics"]["moex_calendar_api_allowed"] is False
     assert contract["observed_date_semantics"]["weekday_weekend_inference"] is False
