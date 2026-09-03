@@ -36,7 +36,7 @@ def test_refresh_snapshot_publishes_live_market_oi_inside_canonical_write(monkey
         "run_refresh_all",
         lambda **_kwargs: {"instrument_results": {}},
     )
-    monkeypatch.setattr(overlay.current_context.current, "current_producers", lambda: [])
+    monkeypatch.setattr(overlay.current_context.current, "current_producers", lambda: {})
     monkeypatch.setattr(
         overlay.futoi,
         "build_snapshot",
