@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from moex_data.futures import futoi_intraday_previous_session_context as context
 from moex_data.futures import futoi_live_factual_refresh_source_native as source
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_current_context as snapshot_context
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_futoi as futoi
+from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_live_market_oi as live_runner
 
 
 def _factual(instrument_id: str, trade_date: str) -> dict[str, object]:
@@ -125,3 +128,14 @@ def test_attach_exposes_delta_statistics_without_granting_directional_or_action_
     assert snapshot["analysis_views"]["futoi_context_fields"]["delta_20d"] == "delta_statistics.deltas.delta_20d"
     assert snapshot["authority"]["futoi_directional_authority"] is False
     assert snapshot["authority"]["futoi_action_authority"] is False
+
+
+def test_canonical_live_refresh_builds_and_attaches_real_delta_bundle() -> None:
+    body = inspect.getsource(live_runner.refresh_snapshot)
+    refresh_call = "current_context.context.run_refresh_all"
+    delta_call = "current_context.delta_context.build_all"
+    attach_call = "current_context._attach_futoi_context(snapshot, refresh_bundle, delta_bundle)"
+    assert refresh_call in body
+    assert delta_call in body
+    assert attach_call in body
+    assert body.index(refresh_call) < body.index(delta_call) < body.index(attach_call)
