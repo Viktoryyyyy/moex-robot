@@ -97,6 +97,58 @@ def test_empty_materializer_source_preserves_pending_semantics(monkeypatch) -> N
     assert "pending on authoritative observed TradeStats date" in result["refresh_error"]
 
 
+def test_observed_date_resolution_stops_after_current_and_previous(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        source.observed_dates,
+        "reference_secid",
+        lambda instrument_id: "SiU6",
+    )
+
+    def exact(candidate, *, secid, timeout, apim_base_url):
+        calls.append(candidate.isoformat())
+        return candidate.isoformat() in {"2026-09-03", "2026-09-02"}
+
+    monkeypatch.setattr(source.observed_dates, "_exact_date_has_secid", exact)
+
+    observed, current, previous = fast._resolve_observed_trade_dates_fast(
+        "2026-09-03",
+        instrument_id=source.SI_INSTRUMENT_ID,
+        timeout=60.0,
+    )
+
+    assert calls == ["2026-09-03", "2026-09-02"]
+    assert observed == ["2026-09-02", "2026-09-03"]
+    assert current == "2026-09-03"
+    assert previous == "2026-09-02"
+
+
+def test_observed_date_resolution_stops_after_latest_when_through_not_observed(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        source.observed_dates,
+        "reference_secid",
+        lambda instrument_id: "SiU6",
+    )
+
+    def exact(candidate, *, secid, timeout, apim_base_url):
+        calls.append(candidate.isoformat())
+        return candidate.isoformat() == "2026-09-02"
+
+    monkeypatch.setattr(source.observed_dates, "_exact_date_has_secid", exact)
+
+    observed, current, previous = fast._resolve_observed_trade_dates_fast(
+        "2026-09-03",
+        instrument_id=source.SI_INSTRUMENT_ID,
+        timeout=60.0,
+    )
+
+    assert calls == ["2026-09-03", "2026-09-02"]
+    assert observed == ["2026-09-02"]
+    assert current is None
+    assert previous == "2026-09-02"
+
+
 def test_run_refresh_all_executes_si_and_cr_in_parallel(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
     barrier = Barrier(len(source.LIVE_INSTRUMENT_IDS))
@@ -127,8 +179,8 @@ def test_run_refresh_executes_current_and_previous_in_parallel(monkeypatch, tmp_
     monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
     monkeypatch.setattr(fast.core, "_load_previous", lambda root, instrument_id: None)
     monkeypatch.setattr(
-        fast.core,
-        "_resolve_observed_trade_dates",
+        fast,
+        "_resolve_observed_trade_dates_fast",
         lambda through_date, instrument_id, timeout: (
             ["2026-09-01", "2026-09-02"],
             "2026-09-02",
