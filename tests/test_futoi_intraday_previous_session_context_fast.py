@@ -121,3 +121,41 @@ def test_run_refresh_all_executes_si_and_cr_in_parallel(monkeypatch, tmp_path) -
     assert result["status"] == "PASS"
     assert result["failed_instrument_ids"] == []
     assert list(result["instrument_results"]) == list(source.LIVE_INSTRUMENT_IDS)
+
+
+def test_run_refresh_executes_current_and_previous_in_parallel(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(fast.core, "_load_previous", lambda root, instrument_id: None)
+    monkeypatch.setattr(
+        fast.core,
+        "_resolve_observed_trade_dates",
+        lambda through_date, instrument_id, timeout: (
+            ["2026-09-01", "2026-09-02"],
+            "2026-09-02",
+            "2026-09-01",
+        ),
+    )
+    monkeypatch.setattr(source, "_atomic_json", lambda path, payload: None)
+    barrier = Barrier(2)
+
+    def fake_record(*, trade_date, role, **kwargs):
+        barrier.wait(timeout=2.0)
+        return {
+            "role": role,
+            "status": "FRESH",
+            "trade_date": trade_date,
+            "factual": {"trade_date": trade_date},
+        }
+
+    monkeypatch.setattr(fast, "_record_with_failure_semantics", fake_record)
+
+    result = fast.run_refresh(
+        through_date="2026-09-02",
+        instrument_id=source.SI_INSTRUMENT_ID,
+        run_id="role_parallel_test",
+        now_fn=lambda: NOW,
+    )
+
+    assert result["status"] == "PASS"
+    assert result[fast.CURRENT_ROLE]["trade_date"] == "2026-09-02"
+    assert result[fast.PREVIOUS_ROLE]["trade_date"] == "2026-09-01"
