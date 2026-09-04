@@ -8,11 +8,7 @@ Research/runtime data contract for separate analysis chats. This contract does n
 
 Persist one stable server-side factual snapshot that separate analysis chats can read without independently refetching market, news, or macro sources.
 
-The intended downstream reasoning sequence is:
-
-`weekly regime -> daily structure -> levels -> carry/rates -> CNY/oil -> news/macro -> scenario -> BUY/SELL/OUT + invalidation`
-
-The server snapshot supplies data/context only. The reasoning sequence itself belongs to separate chats and later S7.3/S7.5 policy work.
+The server snapshot supplies data/context only. Interpretation and any later trading decision remain outside this publisher.
 
 ## Refresh architecture
 
@@ -21,7 +17,7 @@ Two refresh lanes remain intentionally separate:
 1. Slow/daily canonical acceptance lane: completed-date D1/W1 and accepted Stage 3/4/5/7 datasets. Heavy history/catch-up work must not run every ten minutes.
 2. Fast chat-snapshot lane: `moex-rub-chat-snapshot.timer` invokes a bounded oneshot approximately every 10 minutes.
 
-The fast lane reads Stage 9 accepted daily/weekly bundles and refreshes factual live-context sources that already have deterministic adapters.
+The fast lane reads accepted daily/weekly bundles and refreshes factual live-context sources through existing deterministic adapters. The canonical systemd service currently invokes `moex_research.runners.usdrubf_s7_3_chat_analysis_snapshot_live_market_oi`.
 
 ## Canonical snapshot location
 
@@ -29,7 +25,7 @@ The repository defines the current snapshot relative to the data root:
 
 `${MOEX_DATA_ROOT}/state/rub_intelligence/chat_analysis_snapshot/current.json`
 
-The path is derived from `MOEX_DATA_ROOT`; application code does not hard-code the server data-root path.
+The path is derived from `MOEX_DATA_ROOT`; application code does not hard-code a separate data-root path.
 
 On the canonical server service unit, `MOEX_DATA_ROOT=/home/trader/moex_bot/data`, therefore the applied current-file location is derived deterministically from that service configuration.
 
@@ -43,8 +39,9 @@ A process-scoped non-blocking lock prevents overlapping refresh writers. A reade
 
 - expected refresh interval: 600 seconds;
 - snapshot stale threshold: 1200 seconds;
-- `--read-current` calculates snapshot age from `identity.generated_at_utc` and reports `FRESH` or `STALE`;
-- source/component timestamps remain explicit and are not backdated to the snapshot generation time.
+- reader-side freshness is calculated from `identity.generated_at_utc`;
+- source/component timestamps remain explicit and are not backdated to the snapshot generation time;
+- the structural-level block independently carries price-source freshness based on its latest closed 5m observation.
 
 ## Component failure semantics
 
@@ -69,109 +66,116 @@ Deterministic Stage 9 weekly server-core bundle. Existing Stage 9 policy gaps re
 
 ### `live_market_structure`
 
-Current USDRUBF factual context built from closed 5m observations plus prior-session Level & Structure semantics:
+Canonical current structural context is factual USDRUBF data only.
 
-- price;
-- deterministic trend context;
-- market-regime label from current Level & Structure implementation;
-- active levels;
-- level interactions;
-- EMA(3/19) context;
-- governed FUTOI context.
+Source and timeframe:
 
-S7.2 verdict is binding: EMA(3/19) has no standalone directional authority. It remains descriptive context only.
+- instrument/requested SECID: `USDRUBF`;
+- source id: `moex_algopack_fo_tradestats_5m`;
+- source contract: `contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml`;
+- source timeframe: closed 5m TradeStats observations;
+- current price and level-interaction bars use the same accepted source family;
+- prior-session discovery probes a bounded set of preceding dates and accepts only a date for which actual USDRUBF observations exist;
+- no MOEX Calendar API, weekday rule, or weekend rule determines the prior observed session.
 
-If the current Moscow date has no usable market bars (weekend, before session, source gap, or insufficient live bridge input), the publisher retains the previous market component if available rather than manufacturing current bars.
+The canonical producer reuses, without changing their semantics:
+
+- `contracts/intelligence/usdrubf_market_state_level_structure_v1.json`;
+- `src/moex_research/intelligence/usdrubf_level_structure.py`;
+- the existing causal `build_previous_session_zones` implementation.
+
+The producer emits all active previous-completed-session high/low LevelZones and classifies their interaction against current closed 5m bars with the existing state machine. It applies no level ranking and silently drops no active level.
+
+The compatibility fields remain directly under `components.live_market_structure.data`:
+
+- `instrument`;
+- `trade_date` and `prior_trade_date`;
+- `market_data_as_of`;
+- `price`;
+- `active_levels`;
+- `level_interactions`;
+- source/provenance identifiers and closed-bar counts.
+
+The compact analyst block is:
+
+`components.live_market_structure.data.structural_levels`
+
+Its schema id is `usdrubf_structural_levels_snapshot.v1` and it contains:
+
+- `price_context`: factual price, source timestamp/data-as-of, freshness, source id/contract, exact requested SECID and timeframe;
+- `active_levels`: existing LevelZone fields plus deterministic interaction structural quality, actual level age and provenance;
+- `level_interactions`: exact existing state/direction/event/previous-state/structural-quality fields plus engine fields and provenance;
+- `observed_extrema.prior_completed_session`: observed high/low from the completed prior USDRUBF session;
+- `observed_extrema.current_observed_session`: high/low of closed current-session observations through `data_as_of`;
+- `methodology`: exact contract/engine refs, closed-bar/PIT rules, no-ranking rule and observed-session semantics;
+- `unsupported_facts`: explicit non-emission of recent D1 high/low and HH/HL/LH/LL swing labels because no accepted deterministic live convention exists in the current structure path;
+- `authority`: all directional/action/standalone-trading and Stage5 readiness/promotion flags remain false.
+
+A historical active level keeps its actual `created_at`, current interaction timestamp and calculated age. A fresh price does not make an old level newly created or newly fresh.
+
+If the current observed date has no usable USDRUBF closed 5m bars, the publisher follows the existing component failure policy rather than manufacturing a current market observation.
 
 ### `cnyrub_spot_live`
 
-Current-day partial CNYRUB_TOM context from the exact official AlgoPack route and timestamp policy. It is context-only and carries no action authority.
+Current-day partial CNYRUB_TOM context from the accepted official route and timestamp policy. It is context-only and carries no action authority.
 
 ### `cnyrubf_live`
 
-Current-day partial CNYRUBF context from the exact official AlgoPack FO route. It is context-only and carries no action authority.
+Current-day partial CNYRUBF context from the accepted official AlgoPack FO route. It is context-only and carries no action authority.
 
 ### `cbr_macro`
 
-Current accepted CBR macro composition (key rate and RUONIA under the existing live CBR contract). It supplies facts/context only.
+Current accepted CBR macro composition supplies facts/context only.
 
 ### `official_news`
 
-Bounded current official-news events from the existing deterministic live RSS pipeline. News classification remains neutral/context-only and has no independent BUY/SELL authority.
+Bounded current official-news events from the existing deterministic live pipeline remain context-only.
 
 ### `oil`
 
-`GOVERNED_BLOCKED` until an oil source is accepted for this snapshot. Current declared blockers include MOEX Brent futures and CME WTI pre-MOEX. Missing oil data must not be interpreted as neutral oil evidence.
+`GOVERNED_BLOCKED` until an oil source is accepted for this snapshot. Missing oil data must not be interpreted as neutral oil evidence.
 
 ## Convenience views
 
-The snapshot exposes references/views for:
+The base snapshot retains its existing convenience views for levels/interactions and other factual components. The compact structural block is intentionally kept inside the canonical `live_market_structure` component so no second structure component or competing snapshot is introduced.
 
-- levels and level interactions;
-- accepted Stage 4 carry/basis blocks;
-- accepted CNY context;
-- live CNY spot/futures component references;
-- rates;
-- news;
-- oil status.
+## Structural no-interpretation boundary
 
-These views do not add any derived trading rule.
+The structural producer may state only deterministic factual observations and contracted state transitions. It does not forecast whether a level will hold or break, does not classify the market as bullish/bearish, and does not create scenarios, probabilities, targets, stops, position sizes or broker actions.
 
-## Downstream chat authority
+The following flags are fixed false in the compact structural block and component:
 
-`analysis_workflow` explicitly delegates all reasoning to separate analysis chats:
+- `directional_authority`;
+- `action_authority`;
+- `standalone_buy_sell_authority`;
+- `stage5_full_mode_ready`;
+- `stage5_pointer_promotion_performed`.
 
-- weekly regime;
-- daily structure;
-- levels interpretation;
-- carry/rates interpretation;
-- CNY/oil interpretation;
-- news/macro interpretation;
-- scenario;
-- BUY/SELL/OUT;
-- invalidation.
-
-The server publisher must not generate:
-
-- scenario probabilities;
-- BUY/SELL/OUT;
-- stop/target/invalidation;
-- position size;
-- broker orders.
-
-Telegram remains outside this step.
-
-## CLI
-
-Refresh the persisted snapshot:
-
-`python -m moex_research.runners.usdrubf_s7_3_chat_analysis_snapshot --refresh`
-
-Read the current snapshot with reader-side freshness status:
-
-`python -m moex_research.runners.usdrubf_s7_3_chat_analysis_snapshot --read-current`
-
-Both commands require `MOEX_DATA_ROOT` and normal project runtime credentials for live sources.
-
-## systemd
+## CLI and systemd
 
 Repository units:
 
-- `ops/systemd/moex-rub-chat-snapshot.service`
-- `ops/systemd/moex-rub-chat-snapshot.timer`
+- `ops/systemd/moex-rub-chat-snapshot.service`;
+- `ops/systemd/moex-rub-chat-snapshot.timer`.
 
-The timer uses `OnBootSec=2min` and `OnUnitActiveSec=10min`. Because the service is oneshot, overlapping timer executions are naturally avoided; the application lock additionally protects against a concurrent manual refresh.
+The canonical service invokes the layered current snapshot runner. The timer uses `OnBootSec=2min` and `OnUnitActiveSec=10min`. Because the service is oneshot, overlapping timer executions are naturally avoided; the application lock additionally protects against a concurrent manual refresh.
 
 ## Acceptance gates
 
 The Git-side implementation is acceptable only if:
 
-1. unit/contract tests pass;
-2. current-file publication is atomic;
-3. symlink/path escape is rejected;
-4. component failure never fabricates fresh data;
-5. no server-generated scenario or trade action appears;
-6. EMA standalone authority remains false;
-7. oil remains explicitly blocked until separately accepted;
-8. live/runtime broker execution and Telegram are unchanged;
-9. a controlled server refresh creates a readable `current.json` and a second read confirms freshness/status.
+1. deterministic same-input structural output is reproducible;
+2. current price and level interaction use only observable closed bars;
+3. future rows do not enter price, extrema or interaction state;
+4. existing LevelZone metadata and exact interaction state machine are preserved;
+5. active level ids remain deterministic and interactions reference the same ids;
+6. prior/current session facts are based on observed rows, not calendar inference;
+7. no subjective level ranking is applied;
+8. no HH/HL/LH/LL labels are fabricated;
+9. stale/current timestamps and historical level age stay explicit;
+10. source/provenance remains attached to price, levels and interactions;
+11. all directional/action/standalone-trading and Stage5 flags remain false;
+12. no scenario probability, target, stop, position sizing or broker execution is generated;
+13. existing component retention/atomic publication semantics are unchanged;
+14. no material canonical refresh runtime regression is introduced;
+15. after merge, a separately controlled server apply/refresh validates the actual persisted structural block.
