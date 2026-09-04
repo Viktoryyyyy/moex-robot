@@ -325,7 +325,6 @@ def load_live_analysis_snapshot(
     live_loader: LiveLoader = live_market.fetch_live_snapshot,
 ) -> dict[str, object]:
     base.load_dotenv(base.PROJECT_ENV_PATH, override=False)
-    root = base._data_root()
     snapshot, _path = reader(now_fn=now_fn)
     attempted_at = _iso_now(now_fn)
     live_snapshot = _load_live_or_unavailable(live_loader)
@@ -339,7 +338,6 @@ def load_live_analysis_snapshot(
         live_snapshot,
         attempted_at_utc=attempted_at,
     )
-    user_position.attach_user_position_context(snapshot, root=root)
     return snapshot
 
 
