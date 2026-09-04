@@ -95,6 +95,12 @@ def test_usdrubf_structural_component_is_exact_source_causal_and_compact(monkeyp
     assert data["current_closed_5m_bar_count"] == 3
     assert result.data_as_of == datetime(2026, 8, 31, 13, 40, tzinfo=current.base.MOSCOW)
 
+    assert data["trend"] in {"BULLISH_USD", "NEUTRAL", "BEARISH_USD"}
+    assert isinstance(data["market_regime"], str) and data["market_regime"]
+    assert data["ema_3_19"]["standalone_directional_authority"] is False
+    assert data["ema_3_19"]["s7_2_verdict"] == "REJECT_AS_STANDALONE_DIRECTIONAL_SIGNAL"
+    assert data["futoi"]["action_authority"] is False
+
     assert block["schema_version"] == "usdrubf_structural_levels_snapshot.v1"
     assert block["instrument"] == "USDRUBF"
     assert block["status"] == "FRESH"
@@ -145,8 +151,6 @@ def test_usdrubf_structural_component_is_exact_source_causal_and_compact(monkeyp
         "stage5_full_mode_ready": False,
         "stage5_pointer_promotion_performed": False,
     }
-    assert "trend" not in data
-    assert "ema_3_19" not in data
     assert "targets" not in block
     assert "stops" not in block
     assert "scenario_probabilities" not in block
@@ -171,6 +175,8 @@ def test_usdrubf_structural_component_is_reproducible_for_same_input(monkeypatch
     assert first.data["structural_levels"] == second.data["structural_levels"]
     assert first.data["active_levels"] == second.data["active_levels"]
     assert first.data["level_interactions"] == second.data["level_interactions"]
+    assert first.data["market_regime"] == second.data["market_regime"]
+    assert first.data["ema_3_19"] == second.data["ema_3_19"]
 
 
 def test_cnyrubf_live_uses_explicit_current_front_and_closed_bars(monkeypatch) -> None:
