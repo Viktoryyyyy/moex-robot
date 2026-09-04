@@ -12,6 +12,7 @@ from src.moex_research.runners import s7_3_parallel_component_prefetch as parall
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as base
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_current_context as current_context
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_futoi as futoi
+from src.moex_research.runners import usdrubf_user_position_context as user_position
 
 
 current_context.context = fast_context
@@ -312,6 +313,7 @@ def refresh_snapshot(
             live_snapshot,
             attempted_at_utc=attempted_at,
         )
+        user_position.attach_user_position_context(snapshot, root=root)
         base._atomic_write(path, snapshot)
     return snapshot, path
 
@@ -323,6 +325,7 @@ def load_live_analysis_snapshot(
     live_loader: LiveLoader = live_market.fetch_live_snapshot,
 ) -> dict[str, object]:
     base.load_dotenv(base.PROJECT_ENV_PATH, override=False)
+    root = base._data_root()
     snapshot, _path = reader(now_fn=now_fn)
     attempted_at = _iso_now(now_fn)
     live_snapshot = _load_live_or_unavailable(live_loader)
@@ -336,6 +339,7 @@ def load_live_analysis_snapshot(
         live_snapshot,
         attempted_at_utc=attempted_at,
     )
+    user_position.attach_user_position_context(snapshot, root=root)
     return snapshot
 
 
