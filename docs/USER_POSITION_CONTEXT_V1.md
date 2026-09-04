@@ -44,12 +44,12 @@ The attachment is a local file read only. It performs no network call and does n
 
 ## Manual update
 
-Use the existing project Python environment and run:
+Use the existing project Python environment with the repository's canonical `PYTHONPATH=.:src` convention:
 
-`python -m src.moex_research.runners.usdrubf_user_position_context --direction LONG --average-entry-price 86.15`
+`PYTHONPATH=.:src python -m moex_research.runners.usdrubf_user_position_context --direction LONG --average-entry-price 86.15`
 
-`python -m src.moex_research.runners.usdrubf_user_position_context --direction SHORT --average-entry-price 86.15`
+`PYTHONPATH=.:src python -m moex_research.runners.usdrubf_user_position_context --direction SHORT --average-entry-price 86.15`
 
-`python -m src.moex_research.runners.usdrubf_user_position_context --direction FLAT`
+`PYTHONPATH=.:src python -m moex_research.runners.usdrubf_user_position_context --direction FLAT`
 
 The update validates fail-closed and publishes the state atomically with the existing temp-file + `os.replace` mechanism.
