@@ -5,6 +5,7 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timezone
 
+from moex_data import live_basis_carry_context as live_basis_carry
 from moex_data import synchronized_live_market_oi_context_partial as live_market
 from moex_data.futures import futoi_intraday_previous_session_context_fast as fast_context
 from src.moex_research.runners import s7_3_parallel_component_prefetch as parallel_prefetch
@@ -18,6 +19,7 @@ current_context.context = fast_context
 PROJECT = current_context.PROJECT
 MODE = current_context.MODE
 COMPONENT = "synchronized_live_market_oi"
+BASIS_CARRY_COMPONENT = "live_basis_carry"
 LiveLoader = Callable[[], dict[str, object]]
 
 
@@ -52,6 +54,26 @@ def _load_live_or_unavailable(live_loader: LiveLoader) -> dict[str, object]:
             },
             "error_class": exc.__class__.__name__,
             "error": str(exc),
+        }
+
+
+def _load_basis_carry_or_unavailable(live_snapshot: Mapping[str, object]) -> dict[str, object]:
+    try:
+        return live_basis_carry.build_context(live_snapshot)
+    except Exception as exc:
+        return {
+            "schema_version": live_basis_carry.SCHEMA_VERSION,
+            "status": "UNAVAILABLE",
+            "data_as_of": None,
+            "source_component_ref": live_basis_carry.SOURCE_COMPONENT_REF,
+            "ready_metric_count": 0,
+            "error_class": exc.__class__.__name__,
+            "error": str(exc),
+            "directional_authority": False,
+            "action_authority": False,
+            "standalone_buy_sell_authority": False,
+            "stage5_full_mode_ready": False,
+            "stage5_pointer_promotion_performed": False,
         }
 
 
@@ -140,6 +162,55 @@ def attach_live_market_oi_context(
     _recompute_readiness_with_partial(snapshot)
 
 
+def attach_live_basis_carry_context(
+    snapshot: dict[str, object],
+    live_snapshot: Mapping[str, object],
+    *,
+    attempted_at_utc: str,
+) -> None:
+    components = snapshot.get("components")
+    authority = snapshot.get("authority")
+    analysis_views = snapshot.get("analysis_views")
+    analysis_workflow = snapshot.get("analysis_workflow")
+    if not all(isinstance(value, dict) for value in (components, authority, analysis_views, analysis_workflow)):
+        raise LiveMarketOIContextSnapshotError("S7.3 snapshot structure is missing")
+
+    derived = _load_basis_carry_or_unavailable(live_snapshot)
+    status = str(derived.get("status") or "UNAVAILABLE")
+    if status not in {"READY", "PARTIAL", "UNAVAILABLE"}:
+        status = "UNAVAILABLE"
+    factual_usable = bool(int(derived.get("ready_metric_count") or 0) > 0)
+    source_error = derived.get("error")
+    components[BASIS_CARRY_COMPONENT] = {
+        "status": status,
+        "refresh_attempted_at": attempted_at_utc,
+        "last_success_at": attempted_at_utc if factual_usable else None,
+        "data_as_of": derived.get("data_as_of"),
+        "refresh_error_class": derived.get("error_class") if not factual_usable else None,
+        "refresh_error": str(source_error) if not factual_usable and source_error is not None else None,
+        "data": derived,
+    }
+    analysis_views["fresh_basis_carry_component_ref"] = BASIS_CARRY_COMPONENT
+    analysis_workflow["fresh_basis_carry"] = {
+        "consumer": "SEPARATE_ANALYSIS_CHAT",
+        "component_ref": BASIS_CARRY_COMPONENT,
+        "source_component_ref": COMPONENT,
+        "factual_use_requires": (
+            f"components.{BASIS_CARRY_COMPONENT}.status in {{READY,PARTIAL}} and requested metric status=READY"
+        ),
+        "current_live_values_only": True,
+        "additional_live_fetch_allowed": False,
+        "missing_value_must_not_be_interpreted_as_zero": True,
+        "directional_authority": False,
+        "action_authority": False,
+        "standalone_buy_sell_authority": False,
+    }
+    authority["live_basis_carry_factual_authority"] = factual_usable
+    authority["live_basis_carry_directional_authority"] = False
+    authority["live_basis_carry_action_authority"] = False
+    _recompute_readiness_with_partial(snapshot)
+
+
 def refresh_snapshot(
     *,
     now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
@@ -177,10 +248,16 @@ def refresh_snapshot(
         )
         current_context._attach_futoi_context(snapshot, refresh_bundle, delta_bundle)
         live_snapshot = _load_live_or_unavailable(live_loader)
+        attempted_at = _iso_now(lambda: now)
         attach_live_market_oi_context(
             snapshot,
             live_snapshot,
-            attempted_at_utc=_iso_now(lambda: now),
+            attempted_at_utc=attempted_at,
+        )
+        attach_live_basis_carry_context(
+            snapshot,
+            live_snapshot,
+            attempted_at_utc=attempted_at,
         )
         base._atomic_write(path, snapshot)
     return snapshot, path
@@ -197,6 +274,11 @@ def load_live_analysis_snapshot(
     attempted_at = _iso_now(now_fn)
     live_snapshot = _load_live_or_unavailable(live_loader)
     attach_live_market_oi_context(
+        snapshot,
+        live_snapshot,
+        attempted_at_utc=attempted_at,
+    )
+    attach_live_basis_carry_context(
         snapshot,
         live_snapshot,
         attempted_at_utc=attempted_at,
