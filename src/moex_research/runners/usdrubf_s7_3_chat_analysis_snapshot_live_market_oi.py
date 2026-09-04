@@ -12,6 +12,7 @@ from src.moex_research.runners import s7_3_parallel_component_prefetch as parall
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as base
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_current_context as current_context
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_futoi as futoi
+from src.moex_research.runners import usdrubf_user_position_context as user_position
 
 
 current_context.context = fast_context
@@ -312,6 +313,7 @@ def refresh_snapshot(
             live_snapshot,
             attempted_at_utc=attempted_at,
         )
+        user_position.attach_user_position_context(snapshot, root=root)
         base._atomic_write(path, snapshot)
     return snapshot, path
 
