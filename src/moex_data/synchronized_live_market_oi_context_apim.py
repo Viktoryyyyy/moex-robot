@@ -4,7 +4,7 @@ import os
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Final
 
 import requests
@@ -15,6 +15,13 @@ from moex_data import synchronized_live_market_oi_context as core
 APIM_FULL_RESPONSE_PROBE_START: Final[int] = 1_000_000_000
 COMPLETENESS_MODE: Final[str] = "apim_full_response_start_invariant_probe"
 FORTS_WAP_STATUS: Final[str] = "unavailable_source_native"
+CONTRACT_METADATA_SOURCE_ID: Final[str] = "moex_apim_forts_rfud_live_securities"
+EXPIRING_LOGICAL_IDS: Final[tuple[str, ...]] = (
+    "si_front",
+    "si_next",
+    "cr_front",
+    "cr_next",
+)
 
 
 def _secid_sequence(payload: Mapping[str, object], block_name: str) -> tuple[str, ...]:
@@ -99,6 +106,46 @@ def _mark_wap_semantics(snapshot: dict[str, object]) -> None:
         raise core.SynchronizedLiveMarketOIError("snapshot FORTS provenance is missing")
     provenance["forts"]["wap_method"] = None
     provenance["forts"]["wap_status"] = FORTS_WAP_STATUS
+
+
+def _attach_expiry_metadata(
+    snapshot: dict[str, object],
+    forts_payload: Mapping[str, object],
+) -> None:
+    instruments = snapshot.get("instruments")
+    provenance = snapshot.get("provenance")
+    if not isinstance(instruments, dict):
+        raise core.SynchronizedLiveMarketOIError("snapshot instruments are missing")
+    if not isinstance(provenance, dict) or not isinstance(provenance.get("forts"), dict):
+        raise core.SynchronizedLiveMarketOIError("snapshot FORTS provenance is missing")
+    securities = core._table_frame(forts_payload, "securities")
+    core._require_columns(securities, core.FUTURES_SECURITY_COLUMNS, "FORTS securities")
+    source_url = provenance["forts"].get("source_url")
+
+    for logical_id in EXPIRING_LOGICAL_IDS:
+        item = instruments.get(logical_id)
+        if not isinstance(item, dict):
+            raise core.SynchronizedLiveMarketOIError(f"snapshot instrument {logical_id} is missing")
+        secid = str(item.get("secid") or "").strip()
+        if not secid:
+            raise core.SynchronizedLiveMarketOIError(f"snapshot instrument {logical_id} SECID is missing")
+        row = core._row_by_secid(securities, secid, block_name="FORTS securities")
+        raw_expiry = str(row.get("LASTTRADEDATE") or "").strip()
+        try:
+            expiry = date.fromisoformat(raw_expiry).isoformat()
+        except ValueError as exc:
+            raise core.SynchronizedLiveMarketOIError(
+                f"{secid}.LASTTRADEDATE is invalid"
+            ) from exc
+        item["expiry_date"] = expiry
+        item["expiry_metadata"] = {
+            "source_id": CONTRACT_METADATA_SOURCE_ID,
+            "source_url": source_url,
+            "source_field": "LASTTRADEDATE",
+            "same_rfud_response_as_live_binding": True,
+            "front_next_minimum_days_to_expiry": 1,
+            "expiry_day_contract_allowed": False,
+        }
 
 
 def _fetch_forts_verified(
@@ -227,11 +274,14 @@ def fetch_live_snapshot(
         cets_source_url=cets_source_url,
     )
     _mark_wap_semantics(snapshot)
+    _attach_expiry_metadata(snapshot, normalized_forts_payload)
     provenance = snapshot.get("provenance")
     if not isinstance(provenance, dict) or not isinstance(provenance.get("forts"), dict):
         raise core.SynchronizedLiveMarketOIError("snapshot FORTS provenance is missing")
     provenance["forts"]["pagination_complete"] = True
     provenance["forts"]["completeness"] = completeness
+    provenance["forts"]["contract_metadata_source_id"] = CONTRACT_METADATA_SOURCE_ID
+    provenance["forts"]["contract_metadata_reused_from_live_response"] = True
     return snapshot
 
 
