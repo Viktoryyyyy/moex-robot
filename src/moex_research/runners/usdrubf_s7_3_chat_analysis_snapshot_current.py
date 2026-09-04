@@ -8,8 +8,6 @@ from datetime import date, datetime, timezone
 from typing import Mapping, Sequence
 
 from moex_data.futures import front_next_binding
-from src.moex_research.intelligence.usdrubf_level_structure import classify_level_history
-from src.moex_research.intelligence.usdrubf_live_shadow_bridge import build_previous_session_zones
 from src.moex_research.runners import usdrubf_live_shadow_smoke as live
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as base
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_futoi as futoi
@@ -237,8 +235,23 @@ def _usdrubf_live_market_structure_component(now: datetime) -> base.ProducedComp
     if _observed_session_date(prior_closed, field="prior_closed") != prior_trade_date:
         raise CurrentChatSnapshotError("prior USDRUBF bars do not match the observed prior date")
 
-    zones = tuple(build_previous_session_zones(prior_closed))
-    interactions = tuple(classify_level_history(zone, current_closed) for zone in zones)
+    market_data_as_of = current_closed[-1]["end"]
+    futoi_context = base.load_futoi_context(
+        prior_trade_date=prior_trade_date,
+        current_trade_date=current_trade_date,
+        fallback_available_at=market_data_as_of,
+        enabled=False,
+    )
+    inputs = base.build_live_decision_input(
+        current_session_bars=current_closed,
+        prior_session_bars=prior_closed,
+        wall_clock_as_of=now_moscow,
+        futoi_context=futoi_context,
+        news_events=(),
+        macro_state=None,
+    )
+    zones = tuple(inputs.active_levels)
+    interactions = tuple(inputs.level_interactions)
     structural_levels = _structural_levels_block(
         now_utc=now_utc,
         current_trade_date=current_trade_date,
@@ -248,18 +261,28 @@ def _usdrubf_live_market_structure_component(now: datetime) -> base.ProducedComp
         zones=zones,
         interactions=interactions,
     )
-    market_data_as_of = current_closed[-1]["end"]
     data = {
         "instrument": USDRUBF_SECID,
         "trade_date": current_trade_date.isoformat(),
         "prior_trade_date": prior_trade_date.isoformat(),
         "market_data_as_of": market_data_as_of,
-        "price": structural_levels["price_context"]["price"],
+        "price": inputs.price,
+        "trend": inputs.trend,
+        "market_regime": inputs.market_regime,
         "source_id": SOURCE_ID,
         "source_contract_ref": SOURCE_CONTRACT_REF,
         "requested_secid": USDRUBF_SECID,
         "active_levels": zones,
         "level_interactions": interactions,
+        "ema_3_19": {
+            **asdict(inputs.ema_3_19_ai),
+            "standalone_directional_authority": False,
+            "s7_2_verdict": "REJECT_AS_STANDALONE_DIRECTIONAL_SIGNAL",
+        },
+        "futoi": {
+            **asdict(inputs.futoi),
+            "action_authority": False,
+        },
         "structural_levels": structural_levels,
         "current_closed_5m_bar_count": len(current_closed),
         "prior_session_5m_bar_count": len(prior_closed),
