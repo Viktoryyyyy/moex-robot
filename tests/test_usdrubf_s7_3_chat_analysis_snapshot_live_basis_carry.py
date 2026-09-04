@@ -129,7 +129,11 @@ def test_refresh_writes_basis_carry_from_single_live_fetch_into_canonical_snapsh
     assert written["snapshot"] is snapshot
     assert snapshot["components"][overlay.COMPONENT]["status"] == "READY"
     basis_component = snapshot["components"][overlay.BASIS_CARRY_COMPONENT]
-    assert basis_component["status"] == "PARTIAL"
+    assert basis_component["status"] == "READY"
+    assert basis_component["data"]["status"] == "PARTIAL"
+    assert basis_component["data"]["current_live_scope_status"] == "READY"
+    assert basis_component["data"]["current_live_schema_usd_tom_supported"] is False
+    assert len(basis_component["data"]["structurally_unavailable_metric_ids"]) == 8
     assert basis_component["data"]["source_component_ref"] == "components.synchronized_live_market_oi"
     assert basis_component["data"]["live_input_policy"]["additional_live_fetch_performed"] is False
     assert basis_component["data"]["pairs"]["cny_rub"]["status"] == "READY"
@@ -140,4 +144,4 @@ def test_refresh_writes_basis_carry_from_single_live_fetch_into_canonical_snapsh
     assert snapshot["authority"]["live_basis_carry_action_authority"] is False
     assert basis_component["data"]["stage5_full_mode_ready"] is False
     assert basis_component["data"]["stage5_pointer_promotion_performed"] is False
-    assert snapshot["readiness"]["status"] == "PARTIAL"
+    assert snapshot["readiness"]["status"] == "READY"
