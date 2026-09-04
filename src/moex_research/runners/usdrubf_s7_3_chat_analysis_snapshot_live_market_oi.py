@@ -58,15 +58,26 @@ def _load_live_or_unavailable(live_loader: LiveLoader) -> dict[str, object]:
 
 
 def _load_basis_carry_or_unavailable(live_snapshot: Mapping[str, object]) -> dict[str, object]:
+    source_snapshot = dict(live_snapshot)
+    usd_tom_supported = "usd_tom" in live_basis_carry.live_core.LOGICAL_ORDER
+    instruments = live_snapshot.get("instruments")
+    if isinstance(instruments, Mapping):
+        sanitized_instruments = dict(instruments)
+        if not usd_tom_supported:
+            sanitized_instruments.pop("usd_tom", None)
+        source_snapshot["instruments"] = sanitized_instruments
     try:
-        return live_basis_carry.build_context(live_snapshot)
+        derived = live_basis_carry.build_context(source_snapshot)
     except Exception as exc:
         return {
             "schema_version": live_basis_carry.SCHEMA_VERSION,
             "status": "UNAVAILABLE",
+            "current_live_scope_status": "UNAVAILABLE",
             "data_as_of": None,
             "source_component_ref": live_basis_carry.SOURCE_COMPONENT_REF,
             "ready_metric_count": 0,
+            "current_live_schema_usd_tom_supported": usd_tom_supported,
+            "structurally_unavailable_metric_ids": [],
             "error_class": exc.__class__.__name__,
             "error": str(exc),
             "directional_authority": False,
@@ -75,6 +86,48 @@ def _load_basis_carry_or_unavailable(live_snapshot: Mapping[str, object]) -> dic
             "stage5_full_mode_ready": False,
             "stage5_pointer_promotion_performed": False,
         }
+
+    all_unavailable: list[str] = []
+    structural_unavailable: list[str] = []
+    pairs = derived.get("pairs")
+    if isinstance(pairs, Mapping):
+        for pair in pairs.values():
+            if not isinstance(pair, Mapping):
+                continue
+            metrics = pair.get("metrics")
+            if isinstance(metrics, (str, bytes)) or not isinstance(metrics, Sequence):
+                continue
+            for metric in metrics:
+                if not isinstance(metric, Mapping) or metric.get("status") == "READY":
+                    continue
+                metric_id = str(metric.get("metric_id") or "").strip()
+                if not metric_id:
+                    continue
+                all_unavailable.append(metric_id)
+                legs = metric.get("legs")
+                reason = str(metric.get("unavailable_reason") or "")
+                if (
+                    not usd_tom_supported
+                    and isinstance(legs, Sequence)
+                    and not isinstance(legs, (str, bytes))
+                    and "usd_tom" in [str(value) for value in legs]
+                    and reason.startswith("leg_unavailable:usd_tom:leg_not_present_in_synchronized_live_component")
+                ):
+                    structural_unavailable.append(metric_id)
+
+    ready_metric_count = int(derived.get("ready_metric_count") or 0)
+    current_live_scope_status = "UNAVAILABLE"
+    if ready_metric_count > 0:
+        current_live_scope_status = (
+            "READY"
+            if sorted(all_unavailable) == sorted(structural_unavailable)
+            else "PARTIAL"
+        )
+    derived["requested_metric_availability_status"] = derived.get("status")
+    derived["current_live_scope_status"] = current_live_scope_status
+    derived["current_live_schema_usd_tom_supported"] = usd_tom_supported
+    derived["structurally_unavailable_metric_ids"] = sorted(structural_unavailable)
+    return derived
 
 
 def _recompute_readiness_with_partial(snapshot: dict[str, object]) -> None:
@@ -176,7 +229,7 @@ def attach_live_basis_carry_context(
         raise LiveMarketOIContextSnapshotError("S7.3 snapshot structure is missing")
 
     derived = _load_basis_carry_or_unavailable(live_snapshot)
-    status = str(derived.get("status") or "UNAVAILABLE")
+    status = str(derived.get("current_live_scope_status") or "UNAVAILABLE")
     if status not in {"READY", "PARTIAL", "UNAVAILABLE"}:
         status = "UNAVAILABLE"
     factual_usable = bool(int(derived.get("ready_metric_count") or 0) > 0)
