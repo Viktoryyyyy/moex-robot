@@ -16,8 +16,8 @@ import requests, pandas as pd
 
 # локальные утилиты проекта (у тебя они уже есть)
 from dotenv import load_dotenv
-from scripts.config_utils import load_config
-from scripts.tg_utils import send_message
+from src.misc.config_utils import load_config
+from src.misc.tg_utils import send_message
 
 APIM_BASE = "https://apim.moex.com"
 ISS_BASE  = "https://iss.moex.com"

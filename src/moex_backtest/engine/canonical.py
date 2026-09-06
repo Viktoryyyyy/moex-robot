@@ -177,7 +177,31 @@ class CanonicalBacktestEngine:
                 peak_equity = max(peak_equity, path_row["equity"])
                 max_drawdown = max(max_drawdown, peak_equity - path_row["equity"])
 
-        final_equity = cash if not position_path else position_path[-1]["equity"]
+        # Replay fills chronologically and mark every valid close, including
+        # holding bars. Keep position_path's existing execution-only contract.
+        marked_cash = execution_config.initial_cash
+        marked_position = 0
+        peak_equity = execution_config.initial_cash
+        max_drawdown = 0.0
+        equity_path = []
+        fill_index = 0
+        for bar in bars:
+            if not bar.valid:
+                continue
+            while fill_index < len(fills) and fills[fill_index]["execution_timestamp"] == bar.timestamp:
+                fill = fills[fill_index]
+                if fill["reason"] == "forced_terminal_close":
+                    # Mark the terminal close before its liquidation costs as well.
+                    peak_equity = max(peak_equity, marked_cash + marked_position * bar.close)
+                marked_cash -= fill["quantity"] * fill["fill_price"] + costs[fill_index]["commission"]
+                marked_position = fill["position_after"]
+                fill_index += 1
+            equity = marked_cash + marked_position * bar.close
+            peak_equity = max(peak_equity, equity)
+            max_drawdown = max(max_drawdown, peak_equity - equity)
+            equity_path.append({"timestamp": bar.timestamp, "position": marked_position,
+                                "cash": marked_cash, "mark_price": bar.close, "equity": equity})
+        final_equity = equity_path[-1]["equity"] if equity_path else cash
         metrics = {
             "engine_id": self.engine_id,
             "fill_model_id": execution_config.fill_model_id,
@@ -210,6 +234,7 @@ class CanonicalBacktestEngine:
             "cost_slippage_records": tuple(costs),
             "rejected_signals": tuple(rejected_signals),
             "equity_summary": metrics,
+            "marked_equity_path": tuple(equity_path),
         }
         return BacktestResult(
             fills=tuple(fills),

@@ -105,12 +105,12 @@ def main() -> int:
     ema["EMA_EDGE_DAY"] = pd.to_numeric(ema["EMA_EDGE_DAY"], errors="coerce")
 
     if ema["pnl_day"].isna().any():
-        _die(f"ema: non-numeric pnl_day rows={int(ema[pnl_day].isna().sum())}")
+        _die(f"ema: non-numeric pnl_day rows={int(ema['pnl_day'].isna().sum())}")
     if ema["EMA_EDGE_DAY"].isna().any():
-        _die(f"ema: non-numeric EMA_EDGE_DAY rows={int(ema[EMA_EDGE_DAY].isna().sum())}")
+        _die(f"ema: non-numeric EMA_EDGE_DAY rows={int(ema['EMA_EDGE_DAY'].isna().sum())}")
 
     if ema["date"].duplicated().any():
-        _die(f"ema: duplicate date rows={int(ema[date].duplicated().sum())}")
+        _die(f"ema: duplicate date rows={int(ema['date'].duplicated().sum())}")
 
     metrics = pd.read_csv(args.day_metrics_csv)
     _validate_columns(metrics, METRICS_REQUIRED_COLS, "day_metrics")
@@ -123,7 +123,7 @@ def main() -> int:
             _die(f"day_metrics: non-numeric {c} rows={int(metrics[c].isna().sum())}")
 
     if metrics["date"].duplicated().any():
-        _die(f"day_metrics: duplicate date rows={int(metrics[date].duplicated().sum())}")
+        _die(f"day_metrics: duplicate date rows={int(metrics['date'].duplicated().sum())}")
 
     d = metrics.copy()
     d["date"] = pd.to_datetime(d["date"], errors="coerce")
@@ -135,7 +135,7 @@ def main() -> int:
     gate = gate.rename(columns={"PhaseTransitionRisk": "gate_state"})
 
     if gate["gate_state"].isna().any():
-        _die(f"gate: NaN gate_state rows={int(gate[gate_state].isna().sum())}")
+        _die(f"gate: NaN gate_state rows={int(gate['gate_state'].isna().sum())}")
 
     joined = ema.merge(gate, on="date", how="inner", validate="one_to_one")
     if joined.empty:

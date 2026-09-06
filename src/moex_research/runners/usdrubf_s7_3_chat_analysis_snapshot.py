@@ -580,7 +580,9 @@ def read_current_snapshot(
     identity = snapshot["identity"]
     generated = _aware(identity["generated_at_utc"], "generated_at_utc")
     now = _aware(now_fn(), "clock")
-    age = max(0, int((now - generated).total_seconds()))
+    if generated > now:
+        raise ChatAnalysisSnapshotError("current snapshot generated_at_utc is in the future")
+    age = int((now - generated).total_seconds())
     result = dict(snapshot)
     result["read_freshness"] = {
         "read_at_utc": _iso(now),

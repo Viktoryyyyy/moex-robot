@@ -131,7 +131,7 @@ def _execute_canonical_backtest(
         .reset_index(drop=True)
     )
     out["cum_pnl_day"] = out["pnl_day"].cumsum()
-    out["dd_day"] = out["cum_pnl_day"] - out["cum_pnl_day"].cummax()
+    out["dd_day"] = out["cum_pnl_day"] - out["cum_pnl_day"].cummax().clip(lower=0.0)
     out["max_dd_day"] = out["dd_day"].mul(-1.0)
     out["EMA_EDGE_DAY"] = (out["pnl_day"] > 0.0).astype(int)
     out = out.rename(columns={"trade_session_date": "date"})

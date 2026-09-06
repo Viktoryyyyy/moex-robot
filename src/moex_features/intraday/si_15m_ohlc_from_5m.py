@@ -45,6 +45,13 @@ def materialize_feature_frame(*, dataset_artifact_path: str | Path, instrument_i
 
     work = work.dropna(subset=["end", "open", "high", "low", "close"]).sort_values("end").reset_index(drop=True)
 
+    # A finalized 15m interval requires all three distinct 5m closes.
+    if work["end"].duplicated().any():
+        raise ValueError("duplicate 5m bar timestamps")
+    if (work["end"] != work["end"].dt.floor("5min")).any():
+        raise ValueError("5m bar timestamps must align to five-minute boundaries")
+    counts = work.set_index("end").resample("15min", label="right", closed="right").size()
+
     agg = {
         "open": "first",
         "high": "max",
@@ -58,6 +65,7 @@ def materialize_feature_frame(*, dataset_artifact_path: str | Path, instrument_i
         work.set_index("end")
         .resample("15min", label="right", closed="right")
         .agg(agg)
+        .loc[counts.eq(3)]
         .dropna(subset=["open", "high", "low", "close"])
         .reset_index()
     )

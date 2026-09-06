@@ -43,6 +43,26 @@ def _action(prev_position: float, new_position: float) -> str:
     raise StrategyRegistrationError("runtime position change action undefined")
 
 
+def recover_position_state(
+    prior_state: Mapping[str, object], last_trade_log_row: Mapping[str, str] | None,
+) -> dict[str, object]:
+    """A newer committed log row takes precedence over a stale checkpoint."""
+    state = dict(prior_state)
+    if last_trade_log_row is None:
+        return state
+    try:
+        seq = int(last_trade_log_row["seq"])
+        state_seq = int(state.get("last_trade_seq", 0))
+        position = _coerce_position(float(last_trade_log_row["new_pos"]))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise StrategyRegistrationError("invalid runtime recovery log row") from exc
+    if seq > state_seq:
+        state.update(current_position=position, last_desired_position=position,
+                     last_trade_seq=seq, last_bar_end=last_trade_log_row.get("bar_end"),
+                     last_reason_code=last_trade_log_row.get("reason_code"))
+    return state
+
+
 def resolve_runtime_position_transition(
     *,
     prior_state: Mapping[str, object],
@@ -57,12 +77,8 @@ def resolve_runtime_position_transition(
     next_trade_seq: int,
     updated_at_iso: str,
 ) -> RuntimePositionTransition:
+    prior_state = recover_position_state(prior_state, last_trade_log_row)
     current_position = _coerce_position(prior_state.get("current_position"))
-    if current_position == 0.0 and last_trade_log_row is not None and "new_pos" in last_trade_log_row:
-        try:
-            current_position = _coerce_position(float(last_trade_log_row["new_pos"]))
-        except ValueError as exc:
-            raise StrategyRegistrationError("runtime trade log new_pos must be numeric") from exc
     desired_position = float(decision.desired_position)
     position_changed = desired_position != current_position
     action = _action(current_position, desired_position) if position_changed else None

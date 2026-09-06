@@ -3,7 +3,6 @@
 import os, time, json, requests
 from pathlib import Path
 from dotenv import load_dotenv
-from config_utils import load_config, save_config
 
 OFFSET_FILE = Path(".state/cmd_bot.offset")
 STOP_FILE   = Path(".state/stop_mr1")
@@ -92,8 +91,8 @@ def main():
                 elif text.lower() in ("/status", "status"):
                     # Показываем статус
                     parts = []
-                    parts.append(f"loop lock: {есть if LOCK_FILE.exists() else нет}")
-                    parts.append(f"stop file: {есть if STOP_FILE.exists() else нет}")
+                    parts.append(f"loop lock: {'есть' if LOCK_FILE.exists() else 'нет'}")
+                    parts.append(f"stop file: {'есть' if STOP_FILE.exists() else 'нет'}")
                     send_message(token, chat_id, "ℹ️ Статус: " + "; ".join(parts))
 
                 else:

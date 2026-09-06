@@ -14,10 +14,11 @@ MOEX APIs. It only works with:
 
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, TYPE_CHECKING
 
 from .config_ema_5_12 import EMA_FAST_WINDOW, EMA_SLOW_WINDOW
-from .feed_ema_5_12 import Bar
+if TYPE_CHECKING:
+    from .feed_ema_5_12 import Bar
 
 
 # Signal types returned by process_bar
