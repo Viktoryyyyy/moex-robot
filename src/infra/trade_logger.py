@@ -9,6 +9,7 @@ For EMA(5,12) robot we log TradeEvent into:
 from __future__ import annotations
 
 import csv
+import os
 from datetime import date
 from pathlib import Path
 
@@ -81,10 +82,11 @@ def append_trade_ema_5_12(trade_date: date, trade: TradeEvent) -> None:
         "reason_close": trade.reason_close,
     }
 
-    tmp = path.with_suffix(".csv.tmp")
-    with tmp.open("a", newline="") as f:
+    # The realtime loop holds the single-instance writer lock.
+    with path.open("a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDNAMES_EMA_5_12)
         if is_new:
             writer.writeheader()
         writer.writerow(row)
-    tmp.replace(path)
+        f.flush()
+        os.fsync(f.fileno())

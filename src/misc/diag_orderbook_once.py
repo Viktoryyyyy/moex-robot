@@ -2,7 +2,7 @@
 import pandas as pd, numpy as np
 from zoneinfo import ZoneInfo
 import sys
-from scripts.lib_moex_v3 import get_json
+from src.misc.lib_moex_v3 import get_json
 
 def to_df(block):
     cols = (block or {}).get("columns")
@@ -23,31 +23,6 @@ def pick_price_qty(df):
     q = find_col(cols, ["quantity","qty","NUMBER","volume"])
     return p, q
 
-ticker = sys.argv[1] if len(sys.argv)>1 else "SiZ5"
-depth  = int(sys.argv[2]) if len(sys.argv)>2 else 20
-tz     = ZoneInfo("Europe/Moscow")
-
-raw = get_json(f"/iss/engines/futures/markets/forts/securities/{ticker}/orderbook.json", {"depth": depth})
-bids = to_df(raw.get("bids", {}))
-offers_df = to_df(raw.get("offers", {}))
-asks_df = to_df(raw.get("asks", {}))
-asks = offers_df if not offers_df.empty else asks_df
-
-# время
-dt = None
-for key in ["orderbook","marketdata","securities"]:
-    blk = to_df(raw.get(key, {}))
-    if not blk.empty:
-        tcol = find_col(list(blk.columns), ["systime","time","datetime","timestamp"])
-        if tcol:
-            try:
-                dt = pd.to_datetime(blk[tcol].iloc[0], utc=True).tz_convert(tz)
-            except Exception:
-                dt = pd.to_datetime(blk[tcol].iloc[0]).tz_localize(tz)
-            break
-if dt is None:
-    dt = pd.Timestamp.now(tz)
-
 def topn(df, side, n=5):
     if df.empty: return np.nan, 0.0
     p, q = pick_price_qty(df)
@@ -65,10 +40,40 @@ def topn(df, side, n=5):
     depth = float(df2[q].sum()) if not df2.empty else 0.0
     return best, depth
 
-bb, db = topn(bids, "bid", 5)
-ba, da = topn(asks, "ask", 5)
-spread = (ba - bb) if pd.notna(ba) and pd.notna(bb) else np.nan
+def main():
+    ticker = sys.argv[1] if len(sys.argv)>1 else "SiZ5"
+    depth  = int(sys.argv[2]) if len(sys.argv)>2 else 20
+    tz     = ZoneInfo("Europe/Moscow")
 
-print(f"dt={dt.tz_convert(tz).tz_localize(None)}  best_bid={bb}  best_ask={ba}  spread={spread}")
-print("bids_cols:", list(bids.columns)[:8], "… rows:", len(bids))
-print("asks_cols:", list(asks.columns)[:8], "… rows:", len(asks))
+    raw = get_json(f"/iss/engines/futures/markets/forts/securities/{ticker}/orderbook.json", {"depth": depth})
+    bids = to_df(raw.get("bids", {}))
+    offers_df = to_df(raw.get("offers", {}))
+    asks_df = to_df(raw.get("asks", {}))
+    asks = offers_df if not offers_df.empty else asks_df
+
+    # время
+    dt = None
+    for key in ["orderbook","marketdata","securities"]:
+        blk = to_df(raw.get(key, {}))
+        if not blk.empty:
+            tcol = find_col(list(blk.columns), ["systime","time","datetime","timestamp"])
+            if tcol:
+                try:
+                    dt = pd.to_datetime(blk[tcol].iloc[0], utc=True).tz_convert(tz)
+                except Exception:
+                    dt = pd.to_datetime(blk[tcol].iloc[0]).tz_localize(tz)
+                break
+    if dt is None:
+        dt = pd.Timestamp.now(tz)
+
+    bb, db = topn(bids, "bid", 5)
+    ba, da = topn(asks, "ask", 5)
+    spread = (ba - bb) if pd.notna(ba) and pd.notna(bb) else np.nan
+
+    print(f"dt={dt.tz_convert(tz).tz_localize(None)}  best_bid={bb}  best_ask={ba}  spread={spread}")
+    print("bids_cols:", list(bids.columns)[:8], "… rows:", len(bids))
+    print("asks_cols:", list(asks.columns)[:8], "… rows:", len(asks))
+
+
+if __name__ == "__main__":
+    main()

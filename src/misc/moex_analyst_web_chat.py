@@ -482,8 +482,8 @@ class AnalystRequestHandler(BaseHTTPRequestHandler):
         user, separator, password = decoded.partition(":")
         if separator != ":":
             return False
-        return hmac.compare_digest(user, self.server.web_user) and hmac.compare_digest(
-            password, self.server.web_password
+        return hmac.compare_digest(user.encode("utf-8"), self.server.web_user.encode("utf-8")) and hmac.compare_digest(
+            password.encode("utf-8"), self.server.web_password.encode("utf-8")
         )
 
     def _require_auth(self) -> bool:

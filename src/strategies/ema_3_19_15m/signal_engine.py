@@ -45,7 +45,7 @@ def generate_signals(*, inputs: StrategyInputFrame, config: StrategyConfig) -> S
     prev_slow: float | None = None
     next_rows: list[dict[str, object]] = []
 
-    for row in inputs:
+    for bars_seen, row in enumerate(inputs, start=1):
         end = _coerce_bar_end(row.get("end"))
         close = _coerce_close(row.get("close"))
         instrument_id = _coerce_instrument_id(row, config)
@@ -57,7 +57,7 @@ def generate_signals(*, inputs: StrategyInputFrame, config: StrategyConfig) -> S
         next_fast = close if prev_fast is None else (_alpha(config.ema_fast_window) * close) + ((1.0 - _alpha(config.ema_fast_window)) * prev_fast)
         next_slow = close if prev_slow is None else (_alpha(config.ema_slow_window) * close) + ((1.0 - _alpha(config.ema_slow_window)) * prev_slow)
 
-        if prev_fast is not None and prev_slow is not None:
+        if bars_seen >= config.warmup_bars and prev_fast is not None and prev_slow is not None:
             crossed_up = prev_fast <= prev_slow and next_fast > next_slow
             crossed_down = prev_fast >= prev_slow and next_fast < next_slow
 

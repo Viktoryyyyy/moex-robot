@@ -118,7 +118,7 @@ class SnapshotRequestHandler(BaseHTTPRequestHandler):
             return False
         if credential != credential.strip() or any(char.isspace() for char in credential):
             return False
-        return hmac.compare_digest(credential, self.server.api_token)
+        return credential.isascii() and hmac.compare_digest(credential, self.server.api_token)
 
     def _require_authorization(self) -> bool:
         if self._authorized():

@@ -2,7 +2,7 @@
 import os, time, argparse, pandas as pd, numpy as np
 from datetime import datetime, date
 from zoneinfo import ZoneInfo
-from scripts.lib_moex_v3 import get_json
+from src.misc.lib_moex_v3 import get_json
 
 def to_df(block):
     cols = (block or {}).get("columns")

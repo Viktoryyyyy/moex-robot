@@ -141,6 +141,7 @@ def execute_on_bar(
     state.pnl_cum += pnl_net
 
     pos_after = target_pos
+    state.pos = pos_after
     if pos_after != 0:
         state.entry_price = close_price
     else:
