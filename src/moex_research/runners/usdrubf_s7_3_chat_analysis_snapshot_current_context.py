@@ -231,6 +231,7 @@ def refresh_snapshot(
             data_root=root,
         )
         _attach_futoi_context(snapshot, refresh_bundle, delta_bundle)
+        base.finalize_snapshot_timing(snapshot, started=now, completed=now_fn())
         base._atomic_write(path, snapshot)
     return snapshot, path
 

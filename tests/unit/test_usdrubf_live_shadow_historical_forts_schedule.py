@@ -103,3 +103,18 @@ def test_non_clearing_historical_gap_remains_fail_closed() -> None:
 
     with pytest.raises(LiveShadowBridgeError, match="broken 15m bucket.*13:15:00"):
         build_closed_15m_bars(bars)
+
+
+def test_broken_bucket_reports_exact_missing_source_bars() -> None:
+    bars = (
+        _bar("2026-09-06", "11:45", 80.00),
+        _bar("2026-09-06", "11:50", 80.05),
+        _bar("2026-09-06", "11:55", 80.10),
+        _bar("2026-09-06", "12:05", 80.15),
+        _bar("2026-09-06", "12:10", 80.20),
+    )
+    with pytest.raises(LiveShadowBridgeError) as error:
+        build_closed_15m_bars(bars)
+    assert "missing=2026-09-06T12:00:00+03:00;" in str(error.value)
+    assert "observed=2026-09-06T12:05:00+03:00,2026-09-06T12:10:00+03:00" in str(error.value)
+    assert "synthetic_fill_allowed=false" in str(error.value)

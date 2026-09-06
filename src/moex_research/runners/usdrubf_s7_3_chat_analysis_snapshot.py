@@ -15,6 +15,7 @@ from typing import Callable, Iterator, Mapping, Sequence
 from dotenv import load_dotenv
 
 from moex_data import step9_rub_analysis_bundle as step9
+from moex_data.rub_snapshot_read_freshness import apply_read_freshness
 from moex_research.external_data import moex_cnyrub_algopack_history as cny_spot
 from moex_research.external_data import moex_cnyrubf_algopack_history as cny_futures
 from moex_research.external_data.moex_cnyrub_algopack_timestamp_policy import (
@@ -550,6 +551,23 @@ def build_snapshot(
     }
 
 
+def finalize_snapshot_timing(snapshot: dict[str, object], *, started: datetime, completed: datetime) -> None:
+    """Stamp completed collection, not its start, immediately before atomic publication."""
+    started = _aware(started, "refresh_started_at")
+    completed = _aware(completed, "refresh_completed_at")
+    if completed < started:
+        raise ChatAnalysisSnapshotError("refresh completion precedes start")
+    identity = snapshot["identity"]
+    identity["refresh_started_at_utc"] = _iso(started)
+    identity["refresh_completed_at_utc"] = _iso(completed)
+    identity["generated_at_utc"] = _iso(completed)
+    identity["generation_time_semantics"] = "collection_completed_before_atomic_publish"
+    for component in snapshot["components"].values():
+        if component.get("status") in {"READY", "PARTIAL"} and component.get("data") is not None:
+            component["last_success_at"] = _iso(completed)
+            component["last_success_at_semantics"] = "snapshot_collection_completed_upper_bound"
+
+
 def refresh_snapshot(
     *,
     now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
@@ -564,6 +582,7 @@ def refresh_snapshot(
         previous = _load_previous(path)
         now = _aware(now_fn(), "clock")
         snapshot = build_snapshot(now=now, previous=previous, producers=producers)
+        finalize_snapshot_timing(snapshot, started=now, completed=now_fn())
         _atomic_write(path, snapshot)
     return snapshot, path
 
@@ -583,7 +602,7 @@ def read_current_snapshot(
     if generated > now:
         raise ChatAnalysisSnapshotError("current snapshot generated_at_utc is in the future")
     age = int((now - generated).total_seconds())
-    result = dict(snapshot)
+    result = apply_read_freshness(snapshot, now=now)
     result["read_freshness"] = {
         "read_at_utc": _iso(now),
         "snapshot_age_seconds": age,
