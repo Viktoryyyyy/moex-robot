@@ -407,6 +407,9 @@ def test_si_and_cr_refresh_write_separate_current_artifacts(monkeypatch, tmp_pat
         assert result["standalone_buy_sell_authority"] is False
         assert result["stage5_full_mode_ready"] is False
         assert result["stage5_pointer_promotion_performed"] is False
+        archived = tmp_path / result["run_evidence_ref"].removeprefix(factual.ROOT_REF_PREFIX)
+        assert factual._sha256_file(archived) == result["run_evidence_sha256"]
+        assert json.loads(archived.read_text())["run_id"] == result["run_id"]
 
     si_path = factual._current_path(tmp_path, factual.SI_INSTRUMENT_ID)
     cr_path = factual._current_path(tmp_path, factual.CR_INSTRUMENT_ID)

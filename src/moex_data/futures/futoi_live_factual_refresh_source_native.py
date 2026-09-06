@@ -106,6 +106,36 @@ def _load_json(path: Path, field: str) -> dict[str, object]:
     return values
 
 
+def _freeze_artifact(root: Path, path: Path, expected_sha: str) -> Path:
+    """Keep verified bytes independent of subsequent canonical partition refreshes."""
+    _rooted_ref(root, path)
+    content = path.read_bytes()
+    if hashlib.sha256(content).hexdigest() != expected_sha:
+        _fail("FUTOI evidence changed before archival: SHA mismatch")
+    directory = root / "state" / "datasets" / ("dataset_id=" + DATASET_ID) / "evidence"
+    if not directory.resolve().is_relative_to(root.resolve()):
+        _fail("FUTOI evidence directory escaped MOEX_DATA_ROOT")
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = directory / (expected_sha + path.suffix)
+    with tempfile.NamedTemporaryFile("wb", dir=directory, delete=False) as handle:
+        temporary = Path(handle.name)
+        handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
+    try:
+        # Publish atomically without overwriting an existing content-addressed object.
+        try:
+            os.link(temporary, destination)
+        except FileExistsError:
+            pass
+        _rooted_ref(root, destination)
+        if _sha256_file(destination) != expected_sha:
+            _fail("archived FUTOI evidence SHA mismatch")
+    finally:
+        temporary.unlink(missing_ok=True)
+    return destination
+
+
 def _current_path(root: Path, instrument_id: str) -> Path:
     checked_instrument = _instrument_id(instrument_id)
     return (
@@ -477,12 +507,17 @@ def _materialize_target(
     expected_partition_sha = str(result.get("published_partition_sha256") or "").strip().lower()
     if len(expected_partition_sha) != 64 or _sha256_file(partition_path) != expected_partition_sha:
         _fail("materialized FUTOI partition SHA mismatch")
+    partition_path = _freeze_artifact(root, partition_path, expected_partition_sha)
+    quality_path = _freeze_artifact(root, quality_path, _sha256_file(quality_path))
+    manifest_path = _freeze_artifact(root, manifest_path, _sha256_file(manifest_path))
     quality = _load_json(quality_path, "FUTOI raw quality report")
     manifest = _load_json(manifest_path, "FUTOI raw refresh manifest")
     if quality.get("quality_status") != "pass" or int(quality.get("row_count") or 0) <= 0:
         _fail("FUTOI raw quality report is not pass")
     if quality.get("instrument_id") != checked_instrument:
         _fail("FUTOI raw quality report instrument_id mismatch")
+    if quality.get("run_id") != raw_run_id or quality.get("trade_date") != target_trade_date:
+        _fail("FUTOI raw quality report run/date mismatch")
     if str(quality.get("futoi_ticker") or "").strip().lower() != identity["source_ticker"].lower():
         _fail("FUTOI raw quality report ticker mismatch")
     if str(quality.get("secid") or "").strip() != identity["secid"]:
@@ -576,7 +611,20 @@ def run_refresh(
         "stage5_pointer_promotion_performed": False,
         "historical_pit_research_ready_claimed": False,
     }
-    _atomic_json(_current_path(root, checked_instrument), payload)
+    current_path = _current_path(root, checked_instrument)
+    # Preserve the complete run result as well as its source artifacts.
+    serialized = (json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    current_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("wb", dir=current_path.parent, suffix=".json", delete=False) as handle:
+        temporary = Path(handle.name)
+        handle.write(serialized)
+    try:
+        archived = _freeze_artifact(root, temporary, hashlib.sha256(serialized).hexdigest())
+    finally:
+        temporary.unlink(missing_ok=True)
+    payload["run_evidence_ref"] = _rooted_ref(root, archived)
+    payload["run_evidence_sha256"] = _sha256_file(archived)
+    _atomic_json(current_path, payload)
     return payload
 
 

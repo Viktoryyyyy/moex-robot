@@ -160,7 +160,10 @@ def _futoi_stage5_promotion_governance(repo: Path) -> dict[str, object]:
         _fail("FUTOI governance authority must be an object")
     factual_live_authority = authority.get("factual_live_authority") is True
     all_required_gates_pass = not blocked_gate_ids
-    promotion_allowed = all_required_gates_pass and factual_live_authority
+    stage5_promotion_authority = authority.get("stage5_promotion_authority") is True
+    promotion_allowed = (
+        all_required_gates_pass and factual_live_authority and stage5_promotion_authority
+    )
     return {
         "contract_ref": FUTOI_GOVERNANCE_RELATIVE_PATH.as_posix(),
         "status": str(values.get("status") or ""),
@@ -168,6 +171,7 @@ def _futoi_stage5_promotion_governance(repo: Path) -> dict[str, object]:
         "blocked_gate_ids": blocked_gate_ids,
         "all_required_gates_pass": all_required_gates_pass,
         "factual_live_authority": factual_live_authority,
+        "stage5_promotion_authority": stage5_promotion_authority,
         "directional_authority": authority.get("directional_authority") is True,
         "action_authority": authority.get("action_authority") is True,
         "promotion_allowed": promotion_allowed,
