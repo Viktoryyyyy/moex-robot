@@ -224,7 +224,7 @@ def build_closed_15m_bars(
             missing_ends = tuple(value for value in expected if value not in observed)
             for missing_end in missing_ends:
                 proof = (empty_intervals or {}).get(missing_end, {})
-                if proof.get("status") != "CORROBORATED_EMPTY" or proof.get("interval_end") != missing_end.isoformat():
+                if proof.get("status") != "CORROBORATED_EMPTY" or _aware_datetime(proof.get("interval_end"), "empty_interval.end") != missing_end:
                     raise LiveShadowBridgeError(
                         "broken 15m bucket aligned to broker label " + label.isoformat()
                         + "; missing=" + ",".join(value.isoformat() for value in missing_ends)
