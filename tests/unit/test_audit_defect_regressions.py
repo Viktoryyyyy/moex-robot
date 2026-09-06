@@ -155,11 +155,13 @@ def isolated_definitions(relative, names, namespace):
 
 @pytest.mark.parametrize('offset,status', [(1,None), (0,'FRESH'), (-1201,'STALE')])
 def test_snapshot_rejects_future_clock(offset, status):
+    from moex_data.rub_snapshot_read_freshness import apply_read_freshness
     snapshot = {'identity': {'generated_at_utc': (NOW + timedelta(seconds=offset)).isoformat()}}
     ns = isolated_definitions('src/moex_research/runners/usdrubf_s7_3_chat_analysis_snapshot.py',
         {'_aware','_iso','read_current_snapshot'}, dict(datetime=datetime, timezone=timezone, Path=Path,
         ChatAnalysisSnapshotError=RuntimeError, STALE_AFTER_SECONDS=1200, _data_root=lambda: Path('.'),
-        current_snapshot_path=lambda _:Path('fixture'), _load_previous=lambda _:snapshot))
+        current_snapshot_path=lambda _:Path('fixture'), _load_previous=lambda _:snapshot,
+        apply_read_freshness=apply_read_freshness))
     if status is None:
         with pytest.raises(RuntimeError, match='future'):
             ns['read_current_snapshot'](now_fn=lambda:NOW)
