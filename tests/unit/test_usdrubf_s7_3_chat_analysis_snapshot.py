@@ -201,6 +201,27 @@ def test_fresh_file_does_not_keep_expired_instrument_usable(monkeypatch, tmp_pat
     assert path.read_bytes() == original_bytes
 
 
+def test_news_collection_does_not_claim_neutral_impact(monkeypatch) -> None:
+    event = {"event_id": "news-1", "direction": "NEUTRAL", "confidence": 0.0,
+             "rub_relevance": 0.0, "source_reference": "https://example.org/release",
+             "published_at": NOW.isoformat()}
+    monkeypatch.setattr(snapshot.live, "_load_current_live_news",
+                        lambda **kwargs: ([event], NOW, {"ok_source_count": 1}))
+    result = snapshot._news_component(NOW)
+    assert result.data_as_of == NOW
+    assert result.data["mode"] == "LIVE_RSS_UNANALYZED"
+    assert result.data["analysis_ready"] is False
+    assert result.data["directional_action_authority"] is False
+    item = result.data["events"][0]
+    assert item["direction"] == "UNKNOWN"
+    assert item["confidence"] is None
+    assert item["rub_relevance"] is None
+    assert item["classification_status"] == "NOT_ANALYZED"
+    assert item["published_at"] == event["published_at"]
+    assert item["source_reference"] == event["source_reference"]
+    assert event["direction"] == "NEUTRAL"
+
+
 def test_snapshot_state_dir_rejects_symlink_escape(monkeypatch, tmp_path: Path) -> None:
     outside = tmp_path.parent / (tmp_path.name + "_outside")
     outside.mkdir()

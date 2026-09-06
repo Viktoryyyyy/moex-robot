@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 
 from moex_data import step9_rub_analysis_bundle as step9
 from moex_data.rub_snapshot_read_freshness import apply_read_freshness
+from moex_data.rub_production_source_matrix import unanalyzed_news
 from moex_research.external_data import moex_cnyrub_algopack_history as cny_spot
 from moex_research.external_data import moex_cnyrubf_algopack_history as cny_futures
 from moex_research.external_data.moex_cnyrub_algopack_timestamp_policy import (
@@ -277,9 +278,11 @@ def _news_component(now: datetime) -> ProducedComponent:
         max_events=20,
     )
     data = {
-        "mode": "LIVE_RSS_DETERMINISTIC_NEUTRAL",
+        "mode": "LIVE_RSS_UNANALYZED",
         "summary": dict(summary),
-        "events": events,
+        "events": unanalyzed_news([_jsonable(event) for event in events]),
+        "classification_status": "NOT_ANALYZED",
+        "analysis_ready": False,
         "directional_action_authority": False,
     }
     return ProducedComponent(data=data, data_as_of=news_as_of)
