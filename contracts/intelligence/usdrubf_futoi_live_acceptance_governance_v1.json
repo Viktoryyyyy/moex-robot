@@ -75,6 +75,7 @@
     {"gate_id":"snapshot_live_enable","required":true,"status":"PASS","evidence":{"artifact_ref":"contracts/intelligence/futoi_live_smoke_snapshot_acceptance_2026-08-30.json","instrument_id":"si_futures_family","snapshot_generated_at_utc":"2026-08-30T14:15:05.340820+00:00","component_id":"futoi_live","component_status_during_governance_block":"GOVERNED_BLOCKED","candidate_status":"PASS","consumer_factual_use_allowed":false,"directional_authority":false,"action_authority":false,"cr_snapshot_smoke_not_claimed_by_this_evidence":true}}
   ],
   "authority": {
+    "stage5_promotion_authority": false,
     "factual_live_authority": false,
     "directional_authority": false,
     "action_authority": false,
