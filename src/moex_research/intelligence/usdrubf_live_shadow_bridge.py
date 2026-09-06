@@ -187,6 +187,8 @@ def _is_expected_historical_forts_clearing_bucket(label: datetime) -> bool:
 
 def build_closed_15m_bars(
     current_session_bars: Sequence[Mapping[str, object]],
+    *,
+    empty_intervals: Mapping[datetime, Mapping[str, object]] | None = None,
 ) -> tuple[dict[str, object], ...]:
     """Aggregate complete aligned 5m triples with documented FORTS session gaps."""
 
@@ -211,27 +213,38 @@ def build_closed_15m_bars(
         label = _bucket_label_15m(t2)
         if t2 != label + timedelta(minutes=10):
             continue
+        bucket_bars = (b0, b1, b2)
+        available_at = t2
+        corroborated = []
         if t0 != label or t1 != label + timedelta(minutes=5):
             if _is_expected_historical_forts_clearing_bucket(label):
                 continue
             expected = tuple(label + timedelta(minutes=offset) for offset in (0, 5, 10))
             observed = tuple(bar["end"] for bar in normalized if label <= bar["end"] < label + timedelta(minutes=15))
-            missing = tuple(value.isoformat() for value in expected if value not in observed)
-            raise LiveShadowBridgeError(
-                "broken 15m bucket aligned to broker label " + label.isoformat()
-                + "; missing=" + ",".join(missing)
-                + "; observed=" + ",".join(value.isoformat() for value in observed)
-                + "; synthetic_fill_allowed=false"
-            )
+            missing_ends = tuple(value for value in expected if value not in observed)
+            for missing_end in missing_ends:
+                proof = (empty_intervals or {}).get(missing_end, {})
+                if proof.get("status") != "CORROBORATED_EMPTY" or proof.get("interval_end") != missing_end.isoformat():
+                    raise LiveShadowBridgeError(
+                        "broken 15m bucket aligned to broker label " + label.isoformat()
+                        + "; missing=" + ",".join(value.isoformat() for value in missing_ends)
+                        + "; observed=" + ",".join(value.isoformat() for value in observed)
+                        + "; synthetic_fill_allowed=false"
+                    )
+                checked_at = _aware_datetime(proof.get("checked_at"), "empty_interval.checked_at")
+                available_at = max(available_at, checked_at)
+                corroborated.append(missing_end.isoformat())
+            bucket_bars = tuple(bar for bar in (b0, b1, b2) if bar["end"] in expected)
         aggregates.append(
             {
                 "end": label.isoformat(),
-                "open": float(b0["open"]),
-                "high": max(float(b0["high"]), float(b1["high"]), float(b2["high"])),
-                "low": min(float(b0["low"]), float(b1["low"]), float(b2["low"])),
-                "close": float(b2["close"]),
-                "volume": float(b0["volume"]) + float(b1["volume"]) + float(b2["volume"]),
-                "source_available_at": t2,
+                "open": float(bucket_bars[0]["open"]),
+                "high": max(float(bar["high"]) for bar in bucket_bars),
+                "low": min(float(bar["low"]) for bar in bucket_bars),
+                "close": float(bucket_bars[-1]["close"]),
+                "volume": sum(float(bar["volume"]) for bar in bucket_bars),
+                "source_available_at": available_at,
+                **({"corroborated_empty_5m_ends": corroborated} if corroborated else {}),
             }
         )
     if not aggregates:
@@ -241,6 +254,8 @@ def build_closed_15m_bars(
 
 def build_ema_context(
     current_session_bars: Sequence[Mapping[str, object]],
+    *,
+    empty_intervals: Mapping[datetime, Mapping[str, object]] | None = None,
 ) -> DirectionalContext:
     if not current_session_bars:
         raise LiveShadowBridgeError("current session bars are required for EMA context")
@@ -250,7 +265,7 @@ def build_ema_context(
     if any(item["end"].astimezone(MOSCOW).date().isoformat() != trade_date for item in normalized):
         raise LiveShadowBridgeError("current session bars must belong to one Moscow trade date")
 
-    synthetic_15m = build_closed_15m_bars(normalized)
+    synthetic_15m = build_closed_15m_bars(normalized, empty_intervals=empty_intervals)
     state = SessionStateEma31915m(trade_date=trade_date)
     for bar in synthetic_15m:
         state = update_signal_state_on_closed_bar(state, bar)
@@ -262,7 +277,7 @@ def build_ema_context(
         target = -1
     else:
         target = 0
-    available_at = synthetic_15m[-1]["source_available_at"]
+    available_at = max(bar["source_available_at"] for bar in synthetic_15m)
     if not isinstance(available_at, datetime):
         raise AssertionError("15m source_available_at must be datetime")
     return ema_context_from_target_position(
@@ -409,6 +424,7 @@ def build_live_decision_input(
     futoi_context: DirectionalContext | None = None,
     news_events: Sequence[NewsEvent] = (),
     macro_state: MacroState | None = None,
+    empty_intervals: Mapping[datetime, Mapping[str, object]] | None = None,
 ) -> DecisionInput:
     wall_clock = _aware_datetime(wall_clock_as_of, "wall_clock_as_of")
     current = closed_bars(current_session_bars, as_of_timestamp=wall_clock)
@@ -419,14 +435,19 @@ def build_live_decision_input(
     decision_as_of = current[-1]["end"]
     if not isinstance(decision_as_of, datetime):
         raise AssertionError("normalized decision_as_of must be datetime")
-    current_date = decision_as_of.astimezone(MOSCOW).date()
+    for proof in (empty_intervals or {}).values():
+        checked_at = _aware_datetime(proof.get("checked_at"), "empty_interval.checked_at")
+        if checked_at > wall_clock:
+            raise LiveShadowBridgeError("empty interval evidence is not available by wall clock")
+        decision_as_of = max(decision_as_of, checked_at)
+    current_date = current[-1]["end"].astimezone(MOSCOW).date()
     prior_date = prior[-1]["end"].astimezone(MOSCOW).date()
     if prior_date >= current_date:
         raise LiveShadowBridgeError("prior session must precede current session")
 
     zones = build_previous_session_zones(prior)
     interactions = tuple(classify_level_history(zone, current) for zone in zones)
-    ema = build_ema_context(current)
+    ema = build_ema_context(current, empty_intervals=empty_intervals)
     futoi = futoi_context or blocked_futoi_context(
         available_at=decision_as_of,
         reason="futoi_context_not_supplied",

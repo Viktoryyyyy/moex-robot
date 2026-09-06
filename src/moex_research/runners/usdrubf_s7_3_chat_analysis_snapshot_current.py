@@ -4,10 +4,11 @@ import argparse
 from dataclasses import asdict
 import json
 import math
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Mapping, Sequence
 
 from moex_data.futures import front_next_binding
+from moex_data.empty_tradestats_interval import reconcile_empty_interval
 from src.moex_research.runners import usdrubf_live_shadow_smoke as live
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as base
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_futoi as futoi
@@ -214,6 +215,34 @@ def _load_usdrubf_bars_for_observed_date(_legacy_key: str, trade_date: date):
     return live._load_bars(USDRUBF_SECID, trade_date)
 
 
+def _corroborate_empty_intervals(bars, *, minute_loader=None):
+    """Only isolated gaps with matching adjacent ISS minute OHLCV can be used."""
+    from src.api.utils.lib_moex_api import get_json
+
+    loader = get_json if minute_loader is None else minute_loader
+    ends = {bar["end"] for bar in bars}
+    missing = []
+    candidate = min(ends) + timedelta(minutes=5)
+    while candidate < max(ends):
+        if candidate not in ends:
+            missing.append(candidate)
+        candidate += timedelta(minutes=5)
+    if len(missing) > 12:
+        raise CurrentChatSnapshotError("too many missing intervals for bounded source reconciliation")
+    evidence = {}
+    route = "/iss/engines/futures/markets/forts/boards/RFUD/securities/USDRUBF/candles.json"
+    for end in missing:
+        begin = end - timedelta(minutes=10)
+        till = end + timedelta(minutes=5) - timedelta(seconds=1)
+        params = {"from": begin.strftime("%Y-%m-%d %H:%M:%S"),
+                  "till": till.strftime("%Y-%m-%d %H:%M:%S"), "interval": 1}
+        payload = loader(route, params, timeout=15.0)
+        proof = reconcile_empty_interval(missing_end=end, neighboring_bars=bars, minute_payload=payload)
+        proof.update(checked_at=datetime.now(timezone.utc).isoformat(), source_route=route, source_query=params)
+        evidence[end] = proof
+    return evidence
+
+
 def _usdrubf_live_market_structure_component(now: datetime) -> base.ProducedComponent:
     now_utc = base._aware(now, "live_market_structure.now")
     now_moscow = now_utc.astimezone(base.MOSCOW)
@@ -225,6 +254,10 @@ def _usdrubf_live_market_structure_component(now: datetime) -> base.ProducedComp
     current_closed = tuple(base.closed_bars(current_raw, as_of_timestamp=now_moscow))
     if _observed_session_date(current_closed, field="current_closed") != current_trade_date:
         raise CurrentChatSnapshotError("current USDRUBF bars do not match the observed current date")
+    empty_intervals = _corroborate_empty_intervals(current_closed)
+    if empty_intervals:
+        now_utc = max(now_utc, datetime.now(timezone.utc))
+        now_moscow = now_utc.astimezone(base.MOSCOW)
 
     prior_trade_date, prior_raw = base.find_prior_session(
         current_trade_date,
@@ -249,6 +282,7 @@ def _usdrubf_live_market_structure_component(now: datetime) -> base.ProducedComp
         futoi_context=futoi_context,
         news_events=(),
         macro_state=None,
+        empty_intervals=empty_intervals,
     )
     zones = tuple(inputs.active_levels)
     interactions = tuple(inputs.level_interactions)
@@ -266,6 +300,8 @@ def _usdrubf_live_market_structure_component(now: datetime) -> base.ProducedComp
         "trade_date": current_trade_date.isoformat(),
         "prior_trade_date": prior_trade_date.isoformat(),
         "market_data_as_of": market_data_as_of,
+        "empty_interval_reconciliation": list(empty_intervals.values()),
+        "synthetic_5m_ohlc_created": False,
         "price": inputs.price,
         "trend": inputs.trend,
         "market_regime": inputs.market_regime,
