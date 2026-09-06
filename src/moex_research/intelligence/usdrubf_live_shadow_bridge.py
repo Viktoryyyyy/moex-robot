@@ -214,8 +214,14 @@ def build_closed_15m_bars(
         if t0 != label or t1 != label + timedelta(minutes=5):
             if _is_expected_historical_forts_clearing_bucket(label):
                 continue
+            expected = tuple(label + timedelta(minutes=offset) for offset in (0, 5, 10))
+            observed = tuple(bar["end"] for bar in normalized if label <= bar["end"] < label + timedelta(minutes=15))
+            missing = tuple(value.isoformat() for value in expected if value not in observed)
             raise LiveShadowBridgeError(
                 "broken 15m bucket aligned to broker label " + label.isoformat()
+                + "; missing=" + ",".join(missing)
+                + "; observed=" + ",".join(value.isoformat() for value in observed)
+                + "; synthetic_fill_allowed=false"
             )
         aggregates.append(
             {

@@ -401,6 +401,7 @@ def refresh_snapshot(
             producers=producers,
             data_root=root,
         )
+        base.finalize_snapshot_timing(snapshot, started=now, completed=now_fn())
         base._atomic_write(path, snapshot)
     return snapshot, path
 

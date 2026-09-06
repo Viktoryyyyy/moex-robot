@@ -153,6 +153,54 @@ def test_read_current_marks_old_snapshot_stale(monkeypatch, tmp_path: Path) -> N
     assert read["read_freshness"]["snapshot_age_seconds"] == snapshot.STALE_AFTER_SECONDS + 1
 
 
+def test_publication_time_is_collection_completion(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    completed = NOW + timedelta(seconds=34)
+    clock = iter((NOW, completed))
+    result, path = snapshot.refresh_snapshot(now_fn=lambda: next(clock), producers=_producers())
+    assert result["identity"]["generated_at_utc"] == completed.isoformat()
+    assert result["identity"]["refresh_started_at_utc"] == NOW.isoformat()
+    assert result["components"]["official_news"]["last_success_at"] == completed.isoformat()
+    read, _ = snapshot.read_current_snapshot(now_fn=lambda: completed + timedelta(seconds=1))
+    assert read["read_freshness"]["snapshot_age_seconds"] == 1
+    assert json.loads(path.read_text(encoding="utf-8"))["identity"] == result["identity"]
+
+
+def test_finalization_preserves_retained_component_success_time() -> None:
+    result = snapshot.build_snapshot(now=NOW, producers=_producers())
+    retained = result["components"]["official_news"]
+    retained["status"] = "RETAINED_PREVIOUS"
+    retained["last_success_at"] = (NOW - timedelta(days=1)).isoformat()
+    snapshot.finalize_snapshot_timing(result, started=NOW, completed=NOW + timedelta(seconds=34))
+    assert retained["last_success_at"] == (NOW - timedelta(days=1)).isoformat()
+
+
+def test_finalization_rejects_backwards_clock() -> None:
+    result = snapshot.build_snapshot(now=NOW, producers=_producers())
+    with pytest.raises(snapshot.ChatAnalysisSnapshotError, match="completion precedes start"):
+        snapshot.finalize_snapshot_timing(result, started=NOW, completed=NOW - timedelta(seconds=1))
+
+
+def test_fresh_file_does_not_keep_expired_instrument_usable(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    result, path = snapshot.refresh_snapshot(now_fn=lambda: NOW, producers=_producers())
+    result["components"]["synchronized_live_market_oi"] = {
+        "status": "PARTIAL", "data": {
+            "instruments": {"usdrubf": {"timestamp": NOW.isoformat(), "stale": False, "price_oi_usable": True}},
+            "synchronization": {"synchronized": False},
+            "quality": {"factual_context_usable": True, "price_oi_usable_by_instrument": {"usdrubf": True}},
+        },
+    }
+    snapshot._atomic_write(path, result)
+    original_bytes = path.read_bytes()
+    read, _ = snapshot.read_current_snapshot(now_fn=lambda: NOW + timedelta(seconds=61))
+    assert read["read_freshness"]["status"] == "FRESH"
+    live = read["components"]["synchronized_live_market_oi"]
+    assert live["status"] == "UNAVAILABLE"
+    assert live["data"]["instruments"]["usdrubf"]["price_oi_usable"] is False
+    assert path.read_bytes() == original_bytes
+
+
 def test_snapshot_state_dir_rejects_symlink_escape(monkeypatch, tmp_path: Path) -> None:
     outside = tmp_path.parent / (tmp_path.name + "_outside")
     outside.mkdir()
