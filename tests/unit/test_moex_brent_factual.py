@@ -539,12 +539,13 @@ def test_review_p2_completion_clock_and_budget_checked_after_validation():
 
 
 @pytest.mark.parametrize("freshness", [
-    None, "invalid", 7, [], True,
+    None, "invalid", 7, [], True, {}, {"maximum_source_age_seconds": 60},
     {"read_at_utc": None}, {"read_at_utc": ""}, {"read_at_utc": "not-a-date"},
 ])
 def test_review_p2_malformed_optional_freshness_blocks_only_brent(freshness):
     context = {"identity": {"generated_at_utc": NOW.isoformat()},
                "components": {"oil": component()}, "live_read_freshness": freshness}
+    untouched = deepcopy(context)
     baseline = deepcopy(context)
     baseline.pop("live_read_freshness")
     expected = {r["block_id"]: r for r in matrix.build(baseline)["rows"]
@@ -553,5 +554,25 @@ def test_review_p2_malformed_optional_freshness_blocks_only_brent(freshness):
     row = next(r for r in result["rows"] if r["block_id"] == "brent")
     assert row["collection_present"]
     assert not row["usable_for_full_forecast"]
+    assert not row["factual_context_usable"]
     assert row["reason"] == "invalid_snapshot_freshness_reference"
     assert {r["block_id"]: r for r in result["rows"] if r["block_id"] != "brent"} == expected
+    assert context == untouched
+
+
+def test_review_p2_absent_freshness_and_valid_explicit_reference_remain_usable():
+    context = {"identity": {"generated_at_utc": NOW.isoformat()},
+               "components": {"oil": component()}}
+    untouched = deepcopy(context)
+    absent_result = matrix.build(context)
+    explicit = deepcopy(context)
+    explicit["live_read_freshness"] = {"read_at_utc": NOW.isoformat()}
+    explicit_untouched = deepcopy(explicit)
+    explicit_result = matrix.build(explicit)
+    assert absent_result["rows"] == explicit_result["rows"]
+    row = next(r for r in absent_result["rows"] if r["block_id"] == "brent")
+    assert row["collection_present"] and row["usable_for_full_forecast"]
+    assert row["factual_context_usable"] and row["intraday_fresh"] is False
+    assert absent_result["freshness_evaluated_at"] is None
+    assert explicit_result["freshness_evaluated_at"] == NOW.isoformat()
+    assert context == untouched and explicit == explicit_untouched

@@ -50,14 +50,15 @@ def build(snapshot):
     oil=oil if isinstance(oil,dict) else {}
     oil_data=oil.get('data')
     oil_data=oil_data if isinstance(oil_data,dict) else {}
-    freshness=snapshot.get('live_read_freshness',{})
-    freshness_valid=isinstance(freshness,dict)
-    freshness=freshness if freshness_valid else {}
-    reference=freshness.get('read_at_utc',snapshot['identity']['generated_at_utc'])
+    freshness_present='live_read_freshness' in snapshot
+    freshness=snapshot.get('live_read_freshness')
+    freshness_valid=not freshness_present or (isinstance(freshness,dict) and 'read_at_utc' in freshness)
+    freshness=freshness if isinstance(freshness,dict) else {}
     reason=oil_data.get('reason','consumer_acceptance_required')
     try:
         if not freshness_valid:
             raise ValueError("invalid optional freshness block")
+        reference=freshness['read_at_utc'] if freshness_present else snapshot['identity']['generated_at_utc']
         oil_view=brent.reconcile_component(oil,now=datetime.fromisoformat(reference))
         view_data=oil_view.get('data')
         if isinstance(view_data,dict):
