@@ -622,6 +622,8 @@ def read_current_snapshot(
     if generated > now:
         raise ChatAnalysisSnapshotError("current snapshot generated_at_utc is in the future")
     age = int((now - generated).total_seconds())
+    from moex_data.rub_fast_market import apply as apply_fast_market
+    snapshot = apply_fast_market(snapshot, root=root, now=now)
     result = apply_read_freshness(snapshot, now=now)
     result["read_freshness"] = {
         "read_at_utc": _iso(now),
