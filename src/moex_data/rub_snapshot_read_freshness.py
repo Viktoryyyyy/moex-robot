@@ -29,6 +29,8 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
     components = result.get("components", {})
     apply_oil_freshness(result, now=now)
     apply_cr_pair_freshness(result, now=now)
+    from moex_data.rub_temporal_applicability import apply as apply_temporal
+    apply_temporal(result, now=now)
     live = components.get(LIVE) if isinstance(components, dict) else None
     data = live.get("data") if isinstance(live, dict) else None
     instruments = data.get("instruments", {}) if isinstance(data, dict) else {}
