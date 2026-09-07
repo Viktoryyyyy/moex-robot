@@ -95,7 +95,10 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
                     and item.get("quote_usable") is True
                 )
             quality["quote_usable_by_instrument"] = quote_map
-            quality["quote_all_instruments_usable"] = bool(quote_map) and all(quote_map.values())
+            quality["quote_all_instruments_usable"] = bool(
+                quality.get("quote_all_instruments_usable") is True
+                and quote_map and all(quote_map.values())
+            )
         for field in ("futures_synchronized", "futures_all_fresh"):
             sync[field] = bool(sync.get(field) is True and futures_ok)
         sync["futures_status"] = "PASS" if sync["futures_synchronized"] else "FAIL"
