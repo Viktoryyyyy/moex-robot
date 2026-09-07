@@ -1,9 +1,12 @@
 """Evidence-backed production coverage and unanalyzed-news presentation."""
 import argparse
 import copy
+from datetime import datetime
 import hashlib
 import json
 from pathlib import Path
+
+from moex_research.external_data import moex_brent_factual as brent
 
 
 def unanalyzed_news(events):
@@ -44,7 +47,23 @@ def build(snapshot):
     news=components.get('official_news',{}).get('data',{})
     add('official_news','required',bool(news.get('events')),False,'acquired_events_are_not_impact_analysis','components.official_news')
     oil=components.get('oil',{})
-    add('brent','required',False,False,oil.get('data',{}).get('reason','accepted_source_missing'),'components.oil')
+    oil=oil if isinstance(oil,dict) else {}
+    oil_data=oil.get('data')
+    oil_data=oil_data if isinstance(oil_data,dict) else {}
+    reference=snapshot.get('live_read_freshness',{}).get('read_at_utc') or snapshot['identity']['generated_at_utc']
+    reason=oil_data.get('reason','consumer_acceptance_required')
+    try:
+        oil_view=brent.reconcile_component(oil,now=datetime.fromisoformat(reference))
+        view_data=oil_view.get('data')
+        if isinstance(view_data,dict):
+            reason=view_data.get('read_freshness_reason') or reason
+    except (ValueError,TypeError,OverflowError,KeyError):
+        oil_view={'status':'UNAVAILABLE'}
+        reason='invalid_snapshot_freshness_reference'
+    usable=brent.factual_usable(oil_view)
+    collected=oil_data.get('source_id')==brent.SOURCE_ID and bool(oil_data.get('secid')) and isinstance(oil_data.get('ohlc'),dict)
+    add('brent','required',collected,usable,'accepted_latest_published_close_not_live' if usable else reason,'components.oil')
+    rows[-1].update(factual_context_usable=bool(usable),price_context_scope='latest_published_history_only',intraday_fresh=False)
     add('external_cny','required',False,False,'accepted_external_CNY_or_CNH_required','components.stage9_daily.data.external_context_required')
     for block in ('wti','urals','dxy','ust'):
         add(block,'enrichment',False,False,'no_accepted_snapshot_block','components.stage9_daily.data.external_context_required')

@@ -5,6 +5,8 @@ from collections.abc import Mapping
 from copy import deepcopy
 from datetime import datetime, timezone
 
+from moex_research.external_data.moex_brent_factual import apply_oil_freshness
+
 
 LIVE = "synchronized_live_market_oi"
 BASIS = "live_basis_carry"
@@ -24,6 +26,7 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
     now = _time(now)
     result = deepcopy(dict(snapshot))
     components = result.get("components", {})
+    apply_oil_freshness(result, now=now)
     live = components.get(LIVE) if isinstance(components, dict) else None
     data = live.get("data") if isinstance(live, dict) else None
     instruments = data.get("instruments", {}) if isinstance(data, dict) else {}
