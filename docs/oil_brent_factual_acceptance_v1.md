@@ -43,6 +43,10 @@ A successful source collection can expose `READY` and factual consumer authority
 
 The receipt recheck expires after 1,200 seconds, matching the existing snapshot lifetime, or when the Moscow selection date changes. This timeout measures cache/recheck age, **not** the age of the price. Intraday freshness is always false; current market session status remains UNKNOWN.
 
+Persisted acceptance also requires the exact source/contract identity, positive integer contract size matching retained native identity evidence, and exactly three ordered provenance records with matching official routes, selected SECID, published date, valid SHA-256 fields and receipt chronology. These are structural/internal-consistency gates, not a claim of independent raw-body replay or cryptographic authenticity. Missing or corrupt metadata/provenance withdraw factual authority at the reader and matrix boundaries.
+
+The collector samples `collection_completed_at` after response parsing and validation; it rejects a selection-date transition or budget violation at that point, not merely at response receipt. This completion stamp does not replace the original history receipt.
+
 Read-time evaluation and final publication evaluation only downgrade. A new snapshot generation time or `last_success_at` does not renew the underlying receipt. The shared reader performs no source fetch and does not overwrite the persisted snapshot.
 
 A refresh failure without a previously accepted record is `UNAVAILABLE`. An old governance placeholder cannot become a retained price. A previously accepted record may be displayed as `RETAINED_PREVIOUS` with its original value and receipt, but factual consumer authority is false until a new valid collection. Repeated failure does not renew that record. Explicit producer injection without oil preserves the prior governance-blocked test/offline mode; production defaults include the Brent producer.
@@ -51,7 +55,7 @@ Directional, action, standalone buy/sell, historical PIT, Stage5 full mode and p
 
 ## Production matrix
 
-The existing Brent row derives collection presence from the canonical oil record and use from explicit acceptance plus receipt/selection/price gates. READY alone is insufficient. Null UNAVAILABLE data, retained data and stale receipts do not pass.
+The existing Brent row derives collection presence from the canonical oil record and use from explicit acceptance plus receipt/selection/price gates. READY alone is insufficient. Null UNAVAILABLE data, retained data and stale receipts do not pass. A null/malformed optional read-freshness block or invalid supplied read timestamp makes Brent unavailable without aborting the matrix or changing unrelated rows. An absent optional block still uses the snapshot-generation reference.
 
 The legacy row field `usable_for_full_forecast` denotes admission of this **dated factual input**, not full product readiness. The row additionally exposes `factual_context_usable`, `price_context_scope=latest_published_history_only`, and `intraday_fresh=false`. Root `data_acceptance_complete`, `analysis_ready`, `model_validated` and `training_authorized` remain false. Other source acceptance decisions are unchanged.
 

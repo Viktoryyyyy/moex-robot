@@ -50,9 +50,14 @@ def build(snapshot):
     oil=oil if isinstance(oil,dict) else {}
     oil_data=oil.get('data')
     oil_data=oil_data if isinstance(oil_data,dict) else {}
-    reference=snapshot.get('live_read_freshness',{}).get('read_at_utc') or snapshot['identity']['generated_at_utc']
+    freshness=snapshot.get('live_read_freshness',{})
+    freshness_valid=isinstance(freshness,dict)
+    freshness=freshness if freshness_valid else {}
+    reference=freshness.get('read_at_utc',snapshot['identity']['generated_at_utc'])
     reason=oil_data.get('reason','consumer_acceptance_required')
     try:
+        if not freshness_valid:
+            raise ValueError("invalid optional freshness block")
         oil_view=brent.reconcile_component(oil,now=datetime.fromisoformat(reference))
         view_data=oil_view.get('data')
         if isinstance(view_data,dict):
@@ -70,7 +75,7 @@ def build(snapshot):
     add('volume_features','excluded',False,False,'excluded_by_user_instruction',None)
     return dict(schema_version='rub_production_source_matrix.v1',
         snapshot_generated_at=snapshot['identity']['generated_at_utc'],
-        freshness_evaluated_at=snapshot.get('live_read_freshness',{}).get('read_at_utc'),
+        freshness_evaluated_at=freshness.get('read_at_utc'),
         rows=rows,blocking_required_blocks=[r['block_id'] for r in rows if r['requirement']=='required' and not r['usable_for_full_forecast']],
         data_acceptance_complete=False,analysis_ready=False,model_validated=False,
         training_authorized=False,volume_investigation_in_scope=False,

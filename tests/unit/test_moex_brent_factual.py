@@ -256,7 +256,7 @@ def test_budget_and_clock_regression_fail():
 
 def test_midnight_selection_transition_fails():
     before = NOW.replace(hour=20, minute=59, second=59)
-    clock = iter([before] * 6 + [before + timedelta(seconds=2)])
+    clock = iter([before] * 6 + [before + timedelta(seconds=2)] * 2)
     with pytest.raises(ValueError, match="date changed"):
         collect(clock=lambda: next(clock))
 
@@ -424,3 +424,134 @@ def test_shared_reader_preserves_unrelated_factual_components():
     assert view["components"]["oil"]["status"] == "UNAVAILABLE"
     assert view["components"]["official_news"] == original["components"]["official_news"]
     assert result == original
+
+
+@pytest.mark.parametrize("field,value", [
+    ("secid", None), ("secid", "BRX6"), ("secid", []),
+    ("board", None), ("board", "TQBR"),
+    ("asset_code", None), ("asset_code", "Si"),
+    ("engine", "stock"), ("market", "shares"),
+    ("contract_size_barrels", None), ("contract_size_barrels", True),
+    ("contract_size_barrels", "10"), ("contract_size_barrels", 100),
+    ("provenance", None), ("provenance", []), ("provenance", {}),
+    ("identity_evidence", None), ("identity_evidence", {}),
+    ("selection_rule", "always_brv6"), ("last_delivery_date", None),
+    ("collection_completed_at", None), ("collection_elapsed_seconds", -1),
+])
+def test_review_p1_invalid_persisted_identity_isolated_in_reader_and_matrix(field, value):
+    original = component()
+    original["data"][field] = value
+    assert not brent.factual_usable(original)
+    context = {"identity": {"generated_at_utc": NOW.isoformat()},
+               "components": {"oil": original}, "readiness": {"status": "READY"}}
+    untouched = deepcopy(context)
+    view = apply_read_freshness(context, now=NOW)
+    oil = view["components"]["oil"]
+    assert oil["status"] == "UNAVAILABLE"
+    assert all(oil["data"][key] is False for key in brent.FACTUAL_FLAGS)
+    assert all(oil["data"][key] is False for key in brent.FALSE_FLAGS)
+    assert not brent_row(context)["usable_for_full_forecast"]
+    assert context == untouched
+
+
+@pytest.mark.parametrize("field", [
+    "secid", "board", "asset_code", "engine", "market", "contract_size_barrels",
+    "provenance", "identity_evidence", "selection_rule", "collection_completed_at",
+])
+def test_review_p1_missing_persisted_identity_fails_closed(field):
+    original = component()
+    del original["data"][field]
+    assert not brent.factual_usable(original)
+    assert brent.reconcile_component(original, now=NOW)["status"] == "UNAVAILABLE"
+
+
+@pytest.mark.parametrize("kind", [
+    "wrong_contract_route", "wrong_date_route", "nonofficial_route", "missing_hash",
+    "malformed_hash", "wrong_role", "null_item", "missing_item", "extra_item",
+    "receipt_regression", "receipt_binding_mismatch", "identity_size_mismatch",
+    "identity_expiry_mismatch", "completion_regression",
+])
+def test_review_p1_provenance_binding_not_merely_presence(kind):
+    original = component()
+    data = original["data"]
+    proof = data["provenance"]
+    if kind == "wrong_contract_route":
+        proof[1]["source_route"] = proof[1]["source_route"].replace("BRV6", "BRX6")
+    elif kind == "wrong_date_route":
+        proof[2]["source_route"] = proof[2]["source_route"].replace("2026-09-04", "2026-09-03")
+    elif kind == "nonofficial_route":
+        proof[0]["source_route"] = proof[0]["source_route"].replace("iss.moex.com", "example.org")
+    elif kind == "missing_hash":
+        del proof[0]["raw_payload_sha256"]
+    elif kind == "malformed_hash":
+        proof[0]["raw_payload_sha256"] = "not-a-sha256"
+    elif kind == "wrong_role":
+        proof[1]["role"] = "history"
+    elif kind == "null_item":
+        proof[0] = None
+    elif kind == "missing_item":
+        proof.pop()
+    elif kind == "extra_item":
+        proof.append(deepcopy(proof[-1]))
+    elif kind == "receipt_regression":
+        proof[1]["requested_at"] = (NOW - timedelta(seconds=1)).isoformat()
+    elif kind == "receipt_binding_mismatch":
+        proof[-1]["received_at"] = (NOW + timedelta(seconds=1)).isoformat()
+    elif kind == "identity_size_mismatch":
+        data["identity_evidence"]["lot_size"] = 100
+    elif kind == "identity_expiry_mismatch":
+        data["identity_evidence"]["last_trade_date"] = "2026-10-02"
+    else:
+        data["collection_completed_at"] = (NOW - timedelta(seconds=1)).isoformat()
+    assert not brent.factual_usable(original)
+    assert brent.reconcile_component(original, now=NOW)["status"] == "UNAVAILABLE"
+
+
+def test_review_p1_governance_blocked_cannot_keep_cached_factual_flags():
+    original = component()
+    original["status"] = "GOVERNED_BLOCKED"
+    context = {"components": {"oil": original}}
+    brent.apply_oil_freshness(context, now=NOW)
+    oil = context["components"]["oil"]
+    assert oil["status"] == "GOVERNED_BLOCKED"
+    assert all(oil["data"][key] is False for key in brent.FACTUAL_FLAGS)
+
+
+def test_review_p2_midnight_after_receipt_before_validation_completion():
+    before = NOW.replace(hour=20, minute=59, second=59)
+    clock = iter([before] * 7 + [before + timedelta(seconds=2)])
+    with pytest.raises(ValueError, match="date changed"):
+        collect(clock=lambda: next(clock))
+
+
+def test_review_p2_completion_clock_and_budget_checked_after_validation():
+    clock = iter([NOW] * 7 + [NOW - timedelta(seconds=1)])
+    with pytest.raises(ValueError, match="completion clock regressed"):
+        collect(clock=lambda: next(clock))
+    ticks = iter([0.0] * 7 + [brent.COLLECTION_BUDGET_SECONDS + 1])
+    with pytest.raises(ValueError, match="budget"):
+        collect(monotonic=lambda: next(ticks))
+    clock = iter([NOW] * 7 + [NOW + timedelta(seconds=1)])
+    data, _, _ = collect(clock=lambda: next(clock))
+    assert data["received_at"] == NOW.isoformat()
+    assert data["collection_completed_at"] == (NOW + timedelta(seconds=1)).isoformat()
+    assert brent.factual_usable(component(data))
+
+
+@pytest.mark.parametrize("freshness", [
+    None, "invalid", 7, [], True,
+    {"read_at_utc": None}, {"read_at_utc": ""}, {"read_at_utc": "not-a-date"},
+])
+def test_review_p2_malformed_optional_freshness_blocks_only_brent(freshness):
+    context = {"identity": {"generated_at_utc": NOW.isoformat()},
+               "components": {"oil": component()}, "live_read_freshness": freshness}
+    baseline = deepcopy(context)
+    baseline.pop("live_read_freshness")
+    expected = {r["block_id"]: r for r in matrix.build(baseline)["rows"]
+                if r["block_id"] != "brent"}
+    result = matrix.build(context)
+    row = next(r for r in result["rows"] if r["block_id"] == "brent")
+    assert row["collection_present"]
+    assert not row["usable_for_full_forecast"]
+    assert row["reason"] == "invalid_snapshot_freshness_reference"
+    assert {r["block_id"]: r for r in result["rows"] if r["block_id"] != "brent"} == expected

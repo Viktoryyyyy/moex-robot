@@ -238,8 +238,14 @@ def load_factual_brent(
              "history identity/date mismatch")
     ohlc = _ohlc(row)
     received = _utc(provenance[-1]["received_at"])
-    _require(received.astimezone(MOSCOW).date() == evaluated,
+    completed = _utc(clock())
+    elapsed = monotonic() - started
+    _require(completed >= received, "completion clock regressed")
+    _require(received.astimezone(MOSCOW).date() == evaluated
+             and completed.astimezone(MOSCOW).date() == evaluated,
              "selection date changed during collection")
+    _require(0 <= elapsed <= COLLECTION_BUDGET_SECONDS,
+             "Brent collection budget exceeded after validation")
     return {
         "source_id": SOURCE_ID, "acceptance_policy": POLICY_ID,
         "source_acceptance": "FACTUAL_ONLY",
@@ -252,6 +258,13 @@ def load_factual_brent(
         "quote_currency": "USD", "price_unit": "USD/barrel",
         "source_unit_text": description["UNIT"],
         "contract_size_barrels": contract_size,
+        "identity_evidence": {
+            "secid": description["SECID"], "board": boards[0]["boardid"],
+            "asset_code": description["ASSETCODE"], "unit": description["UNIT"],
+            "first_trade_date": first_trade.isoformat(),
+            "last_trade_date": expiry.isoformat(),
+            "last_delivery_date": delivery.isoformat(), "lot_size": contract_size,
+        },
         "price": ohlc["close"], "ohlc": ohlc, "price_field": "CLOSE",
         "price_semantics": PRICE_SEMANTICS,
         "source_trade_date": published_date.isoformat(),
@@ -266,17 +279,103 @@ def load_factual_brent(
         "freshness_basis": "receipt_recheck_not_intraday_price_age",
         "maximum_receipt_age_seconds": MAX_RECEIPT_AGE_SECONDS,
         "quality_passed": True, "provenance": provenance,
-        "collection_elapsed_seconds": round(monotonic() - started, 6),
+        "collection_completed_at": completed.isoformat(),
+        "collection_elapsed_seconds": round(elapsed, 6),
         **{key: True for key in FACTUAL_FLAGS},
         **{key: False for key in FALSE_FLAGS},
     }
+
+
+
+def _validate_persisted_identity(data: Mapping) -> None:
+    """Require complete, internally bound metadata/provenance; no source re-fetch."""
+    secid = data.get("secid")
+    _require(isinstance(secid, str) and re.fullmatch(r"[A-Z0-9_]{2,32}", secid) is not None
+             and secid != "BR", "persisted explicit contract identity invalid")
+    _require(data.get("board") == "RFUD" and data.get("asset_code") == "BR"
+             and data.get("engine") == "futures" and data.get("market") == "forts",
+             "persisted source identity invalid")
+    _require(data.get("selection_rule") ==
+             "nearest_expiry_ge_evaluation_date_plus_7_calendar_days"
+             and data.get("mode") == "LATEST_PUBLISHED_HISTORY",
+             "persisted source selection semantics invalid")
+    size = data.get("contract_size_barrels")
+    _require(type(size) is int and size > 0, "persisted contract size invalid")
+    evidence = data.get("identity_evidence")
+    _require(isinstance(evidence, Mapping), "persisted native identity evidence missing")
+    _require(evidence.get("secid") == secid and evidence.get("board") == "RFUD"
+             and evidence.get("asset_code") == "BR" and evidence.get("unit") == UNIT_TEXT
+             and type(evidence.get("lot_size")) is int and evidence["lot_size"] == size,
+             "persisted native identity evidence inconsistent")
+    evaluated = _date(data.get("selection_evaluated_date_moscow"))
+    expiry = _date(data.get("expiry"))
+    delivery = _date(data.get("last_delivery_date"))
+    published = _date(data.get("source_trade_date"))
+    _require(_date(evidence.get("first_trade_date")) <= published < evaluated
+             and published == _date(data.get("source_history_till"))
+             and expiry == _date(evidence.get("last_trade_date"))
+             and delivery == _date(evidence.get("last_delivery_date"))
+             and delivery >= expiry >= evaluated + timedelta(days=7),
+             "persisted contract lifecycle inconsistent")
+    received = _utc(data.get("received_at"))
+    completed = _utc(data.get("collection_completed_at"))
+    _require(completed >= received
+             and completed.astimezone(MOSCOW).date() == evaluated
+             and received.astimezone(MOSCOW).date() == evaluated,
+             "persisted completion/receipt identity inconsistent")
+    _require(_utc(data.get("data_as_of")) == received
+             and data.get("data_as_of_semantics") ==
+             "receipt_of_current_revision_not_price_event_time"
+             and data.get("availability_semantics") ==
+             "known_available_at_receipt_no_historical_PIT_claim"
+             and data.get("source_revision_status") == "official_iss_current_revision",
+             "persisted availability semantics invalid")
+    elapsed = data.get("collection_elapsed_seconds")
+    _require(type(elapsed) in (int, float) and math.isfinite(elapsed)
+             and 0 <= elapsed <= COLLECTION_BUDGET_SECONDS,
+             "persisted collection duration invalid")
+    proof = data.get("provenance")
+    _require(isinstance(proof, list) and len(proof) == 3,
+             "persisted provenance must contain exactly three source requests")
+    code = quote(secid, safe="")
+    routes = (
+        ("universe", _route(MARKET + "/securities.json",
+                           assetcode="BR", **{"iss.only": "securities"})),
+        ("identity", _route("/securities/" + code + ".json",
+                           **{"iss.only": "description,boards"})),
+        ("history", _route(
+            "/history" + MARKET + "/boards/RFUD/securities/" + code + ".json",
+            **{"from": published.isoformat(), "till": published.isoformat(),
+               "start": 0, "limit": 100, "iss.only": "history,history.cursor"})),
+    )
+    previous_received = None
+    for item, (role, route) in zip(proof, routes, strict=True):
+        _require(isinstance(item, Mapping), "persisted provenance item invalid")
+        _require(item.get("role") == role and item.get("source_route") == route,
+                 "persisted provenance identity/date route mismatch")
+        digest = item.get("raw_payload_sha256")
+        _require(isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest) is not None,
+                 "persisted source digest malformed or missing")
+        requested, receipt = _utc(item.get("requested_at")), _utc(item.get("received_at"))
+        _require(requested <= receipt <= received
+                 and requested.astimezone(MOSCOW).date() == evaluated
+                 and (previous_received is None or requested >= previous_received),
+                 "persisted provenance receipt chronology invalid")
+        previous_received = receipt
+    _require(previous_received == received, "persisted history receipt mismatch")
 
 
 def factual_usable(component: object) -> bool:
     if not isinstance(component, Mapping) or component.get("status") != "READY":
         return False
     data = component.get("data")
-    return isinstance(data, Mapping) and (
+    if not isinstance(data, Mapping):
+        return False
+    try:
+        _validate_persisted_identity(data)
+    except (ValueError, TypeError, OverflowError, KeyError):
+        return False
+    return (
         data.get("source_id") == SOURCE_ID
         and data.get("acceptance_policy") == POLICY_ID
         and data.get("source_acceptance") == "FACTUAL_ONLY"
@@ -321,7 +420,7 @@ def reconcile_component(component: Mapping, *, now: datetime) -> dict:
                  "selected contract no longer eligible")
         ohlc = data.get("ohlc")
         _require(isinstance(ohlc, dict), "missing accepted OHLC")
-        checked = _ohlc({key.upper(): value for key, value in ohlc.items()})
+        checked = _ohlc({key.upper(): ohlc.get(key) for key in ("open", "high", "low", "close")})
         _require(_number(data.get("price"), "price") == checked["close"]
                  and data.get("price_field") == "CLOSE", "accepted CLOSE mismatch")
     except (ValueError, TypeError, OverflowError, KeyError) as exc:
@@ -349,7 +448,9 @@ def apply_oil_freshness(snapshot: dict, *, now: datetime) -> None:
     component = components["oil"]
     # Historical governance placeholders have no accepted value to downgrade.
     if component.get("status") == "GOVERNED_BLOCKED":
-        return
+        data = component.get("data")
+        if not isinstance(data, Mapping) or data.get("acceptance_policy") != POLICY_ID:
+            return
     components["oil"] = reconcile_component(component, now=now)
     readiness = snapshot.get("readiness")
     if isinstance(readiness, dict):
