@@ -50,11 +50,18 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
         item["freshness_reference_utc"] = now.isoformat()
         item["stale"] = reason is not None
         item["read_freshness_reason"] = reason
+        if "quote_stale" in item:
+            item["quote_stale"] = reason is not None
         if reason:
             blocked.add(key)
             item["price_oi_usable"] = False
             if "spot_price_usable" in item:
                 item["spot_price_usable"] = False
+            if "quote_usable" in item:
+                item["quote_usable"] = False
+                if item.get("quote_status") == "available":
+                    item["quote_status"] = "stale_quote_at_read"
+                    item["quote_reason"] = "source_not_fresh_at_read"
 
     if isinstance(data, dict):
         sync = data.get("synchronization", {})
@@ -77,6 +84,18 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
         )
         spot_ok = "cnyrub_tom" in instruments and "cnyrub_tom" not in blocked
         quality["spot_price_usable"] = bool(quality.get("spot_price_usable") is True and spot_ok)
+        quote_map = quality.get("quote_usable_by_instrument", {})
+        if isinstance(quote_map, dict):
+            for key in list(quote_map):
+                item = instruments.get(key)
+                quote_map[key] = bool(
+                    quote_map[key] is True
+                    and key not in blocked
+                    and isinstance(item, dict)
+                    and item.get("quote_usable") is True
+                )
+            quality["quote_usable_by_instrument"] = quote_map
+            quality["quote_all_instruments_usable"] = bool(quote_map) and all(quote_map.values())
         for field in ("futures_synchronized", "futures_all_fresh"):
             sync[field] = bool(sync.get(field) is True and futures_ok)
         sync["futures_status"] = "PASS" if sync["futures_synchronized"] else "FAIL"
