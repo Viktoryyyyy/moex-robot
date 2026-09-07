@@ -5,7 +5,7 @@ from moex_data import synchronized_live_market_oi_context_apim as apim
 
 
 def _forts_row(secid: str, systime: str, *, oi: int) -> list[object]:
-    return [secid, 90.0, 92.0, 89.0, 91.0, 100, 1000, 10, oi, 90.9, 91.1, systime]
+    return [secid, 90.0, 92.0, 89.0, 91.0, 100, 1000, 10, oi, 90.9, 91.1, systime, None, None, None]
 
 
 def test_unproven_forts_wap_is_unavailable_without_blocking_price_oi() -> None:
