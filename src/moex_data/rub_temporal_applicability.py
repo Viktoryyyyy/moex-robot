@@ -3,6 +3,7 @@ from collections.abc import Mapping
 from datetime import date, datetime, timezone
 
 from moex_data.futures.futoi_current_pair_authority import check_time, MAX_AGE_SECONDS
+from moex_data.rub_published_schedule import describe as describe_schedule
 
 POLICY = "rub_temporal_applicability.v1"
 
@@ -97,5 +98,6 @@ def apply(snapshot, *, now):
     snapshot["temporal_applicability"] = {"policy": POLICY,
         "read_at_utc": now.astimezone(timezone.utc).isoformat(), "components": views,
         "session_state": "UNKNOWN", "calendar_coverage_accepted": False,
+        "published_schedule_plan": describe_schedule(now=now),
         "absence_or_expiry_proves_closed_session": False,
         "authority_granted_by_this_view": False}

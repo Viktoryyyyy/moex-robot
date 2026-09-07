@@ -1,0 +1,26 @@
+{
+  "schema": "rub_published_schedule.v1",
+  "reviewed_at_utc": "2026-09-07T23:31:17+00:00",
+  "timezone": "Europe/Moscow",
+  "instruments": ["si_futures_family", "cr_futures_family"],
+  "sources": {
+    "july": "https://www.moex.com/n101220?nt=106",
+    "september": "https://www.moex.com/n103379",
+    "weekend_exceptions": "https://www.moex.com/n95564?nt=112"
+  },
+  "rules": {
+    "july": [["06:50", "07:00", "OPENING_AUCTION"], ["07:00", "10:00", "MORNING"], ["10:00", "19:00", "MAIN"], ["19:00", "23:50", "EVENING"]],
+    "september": [["06:50", "07:00", "OPENING_AUCTION"], ["07:00", "09:00", "MORNING"], ["09:00", "19:00", "MAIN"], ["19:00", "23:50", "EVENING"]],
+    "weekend_exceptions": []
+  },
+  "civil_dates": {
+    "2026-09-07": "july",
+    "2026-09-08": "july",
+    "2026-09-09": "july",
+    "2026-09-10": "july",
+    "2026-09-11": "july",
+    "2026-09-12": "weekend_exceptions",
+    "2026-09-13": "weekend_exceptions",
+    "2026-09-14": "september"
+  }
+}
