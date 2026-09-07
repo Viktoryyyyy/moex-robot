@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from moex_data import step9_rub_analysis_bundle as step9
 from moex_data.rub_snapshot_read_freshness import apply_read_freshness
 from moex_data.rub_production_source_matrix import unanalyzed_news
+from moex_research.external_data import moex_brent_factual as brent
 from moex_research.external_data import moex_cnyrub_algopack_history as cny_spot
 from moex_research.external_data import moex_cnyrubf_algopack_history as cny_futures
 from moex_research.external_data.moex_cnyrub_algopack_timestamp_policy import (
@@ -320,6 +321,12 @@ def _cny_futures_component(now: datetime) -> ProducedComponent:
     return ProducedComponent(data=data, data_as_of=candle.source_available_at)
 
 
+def _oil_component(now: datetime) -> ProducedComponent:
+    del now
+    data = brent.load_factual_brent()
+    return ProducedComponent(data=data, data_as_of=data["received_at"])
+
+
 def default_producers() -> Mapping[str, ComponentProducer]:
     return {
         "stage9_daily": _stage9_component("daily"),
@@ -329,6 +336,7 @@ def default_producers() -> Mapping[str, ComponentProducer]:
         "official_news": _news_component,
         "cnyrub_spot_live": _cny_spot_component,
         "cnyrubf_live": _cny_futures_component,
+        "oil": _oil_component,
     }
 
 
@@ -341,6 +349,12 @@ def _previous_component(previous: Mapping[str, object] | None, name: str) -> Map
     value = components.get(name)
     if not isinstance(value, Mapping) or value.get("data") is None:
         return None
+    if name == "oil":
+        data = value.get("data")
+        if not isinstance(data, Mapping) or data.get("acceptance_policy") != brent.POLICY_ID:
+            return None
+        if data.get("source_id") != brent.SOURCE_ID or data.get("quality_passed") is not True:
+            return None
     return value
 
 
@@ -368,7 +382,7 @@ def _component_payload(
     except Exception as exc:
         prior = _previous_component(previous, name)
         if prior is not None:
-            return {
+            retained = {
                 "status": "RETAINED_PREVIOUS",
                 "refresh_attempted_at": attempted_at,
                 "last_success_at": prior.get("last_success_at"),
@@ -377,6 +391,7 @@ def _component_payload(
                 "refresh_error": str(exc),
                 "data": prior.get("data"),
             }
+            return brent.reconcile_component(retained, now=now) if name == "oil" else retained
         return {
             "status": "UNAVAILABLE",
             "refresh_attempted_at": attempted_at,
@@ -425,7 +440,8 @@ def build_snapshot(
         "cnyrub_spot_live",
         "cnyrubf_live",
     }
-    if set(selected_producers) != required:
+    # Explicit legacy/offline producer injection may omit oil; production defaults include it.
+    if not required <= set(selected_producers) <= required | {"oil"}:
         raise ChatAnalysisSnapshotError("producer set mismatch")
 
     components = {
@@ -435,9 +451,9 @@ def build_snapshot(
             now=now_utc,
             previous=previous,
         )
-        for name in sorted(required)
+        for name in sorted(selected_producers)
     }
-    components["oil"] = {
+    components.setdefault("oil", {
         "status": "GOVERNED_BLOCKED",
         "refresh_attempted_at": _iso(now_utc),
         "last_success_at": None,
@@ -451,7 +467,7 @@ def build_snapshot(
             "missing_oil_must_not_be_interpreted_as_neutral": True,
             "action_authority": False,
         },
-    }
+    })
 
     daily = components["stage9_daily"]
     market = components["live_market_structure"]
@@ -569,6 +585,7 @@ def finalize_snapshot_timing(snapshot: dict[str, object], *, started: datetime, 
         if component.get("status") in {"READY", "PARTIAL"} and component.get("data") is not None:
             component["last_success_at"] = _iso(completed)
             component["last_success_at_semantics"] = "snapshot_collection_completed_upper_bound"
+    brent.apply_oil_freshness(snapshot, now=completed)
 
 
 def refresh_snapshot(
