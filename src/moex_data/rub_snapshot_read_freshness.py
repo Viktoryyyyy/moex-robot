@@ -212,4 +212,6 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
         "last_trade_freshness_proven": False,
         "session_calendar_acceptance_proven": False,
     }
+    from moex_data.rub_source_observation import build_context
+    result["source_observation_context"] = build_context(instruments, now=now)
     return result
