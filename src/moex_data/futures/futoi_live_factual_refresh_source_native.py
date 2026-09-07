@@ -268,10 +268,11 @@ def latest_aligned_factual(
     groups_by_ts = work.groupby("_parsed_ts")["clgroup"].agg(
         lambda values: set(str(value).upper() for value in values)
     )
-    aligned = [ts for ts, groups in groups_by_ts.items() if groups == {"FIZ", "YUR"}]
-    if not aligned:
-        _fail("accepted FUTOI partition has no exact aligned FIZ/YUR snapshot")
-    selected_ts = max(aligned)
+    # Select the source frontier before checking its quality. Searching backwards
+    # for a complete pair would silently replace an incomplete new publication.
+    selected_ts = work["_parsed_ts"].max()
+    if groups_by_ts.loc[selected_ts] != {"FIZ", "YUR"}:
+        _fail("latest source FUTOI timestamp must contain exactly FIZ and YUR; fallback forbidden")
     fiz = _resolved_group(work, "FIZ", selected_ts)
     yur = _resolved_group(work, "YUR", selected_ts)
 
