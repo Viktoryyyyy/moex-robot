@@ -42,6 +42,7 @@ def read(root, now=NOW):
 def test_opt_out_does_not_change_snapshot(tmp_path):
     original = snapshot()
     assert fast.apply(original, root=tmp_path, now=NOW) is original
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_fresh_overlay_preserves_slow_data_identity_and_no_network_on_read(tmp_path):

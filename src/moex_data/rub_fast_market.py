@@ -26,7 +26,9 @@ def _digest(value):
 
 def state_path(root):
     from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as base
-    parent = base.snapshot_state_dir(root)
+    parent = root / base.STATE_RELATIVE_DIR
+    if parent.is_symlink() or not parent.resolve().is_relative_to(root.resolve()):
+        raise ValueError("snapshot path escaped data root")
     folder = parent / "fast_market"
     if folder.is_symlink() or not folder.resolve().is_relative_to(parent.resolve()):
         raise ValueError("fast market path escaped state directory")
