@@ -283,7 +283,7 @@ def refresh_snapshot(
         refresh_bundle = current_context.context.run_refresh_all(
             through_date=through_date,
             run_id=run_id,
-            now_fn=lambda: now,
+            now_fn=now_fn,
         )
         delta_bundle = current_context.delta_context.build_all(
             root=root,
