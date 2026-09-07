@@ -475,14 +475,17 @@ def test_sentinel_normalization_is_deterministic_and_keeps_input_unchanged() -> 
 def test_existing_apim_response_evidence_needs_no_additional_fetch() -> None:
     from moex_data import synchronized_live_market_oi_context_apim as apim
 
-    def run(empty_offer: bool) -> tuple[dict[str, object], list[str]]:
+    def run(empty_offer: bool, *, evidence: bool = True) -> tuple[dict[str, object], list[str]]:
         forts, cets = _payloads()
         present = {row[0] for row in forts["marketdata"]["data"]}
         forts["securities"]["data"] = [
             row for row in forts["securities"]["data"] if row[0] in present
         ]
         if empty_offer:
-            _zero_offer(forts, "USDRUBF")
+            if evidence:
+                _zero_offer(forts, "USDRUBF")
+            else:
+                _set_quote(forts, "USDRUBF", 90.9, 0)
         calls = []
 
         class Response:
@@ -501,8 +504,22 @@ def test_existing_apim_response_evidence_needs_no_additional_fetch() -> None:
         def get(url: str, **kwargs: object) -> Response:
             assert url in (live.DEFAULT_BASE_URL + live.FORTS_ENDPOINT, live.DEFAULT_BASE_URL + live.CETS_ENDPOINT)
             assert kwargs["allow_redirects"] is False
-            calls.append(json.dumps([url, kwargs["params"]], sort_keys=True))
-            return Response(url, forts if "/RFUD/" in url else cets)
+            params = kwargs["params"]
+            if "/RFUD/" in url:
+                assert set(OFFER_EVIDENCE) <= set(params["marketdata.columns"].split(","))
+            calls.append(json.dumps([url, params], sort_keys=True))
+            payload = deepcopy(forts if "/RFUD/" in url else cets)
+            # Honor requested columns: full fixtures must not hide request omissions.
+            for block_name in ("securities", "marketdata"):
+                requested = params.get(block_name + ".columns")
+                if requested and block_name in payload:
+                    block = payload[block_name]
+                    available = block["columns"]
+                    selected = [field for field in requested.split(",") if field in available]
+                    indices = [available.index(field) for field in selected]
+                    block["columns"] = selected
+                    block["data"] = [[row[index] for index in indices] for row in block["data"]]
+            return Response(url, payload)
 
         snapshot = partial.fetch_live_snapshot(
             http_get=get,
@@ -521,3 +538,9 @@ def test_existing_apim_response_evidence_needs_no_additional_fetch() -> None:
     assert item["quote_status"] == "empty_offer_source_native"
     assert item["price_oi_usable"] is True
     assert item["ask"] is None and item["spread"] is None
+
+    unproven, missing_calls = run(True, evidence=False)
+    assert missing_calls == normal_calls
+    assert unproven["instruments"]["usdrubf"]["quote_status"] == "zero_quote_unproven"
+    assert unproven["instruments"]["usdrubf"]["price_oi_usable"] is True
+    assert unproven["status"] == "READY"

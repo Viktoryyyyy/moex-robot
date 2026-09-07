@@ -53,6 +53,9 @@ FUTURES_MARKETDATA_COLUMNS: Final[tuple[str, ...]] = (
     "BID",
     "OFFER",
     "SYSTIME",
+    "OFFERDEPTH",
+    "OFFERDEPTHT",
+    "NUMOFFERS",
 )
 CETS_MARKETDATA_COLUMNS: Final[tuple[str, ...]] = (
     "SECID",
@@ -514,10 +517,12 @@ def build_snapshot_from_payloads(
     forts_marketdata = _table_frame(forts_payload, "marketdata")
     cets_marketdata = _table_frame(cets_payload, "marketdata")
     _require_columns(securities, FUTURES_SECURITY_COLUMNS, "securities")
-    # Missing quote columns are quote-local; factual LAST/OI columns stay required.
+    # Quote and optional sentinel-evidence columns are quote-local; factual columns stay required.
     _require_columns(
         forts_marketdata,
-        [name for name in FUTURES_MARKETDATA_COLUMNS if name not in ("BID", "OFFER")],
+        [name for name in FUTURES_MARKETDATA_COLUMNS if name not in (
+            "BID", "OFFER", "OFFERDEPTH", "OFFERDEPTHT", "NUMOFFERS"
+        )],
         "FORTS marketdata",
     )
     _require_columns(
