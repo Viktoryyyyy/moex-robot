@@ -85,20 +85,23 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
         spot_ok = "cnyrub_tom" in instruments and "cnyrub_tom" not in blocked
         quality["spot_price_usable"] = bool(quality.get("spot_price_usable") is True and spot_ok)
         quote_map = quality.get("quote_usable_by_instrument", {})
-        if isinstance(quote_map, dict):
-            for key in list(quote_map):
-                item = instruments.get(key)
-                quote_map[key] = bool(
-                    quote_map[key] is True
-                    and key not in blocked
-                    and isinstance(item, dict)
-                    and item.get("quote_usable") is True
-                )
-            quality["quote_usable_by_instrument"] = quote_map
-            quality["quote_all_instruments_usable"] = bool(
-                quality.get("quote_all_instruments_usable") is True
-                and quote_map and all(quote_map.values())
+        if not isinstance(quote_map, dict):
+            quote_map = {}
+        for key in list(quote_map):
+            item = instruments.get(key)
+            quote_map[key] = bool(
+                quote_map[key] is True
+                and key not in blocked
+                and isinstance(item, dict)
+                and item.get("quote_usable") is True
             )
+        quality["quote_usable_by_instrument"] = quote_map
+        quality["quote_all_instruments_usable"] = bool(
+            quality.get("quote_all_instruments_usable") is True
+            and quote_map
+            and quote_map.keys() == instruments.keys()
+            and all(quote_map.values())
+        )
         for field in ("futures_synchronized", "futures_all_fresh"):
             sync[field] = bool(sync.get(field) is True and futures_ok)
         sync["futures_status"] = "PASS" if sync["futures_synchronized"] else "FAIL"
