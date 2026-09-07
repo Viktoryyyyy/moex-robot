@@ -531,7 +531,7 @@ def _materialize_target(
         _fail("FUTOI raw refresh manifest instrument scope mismatch")
     if manifest.get("published_partition_sha256") != expected_partition_sha:
         _fail("FUTOI raw refresh manifest partition SHA mismatch")
-    return partition_path, {
+    provenance = {
         "accepted_state_kind": "source_native_exact_date_raw_quality_pass",
         "raw_partition_ref": _rooted_ref(root, partition_path),
         "raw_partition_sha256": expected_partition_sha,
@@ -543,6 +543,12 @@ def _materialize_target(
         "raw_contract_ref": materializer.RAW_CONTRACT_REF,
         "raw_producer": materializer.PRODUCER_ID,
     }
+    if checked_instrument == CR_INSTRUMENT_ID:
+        from .futoi_publication_audit import audited_latest
+        audited_latest(root, pd.read_parquet(partition_path), provenance,
+            expected_trade_date=target_trade_date, expected_instrument_id=checked_instrument,
+            expected_source_ticker=identity["source_ticker"], expected_secid=identity["secid"])
+    return partition_path, provenance
 
 
 def run_refresh(

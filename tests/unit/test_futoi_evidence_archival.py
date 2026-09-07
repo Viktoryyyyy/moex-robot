@@ -41,6 +41,11 @@ def test_corrupt_archive_is_not_silently_overwritten(tmp_path):
 
 @pytest.mark.parametrize("instrument_id", factual.LIVE_INSTRUMENT_IDS)
 def test_materialization_returns_frozen_sources(monkeypatch, tmp_path, instrument_id):
+    # This test exercises byte archival with a deliberately non-parquet payload;
+    # real CR parquet/audit rejection is covered in test_futoi_publication_audit.
+    from moex_data.futures import futoi_publication_audit
+    monkeypatch.setattr(factual.pd, "read_parquet", lambda path: None)
+    monkeypatch.setattr(futoi_publication_audit, "audited_latest", lambda *args, **kwargs: None)
     identity = factual.source_identity(instrument_id)
     day = "2026-09-05"
     run = "scheduled"
