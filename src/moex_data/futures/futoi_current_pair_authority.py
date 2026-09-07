@@ -19,6 +19,8 @@ def _utc(value):
 
 def check_time(record, now):
     now = _utc(now)
+    if not isinstance(record, dict) or not isinstance(record.get("factual"), dict):
+        raise ValueError("current pair record or fact is missing")
     if record.get("status") != "FRESH" or record.get("failed_attempt_at"):
         raise ValueError("latest pair attempt is not fresh")
     fact = record["factual"]

@@ -128,3 +128,9 @@ def test_read_time_revokes_without_mutating_archived_fact(sample):
     assert snapshot['components']['futoi_live_cr']['status'] == 'UNAVAILABLE'
     assert snapshot['authority']['futoi_by_instrument']['cr_futures_family']['factual_authority'] is False
     assert record['factual'] == original_fact
+
+
+@pytest.mark.parametrize('record', [None, [], {}, {'status': 'FRESH', 'factual': None}])
+def test_malformed_pair_record_has_no_time_admission(record):
+    with pytest.raises(ValueError):
+        authority.check_time(record, datetime.now(timezone.utc))

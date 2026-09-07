@@ -92,6 +92,8 @@ def verify_current(root: Path, record: Mapping) -> dict:
         raise ValueError("publication audit missing")
     path = _verified_path(root, receipt.get("ref"), receipt.get("sha256"))
     report = json.loads(path.read_text())
+    if not isinstance(report, Mapping) or not isinstance(report.get("provenance"), Mapping):
+        raise ValueError("invalid publication audit structure")
     if (report.get("schema_version") != SCHEMA or report.get("policy") != POLICY
             or report.get("instrument_id") != source.CR_INSTRUMENT_ID
             or report.get("latest_status") != "PASS"
