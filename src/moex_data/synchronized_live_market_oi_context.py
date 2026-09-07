@@ -205,6 +205,117 @@ def _nonnegative_price(value: object, *, secid: str, field: str) -> float | None
     return numeric
 
 
+def _source_scalar(value: object) -> object:
+    if value is None or pd.isna(value):
+        return None
+    scalar = value.item() if hasattr(value, "item") else value
+    if isinstance(scalar, (str, int, float, bool)):
+        return scalar
+    return str(scalar)
+
+
+def _quote_side(value: object, *, zero_is_source_empty: bool) -> tuple[float | None, str]:
+    if value is None or pd.isna(value):
+        return None, "missing"
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None, "malformed"
+    if not math.isfinite(numeric) or numeric < 0:
+        return None, "malformed"
+    if numeric == 0:
+        return None, "empty" if zero_is_source_empty else "zero_unproven"
+    return numeric, "available"
+
+
+def _quote_semantics(
+    *,
+    row: Mapping[str, object],
+    stale: bool,
+    zero_is_source_empty: bool,
+) -> dict[str, object]:
+    bid_raw = row.get("BID")
+    ask_raw = row.get("OFFER")
+    bid, bid_state = _quote_side(bid_raw, zero_is_source_empty=zero_is_source_empty)
+    ask, ask_state = _quote_side(ask_raw, zero_is_source_empty=zero_is_source_empty)
+
+    status: str
+    reason: str | None
+    temporal_coherence = "same_marketdata_row"
+    usable = False
+    spread: float | None = None
+
+    malformed = [side for side, state in (("bid", bid_state), ("offer", ask_state)) if state == "malformed"]
+    zero_unproven = [side for side, state in (("bid", bid_state), ("offer", ask_state)) if state == "zero_unproven"]
+    if malformed:
+        status = "malformed_quote"
+        reason = "malformed_quote_side:" + ",".join(malformed)
+        temporal_coherence = "not_applicable"
+    elif zero_unproven:
+        status = "zero_quote_unproven"
+        reason = "zero_quote_semantics_not_source_proven:" + ",".join(zero_unproven)
+        temporal_coherence = "not_applicable"
+    elif bid_state == "empty" and ask_state == "empty":
+        status = "empty_book_source_native"
+        reason = "BID_and_OFFER_zero_encode_empty_RFUD_book_sides"
+        temporal_coherence = "not_applicable"
+    elif bid_state == "empty":
+        status = "empty_bid_source_native"
+        reason = "BID_zero_encodes_empty_RFUD_bid_side"
+        temporal_coherence = "not_applicable"
+    elif ask_state == "empty":
+        status = "empty_offer_source_native"
+        reason = "OFFER_zero_encodes_empty_RFUD_offer_side"
+        temporal_coherence = "not_applicable"
+    elif bid_state == "missing" and ask_state == "missing":
+        status = "missing_book"
+        reason = "BID_and_OFFER_missing"
+        temporal_coherence = "not_applicable"
+    elif bid_state == "missing":
+        status = "missing_bid"
+        reason = "BID_missing"
+        temporal_coherence = "not_applicable"
+    elif ask_state == "missing":
+        status = "missing_offer"
+        reason = "OFFER_missing"
+        temporal_coherence = "not_applicable"
+    elif bid is not None and ask is not None and bid > ask:
+        status = "crossed_quote_unusable"
+        reason = "positive_BID_exceeds_positive_OFFER_and_quote_side_temporal_coherence_is_unproven"
+        temporal_coherence = "unproven_for_crossed_quote"
+    elif bid is not None and ask is not None and bid == ask:
+        status = "locked_quote_unverified"
+        reason = "positive_BID_equals_OFFER_but_locked_book_semantics_are_not_source_proven"
+        temporal_coherence = "unproven_for_locked_quote"
+    elif stale:
+        status = "stale_quote"
+        reason = "marketdata_row_SYSTIME_exceeds_freshness_threshold"
+    elif bid is not None and ask is not None:
+        status = "available"
+        reason = None
+        usable = True
+        spread = ask - bid
+    else:
+        status = "unavailable"
+        reason = "quote_state_unresolved"
+        temporal_coherence = "not_applicable"
+
+    return {
+        "bid": bid,
+        "ask": ask,
+        "spread": spread,
+        "quote_usable": usable,
+        "quote_status": status,
+        "quote_reason": reason,
+        "quote_stale": stale,
+        "quote_freshness_basis": "marketdata_row_SYSTIME",
+        "quote_independent_timestamp_available": False,
+        "quote_temporal_coherence": temporal_coherence,
+        "bid_source_value": _source_scalar(bid_raw),
+        "offer_source_value": _source_scalar(ask_raw),
+    }
+
+
 def _price_range_tolerance(*values: float | None) -> float:
     scale = max((abs(value) for value in values if value is not None), default=1.0)
     return max(1e-9, scale * 1e-9)
@@ -249,6 +360,7 @@ def _normalize_row(
             f"allowed={MAX_FUTURE_CLOCK_SKEW_SECONDS}s"
         )
     age_seconds = max(0.0, (freshness_reference_utc - event_time).total_seconds())
+    stale = age_seconds > MAX_FRESHNESS_SECONDS
     last = _nonnegative_price(row.get("LAST"), secid=secid, field="LAST")
     open_price = _nonnegative_price(row.get("OPEN"), secid=secid, field="OPEN")
     high = _nonnegative_price(row.get("HIGH"), secid=secid, field="HIGH")
@@ -260,11 +372,7 @@ def _normalize_row(
             raise SynchronizedLiveMarketOIError(f"{secid}.{field} must not exceed HIGH")
         if value is not None and low is not None and value < low:
             raise SynchronizedLiveMarketOIError(f"{secid}.{field} must not be below LOW")
-    bid = _nonnegative_price(row.get("BID"), secid=secid, field="BID")
-    ask = _nonnegative_price(row.get("OFFER"), secid=secid, field="OFFER")
-    if bid is not None and ask is not None and bid > ask:
-        raise SynchronizedLiveMarketOIError(f"{secid}.BID must not exceed OFFER")
-    spread = ask - bid if bid is not None and ask is not None else None
+    quote = _quote_semantics(row=row, stale=stale, zero_is_source_empty=is_future)
     volume = _number(row.get("VOLTODAY"))
     trades = _integer(row.get("NUMTRADES"))
     if volume is not None and volume < 0:
@@ -309,15 +417,13 @@ def _normalize_row(
         "oi_status": "available" if is_future and oi is not None else (
             "missing" if is_future else "not_applicable"
         ),
-        "bid": bid,
-        "ask": ask,
-        "spread": spread,
+        **quote,
         "timestamp": _iso(event_time),
         "received_at_utc": _iso(received_at_utc),
         "freshness_reference_utc": _iso(freshness_reference_utc),
         "age_seconds": round(age_seconds, 3),
         "future_clock_skew_seconds": round(max(0.0, future_seconds), 3),
-        "stale": age_seconds > MAX_FRESHNESS_SECONDS,
+        "stale": stale,
         "source_id": source_id,
         "price_oi_same_source_row": bool(is_future),
         "price_oi_source_field": "OPENPOSITION" if is_future else None,
@@ -471,6 +577,10 @@ def build_snapshot_from_payloads(
         and all(futures_price_oi_usable.values())
         and spot_price_usable
     )
+    quote_usable_by_instrument = {
+        logical_id: instruments[logical_id].get("quote_usable") is True
+        for logical_id in LOGICAL_ORDER
+    }
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -502,6 +612,9 @@ def build_snapshot_from_payloads(
             "price_oi_all_futures_usable": all(futures_price_oi_usable.values()),
             "price_oi_usable_by_instrument": futures_price_oi_usable,
             "spot_price_usable": spot_price_usable,
+            "quote_usable_by_instrument": quote_usable_by_instrument,
+            "quote_all_instruments_usable": all(quote_usable_by_instrument.values()),
+            "quote_required_for_analysis": False,
             "fail_closed": True,
         },
         "provenance": {
@@ -514,6 +627,8 @@ def build_snapshot_from_payloads(
                 "authenticated_gateway": True,
                 "pagination_complete": True,
                 "row_receipt_times_preserved": forts_row_receipts is not None,
+                "quote_zero_semantics": "RFUD BID/OFFER zero means empty source-native book side",
+                "quote_zero_semantics_evidence": "authenticated_APIM_RFUD_raw_probe_2026-09-07",
             },
             "cnyrub_tom": {
                 "source_id": CETS_SOURCE_ID,
@@ -522,6 +637,7 @@ def build_snapshot_from_payloads(
                 "oi_not_applicable": True,
                 "wap_method": "WAPRICE",
                 "authenticated_gateway": True,
+                "quote_zero_semantics": "unproven",
             },
         },
     }
