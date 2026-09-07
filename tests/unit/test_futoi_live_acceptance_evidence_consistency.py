@@ -20,11 +20,20 @@ def test_futoi_governance_and_implementation_evidence_are_consistent() -> None:
     evidence = _load(ACCEPTANCE_EVIDENCE_PATH)
     gates = {gate["gate_id"]: gate for gate in governance["gates"]}
 
-    assert governance["status"] == "FUTOI_GOVERNED_BLOCKED"
+    assert governance["status"] == "FUTOI_LIVE_ACCEPTED_FACTUAL_CONTEXT_ONLY_FOR_EXPLICITLY_ACCEPTED_INSTRUMENTS"
     assert gates["canonical_live_smoke"]["status"] == "PASS"
     assert gates["snapshot_live_enable"]["status"] == "PASS"
-    assert gates["recurring_live_quality_and_freshness"]["status"] == "BLOCKED"
+    assert gates["recurring_live_quality_and_freshness"]["status"] == "PASS"
 
+    # Preserve the old checkpoint; it must not masquerade as current acceptance.
+    assert implementation["evidence_scope"] == "historical_implementation_checkpoint_before_2026_09_07_factual_acceptance"
+    assert REPO_ROOT / implementation["current_governance_ref"] == GOVERNANCE_PATH
+    recurring_ref = governance["source_of_truth"]["recurring_scheduled_evidence_ref"]
+    assert implementation["subsequent_acceptance_evidence_ref"] == recurring_ref
+    recurring = _load(REPO_ROOT / recurring_ref)
+    assert recurring["acceptance_decision"]["recurring_scheduled_gate"] == "PASS"
+    assert recurring["scheduled_run"]["journal_binding"]["manifest_content_matches"] is True
+    assert recurring["frozen_evidence"]["all_eight_digests_verified"] is True
     assert implementation["status"] == "IMPLEMENTATION_READY_RECURRING_ACCEPTANCE_PENDING"
     assert implementation["runtime_live_smoke_passed"] is True
     assert implementation["snapshot_component_enabled"] is True
@@ -37,7 +46,9 @@ def test_futoi_governance_and_implementation_evidence_are_consistent() -> None:
     assert evidence["snapshot_integration_smoke"]["status"] == "PASS"
     assert evidence["remaining_acceptance_blocker"] == "recurring_live_quality_and_freshness"
 
-    assert governance["authority"]["factual_live_authority"] is False
+    assert governance["authority"]["factual_live_authority"] is True
+    assert governance["authority"]["factual_live_instrument_scope"] == ["si_futures_family"]
+    assert governance["instrument_acceptance"]["cr_futures_family"]["factual_live_authority"] is False
     assert implementation["factual_live_authority"] is False
     assert implementation["consumer_factual_use_allowed"] is False
     assert governance["authority"]["directional_authority"] is False

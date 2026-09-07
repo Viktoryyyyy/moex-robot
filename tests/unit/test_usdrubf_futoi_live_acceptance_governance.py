@@ -88,11 +88,11 @@ def _assert_loader_disabled(function: ast.FunctionDef) -> None:
     assert enabled_keywords[0].value.value is False
 
 
-def test_futoi_live_acceptance_is_blocked_only_by_recurring_freshness() -> None:
+def test_futoi_live_acceptance_has_passed_global_gates_and_si_only_authority() -> None:
     contract = _contract()
 
     assert contract["project"] == "MOEX_Bot"
-    assert contract["status"] == "FUTOI_GOVERNED_BLOCKED"
+    assert contract["status"] == "FUTOI_LIVE_ACCEPTED_FACTUAL_CONTEXT_ONLY_FOR_EXPLICITLY_ACCEPTED_INSTRUMENTS"
     assert contract["acceptance_rule"]["all_required_gates_must_pass_for_live_accepted"] is True
     assert contract["acceptance_rule"]["adapter_working_is_not_live_acceptance"] is True
     assert contract["acceptance_rule"]["successful_authenticated_request_is_not_license_acceptance"] is True
@@ -105,10 +105,16 @@ def test_futoi_live_acceptance_is_blocked_only_by_recurring_freshness() -> None:
     gates = {gate["gate_id"]: gate for gate in contract["gates"]}
     assert set(gates) == REQUIRED_GATES
     assert all(gate["required"] is True for gate in gates.values())
-    assert all(gate["status"] in {"PASS", "BLOCKED"} for gate in gates.values())
-    assert {gate_id for gate_id, gate in gates.items() if gate["status"] == "BLOCKED"} == {
-        "recurring_live_quality_and_freshness"
-    }
+    assert all(gate["status"] == "PASS" for gate in gates.values())
+    states = contract["instrument_acceptance"]
+    assert states["si_futures_family"]["factual_live_authority"] is True
+    assert states["si_futures_family"]["local_blockers"] == []
+    assert states["cr_futures_family"]["factual_live_authority"] is False
+    assert states["cr_futures_family"]["canonical_live_smoke_accepted"] is False
+    assert states["cr_futures_family"]["local_blockers"] == [
+        "cr_canonical_live_smoke_not_yet_accepted",
+        "cr_current_intraday_balance_failure_unresolved",
+    ]
 
     license_gate = gates["license_access_and_derived_use"]
     assert license_gate["status"] == "PASS"
@@ -170,18 +176,20 @@ def test_futoi_live_acceptance_is_blocked_only_by_recurring_freshness() -> None:
     assert live_evidence["snapshot_integration_smoke"]["consumer_factual_use_allowed"] is False
 
     assert gates["canonical_live_smoke"]["status"] == "PASS"
-    assert gates["recurring_live_quality_and_freshness"]["status"] == "BLOCKED"
+    assert gates["recurring_live_quality_and_freshness"]["status"] == "PASS"
     assert gates["snapshot_live_enable"]["status"] == "PASS"
     assert contract["acceptance_progress"]["required_gate_count"] == 10
-    assert contract["acceptance_progress"]["passed_gate_count"] == 9
-    assert contract["acceptance_progress"]["blocked_gate_ids"] == ["recurring_live_quality_and_freshness"]
+    assert contract["acceptance_progress"]["passed_gate_count"] == 10
+    assert contract["acceptance_progress"]["blocked_gate_ids"] == []
     assert contract["architecture_decision"]["legacy_phase8_transport_may_become_live_authority"] is False
 
 
-def test_blocked_acceptance_has_no_hidden_factual_or_action_authority() -> None:
+def test_factual_acceptance_has_no_hidden_directional_or_action_authority() -> None:
     authority = _contract()["authority"]
 
-    assert authority["factual_live_authority"] is False
+    assert authority["factual_live_authority"] is True
+    assert authority["factual_live_instrument_scope"] == ["si_futures_family"]
+    assert authority["stage5_promotion_authority"] is False
     assert authority["directional_authority"] is False
     assert authority["action_authority"] is False
     assert authority["buy_sell_authority"] is False
@@ -209,8 +217,8 @@ def test_disabled_loader_returns_governed_blocked_fallback() -> None:
     assert context.details["reason"] == "live_futoi_not_explicitly_enabled"
 
 
-def test_snapshot_market_bridge_remains_fail_closed_while_factual_acceptance_is_blocked() -> None:
-    assert _contract()["status"] == "FUTOI_GOVERNED_BLOCKED"
+def test_snapshot_market_bridge_remains_fail_closed_after_factual_acceptance() -> None:
+    assert _contract()["authority"]["directional_authority"] is False
     function = _function(SNAPSHOT_PATH, "_live_market_component")
     _assert_loader_disabled(function)
 
@@ -241,8 +249,8 @@ def test_snapshot_market_bridge_remains_fail_closed_while_factual_acceptance_is_
     assert action_values[0].value is False
 
 
-def test_live_shadow_runner_cannot_bypass_governed_block() -> None:
-    assert _contract()["status"] == "FUTOI_GOVERNED_BLOCKED"
+def test_live_shadow_runner_cannot_bypass_directional_block() -> None:
+    assert _contract()["authority"]["directional_authority"] is False
     source = LIVE_SHADOW_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source)
 
