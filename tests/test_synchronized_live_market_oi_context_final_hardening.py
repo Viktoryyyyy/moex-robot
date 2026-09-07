@@ -83,9 +83,17 @@ def test_api_base_url_accepts_only_canonical_https_origin() -> None:
             live._api_base_url(value, {})
 
 
-def test_crossed_bid_offer_fails_closed() -> None:
-    with pytest.raises(live.SynchronizedLiveMarketOIError, match="BID must not exceed OFFER"):
-        _normalize_future(BID=91.2, OFFER=91.1)
+def test_crossed_bid_offer_fails_quote_closed_without_poisoning_factual_row() -> None:
+    item = _normalize_future(BID=91.2, OFFER=91.1)
+
+    assert item["bid"] == pytest.approx(91.2)
+    assert item["ask"] == pytest.approx(91.1)
+    assert item["spread"] is None
+    assert item["quote_usable"] is False
+    assert item["quote_status"] == "crossed_quote_unusable"
+    assert item["quote_temporal_coherence"] == "unproven_for_crossed_quote"
+    assert item["last"] == pytest.approx(91.0)
+    assert item["oi"] == 1000
 
 
 def test_futures_wap_outside_session_range_fails_closed() -> None:

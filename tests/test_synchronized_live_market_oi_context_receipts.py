@@ -54,6 +54,9 @@ def _market_row(secid: str, systime: str = "2026-09-02 13:00:00") -> list[object
         90.9,
         91.1,
         systime,
+        None,
+        None,
+        None,
     ]
 
 

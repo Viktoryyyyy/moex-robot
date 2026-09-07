@@ -43,6 +43,9 @@ def _market_row(secid: str, systime: str, *, oi: int, rub_per_quote_unit: float)
         90.9,
         91.1,
         systime,
+        None,
+        None,
+        None,
     ]
 
 
