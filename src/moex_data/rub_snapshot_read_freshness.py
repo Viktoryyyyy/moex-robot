@@ -205,6 +205,8 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
         "maximum_source_age_seconds": MAX_LIVE_AGE_SECONDS,
         "blocked_instruments": sorted(blocked),
         "additional_live_fetch_performed": False,
-        "policy": "downgrade_only_source_event_time_at_read",
+        "policy": "downgrade_only_source_update_time_at_read",
+        "last_trade_freshness_proven": False,
+        "session_calendar_acceptance_proven": False,
     }
     return result

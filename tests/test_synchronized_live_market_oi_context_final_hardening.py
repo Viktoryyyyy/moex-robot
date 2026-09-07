@@ -41,6 +41,22 @@ def _normalize_future(**overrides: object) -> dict[str, object]:
     )
 
 
+def test_source_update_never_becomes_last_trade_time() -> None:
+    item = _normalize_future(TIME="12:00:01", TRADEDATE="2026-09-02")
+    assert item["timestamp"] == item["source_update_timestamp_utc"]
+    assert item["timestamp_semantics"] == "source_row_update_time_not_last_trade_time"
+    assert item["last_trade_time_moscow"] == "12:00:01"
+    assert item["source_trade_date"] == "2026-09-02"
+    assert item["price_oi_usable"] is False
+
+
+def test_missing_trade_date_is_not_inferred_from_source_update() -> None:
+    item = _normalize_future(TIME="18:59:59", TRADEDATE=float("nan"))
+    assert item["source_trade_date"] is None
+    assert item["source_trading_status"] is None
+    assert item["last_trade_time_moscow"] == "18:59:59"
+
+
 def _normalize_spot(**overrides: object) -> dict[str, object]:
     row: dict[str, object] = {
         "SYSTIME": "2026-09-02 13:00:00",

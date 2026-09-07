@@ -70,6 +70,7 @@ CETS_MARKETDATA_COLUMNS: Final[tuple[str, ...]] = (
     "OFFER",
     "SYSTIME",
 )
+OBSERVATION_MARKETDATA_COLUMNS: Final[tuple[str, ...]] = ("TIME", "TRADEDATE", "TRADINGSTATUS")
 FUTURES_LOGICAL_ORDER: Final[tuple[str, ...]] = (
     "usdrubf",
     "si_front",
@@ -436,6 +437,12 @@ def _normalize_row(
         ),
         **quote,
         "timestamp": _iso(event_time),
+        "timestamp_semantics": "source_row_update_time_not_last_trade_time",
+        "source_update_timestamp_utc": _iso(event_time),
+        # Preserve native dates separately: exchange and calendar days can differ.
+        "last_trade_time_moscow": _optional_source_text(row.get("TIME")),
+        "source_trade_date": _optional_source_text(row.get("TRADEDATE")),
+        "source_trading_status": _optional_source_text(row.get("TRADINGSTATUS")),
         "received_at_utc": _iso(received_at_utc),
         "freshness_reference_utc": _iso(freshness_reference_utc),
         "age_seconds": round(age_seconds, 3),
@@ -446,6 +453,12 @@ def _normalize_row(
         "price_oi_source_field": "OPENPOSITION" if is_future else None,
         "price_oi_usable": False,
     }
+
+
+def _optional_source_text(value: object) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    return str(value).strip() or None
 
 
 def _bindings_from_forts(

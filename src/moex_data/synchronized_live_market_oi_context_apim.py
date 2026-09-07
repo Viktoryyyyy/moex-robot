@@ -234,12 +234,12 @@ def fetch_live_snapshot(
         "iss.meta": "off",
         "iss.only": "securities,marketdata,securities.cursor",
         "securities.columns": ",".join(core.FUTURES_SECURITY_COLUMNS),
-        "marketdata.columns": ",".join(core.FUTURES_MARKETDATA_COLUMNS),
+        "marketdata.columns": ",".join(core.FUTURES_MARKETDATA_COLUMNS + core.OBSERVATION_MARKETDATA_COLUMNS),
     }
     cets_params = {
         "iss.meta": "off",
         "iss.only": "marketdata",
-        "marketdata.columns": ",".join(core.CETS_MARKETDATA_COLUMNS),
+        "marketdata.columns": ",".join(core.CETS_MARKETDATA_COLUMNS + core.OBSERVATION_MARKETDATA_COLUMNS),
     }
 
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="moex-live-snapshot") as executor:
