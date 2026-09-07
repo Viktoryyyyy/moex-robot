@@ -22,6 +22,16 @@
       "acceptance_evidence_ref": "contracts/intelligence/futoi_live_factual_acceptance_evidence_2026-09-07.json"
     },
     "cr_futures_family": {
+      "current_pair_acceptance": {
+        "accepted": true,
+        "scope": "current_intraday_latest_pair_only",
+        "evidence_ref": "contracts/intelligence/futoi_cr_current_pair_acceptance_2026-09-07.json",
+        "evidence_sha256": "6ee9abc2f44c61b325a165f966cead981b9f68e64ba3a4574bb95f974e8d46ab",
+        "previous_session_authority": false,
+        "delta_statistics_authority": false,
+        "historical_authority": false,
+        "provider_root_cause_established": false
+      },
       "status": "FUTOI_GOVERNED_BLOCKED",
       "collection_allowed": true,
       "canonical_live_smoke_accepted": false,

@@ -38,6 +38,8 @@ def check_time(record, now):
 
 def admit(values, record, *, root, repo_root, now):
     try:
+        if root is None:
+            root = audit.source._data_root()
         entry = values["instrument_acceptance"]["cr_futures_family"]["current_pair_acceptance"]
         if entry.get("accepted") is not True or entry.get("scope") != SCOPE:
             raise ValueError("current pair scope not accepted")

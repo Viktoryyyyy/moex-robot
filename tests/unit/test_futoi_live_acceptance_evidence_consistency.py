@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 
 
@@ -55,3 +56,21 @@ def test_futoi_governance_and_implementation_evidence_are_consistent() -> None:
     assert implementation["directional_authority"] is False
     assert governance["authority"]["action_authority"] is False
     assert implementation["action_authority"] is False
+
+
+def test_cr_current_pair_scope_has_hash_bound_acceptance_without_broad_authority():
+    contract = _load(GOVERNANCE_PATH)
+    cr = contract["instrument_acceptance"]["cr_futures_family"]
+    entry = cr["current_pair_acceptance"]
+    path = REPO_ROOT / entry["evidence_ref"]
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == entry["evidence_sha256"]
+    evidence = _load(path)
+    assert entry["accepted"] is True
+    assert entry["scope"] == evidence["scope"] == "current_intraday_latest_pair_only"
+    assert evidence["canonical_live_smoke"] == evidence["negative_replay"] == "PASS"
+    assert evidence["attachment_scope_check"] == evidence["read_expiry_check"] == "PASS"
+    assert evidence["rejected_archives_survive_next_refresh"] == "PASS"
+    assert evidence["historical_authority"] is False
+    assert evidence["provider_root_cause_established"] is False
+    assert cr["factual_live_authority"] is False
+    assert entry["previous_session_authority"] is entry["delta_statistics_authority"] is False

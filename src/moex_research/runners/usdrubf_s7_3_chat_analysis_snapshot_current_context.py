@@ -182,7 +182,7 @@ def _attach_futoi_context(
             admission = {"allowed": False, "scope": pair_authority.SCOPE, "error": "current pair scope not accepted"}
             if entry.get("current_pair_acceptance", {}).get("accepted") is True:
                 admission = pair_authority.admit(governance_values, current_view,
-                    root=futoi_source._data_root(), repo_root=futoi.REPO_ROOT,
+                    root=None, repo_root=futoi.REPO_ROOT,
                     now=datetime.now(timezone.utc))
             factual_authority = admission["allowed"] is True
             existing_data.update(factual_authority=factual_authority,

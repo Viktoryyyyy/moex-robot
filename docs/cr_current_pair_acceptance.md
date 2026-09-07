@@ -35,3 +35,15 @@ training and order execution are not granted by this scope.
 Deployment acceptance must exercise the real collector and API, verify archived
 failed attempts survive a subsequent successful refresh, check corrupt/expired
 evidence fails closed, and check previous-session/delta fields remain prohibited.
+
+## Accepted current-pair scope, 2026-09-07
+
+The separate current-pair gate is explicitly enabled by the hash-bound artifact
+`contracts/intelligence/futoi_cr_current_pair_acceptance_2026-09-07.json`.
+Canonical smoke at 19:39 UTC replayed the 19:35 UTC pair with zero balance; the
+187-publication response retained 49 rejected publications. The known historical
+imbalance, newer incomplete frontier, tampered fact/receipt, retention and expiry
+were rejected. A second real refresh preserved the rejected evidence hashes.
+Snapshot attachment granted only current-pair consumer rights; previous-session
+and delta/statistics stayed false. This resolves handling of inconsistent earlier
+publications for this narrow scope, not the provider root cause or broad CR gates.
