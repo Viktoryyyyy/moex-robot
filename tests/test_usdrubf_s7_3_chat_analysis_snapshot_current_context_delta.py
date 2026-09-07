@@ -139,3 +139,25 @@ def test_canonical_live_refresh_builds_and_attaches_real_delta_bundle() -> None:
     assert delta_call in body
     assert attach_call in body
     assert body.index(refresh_call) < body.index(delta_call) < body.index(attach_call)
+
+
+@pytest.mark.parametrize("admitted", [True, False])
+def test_cr_pair_admission_does_not_grant_previous_or_delta_scope(monkeypatch, tmp_path, admitted):
+    monkeypatch.setattr(futoi, "_load_governance", lambda: {"instrument_acceptance": {
+        source.CR_INSTRUMENT_ID: {"current_pair_acceptance": {"accepted": True}}}})
+    monkeypatch.setattr(futoi, "_governance_state", lambda *args: {"factual_use_allowed": False})
+    monkeypatch.setattr(source, "_data_root", lambda: tmp_path)
+    monkeypatch.setattr(snapshot_context.pair_authority, "admit", lambda *args, **kwargs: {
+        "allowed": admitted, "scope": snapshot_context.pair_authority.SCOPE})
+    snapshot = {"components": {}, "authority": {}, "analysis_views": {}}
+    bundle = {"instrument_results": {i: _instrument_context(i) for i in source.LIVE_INSTRUMENT_IDS}}
+    bundle["instrument_results"][source.CR_INSTRUMENT_ID][context.PREVIOUS_ROLE]["status"] = "ERROR"
+    snapshot_context._attach_futoi_context(snapshot, bundle)
+    component = snapshot["components"][futoi.FUTOI_CR_COMPONENT]
+    assert component["status"] == ("READY" if admitted else "UNAVAILABLE")
+    assert component["data"]["current_intraday"]["consumer_factual_use_allowed"] is admitted
+    assert component["data"]["previous_completed_session"]["consumer_factual_use_allowed"] is False
+    assert component["data"]["delta_statistics"]["consumer_factual_use_allowed"] is False
+    assert snapshot["authority"]["futoi_by_instrument"][source.CR_INSTRUMENT_ID]["factual_authority"] is admitted
+    assert snapshot["authority"]["futoi_by_instrument"][source.CR_INSTRUMENT_ID]["factual_authority_scope"] == snapshot_context.pair_authority.SCOPE
+    assert snapshot["authority"]["futoi_action_authority"] is False

@@ -9,6 +9,7 @@ from typing import Callable, Sequence
 from moex_data.futures import futoi_delta_statistics_context as delta_context
 from moex_data.futures import futoi_intraday_previous_session_context as context
 from moex_data.futures import futoi_live_factual_refresh_source_native as futoi_source
+from moex_data.futures import futoi_current_pair_authority as pair_authority
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as base
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_current as current
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_futoi as futoi
@@ -174,6 +175,23 @@ def _attach_futoi_context(
             }
         )
         components[component_name] = component
+        if instrument_id == futoi_source.CR_INSTRUMENT_ID:
+            # CR broad instrument authority stays blocked. Admit only a verified
+            # current pair, independently of previous-session and delta payloads.
+            entry = governance_values.get("instrument_acceptance", {}).get(instrument_id, {})
+            admission = {"allowed": False, "scope": pair_authority.SCOPE, "error": "current pair scope not accepted"}
+            if entry.get("current_pair_acceptance", {}).get("accepted") is True:
+                admission = pair_authority.admit(governance_values, current_view,
+                    root=None, repo_root=futoi.REPO_ROOT,
+                    now=datetime.now(timezone.utc))
+            factual_authority = admission["allowed"] is True
+            existing_data.update(factual_authority=factual_authority,
+                consumer_factual_use_allowed=factual_authority,
+                factual_authority_scope=pair_authority.SCOPE, current_pair_admission=admission)
+            existing_data["current_intraday"]["consumer_factual_use_allowed"] = factual_authority
+            existing_data["previous_completed_session"]["consumer_factual_use_allowed"] = False
+            existing_data["delta_statistics"]["consumer_factual_use_allowed"] = False
+            component["status"] = "READY" if factual_authority else "UNAVAILABLE"
         authority_by_instrument[instrument_id] = {
             "component_ref": component_name,
             "factual_authority": factual_authority,
@@ -181,6 +199,8 @@ def _attach_futoi_context(
             "action_authority": False,
             "standalone_buy_sell_authority": False,
         }
+        if instrument_id == futoi_source.CR_INSTRUMENT_ID:
+            authority_by_instrument[instrument_id]["factual_authority_scope"] = pair_authority.SCOPE
 
     si_authority = authority_by_instrument[futoi_source.SI_INSTRUMENT_ID]
     authority["futoi_factual_authority"] = bool(si_authority["factual_authority"])

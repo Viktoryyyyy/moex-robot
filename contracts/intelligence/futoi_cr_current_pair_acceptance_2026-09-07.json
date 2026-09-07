@@ -1,0 +1,106 @@
+{
+  "scope": "current_intraday_latest_pair_only",
+  "policy": "latest_source_timestamp_no_fallback_exact_balance_v1",
+  "instrument_id": "cr_futures_family",
+  "canonical_live_smoke": "PASS",
+  "negative_replay": "PASS",
+  "historical_authority": false,
+  "checked_at": "2026-09-07T19:39:49.251432+00:00",
+  "isolated_data_root": "/home/trader/moex_bot/deploy_backups/cr_audit_acceptance_20260907T193944Z",
+  "factual": {
+    "trade_date": "2026-09-07",
+    "snapshot_ts": "2026-09-07T19:35:00+00:00",
+    "source_publication_time": "2026-09-07T19:35:10+00:00",
+    "availability_ts_utc": "2026-09-07T19:39:44+00:00",
+    "ingest_ts_utc": "2026-09-07T19:39:44+00:00",
+    "source_ticker": "CR",
+    "secid": "CRU6",
+    "sess_id": 7642,
+    "fiz": {
+      "long": 6609296,
+      "short": 4343966,
+      "net": 2265330,
+      "long_participants": 16823,
+      "short_participants": 6736
+    },
+    "yur": {
+      "long": 15665842,
+      "short": 17931172,
+      "net": -2265330,
+      "long_participants": 269,
+      "short_participants": 139
+    },
+    "total_open_interest": 22275138,
+    "short_semantics": "absolute_contract_count",
+    "timestamp_semantics": "source_event_and_publication_localized_from_Europe/Moscow_to_UTC",
+    "fiz_yur_alignment": "latest_exact_shared_source_event_ts_and_sess_id_after_max_seqnum_revision_resolution"
+  },
+  "provenance": {
+    "accepted_state_kind": "source_native_exact_date_raw_quality_pass",
+    "raw_partition_ref": "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/305a79a8588afa426afce5474c9c19120dddfed25c223aed737f368d087ee288.parquet",
+    "raw_partition_sha256": "305a79a8588afa426afce5474c9c19120dddfed25c223aed737f368d087ee288",
+    "raw_quality_report_ref": "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/8ecbe002d51ec4e74f17c2cbf220a7972e852ca73d62d2694c13485f4be170a7.json",
+    "raw_quality_report_sha256": "8ecbe002d51ec4e74f17c2cbf220a7972e852ca73d62d2694c13485f4be170a7",
+    "raw_refresh_manifest_ref": "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/932e4cc790ed0250028c89e579bcbdec27f35e6312964932a1db2a3988b5ce09.json",
+    "raw_refresh_manifest_sha256": "932e4cc790ed0250028c89e579bcbdec27f35e6312964932a1db2a3988b5ce09",
+    "source_contract_ref": "contracts/sources/futures/moex_algopack_futoi.v1.yaml",
+    "raw_contract_ref": "contracts/datasets/futures_futoi_raw.v1.yaml",
+    "raw_producer": "moex_data.futures.materialize_futoi_instrument.v1",
+    "publication_audit": {
+      "ref": "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/93f0b3d8ea2c26e63e1fe22573944ebb836a7a4e67eba89e7d7696f65ff2404d.json",
+      "sha256": "93f0b3d8ea2c26e63e1fe22573944ebb836a7a4e67eba89e7d7696f65ff2404d"
+    }
+  },
+  "audit_summary": {
+    "policy": "latest_source_timestamp_no_fallback_exact_balance_v1",
+    "audit_sha256": "93f0b3d8ea2c26e63e1fe22573944ebb836a7a4e67eba89e7d7696f65ff2404d",
+    "publication_count": 187,
+    "rejected_count": 49,
+    "scope": "current_intraday_latest_pair_only"
+  },
+  "negative_cases": {
+    "newer_incomplete": {
+      "status": "REJECTED",
+      "reason": "latest source FUTOI timestamp must contain exactly FIZ and YUR; fallback forbidden",
+      "receipt": {
+        "ref": "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/97a3b5e1371bc9978b7f5c49d46d6b79f65e1a4ea911e68cecce05bbe427b99f.json",
+        "sha256": "97a3b5e1371bc9978b7f5c49d46d6b79f65e1a4ea911e68cecce05bbe427b99f"
+      },
+      "original_source_sha256": null
+    },
+    "known_imbalance": {
+      "status": "REJECTED",
+      "reason": "FIZ/YUR net positions do not balance to zero",
+      "receipt": {
+        "ref": "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/034be2d42afb967f860286bb224213f87872ea757555f038b1c95d003429e249.json",
+        "sha256": "034be2d42afb967f860286bb224213f87872ea757555f038b1c95d003429e249"
+      },
+      "original_source_sha256": "5dc08b3cf6523d8e56f062c3c1cda4130759ee5a66e941c245ec138f47e1a0ab"
+    },
+    "fact_tamper": "REJECTED",
+    "receipt_tamper": "REJECTED",
+    "retained": "REJECTED"
+  },
+  "production_modified": false,
+  "provider_root_cause_established": false,
+  "training_or_model_evaluation": false,
+  "attachment_scope_check": "PASS",
+  "read_expiry_check": "PASS",
+  "rejected_archives_survive_next_refresh": "PASS",
+  "second_provenance": {
+    "accepted_state_kind": "source_native_exact_date_raw_quality_pass",
+    "raw_partition_ref": "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/28ca98466ab31e2fe83e25bebe05f3020dfa81981ca8c18782a0e6aa6c86edf2.parquet",
+    "raw_partition_sha256": "28ca98466ab31e2fe83e25bebe05f3020dfa81981ca8c18782a0e6aa6c86edf2",
+    "raw_quality_report_ref": "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/b6feec86a8554cf3f3fe480f7416bbe1b69dce665c65f593e6e413fb5f4ecb6f.json",
+    "raw_quality_report_sha256": "b6feec86a8554cf3f3fe480f7416bbe1b69dce665c65f593e6e413fb5f4ecb6f",
+    "raw_refresh_manifest_ref": "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/c42e5d02f5541becd1cea37650cff4c054a0f381003f0b21e54043367df71859.json",
+    "raw_refresh_manifest_sha256": "c42e5d02f5541becd1cea37650cff4c054a0f381003f0b21e54043367df71859",
+    "source_contract_ref": "contracts/sources/futures/moex_algopack_futoi.v1.yaml",
+    "raw_contract_ref": "contracts/datasets/futures_futoi_raw.v1.yaml",
+    "raw_producer": "moex_data.futures.materialize_futoi_instrument.v1",
+    "publication_audit": {
+      "ref": "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/2c9d6349c8f9659abb8182a5649e1e8eccf41113766a34b0b125dfeb49904a33.json",
+      "sha256": "2c9d6349c8f9659abb8182a5649e1e8eccf41113766a34b0b125dfeb49904a33"
+    }
+  }
+}

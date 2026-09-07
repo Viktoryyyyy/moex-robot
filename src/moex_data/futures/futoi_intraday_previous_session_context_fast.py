@@ -183,13 +183,14 @@ def _record_with_failure_semantics(
             require_same_trade_date=require_same,
         )
         if retained is not None:
+            retained["failed_attempt_evidence"] = getattr(exc, "attempt_provenance", None)
             return retained
         status = (
             "PENDING"
             if "pending on authoritative observed TradeStats date" in str(exc)
             else "ERROR"
         )
-        return core._empty_record(
+        failed = core._empty_record(
             role=role,
             expected_trade_date=trade_date,
             attempted_at=attempted_at,
@@ -197,6 +198,8 @@ def _record_with_failure_semantics(
             error_class=exc.__class__.__name__,
             error=str(exc),
         )
+        failed["failed_attempt_evidence"] = getattr(exc, "attempt_provenance", None)
+        return failed
 
 
 def run_refresh(
