@@ -1,6 +1,10 @@
 {
   "project": "MOEX_Bot",
   "evidence_id": "futoi_live_factual_refresh_implementation_v1",
+  "evidence_scope": "historical_implementation_checkpoint_before_2026_09_07_factual_acceptance",
+  "status_semantics": "Recorded implementation and runtime checkpoint, not current governance or a claim of post-acceptance server apply. Original observations below are preserved.",
+  "current_governance_ref": "contracts/intelligence/usdrubf_futoi_live_acceptance_governance_v1.json",
+  "subsequent_acceptance_evidence_ref": "contracts/intelligence/futoi_live_factual_acceptance_evidence_2026-09-07.json",
   "status": "IMPLEMENTATION_READY_RECURRING_ACCEPTANCE_PENDING",
   "base_main_sha": "6ea33c0f0c11d84fab1525852e49a59a45285a56",
   "source_id": "moex_algopack_futoi",
