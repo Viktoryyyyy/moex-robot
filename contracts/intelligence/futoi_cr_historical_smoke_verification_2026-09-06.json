@@ -1,0 +1,39 @@
+{
+  "project": "MOEX_Bot",
+  "recorded_at": "2026-09-06T19:17:01.759261+00:00",
+  "status": "PASS_HISTORICAL_REPLAY_ONLY",
+  "instrument_id": "cr_futures_family",
+  "run_id": "step10_manual_20260906T155933Z_futoi_factual_cr_futures_family",
+  "source_trade_date": "2026-09-05",
+  "source_row_count": 218,
+  "factual_reproduced": true,
+  "hashes_verified": 4,
+  "run_evidence_ref": "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/b1e78127228ae50cd58bba2638319d2110a2b5bbdeaae5626d09a961c4d81997.json",
+  "run_evidence_sha256": "b1e78127228ae50cd58bba2638319d2110a2b5bbdeaae5626d09a961c4d81997",
+  "provenance": {
+    "accepted_state_kind": "source_native_exact_date_raw_quality_pass",
+    "raw_contract_ref": "contracts/datasets/futures_futoi_raw.v1.yaml",
+    "raw_partition_ref": "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/3f6e6caf0af0e4e08b0db3ec6c11db062b475b995f7d07506203d20a1260d8e3.parquet",
+    "raw_partition_sha256": "3f6e6caf0af0e4e08b0db3ec6c11db062b475b995f7d07506203d20a1260d8e3",
+    "raw_producer": "moex_data.futures.materialize_futoi_instrument.v1",
+    "raw_quality_report_ref": "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/04d30de68f33f9374d46dd7aa57511e38e6fc6be0a2b556c36615a42fb34446b.json",
+    "raw_quality_report_sha256": "04d30de68f33f9374d46dd7aa57511e38e6fc6be0a2b556c36615a42fb34446b",
+    "raw_refresh_manifest_ref": "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/aa659f46abf3f271263d179dab52ccf9c726de994d5e14a92e1405e15775465f.json",
+    "raw_refresh_manifest_sha256": "aa659f46abf3f271263d179dab52ccf9c726de994d5e14a92e1405e15775465f",
+    "source_contract_ref": "contracts/sources/futures/moex_algopack_futoi.v1.yaml"
+  },
+  "snapshot_integration": {
+    "component_id": "futoi_live_cr",
+    "status": "GOVERNED_BLOCKED",
+    "candidate_status": "PASS",
+    "consumer_factual_use_allowed": false
+  },
+  "automatic_scheduled_run_evidence": false,
+  "recurring_gate_passed": false,
+  "directional_authority": false,
+  "action_authority": false,
+  "stage5_promotion_authority": false,
+  "current_cr_acceptance_granted": false,
+  "superseded_for_live_acceptance_by": "contracts/intelligence/futoi_live_factual_acceptance_evidence_2026-09-07.json",
+  "note": "September 5 archived replay does not resolve the later current-intraday balance contradiction recorded on September 7."
+}
