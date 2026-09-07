@@ -206,38 +206,60 @@ def _nonnegative_price(value: object, *, secid: str, field: str) -> float | None
 
 
 def _source_scalar(value: object) -> object:
+    if not pd.api.types.is_scalar(value):
+        return str(value)
     if value is None or pd.isna(value):
         return None
     scalar = value.item() if hasattr(value, "item") else value
+    if isinstance(scalar, float) and not math.isfinite(scalar):
+        return str(scalar)
     if isinstance(scalar, (str, int, float, bool)):
         return scalar
     return str(scalar)
 
 
-def _quote_side(value: object, *, zero_is_source_empty: bool) -> tuple[float | None, str]:
-    if value is None or pd.isna(value):
+def _quote_side(value: object) -> tuple[float | None, str]:
+    if value is None:
         return None, "missing"
+    if isinstance(value, bool):
+        return None, "malformed"
     try:
         numeric = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None, "malformed"
     if not math.isfinite(numeric) or numeric < 0:
         return None, "malformed"
     if numeric == 0:
-        return None, "empty" if zero_is_source_empty else "zero_unproven"
+        return None, "zero_unproven"
     return numeric, "available"
+
+
+def _rfud_offer_zero_state(row: Mapping[str, object]) -> str:
+    # Evidence must be numeric, complete and from the same RFUD marketdata row.
+    # Missing/invalid evidence is not permission to infer an empty side.
+    missing = False
+    for field in ("OFFERDEPTH", "OFFERDEPTHT", "NUMOFFERS"):
+        value = _source_scalar(row.get(field))
+        if value is None:
+            missing = True
+        elif isinstance(value, bool) or not isinstance(value, (int, float)) or value != 0:
+            return "malformed"
+    return "zero_unproven" if missing else "empty"
 
 
 def _quote_semantics(
     *,
     row: Mapping[str, object],
     stale: bool,
-    zero_is_source_empty: bool,
+    rfud_source: bool,
 ) -> dict[str, object]:
-    bid_raw = row.get("BID")
-    ask_raw = row.get("OFFER")
-    bid, bid_state = _quote_side(bid_raw, zero_is_source_empty=zero_is_source_empty)
-    ask, ask_state = _quote_side(ask_raw, zero_is_source_empty=zero_is_source_empty)
+    bid_raw = _source_scalar(row.get("BID"))
+    ask_raw = _source_scalar(row.get("OFFER"))
+    bid, bid_state = _quote_side(bid_raw)
+    ask, ask_state = _quote_side(ask_raw)
+    # BID-side symmetry is not established. Only OFFER has accepted evidence.
+    if rfud_source and ask_state == "zero_unproven":
+        ask_state = _rfud_offer_zero_state(row)
 
     status: str
     reason: str | None
@@ -255,17 +277,9 @@ def _quote_semantics(
         status = "zero_quote_unproven"
         reason = "zero_quote_semantics_not_source_proven:" + ",".join(zero_unproven)
         temporal_coherence = "not_applicable"
-    elif bid_state == "empty" and ask_state == "empty":
-        status = "empty_book_source_native"
-        reason = "BID_and_OFFER_zero_encode_empty_RFUD_book_sides"
-        temporal_coherence = "not_applicable"
-    elif bid_state == "empty":
-        status = "empty_bid_source_native"
-        reason = "BID_zero_encodes_empty_RFUD_bid_side"
-        temporal_coherence = "not_applicable"
     elif ask_state == "empty":
         status = "empty_offer_source_native"
-        reason = "OFFER_zero_encodes_empty_RFUD_offer_side"
+        reason = "OFFER_zero_with_zero_OFFERDEPTH_OFFERDEPTHT_NUMOFFERS_in_same_RFUD_row"
         temporal_coherence = "not_applicable"
     elif bid_state == "missing" and ask_state == "missing":
         status = "missing_book"
@@ -283,10 +297,6 @@ def _quote_semantics(
         status = "crossed_quote_unusable"
         reason = "positive_BID_exceeds_positive_OFFER_and_quote_side_temporal_coherence_is_unproven"
         temporal_coherence = "unproven_for_crossed_quote"
-    elif bid is not None and ask is not None and bid == ask:
-        status = "locked_quote_unverified"
-        reason = "positive_BID_equals_OFFER_but_locked_book_semantics_are_not_source_proven"
-        temporal_coherence = "unproven_for_locked_quote"
     elif stale:
         status = "stale_quote"
         reason = "marketdata_row_SYSTIME_exceeds_freshness_threshold"
@@ -311,8 +321,8 @@ def _quote_semantics(
         "quote_freshness_basis": "marketdata_row_SYSTIME",
         "quote_independent_timestamp_available": False,
         "quote_temporal_coherence": temporal_coherence,
-        "bid_source_value": _source_scalar(bid_raw),
-        "offer_source_value": _source_scalar(ask_raw),
+        "bid_source_value": bid_raw,
+        "offer_source_value": ask_raw,
     }
 
 
@@ -372,7 +382,11 @@ def _normalize_row(
             raise SynchronizedLiveMarketOIError(f"{secid}.{field} must not exceed HIGH")
         if value is not None and low is not None and value < low:
             raise SynchronizedLiveMarketOIError(f"{secid}.{field} must not be below LOW")
-    quote = _quote_semantics(row=row, stale=stale, zero_is_source_empty=is_future)
+    quote = _quote_semantics(
+        row=row,
+        stale=stale,
+        rfud_source=is_future and source_id == FORTS_SOURCE_ID,
+    )
     volume = _number(row.get("VOLTODAY"))
     trades = _integer(row.get("NUMTRADES"))
     if volume is not None and volume < 0:
@@ -500,8 +514,17 @@ def build_snapshot_from_payloads(
     forts_marketdata = _table_frame(forts_payload, "marketdata")
     cets_marketdata = _table_frame(cets_payload, "marketdata")
     _require_columns(securities, FUTURES_SECURITY_COLUMNS, "securities")
-    _require_columns(forts_marketdata, FUTURES_MARKETDATA_COLUMNS, "FORTS marketdata")
-    _require_columns(cets_marketdata, CETS_MARKETDATA_COLUMNS, "CETS marketdata")
+    # Missing quote columns are quote-local; factual LAST/OI columns stay required.
+    _require_columns(
+        forts_marketdata,
+        [name for name in FUTURES_MARKETDATA_COLUMNS if name not in ("BID", "OFFER")],
+        "FORTS marketdata",
+    )
+    _require_columns(
+        cets_marketdata,
+        [name for name in CETS_MARKETDATA_COLUMNS if name not in ("BID", "OFFER")],
+        "CETS marketdata",
+    )
 
     bindings = _bindings_from_forts(
         securities,
@@ -627,7 +650,10 @@ def build_snapshot_from_payloads(
                 "authenticated_gateway": True,
                 "pagination_complete": True,
                 "row_receipt_times_preserved": forts_row_receipts is not None,
-                "quote_zero_semantics": "RFUD BID/OFFER zero means empty source-native book side",
+                "quote_zero_semantics": (
+                    "RFUD OFFER=0 is absent only with same-row numeric "
+                    "OFFERDEPTH=OFFERDEPTHT=NUMOFFERS=0; BID=0 remains unproven"
+                ),
                 "quote_zero_semantics_evidence": "authenticated_APIM_RFUD_raw_probe_2026-09-07",
             },
             "cnyrub_tom": {
