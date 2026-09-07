@@ -38,3 +38,25 @@ are accepted by this change. Session state remains UNKNOWN. No dependency on the
 two unavailable ISS calendar URLs, weekday inference or inferred weekend closure
 is introduced. Separate reviewed instrument/date intervals and exceptions are
 still required before any completion/closure claim can be made.
+
+## Published plan view
+
+`temporal_applicability.published_schedule_plan` describes the published plan for
+Si and CR futures families on explicitly listed Moscow civil dates, 7–14 September.
+The SHA-256 pinned artifact is `contracts/intelligence/rub_published_schedule_2026-09-08.json`.
+Its review timestamp is the knowledge boundary: earlier reads remain UNKNOWN.
+The July hours apply through 11 September; the September rule begins on the 14th.
+The published weekend exclusions on 12–13 September come from
+https://www.moex.com/n95564?nt=112. No weekday or weekend fallback is used beyond
+the enumerated dates. Intervals include their start and exclude their end.
+
+`published_plan_covered` only means that this dated plan is present. It does not
+assert that later exceptional announcements were exhaustively checked, that
+trading actually occurred, or that a session completed. `PUBLISHED_NO_SESSION`
+and `OUTSIDE_PUBLISHED_INTERVALS` are plan descriptions, never actual CLOSED.
+The actual session state and previous-date completion remain UNKNOWN. Consumer
+authority, quote lifetimes, historical PIT acceptance and execution are unchanged.
+Civil dates are not reinterpreted as exchange trading dates; this matters for
+weekend sessions assigned to the next trading day. Missing or altered artifacts
+produce UNKNOWN, without a network request. The plan requires a new reviewed
+artifact to extend its finite coverage or incorporate later announcements.
