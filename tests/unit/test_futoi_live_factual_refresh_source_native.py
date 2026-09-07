@@ -303,6 +303,43 @@ def test_latest_exact_aligned_fiz_yur_event_is_selected() -> None:
     assert result["yur"]["net"] == -20
 
 
+@pytest.mark.parametrize("instrument_id", factual.LIVE_INSTRUMENT_IDS)
+@pytest.mark.parametrize("group", ["FIZ", "YUR", "OTHER"])
+def test_newer_incomplete_publication_never_falls_back(instrument_id, group):
+    older = _accepted_frame("2026-08-28", instrument_id, event_time="20:00:00")
+    newer = _accepted_frame("2026-08-28", instrument_id).iloc[[0]].copy()
+    newer["clgroup"] = group
+    with pytest.raises(factual.FutoiSourceNativeRefreshError, match="fallback forbidden"):
+        _latest(pd.concat([older, newer], ignore_index=True), instrument_id)
+
+
+@pytest.mark.parametrize("instrument_id", factual.LIVE_INSTRUMENT_IDS)
+@pytest.mark.parametrize("defect", ["balance", "session", "ambiguous_revision"])
+def test_invalid_frontier_never_uses_older_good_pair(instrument_id, defect):
+    older = _accepted_frame("2026-08-28", instrument_id, event_time="20:00:00")
+    newer = _accepted_frame("2026-08-28", instrument_id)
+    if defect == "balance":
+        newer.loc[1, "pos_long"] += 1
+        newer.loc[1, "pos"] += 1
+    elif defect == "session":
+        newer.loc[1, "sess_id"] = 2
+    else:
+        newer = pd.concat([newer, newer.iloc[[0]]], ignore_index=True)
+    with pytest.raises(factual.FutoiSourceNativeRefreshError):
+        _latest(pd.concat([older, newer], ignore_index=True), instrument_id)
+
+
+@pytest.mark.parametrize("instrument_id", factual.LIVE_INSTRUMENT_IDS)
+def test_good_frontier_does_not_accept_bad_earlier_history(instrument_id):
+    older = _accepted_frame("2026-08-28", instrument_id, event_time="20:00:00")
+    older.loc[1, "pos_long"] += 1
+    older.loc[1, "pos"] += 1
+    newer = _accepted_frame("2026-08-28", instrument_id)
+    assert _latest(pd.concat([older, newer], ignore_index=True), instrument_id)["snapshot_ts"] == "2026-08-28T20:50:00+00:00"
+    with pytest.raises(factual.FutoiSourceNativeRefreshError, match="do not balance"):
+        _latest(older, instrument_id)
+
+
 def test_max_seqnum_revision_is_resolved_deterministically() -> None:
     first = _accepted_frame(
         "2026-08-28",
