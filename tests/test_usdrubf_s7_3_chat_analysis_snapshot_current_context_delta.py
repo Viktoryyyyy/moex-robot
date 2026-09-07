@@ -159,4 +159,5 @@ def test_cr_pair_admission_does_not_grant_previous_or_delta_scope(monkeypatch, t
     assert component["data"]["previous_completed_session"]["consumer_factual_use_allowed"] is False
     assert component["data"]["delta_statistics"]["consumer_factual_use_allowed"] is False
     assert snapshot["authority"]["futoi_by_instrument"][source.CR_INSTRUMENT_ID]["factual_authority"] is admitted
+    assert snapshot["authority"]["futoi_by_instrument"][source.CR_INSTRUMENT_ID]["factual_authority_scope"] == snapshot_context.pair_authority.SCOPE
     assert snapshot["authority"]["futoi_action_authority"] is False

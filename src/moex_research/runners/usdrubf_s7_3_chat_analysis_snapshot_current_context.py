@@ -199,6 +199,8 @@ def _attach_futoi_context(
             "action_authority": False,
             "standalone_buy_sell_authority": False,
         }
+        if instrument_id == futoi_source.CR_INSTRUMENT_ID:
+            authority_by_instrument[instrument_id]["factual_authority_scope"] = pair_authority.SCOPE
 
     si_authority = authority_by_instrument[futoi_source.SI_INSTRUMENT_ID]
     authority["futoi_factual_authority"] = bool(si_authority["factual_authority"])
