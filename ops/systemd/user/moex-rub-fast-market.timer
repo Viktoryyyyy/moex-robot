@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh RUB factual market cache every 30 seconds
+
+[Timer]
+OnStartupSec=5s
+OnUnitActiveSec=30s
+AccuracySec=1s
+Unit=moex-rub-fast-market.service
+
+[Install]
+WantedBy=timers.target

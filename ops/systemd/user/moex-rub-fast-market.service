@@ -1,0 +1,12 @@
+[Unit]
+Description=Independent RUB factual market cache refresh
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/trader/moex_bot/moex-robot
+EnvironmentFile=/home/trader/moex_bot/.env
+Environment=PYTHONPATH=src:.
+ExecStart=/home/trader/moex_bot/venv/bin/python -m moex_data.rub_fast_market
+TimeoutStartSec=25
+UMask=0027
+NoNewPrivileges=yes
