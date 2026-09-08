@@ -11,6 +11,11 @@ are excluded. Every displayed fact references its location in the input
 snapshot. Slow published prices retain their observation dates and scopes.
 The matrix lists missing mandatory factors rather than replacing them with zero.
 
+`macro_evidence_inventory` separates replayed CBR/Rosstat observations from
+scheduled publications and unresolved source/series policies. Direct descriptions
+also reconcile these macro components before assembling facts and matrix rows.
+See [macro facts and scheduled publications](rub_macro_evidence_inventory.md).
+
 Direct `describe()` calls also replay the FRED evidence at the snapshot's
 read-time reference (or generation time when no read-time reference is present).
 An expired, modified or malformed FRED component cannot appear as an admitted
