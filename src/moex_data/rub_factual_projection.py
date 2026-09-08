@@ -162,6 +162,22 @@ def consumer_context(snapshot):
         'session_completion_proven': False}
     if allowed:
         structure['values'] = deepcopy(levels)
+        source_data = _dict(component.get('data'))
+        structure['deterministic_context'] = {key: deepcopy(source_data[key]) for key in
+            ('market_regime',) if key in source_data}
+        ema = _dict(source_data.get('ema_3_19')); details = _dict(ema.get('details'))
+        ema_allowed = (ema.get('quality_status') == 'OK' and _causal(ema.get('available_at'), now)
+            and all(isinstance(details.get(key), (int, float)) and not isinstance(details.get(key), bool)
+                and isfinite(details[key]) for key in ('ema_fast', 'ema_slow')))
+        structure['deterministic_context']['ema_3_19'] = ({'status': 'AVAILABLE',
+            'available_at': ema['available_at'], 'quality_status': 'OK',
+            'values': {key: deepcopy(details[key]) for key in ('ema_fast', 'ema_slow', 'bar_count', 'source') if key in details},
+            'relation': ema.get('direction'), 'relation_semantics': 'sign_of_ema_fast_minus_ema_slow_not_forecast',
+            'standalone_directional_authority': False, 's7_2_verdict': 'REJECT_AS_STANDALONE_DIRECTIONAL_SIGNAL'}
+            if ema_allowed else {'status': 'UNAVAILABLE', 'reason': 'ema_quality_values_or_causal_time_not_admitted'})
+        if ema_allowed and 'trend' in source_data:
+            structure['deterministic_context']['trend'] = deepcopy(source_data['trend'])
+        structure['standalone_directional_authority'] = False
         extrema = structure['values'].get('observed_extrema', {})
         if 'prior_completed_session' in extrema:
             prior = extrema.pop('prior_completed_session')
@@ -195,8 +211,10 @@ def consumer_context(snapshot):
             and data.get('factual_authority') is True)
         context = {'scope': 'current_pair_only' if name.endswith('_cr') else 'si_admitted_dated_context',
             'current_usable': admitted, 'previous_observation': None, 'comparisons': None,
-            'reason': None if admitted else 'latest_current_pair_not_admitted', 'session_completion_proven': False}
-        if admitted and name == 'futoi_live' and _dict(data.get('governance')).get('factual_use_allowed') is True:
+            'reason': None if admitted else (current.get('refresh_error') or component.get('refresh_error')
+                or _dict(_dict(temporal.get(name)).get('current')).get('reason') or 'latest_current_pair_not_admitted'),
+            'session_completion_proven': False}
+        if name == 'futoi_live' and _dict(data.get('governance')).get('factual_use_allowed') is True:
             previous = _dict(data.get('previous_completed_session'))
             prior_allowed = (_dict(_dict(temporal.get(name)).get('previous')).get('dated_observation_available') is True
                 and previous.get('consumer_factual_use_allowed') is not False)
@@ -207,7 +225,7 @@ def consumer_context(snapshot):
             match = delta.get('instrument_id') == data.get('instrument_id') == 'si_futures_family' and _same_pair(pair_fact, current_fact)
             witness = _dict(delta.get('observed_date_witness'))
             witness_match = (witness.get('status') == 'PASS' and witness.get('current_observed_trade_date') == current_fact.get('trade_date'))
-            if (pair.get('status') == 'AVAILABLE' and match and delta.get('consumer_factual_use_allowed') is not False and witness_match):
+            if (admitted and pair.get('status') == 'AVAILABLE' and match and delta.get('consumer_factual_use_allowed') is not False and witness_match):
                 context['comparisons'] = {key: deepcopy(delta[key]) for key in ('deltas', 'statistics',
                     'lag_targets', 'observed_date_witness', 'historical_context') if key in delta}
                 for delta_name, item in context['comparisons'].get('deltas', {}).items():
@@ -240,6 +258,10 @@ def consumer_context(snapshot):
             event_semantics='source_publication_not_verified_economic_actual_or_consensus')
         events.append(item)
     news = {'events': events, 'summary': deepcopy(data.get('summary', {})),
+        'source_status': component.get('status', 'UNAVAILABLE'),
+        'source_refresh_attempted_at': component.get('refresh_attempted_at'),
+        'acquisition_fresh': component.get('status') == 'READY' and _causal(
+            component.get('refresh_attempted_at') or _dict(snapshot.get('identity')).get('generated_at_utc'), now, 1200),
         'classification_status': 'NOT_ANALYZED', 'direction': 'UNKNOWN',
         'selection_scope': 'existing_source_selected_events_no_relevance_acceptance_claim',
         'excluded_event_count': rejected, 'source_as_of': component.get('data_as_of'),

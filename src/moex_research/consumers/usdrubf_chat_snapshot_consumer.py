@@ -90,8 +90,24 @@ def load_analysis_chat_snapshot(
     return snapshot
 
 
+def load_factual_release(*, now_fn=lambda: datetime.now(timezone.utc),
+                         reader: SnapshotReader = read_current_snapshot, code_revision=None):
+    """One captured clock for the canonical fast-overlay reader and compact file."""
+    from moex_data.rub_factual_release import compact, executing_revision
+    now = now_fn()
+    if not isinstance(now, datetime) or now.utcoffset() is None:
+        raise ChatSnapshotConsumerError('aware current release clock required')
+    now = now.astimezone(timezone.utc)
+    snapshot = load_analysis_chat_snapshot(now_fn=lambda: now, reader=reader)
+    read_at = datetime.fromisoformat(snapshot['read_freshness']['read_at_utc'])
+    if read_at != now:
+        raise ChatSnapshotConsumerError('reader returned a different consumption time')
+    return compact(snapshot, now=now, code_revision=code_revision or executing_revision())
+
+
 __all__ = [
     "ChatSnapshotConsumerError",
     "load_analysis_chat_snapshot",
+    "load_factual_release",
     "validate_analysis_chat_snapshot",
 ]

@@ -222,7 +222,7 @@ def test_si_history_admission_and_cr_scope_are_independent(defect):
         else: assert si['comparisons']['deltas']['delta_1d']['values']['total_open_interest'] == 1
         assert si['comparisons']['deltas']['delta_20d']['values'] is None
         assert si['comparisons']['statistics']['variables'] is None
-    assert (si['previous_observation'] is None) == (defect in ('bad_current', 'previous_date', 'previous_denied'))
+    assert (si['previous_observation'] is None) == (defect in ('previous_date', 'previous_denied'))
     assert si['session_completion_proven'] is False
 
 

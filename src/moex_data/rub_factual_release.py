@@ -6,6 +6,8 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
+import subprocess
+import os
 from moex_data.rub_factual_projection import spot_usable, basis_metrics, market_values, IDENTITY_FIELDS, consumer_context, fresh
 
 SCHEMA = 'rub_factual_release.v1'
@@ -133,13 +135,69 @@ def export(snapshot, *, now, code_revision, output):
     return directory
 
 
-if __name__ == '__main__':
+def compact(snapshot, *, now, code_revision):
+    """Same frozen input/time builder for the current API and manual export."""
+    from moex_data.rub_snapshot_read_freshness import apply_read_freshness
+    from moex_data.rub_factual_release_acceptance import projection_completeness
+    from moex_data.rub_factual_package import build_package
+    if now.utcoffset() is None: raise ValueError('aware consumption time required')
+    now = now.astimezone(timezone.utc)
+    view = apply_read_freshness(snapshot, now=now)
+    value = build(view, now=now, code_revision=code_revision)
+    projection_completeness(view, value, now=now)
+    return build_package(view, value, now=now)
+
+
+def executing_revision():
+    repo = Path(__file__).resolve().parents[2]
+    if subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=repo, text=True).strip():
+        raise ValueError('current release requires a clean tracked executing checkout')
+    return subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip()
+
+
+def export_current(*, output, now_fn=lambda: datetime.now(timezone.utc), reader=None, code_revision=None):
+    from src.moex_research.consumers.usdrubf_chat_snapshot_consumer import load_factual_release
+    options = {'now_fn': now_fn, 'code_revision': code_revision}
+    if reader is not None: options['reader'] = reader
+    package = load_factual_release(**options)
+    raw = _encoded(package)
+    directory = Path(output); directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    stamp = datetime.fromisoformat(package['as_of_utc']).strftime('%Y-%m-%dT%H-%M-%S.%fZ')
+    path = directory / (stamp + '_' + sha256(raw).hexdigest()[:12] + '_rub_factual.json')
+    # Exclusive creation also refuses an existing file or symlink.
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, 'wb') as stream:
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+    return path
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--snapshot', type=Path, required=True)
-    parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--code-revision', required=True)
-    parser.add_argument('--as-of', required=True)
-    args = parser.parse_args()
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument('--snapshot', type=Path)
+    source.add_argument('--current', action='store_true')
+    parser.add_argument('--output', type=Path)
+    parser.add_argument('--code-revision')
+    parser.add_argument('--as-of')
+    args = parser.parse_args(argv)
+    if args.current:
+        if args.as_of or args.code_revision:
+            parser.error('current export captures the executing revision and current time')
+        if 'MOEX_DATA_ROOT' not in os.environ:
+            from dotenv import dotenv_values
+            from src.moex_research.runners.usdrubf_s7_3_chat_analysis_snapshot import PROJECT_ENV_PATH
+            configured_root = dotenv_values(PROJECT_ENV_PATH).get('MOEX_DATA_ROOT')
+            if configured_root is not None: os.environ['MOEX_DATA_ROOT'] = configured_root
+        directory = export_current(output=args.output or Path('/home/trader/moex_bot/exports/rub_snapshots'))
+        print(str(directory)); return 0
+    if not all((args.output, args.code_revision, args.as_of)):
+        parser.error('frozen audit export requires --output, --code-revision and --as-of')
     directory = export(json.loads(args.snapshot.read_text()), now=datetime.fromisoformat(args.as_of),
         code_revision=args.code_revision, output=args.output)
-    print(str(directory))
+    print(str(directory)); return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
