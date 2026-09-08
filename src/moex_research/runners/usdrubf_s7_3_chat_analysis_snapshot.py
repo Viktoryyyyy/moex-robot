@@ -375,6 +375,7 @@ def _liquidity_component(now: datetime) -> ProducedComponent:
 
 
 def _cbr_meeting_calendar_component(now: datetime) -> ProducedComponent:
+    """Current schedule governed by cbr_meeting_calendar.RUNTIME_CONTRACT_REF."""
     data = cbr_meeting_calendar.load(root=_data_root())
     return ProducedComponent(data=data, data_as_of=data['received_at'])
 

@@ -14,6 +14,10 @@ SOURCE_URL = 'https://www.cbr.ru/dkp/cal_mp/'
 POLICY = 'cbr_meeting_calendar.v1'
 SCOPE = 'PUBLISHED_CBR_MEETING_SCHEDULE_ONLY'
 COMPONENT = 'cbr_meeting_calendar'
+# Current-chat governance metadata; deliberately outside frozen receipt payloads.
+RUNTIME_CONTRACT_REF = 'contracts/intelligence/cbr_meeting_calendar_current_received_schedule_v1.json'
+SOURCE_ID = 'cbr_meeting_calendar_current_received'
+CALENDAR_IDENTITY = 'runtime.cbr_meeting_calendar_current_received'
 MAX_BYTES = 2_000_000
 MAX_RECEIPT_SECONDS = 1200
 MOSCOW = ZoneInfo('Europe/Moscow')

@@ -48,9 +48,11 @@ def test_registered_source_references_exist_without_new_provider():
     registry = json.loads((root / policy.NEWS_REGISTRY).read_text(encoding='utf-8'))
     known = {row['source_id'] for row in registry['primary_sources']}
     for row in policy.describe()['requirements']:
-        assert (root / row['source_registry_ref']).is_file()
+        assert (root / row['source_registry_ref'].split('#')[0]).is_file()
         if row['source_registry_ref'] == policy.NEWS_REGISTRY:
             assert row['source_id'] in known
+        elif row['source_registry_ref'].endswith('#CURRENT_RECEIVED_SCHEDULE_REGISTRY'):
+            assert row['source_id'] in policy.CURRENT_RECEIVED_SCHEDULE_REGISTRY
         elif row['source_registry_ref'] != policy.REGISTRY:
             assert row['source_id'] is None
 
@@ -70,7 +72,7 @@ def test_plans_do_not_claim_outcomes_or_numeric_series():
     assert plan['value_mapping']['asset_scope'] == 'FX_AND_GOLD'
     assert plan['value_mapping']['executed_operations_proven'] is False
     schedules = [r for r in rows if r['kind'] == 'scheduled_event']
-    assert {r['event_family'] for r in schedules} == {'rosstat_weekly_cpi', 'rates.cbr_key_rate_calendar'}
+    assert {r['event_family'] for r in schedules} == {'rosstat_weekly_cpi', 'runtime.cbr_meeting_calendar_current_received'}
     assert all(r['metric_id'] is None and r['admitted'] is False for r in schedules)
 
 
@@ -78,7 +80,9 @@ def test_cbr_schedule_tracks_runtime_adapter_without_claiming_historical_availab
     row = next(r for r in policy.describe()['requirements']
                if r['requirement_id'] == 'cbr_key_rate_meeting_schedule')
     root = Path(__file__).resolve().parents[2]
-    assert row['design_reference'] == row['source_registry_ref']
+    assert row['design_reference'] == 'contracts/calendars/rates/cbr_key_rate_calendar.v1.yaml'
+    assert row['design_reference'] != row['source_registry_ref']
+    assert (root / row['runtime_contract_ref']).is_file()
     assert row['source_adapter_ref'] == 'src/moex_research/external_data/cbr_meeting_calendar.py'
     assert (root / row['source_adapter_ref']).is_file()
     assert row['availability_scope'] == 'current_receipt_not_historical'

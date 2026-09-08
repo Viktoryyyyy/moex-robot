@@ -165,7 +165,9 @@ def describe(snapshot, *, now):
             and calendar_data.get('calendar_schedule_usable') is True):
         for planned in calendar_data['upcoming_events']:
             events.append({**deepcopy(planned), 'block_id': 'event_calendar',
-                'event_family': 'rates.cbr_key_rate_calendar', 'component': 'cbr_meeting_calendar',
+                'event_family': cbr_meeting_calendar.CALENDAR_IDENTITY, 'component': 'cbr_meeting_calendar',
+                'source_id': cbr_meeting_calendar.SOURCE_ID,
+                'runtime_contract_ref': cbr_meeting_calendar.RUNTIME_CONTRACT_REF,
                 'scope': calendar_data['scope'], 'system_available_at': calendar_data['system_available_at'],
                 'source_url': calendar_data['source_url'], 'raw_sha256': calendar_data['raw_sha256'],
                 'manifest_sha256': calendar_data['manifest_sha256'],

@@ -5,6 +5,19 @@ from typing import Final
 
 from .models import BLOCKED_STATUSES, ExternalDataError
 
+# Separate from research SOURCE_SLOTS and SOURCE_REGISTRY: schedule display only.
+CURRENT_RECEIVED_SCHEDULE_REGISTRY: Final[dict[str, dict[str, str]]] = {
+    'cbr_meeting_calendar_current_received': {
+        'source_id': 'cbr_meeting_calendar_current_received',
+        'calendar_identity': 'runtime.cbr_meeting_calendar_current_received',
+        'scope': 'CURRENT_RECEIVED_SCHEDULE',
+        'contract_ref': 'contracts/intelligence/cbr_meeting_calendar_current_received_schedule_v1.json',
+        'component': 'cbr_meeting_calendar',
+        'producer_ref': 'src/moex_research/external_data/cbr_meeting_calendar.py',
+        'historical_model_use_status': 'NOT_AUTHORIZED',
+    },
+}
+
 
 @dataclass(frozen=True)
 class SourceDefinition:
