@@ -77,7 +77,22 @@ Before any response is committed, the loaded snapshot must also be serializable 
 
 The response includes `Cache-Control: no-store`.
 
-### `GET /readyz`
+### `GET /v1/rub/factual-release`
+
+Authentication: the same required Bearer token. This route returns the compact
+`rub_factual_package.v1` through `load_factual_release`, the same builder used by
+manual current export. It captures one consumption time and uses the canonical
+reader with fast market overlay. It returns HTTP 200 for valid PARTIAL factual
+coverage, with explicit missing requirements; invalid source/read-view validation
+returns HTTP 503 without falling back to an old package. Query clocks are refused.
+`Cache-Control: no-store` applies. No upstream refresh or model API is invoked.
+
+The heavy `/v1/rub/factual-snapshot` route remains compatible. Its legacy forecast
+matrix and readiness are retained for audit consumers; the compact route presents
+mandatory factual coverage separately from model readiness. See the
+[manual export instructions](MOEX_BOT_RUB_SNAPSHOT_MANUAL_EXPORT.md).
+
+### `GET /readyz` (legacy operational readiness)
 
 Authentication: required Bearer token.
 

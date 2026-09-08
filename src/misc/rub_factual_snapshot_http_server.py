@@ -14,6 +14,7 @@ from dotenv import dotenv_values
 
 from src.moex_research.consumers.usdrubf_chat_snapshot_consumer import (
     load_analysis_chat_snapshot,
+    load_factual_release,
 )
 
 
@@ -24,6 +25,7 @@ ENV_FILE_ENV = "MOEX_ENV_FILE"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 SNAPSHOT_PATH = "/v1/rub/factual-snapshot"
+RELEASE_PATH = "/v1/rub/factual-release"
 READINESS_PATH = "/readyz"
 
 SnapshotLoader = Callable[[], dict[str, object]]
@@ -81,9 +83,11 @@ class SnapshotHTTPServer(ThreadingHTTPServer):
         *,
         api_token: str,
         snapshot_loader: SnapshotLoader,
+        release_loader: SnapshotLoader | None = None,
     ) -> None:
         self.api_token = api_token
         self.snapshot_loader = snapshot_loader
+        self.release_loader = load_factual_release if release_loader is None else release_loader
         super().__init__(server_address, handler_class)
 
 
@@ -175,9 +179,19 @@ class SnapshotRequestHandler(BaseHTTPRequestHandler):
         }
         self._send_json(200 if ready else 503, payload)
 
+    def _serve_release(self) -> None:
+        try:
+            package = self.server.release_loader()
+            self._encode_json(package)
+        except Exception:
+            self.log_error('canonical compact release validation failed')
+            self._send_json(503, {'error': 'factual_release_unavailable'})
+            return
+        self._send_json(200, package)
+
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler contract
         parsed = urlsplit(self.path)
-        if parsed.path not in {SNAPSHOT_PATH, READINESS_PATH}:
+        if parsed.path not in {SNAPSHOT_PATH, RELEASE_PATH, READINESS_PATH}:
             self._send_json(404, {"error": "not_found"})
             return
         if parsed.query or parsed.fragment:
@@ -187,6 +201,9 @@ class SnapshotRequestHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == SNAPSHOT_PATH:
             self._serve_snapshot()
+            return
+        if parsed.path == RELEASE_PATH:
+            self._serve_release()
             return
         self._serve_readiness()
 

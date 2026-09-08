@@ -94,6 +94,28 @@ def projection_completeness(snapshot, value, *, now):
             expected_extrema['prior_observed_date'] = {key: item for key, item in old.items() if key != 'partial_session'}
             expected_extrema['prior_observed_date'].update(session_completion_proven=False, session_completion_state='UNKNOWN')
         _require(actual_levels.get('observed_extrema', {}) == expected_extrema, 'observed extrema completeness and values')
+        source_data = structure.get('data') or {}
+        deterministic = value['market_structure']['deterministic_context']
+        for key in ('market_regime',):
+            _require(deterministic.get(key) == source_data.get(key), 'deterministic structure context')
+        ema = source_data.get('ema_3_19') or {}; details = ema.get('details') or {}
+        try: causal_ema = datetime.fromisoformat(ema['available_at']) <= now
+        except (KeyError, ValueError, TypeError): causal_ema = False
+        expected_ema = ema.get('quality_status') == 'OK' and causal_ema and all(
+            isinstance(details.get(key), (int, float)) and not isinstance(details.get(key), bool) and isfinite(details[key])
+            for key in ('ema_fast', 'ema_slow'))
+        actual_ema = deterministic['ema_3_19']
+        _require(deterministic.get('trend') == (source_data.get('trend') if expected_ema else None), 'EMA-derived trend admission')
+        _require((actual_ema['status'] == 'AVAILABLE') == expected_ema, 'EMA independent admission')
+        if expected_ema:
+            _require(actual_ema['values'] == {key: details[key] for key in ('ema_fast', 'ema_slow', 'bar_count', 'source') if key in details}
+                and actual_ema['available_at'] == ema['available_at'], 'EMA values and date')
+            _require(actual_ema['relation'] == ema.get('direction') and actual_ema['standalone_directional_authority'] is False,
+                'EMA relation and scope')
+        else:
+            _require(actual_ema == {'status': 'UNAVAILABLE', 'reason': 'ema_quality_values_or_causal_time_not_admitted'},
+                'EMA excluded values')
+        _require('confidence' not in actual_ema, 'EMA no model probability')
     position = snapshot.get('user_position_context')
     position = position if isinstance(position, dict) else {}
     price = position.get('average_entry_price'); direction = position.get('direction')
@@ -128,7 +150,7 @@ def projection_completeness(snapshot, value, *, now):
     admission = si_component.get('status') == 'READY' and si.get('consumer_factual_use_allowed') is True and si.get('factual_authority') is True and si.get('governance', {}).get('factual_use_allowed') is True
     previous = si.get('previous_completed_session') or {}
     prior_available = view.get('temporal_applicability', {}).get('components', {}).get('futoi_live', {}).get('previous', {}).get('dated_observation_available') is True
-    expected_previous = previous.get('factual') if admission and prior_available and previous.get('consumer_factual_use_allowed') is not False else None
+    expected_previous = previous.get('factual') if si.get('governance', {}).get('factual_use_allowed') is True and prior_available and previous.get('consumer_factual_use_allowed') is not False else None
     _require(value['futoi_context']['futoi_live']['previous_observation'] == expected_previous, 'Si previous completeness')
     engine = si.get('delta_statistics') or {}; current = (si.get('current_intraday') or {}).get('factual') or {}
     normalized = (engine.get('current') or {}).get('factual') or {}

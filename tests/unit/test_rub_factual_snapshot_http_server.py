@@ -79,12 +79,13 @@ def _snapshot(*, readiness: str = "READY", freshness: str = "FRESH") -> dict[str
 
 
 @contextmanager
-def _running_server(loader):
+def _running_server(loader, *, release_loader=None):
     server = api.SnapshotHTTPServer(
         (api.DEFAULT_HOST, 0),
         api.SnapshotRequestHandler,
         api_token=TOKEN,
         snapshot_loader=loader,
+        release_loader=release_loader,
     )
     thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01})
     thread.start()
@@ -120,6 +121,42 @@ def test_snapshot_endpoint_preserves_canonical_payload_exactly() -> None:
     assert body["identity"]["generated_at_utc"] == "2026-08-31T15:20:00+00:00"  # type: ignore[index]
     assert body["read_freshness"]["read_at_utc"] == "2026-08-31T15:20:05+00:00"  # type: ignore[index]
     assert body["components"]["official_news"]["data_as_of"] == "2026-08-31T15:18:00+00:00"  # type: ignore[index]
+
+
+def test_compact_endpoint_matches_current_export_same_reader_and_clock(tmp_path):
+    import runpy
+    from moex_data.rub_factual_release import export_current
+    from src.moex_research.consumers.usdrubf_chat_snapshot_consumer import load_factual_release
+    helper = runpy.run_path(str(Path(__file__).with_name('test_rub_factual_projection.py')))
+    original = helper['core_snapshot'](); now = helper['NOW']; metadata = _snapshot()
+    for key in ('schema_version', 'refresh_policy', 'readiness', 'authority'): original[key] = metadata[key]
+    original['identity']['project'] = 'MOEX_Bot'
+    original['read_freshness'] = {'status': 'FRESH', 'snapshot_age_seconds': 0, 'read_at_utc': now.isoformat()}
+    original['fast_market_read'] = {'read_at': now.isoformat(), 'completed_at': now.isoformat(), 'error': None}
+    calls = []
+    def reader(*, now_fn):
+        calls.append(now_fn())
+        return deepcopy(original), tmp_path / 'unused'
+    def compact_loader():
+        return load_factual_release(now_fn=lambda: now, reader=reader, code_revision='a' * 40)
+    with _running_server(lambda: deepcopy(original), release_loader=compact_loader) as port:
+        status, headers, body = _request(port, api.RELEASE_PATH)
+        assert status == 200 and headers['Cache-Control'] == 'no-store'
+        assert _request(port, api.RELEASE_PATH, token=None)[0] == 401
+        assert _request(port, api.RELEASE_PATH + '?as_of=yesterday')[0] == 400
+    assert calls == [now]
+    exported = export_current(output=tmp_path, now_fn=lambda: now, reader=reader, code_revision='a' * 40)
+    assert json.loads(exported.read_bytes()) == body
+    assert body['generations']['fast_market']['completed_at'] == now.isoformat()
+    assert body['as_of_utc'] == now.isoformat() and body['status'] == 'PARTIAL'
+    assert body['authority']['model_ready'] is False
+
+
+def test_compact_failure_returns_503_without_old_snapshot_fallback():
+    def failed(): raise ValueError('invalid source evidence')
+    with _running_server(_snapshot, release_loader=failed) as port:
+        status, _, body = _request(port, api.RELEASE_PATH)
+    assert status == 503 and body == {'error': 'factual_release_unavailable'}
 
 
 def test_api_preserves_complete_spot_and_partial_basis_projection(tmp_path, monkeypatch):

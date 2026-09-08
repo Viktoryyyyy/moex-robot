@@ -102,7 +102,7 @@ def describe(snapshot, *, now):
          'missing_evidence': ['accepted_global_macro_calendar', 'accepted_cbr_decision_release_calendar']},
     ]
     by_block = {row['block_id']: row for row in blocks}
-    facts, events = [], []
+    facts, events, calendar_coverage = [], [], []
     cbr_component = components.get('cbr_rates_verified')
     if _usable(cbr_component):
         data = cbr_component['data']
@@ -140,6 +140,10 @@ def describe(snapshot, *, now):
             'consensus': None, 'surprise': None, 'monthly_final': False,
             'historical_pit_acceptance': False, 'horizon_alignment_accepted': False})
         if data.get('weekly_release_calendar_accepted') is True:
+            calendar_coverage.append({'requirement_id': 'rosstat_weekly_cpi_schedule',
+                'calendar_usable': True, 'coverage_end': data['weekly_calendar_coverage_end'],
+                'scope': data['weekly_calendar_scope'], 'source_url': rosstat.INDEX_URL,
+                'system_available_at': data['index_received_at']})
             upcoming = data['next_scheduled_release']
             events.append({'event_id': 'rosstat_weekly_cpi:' + upcoming['observation_end'],
                 'block_id': 'event_calendar', 'component': 'rosstat_cpi', 'series_id': data['series_id'],
@@ -163,6 +167,10 @@ def describe(snapshot, *, now):
     calendar_data = calendar.get('data') if isinstance(calendar, dict) else None
     if (isinstance(calendar_data, dict) and calendar.get('status') == 'READY'
             and calendar_data.get('calendar_schedule_usable') is True):
+        calendar_coverage.append({'requirement_id': 'cbr_key_rate_meeting_schedule',
+            'calendar_usable': True, 'coverage_year': calendar_data['year'],
+            'scope': calendar_data['scope'], 'source_url': calendar_data['source_url'],
+            'system_available_at': calendar_data['system_available_at']})
         for planned in calendar_data['upcoming_events']:
             events.append({**deepcopy(planned), 'block_id': 'event_calendar',
                 'event_family': cbr_meeting_calendar.CALENDAR_IDENTITY, 'component': 'cbr_meeting_calendar',
@@ -173,9 +181,8 @@ def describe(snapshot, *, now):
                 'manifest_sha256': calendar_data['manifest_sha256'],
                 'consensus': None, 'surprise': None, 'event_occurred_proven': False,
                 'full_calendar_accepted': False})
-        if calendar_data['upcoming_events']:
-            for block_id in ('cbr_rates', 'event_calendar'):
-                by_block[block_id]['missing_evidence'].remove('accepted_cbr_decision_release_calendar')
+        for block_id in ('cbr_rates', 'event_calendar'):
+            by_block[block_id]['missing_evidence'].remove('accepted_cbr_decision_release_calendar')
     monthly = components.get('rosstat_monthly_cpi')
     if _usable(monthly):
         data = monthly['data']
@@ -230,13 +237,14 @@ def describe(snapshot, *, now):
         matched_facts = [fact['fact_id'] for fact in facts if fact['series_id'] in metric_ids]
         matched_events = [event['event_id'] for event in events if event_family is not None and event.get('event_family') == event_family]
         coverage.append({'requirement_id': requirement['requirement_id'],
-            'current_evidence_present': (bool(metric_ids) and set(metric_ids) <= set(matched_facts)) or bool(matched_events),
+            'current_evidence_present': (bool(metric_ids) and set(metric_ids) <= set(matched_facts)) or any(
+                item['requirement_id'] == requirement['requirement_id'] and item['calendar_usable'] for item in calendar_coverage),
             'admitted_fact_ids': matched_facts, 'scheduled_event_ids': matched_events,
             'full_requirement_accepted': False})
     return {'schema_version': SCHEMA, 'as_of_utc': reference.isoformat() if reference else None,
         'reference_time_valid': reference is not None, 'status': 'INCOMPLETE',
         'scope': 'RECEIVED_MACRO_EVIDENCE_INVENTORY_ONLY', 'required_blocks': blocks,
-        'facts': facts, 'scheduled_events': events,
+        'facts': facts, 'scheduled_events': events, 'calendar_coverage': calendar_coverage,
         'requirements_policy': requirements, 'requirements_coverage': coverage,
         'missing_evidence': sorted({gap for block in blocks for gap in block['missing_evidence']}),
         'policy_gaps': sorted({gap for block in blocks for gap in block['policy_gaps']}),
