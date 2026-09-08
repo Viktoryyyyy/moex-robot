@@ -390,3 +390,146 @@ PM_L1 authorizes sole mutation owner package_implementation on isolated branch c
 Product contract BEFORE code: admit existing official WPSR index full month names and explicit English month abbreviations with optional periods; require one unambiguous adjacent Data for week ending / Release Date pair. Do not use Next Release Date, previous issues or ambiguous multiple pairs as latest publication. Preserve exact PDF week cross-check, official schedule/holiday matching, publication-before-acquisition causality and HTTPS/host/type/PDFmagic gates. No new source, date fallback or timestamp inference.
 Research evidence: real21:39:31–33Z acquisition error TIMESTAMP_UNPROVABLE EIA index release date fields are missing, after transport/type/PDFmagic gates. Official index has Data for week ending Aug.28,2026 / Release Date Sept.2,2026 / Next Release Date Sept.10,2026 (source spaces after month periods); PDF independently has week ending August28,2026 and existing schedule gives September2 10:30EDT. Failure is proved parser/date-format incompatibility, not EIA source inaccessibility; HTTPS secure-PDF redirect is already permitted. Root owns independent exact-head review/CI, publication/merge and separate apply.
 Local validation: focused EIA adapter and wiring suites 22 PASS; git diff --check PASS. Regressions cover observed full/dotted month equivalence, Next Release Date exclusion, missing/unsupported/invalid dates, duplicate/conflicting pairs and malformed extra week anchor, PDF mismatch, holiday week mismatch and future publication exclusion. No production acquisition recovery or merge/apply is claimed before root acceptance.
+
+## Current root acceptance checkpoint — 2026-09-09 Moscow / 2026-09-08 UTC
+
+This section supersedes earlier active-task/next-step labels for
+`rub_snapshot_target_completion_v1`. Earlier entries remain dated evidence and
+scope-decision history, not competing current-state records.
+
+Root completion is **not accepted**. The implemented consumer path is operational,
+but mandatory Minfin evidence remains unavailable, night-time current facts have
+freshness/date refusals, and the separate fresh-consumer check has not run because
+exact-file transfer approval is pending.
+
+Current task: `rub_snapshot_target_acceptance_checkpoint_v1` (documentation only).
+Sole mutation owner: `package_implementation`; isolated branch
+`codex/rub-snapshot-target-acceptance-checkpoint-v1`, based on
+`259f05efbf41b9a444e977a0a0cc6c81ed93365f`. Only this existing execution-state document
+is in scope. Root owns review, publication, merge and any separately authorized
+exact-SHA server apply. This checkpoint task has not changed production code/data.
+
+### Closed implementation phases and installed state
+
+- Core projection task: PR #500 merged/applied
+  `a2e8eb48adfabee5fe685da8869976d601179bdb`; its installed and actual HTTP acceptance
+  is recorded above. The initial trailing-CR deployment rollback incident was
+  resolved by the verified retry; no data rollback occurred.
+- Delivery/readiness task: PR #501 final reviewed head
+  `2474417dc1d81cb161ec8ad765456c65619b7d3c`, tree
+  `a32f88ff3fadd9d3577a7efeeda98f905497f48b`. Exact-head CI run `34280487426` PASS;
+  independent review PASS; material P2 news-source completeness finding resolved
+  on that final head before merge.
+- PR #501 merged SHA and verified server Applied State:
+  `24122e1b543ee31a5a5803ccf940de1de6459dba`, clean canonical `main`.
+  Installed Linux tests: **228 PASS**.
+
+Actual runtime acceptance ran from `2026-09-08T21:30:08Z` through
+`2026-09-08T21:31:48Z`: compact and heavy production HTTP endpoints, current export,
+fixed-input/time compact equality and replay, exclusive-create overwrite refusal,
+unchanged earlier audit archives, and actual CLI export without an OpenAI API key
+passed. The delivery report records nine checks; the separate factual audit gate
+passed all 17 checks. Evidence:
+
+`/home/trader/moex_bot/deploy_backups/rub_snapshot_target_completion_v1_delivery/20260908T213008.211649Z/report.json`
+
+EIA source correction task: PR #502 final reviewed head
+`38ccdfd585a6493de748ecd0b7b2a7c9c83e30d7`, exact tree
+`a768d0d2eb0faaa166582d6aa2ea7b75d5fb772a`; CI `34282747940` PASS,
+independent focused 22-test review PASS, automated review had no findings.
+Merged and applied code is now `259f05efbf41b9a444e977a0a0cc6c81ed93365f`,
+verified clean canonical main; installed Linux EIA tests: **22 PASS**.
+The official dotted index date format is accepted with unchanged PDF, schedule,
+holiday and publication-causality gates.
+
+Repeat actual installed HTTP/CLI/replay/archive acceptance ran from
+`2026-09-08T21:55:51.092808Z` to `21:57:06.967566Z`: all nine delivery checks and
+17 factual audit checks PASS. Earlier archives remained immutable; CLI required no
+OpenAI API key. Evidence:
+
+`/home/trader/moex_bot/deploy_backups/rub_snapshot_target_completion_v1_delivery/20260908T215551.092808Z/report.json`
+
+The supported user path is authenticated `GET /v1/rub/factual-release` or the
+single current-export command in `docs/MOEX_BOT_RUB_SNAPSHOT_MANUAL_EXPORT.md`.
+Both use the canonical reader/fast overlay and same compact builder with one
+captured consumption time. Frozen audit export remains separate and replayable.
+
+### Actual observed data state, not simulated outages
+
+At `2026-09-08T21:33:40Z`, compact production HTTP returned 200 on applied
+`24122e1b543ee31a5a5803ccf940de1de6459dba`, using heavy generation `21:29:45Z` and
+fast generation `21:33:17Z`. Six admitted macro facts, eight dated timeframe blocks
+and 20 original news headlines remained available. News coverage was 13 configured
+sources, 12 successful and one EIA failure: the package correctly reported PARTIAL
+while retaining the admitted headlines and failure detail.
+
+Two further ordinary delivery-code heavy/fast cycles on `24122e1` returned
+HTTP 200 PARTIAL: heavy `2026-09-08T21:39:43.003833Z`, observed `21:41:14Z`,
+fast `21:41:00Z`; then heavy `21:49:46.313724Z`, observed `21:52:17.898011Z`,
+fast `21:51:49Z`. The first had 12/13 successful configured news sources;
+the second had 11/13, with `fed_press_all_rss` and
+`eia_weekly_petroleum_status_report` failed. These were dated acquisition gaps,
+not proof of permanent provider outages. EIA's demonstrated cause was unsupported
+index month spelling, not the permitted secure-PDF redirect.
+
+After EIA apply, actual HTTP at `2026-09-08T21:57:38.811330Z` used manual heavy
+`21:55:26.561728Z` and fast `21:56:59.128804Z`: all **13/13 configured news
+sources succeeded, zero failed**. Fed's observed transient gap recovered and EIA
+acquisition recovered after the parser correction. News acquisition is therefore
+not an open permanent blocker. A post-EIA ordinary heavy cycle is not yet claimed
+in this checkpoint; the acceptance above uses the labelled manual refresh.
+
+Si's independently admitted previous dated observation survived current-pair
+refusal for the new source date; it was not labelled current or completed-session
+proof and did not grant comparisons. CR previous history remained absent under its
+current-pair-only scope. Stale or refused facts were not upgraded to neutral/current.
+
+D1 reports the September 9 Moscow civil day through the actual consumption time.
+W1 reports September 7 through consumption time, with a distinct prospective
+September 14–20 civil week. September 19/20 civil-date mappings to September 21
+trading date remain explicit; the separate in-week trading-date list stays within
+prospective bounds. Neither the calendar nor bar aggregates prove actual session
+completion. These observations are separate from labelled refusal/unit simulations.
+
+### Remaining required blockers and user-file handoff
+
+1. **Required Minfin announced-plan evidence remains an external blocker.**
+   Actual rechecks at `2026-09-08T21:20:13.981622Z` returned HTTP 503 from
+   `https://minfin.gov.ru/ru/press-center/`; at `21:20:28.916016Z`,
+   `https://t.me/s/minfin` failed with `Errno101 Network unreachable`.
+   TLS verification and redirect restrictions were preserved. Evidence is
+   `/home/trader/moex_bot/deploy_backups/rub_snapshot_target_completion_v1_baseline/minfin_recheck.json`.
+   No announcement was fabricated, no plan was presented as execution, and this
+   mandatory source was not demoted to optional enrichment.
+2. **Current night-time coverage remains incomplete.** Actual current markets,
+   structure, H1 and current FUTOI carry freshness/date refusals. Independently
+   admitted dated facts remain useful, but these refusals do not become current
+   facts or a full mandatory-coverage PASS. Reassess on a future observed live cycle.
+3. **Local exact-file transfer awaits explicit approval.** The preferred compact
+   server file is now:
+   `/home/trader/moex_bot/exports/rub_snapshots/2026-09-08T21-56-59.789014Z_8871672c4983_rub_factual.json`,
+   88,006 bytes, SHA-256
+   `8871672c4983a9e160acb0a4bd923319b86891d60c6bc2c4fb31ce2011c665a0`.
+   Its position state is `NO_EXPLICIT_USER_INPUT`; the scoped sensitive-key scan
+   found none. The earlier 21:31:38Z file (88,988 bytes, SHA-256
+   `5b8b43da8c3d2ba7408aab37fa52fb9d88001a75b249729d7349b4d40744828f`)
+   remains immutable but is superseded for the proposed handoff.
+   Automatic approval review blocked production-data egress and destination
+   authorization despite the scoped scan. Root's explicit approval question is
+   unanswered. No executor downloaded/copied either production package or bypassed
+   the rejection. The preferred artifact remains on the canonical server.
+4. **Fresh independent consumer acceptance is pending authorized transfer.**
+   No successful fresh-chat/file-only consumer verdict is claimed. The generated
+   compact file and production acceptance do not alone prove this final user step.
+
+Broader global calendars, historical model vintages and model training/evaluation
+remain explicitly deferred scope; they do not excuse the required blockers above.
+No training, trading signals/orders, broker execution or Stage5 promotion occurred.
+
+Next owner/action: root reconciles the pending exact-file approval. If approved,
+transfer only the authorized compact artifact to the approved local outputs destination,
+verify its digest, run the independent
+file-only consumer check, and record its actual result before assessing root
+completion. Observe a future live freshness/refusal cycle and recover Minfin only through
+approved access/source routes followed by a latest capture, retaining its mandatory status. Do not promise unattended continuation
+or mark the root COMPLETED while the mandatory contract remains unsatisfied.
