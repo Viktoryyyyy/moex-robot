@@ -19,6 +19,19 @@ def describe(snapshot):
     snapshot = dict(snapshot)
     if not isinstance(snapshot.get('components'), dict):
         snapshot['components'] = {}
+    else:
+        snapshot['components'] = dict(snapshot['components'])
+    if 'external_cny' in snapshot['components']:
+        from moex_research.external_data.fred_cny_factual import reconcile as reconcile_cny
+        # build/API already apply read freshness. Direct describe callers must
+        # use the same receipt/evidence decision for both the matrix and facts.
+        try:
+            reference = (snapshot['live_read_freshness']['read_at_utc']
+                if 'live_read_freshness' in snapshot else snapshot['identity']['generated_at_utc'])
+        except (TypeError, KeyError):
+            reference = None
+        snapshot['components']['external_cny'] = reconcile_cny(
+            snapshot['components']['external_cny'], now=reference)
     matrix = matrix_build(snapshot)
     components = snapshot['components']
     facts = []
@@ -32,6 +45,9 @@ def describe(snapshot):
     for key in ('oil', 'external_cny', 'rosstat_cpi', 'cbr_rates_verified', 'futoi_live', 'futoi_live_cr'):
         component = components.get(key, {})
         data = component.get('data') or {}
+        if key == 'external_cny' and not any(row['block_id'] == key and
+                row.get('factual_context_usable') is True for row in matrix['rows']):
+            continue
         if component.get('status') != 'READY' or data.get('consumer_factual_use_allowed') is not True:
             continue
         if key.startswith('futoi'):

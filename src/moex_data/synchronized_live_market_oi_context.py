@@ -118,7 +118,8 @@ def _aware_utc(value: datetime | str, field: str) -> datetime:
 
 
 def _iso(value: datetime) -> str:
-    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+    # Persist exact source/receipt instants: serialized values feed later gates.
+    return value.astimezone(timezone.utc).isoformat()
 
 
 def _source_event_time(value: object, field: str) -> datetime:
