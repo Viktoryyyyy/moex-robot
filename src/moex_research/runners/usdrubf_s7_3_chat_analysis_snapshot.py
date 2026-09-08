@@ -19,6 +19,7 @@ from moex_data.rub_snapshot_read_freshness import apply_read_freshness
 from moex_data.rub_production_source_matrix import unanalyzed_news
 from moex_research.external_data import moex_brent_factual as brent
 from moex_research.external_data import fred_cny_factual as fred_cny
+from moex_research.external_data import rosstat_cpi_factual as rosstat_cpi
 from moex_research.external_data import moex_cnyrub_algopack_history as cny_spot
 from moex_research.external_data import moex_cnyrubf_algopack_history as cny_futures
 from moex_research.external_data.moex_cnyrub_algopack_timestamp_policy import (
@@ -349,7 +350,14 @@ def default_producers() -> Mapping[str, ComponentProducer]:
         "cnyrubf_live": _cny_futures_component,
         "oil": _oil_component,
         "external_cny": _external_cny_component,
+        "rosstat_cpi": _rosstat_cpi_component,
     }
+
+
+def _rosstat_cpi_component(now: datetime) -> ProducedComponent:
+    del now
+    data = rosstat_cpi.load(root=_data_root())
+    return ProducedComponent(data=data, data_as_of=data["received_at"])
 
 
 def _external_cny_component(now: datetime) -> ProducedComponent:
@@ -409,6 +417,8 @@ def _component_payload(
                 "refresh_error": str(exc),
                 "data": prior.get("data"),
             }
+            if name == "rosstat_cpi":
+                return rosstat_cpi.reconcile(retained, now=now)
             if name == "external_cny":
                 return fred_cny.reconcile(retained, now=now)
             return brent.reconcile_component(retained, now=now) if name == "oil" else retained
@@ -461,7 +471,7 @@ def build_snapshot(
         "cnyrubf_live",
     }
     # Explicit legacy/offline producer injection may omit oil; production defaults include it.
-    if not required <= set(selected_producers) <= required | {"oil", "external_cny"}:
+    if not required <= set(selected_producers) <= required | {"oil", "external_cny", "rosstat_cpi"}:
         raise ChatAnalysisSnapshotError("producer set mismatch")
 
     components = {
@@ -607,6 +617,7 @@ def finalize_snapshot_timing(snapshot: dict[str, object], *, started: datetime, 
             component["last_success_at_semantics"] = "snapshot_collection_completed_upper_bound"
     brent.apply_oil_freshness(snapshot, now=completed)
     fred_cny.apply(snapshot, now=completed)
+    rosstat_cpi.apply(snapshot, now=completed)
 
 
 def refresh_snapshot(
