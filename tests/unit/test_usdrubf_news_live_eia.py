@@ -171,3 +171,77 @@ def test_eia_contract_preserves_no_action_authority_and_no_header_timestamp_fall
     assert policy["last_modified_is_publication_time"] is False
     assert policy["pdf_creation_metadata_is_publication_time"] is False
     assert policy["calendar_or_schedule_alone_proves_content_availability"] is False
+
+
+@pytest.mark.parametrize("week,release", [
+    ("August 28, 2026", "September 2, 2026"),
+    ("Aug. 28, 2026", "Sept. 2, 2026"),
+    ("Aug 28, 2026", "Sep 2, 2026"),
+])
+def test_official_index_month_formats_preserve_proven_publication(week, release) -> None:
+    index = _index(week=week, release=release).replace(
+        b"<span>September 2, 2026</span>", b"<span>Sept. 10, 2026</span>"
+    )
+    acquired = datetime(2026, 9, 8, 21, 39, tzinfo=timezone.utc)
+    result = fetch_eia_wpsr(
+        opener=_opener(index, _schedule()), now_fn=lambda: acquired,
+        pdf_text_extractor=lambda raw: _pdf_text("August 28, 2026"),
+    )
+    assert result.records[0].published_at.isoformat() == "2026-09-02T10:30:00-04:00"
+    assert result.records[0].available_at == acquired
+    assert result.records[0].source_reference == SUMMARY_PDF_URL
+    assert week in result.records[0].headline
+
+
+@pytest.mark.parametrize("index", [
+    b"<p>Next Release Date: Sept. 2, 2026</p>",
+    b"<p>Data for week ending Aug. 28, 2026 Next Release Date: Sept. 2, 2026</p>",
+    _index(week="Bogus. 28, 2026", release="Sept. 2, 2026"),
+    _index(week="Aug. 32, 2026", release="Sept. 2, 2026"),
+    _index() + _index(),
+    _index() + _index(week="August 28, 2026", release="September 2, 2026"),
+    _index() + b"<p>Previous issues: Data for week ending unknown</p>",
+])
+def test_missing_unknown_or_ambiguous_index_dates_fail_closed(index) -> None:
+    with pytest.raises(EiaAcquisitionError) as caught:
+        fetch_eia_wpsr(
+            opener=_opener(index, _schedule()),
+            now_fn=lambda: datetime(2026, 9, 8, 22, tzinfo=timezone.utc),
+            pdf_text_extractor=lambda raw: _pdf_text(),
+        )
+    assert caught.value.code == "TIMESTAMP_UNPROVABLE"
+
+
+def test_dotted_index_retains_pdf_week_crosscheck() -> None:
+    with pytest.raises(EiaAcquisitionError) as caught:
+        fetch_eia_wpsr(
+            opener=_opener(_index(week="Aug. 28, 2026", release="Sept. 2, 2026"), _schedule()),
+            now_fn=lambda: datetime(2026, 9, 8, 22, tzinfo=timezone.utc),
+            pdf_text_extractor=lambda raw: _pdf_text("August 21, 2026"),
+        )
+    assert caught.value.code == "SOURCE_INVALID"
+
+
+def test_dotted_index_retains_holiday_week_crosscheck() -> None:
+    holiday = (
+        "<tr><td>September 4, 2026</td><td>September 10, 2026</td>"
+        "<td>Thursday</td><td>12:00 p.m.</td><td>Labor Day</td></tr>"
+    )
+    with pytest.raises(EiaAcquisitionError) as caught:
+        fetch_eia_wpsr(
+            opener=_opener(_index(week="Aug. 28, 2026", release="Sept. 10, 2026"),
+                           _schedule(holiday_row=holiday)),
+            now_fn=lambda: datetime(2026, 9, 10, 22, tzinfo=timezone.utc),
+            pdf_text_extractor=lambda raw: _pdf_text("August 28, 2026"),
+        )
+    assert caught.value.code == "TIMESTAMP_UNPROVABLE"
+
+
+def test_dotted_index_future_publication_still_excluded() -> None:
+    result = fetch_eia_wpsr(
+        opener=_opener(_index(week="Aug. 28, 2026", release="Sept. 2, 2026"), _schedule()),
+        now_fn=lambda: datetime(2026, 9, 2, 14, 29, tzinfo=timezone.utc),
+        pdf_text_extractor=lambda raw: _pdf_text("August 28, 2026"),
+    )
+    assert result.records == ()
+    assert result.future_items_skipped == 1
