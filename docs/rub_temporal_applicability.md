@@ -10,6 +10,17 @@ additional authority or reinterpreting missing data as a neutral factor.
   cannot keep current authority alive. Fast quotes retain their independent 60-second gate.
 * Previous observed date: a dated observation requires a FRESH record, a receipt
   within 1200 seconds, and a matching instrument-specific observed-date witness.
+  The wrapper instrument and both record dates must match the witnessed date.
+  Failed attempts and refresh errors disqualify the dated view even if an old
+  status still says FRESH. Source event, publication, availability, ingest and
+  receipt must be timezone-aware and causally ordered, with receipt no later
+  than consumption. The source event itself may be old: only the receipt and
+  date-witness attempt have a 1200-second lifetime. Witness/request/receipt
+  chronology is checked separately. Missing timestamps fail closed with an
+  explicit reason; raw previous facts and their consumer permissions are untouched.
+  Witnessed dates must lie within the recorded query through-date, and an
+  explicitly observed current date must match that through-date. No comparison
+  to the current civil date or weekday is used to infer exchange trading dates.
   The legacy field `previous_completed_session` is retained for compatibility but
   does not establish session completion. Its typed meaning is
   `PREVIOUS_OBSERVED_DATE_FACT`, with completion UNKNOWN and current use false.
@@ -42,9 +53,12 @@ still required before any completion/closure claim can be made.
 ## Published plan view
 
 `temporal_applicability.published_schedule_plan` describes the published plan for
-Si and CR futures families on explicitly listed Moscow civil dates, 7–14 September.
-The SHA-256 pinned artifact is `contracts/intelligence/rub_published_schedule_2026-09-08.json`.
-Its review timestamp is the knowledge boundary: earlier reads remain UNKNOWN.
+Si and CR futures families on explicitly listed Moscow civil dates through
+21 September. The v2 pinned artifact is
+`contracts/intelligence/rub_published_schedule_2026-09-08_v2.json` and binds
+archived official source receipts. Its review timestamp is the knowledge
+boundary: earlier reads use only the prior reviewed plan, without backdating
+the extension. See `docs/rub_published_schedule_plan.md` for archive details.
 The July hours apply through 11 September; the September rule begins on the 14th.
 The published weekend exclusions on 12–13 September come from
 https://www.moex.com/n95564?nt=112. No weekday or weekend fallback is used beyond
