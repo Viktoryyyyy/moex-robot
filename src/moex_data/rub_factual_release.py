@@ -25,7 +25,7 @@ def describe(snapshot):
             facts.append({'factor': key, 'scope': 'current_source_row',
                 'snapshot_path': f'components.synchronized_live_market_oi.data.instruments.{key}',
                 'source_identity': {k: item.get(k) for k in ('secid', 'timestamp', 'source_trade_date')},
-                'values': {k: item.get(k) for k in ('last', 'open_interest')}})
+                'values': {k: item[k] for k in ('last', 'oi') if k in item}})
     for key in ('oil', 'external_cny', 'futoi_live', 'futoi_live_cr'):
         component = components.get(key, {})
         data = component.get('data') or {}
@@ -35,8 +35,8 @@ def describe(snapshot):
             fact = data.get('current_intraday', {}).get('factual')
             scope = 'current_pair_only_no_previous_or_history_grant'
         else:
-            fact = {k: data.get(k) for k in ('secid', 'series_id', 'units', 'value', 'ohlc',
-                'source_trade_date', 'observation_date', 'received_at', 'source_url', 'manifest_sha256', 'raw_sha256')}
+            fact = {k: data[k] for k in ('secid', 'series_id', 'units', 'value', 'price', 'price_unit', 'ohlc',
+                'source_trade_date', 'observation_date', 'received_at', 'source_url', 'manifest_sha256', 'raw_sha256', 'provenance') if k in data}
             scope = 'latest_published_dated_reference'
         facts.append({'factor': key, 'scope': scope, 'snapshot_path': 'components.' + key + '.data', 'values': fact})
     horizons = {}

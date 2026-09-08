@@ -47,3 +47,13 @@ def test_expired_current_pair_is_not_presented_as_a_usable_fact():
 def test_future_snapshot_or_unpinned_revision_cannot_be_exported():
     with pytest.raises(ValueError): build(snapshot(), now=NOW - timedelta(seconds=1), code_revision=COMMIT)
     with pytest.raises(ValueError): build(snapshot(), now=NOW, code_revision='main')
+
+
+def test_source_native_oi_field_is_preserved():
+    from moex_data.rub_factual_release import describe
+    value = snapshot()
+    value['components']['synchronized_live_market_oi'] = {'data': {'instruments': {
+        'si_front': {'secid': 'SiU6', 'timestamp': NOW.isoformat(), 'price_oi_usable': True,
+                     'last': 86748., 'oi': 123456}}}}
+    fact = describe(value)['facts'][0]
+    assert fact['values'] == {'last': 86748., 'oi': 123456}
