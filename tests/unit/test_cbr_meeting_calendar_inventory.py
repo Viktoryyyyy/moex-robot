@@ -12,7 +12,7 @@ from moex_research.external_data import cbr_meeting_calendar as calendar
 from moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as runner
 
 NOW = datetime(2026, 9, 8, 7, tzinfo=timezone.utc)
-FAMILY = 'rates.cbr_key_rate_calendar'
+FAMILY = 'runtime.cbr_meeting_calendar_current_received'
 
 
 @pytest.fixture

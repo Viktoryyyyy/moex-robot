@@ -1,7 +1,8 @@
 """Versioned engineering minimum; requirement presence never admits evidence."""
 from copy import deepcopy
 
-from moex_research.external_data.registry import SOURCE_REGISTRY
+from moex_research.external_data.registry import SOURCE_REGISTRY, CURRENT_RECEIVED_SCHEDULE_REGISTRY
+from moex_research.external_data import cbr_meeting_calendar
 
 SCHEMA = 'rub_macro_requirements.v1'
 REGISTRY = 'src/moex_research/external_data/registry.py'
@@ -45,8 +46,8 @@ _REQUIREMENTS = [
                  'rosstat_official_releases', NEWS_REGISTRY, event='rosstat_weekly_cpi',
                  scope='finite_weekly_release_schedule_not_actual_publication'),
     _requirement('cbr_key_rate_meeting_schedule', 'event_calendar', 'scheduled_event',
-                 None, 'contracts/calendars/rates/cbr_key_rate_calendar.v1.yaml',
-                 event='rates.cbr_key_rate_calendar', scope='planned_meeting_not_realized_decision',
+                 cbr_meeting_calendar.SOURCE_ID, REGISTRY + '#CURRENT_RECEIVED_SCHEDULE_REGISTRY',
+                 event=cbr_meeting_calendar.CALENDAR_IDENTITY, scope='planned_meeting_not_realized_decision',
                  unresolved=('historical_schedule_vintages', 'actual_decision_publication')),
 ]
 _REQUIREMENTS[3]['metric_ids'] = ['liquidity_deficit_surplus_rub_bn',
@@ -57,6 +58,7 @@ _REQUIREMENTS.append(_requirement('rosstat_monthly_cpi', 'rosstat_macro', 'fact'
     scope='latest_received_monthly_indices_with_explicit_bases',
     unresolved=('historical_publication_vintages',)))
 _REQUIREMENTS[6].update(
+    runtime_contract_ref=cbr_meeting_calendar.RUNTIME_CONTRACT_REF,
     design_reference='contracts/calendars/rates/cbr_key_rate_calendar.v1.yaml',
     source_adapter_ref='src/moex_research/external_data/cbr_meeting_calendar.py',
     availability_scope='current_receipt_not_historical')
@@ -80,6 +82,11 @@ _POLICY = {'schema_version': SCHEMA, 'status': 'ENGINEERING_MINIMUM',
 def describe():
     """Return an isolated checklist, without fetching or admitting any source."""
     for requirement in _REQUIREMENTS:
+        if requirement['source_registry_ref'] == REGISTRY + '#CURRENT_RECEIVED_SCHEDULE_REGISTRY':
+            source = CURRENT_RECEIVED_SCHEDULE_REGISTRY.get(requirement['source_id'])
+            if (source is None or source['contract_ref'] != requirement['runtime_contract_ref']
+                    or source['calendar_identity'] != requirement['event_family']):
+                raise ValueError('current received schedule registry mismatch')
         if requirement['source_registry_ref'] == REGISTRY:
             source = SOURCE_REGISTRY.get(requirement['source_id'])
             if source is None or source.source_id != requirement['source_id']:

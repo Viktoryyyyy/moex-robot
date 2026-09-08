@@ -1,0 +1,51 @@
+{
+  "contract_id": "cbr_meeting_calendar_current_received_schedule.v1",
+  "status": "CURRENT_RECEIVED_SCHEDULE",
+  "lane": "rub_factual_chat",
+  "task_id": "cbr_calendar_runtime_contract_alignment_v1",
+  "authorization_scope": "Explicit user authorization for the current received CBR schedule runtime contract and its existing factual-chat producer; no research or model authorization.",
+  "source_id": "cbr_meeting_calendar_current_received",
+  "calendar_identity": "runtime.cbr_meeting_calendar_current_received",
+  "source_url": "https://www.cbr.ru/dkp/cal_mp/",
+  "registry_ref": "src/moex_research/external_data/registry.py#CURRENT_RECEIVED_SCHEDULE_REGISTRY",
+  "producer_ref": "src/moex_research/external_data/cbr_meeting_calendar.py",
+  "default_producer_ref": "src/moex_research/runners/usdrubf_s7_3_chat_analysis_snapshot.py#_cbr_meeting_calendar_component",
+  "component": "cbr_meeting_calendar",
+  "receipt_policy": "cbr_meeting_calendar.v1",
+  "evidence_scope": "PUBLISHED_CBR_MEETING_SCHEDULE_ONLY",
+  "permissions": {
+    "current_schedule_retrieval": true,
+    "current_schedule_runtime": true,
+    "factual_chat_schedule_display": true,
+    "actual_decision_proven": false,
+    "actual_publication_proven": false,
+    "historical_pit_acceptance": false,
+    "historical_feature_computation": false,
+    "forecast_use_allowed": false,
+    "modeling_ready": false,
+    "training_authorized": false,
+    "evaluation_authorized": false,
+    "action_authority": false,
+    "full_calendar_accepted": false
+  },
+  "availability_policy": {
+    "system_available_at": "Actual successful receipt of this archived calendar version; never scheduled time or HTTP metadata.",
+    "source_publication_time": null,
+    "actual_event_time": null,
+    "planned_times": "Only explicitly printed tentative release/conference times, never actual publication or meeting start.",
+    "revision_rule": "Freeze raw HTML and receipt; replay only at or after receipt. A later received revision cannot establish earlier availability.",
+    "maximum_receipt_age_seconds": 1200,
+    "historical_anchor_eligibility": "NOT_GRANTED"
+  },
+  "validation": {
+    "verified_https_required": true,
+    "immutable_raw_and_manifest_hashes_required": true,
+    "source_identity_and_current_year_scope_required": true,
+    "receipt_chronology_required": true,
+    "expired_failed_retained_or_modified_evidence_revokes_schedule": true,
+    "existing_receipt_schema_unchanged": true
+  },
+  "legacy_design_reference": "contracts/calendars/rates/cbr_key_rate_calendar.v1.yaml",
+  "legacy_design_reference_governs_this_runtime": false,
+  "legacy_design_contract_modified_or_promoted": false
+}
