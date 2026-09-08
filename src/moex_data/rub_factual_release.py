@@ -47,13 +47,16 @@ def describe(snapshot):
                 'snapshot_path': f'components.synchronized_live_market_oi.data.instruments.{key}',
                 'source_identity': {k: item.get(k) for k in ('secid', 'timestamp', 'source_trade_date')},
                 'values': {k: item[k] for k in ('last', 'oi') if k in item}})
-    for key in ('oil', 'external_cny', 'rosstat_cpi', 'cbr_rates_verified', 'futoi_live', 'futoi_live_cr'):
+    for key in ('oil', 'external_cny', 'rosstat_cpi', 'cbr_rates_verified', 'rosstat_monthly_cpi', 'cbr_liquidity_verified', 'futoi_live', 'futoi_live_cr'):
         component = components.get(key, {})
         data = component.get('data') or {}
         macro_block = {'external_cny': 'external_cny', 'rosstat_cpi': 'rosstat_macro',
-            'cbr_rates_verified': 'cbr_rates'}.get(key)
+            'cbr_rates_verified': 'cbr_rates', 'rosstat_monthly_cpi': 'rosstat_macro',
+            'cbr_liquidity_verified': 'cbr_rates'}.get(key)
+        admission_field = {'rosstat_monthly_cpi': 'monthly_cpi_factual_context_usable',
+            'cbr_liquidity_verified': 'liquidity_factual_context_usable'}.get(key, 'factual_context_usable')
         if macro_block is not None and not any(row['block_id'] == macro_block and
-                row.get('factual_context_usable') is True for row in matrix['rows']):
+                row.get(admission_field) is True for row in matrix['rows']):
             continue
         if component.get('status') != 'READY' or data.get('consumer_factual_use_allowed') is not True:
             continue
@@ -62,7 +65,7 @@ def describe(snapshot):
             scope = 'current_pair_only_no_previous_or_history_grant'
         else:
             fact = {k: data[k] for k in ('secid', 'series_id', 'units', 'value', 'price', 'price_unit', 'ohlc',
-                'observations', 'document_format', 'next_scheduled_release', 'weekly_release_calendar_accepted', 'observation_start', 'observation_end', 'indices', 'weekly_change_percent', 'listed_publication_date', 'index_manifest_sha256', 'document_manifest_sha256', 'source_trade_date', 'observation_date', 'received_at', 'source_url', 'manifest_sha256', 'raw_sha256', 'provenance') if k in data}
+                'observations', 'document_format', 'next_scheduled_release', 'weekly_release_calendar_accepted', 'observation_start', 'observation_end', 'indices', 'weekly_change_percent', 'listed_publication_date', 'index_manifest_sha256', 'document_manifest_sha256', 'source_trade_date', 'observation_date', 'received_at', 'source_url', 'manifest_sha256', 'raw_sha256', 'provenance', 'observation_month', 'changes_percent', 'quality_status', 'limitations', 'arithmetic_residual', 'source_revision_status') if k in data}
             scope = 'latest_published_dated_reference'
         facts.append({'factor': key, 'scope': scope, 'snapshot_path': 'components.' + key + '.data', 'values': fact})
     horizons = {}

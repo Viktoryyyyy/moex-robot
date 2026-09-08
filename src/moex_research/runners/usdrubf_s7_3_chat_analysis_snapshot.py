@@ -21,6 +21,7 @@ from moex_research.external_data import moex_brent_factual as brent
 from moex_research.external_data import fred_cny_factual as fred_cny
 from moex_research.external_data import rosstat_cpi_factual as rosstat_cpi
 from moex_research.external_data import cbr_meeting_calendar
+from moex_research.external_data import rosstat_monthly_cpi, cbr_liquidity_factual
 from moex_research.external_data import cbr_rates_factual as cbr_rates
 from moex_data import rub_futures_calendar as futures_calendar
 from moex_research.external_data import moex_cnyrub_algopack_history as cny_spot
@@ -358,7 +359,19 @@ def default_producers() -> Mapping[str, ComponentProducer]:
         "cbr_rates_verified": _cbr_rates_verified_component,
         "futures_calendar": _futures_calendar_component,
         "cbr_meeting_calendar": _cbr_meeting_calendar_component,
+        "rosstat_monthly_cpi": _monthly_cpi_component,
+        "cbr_liquidity_verified": _liquidity_component,
     }
+
+
+def _monthly_cpi_component(now: datetime) -> ProducedComponent:
+    data = rosstat_monthly_cpi.load(root=_data_root())
+    return ProducedComponent(data=data, data_as_of=data['received_at'])
+
+
+def _liquidity_component(now: datetime) -> ProducedComponent:
+    data = cbr_liquidity_factual.load(root=_data_root())
+    return ProducedComponent(data=data, data_as_of=data['received_at'])
 
 
 def _cbr_meeting_calendar_component(now: datetime) -> ProducedComponent:
@@ -444,6 +457,10 @@ def _component_payload(
                 return futures_calendar.reconcile(retained, now=now)
             if name == 'cbr_meeting_calendar':
                 return cbr_meeting_calendar.reconcile(retained, now=now)
+            if name == 'rosstat_monthly_cpi':
+                return rosstat_monthly_cpi.reconcile(retained, now=now)
+            if name == 'cbr_liquidity_verified':
+                return cbr_liquidity_factual.reconcile(retained, now=now)
             if name == "cbr_rates_verified":
                 return cbr_rates.reconcile(retained, now=now)
             if name == "rosstat_cpi":
@@ -500,7 +517,7 @@ def build_snapshot(
         "cnyrubf_live",
     }
     # Explicit legacy/offline producer injection may omit oil; production defaults include it.
-    if not required <= set(selected_producers) <= required | {"oil", "external_cny", "rosstat_cpi", "cbr_rates_verified", "futures_calendar", "cbr_meeting_calendar"}:
+    if not required <= set(selected_producers) <= required | {"oil", "external_cny", "rosstat_cpi", "cbr_rates_verified", "futures_calendar", "cbr_meeting_calendar", "rosstat_monthly_cpi", "cbr_liquidity_verified"}:
         raise ChatAnalysisSnapshotError("producer set mismatch")
 
     components = {
@@ -650,6 +667,8 @@ def finalize_snapshot_timing(snapshot: dict[str, object], *, started: datetime, 
     cbr_rates.apply(snapshot, now=completed)
     futures_calendar.apply(snapshot, now=completed)
     cbr_meeting_calendar.apply(snapshot, now=completed)
+    rosstat_monthly_cpi.apply(snapshot, now=completed)
+    cbr_liquidity_factual.apply(snapshot, now=completed)
 
 
 def refresh_snapshot(

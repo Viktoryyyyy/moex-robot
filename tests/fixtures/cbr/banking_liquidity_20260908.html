@@ -1,0 +1,1015 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    
+
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<meta name="format-detection" content="telephone=no" />
+<meta name="zoom:lang" content="en" />
+    <meta name="zoom:last-modified" content="Mon, 07 Sep 2026 21:00:00 GMT" />
+    <meta name="zoom:tags" content="InMaterialsEng, DataBases" />
+<title>The Banking Sector Liquidity Deficit/Surplus | Bank of Russia</title>
+
+
+
+    <meta property="og:image" content="/common/images/share-1.jpg" />
+
+    
+
+
+            <link rel="stylesheet" type="text/css" href="/common/libs/jquery-ui/jquery-ui.min.css?v=v478607061" media="all">
+
+            <!--[if IE 9]><link rel="stylesheet" type="text/css" href="/common/style/main-ie9.css?v=v1337212920" media="all"><![endif]-->
+
+            <!--[if gt IE 9]><!--><link rel="stylesheet" type="text/css" href="/common/style/main.min.css?v=v1337212920" media="all"><!--<![endif]-->
+
+
+        <script type="text/javascript" src="/common/libs/jquery-3.7.1.min.js?v=v735956814"></script>
+
+
+
+        <script type="text/javascript" src="/common/libs/jquery-ui/jquery-ui.min.js?v=v478607061"></script>
+
+        <script type="text/javascript" src="/common/libs/jquery.inputmask.min.js?v=v478607061"></script>
+
+
+        <script type="text/javascript" src="/common/scripts/vendor.js?v=v4270970564"></script>
+
+        <script type="text/javascript" src="/common/libs/jquery.floatThead.min.js?v=v478607061"></script>
+
+
+
+
+
+
+
+
+        <script type="text/javascript" src="/common/libs/popper.js?v=v478607061"></script>
+
+        <script type="text/javascript" src="/common/libs/tippy.js?v=v478607061"></script>
+
+        <script type="text/javascript" src="/common/scripts/main.min.js?v=v1337212920"></script>
+
+
+        <script type="text/javascript" src="/common/libs/localization-en.js?v=v955241707"></script>
+
+        <script type="text/javascript" src="/js/jquery.cookie.min.js?v=v4260771145"></script>
+
+        <script type="text/javascript" src="/js/site.js?v=v2848633841"></script>
+
+
+
+
+
+<script src="/Modules/Queries/Scripts/queries-ui.js?v=v713109731" type="text/javascript"></script>
+    <script type="text/javascript">
+        $(function () {
+            var $menu = $('[data-menu]'),
+                $menuItemBtn = $menu.find('[data-menu-item-btn]'),
+                $menuShow = $('[data-menu-show]'),
+                $menuClose = $('[data-menu-close]');
+            var config = $menu.data('config');
+
+            $menuShow.on('click.cms_loadwholesite mouseenter.cms_loadwholesite', function (event) {
+                loadWholeSite();
+            });
+
+            var xhr = null;
+            function loadWholeSite() {
+                if (xhr === null) {
+                    $('.menu_wrap .networks-circle').html($('.networks-circle.footer_networks').html());
+                    $('.menu_wrap .header_search').html($('.header .offsetMenu .header_search').html());
+
+                    $('[data-cms-wholesite-placeholder]').addClass('with-centered-loader').empty();
+                    xhr = $.ajax(config.url, {
+                        dataType: "html",
+                        method: "get",
+                        success: function (html) {
+                            $('[data-cms-wholesite-placeholder]').replaceWith(html);
+
+                            $menu.find('.menu_tab[data-tabs-tab]').each(function () {
+                                var tab = $(this).data('tabs-tab');
+                                $(this).toggle($menu.find('[data-tabs-content="' + tab + '"]').length != 0);
+                            });
+
+                            $menu.trigger('new-html');
+
+                            for (var i in config.catalogPath) {
+                                $menu.find('li[data-catalog-id="' + config.catalogPath[i] + '"]')
+                                    .addClass("_active");
+                                $menu.find('li[data-catalog-id="' + config.catalogPath[i] + '"]')
+                                    .closest('[data-tabs-content]')
+                                    .trigger('open-anchor');
+                            }
+
+                            $menuShow.off('click.cms_loadwholesite mouseenter.cms_loadwholesite');
+                        },
+                        error: function () {
+                            $('[data-cms-wholesite-placeholder]').removeClass('with-centered-loader')
+                                .append('<div class="menu_content offset-md-1">' +
+                                    '<span class="group-error field-validation-error">Error loading site map. <a href="#">Please try again.</a></span>' +
+                                    '</div>')
+                                .find('a')
+                                .on('click', function () { loadWholeSite(); });
+                        },
+                        complete: function () {
+                            xhr = null;
+                        }
+                    });
+                }
+            }
+        });
+    </script>
+
+
+<script>
+    if (window.localStorage) {
+        if (localStorage.getItem('vision-impaired'))
+            document.getElementsByTagName('html')[0].className += ' vision-impaired';
+    }
+</script>
+<script>
+    document.documentElement.style.setProperty('--scrollbar-width', '17px');
+    setTimeout(function () {
+        
+        var div = document.createElement('div');
+
+        div.style.overflowY = 'scroll';
+        div.style.width = '50px';
+        div.style.height = '50px';
+
+        
+        div.style.visibility = 'hidden';
+
+        document.body.appendChild(div);
+        var scrollWidth = Math.max(div.offsetWidth - div.clientWidth, 0.15); 
+        document.body.removeChild(div);
+        
+        document.documentElement.style.setProperty('--scrollbar-width', scrollWidth + 'px');
+    }, 0);
+</script>
+
+
+
+
+    
+</head>
+<body class="page-v3 page-v3-inside">
+
+
+<!-- Yandex.Metrika counter -->
+<script type="text/javascript" >
+    (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+    m[i].l=1*new Date();
+    for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+    k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
+    (window, document, "script", "https://mc.yandex.ru/metrika/tag.js", "ym");
+
+    ym(5774506, "init", {
+        clickmap:true,
+        trackLinks:true,
+        accurateTrackBounce:true,
+        webvisor:true
+    });
+</script>
+<noscript><div><img src="https://mc.yandex.ru/watch/5774506" style="position:absolute; left:-9999px;" alt="" /></div></noscript>    
+<!-- /Yandex.Metrika counter -->
+        
+    
+
+    <div class="header-print">
+    <div class="offsetMenu">
+        <div class="header-print_inner">
+            <img class="header-print_logo" alt="cbr" src="/common/images/logo.svg">
+            <ul class="header-print_contacts">
+<li>12&nbsp;Neglinnaya Street, Moscow, 107016 Russia</li>
+
+<li><nobr class="phone">8 800 300-30-00</nobr></li>
+<li>www.cbr.ru</li>
+</ul>
+
+        </div>
+    </div>
+</div>
+
+    <header class="header" id="header">
+        <div class="top-line" data-top-line="">
+            <div class="header_burger-big"></div>
+            <div class="offsetMenu">
+                <div class="col-md-23 header_margin-left">
+                    <div class="top-line_inner header_inner">
+                        
+
+<div class="row">
+    <div class="col-xl-4 col-md-6">
+        <div class="header_left pr-0">
+                <div class="header_menu" data-menu-show=""></div>
+            <a class="header_logo_eng" href="/eng/"></a>
+                <a class="header_search_btn d-flex d-md-none" href="#" data-search-form-show="" aria-label="Search"><div class="header_search_icon"></div></a>
+            <a class="d-flex d-md-none" href="#" data-tooltip="" data-tooltip-content="Mode for visually impaired" data-tooltip-class="mobile-hide"><div class="header_visual-impaired_item"></div></a>
+        </div>
+    </div>
+    <div class="col-xl-17 col-md-13 offset-md-1 header_block">
+        <div class="d-none d-md-block">
+            <div class="header_right">
+                
+                <div class="networks header_networks header_visual-impaired header_visual-impaired_inner"><a href="#" data-tooltip="" data-tooltip-content="Mode for visually impaired" data-tooltip-class="mobile-hide" aria-label="Mode for visually impaired"><div class="header_visual-impaired_item"></div></a></div>
+                <div class="header_lang header_lang_inner header_networks">
+    <a href="/Localization/SwitchLanguage?url=%2Feng%2Fhd_base%2Fbliquidity%2F%3FUniDbQuery.Posted%3DTrue%26UniDbQuery.From%3D09.08.2026%26UniDbQuery.To%3D08.09.2026&amp;from=en-CB&amp;to=ru-RU"><!--noindex-->RU<!--/noindex--></a>
+</div>
+                    <div class="header_networks header_search header_search_inner">
+                        <a class="header_search_btn" href="#" data-search-form-show="" aria-label="Search"><div class="header_search_icon"></div><span aria-hidden="true">Search</span></a>
+                    </div>
+            </div>
+        </div>
+    </div>
+</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="offsetMenu">
+            <div class="col-md-23 offset-md-1 header_margin-left">
+                <div class="header_inner">
+                    
+<div class="row">
+    <div class="col-xl-5 col-md-6">
+        <div class="header_left pr-0">
+            <div class="header_menu" data-menu-show=""></div>
+            <a class="header_logo_eng" href="/eng/"></a>
+            <a class="header_search_btn d-flex d-md-none" href="#" data-search-form-show="" aria-label="Search">
+                <div class="header_search_icon"></div>
+            </a>
+            <a class="d-flex d-md-none" href="#" data-tooltip data-tooltip-content="Mode for visually impaired" data-tooltip-class="mobile-hide">
+                <div class="header_visual-impaired_item"></div>
+            </a>
+        </div>
+    </div>
+    <div class="col-xl-17 col-md-13 offset-md-1 header_block justify-content-end">
+        <div class="d-none d-md-block">
+            <div class="header_right">
+                
+                <div class="networks header_networks header_visual-impaired header_visual-impaired_inner">
+                    <a href="#" data-tooltip data-tooltip-content="Mode for visually impaired" data-tooltip-class="mobile-hide" aria-label="Mode for visually impaired">
+                        <div class="header_visual-impaired_item"></div>
+                    </a>
+                </div>
+                <div class="header_lang header_lang_inner header_networks">
+    <a href="/Localization/SwitchLanguage?url=%2Feng%2Fhd_base%2Fbliquidity%2F%3FUniDbQuery.Posted%3DTrue%26UniDbQuery.From%3D09.08.2026%26UniDbQuery.To%3D08.09.2026&amp;from=en-CB&amp;to=ru-RU"><!--noindex-->RU<!--/noindex--></a>
+</div>
+                <div class="header_networks header_search header_search_inner">
+                    <a class="header_search_btn" href="#" data-search-form-show="" aria-label="Search">
+                        <div class="header_search_icon"></div><span aria-hidden="true">Search</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+                </div>
+            </div>
+        </div>
+    </header>
+    <form action="/eng/search/" method="get" class="search-form" data-search-form=""
+      data-api-url="/Content/SearchSuggest/Suggest"
+      data-api-top-url="">
+    <div class="offsetMenu">
+        <div class="col-md-23 offset-md-1">
+            <div class="search-form_inner">
+                <div class="search-form_title">What do you want to find?<img class="search-form_title-close" src="/common/images/icons/menu-close-dark-grey.svg"></div>
+                <div class="search-form_content">
+                    <div class="search-form_block">
+                        <div class="search-form_icon"></div>
+                        <div class="search-form_field">
+                            <input name="text" type="text" autocomplete="off" placeholder="Start typing" data-search-form-input="" />
+                        </div>
+                    </div>
+                    <div class="search-form_clear" data-search-form-clear-btn=""><img src="/common/images/icons/menu-close-gray.svg"></div>
+                    <div class="search-form_btn">
+                        <button class="b-btn _blue" data-search-form-btn="">Search</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+
+
+<div class="menu_wrap" data-menu="" data-config="{&quot;catalogPath&quot;:[22267,21244],&quot;url&quot;:&quot;/Catalog/SiteMap/GetWholeSiteHtml?blockId=59192&quot;}">
+    <div class="offsetMenu">
+        <div class="header_menu _close menu_close d-none d-md-block" data-menu-close=""></div>
+        <div class="header_inner top-line_inner d-block d-md-none">
+            <div class="row">
+                <div class="col-xl-5 col-md-9">
+                    <div class="header_left pr-0">
+                        <div class="header_menu _close" role="button" tabindex="0" aria-label="Close menu" data-menu-close=""></div>
+                        <a class="header_logo" href="/eng/"></a>
+                        <a class="header_search_btn" href="#" data-search-form-show="data-search-form-show" aria-label="Search"><div class="header_search_icon"></div></a>
+                        <a href="#" data-tooltip="data-tooltip" data-tooltip-content="Mode for visually impaired" data-tooltip-class="mobile-hide"><div class="header_visual-impaired_item"></div></a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="menu row" data-tabs="data-tabs">
+            <div class="menu_quick col-md-7">
+                <div role="tablist" class="menu_quick_tabs">
+    <a role="tab" id="menu_tab_Activity" aria-controls="menu_content_Activity" aria-selected="true" class="menu_tab _active" href="#" data-tabs-tab="Activity">Activity</a>
+    <a role="tab" id="menu_tab_FinancialMarkets" aria-controls="menu_content_FinancialMarkets" aria-selected="false" class="menu_tab" href="#" data-tabs-tab="FinancialMarkets">Financial markets</a>
+    <a role="tab" id="menu_tab_Documents" aria-controls="menu_content_Documents" aria-selected="false" class="menu_tab" href="#" data-tabs-tab="Documents">Documents and data</a>
+    <a role="tab" id="menu_tab_AboutBank" aria-controls="menu_content_AboutBank" aria-selected="false" class="menu_tab" href="#" data-tabs-tab="AboutBank">About Bank of Russia</a>
+    <a role="tab" id="menu_tab_Services" aria-controls="menu_content_Services" aria-selected="false" class="menu_tab" href="#" data-tabs-tab="Services">Services</a>
+</div>
+<div class="menu_quick_links">
+    <div class="phones">
+  <a class="menu_phone_val" href="tel:+74993003000">
+  <div class="plus">+</div>7 499 300-30-00</a>
+  <a class="menu_phone_val" href="tel:88003003000">8 800 300-30-00</a>
+</div>
+<div class="inner_links">
+  <a href="/eng/news/" title="Events">Events</a>
+  <a href="/eng/contacts/" title="Contacts">Contacts</a>
+  <a href="/eng/sitemap" title="site map ">Site map</a>
+  <a href="/eng/about/" title="About the Site ">About the Site </a>
+</div>
+<div class="networks-circle">
+  <a class="networks-circle_item _yt" href="https://www.youtube.com/user/BankofRussia" title="Youtube"></a>
+  <a class="networks-circle_item _tg" href="https://telegram.me/centralbank_russia" title="Telegram"></a>
+</div>
+
+</div>
+            </div>
+            <div class="d-md-none link-above">
+                <div class="header_right">
+                    <div class="header_link"><a href="/eng/about_br/">About Bank of Russia</a></div>
+                    <div class="header_lang">
+            <div class="header_lang_item"><a href="/Localization/SwitchLanguage?url=%2Feng%2Fhd_base%2Fbliquidity%2F%3FUniDbQuery.Posted%3DTrue%26UniDbQuery.From%3D09.08.2026%26UniDbQuery.To%3D08.09.2026&amp;from=en-CB&amp;to=ru-RU"><!--noindex-->RU<!--/noindex--></a></div>
+            <div class="header_lang_item _active"><span><!--noindex-->EN<!--/noindex--></span></div>
+</div>
+                </div>
+            </div>
+            <div class="menu_content_container col-md" data-cms-wholesite-placeholder="">
+            </div>
+        </div>
+    </div>
+</div>
+
+    <main id="content">
+        <div class="offsetMenu ">
+            <div class="container-fluid">
+                <div class="col-md-23 offset-md-1">
+                    <div class="breadcrumbs">
+    <div class="breadcrumbs_item"><a class="breadcrumbs_home" href="/eng/"></a></div>
+        <div class="breadcrumbs_item">
+            <a href="/eng/hd_base/"><!--noindex-->Databases<!--/noindex--></a>
+        </div>
+    </div>
+
+                    <!--index-->
+<h1><span class="referenceable">The&#160;Banking Sector Liquidity Deficit/Surplus</span>
+</h1>
+                                        
+
+
+
+
+
+
+                                                                                
+
+<script type="text/javascript">
+<!--
+    var UniDbQuery_Data = {};
+// -->
+</script>
+
+        <!--noindex-->
+<div class="block-part">
+<form action="/eng/hd_base/bliquidity/?UniDbQuery.Posted=True&amp;UniDbQuery.From=09.08.2026&amp;UniDbQuery.To=08.09.2026" data-auto-submit="true" method="get"><input id="UniDbQuery_Posted" name="UniDbQuery.Posted" type="hidden" value="True" />        <div class="block-part vertical" id="UniDbQuery_form">
+
+
+
+
+    <div class="filters_wrapper">
+        <div class="filters">
+
+
+
+    <div class="filter" >
+            <div class="datepicker-filter" data-datepicker-period-filter
+         data-min-date="01.01.2014"
+         data-max-date="08.09.2026"
+         data-default-value-from="01.09.2026"
+         data-default-value-to="08.09.2026">
+        <input class="datepicker-filter_input-from" type="hidden" name="UniDbQuery.From" value="09.08.2026" />
+        <input class="datepicker-filter_input-to" type="hidden" name="UniDbQuery.To" value="08.09.2026" />
+        <button class="datepicker-filter_button" type="button">09.08.2026 - 08.09.2026</button>
+        <div class="datepicker-filter_modal">
+            <div class="datepicker-filter_head">
+                <div class="datepicker-filter_close"></div>
+            </div>
+            <div class="datepicker-filter_tabs">
+                <div class="datepicker-filter_tab-from"></div>&nbsp;-&nbsp;
+                <div class="datepicker-filter_tab-to"></div>
+            </div>
+            <div class="datepicker-filter_body">
+                <div class="datepicker-filter_datepicker-from datepicker-custom"></div>
+                <div class="datepicker-filter_datepicker-to datepicker-custom"></div>
+            </div>
+            <div class="datepicker-filter_footer">
+                <button class="datepicker-filter_apply-btn" type="button">Apply</button>
+            </div>
+        </div>
+    </div>
+
+    </div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        </div>
+    </div>
+
+
+
+
+
+
+
+        </div>
+</form></div>        <!--/noindex-->
+<div class="table-wrapper">
+  <div class="table-caption gray">
+                    billions of rubles (at the beginning of the day)
+                </div>
+  <div class="table">
+    <table class="data spaced">
+      <tr>
+        <th rowspan="5">Date</th>
+        <th rowspan="5">Liquidity deficit (+)/<br>surplus (-)</th>
+        <th rowspan="5">Liquidity deficit (+)/<br>surplus (-) subject to correspondent account balances fluctuations</th>
+        <th colspan="10">including</th>
+        <th colspan="2">As reference:</th>
+      </tr>
+      <tr>
+        <th colspan="9">the CBR standard monetary policy instruments</th>
+        <th rowspan="4">non-standard CBR monetary policy instruments (including SM)<sup>*</sup></th>
+        <th rowspan="4">Correspondent account balances of credit institutions with the Bank of Russia</th>
+        <th rowspan="4">Required Reserves to be Averaged on Correspondent Accounts<sup>**</sup></th>
+      </tr>
+      <tr>
+        <th rowspan="3">the CBR claims on the banking sector</th>
+        <th colspan="4">including</th>
+        <th rowspan="3">the CBR liabilities to the banking sector</th>
+        <th colspan="3">including</th>
+      </tr>
+      <tr>
+        <th colspan="2">auctions</th>
+        <th colspan="2">standing facilities</th>
+        <th colspan="2">deposits</th>
+        <th rowspan="2">the CBR coupon bonds</th>
+      </tr>
+      <tr>
+        <th>REPOs and buy/sell FX swaps</th>
+        <th>secured loans</th>
+        <th>REPOs and buy/sell FX swaps</th>
+        <th>secured loans</th>
+        <th>auctions</th>
+        <th>standing facilities</th>
+      </tr>
+      <tr>
+        <th>1</th>
+        <th>2 = 4 - 9 + 13 - 14 + 15</th>
+        <th>3 = 4 - 9 + 13</th>
+        <th>4 = 5 + 6 + 7 + 8</th>
+        <th>5</th>
+        <th>6</th>
+        <th>7</th>
+        <th>8</th>
+        <th>9 = 10 + 11 + 12</th>
+        <th>10</th>
+        <th>11</th>
+        <th>12</th>
+        <th>13</th>
+        <th>14</th>
+        <th>15</th>
+      </tr>
+      <tr>
+        <td>08.09.2026</td>
+        <td>2,817.4</td>
+        <td>3,675.6</td>
+        <td>7,394.2</td>
+        <td>5,924.6</td>
+        <td>0</td>
+        <td>10</td>
+        <td>1,459.7</td>
+        <td>3,955.2</td>
+        <td>0</td>
+        <td>3,955.2</td>
+        <td>0</td>
+        <td>236.5</td>
+        <td>6,198.8</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>07.09.2026</td>
+        <td>2,781.8</td>
+        <td>2,951.4</td>
+        <td>6,624</td>
+        <td>5,324.3</td>
+        <td>0</td>
+        <td>10</td>
+        <td>1,289.7</td>
+        <td>3,906.8</td>
+        <td>0</td>
+        <td>3,906.8</td>
+        <td>0</td>
+        <td>234.2</td>
+        <td>5,510.2</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>04.09.2026</td>
+        <td>2,833.8</td>
+        <td>2,817.9</td>
+        <td>6,519</td>
+        <td>5,324.3</td>
+        <td>0</td>
+        <td>10</td>
+        <td>1,184.7</td>
+        <td>3,940.9</td>
+        <td>0</td>
+        <td>3,940.9</td>
+        <td>0</td>
+        <td>239.7</td>
+        <td>5,324.8</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>03.09.2026</td>
+        <td>2,742</td>
+        <td>3,239.5</td>
+        <td>6,959</td>
+        <td>5,324.3</td>
+        <td>0</td>
+        <td>10</td>
+        <td>1,624.7</td>
+        <td>3,959</td>
+        <td>0</td>
+        <td>3,959</td>
+        <td>0</td>
+        <td>239.5</td>
+        <td>5,838.1</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>02.09.2026</td>
+        <td>2,673.3</td>
+        <td>1,899.2</td>
+        <td>6,166.2</td>
+        <td>4,381.7</td>
+        <td>0</td>
+        <td>0</td>
+        <td>1,784.5</td>
+        <td>4,492.9</td>
+        <td>2,489.3</td>
+        <td>2,003.6</td>
+        <td>0</td>
+        <td>225.8</td>
+        <td>4,566.5</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>01.09.2026</td>
+        <td>2,629.3</td>
+        <td>1,819.4</td>
+        <td>6,081.5</td>
+        <td>4,381.7</td>
+        <td>0</td>
+        <td>0</td>
+        <td>1,699.7</td>
+        <td>4,488.7</td>
+        <td>1,898.6</td>
+        <td>2,590.1</td>
+        <td>0</td>
+        <td>226.6</td>
+        <td>4,530.8</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>31.08.2026</td>
+        <td>2,578.3</td>
+        <td>2,188</td>
+        <td>5,966.5</td>
+        <td>4,381.7</td>
+        <td>0</td>
+        <td>0</td>
+        <td>1,584.7</td>
+        <td>4,001.2</td>
+        <td>0</td>
+        <td>4,001.2</td>
+        <td>0</td>
+        <td>222.8</td>
+        <td>4,950.4</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>28.08.2026</td>
+        <td>2,512.5</td>
+        <td>2,656.7</td>
+        <td>6,456.9</td>
+        <td>4,381.7</td>
+        <td>0</td>
+        <td>990.4</td>
+        <td>1,084.7</td>
+        <td>4,027.1</td>
+        <td>0</td>
+        <td>4,027.1</td>
+        <td>0</td>
+        <td>226.9</td>
+        <td>5,484.9</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>27.08.2026</td>
+        <td>2,475.5</td>
+        <td>1,638.2</td>
+        <td>5,530.5</td>
+        <td>4,381.7</td>
+        <td>0</td>
+        <td>0</td>
+        <td>1,148.7</td>
+        <td>4,118.9</td>
+        <td>0</td>
+        <td>4,118.9</td>
+        <td>0</td>
+        <td>226.7</td>
+        <td>4,503.4</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>26.08.2026</td>
+        <td>2,446.7</td>
+        <td>2,257.1</td>
+        <td>6,141.5</td>
+        <td>4,511.8</td>
+        <td>0</td>
+        <td>0</td>
+        <td>1,629.7</td>
+        <td>4,111.3</td>
+        <td>0</td>
+        <td>4,111.3</td>
+        <td>0</td>
+        <td>226.9</td>
+        <td>5,151</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>25.08.2026</td>
+        <td>2,494.1</td>
+        <td>2,062.9</td>
+        <td>5,956.5</td>
+        <td>4,511.8</td>
+        <td>0</td>
+        <td>0</td>
+        <td>1,444.7</td>
+        <td>4,120.3</td>
+        <td>0</td>
+        <td>4,120.3</td>
+        <td>0</td>
+        <td>226.7</td>
+        <td>4,909.5</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>24.08.2026</td>
+        <td>2,491.2</td>
+        <td>2,635</td>
+        <td>6,436.5</td>
+        <td>4,511.8</td>
+        <td>0</td>
+        <td>0</td>
+        <td>1,924.7</td>
+        <td>4,024.7</td>
+        <td>0</td>
+        <td>4,024.7</td>
+        <td>0</td>
+        <td>223.2</td>
+        <td>5,484.5</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>21.08.2026</td>
+        <td>2,667.4</td>
+        <td>2,466.5</td>
+        <td>6,222.8</td>
+        <td>4,512.1</td>
+        <td>0</td>
+        <td>0</td>
+        <td>1,710.7</td>
+        <td>3,978.4</td>
+        <td>0</td>
+        <td>3,978.4</td>
+        <td>0</td>
+        <td>222.1</td>
+        <td>5,139.8</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>20.08.2026</td>
+        <td>2,714.3</td>
+        <td>2,415.2</td>
+        <td>6,208.8</td>
+        <td>4,512.1</td>
+        <td>0</td>
+        <td>0</td>
+        <td>1,696.7</td>
+        <td>4,016.1</td>
+        <td>0</td>
+        <td>4,016.1</td>
+        <td>0</td>
+        <td>222.5</td>
+        <td>5,041.5</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>19.08.2026</td>
+        <td>2,666.6</td>
+        <td>3,137.8</td>
+        <td>6,933.8</td>
+        <td>5,244.1</td>
+        <td>0</td>
+        <td>0</td>
+        <td>1,689.7</td>
+        <td>4,021.8</td>
+        <td>0</td>
+        <td>4,021.8</td>
+        <td>0</td>
+        <td>225.8</td>
+        <td>5,811.8</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>18.08.2026</td>
+        <td>2,631.5</td>
+        <td>3,212.1</td>
+        <td>7,018.8</td>
+        <td>5,244.1</td>
+        <td>0</td>
+        <td>0</td>
+        <td>1,774.7</td>
+        <td>4,032.5</td>
+        <td>0</td>
+        <td>4,032.5</td>
+        <td>0</td>
+        <td>225.9</td>
+        <td>5,921.3</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>17.08.2026</td>
+        <td>2,665.6</td>
+        <td>3,150.8</td>
+        <td>6,858.8</td>
+        <td>5,244.1</td>
+        <td>0</td>
+        <td>0</td>
+        <td>1,614.7</td>
+        <td>3,934</td>
+        <td>0</td>
+        <td>3,934</td>
+        <td>0</td>
+        <td>226.1</td>
+        <td>5,825.9</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>14.08.2026</td>
+        <td>2,685.1</td>
+        <td>2,913.4</td>
+        <td>6,638.8</td>
+        <td>5,244.1</td>
+        <td>0</td>
+        <td>0</td>
+        <td>1,394.7</td>
+        <td>3,951.4</td>
+        <td>0</td>
+        <td>3,951.4</td>
+        <td>0</td>
+        <td>226.1</td>
+        <td>5,569</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>13.08.2026</td>
+        <td>2,716.1</td>
+        <td>2,817</td>
+        <td>6,558.8</td>
+        <td>5,244.1</td>
+        <td>0</td>
+        <td>0</td>
+        <td>1,314.7</td>
+        <td>3,967.5</td>
+        <td>0</td>
+        <td>3,967.5</td>
+        <td>0</td>
+        <td>225.7</td>
+        <td>5,441.6</td>
+        <td>5,340.7</td>
+      </tr>
+      <tr>
+        <td>12.08.2026</td>
+        <td>2,571.1</td>
+        <td>2,991.9</td>
+        <td>6,896</td>
+        <td>5,211.9</td>
+        <td>0</td>
+        <td>990.4</td>
+        <td>693.7</td>
+        <td>4,129.9</td>
+        <td>0</td>
+        <td>4,129.9</td>
+        <td>0</td>
+        <td>225.8</td>
+        <td>5,753</td>
+        <td>5,332.2</td>
+      </tr>
+      <tr>
+        <td>11.08.2026</td>
+        <td>2,511.7</td>
+        <td>2,776.1</td>
+        <td>6,541.2</td>
+        <td>4,311.6</td>
+        <td>0</td>
+        <td>990.4</td>
+        <td>1,239.2</td>
+        <td>3,990.7</td>
+        <td>0</td>
+        <td>3,990.7</td>
+        <td>0</td>
+        <td>225.6</td>
+        <td>5,596.6</td>
+        <td>5,332.2</td>
+      </tr>
+      <tr>
+        <td>10.08.2026</td>
+        <td>2,523.8</td>
+        <td>775.6</td>
+        <td>4,786.3</td>
+        <td>4,311.6</td>
+        <td>0</td>
+        <td>0</td>
+        <td>474.7</td>
+        <td>4,236.3</td>
+        <td>1,000.5</td>
+        <td>3,235.8</td>
+        <td>0</td>
+        <td>225.6</td>
+        <td>3,583.9</td>
+        <td>5,332.2</td>
+      </tr>
+    </table>
+  </div>
+  <div class="table-caption">
+    <p><sup>*</sup> The net of the CBR claims on the banking sector and the CBR liabilities to the banking sector: special facilities, supplementary mechanism of liquidity provision, contractual committed liquidity facility and sell/buy FX swaps.
+                    </p>
+    <p><sup>**</sup> Data is also available on the section <a href="/eng/hd_base/RReserves/">Required Reserves of Credit Institutions</a>. Until the end of <a href="/eng/oper_br/oap/">the required reserve regulation period</a> an estimated value is used for calculations. When the actual data is published, the estimated value of the liquidity balance is recalculated and published on the second working day after the end of the regulation period.
+                    </p>
+    <p>Data is available from 01.01.2014 to 08.09.2026, inclusive.</p>
+  </div>
+</div>
+<div class="note">
+  <p>Liquidity deficit/surplus is calculated as a difference between the CBR aggregated claims on the banking sector and the CBR aggregated liabilities to the banking sector with the difference between actual correspondent account balances and required reserves to be averaged. Taking into account the difference between actual and required reserves allows to eliminate the impact of bank’s strategies for fulfillment the reserve requirements. The banking sector liquidity deficit is the volume of reserves that the banking sector should borrow from the CBR. The banking sector liquidity surplus is the volume of excess reserves that would accrue on banks’ correspondent accounts barring CBR liquidity management operations.</p>
+  <p>Liquidity deficit or surplus subject to correspondent account balances fluctuations is calculated as a difference between the CBR aggregated claims on the banking sector and the CBR aggregated liabilities to the banking sector.</p>
+  <p>Until November 2023 the term liquidity deficit/surplus in the CBR analytics characterized liquidity deficit/surplus subject to correspondent account balances fluctuations. Starting from November 2023 liquidity deficit/surplus that takes into account the difference between actual and required reserves is used in analytics.</p>
+</div>
+                    
+                    <!--/index-->
+
+    <div class="page-info">
+        <!--noindex-->
+        
+
+
+<div class="page-info_helpful"
+     data-page-feedback=""
+     data-feedback-url="/Content/PageInfo/RegisterFeedback">
+    <!--noindex-->
+    <div class="helpful" data-helpful="">
+        Was this page useful?
+        <div class="helpful_btns">
+            <button class="helpful_btn _yes" data-helpful-btn="yes"><i class="helpful_icon"></i><span>Yes</span></button>
+            <button class="helpful_btn _no" data-helpful-btn="no"><i class="helpful_icon"></i><span>No</span></button>
+        </div>
+    </div>
+    <!--/noindex-->
+</div>
+
+            <div class="page-info_last-update">Last updated on: 08.09.2026</div>
+        <!--/noindex-->
+    </div>
+                </div>
+            </div>
+    </main>
+
+    <footer class="footer" id="footer">
+    <div class="offsetMenu footer_margin-left">
+        <div class="footer_main">
+            <div class="col-md-23 col-xl-22 offset-md-1 offset-xl-2 footer-size">
+                <div class="footer_top">
+                    <a class="footer_logo_eng" href="/eng/"></a>
+                    <div class="footer_up gotoUp">
+                        <div class="footer_up_title">Up</div>
+                        <div class="footer_up_icon"></div>
+                    </div>
+                </div>
+                
+<div class="footer_contacts">
+<div class="footer_address">Bldg V, 12&nbsp;Neglinnaya Street, Bank of&nbsp;Russia, Moscow, 107016 Russia</div>
+<div class="footer_phones">
+
+<div class="footer_phone"><nobr class="phone"><a class="footer_phone_val" href="tel:88003003000">8 800 300-30-00</a></nobr></div>
+
+<div class="footer_phone"><nobr class="phone"><a class="footer_phone_val" href="tel:+74993003000">+7 499 300-30-00</a></nobr></div>
+
+</div>
+</div>
+<div class="footer_main_block">
+<div class="footer_left-menu">
+
+<div class="footer_left-menu_item"><a href="/eng/about_br/irp/">Investor Relations</a></div>
+<div class="footer_left-menu_item"><a href="/eng/other/holidays/">Public Holidays in&nbsp;Russia</a></div>
+
+</div>
+<div class="networks-circle footer_networks">
+<a class="networks-circle_item _yt" href="https://www.youtube.com/user/BankofRussia"></a>
+<a class="networks-circle_item _tg" href="https://telegram.me/centralbank_russia" title="Telegram"></a></div>
+</div>
+<div class="footer_menu">
+<div class="footer_menu_items">
+<div class="footer_menu_item"><a href="/eng/about/">About the&nbsp;Site</a></div>
+<div class="footer_menu_item"><a href="/eng/contacts/">Contacts</a></div>
+<div class="footer_menu_item"><a href="/eng/development/">Technical resources</a></div>
+
+<!--<div class="footer_menu_item"><a href="/eng/development/">Links</a></div>-->
+</div>
+<a class="footer_menu_item _visually-impaired" href="#" title="Mode for visually impaired">
+	<div class="footer_visually-impaired-icon"></div>
+	<div><span class="visually-impaired-on">Mode for&nbsp;visually impaired</span><span class="visually-impaired-off">Regular version</span></div>
+</a>
+</div>
+
+            </div>
+        </div>
+        <div class="footer_bottom">
+            <div class="col-md-23 col-xl-23 offset-md-1 offset-xl-2 row footer_bottom-container">
+                <div class="footer_bottom_text col-md-11 col-xl-11">&#169; Bank of Russia, 2000–2026.</div>
+<div class="footer_bottom_aic col-md-12 col-xl-11">Design by <a href="https://aic.ru" target="_blank"><img src="/common/images/icons/aic-logo.svg" /></a></div>
+
+            </div>
+        </div>
+    </div>
+</footer>
+
+    
+    
+
+        <div class="popup-cookies" data-popup-cookies>
+            <div class="popup-cookies_title">
+                The Bank of Russia website uses cookies
+            </div>
+            <div class="popup-cookies_subtitle">
+                By using <a href="/eng/">www.cbr.ru</a>, you accept
+                the  <a href="/eng/user_agreement/">User Agreement.</a>
+            </div>
+            <button class="btn _medium _blue " data-popup-cookies-btn>
+                Accept
+            </button>
+        </div>
+
+    
+<!--[if IE 9]><script>$('body').addClass('ie9')</script><![endif]-->
+<script src="/Modules/Content/Scripts/PageInfo.js?v=v3116962712" type="text/javascript"></script>
+    <script type="text/javascript">
+        $(function () {
+            Content_PageInfo.init($('[data-page-feedback]'));
+        });
+    </script>
+
+
+
+</body>
+</html>

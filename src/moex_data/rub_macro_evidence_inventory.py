@@ -5,10 +5,13 @@ from datetime import datetime, timezone
 from moex_research.external_data import cbr_rates_factual as cbr
 from moex_research.external_data import rosstat_cpi_factual as rosstat
 from moex_research.external_data import cbr_meeting_calendar
+from moex_research.external_data import rosstat_monthly_cpi, cbr_liquidity_factual
 from moex_data.rub_macro_requirements import describe as describe_requirements
+from moex_data.rub_data_uncertainty import describe as describe_uncertainty
 
 SCHEMA = 'rub_macro_evidence_inventory.v1'
-PROVIDERS = {'cbr_rates_verified': cbr, 'rosstat_cpi': rosstat}
+PROVIDERS = {'cbr_rates_verified': cbr, 'rosstat_cpi': rosstat,
+    'rosstat_monthly_cpi': rosstat_monthly_cpi, 'cbr_liquidity_verified': cbr_liquidity_factual}
 DENIED = ('required_series_policy_complete', 'full_macro_accepted', 'full_calendar_accepted',
           'horizon_alignment_accepted', 'model_accepted', 'action_authority')
 
@@ -171,6 +174,48 @@ def describe(snapshot, *, now):
         if calendar_data['upcoming_events']:
             for block_id in ('cbr_rates', 'event_calendar'):
                 by_block[block_id]['missing_evidence'].remove('accepted_cbr_decision_release_calendar')
+    monthly = components.get('rosstat_monthly_cpi')
+    if _usable(monthly):
+        data = monthly['data']
+        fact = {'fact_id': data['series_id'], 'series_id': data['series_id'],
+            'block_id': 'rosstat_macro', 'component': 'rosstat_monthly_cpi',
+            'units': data['units'], 'observation_month': data['observation_month'],
+            'indices': deepcopy(data['indices']), 'changes_percent': deepcopy(data['changes_percent']),
+            'source_publication_date': data.get('listed_publication_date'),
+            'source_publication_time': None, 'received_at': data['received_at'],
+            'system_available_at': data['system_available_at'], 'scope': data['scope'],
+            'quality_status': 'USABLE_WITH_LIMITATIONS',
+            'evidence': {key: data[key] for key in ('source_url', 'raw_sha256', 'index_manifest_sha256', 'document_manifest_sha256')},
+            'consensus': None, 'surprise': None, 'historical_pit_acceptance': False,
+            'horizon_alignment_accepted': False}
+        fact['uncertainty'] = describe_uncertainty(fact, source_policy={
+            'evidence_verified': True, 'decimal_places': data.get('decimal_places'),
+            'revision_kind': 'immutable_received_version'})
+        facts.append(fact)
+        by_block['rosstat_macro']['policy_gaps'].remove('monthly_cpi_and_other_series_acceptance_pending')
+        by_block['rosstat_macro']['policy_gaps'].append('other_rosstat_series_and_historical_vintages_pending')
+    else:
+        by_block['rosstat_macro']['missing_evidence'].append('fresh_replayable_monthly_cpi')
+    liquidity = components.get('cbr_liquidity_verified')
+    if _usable(liquidity):
+        data = liquidity['data']
+        for observation in data['observations']:
+            fact = {**deepcopy(observation), 'fact_id': observation['metric_id'],
+                'series_id': observation['metric_id'], 'block_id': 'cbr_rates',
+                'component': 'cbr_liquidity_verified', 'received_at': data['received_at'],
+                'scope': data['scope'], 'quality_status': 'USABLE_WITH_LIMITATIONS',
+                'source_publication_date': None, 'consensus': None, 'surprise': None,
+                'evidence': {key: data[key] for key in ('source_url', 'raw_sha256', 'manifest_sha256')},
+                'historical_pit_acceptance': False, 'horizon_alignment_accepted': False,
+                'arithmetic_residual': deepcopy(data.get('arithmetic_residual'))}
+            fact['uncertainty'] = describe_uncertainty(fact, source_policy={
+                'evidence_verified': True, 'decimal_places': observation.get('displayed_decimal_places'),
+                'revision_kind': 'latest_revised'})
+            facts.append(fact)
+        by_block['cbr_rates']['policy_gaps'].remove('banking_liquidity_requirement_and_vintage_policy_pending')
+        by_block['cbr_rates']['policy_gaps'].append('banking_liquidity_historical_vintage_policy_pending')
+    else:
+        by_block['cbr_rates']['missing_evidence'].append('fresh_replayable_banking_liquidity')
     for block in blocks:
         block.update(required=True, full_block_accepted=False,
             admitted_fact_ids=[fact['fact_id'] for fact in facts if fact['block_id'] == block['block_id']],
@@ -179,10 +224,11 @@ def describe(snapshot, *, now):
     coverage = []
     for requirement in requirements['requirements']:
         metric_id, event_family = requirement['metric_id'], requirement['event_family']
-        matched_facts = [fact['fact_id'] for fact in facts if metric_id is not None and fact['series_id'] == metric_id]
+        metric_ids = requirement.get('metric_ids', [metric_id] if metric_id is not None else [])
+        matched_facts = [fact['fact_id'] for fact in facts if fact['series_id'] in metric_ids]
         matched_events = [event['event_id'] for event in events if event_family is not None and event.get('event_family') == event_family]
         coverage.append({'requirement_id': requirement['requirement_id'],
-            'current_evidence_present': bool(matched_facts or matched_events),
+            'current_evidence_present': (bool(metric_ids) and set(metric_ids) <= set(matched_facts)) or bool(matched_events),
             'admitted_fact_ids': matched_facts, 'scheduled_event_ids': matched_events,
             'full_requirement_accepted': False})
     return {'schema_version': SCHEMA, 'as_of_utc': reference.isoformat() if reference else None,
