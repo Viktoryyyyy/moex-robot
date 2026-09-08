@@ -651,6 +651,8 @@ def read_current_snapshot(
         "snapshot_age_seconds": age,
         "status": "FRESH" if age <= STALE_AFTER_SECONDS else "STALE",
     }
+    from moex_data.rub_factual_release import describe as describe_release
+    result['factual_release'] = describe_release(result)
     return result, path
 
 
