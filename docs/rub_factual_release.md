@@ -36,3 +36,49 @@ by the input, the same commit and consumption time. Missing or changed source
 evidence fails the corresponding factual gates. No current network lookup occurs.
 Existing artifacts are never overwritten. A simulated missing-factor example
 must be labelled as a simulation, not an observed production outage.
+
+## Unified acceptance gate
+
+Run from a clean committed checkout. The CLI pins the executing Git HEAD and
+performs no training, model evaluation, source refresh or trading operations.
+For the installed local API:
+
+```sh
+PYTHONPATH=.:src python -m moex_data.rub_factual_release_acceptance \
+  --api-url http://127.0.0.1:8765/v1/rub/factual-snapshot \
+  --env-file /home/trader/moex_bot/.env \
+  --output /home/trader/moex_bot/deploy_backups/factual-release-acceptance
+```
+
+The local API token is read in memory, never put in arguments or artifacts.
+Requests reject redirects and ignore proxy environment settings. A captured
+snapshot can be tested without network access, using its original evidence files:
+
+```sh
+PYTHONPATH=.:src python -m moex_data.rub_factual_release_acceptance \
+  --snapshot /absolute/path/input_snapshot.json \
+  --as-of 2026-09-08T13:27:28+00:00 --output /absolute/path/acceptance-results
+```
+
+Use the intended aware consumption time, not the example timestamp. Keep output
+outside the checkout. Each invocation creates a new directory containing
+`report.json` and two identical frozen exports with snapshot, release and digest
+manifest. Replay still requires the original referenced source evidence files.
+Exit code 0 means PASS; 1 means a failed acceptance check; CLI input/setup errors
+also return nonzero. Failed checks are named in the report.
+
+The profile requires admitted monthly CPI and banking liquidity; an empty
+INCOMPLETE response cannot pass. All displayed facts must agree with matrix
+admission and resolve to source paths. Checks also cover D1/W1 limitations,
+scheduled-versus-actual events, uncertainty, cached projection consistency,
+deterministic export/hash replay and input immutability. Labelled in-memory
+simulations check receipt expiry, altered values, missing evidence, failed
+refreshes and missing inputs. Simulations never edit production evidence.
+PASS is acceptance of the factual contract, while release status remains
+INCOMPLETE and forecast/training/trading acceptance remains false.
+
+The same gate has an offline CI scenario with frozen source fixtures:
+
+```sh
+PYTHONPATH=.:src pytest -q tests/acceptance/test_rub_factual_release_acceptance.py
+```
