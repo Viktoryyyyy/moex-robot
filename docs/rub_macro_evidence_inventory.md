@@ -29,6 +29,19 @@ The inventory does not complete the required-series policy, the full macro or
 event-calendar blocks, historical PIT acceptance, D1/W1 alignment, model
 acceptance or trading authority. Matrix requirements remain unchanged.
 
+`requirements_policy` pins an engineering minimum of seven requirements across
+the existing four blocks. It reuses registered CBR source identities and keeps
+banking liquidity and the latest Minfin FX/gold announcement as explicit open
+requirements. Monthly CPI, tax events, the global calendar, H.10, consensus and
+historical versions remain unresolved. This minimum is not an exhaustive
+forecast-factor definition.
+
+`requirements_coverage` links currently admitted facts or scheduled events to
+that checklist; it does not grant full requirement acceptance. In addition to
+Rosstat, the [received CBR meeting schedule](cbr_meeting_calendar.md) supplies
+separate planned events. A valid upcoming CBR entry removes only the missing
+CBR-schedule evidence marker. The global calendar requirement remains open.
+
 Frozen exports include the inventory in `release.json`; replay requires the
 original snapshot and referenced evidence files, exact code revision and the
 same consumption time. The inventory's availability is not a forecast.
