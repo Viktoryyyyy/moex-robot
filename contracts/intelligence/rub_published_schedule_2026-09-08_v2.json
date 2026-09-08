@@ -1,0 +1,113 @@
+{
+  "schema": "rub_published_schedule.v2",
+  "reviewed_at_utc": "2026-09-08T08:24:24.787012+00:00",
+  "timezone": "Europe/Moscow",
+  "instruments": [
+    "si_futures_family",
+    "cr_futures_family"
+  ],
+  "sources": {
+    "july": "https://www.moex.com/n101220?nt=106",
+    "september": "https://www.moex.com/n103379",
+    "weekend_exceptions": "https://www.moex.com/n95564?nt=112",
+    "weekend": "https://www.moex.com/n103379"
+  },
+  "rules": {
+    "july": [
+      [
+        "06:50",
+        "07:00",
+        "OPENING_AUCTION"
+      ],
+      [
+        "07:00",
+        "10:00",
+        "MORNING"
+      ],
+      [
+        "10:00",
+        "19:00",
+        "MAIN"
+      ],
+      [
+        "19:00",
+        "23:50",
+        "EVENING"
+      ]
+    ],
+    "september": [
+      [
+        "06:50",
+        "07:00",
+        "OPENING_AUCTION"
+      ],
+      [
+        "07:00",
+        "09:00",
+        "MORNING"
+      ],
+      [
+        "09:00",
+        "19:00",
+        "MAIN"
+      ],
+      [
+        "19:00",
+        "23:50",
+        "EVENING"
+      ]
+    ],
+    "weekend_exceptions": [],
+    "weekend": [
+      [
+        "09:50",
+        "10:00",
+        "OPENING_AUCTION"
+      ],
+      [
+        "10:00",
+        "19:00",
+        "WEEKEND_ADDITIONAL"
+      ]
+    ]
+  },
+  "civil_dates": {
+    "2026-09-07": "july",
+    "2026-09-08": "july",
+    "2026-09-09": "july",
+    "2026-09-10": "july",
+    "2026-09-11": "july",
+    "2026-09-12": "weekend_exceptions",
+    "2026-09-13": "weekend_exceptions",
+    "2026-09-14": "september",
+    "2026-09-15": "september",
+    "2026-09-16": "september",
+    "2026-09-17": "september",
+    "2026-09-18": "september",
+    "2026-09-21": "september",
+    "2026-09-19": "weekend",
+    "2026-09-20": "weekend"
+  },
+  "source_evidence_manifest": "rub_schedule_sources_2026-09-08.json",
+  "source_evidence_manifest_sha256": "e855b9a9ecba8570424a7b7f34d154617b00ef4fa58e357885a00ba6925779ce",
+  "coverage_end_inclusive": "2026-09-21",
+  "semantic_review": "Explicit finite civil dates checked against archived official regulations; not actual session evidence.",
+  "source_dependencies": {
+    "july": [
+      "https://www.moex.com/n101220?nt=106",
+      "https://www.moex.com/n94172"
+    ],
+    "september": [
+      "https://www.moex.com/n103379",
+      "https://www.moex.com/n94172"
+    ],
+    "weekend": [
+      "https://www.moex.com/n103379",
+      "https://www.moex.com/n95564?nt=112",
+      "https://www.moex.com/n101220?nt=106"
+    ],
+    "weekend_exceptions": [
+      "https://www.moex.com/n95564?nt=112"
+    ]
+  }
+}
