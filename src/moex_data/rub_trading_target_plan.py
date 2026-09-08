@@ -21,11 +21,12 @@ def describe(component, *, now):
             'horizon_definition_accepted': False, 'reason': 'weekly_horizon_definition_not_accepted',
             'unselected_definitions': ['calendar_week', 'five_forward_trading_days']}}
     try:
-        if not isinstance(now, datetime) or now.utcoffset() is None:
+        if not isinstance(now, datetime) or now.utcoffset() is None or not isinstance(component, dict):
             return result
         view = calendar.reconcile(component, now=now)
-        data = view.get('data') or {}
-        if view.get('status') != 'READY' or data.get('calendar_plan_usable') is not True:
+        data = view.get('data')
+        if (view.get('status') != 'READY' or not isinstance(data, dict)
+                or data.get('calendar_plan_usable') is not True):
             return result
         known_plan = schedule.describe(now=now)
         pinned = known_plan.get('artifact_sha256')

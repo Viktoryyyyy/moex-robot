@@ -62,6 +62,14 @@ def test_expired_calendar_and_pre_review_time_are_not_candidates(monkeypatch):
     assert result['D1']['candidate_trading_date'] is None
 
 
+@pytest.mark.parametrize('component', [None, [], {'status': 'READY', 'data': [1]},
+    {'status': 'READY', 'data': 'invalid'}])
+def test_malformed_calendar_component_is_unavailable(component):
+    result = target.describe(component, now=datetime.fromisoformat('2026-09-08T13:40:00+03:00'))
+    assert result['D1']['candidate_trading_date'] is None
+    assert result['forecast_trading_targets_accepted'] is False
+
+
 def test_real_manifest_pipeline_retention_and_factual_release(tmp_path, monkeypatch):
     import json
     from moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as runner
