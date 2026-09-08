@@ -32,9 +32,9 @@ _ET = ZoneInfo("America/New_York")
 _SPACE_RE = re.compile(r"\s+")
 _INDEX_RE = re.compile(
     r"Data\s+for\s+week\s+ending\s+"
-    r"(?P<week>[A-Za-z]+\s+\d{1,2},\s+\d{4})\s+"
+    r"(?P<week>[A-Za-z]+\.?\s+\d{1,2},\s+\d{4})\s+"
     r"Release\s+Date:\s*"
-    r"(?P<release>[A-Za-z]+\s+\d{1,2},\s+\d{4})",
+    r"(?P<release>[A-Za-z]+\.?\s+\d{1,2},\s+\d{4})",
     re.IGNORECASE,
 )
 _PDF_WEEK_RE = re.compile(
@@ -61,6 +61,8 @@ _ENGLISH_MONTHS = {
     "october": 10,
     "november": 11,
     "december": 12,
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "jun": 6, "jul": 7,
+    "aug": 8, "sep": 9, "sept": 9, "oct": 10, "nov": 11, "dec": 12,
 }
 _ALLOWED_QUALITY = {"OK", "SOURCE_UNAVAILABLE", "SOURCE_INVALID", "TIMESTAMP_UNPROVABLE"}
 
@@ -137,7 +139,7 @@ def _collapse(value: str) -> str:
 
 
 def _parse_english_date(value: str) -> date:
-    match = re.fullmatch(r"([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})", _collapse(value))
+    match = re.fullmatch(r"([A-Za-z]+)\.?\s+(\d{1,2}),\s+(\d{4})", _collapse(value))
     if match is None:
         raise EiaAcquisitionError("TIMESTAMP_UNPROVABLE", "EIA release date is not parseable")
     month = _ENGLISH_MONTHS.get(match.group(1).casefold())
@@ -271,9 +273,13 @@ def _parse_html(raw: bytes, *, label: str) -> _VisibleAndTableParser:
 
 
 def _index_dates(parser: _VisibleAndTableParser) -> tuple[date, date, str]:
-    match = _INDEX_RE.search(parser.text)
-    if match is None:
+    matches = list(_INDEX_RE.finditer(parser.text))
+    anchors = re.findall(r"\bData\s+for\s+week\s+ending\b", parser.text, re.IGNORECASE)
+    if not matches:
         raise EiaAcquisitionError("TIMESTAMP_UNPROVABLE", "EIA index release date fields are missing")
+    if len(matches) != 1 or len(anchors) != 1:
+        raise EiaAcquisitionError("TIMESTAMP_UNPROVABLE", "EIA index release date fields are ambiguous")
+    match = matches[0]
     week_text = _collapse(match.group("week"))
     release_text = _collapse(match.group("release"))
     return _parse_english_date(week_text), _parse_english_date(release_text), week_text
