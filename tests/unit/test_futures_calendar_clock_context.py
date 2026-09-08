@@ -11,6 +11,13 @@ from moex_data import rub_futures_calendar as calendar
 NOW = datetime(2026,9,8,10,tzinfo=timezone.utc)
 
 
+@pytest.fixture(autouse=True)
+def isolate_unrelated_cny_timestamp_policy(monkeypatch):
+    # Clock tests use injected non-CNY producers. Installing the process-global
+    # CNY adapter patch here would leak into independent source contract tests.
+    monkeypatch.setattr(runner, 'install_timestamp_policy', lambda: None)
+
+
 class Clock:
     def __init__(self, offsets):
         self.values = iter(NOW + timedelta(seconds=n) for n in offsets)
