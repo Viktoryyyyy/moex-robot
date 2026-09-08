@@ -18,6 +18,7 @@ from moex_data import step9_rub_analysis_bundle as step9
 from moex_data.rub_snapshot_read_freshness import apply_read_freshness
 from moex_data.rub_production_source_matrix import unanalyzed_news
 from moex_research.external_data import moex_brent_factual as brent
+from moex_research.external_data import fred_cny_factual as fred_cny
 from moex_research.external_data import moex_cnyrub_algopack_history as cny_spot
 from moex_research.external_data import moex_cnyrubf_algopack_history as cny_futures
 from moex_research.external_data.moex_cnyrub_algopack_timestamp_policy import (
@@ -337,7 +338,14 @@ def default_producers() -> Mapping[str, ComponentProducer]:
         "cnyrub_spot_live": _cny_spot_component,
         "cnyrubf_live": _cny_futures_component,
         "oil": _oil_component,
+        "external_cny": _external_cny_component,
     }
+
+
+def _external_cny_component(now: datetime) -> ProducedComponent:
+    del now
+    data = fred_cny.load(root=_data_root())
+    return ProducedComponent(data=data, data_as_of=data['received_at'])
 
 
 def _previous_component(previous: Mapping[str, object] | None, name: str) -> Mapping[str, object] | None:
@@ -391,6 +399,8 @@ def _component_payload(
                 "refresh_error": str(exc),
                 "data": prior.get("data"),
             }
+            if name == "external_cny":
+                return fred_cny.reconcile(retained, now=now)
             return brent.reconcile_component(retained, now=now) if name == "oil" else retained
         return {
             "status": "UNAVAILABLE",
@@ -441,7 +451,7 @@ def build_snapshot(
         "cnyrubf_live",
     }
     # Explicit legacy/offline producer injection may omit oil; production defaults include it.
-    if not required <= set(selected_producers) <= required | {"oil"}:
+    if not required <= set(selected_producers) <= required | {"oil", "external_cny"}:
         raise ChatAnalysisSnapshotError("producer set mismatch")
 
     components = {
@@ -586,6 +596,7 @@ def finalize_snapshot_timing(snapshot: dict[str, object], *, started: datetime, 
             component["last_success_at"] = _iso(completed)
             component["last_success_at_semantics"] = "snapshot_collection_completed_upper_bound"
     brent.apply_oil_freshness(snapshot, now=completed)
+    fred_cny.apply(snapshot, now=completed)
 
 
 def refresh_snapshot(

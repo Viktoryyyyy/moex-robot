@@ -6,6 +6,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 
 from moex_research.external_data.moex_brent_factual import apply_oil_freshness
+from moex_research.external_data.fred_cny_factual import apply as apply_external_cny
 from moex_data.futures.futoi_current_pair_authority import apply_read_freshness as apply_cr_pair_freshness
 
 
@@ -28,6 +29,7 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
     result = deepcopy(dict(snapshot))
     components = result.get("components", {})
     apply_oil_freshness(result, now=now)
+    apply_external_cny(result, now=now)
     apply_cr_pair_freshness(result, now=now)
     from moex_data.rub_temporal_applicability import apply as apply_temporal
     apply_temporal(result, now=now)
