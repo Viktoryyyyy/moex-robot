@@ -266,7 +266,8 @@ def _live_market_component(now: datetime) -> ProducedComponent:
 def _macro_component(now: datetime) -> ProducedComponent:
     del now
     state, macro_as_of = live._load_current_cbr_macro_state()
-    state_view = _jsonable(state)
+    from moex_research.intelligence.cbr_factual_presentation import present
+    state_view = present(_jsonable(state))
     state_view['upstream_placeholder'] = {key: state_view.get(key) for key in ('overall_direction', 'confidence', 'dominant_drivers')}
     state_view.update(overall_direction='UNKNOWN', confidence=None, dominant_drivers=[], classification_status='NOT_ANALYZED')
     data = {

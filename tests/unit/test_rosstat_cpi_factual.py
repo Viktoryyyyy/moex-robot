@@ -18,7 +18,15 @@ def row(url=URL, label='с 25 по 31 августа 2026 года', day='02.09.
 
 
 def index(*rows):
-    return ('<div class="toggle-card"><div class="toggle-card__title">' + source.TITLE + '</div>' + ''.join(rows or [row()]) + '</div>').encode()
+    return ('<div class="toggle-card"><div class="toggle-card__title">' + source.TITLE + '</div>' + ''.join(rows or [row()]) + '</div>' + schedule()).encode()
+
+
+def schedule():
+    return ('<div class="toggle-card"><div class="toggle-card__title">'
+        'ГРАФИК размещения срочных информаций и справок на сайте Росстата во II полугодии 2026 года'
+        '</div><table><tr><td>3</td><td>Об оценке индекса потребительских цен с 25 по 31 августа 2026 года</td><td>2 сентября</td></tr>'
+        '<tr><td>6</td><td>Об оценке индекса потребительских цен с 1 по 7 сентября 2026 года</td><td>9 сентября</td></tr>'
+        '<tr><td>11</td><td>Об оценке индекса потребительских цен с 8 по 14 сентября 2026 года</td><td>16 сентября</td></tr></table></div>')
 
 
 def test_select_uses_latest_publication_not_dom_order_or_other_sections():
@@ -32,7 +40,7 @@ def test_select_uses_latest_publication_not_dom_order_or_other_sections():
 @pytest.mark.parametrize('new', [
     row(day='03.09.2026', url=URL.replace('.html', '.pdf')),
     row(day='03.09.2026', url='https://example.org/x.html'),
-    row(day='03.09.2026', label='с 28 июля по 3 августа 2026 года'),
+    row(day='03.09.2026', label='с 28 июля по 33 августа 2026 года'),
     row(day='09.09.2026'), row(day='n/a'), row(),
 ])
 def test_bad_or_ambiguous_newest_is_not_replaced_by_older_good(new):
@@ -81,6 +89,9 @@ def test_verified_pair_admits_only_weekly_dated_context(tmp_path):
     for key in ('historical_pit_acceptance', 'action_authority', 'calendar_accepted', 'full_rosstat_macro_accepted', 'forecast_alignment_accepted'):
         assert data[key] is False
     assert data['source_publication_time'] is None
+    assert data['weekly_release_calendar_accepted'] is True
+    assert data['next_scheduled_release']['scheduled_publication_date'] == '2026-09-09'
+    assert data['scheduled_release_time'] is None
     assert 'read_freshness_reason' not in original['data']
 
 
@@ -104,8 +115,42 @@ def test_consumer_downgrades_expired_failed_tampered_or_unaccepted(tmp_path, def
 
 
 def test_archive_document_period_conflict_fails(tmp_path):
-    with pytest.raises(ValueError, match='periods disagree'):
+    with pytest.raises(ValueError, match='scheduled release disagree'):
         component(tmp_path, archive=index(row(label='с 24 по 31 августа 2026 года')))
+
+
+def test_calendar_deadline_uses_end_of_moscow_day_without_invented_hour():
+    selected = source.select(index(), now=NOW)
+    assert source.calendar(index(), selected=selected, now='2026-09-09T20:59:59+00:00')['weekly_release_calendar_accepted']
+    with pytest.raises(ValueError, match='overdue'):
+        source.calendar(index(), selected=selected, now='2026-09-09T21:00:00+00:00')
+
+
+@pytest.mark.parametrize('change', ['missing', 'duplicate', 'period', 'date', 'year', 'outside'])
+def test_calendar_missing_ambiguous_or_disagreeing_cannot_admit(change):
+    raw = index()
+    selected = source.select(raw, now=NOW)
+    text = raw.decode()
+    if change == 'missing': text = text.replace(schedule(), '')
+    elif change == 'duplicate': text += schedule()
+    elif change == 'period': text = text.replace('цен с 25 по 31', 'цен с 24 по 31')
+    elif change == 'date': text = text.replace('<td>2 сентября</td>', '<td>3 сентября</td>')
+    elif change == 'year': text = text.replace('II полугодии 2026', 'II полугодии 2025')
+    elif change == 'outside': text = text.replace('<table>', '</div><table>')
+    with pytest.raises(ValueError): source.calendar(text.encode(), selected=selected, now=NOW)
+
+
+def test_calendar_does_not_extrapolate_beyond_last_listed_release():
+    selected = {'archive_period_label': 'с 8 по 14 сентября 2026 года', 'listed_publication_date': '2026-09-16'}
+    with pytest.raises(ValueError, match='coverage missing'):
+        source.calendar(index(), selected=selected, now='2026-09-16T00:00:00+00:00')
+
+
+def test_missing_intermediate_scheduled_week_cannot_extend_old_release():
+    text = index().decode()
+    text = text.replace('<tr><td>6</td><td>Об оценке индекса потребительских цен с 1 по 7 сентября 2026 года</td><td>9 сентября</td></tr>', '')
+    with pytest.raises(ValueError, match='gapped'):
+        source.calendar(text.encode(), selected=source.select(index(), now=NOW), now=NOW)
 
 
 def test_source_matrix_and_release_keep_full_macro_blocked(tmp_path):
