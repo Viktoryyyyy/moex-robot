@@ -70,7 +70,19 @@ def build(snapshot):
     collected=oil_data.get('source_id')==brent.SOURCE_ID and bool(oil_data.get('secid')) and isinstance(oil_data.get('ohlc'),dict)
     add('brent','required',collected,usable,'accepted_latest_published_close_not_live' if usable else reason,'components.oil')
     rows[-1].update(factual_context_usable=bool(usable),price_context_scope='latest_published_history_only',intraday_fresh=False)
-    add('external_cny','required',False,False,'accepted_external_CNY_or_CNH_required','components.stage9_daily.data.external_context_required')
+    external = components.get('external_cny', {})
+    external_data = external.get('data') or {}
+    from moex_research.external_data import fred_cny_factual as fred_cny
+    try:
+        reference = freshness['read_at_utc'] if freshness_present else snapshot['identity']['generated_at_utc']
+        external_view = fred_cny.reconcile(external, now=datetime.fromisoformat(reference))
+        external_usable = external_view.get('status') == 'READY' and (external_view.get('data') or {}).get('consumer_factual_use_allowed') is True
+    except (ValueError, TypeError, KeyError):
+        external_usable = False
+    add('external_cny','required',bool(external_data.get('manifest_sha256')),False,
+        'dated_reference_only_forecast_alignment_pending' if external_usable else 'accepted_external_CNY_or_CNH_required',
+        'components.external_cny')
+    rows[-1].update(factual_context_usable=external_usable, price_context_scope='latest_published_daily_reference', intraday_fresh=False)
     for block in ('wti','urals','dxy','ust'):
         add(block,'enrichment',False,False,'no_accepted_snapshot_block','components.stage9_daily.data.external_context_required')
     add('volume_features','excluded',False,False,'excluded_by_user_instruction',None)
