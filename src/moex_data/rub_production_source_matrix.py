@@ -39,7 +39,24 @@ def build(snapshot):
         usable=component.get('status')=='READY' and data.get('consumer_factual_use_allowed') is True and data.get('factual_authority') is True
         add(key,'required',bool(data.get('current_intraday')),usable,'consumer_acceptance_required' if not usable else 'ready','components.'+key)
     basis=components.get('live_basis_carry',{})
-    add('basis_carry','required',bool(basis.get('data')),basis.get('status')=='READY','synchronized_comparable_inputs_required','components.live_basis_carry')
+    basis = basis if isinstance(basis, dict) else {}
+    basis_data = basis.get('data')
+    basis_data = basis_data if isinstance(basis_data, dict) else {}
+    pairs = basis_data.get('pairs')
+    pairs = pairs if isinstance(pairs, dict) else {}
+    admitted_metrics = sorted({metric['metric_id']
+        for pair in pairs.values() if isinstance(pair, dict)
+        for metric in (pair.get('metrics') if isinstance(pair.get('metrics'), list) else [])
+        if isinstance(metric, dict) and metric.get('status') == 'READY'
+        and isinstance(metric.get('metric_id'), str) and metric['metric_id']})
+    basis_factual = bool(admitted_metrics) and basis.get('status') in {'READY', 'PARTIAL'}
+    add('basis_carry','required',bool(basis_data),basis.get('status')=='READY' and basis_factual,
+        'ready_current_live_scope' if basis.get('status')=='READY' and basis_factual
+        else 'partial_factual_metrics_only' if basis_factual else 'synchronized_comparable_inputs_required',
+        'components.live_basis_carry')
+    rows[-1].update(factual_context_usable=basis_factual,
+        factual_authority_scope='individual_READY_metrics_only',
+        admitted_metric_ids=admitted_metrics if basis_factual else [])
     macro=components.get('cbr_macro',{}).get('data',{}).get('state',{})
     add('cbr_rates','required',bool(macro.get('observations')),False,'key_rate_and_ruonia_present_but_full_macro_acceptance_pending','components.cbr_macro')
     for block in ('minfin_fx_operations','event_calendar'):

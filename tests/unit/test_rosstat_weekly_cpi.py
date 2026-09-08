@@ -21,6 +21,45 @@ def test_real_document_excerpt_preserves_period_units_and_three_bases():
     assert result['monthly_final'] is False
 
 
+def test_real_cross_month_document_uses_end_month_base():
+    raw = (Path(__file__).parents[1] / 'fixtures/rosstat/weekly_cpi_cross_month_excerpt.html').read_bytes()
+    result = source.parse(raw, received_at=NOW)
+    assert (result['observation_start'], result['observation_end']) == ('2026-07-28', '2026-08-03')
+    assert result['indices'] == {'previous_registration': '99.98', 'month_start': '100.00', 'year_start': '104.84'}
+    with pytest.raises(ValueError):
+        source.parse(raw.replace('С начала августа'.encode(), 'С начала июля'.encode()), received_at=NOW)
+
+
+def test_real_january_initial_release_does_not_invent_absent_bases():
+    raw = (Path(__file__).parents[1] / 'fixtures/rosstat/weekly_cpi_january_excerpt.html').read_bytes()
+    result = source.parse(raw, received_at=NOW)
+    assert result['observation_end'] == '2026-01-12'
+    assert result['indices'] == {'previous_registration': None, 'month_start': '101.26', 'year_start': None}
+    assert result['weekly_change_percent'] is None
+    assert result['document_format'] == 'january_initial_month_index'
+    with pytest.raises(ValueError): source.parse(raw.replace(b'101,26%', b'101,27%'), received_at=NOW)
+
+
+@pytest.mark.parametrize('period,start,end', [
+    ('со 2 по 8 июня 2026', '2026-06-02', '2026-06-08'),
+    ('с 17 по 24 февраля 2026', '2026-02-17', '2026-02-24'),
+    ('с 27 октября по 2 ноября 2026', '2026-10-27', '2026-11-02'),
+])
+def test_calendar_grammar_supports_observed_holiday_forms(period, start, end):
+    assert tuple(d.isoformat() for d in source.period_dates(period)) == (start, end)
+
+
+def test_so_prefix_in_title_and_summary_uses_same_period_identity():
+    raw = RAW.decode().replace('с 25 по 31 августа', 'со 2 по 8 августа').encode()
+    assert source.parse(raw, received_at=NOW)['observation_start'] == '2026-08-02'
+
+
+@pytest.mark.parametrize('period', ['с 30 февраля по 2 марта 2026', 'с 28 июля по 3 сентября 2026',
+    'с 3 по 2 августа 2026', 'с 30 декабря по 2 января 2026', 'с 1 по 20 января 2026'])
+def test_invalid_and_unproven_year_rollover_periods_fail(period):
+    with pytest.raises(ValueError): source.period_dates(period)
+
+
 @pytest.mark.parametrize('old,new', [
     ('99,99%', '100,99%'), ('99,92%', '100,92%'),
     ('99,99%', '99,99 рублей'), ('104,67%', 'NaN%'),

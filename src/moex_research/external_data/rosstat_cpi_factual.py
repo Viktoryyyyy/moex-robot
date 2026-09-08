@@ -23,11 +23,17 @@ class Index(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.stack, self.nodes = [], []
+        self.tables, self.table = [], None
         self.ignored = 0
 
     def handle_starttag(self, tag, attrs):
         if tag in ('script', 'style'): self.ignored += 1
         if self.ignored: return
+        if tag == 'table':
+            if self.table is not None: raise ValueError('nested calendar table unsupported')
+            self.table = document.Document()
+            self.tables.append((self.stack.copy(), self.table))
+        if self.table is not None: self.table.handle_starttag(tag, attrs)
         attrs = dict(attrs)
         if tag == 'div':
             node = {'classes': attrs.get('class', '').split(), 'text': [], 'links': [],
@@ -39,6 +45,9 @@ class Index(HTMLParser):
         elif tag == 'br': self.handle_data(' ')
 
     def handle_endtag(self, tag):
+        if not self.ignored and self.table is not None:
+            self.table.handle_endtag(tag)
+            if tag == 'table': self.table = None
         if tag in ('script', 'style'):
             self.ignored = max(0, self.ignored - 1)
         elif not self.ignored and tag == 'div' and self.stack:
@@ -46,11 +55,63 @@ class Index(HTMLParser):
 
     def handle_data(self, text):
         if not self.ignored:
+            if self.table is not None: self.table.handle_data(text)
             for node in self.stack: node['text'].append(text)
 
 
 def _text(node):
     return ' '.join(''.join(node['text']).split())
+
+
+def calendar(raw, *, selected, now):
+    """A dated, bounded weekly publication schedule; no invented release hour."""
+    parser = Index()
+    parser.feed(raw.decode('utf-8-sig'))
+    parser.close()
+    today = document._utc(now).astimezone(ZoneInfo('Europe/Moscow')).date()
+    titles = [n for n in parser.nodes if 'toggle-card__title' in n['classes'] and
+              re.fullmatch(r'ГРАФИК размещения срочных информаций и справок на сайте Росстата (?:в I|во II) полугодии ' + str(today.year) + ' года', _text(n))]
+    if not titles: raise ValueError('current-year official weekly calendar missing')
+    events = []
+    for title in titles:
+        sections = [a for a in title['ancestors'] if 'toggle-card' in a['classes']]
+        if not sections: raise ValueError('calendar scope missing')
+        tables = [t for ancestors, t in parser.tables if any(a is sections[-1] for a in ancestors)]
+        if len(tables) != 1: raise ValueError('one scoped calendar table required')
+        for row in tables[0].rows:
+            if not any('Об оценке индекса потребительских цен' in cell for cell in row): continue
+            if len(row) != 3: raise ValueError('invalid weekly calendar row')
+            match = re.fullmatch(r'Об оценке индекса потребительских цен (' + document.PERIOD + ') года', row[1])
+            if not match: raise ValueError('unsupported weekly calendar period')
+            start, end = document.period_dates(match[1])
+            due = re.fullmatch(r'(\d{1,2}) ([а-я]+)', row[2])
+            if not due or due[2] not in document.MONTHS: raise ValueError('invalid calendar publication date')
+            day = datetime(today.year, document.MONTHS[due[2]], int(due[1])).date()
+            if start.year != today.year or end > day or (day - end).days > 7:
+                raise ValueError('calendar observation/publication dates disagree')
+            events.append({'observation_start': start.isoformat(), 'observation_end': end.isoformat(),
+                           'scheduled_publication_date': day.isoformat()})
+    events.sort(key=lambda e: e['observation_end'])
+    if not events or len({e['observation_end'] for e in events}) != len(events):
+        raise ValueError('empty or ambiguous weekly calendar')
+    for previous, current in zip(events, events[1:]):
+        if ((datetime.fromisoformat(current['observation_start']) -
+             datetime.fromisoformat(previous['observation_end'])).days != 1 or
+            current['scheduled_publication_date'] <= previous['scheduled_publication_date']):
+            raise ValueError('gapped, overlapping or unordered weekly calendar')
+    start, end = document.period_dates(selected['archive_period_label'].removesuffix(' года'))
+    matching = [e for e in events if (e['observation_start'], e['observation_end']) == (start.isoformat(), end.isoformat())]
+    if len(matching) != 1 or matching[0]['scheduled_publication_date'] != selected['listed_publication_date']:
+        raise ValueError('archive and scheduled release disagree')
+    future = [e for e in events if e['observation_end'] > end.isoformat()]
+    if not future: raise ValueError('weekly calendar next release coverage missing')
+    upcoming = future[0]
+    if today.isoformat() > upcoming['scheduled_publication_date']:
+        raise ValueError('scheduled weekly publication overdue; latest archive still old')
+    return {'weekly_release_calendar_accepted': True, 'weekly_calendar_scope': 'official_dated_schedule_only',
+            'next_scheduled_release': upcoming, 'scheduled_release_time': None,
+            'calendar_timezone': 'Europe/Moscow', 'calendar_overdue_policy': 'after_scheduled_date_end',
+            'weekly_calendar_coverage_end': events[-1]['scheduled_publication_date']}
 
 
 def select(raw, *, now):
@@ -91,6 +152,7 @@ def select(raw, *, now):
         raise ValueError('newest weekly release format unsupported')
     if not re.fullmatch(document.PERIOD + ' года', selected['archive_period_label']):
         raise ValueError('newest weekly period unsupported')
+    document.period_dates(selected['archive_period_label'].removesuffix(' года'))
     return selected
 
 
@@ -116,20 +178,18 @@ def _receipt(path, digest, *, now, expected_url=None):
 def _replay(refs, *, now):
     index, raw = _receipt(refs['index_manifest_path'], refs['index_manifest_sha256'], now=now, expected_url=INDEX_URL)
     selected = select(raw, now=now)
+    scheduled = calendar(raw, selected=selected, now=now)
     receipt, _ = _receipt(refs['document_manifest_path'], refs['document_manifest_sha256'], now=now,
                           expected_url=selected['source_url'])
     if document._utc(index['received_at_utc']) > document._utc(receipt['requested_at_utc']):
         raise ValueError('document acquired before index selection')
     parsed = document.replay(refs['document_manifest_path'], manifest_sha256=refs['document_manifest_sha256'], now=now)
-    period = re.fullmatch(document.PERIOD + ' года', selected['archive_period_label']).groups()
-    day1, day2, month, year = period
-    if month not in document.MONTHS: raise ValueError('unknown archive month')
-    expected = [f'{int(year):04d}-{document.MONTHS[month]:02d}-{int(d):02d}' for d in (day1, day2)]
+    expected = [d.isoformat() for d in document.period_dates(selected['archive_period_label'].removesuffix(' года'))]
     if expected != [parsed['observation_start'], parsed['observation_end']]:
         raise ValueError('archive and document periods disagree')
     if parsed['observation_end'] > selected['listed_publication_date']:
         raise ValueError('publication precedes observation end')
-    return {**parsed, **selected, **refs, 'policy': POLICY,
+    return {**parsed, **selected, **scheduled, **refs, 'policy': POLICY,
         'scope': 'latest_listed_weekly_estimate_dated_context',
         'latest_publication_verified': True, 'latest_verification_scope': 'official_weekly_archive_at_receipt',
         'factual_authority': True, 'consumer_factual_use_allowed': True,
@@ -169,6 +229,7 @@ def reconcile(component, *, now):
                     'historical_pit_acceptance', 'action_authority', 'calendar_accepted',
                     'full_rosstat_macro_accepted', 'forecast_alignment_accepted'):
             data[key] = False
+        data['weekly_release_calendar_accepted'] = False
         data['read_freshness_reason'] = str(exc)
     return result
 

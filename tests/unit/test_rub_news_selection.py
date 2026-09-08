@@ -63,13 +63,14 @@ def test_empty_candidates_and_insufficient_source_budget_are_explicit():
 
 def test_macro_collection_is_not_full_coverage_or_neutral_analysis(monkeypatch):
     from moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as runner
-    state = {'observations': [{'metric_id': 'cbr_key_rate_pct', 'value': 10}],
+    state = {'observations': [{'metric_id': 'cbr_key_rate_pct', 'source_id': 'cbr_key_rate_daily', 'value': 10, 'published_at': '2026-09-01T00:00:00+03:00', 'available_at': '2026-09-01T00:00:00+03:00', 'ingested_at': '2026-09-08T06:00:00+00:00'}],
         'overall_direction': 'NEUTRAL', 'confidence': 0., 'dominant_drivers': []}
     monkeypatch.setattr(runner.live, '_load_current_cbr_macro_state', lambda: (state, NOW))
     view = runner._macro_component(NOW).data
     assert state['overall_direction'] == 'NEUTRAL'
     assert view['state']['overall_direction'] == 'UNKNOWN'
-    assert view['state']['observations'] == state['observations']
+    assert view['state']['observations'][0]['value'] == state['observations'][0]['value']
+    assert view['state']['observations'][0]['published_at'] is None
     assert view['full_macro_complete'] is False
     assert set(view['missing_required_blocks']) == {'minfin_fx_operations', 'rosstat_macro', 'event_calendar'}
     assert view['numeric_release_surprise'] is None

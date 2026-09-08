@@ -39,7 +39,7 @@ def describe(snapshot):
             scope = 'current_pair_only_no_previous_or_history_grant'
         else:
             fact = {k: data[k] for k in ('secid', 'series_id', 'units', 'value', 'price', 'price_unit', 'ohlc',
-                'observation_start', 'observation_end', 'indices', 'weekly_change_percent', 'listed_publication_date', 'index_manifest_sha256', 'document_manifest_sha256', 'source_trade_date', 'observation_date', 'received_at', 'source_url', 'manifest_sha256', 'raw_sha256', 'provenance') if k in data}
+                'document_format', 'next_scheduled_release', 'weekly_release_calendar_accepted', 'observation_start', 'observation_end', 'indices', 'weekly_change_percent', 'listed_publication_date', 'index_manifest_sha256', 'document_manifest_sha256', 'source_trade_date', 'observation_date', 'received_at', 'source_url', 'manifest_sha256', 'raw_sha256', 'provenance') if k in data}
             scope = 'latest_published_dated_reference'
         facts.append({'factor': key, 'scope': scope, 'snapshot_path': 'components.' + key + '.data', 'values': fact})
     horizons = {}

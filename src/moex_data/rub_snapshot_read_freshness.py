@@ -198,6 +198,31 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
             basis["status"] = derived.get("current_live_scope_status", derived.get("status"))
 
     authority = result.get("authority")
+    # Missing current evidence must revoke persisted flags too. The temporal
+    # view deliberately skips components without a current_intraday field.
+    for name, instrument in (("futoi_live", "si_futures_family"), ("futoi_live_cr", "cr_futures_family")):
+        component = components.get(name, {}) if isinstance(components, dict) else {}
+        current_data = component.get("data") if isinstance(component, dict) else None
+        current = current_data.get("current_intraday") if isinstance(current_data, dict) else None
+        allowed = (isinstance(component, dict) and component.get("status") == "READY"
+                   and isinstance(current, dict) and isinstance(current.get("factual"), dict)
+                   and current_data.get("factual_authority") is True
+                   and current_data.get("consumer_factual_use_allowed") is True)
+        if not allowed:
+            if isinstance(current_data, dict):
+                was_allowed = current_data.get("factual_authority") is True
+                current_data["factual_authority"] = False
+                if was_allowed or "consumer_factual_use_allowed" in current_data:
+                    current_data["consumer_factual_use_allowed"] = False
+            if isinstance(component, dict) and component:
+                component["status"] = "UNAVAILABLE"
+            if isinstance(authority, dict):
+                by_instrument = authority.get("futoi_by_instrument")
+                item = by_instrument.get(instrument) if isinstance(by_instrument, dict) else None
+                if isinstance(item, dict):
+                    item["factual_authority"] = False
+                if instrument == "si_futures_family":
+                    authority["futoi_factual_authority"] = False
     if isinstance(authority, dict):
         if not isinstance(data, dict) or data.get("quality", {}).get("factual_context_usable") is not True:
             authority["live_market_oi_factual_authority"] = False
