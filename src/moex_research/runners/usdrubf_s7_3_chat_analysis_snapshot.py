@@ -265,9 +265,18 @@ def _live_market_component(now: datetime) -> ProducedComponent:
 def _macro_component(now: datetime) -> ProducedComponent:
     del now
     state, macro_as_of = live._load_current_cbr_macro_state()
+    state_view = _jsonable(state)
+    state_view['upstream_placeholder'] = {key: state_view.get(key) for key in ('overall_direction', 'confidence', 'dominant_drivers')}
+    state_view.update(overall_direction='UNKNOWN', confidence=None, dominant_drivers=[], classification_status='NOT_ANALYZED')
     data = {
         "mode": "LIVE_CBR",
-        "state": state,
+        "state": state_view,
+        "coverage_scope": "cbr_key_rate_and_ruonia_only",
+        "missing_required_blocks": ["minfin_fx_operations", "rosstat_macro", "event_calendar"],
+        "full_macro_complete": False,
+        "analysis_ready": False,
+        "numeric_release_surprise": None,
+        "consensus_verified": False,
         "action_authority": False,
     }
     return ProducedComponent(data=data, data_as_of=macro_as_of)
@@ -278,6 +287,7 @@ def _news_component(now: datetime) -> ProducedComponent:
     events, news_as_of, summary = live._load_current_live_news(
         timeout_seconds=10.0,
         max_events=20,
+        audit_root=_data_root(),
     )
     data = {
         "mode": "LIVE_RSS_UNANALYZED",

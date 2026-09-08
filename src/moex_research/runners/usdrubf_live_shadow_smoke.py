@@ -156,6 +156,7 @@ def _load_current_live_news(
     *,
     timeout_seconds: float,
     max_events: int,
+    audit_root=None,
 ) -> tuple[tuple[NewsEvent, ...], datetime, Mapping[str, object]]:
     if timeout_seconds <= 0:
         raise RuntimeError("news timeout must be positive")
@@ -181,7 +182,13 @@ def _load_current_live_news(
             item.event_id,
         ),
     )
-    selected_events = tuple(ordered_events[-max_events:])
+    selection_audit = None
+    if audit_root is not None:
+        from moex_research.intelligence.rub_news_selection import select, freeze_audit
+        selected_events, audit = select(ordered_events, limit=max_events, as_of=news_as_of)
+        selection_audit = freeze_audit(audit, root=audit_root)
+    else:
+        selected_events = tuple(ordered_events[-max_events:])
     for event in selected_events:
         if _event_time(event.ingested_at, f"news {event.event_id} ingested_at") > news_as_of:
             raise RuntimeError("live News event ingestion is later than News as_of_timestamp")
@@ -197,7 +204,9 @@ def _load_current_live_news(
         ),
         "acquired_record_count": result.acquired_record_count,
         "pipeline_event_count": len(result.news.events),
-        "events_dropped_by_bound": len(result.news.events) - len(selected_events),
+        "events_dropped_by_bound": selection_audit['events_dropped_by_bound'] if selection_audit else len(result.news.events) - len(selected_events),
+        "events_excluded_total": len(result.news.events) - len(selected_events),
+        "selection_audit": selection_audit,
     }
     return selected_events, news_as_of, summary
 
