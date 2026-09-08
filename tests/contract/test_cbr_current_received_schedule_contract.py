@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-import yaml
 
 from moex_data import rub_macro_requirements as requirements
 from moex_research.external_data import cbr_meeting_calendar as calendar
@@ -26,11 +25,18 @@ def test_research_placeholder_bytes_and_denials_are_unchanged():
     assert sha256(raw).hexdigest() in {
         'fe40d7931bab76f1c44768f97edc6ea40dd729152aca4955f4e140db8133bd4a',
         '26f6a894c41a2d31ce13386750a1272d9ac664850cadf0593503daf874f3d5b0'}
-    old = yaml.safe_load(raw)
-    assert old['status'] == 'design_only'
-    assert old['readiness_flags']['design_only'] is True
-    assert all(value is False for key, value in old['readiness_flags'].items() if key != 'design_only')
-    assert old['availability_rules']['eligibility_rule'] == 'availability_ts_utc <= forecast_anchor_ts'
+    # The complete byte digest above pins this known YAML, so these assertions
+    # document its semantics without introducing a YAML parser dependency.
+    lines = raw.decode('utf-8').splitlines()
+    assert 'status: design_only' in lines
+    start = lines.index('readiness_flags:') + 1
+    end = lines.index('', start)
+    flags = lines[start:end]
+    assert '  design_only: true' in flags
+    assert all(line.startswith('  ') and line.endswith(': false')
+               for line in flags if line != '  design_only: true')
+    start = lines.index('availability_rules:') + 1
+    assert lines[start + 1] == '  eligibility_rule: availability_ts_utc <= forecast_anchor_ts'
     assert contract()['legacy_design_reference_governs_this_runtime'] is False
 
 
