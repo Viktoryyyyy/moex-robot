@@ -29,12 +29,28 @@ The inventory does not complete the required-series policy, the full macro or
 event-calendar blocks, historical PIT acceptance, D1/W1 alignment, model
 acceptance or trading authority. Matrix requirements remain unchanged.
 
-`requirements_policy` pins an engineering minimum of seven requirements across
+`requirements_policy` pins an engineering minimum of eight requirements across
 the existing four blocks. It reuses registered CBR source identities and keeps
-banking liquidity and the latest Minfin FX/gold announcement as explicit open
-requirements. Monthly CPI, tax events, the global calendar, H.10, consensus and
-historical versions remain unresolved. This minimum is not an exhaustive
+the latest Minfin FX/gold announcement as an explicit open requirement.
+Monthly CPI and four banking-liquidity metrics are collected as received dated
+context; historical vintages, tax events, the global calendar, H.10 and consensus
+remain unresolved. This minimum is not an exhaustive
 forecast-factor definition.
+
+Monthly CPI retains separate indices against the previous month, previous
+December and the same month of the previous year. Percentage changes are the
+printed index minus 100; cumulative-average indices are not year-on-year CPI.
+The monthly archive does not provide a verified publication date/hour; a date
+in a filename is not used as publication evidence. Latest listed monthly data
+remain usable as dated context with this limitation.
+
+Banking liquidity retains the four published beginning-of-day values and their
+printed precision. The current view may contain revisions. An informational
+arithmetic residual is exposed without correcting the source numbers or claiming
+an error bound. `uncertainty` separates printed granularity, unknown publication
+times and revision limitations; it supplies no probabilities, numerical accuracy
+bounds or forecast weights. Verified limited facts remain available, while
+failed provenance/replay and expired receipts still revoke admission.
 
 `requirements_coverage` links currently admitted facts or scheduled events to
 that checklist; it does not grant full requirement acceptance. In addition to

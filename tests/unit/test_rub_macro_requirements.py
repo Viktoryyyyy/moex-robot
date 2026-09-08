@@ -12,20 +12,21 @@ def test_minimum_keeps_all_blocks_and_unresolved_liquidity():
     assert result['status'] == 'ENGINEERING_MINIMUM'
     assert set(result['required_blocks']) == {'cbr_rates', 'minfin_fx_operations', 'rosstat_macro', 'event_calendar'}
     rows = result['requirements']
-    assert len(rows) == len({r['requirement_id'] for r in rows}) == 7
+    assert len(rows) == len({r['requirement_id'] for r in rows}) == 8
     assert all(r['required'] is True and r['admitted'] is False for r in rows)
     assert {r['metric_id'] for r in rows if r['kind'] == 'fact'} == {
-        'cbr_key_rate_pct', 'cbr_ruonia_rate_pct', 'ROSSTAT_WEEKLY_CPI_ESTIMATE'}
+        'cbr_key_rate_pct', 'cbr_ruonia_rate_pct', 'ROSSTAT_WEEKLY_CPI_ESTIMATE', 'ROSSTAT_MONTHLY_CPI'}
     liquidity = next(r for r in rows if r['source_id'] == 'cbr_banking_liquidity_daily')
     assert liquidity['metric_id'] is None
-    assert liquidity['kind'] == 'unresolved_series'
+    assert liquidity['kind'] == 'fact_group'
+    assert len(liquidity['metric_ids']) == 4
     assert 'row_level_publication_vintages' in liquidity['unresolved']
 
 
 def test_policy_is_not_evidence_or_product_acceptance():
     result = policy.describe()
     assert all(result[key] is False for key in policy.DENIED)
-    assert {'monthly_cpi_and_other_series', 'tax_cycle', 'global_macro_calendar',
+    assert {'other_rosstat_series_and_historical_vintages', 'tax_cycle', 'global_macro_calendar',
             'h10_release_calendar', 'consensus_surprise', 'banking_liquidity_vintage',
             'exhaustive_product_series_and_event_definition'} <= set(result['unresolved_gaps'])
     assert all(r['availability_rule'] and r['revision_rule'] for r in result['requirements'])

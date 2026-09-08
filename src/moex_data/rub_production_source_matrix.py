@@ -23,6 +23,14 @@ def unanalyzed_news(events):
 
 def build(snapshot):
     components=snapshot['components'];rows=[]
+    def verified_context(name, provider):
+        try:
+            reference = (snapshot['live_read_freshness']['read_at_utc']
+                if 'live_read_freshness' in snapshot else snapshot['identity']['generated_at_utc'])
+            checked = provider.reconcile(components.get(name, {}), now=datetime.fromisoformat(reference))
+            return checked.get('status') == 'READY' and (checked.get('data') or {}).get('consumer_factual_use_allowed') is True
+        except (ValueError, TypeError, KeyError, OSError, OverflowError, AttributeError):
+            return False
     def add(block,role,collected,usable,reason,evidence):
         rows.append(dict(block_id=block,requirement=role,collection_present=bool(collected),
             usable_for_full_forecast=bool(usable),reason=reason,evidence_path=evidence))
@@ -74,6 +82,12 @@ def build(snapshot):
         rates_usable = False
     rows[-1].update(factual_context_usable=rates_usable, verified_evidence_path='components.cbr_rates_verified',
         reason='verified_rates_only_forecast_alignment_pending' if rates_usable else 'verified_rates_unavailable_full_macro_pending')
+    from moex_research.external_data import cbr_liquidity_factual
+    liquidity_usable = verified_context('cbr_liquidity_verified', cbr_liquidity_factual)
+    rows[-1].update(liquidity_factual_context_usable=liquidity_usable,
+        liquidity_evidence_path='components.cbr_liquidity_verified',
+        liquidity_scope='latest_received_revised_context_not_historical_vintage')
+    rows[-1]['collection_present'] = rows[-1]['collection_present'] or liquidity_usable
     for block in ('minfin_fx_operations','event_calendar'):
         add(block,'required',False,False,'accepted_block_not_present','components.stage9_daily.data.external_context_required')
     from moex_research.external_data import rosstat_cpi_factual as rosstat
@@ -94,6 +108,12 @@ def build(snapshot):
         'weekly_cpi_only_full_macro_and_calendar_pending' if rosstat_usable else 'accepted_weekly_cpi_unavailable',
         'components.rosstat_cpi')
     rows[-1].update(factual_context_usable=rosstat_usable, price_context_scope='latest_listed_weekly_estimate')
+    from moex_research.external_data import rosstat_monthly_cpi
+    monthly_usable = verified_context('rosstat_monthly_cpi', rosstat_monthly_cpi)
+    rows[-1].update(monthly_cpi_factual_context_usable=monthly_usable,
+        monthly_cpi_evidence_path='components.rosstat_monthly_cpi',
+        monthly_cpi_scope='latest_archive_month_received_context')
+    rows[-1]['collection_present'] = rows[-1]['collection_present'] or monthly_usable
     news=components.get('official_news',{}).get('data',{})
     add('official_news','required',bool(news.get('events')),False,'acquired_events_are_not_impact_analysis','components.official_news')
     oil=components.get('oil',{})

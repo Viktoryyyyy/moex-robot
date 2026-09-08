@@ -35,9 +35,9 @@ _REQUIREMENTS = [
                  metric='cbr_ruonia_rate_pct', scope='latest_received_published_rate'),
     _requirement('rosstat_weekly_cpi', 'rosstat_macro', 'fact', 'rosstat_official_releases', NEWS_REGISTRY,
                  metric='ROSSTAT_WEEKLY_CPI_ESTIMATE', scope='weekly_estimate_not_monthly_final'),
-    _requirement('cbr_banking_liquidity', 'cbr_rates', 'unresolved_series',
-                 'cbr_banking_liquidity_daily', REGISTRY, scope='registered_source_only',
-                 unresolved=('metric_selection', 'row_level_publication_vintages')),
+    _requirement('cbr_banking_liquidity', 'cbr_rates', 'fact_group',
+                 'cbr_banking_liquidity_daily', REGISTRY, scope='current_received_revised_banking_liquidity',
+                 unresolved=('row_level_publication_vintages',)),
     _requirement('minfin_fx_operations_plan', 'minfin_fx_operations', 'announcement_plan',
                  'minfin_ru_press_center', NEWS_REGISTRY, scope='ANNOUNCED_PLAN_NOT_EXECUTION',
                  unresolved=('accepted_latest_document', 'series_identity', 'revision_policy')),
@@ -49,6 +49,13 @@ _REQUIREMENTS = [
                  event='rates.cbr_key_rate_calendar', scope='planned_meeting_not_realized_decision',
                  unresolved=('historical_schedule_vintages', 'actual_decision_publication')),
 ]
+_REQUIREMENTS[3]['metric_ids'] = ['liquidity_deficit_surplus_rub_bn',
+    'liquidity_deficit_surplus_ex_correspondent_accounts_rub_bn',
+    'bank_correspondent_accounts_rub_bn', 'required_reserves_averaging_rub_bn']
+_REQUIREMENTS.append(_requirement('rosstat_monthly_cpi', 'rosstat_macro', 'fact',
+    'rosstat_official_releases', NEWS_REGISTRY, metric='ROSSTAT_MONTHLY_CPI',
+    scope='latest_received_monthly_indices_with_explicit_bases',
+    unresolved=('historical_publication_vintages',)))
 _REQUIREMENTS[6].update(
     design_reference='contracts/calendars/rates/cbr_key_rate_calendar.v1.yaml',
     source_adapter_ref='src/moex_research/external_data/cbr_meeting_calendar.py',
@@ -63,7 +70,7 @@ _REQUIREMENTS[4]['value_mapping'] = {
 _POLICY = {'schema_version': SCHEMA, 'status': 'ENGINEERING_MINIMUM',
            'scope': 'CURRENT_RECEIVED_RUB_MACRO_EVIDENCE_CHECKLIST',
            'required_blocks': list(REQUIRED_BLOCKS), 'requirements': _REQUIREMENTS,
-           'unresolved_gaps': ['monthly_cpi_and_other_series', 'tax_cycle',
+           'unresolved_gaps': ['other_rosstat_series_and_historical_vintages', 'tax_cycle',
                                'global_macro_calendar', 'h10_release_calendar',
                                'consensus_surprise', 'banking_liquidity_vintage',
                                'exhaustive_product_series_and_event_definition'],

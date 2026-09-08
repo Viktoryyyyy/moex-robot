@@ -93,7 +93,7 @@ def test_source_failure_removes_only_corresponding_evidence(tmp_path, provider, 
 
 @pytest.mark.parametrize('bad', [None, [], 'bad', 4, True, {}, {'status': 'READY', 'data': []}, {'status': 'READY', 'data': {}}])
 def test_malformed_known_components_are_normalized_without_mutation(bad):
-    value = {'components': {'cbr_rates_verified': bad, 'rosstat_cpi': bad, 'other': {'data': {'x': 1}}}}
+    value = {'components': {**dict.fromkeys(inventory.PROVIDERS, bad), 'other': {'data': {'x': 1}}}}
     before = deepcopy(value)
     copy = inventory.reconcile_components(value, now=NOW)
     assert value == before
