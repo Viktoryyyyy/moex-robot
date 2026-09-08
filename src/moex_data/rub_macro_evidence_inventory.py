@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 
 from moex_research.external_data import cbr_rates_factual as cbr
 from moex_research.external_data import rosstat_cpi_factual as rosstat
+from moex_research.external_data import cbr_meeting_calendar
+from moex_data.rub_macro_requirements import describe as describe_requirements
 
 SCHEMA = 'rub_macro_evidence_inventory.v1'
 PROVIDERS = {'cbr_rates_verified': cbr, 'rosstat_cpi': rosstat}
@@ -63,6 +65,9 @@ def reconcile_components(snapshot, *, now):
                 # Source readers may encounter structurally invalid on-disk JSON;
                 # isolate that provider without hiding errors in other application code.
                 components[name] = _blocked(value, 'macro_evidence_replay_failed')
+    if 'cbr_meeting_calendar' in components:
+        components['cbr_meeting_calendar'] = cbr_meeting_calendar.reconcile(
+            components['cbr_meeting_calendar'], now=reference)
     return result
 
 
@@ -135,6 +140,7 @@ def describe(snapshot, *, now):
             upcoming = data['next_scheduled_release']
             events.append({'event_id': 'rosstat_weekly_cpi:' + upcoming['observation_end'],
                 'block_id': 'event_calendar', 'component': 'rosstat_cpi', 'series_id': data['series_id'],
+                'event_family': 'rosstat_weekly_cpi',
                 'event_status': 'SCHEDULED', 'scheduled_date': upcoming['scheduled_publication_date'],
                 'scheduled_time': None, 'timezone': data['calendar_timezone'],
                 'observation_start': upcoming['observation_start'], 'observation_end': upcoming['observation_end'],
@@ -150,14 +156,40 @@ def describe(snapshot, *, now):
         by_block['rosstat_macro']['missing_evidence'].append('fresh_replayable_weekly_cpi')
     if not events:
         by_block['event_calendar']['missing_evidence'].append('fresh_replayable_weekly_cpi_schedule')
+    calendar = components.get('cbr_meeting_calendar', {})
+    calendar_data = calendar.get('data') if isinstance(calendar, dict) else None
+    if (isinstance(calendar_data, dict) and calendar.get('status') == 'READY'
+            and calendar_data.get('calendar_schedule_usable') is True):
+        for planned in calendar_data['upcoming_events']:
+            events.append({**deepcopy(planned), 'block_id': 'event_calendar',
+                'event_family': 'rates.cbr_key_rate_calendar', 'component': 'cbr_meeting_calendar',
+                'scope': calendar_data['scope'], 'system_available_at': calendar_data['system_available_at'],
+                'source_url': calendar_data['source_url'], 'raw_sha256': calendar_data['raw_sha256'],
+                'manifest_sha256': calendar_data['manifest_sha256'],
+                'consensus': None, 'surprise': None, 'event_occurred_proven': False,
+                'full_calendar_accepted': False})
+        if calendar_data['upcoming_events']:
+            for block_id in ('cbr_rates', 'event_calendar'):
+                by_block[block_id]['missing_evidence'].remove('accepted_cbr_decision_release_calendar')
     for block in blocks:
         block.update(required=True, full_block_accepted=False,
             admitted_fact_ids=[fact['fact_id'] for fact in facts if fact['block_id'] == block['block_id']],
             scheduled_event_ids=[event['event_id'] for event in events if event['block_id'] == block['block_id']])
+    requirements = describe_requirements()
+    coverage = []
+    for requirement in requirements['requirements']:
+        metric_id, event_family = requirement['metric_id'], requirement['event_family']
+        matched_facts = [fact['fact_id'] for fact in facts if metric_id is not None and fact['series_id'] == metric_id]
+        matched_events = [event['event_id'] for event in events if event_family is not None and event.get('event_family') == event_family]
+        coverage.append({'requirement_id': requirement['requirement_id'],
+            'current_evidence_present': bool(matched_facts or matched_events),
+            'admitted_fact_ids': matched_facts, 'scheduled_event_ids': matched_events,
+            'full_requirement_accepted': False})
     return {'schema_version': SCHEMA, 'as_of_utc': reference.isoformat() if reference else None,
         'reference_time_valid': reference is not None, 'status': 'INCOMPLETE',
         'scope': 'RECEIVED_MACRO_EVIDENCE_INVENTORY_ONLY', 'required_blocks': blocks,
         'facts': facts, 'scheduled_events': events,
+        'requirements_policy': requirements, 'requirements_coverage': coverage,
         'missing_evidence': sorted({gap for block in blocks for gap in block['missing_evidence']}),
         'policy_gaps': sorted({gap for block in blocks for gap in block['policy_gaps']}),
         **dict.fromkeys(DENIED, False)}
