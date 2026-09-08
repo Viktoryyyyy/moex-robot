@@ -42,8 +42,26 @@ def build(snapshot):
     add('basis_carry','required',bool(basis.get('data')),basis.get('status')=='READY','synchronized_comparable_inputs_required','components.live_basis_carry')
     macro=components.get('cbr_macro',{}).get('data',{}).get('state',{})
     add('cbr_rates','required',bool(macro.get('observations')),False,'key_rate_and_ruonia_present_but_full_macro_acceptance_pending','components.cbr_macro')
-    for block in ('minfin_fx_operations','rosstat_macro','event_calendar'):
+    for block in ('minfin_fx_operations','event_calendar'):
         add(block,'required',False,False,'accepted_block_not_present','components.stage9_daily.data.external_context_required')
+    from moex_research.external_data import rosstat_cpi_factual as rosstat
+    rosstat_component = components.get('rosstat_cpi', {})
+    try:
+        if 'live_read_freshness' in snapshot:
+            rosstat_freshness = snapshot['live_read_freshness']
+            if not isinstance(rosstat_freshness, dict):
+                raise ValueError('invalid freshness block')
+            reference = rosstat_freshness['read_at_utc']
+        else:
+            reference = snapshot['identity']['generated_at_utc']
+        view = rosstat.reconcile(rosstat_component, now=datetime.fromisoformat(reference))
+        rosstat_usable = view.get('status') == 'READY' and (view.get('data') or {}).get('consumer_factual_use_allowed') is True
+    except (ValueError, TypeError, KeyError):
+        rosstat_usable = False
+    add('rosstat_macro','required',bool(rosstat_component.get('data')),False,
+        'weekly_cpi_only_full_macro_and_calendar_pending' if rosstat_usable else 'accepted_weekly_cpi_unavailable',
+        'components.rosstat_cpi')
+    rows[-1].update(factual_context_usable=rosstat_usable, price_context_scope='latest_listed_weekly_estimate')
     news=components.get('official_news',{}).get('data',{})
     add('official_news','required',bool(news.get('events')),False,'acquired_events_are_not_impact_analysis','components.official_news')
     oil=components.get('oil',{})
