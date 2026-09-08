@@ -262,3 +262,18 @@ def test_reverse_oracle_rejects_core_omissions(block):
     elif block == 'comparisons': value['futoi_context']['futoi_live']['comparisons'] = None
     else: value['market_usability']['cr_front']['quote'] = None
     with pytest.raises(AssertionError): projection_completeness(original, value, now=NOW)
+
+
+@pytest.mark.parametrize('entrypoint', ['describe', 'build'])
+def test_malformed_basis_cannot_restore_expired_futoi_admission(entrypoint):
+    original = futoi_snapshot()
+    later = NOW + timedelta(days=1)
+    original['live_read_freshness'] = {'read_at_utc': later.isoformat()}
+    original['components']['live_basis_carry']['data']['pairs']['cny']['metrics'] = [None]
+    before = deepcopy(original)
+    # Full read-view validation fails before it can return the downgrade. A
+    # consumer must not then publish the persisted Si/CR authority flags.
+    with pytest.raises(AttributeError):
+        if entrypoint == 'describe': release.describe(original)
+        else: release.build(original, now=later, code_revision=COMMIT)
+    assert original == before

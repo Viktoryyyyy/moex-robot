@@ -33,11 +33,9 @@ def describe(snapshot):
         target_now = None
     if target_now is not None:
         from moex_data.rub_snapshot_read_freshness import apply_read_freshness
-        try:
-            projected = apply_read_freshness(snapshot, now=target_now)
-            snapshot = projected
-        except (ValueError, TypeError, KeyError, AttributeError):
-            snapshot['components']['live_basis_carry'] = {'status': 'UNAVAILABLE', 'data': {}}
+        # A failed read-view reconciliation cannot fall back to persisted flags:
+        # those flags may admit expired current pairs from the old generation.
+        snapshot = apply_read_freshness(snapshot, now=target_now)
     snapshot = reconcile_components(snapshot, now=target_now)
     if 'external_cny' in snapshot['components']:
         from moex_research.external_data.fred_cny_factual import reconcile as reconcile_cny
