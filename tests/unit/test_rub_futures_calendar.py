@@ -145,6 +145,63 @@ def test_current_year_capping():
     assert m.interval(datetime(2026, 12, 30, tzinfo=timezone.utc))[1] == date(2026, 12, 31)
 
 
+def test_weekend_boundary_extends_once_and_archives_final_receipt(tmp_path):
+    from urllib.parse import parse_qs, urlsplit
+    weekend = datetime(2026, 9, 12, 10, tzinfo=timezone.utc)
+    clock = iter([weekend, weekend + timedelta(seconds=2), weekend + timedelta(seconds=4)])
+    calls, responses = [], []
+    def fetch(url, env):
+        calls.append(url)
+        query = parse_qs(urlsplit(url).query)
+        body = payload(date.fromisoformat(query['from'][0]), date.fromisoformat(query['till'][0]))
+        for row in body['off_days']['data']:
+            if row[0] in ('2026-09-26', '2026-09-27'):
+                row[1:4] = [1, '2026-09-28', 'W']
+        responses.append(encoded(body))
+        return responses[-1]
+    data = m.load(root=tmp_path, env={}, now_fn=lambda: next(clock), fetch=fetch)
+    assert len(calls) == 2
+    assert 'till=2026-09-26' in calls[0] and 'till=2026-09-28' in calls[1]
+    assert data['coverage_end'] == '2026-09-28' and data['fetch_attempts'] == 2
+    assert data['requested_at'] == weekend.isoformat()
+    assert data['received_at'] == (weekend + timedelta(seconds=4)).isoformat()
+    assert data['raw_sha256'] == m.sha256(responses[-1]).hexdigest()
+    directory = Path(data['manifest_path']).parent
+    assert not (directory / (m.sha256(responses[0]).hexdigest() + '.json')).exists()
+    assert m.reconcile({'status': 'READY', 'data': data}, now=weekend + timedelta(seconds=5))['status'] == 'READY'
+
+
+@pytest.mark.parametrize('defect', ['too_far', 'cross_year', 'malformed'])
+def test_invalid_extension_never_triggers_second_request(tmp_path, defect):
+    now = datetime(2026, 12, 17, 10, tzinfo=timezone.utc) if defect == 'cross_year' else datetime(2026, 9, 12, 10, tzinfo=timezone.utc)
+    start, end = m.interval(now)
+    body = payload(start, end)
+    tail = body['off_days']['data'][-1]
+    tail[1:4] = [1, '2027-01-04' if defect == 'cross_year' else '2026-10-10' if defect == 'too_far' else '2026-09-28', 'W']
+    if defect == 'malformed': tail[1] = None
+    calls = []
+    def fetch(url, env):
+        calls.append(url)
+        return encoded(body)
+    with pytest.raises(ValueError):
+        m.load(root=tmp_path, env={}, now_fn=lambda: now, fetch=fetch)
+    assert len(calls) == 1
+
+
+def test_extension_still_requires_complete_final_destinations(tmp_path):
+    now = datetime(2026, 9, 12, 10, tzinfo=timezone.utc)
+    start, end = m.interval(now)
+    initial = payload(start, end)
+    initial['off_days']['data'][-1][1:4] = [1, '2026-09-28', 'W']
+    calls = []
+    def fetch(url, env):
+        calls.append(url)
+        return encoded(initial)  # Server ignores expanded range: no destination row.
+    with pytest.raises(ValueError):
+        m.load(root=tmp_path, env={}, now_fn=lambda: now, fetch=fetch)
+    assert len(calls) == 2
+
+
 def test_cross_midnight_rejected(tmp_path):
     clock = iter([NOW, NOW + timedelta(days=1)])
     with pytest.raises(ValueError):

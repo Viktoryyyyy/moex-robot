@@ -42,7 +42,7 @@ def interval(now):
 
 
 def source_url(start, end):
-    if not isinstance(start, date) or not isinstance(end, date) or start > end or (end - start).days > 21 or start.year != end.year:
+    if not isinstance(start, date) or not isinstance(end, date) or start > end or (end - start).days > 28 or start.year != end.year:
         raise ValueError('bounded same-year calendar interval required')
     return BASE_URL + '?' + urlencode({'show_all_days': 1, 'from': start.isoformat(), 'till': end.isoformat()})
 
@@ -59,7 +59,7 @@ def _json(raw):
         parse_constant=lambda value: (_ for _ in ()).throw(ValueError('nonfinite JSON value')))
 
 
-def parse(raw, *, start, end, received_at):
+def _rows(raw, *, start, end, received_at, mapping_end):
     source_url(start, end)
     received = _utc(received_at)
     if not isinstance(raw, bytes) or not 0 < len(raw) <= MAX_BYTES:
@@ -91,8 +91,8 @@ def parse(raw, *, start, end, received_at):
                 raise ValueError('noncanonical or future source update date')
         if reason == 'W':
             destination = _date(session)
-            if traded != 1 or not day < destination <= end:
-                raise ValueError('weekend mapping must point forward within query')
+            if traded != 1 or not day < destination <= mapping_end or destination.year != start.year:
+                raise ValueError('weekend mapping outside allowed forward boundary')
         elif session is not None:
             raise ValueError('session mapping allowed only for W rows')
         days[civil] = {'civil_date': civil, 'is_traded': traded, 'trade_session_date': session,
@@ -100,12 +100,36 @@ def parse(raw, *, start, end, received_at):
             'trading_date': (session or civil) if traded else None}
     if len(days) != len(expected):
         raise ValueError('calendar coverage is incomplete')
+    return days
+
+
+def _destinations(days, *, allow_missing_after=None):
     for item in days.values():
         if item['reason'] == 'W':
             target = days.get(item['trade_session_date'])
+            if target is None and allow_missing_after is not None and _date(item['trade_session_date']) > allow_missing_after:
+                continue
             if target is None or target['is_traded'] != 1 or target['reason'] == 'W':
                 raise ValueError('weekend destination is not a normal trading date')
+
+
+def parse(raw, *, start, end, received_at):
+    days = _rows(raw, start=start, end=end, received_at=received_at, mapping_end=end)
+    _destinations(days)
     return [days[key] for key in sorted(days)]
+
+
+def _expansion_cap(now):
+    today = _utc(now).astimezone(MOSCOW).date()
+    return min(date(today.year, 12, 31), today + timedelta(days=21))
+
+
+def _expanded_end(raw, *, start, end, received_at):
+    # The first response is inspected, never admitted. Only a fully structured W
+    # destination can justify a bounded second request; no permissive fallback.
+    days = _rows(raw, start=start, end=end, received_at=received_at, mapping_end=_expansion_cap(received_at))
+    _destinations(days, allow_missing_after=end)
+    return max([end, *[_date(item['trade_session_date']) for item in days.values() if item['reason'] == 'W']])
 
 
 def _fetch(url, *, env):
@@ -154,6 +178,18 @@ def load(*, root, env=None, now_fn=lambda: datetime.now(timezone.utc), fetch=Non
     received = _utc(now_fn())
     if not started <= received or interval(received) != (start, end):
         raise ValueError('calendar acquisition crossed clock/date boundary')
+    original_end = end
+    expanded = _expanded_end(raw, start=start, end=end, received_at=received)
+    attempts = 1
+    if expanded > end:
+        end = expanded
+        url = source_url(start, end)
+        raw = (fetch or _fetch)(url, env=os.environ if env is None else env)
+        final_received = _utc(now_fn())
+        if not received <= final_received or interval(final_received) != (start, original_end):
+            raise ValueError('calendar extension crossed clock/date boundary')
+        received = final_received
+        attempts = 2
     days = parse(raw, start=start, end=end, received_at=received)
     directory = Path(root) / 'raw/external/moex_futures_calendar'
     if any(p.is_symlink() for p in (directory, *directory.parents)):
@@ -163,6 +199,7 @@ def load(*, root, env=None, now_fn=lambda: datetime.now(timezone.utc), fetch=Non
     _freeze(directory / (raw_hash + '.json'), raw)
     data = {'policy': POLICY, 'scope': SCOPE, 'source_url': url,
         'coverage_start': start.isoformat(), 'coverage_end': end.isoformat(),
+        'initial_query_end': original_end.isoformat(), 'fetch_attempts': attempts,
         'requested_at': started.isoformat(), 'received_at': received.isoformat(),
         'system_available_at': received.isoformat(), 'raw_sha256': raw_hash, 'days': days,
         'source_publication_time': None, 'source_update_timezone_verified': False,
@@ -206,8 +243,14 @@ def reconcile(component, *, now):
         requested, received = _utc(data['requested_at']), _utc(data['received_at'])
         if not requested <= received <= now or (now - received).total_seconds() > MAX_RECEIPT_SECONDS or data.get('system_available_at') != data['received_at']:
             raise ValueError('expired calendar receipt or invalid chronology')
-        start, end = interval(requested)
-        if interval(received) != (start, end) or data.get('coverage_start') != start.isoformat() or data.get('coverage_end') != end.isoformat() or data.get('source_url') != source_url(start, end):
+        start, original_end = interval(requested)
+        end = _date(data['coverage_end'])
+        attempts = data.get('fetch_attempts')
+        if (interval(received) != (start, original_end) or data.get('coverage_start') != start.isoformat()
+                or data.get('initial_query_end') != original_end.isoformat()
+                or not original_end <= end <= _expansion_cap(requested)
+                or type(attempts) is not int or attempts != (2 if end > original_end else 1)
+                or data.get('source_url') != source_url(start, end)):
             raise ValueError('calendar query identity mismatch')
         digest = _digest(data['manifest_sha256'])
         path = Path(data['manifest_path'])

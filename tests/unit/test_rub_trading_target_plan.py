@@ -104,3 +104,30 @@ def test_real_manifest_pipeline_retention_and_factual_release(tmp_path, monkeypa
     expired = apply_read_freshness(snapshot, now=now + timedelta(seconds=1201))
     assert expired['trading_target_plan']['D1']['candidate_trading_date'] is None
     assert describe(expired)['horizons']['D1']['planning_candidate']['candidate_trading_date'] is None
+
+
+def test_live_calendar_boundary_extension_preserves_saturday_candidate(tmp_path):
+    import json
+    from urllib.parse import urlsplit, parse_qs
+    now = datetime.fromisoformat('2026-09-19T09:49:59+03:00')
+    calls = []
+    mappings = {'2026-09-19': '2026-09-21', '2026-09-20': '2026-09-21',
+        '2026-09-26': '2026-09-28', '2026-09-27': '2026-09-28',
+        '2026-10-03': '2026-10-05', '2026-10-04': '2026-10-05'}
+    def fetch(url, *, env):
+        calls.append(url)
+        query = parse_qs(urlsplit(url).query)
+        start, end = date.fromisoformat(query['from'][0]), date.fromisoformat(query['till'][0])
+        rows = []
+        for offset in range((end - start).days + 1):
+            civil = (start + timedelta(days=offset)).isoformat()
+            traded = 0 if civil in {'2026-09-12', '2026-09-13'} else 1
+            rows.append([civil, traded, mappings.get(civil), 'W' if civil in mappings else 'N', None])
+        return json.dumps({'off_days': {'columns': target.calendar.COLUMNS, 'data': rows}}).encode()
+    data = target.calendar.load(root=tmp_path, env={}, now_fn=lambda: now, fetch=fetch)
+    assert len(calls) == 2
+    assert data['coverage_end'] == '2026-10-05'
+    result = target.describe({'status': 'READY', 'data': data}, now=now)
+    assert result['D1']['candidate_trading_date'] == '2026-09-21'
+    assert result['D1']['first_published_start'] == '2026-09-19T09:50:00+03:00'
+    assert result['forecast_trading_targets_accepted'] is False

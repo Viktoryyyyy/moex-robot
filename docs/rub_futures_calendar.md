@@ -3,7 +3,13 @@
 `rub_futures_calendar.load(root=DATA_ROOT, env=ENV)` reads the authenticated, fixed
 route `https://apim.moex.com/iss/calendars/futures.json` with `show_all_days=1`,
 `from` and `till`. The interval is Moscow today minus seven through plus fourteen
-civil days, capped at the current year's boundaries. The caller loads the existing
+civil days, capped at the current year's boundaries. If a fully validated initial
+response includes W rows mapping beyond its end, one additional request extends the
+end to the farthest mapped date, capped at today plus 21 days and year-end. The full
+request span is at most 28 days. Out-of-cap, cross-year or malformed mappings fail
+before any retry. The second response must contain every requested date and all
+destinations; no additional retries or relaxed admission are allowed.
+The caller loads the existing
 project environment; the module uses `MOEX_API_KEY` without logging it. Requests
 uses the configured `REQUESTS_CA_BUNDLE` (or `CURL_CA_BUNDLE`), or standard verified
 TLS. Redirects are refused, responses must be JSON and at most two million bytes.
@@ -16,7 +22,7 @@ Recognized reasons are H/W/N/T. H requires is_traded=0 and T requires is_traded=
 unknown or contradictory reasons fail closed. No weekday heuristics are used.
 Only W rows may map forward to another civil date;
 the destination must occur within this response and have is_traded=1 and reason
-other than W. Missing destinations at a bounded/year-end edge fail closed.
+other than W. Missing destinations after the bounded extension/year-end cap fail closed.
 
 `days` exposes civil_date, is_traded, trade_session_date, reason, source_update_time
 and normalized trading_date (null for no planned trading, mapped date for W, otherwise
@@ -24,6 +30,10 @@ the civil date). `updatetime` remains the literal nullable source value. Its tim
 and exact publication timestamp are not established. Impossible future source update
 dates are rejected; no invented intraday publication time is emitted.
 
+Only the final complete response and its normalized receipt manifest are archived;
+the initial response used to choose an extension is never admitted as a fact. Request
+time precedes the first request, receipt time follows the final response, and
+initial_query_end/fetch_attempts distinguish the one-request and two-request paths.
 Raw JSON and the normalized receipt manifest are written exclusively under
 `raw/external/moex_futures_calendar`, named by SHA-256. Reconciliation verifies both
 hashes, exact query identity, full raw replay and causal request/receipt/use times.
