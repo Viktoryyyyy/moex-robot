@@ -15,7 +15,40 @@ CNY/RUB TOM spot projection uses the same admission as its matrix row: the
 producer's aggregate spot quality must be true, an explicit per-record refusal
 is respected, and its positive finite price and source timestamp must remain
 usable at consumption time. An absent optional per-record spot flag is allowed.
-Spot facts contain price only; no spot open interest or USD TOM is invented.
+Spot facts retain accepted price/OHLC and available source fields; no spot open
+interest or USD TOM is invented.
+
+The core consumer projection also carries:
+
+- `market_usability`: separate price/OI, quote and synchronous-comparison gates.
+  Quotes retain their values/identity even when OI blocks the price/OI row.
+  `contract_metadata` preserves admitted basis-leg units, normalization and
+  expiry only when secid, source, timestamp, receipt and raw price match the
+  market row. Missing metadata is explicit; no unit or expiry is guessed.
+- `market_structure`: all accepted USDRUBF levels/interactions and price/extrema
+  context, with the existing 1200-second structure lifetime checked at read.
+  Legacy prior-session extrema are labelled `prior_observed_date`, with unknown
+  completion. Existing `1H`/`1D`/`1W` Stage 7 blocks are in `timeframe_context`
+  as causal dated observations, without a session-completion claim.
+- `futoi_context`: Si prior observation requires the existing temporal witness
+  and parent factual governance. Comparisons require full current pair identity
+  and instrument agreement with the existing delta engine; 1D also requires the
+  admitted previous baseline. Available statistics retain their sample/gap
+  semantics; unavailable windows/metrics retain reasons without numeric values.
+  CR remains strictly current-pair-only. Latest failed current data cannot borrow
+  old authority from a complete pair. No new delta engine or history grant exists.
+- `news_context`: original source headlines, timestamps, references, source
+  selection summary and omissions, always `UNKNOWN` / `NOT_ANALYZED`. Source
+  publication does not prove a scheduled economic event occurred or supply
+  consensus. Legacy events without preserved headlines disclose that limitation.
+- `user_position_context`: only explicit instrument, direction, entry price and
+  update time. No input means `NO_EXPLICIT_USER_INPUT`, never implicit FLAT.
+
+The product A/B/C/D contract and root-task checkpoint are in
+`MOEX_BOT_CURRENT_EXECUTION_STATE_2026-08-31.md`. Core projection acceptance is
+bidirectional, including deliberate omission tests and source/generation refusal
+tests. Compact consumer values do not require opening referenced audit paths;
+strict replay continues to require original evidence files.
 
 `basis_carry` projects each admitted READY metric once, including when the
 component is PARTIAL. `values.metrics` contains `{snapshot_path, values}` entries;

@@ -53,7 +53,7 @@ def test_source_native_oi_field_is_preserved():
     from moex_data.rub_factual_release import describe
     value = snapshot()
     value['components']['synchronized_live_market_oi'] = {'data': {'instruments': {
-        'si_front': {'secid': 'SiU6', 'timestamp': NOW.isoformat(), 'price_oi_usable': True,
+        'si_front': {'secid': 'SiU6', 'timestamp': NOW.isoformat(), 'stale': False, 'price_oi_usable': True,
                      'last': 86748., 'oi': 123456}}}}
     fact = describe(value)['facts'][0]
     assert fact['values'] == {'last': 86748., 'oi': 123456}
@@ -88,11 +88,12 @@ def test_direct_describe_external_fact_agrees_with_evidence_matrix(tmp_path, def
     component = _external_cny(tmp_path)
     value['components']['external_cny'] = component
     value['components']['synchronized_live_market_oi'] = {'data': {'instruments': {
-        'si_front': {'price_oi_usable': True, 'last': 80000.0, 'oi': 123}}}}
+        'si_front': {'price_oi_usable': True, 'stale': False, 'timestamp': NOW.isoformat(), 'last': 80000.0, 'oi': 123}}}}
     data = component['data']
     path = Path(data['manifest_path'])
     if defect == 'expired':
         value['live_read_freshness'] = {'read_at_utc': (NOW + timedelta(seconds=1201)).isoformat()}
+        value['components']['synchronized_live_market_oi']['data']['instruments']['si_front']['timestamp'] = value['live_read_freshness']['read_at_utc']
     elif defect == 'raw_changed': path.with_name(data['raw_sha256'] + '.csv').write_bytes(b'changed')
     elif defect == 'manifest_changed': path.write_bytes(b'{}')
     elif defect == 'missing_evidence': path.unlink()

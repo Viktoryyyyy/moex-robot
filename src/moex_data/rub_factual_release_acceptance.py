@@ -50,7 +50,141 @@ def projection_completeness(snapshot, value, *, now):
     facts = {fact['factor']: fact for fact in value['facts']}
     rows = {row['block_id']: row for row in value['matrix']}
     _require(('cnyrub_tom' in facts) == expected_spot == rows['cnyrub_tom']['usable_for_full_forecast'], 'spot completeness')
-    if expected_spot: _require(facts['cnyrub_tom']['values'] == {'last': price}, 'spot values')
+    if expected_spot: _require(facts['cnyrub_tom']['values']['last'] == price, 'spot values')
+    fields = ('last', 'oi', 'open', 'high', 'low', 'close', 'volume', 'trades', 'units',
+        'price_unit', 'quote_unit', 'oi_unit', 'expiry_date', 'expiry_metadata', 'contract_size',
+        'price_scale', 'normalization', 'wap', 'wap_method')
+    for key, item in market.get('instruments', {}).items():
+        quote_allowed = item.get('quote_usable') is True and item.get('stale') is False
+        quote = value['market_usability'][key]['quote']
+        _require((quote is not None) == quote_allowed, 'independent quote completeness ' + key)
+        if quote_allowed: _require(quote['values'] == {field: item.get(field) for field in ('bid', 'ask', 'spread')}, 'quote values')
+        matching = []
+        basis_component = components.get('live_basis_carry', {})
+        if basis_component.get('status') in ('READY', 'PARTIAL') and item.get('stale') is False:
+            for pair in (basis_component.get('data') or {}).get('pairs', {}).values():
+                leg = pair.get('legs', {}).get(key, {})
+                if leg.get('status') == 'READY' and leg.get('raw_value') == item.get('last') and all(
+                    item.get(field) is not None and leg.get(field) == item[field] for field in ('secid', 'timestamp', 'received_at_utc', 'source_id')):
+                    matching.append({field: leg[field] for field in ('raw_unit', 'normalization_divisor', 'normalized_unit', 'expiry_date', 'expiry_metadata') if field in leg})
+        expected_metadata = matching[0] if matching and all(item == matching[0] for item in matching) else None
+        actual_metadata = value['market_usability'][key]['contract_metadata']
+        _require((actual_metadata or {}).get('values') == expected_metadata, 'contract metadata completeness ' + key)
+        usable = expected_spot if key == 'cnyrub_tom' else item.get('price_oi_usable') is True
+        _require((key in facts) == usable, 'market completeness ' + key)
+        if not usable: continue
+        admitted_fields = fields + (('bid', 'ask', 'spread') if item.get('quote_usable') is True else ())
+        expected_values = {name: item[name] for name in admitted_fields if name in item and not (key == 'cnyrub_tom' and name == 'oi')}
+        _require(facts[key]['values'] == expected_values, 'market values ' + key)
+    structure = components.get('live_market_structure', {})
+    levels = (structure.get('data') or {}).get('structural_levels', {})
+    try:
+        age = (now - datetime.fromisoformat(levels['data_as_of'])).total_seconds()
+        allowed = structure.get('status') == 'READY' and levels.get('status') == 'FRESH' and 0 <= age <= 1200
+    except (KeyError, ValueError, TypeError): allowed = False
+    _require((value['market_structure']['status'] == 'AVAILABLE') == allowed, 'structure completeness')
+    if allowed:
+        actual_levels = value['market_structure']['values']
+        for key in ('active_levels', 'level_interactions', 'price_context', 'methodology'):
+            _require(actual_levels.get(key) == levels.get(key), 'structure values ' + key)
+        _require('prior_completed_session' not in actual_levels.get('observed_extrema', {}), 'no unproven completed session')
+        expected_extrema = deepcopy(levels.get('observed_extrema', {}))
+        if 'prior_completed_session' in expected_extrema:
+            old = expected_extrema.pop('prior_completed_session')
+            expected_extrema['prior_observed_date'] = {key: item for key, item in old.items() if key != 'partial_session'}
+            expected_extrema['prior_observed_date'].update(session_completion_proven=False, session_completion_state='UNKNOWN')
+        _require(actual_levels.get('observed_extrema', {}) == expected_extrema, 'observed extrema completeness and values')
+    position = snapshot.get('user_position_context')
+    position = position if isinstance(position, dict) else {}
+    price = position.get('average_entry_price'); direction = position.get('direction')
+    try: dated = datetime.fromisoformat(position['user_input_updated_at']) <= now
+    except (KeyError, TypeError, ValueError): dated = False
+    valid_position = (position.get('status') == 'AVAILABLE' and position.get('explicit_user_input') is True
+        and position.get('instrument') == 'USDRUBF' and dated and (
+            direction == 'FLAT' and price is None or direction in ('LONG', 'SHORT')
+            and isinstance(price, (int, float)) and not isinstance(price, bool) and isfinite(price) and price > 0))
+    if valid_position:
+        expected_position = {key: position[key] for key in ('instrument', 'direction', 'average_entry_price', 'user_input_updated_at')}
+        expected_position.update(status='AVAILABLE', explicit_user_input=True)
+    else:
+        invalid = position.get('explicit_user_input') is True or position.get('availability') == 'INVALID_EXPLICIT_USER_INPUT'
+        expected_position = {'status': 'UNAVAILABLE', 'availability': 'INVALID_EXPLICIT_USER_INPUT' if invalid else 'NO_EXPLICIT_USER_INPUT',
+            'direction': None, 'average_entry_price': None, 'explicit_user_input': False}
+    _require(value.get('user_position_context') == expected_position, 'explicit position completeness and exclusions')
+    expected_blocks = {}
+    for name in ('stage9_daily', 'stage9_weekly'):
+        component = components.get(name, {})
+        if component.get('status') != 'READY': continue
+        for block in (component.get('data') or {}).get('server_core', {}).get('blocks', []):
+            try: causal = datetime.fromisoformat(block['selected_causal_ts_utc']) <= now
+            except (KeyError, ValueError, TypeError): causal = False
+            if block.get('status') == 'ready' and block.get('stage') == 7 and block.get('timeframe') in ('1H', '1D', '1W') and causal:
+                expected_blocks[(block.get('block_id'), block.get('selected_causal_ts_utc'))] = block
+    actual_blocks = {(entry['values'].get('block_id'), entry['values'].get('selected_causal_ts_utc')): entry['values'] for entry in value['timeframe_context']}
+    _require(actual_blocks == expected_blocks, 'timeframe completeness')
+    _require(value['futoi_context']['futoi_live_cr']['previous_observation'] is None
+        and value['futoi_context']['futoi_live_cr']['comparisons'] is None, 'CR no history grant')
+    si_component = components.get('futoi_live', {}); si = si_component.get('data') or {}
+    admission = si_component.get('status') == 'READY' and si.get('consumer_factual_use_allowed') is True and si.get('factual_authority') is True and si.get('governance', {}).get('factual_use_allowed') is True
+    previous = si.get('previous_completed_session') or {}
+    prior_available = view.get('temporal_applicability', {}).get('components', {}).get('futoi_live', {}).get('previous', {}).get('dated_observation_available') is True
+    expected_previous = previous.get('factual') if admission and prior_available and previous.get('consumer_factual_use_allowed') is not False else None
+    _require(value['futoi_context']['futoi_live']['previous_observation'] == expected_previous, 'Si previous completeness')
+    engine = si.get('delta_statistics') or {}; current = (si.get('current_intraday') or {}).get('factual') or {}
+    normalized = (engine.get('current') or {}).get('factual') or {}
+    # A separate comparison of source-native fields, not the producer projection helper.
+    same = bool(current) and all(normalized.get(field) == current.get(field) and current.get(field) is not None
+        for field in ('trade_date', 'snapshot_ts', 'source_publication_time', 'availability_ts_utc', 'ingest_ts_utc', 'total_open_interest'))
+    for side in ('fiz', 'yur'):
+        left = normalized.get(side) or {}; right = current.get(side) or {}
+        same = same and all(left.get(field) == right.get(field) and right.get(field) is not None for field in ('long', 'short', 'net', 'long_participants', 'short_participants'))
+        try: same = same and left.get('net_share_of_oi') == right['net'] / current['total_open_interest']
+        except (KeyError, TypeError, ZeroDivisionError): same = False
+    expected_comparisons = (admission and same and engine.get('instrument_id') == si.get('instrument_id') == 'si_futures_family'
+        and engine.get('current', {}).get('status') == 'AVAILABLE' and engine.get('consumer_factual_use_allowed') is not False
+        and engine.get('observed_date_witness', {}).get('status') == 'PASS'
+        and engine.get('observed_date_witness', {}).get('current_observed_trade_date') == current.get('trade_date'))
+    comparisons = value['futoi_context']['futoi_live']['comparisons']
+    _require((comparisons is not None) == expected_comparisons, 'Si comparisons completeness')
+    if expected_comparisons:
+        _require(set(comparisons.get('deltas', {})) == set(engine.get('deltas', {})), 'Si all delta horizons')
+        prior_engine = (engine.get('previous_observed_session') or {}).get('factual') or {}
+        prior_source = previous.get('factual') or {}
+        prior_match = bool(prior_source) and all(prior_engine.get(field) == prior_source.get(field) and prior_source.get(field) is not None
+            for field in ('trade_date', 'snapshot_ts', 'source_publication_time', 'availability_ts_utc', 'ingest_ts_utc', 'total_open_interest'))
+        for side in ('fiz', 'yur'):
+            left = prior_engine.get(side) or {}; right = prior_source.get(side) or {}
+            prior_match = prior_match and all(left.get(field) == right.get(field) and right.get(field) is not None
+                for field in ('long', 'short', 'net', 'long_participants', 'short_participants'))
+            try: prior_match = prior_match and left.get('net_share_of_oi') == right['net'] / prior_source['total_open_interest']
+            except (KeyError, TypeError, ZeroDivisionError): prior_match = False
+        for name, item in engine.get('deltas', {}).items():
+            expected_delta = deepcopy(item)
+            if name == 'delta_1d' and (expected_previous is None or not prior_match):
+                expected_delta.update(status='UNAVAILABLE', reason='previous_observation_not_admitted_or_baseline_mismatch')
+            if expected_delta.get('status') != 'AVAILABLE': expected_delta['values'] = None
+            _require(comparisons['deltas'][name] == expected_delta, 'Si admitted delta values and exclusions')
+        if engine.get('statistics', {}).get('status') == 'AVAILABLE':
+            _require(comparisons['statistics'].get('semantics') == engine['statistics'].get('semantics'), 'Si statistics semantics')
+            for name, variable in (engine['statistics'].get('variables') or {}).items():
+                for window, item in variable.get('windows', {}).items():
+                    if item.get('status') == 'AVAILABLE': _require(comparisons['statistics']['variables'][name]['windows'][window] == item, 'Si available statistics')
+                    else: _require(all(comparisons['statistics']['variables'][name]['windows'][window].get(field) is None
+                        for field in ('percentile', 'zscore', 'population_mean', 'population_std_ddof_0')), 'Si excluded statistics windows')
+        else: _require(comparisons.get('statistics', {}).get('variables') is None, 'Si excluded statistics')
+    _require(all(event['direction'] == 'UNKNOWN' and event['classification_status'] == 'NOT_ANALYZED'
+        for event in value['news_context']['events']), 'news no neutrality')
+    for event in value['news_context']['events']:
+        _require(any(all(event.get(k) == source.get(k) for k in ('event_id', 'source_reference', 'published_at', 'headline'))
+            for source in (components.get('official_news', {}).get('data') or {}).get('events', [])), 'news source values')
+    news = components.get('official_news', {}); expected_events = []
+    for event in (news.get('data') or {}).get('events', []):
+        try:
+            times = [datetime.fromisoformat(event[key]) for key in ('published_at', 'available_at', 'ingested_at')]
+            allowed = news.get('status') == 'READY' and times[0] <= times[1] <= times[2] <= now
+        except (KeyError, TypeError, ValueError): allowed = False
+        if allowed: expected_events.append(event.get('event_id'))
+    _require([event.get('event_id') for event in value['news_context']['events']] == expected_events, 'news completeness')
     basis = components.get('live_basis_carry', {})
     grouped = {}
     if basis.get('status') in {'READY', 'PARTIAL'}:

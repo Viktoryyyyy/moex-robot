@@ -1,5 +1,6 @@
 """Read-time admission shared by the matrix and lossless factual projection."""
 from datetime import datetime
+from copy import deepcopy
 from math import isfinite
 
 from moex_data.rub_snapshot_read_freshness import MAX_LIVE_AGE_SECONDS, MAX_FUTURE_SKEW_SECONDS
@@ -75,3 +76,187 @@ def basis_metrics(snapshot):
                 and all(isinstance(leg, str) and fresh(instruments.get(leg, {}), now) for leg in legs)):
             result.append((path, metric))
     return result
+
+
+MARKET_FIELDS = ('last', 'oi', 'open', 'high', 'low', 'close', 'volume', 'trades',
+    'units', 'price_unit', 'quote_unit', 'oi_unit', 'expiry_date', 'expiry_metadata',
+    'contract_size', 'price_scale', 'normalization', 'wap', 'wap_method')
+QUOTE_FIELDS = ('bid', 'ask', 'spread')
+IDENTITY_FIELDS = ('secid', 'logical_id', 'asset_type', 'timestamp', 'source_trade_date',
+    'timestamp_semantics', 'source_update_timestamp_utc', 'received_at_utc', 'source_id',
+    'last_trade_time_moscow', 'source_trading_status')
+LEG_METADATA_FIELDS = ('raw_unit', 'normalization_divisor', 'normalized_unit', 'expiry_date', 'expiry_metadata')
+
+
+def contract_metadata(snapshot, key, item):
+    component = _dict(_dict(snapshot.get('components')).get('live_basis_carry'))
+    if component.get('status') not in ('READY', 'PARTIAL') or not fresh(item, reference(snapshot)): return None
+    matches = []
+    for pair_id, pair in _dict(_dict(component.get('data')).get('pairs')).items():
+        leg = _dict(_dict(_dict(pair).get('legs')).get(key))
+        if (leg.get('status') != 'READY' or not all(item.get(field) is not None and leg.get(field) == item[field]
+                for field in ('secid', 'timestamp', 'received_at_utc', 'source_id')) or leg.get('raw_value') != item.get('last')):
+            continue
+        metadata = {field: deepcopy(leg[field]) for field in LEG_METADATA_FIELDS if field in leg}
+        matches.append((f'components.live_basis_carry.data.pairs.{pair_id}.legs.{key}', metadata))
+    if not matches or any(value != matches[0][1] for _, value in matches): return None
+    return {'snapshot_path': matches[0][0], 'values': matches[0][1]}
+
+
+def market_values(item, *, spot=False):
+    fields = MARKET_FIELDS + (QUOTE_FIELDS if item.get('quote_usable') is True else ())
+    return {key: deepcopy(item[key]) for key in fields if key in item and not (spot and key == 'oi')}
+
+
+def _causal(value, now, maximum_age=None):
+    try:
+        age = (now - datetime.fromisoformat(value)).total_seconds()
+        return age >= 0 and (maximum_age is None or age <= maximum_age)
+    except (TypeError, ValueError, AttributeError):
+        return False
+
+
+def _same_pair(pair, current):
+    """Compare the engine's normalized payload to the complete admitted pair."""
+    keys = ('trade_date', 'snapshot_ts', 'source_publication_time', 'availability_ts_utc', 'ingest_ts_utc', 'total_open_interest')
+    if not all(pair.get(key) is not None and pair.get(key) == current.get(key) for key in keys): return False
+    for side in ('fiz', 'yur'):
+        left = _dict(pair.get(side)); right = _dict(current.get(side))
+        fields = ('long', 'short', 'net', 'long_participants', 'short_participants')
+        if not all(left.get(key) is not None and left.get(key) == right.get(key) for key in fields): return False
+        try:
+            if left.get('net_share_of_oi') != right['net'] / current['total_open_interest']: return False
+        except (KeyError, TypeError, ZeroDivisionError): return False
+    return True
+
+
+def consumer_context(snapshot):
+    """Compact, explicitly scoped dated context; does not grant model authority."""
+    components = _dict(snapshot.get('components')); now = reference(snapshot)
+    market = market_data(snapshot); instruments = _dict(market.get('instruments'))
+    market_context = {}
+    for key in ('usdrubf', 'si_front', 'si_next', 'cnyrubf', 'cr_front', 'cr_next', 'cnyrub_tom'):
+        item = _dict(instruments.get(key))
+        usable = spot_usable(snapshot) if key == 'cnyrub_tom' else item.get('price_oi_usable') is True and fresh(item, now)
+        metadata = contract_metadata(snapshot, key, item)
+        metadata_values = _dict(_dict(metadata).get('values'))
+        quote_allowed = item.get('quote_usable') is True and fresh(item, now)
+        market_context[key] = {'price_oi_usable': usable,
+            'quote_usable': quote_allowed,
+            'quote': {'values': {field: item.get(field) for field in QUOTE_FIELDS},
+                'source_identity': {field: item[field] for field in IDENTITY_FIELDS if field in item}} if quote_allowed else None,
+            'contract_metadata': metadata,
+            'cross_market_comparison_usable': usable and _dict(market.get('synchronization')).get('synchronized') is True,
+            'quote_status': item.get('quote_status', 'UNAVAILABLE'),
+            'quote_reason': item.get('quote_reason'),
+            'missing_metadata': (['units'] if not any(item.get(field) for field in ('units', 'price_unit', 'quote_unit')) and not metadata_values.get('raw_unit') else [])
+                + (['expiry_date'] if key in ('si_front', 'si_next', 'cr_front', 'cr_next') and not (item.get('expiry_date') or metadata_values.get('expiry_date')) else []),
+            'missing_reason': None if usable else 'source_missing_stale_or_not_admitted'}
+
+    component = _dict(components.get('live_market_structure'))
+    levels = _dict(_dict(component.get('data')).get('structural_levels'))
+    allowed = (component.get('status') == 'READY' and levels.get('status') == 'FRESH'
+        and _causal(levels.get('data_as_of'), now, 1200))
+    structure = {'status': 'AVAILABLE' if allowed else 'UNAVAILABLE',
+        'reason': None if allowed else 'missing_stale_or_unaccepted_structure',
+        'session_completion_proven': False}
+    if allowed:
+        structure['values'] = deepcopy(levels)
+        extrema = structure['values'].get('observed_extrema', {})
+        if 'prior_completed_session' in extrema:
+            prior = extrema.pop('prior_completed_session')
+            prior.pop('partial_session', None)
+            prior.update(session_completion_proven=False, session_completion_state='UNKNOWN')
+            extrema['prior_observed_date'] = prior
+
+    timeframes = []
+    seen = set()
+    for name in ('stage9_daily', 'stage9_weekly'):
+        component = _dict(components.get(name)); data = _dict(component.get('data'))
+        if component.get('status') != 'READY': continue
+        for block in _dict(data.get('server_core')).get('blocks', []):
+            if not isinstance(block, dict): continue
+            if (block.get('status') != 'ready' or block.get('stage') != 7
+                    or block.get('timeframe') not in ('1H', '1D', '1W')
+                    or not _causal(block.get('selected_causal_ts_utc'), now)):
+                continue
+            identity = (block.get('block_id'), block.get('selected_causal_ts_utc'))
+            if identity in seen: continue
+            seen.add(identity)
+            timeframes.append({'snapshot_path': f'components.{name}.data.server_core.blocks',
+                'scope': 'accepted_dated_observation_not_session_completion', 'values': deepcopy(block)})
+
+    futoi = {}
+    temporal = _dict(_dict(snapshot.get('temporal_applicability')).get('components'))
+    for name in ('futoi_live', 'futoi_live_cr'):
+        component = _dict(components.get(name)); data = _dict(component.get('data'))
+        current = _dict(data.get('current_intraday'))
+        admitted = (component.get('status') == 'READY' and data.get('consumer_factual_use_allowed') is True
+            and data.get('factual_authority') is True)
+        context = {'scope': 'current_pair_only' if name.endswith('_cr') else 'si_admitted_dated_context',
+            'current_usable': admitted, 'previous_observation': None, 'comparisons': None,
+            'reason': None if admitted else 'latest_current_pair_not_admitted', 'session_completion_proven': False}
+        if admitted and name == 'futoi_live' and _dict(data.get('governance')).get('factual_use_allowed') is True:
+            previous = _dict(data.get('previous_completed_session'))
+            prior_allowed = (_dict(_dict(temporal.get(name)).get('previous')).get('dated_observation_available') is True
+                and previous.get('consumer_factual_use_allowed') is not False)
+            if prior_allowed:
+                context['previous_observation'] = deepcopy(previous.get('factual'))
+            delta = _dict(data.get('delta_statistics')); pair = _dict(delta.get('current'))
+            pair_fact = _dict(pair.get('factual')); current_fact = _dict(current.get('factual'))
+            match = delta.get('instrument_id') == data.get('instrument_id') == 'si_futures_family' and _same_pair(pair_fact, current_fact)
+            witness = _dict(delta.get('observed_date_witness'))
+            witness_match = (witness.get('status') == 'PASS' and witness.get('current_observed_trade_date') == current_fact.get('trade_date'))
+            if (pair.get('status') == 'AVAILABLE' and match and delta.get('consumer_factual_use_allowed') is not False and witness_match):
+                context['comparisons'] = {key: deepcopy(delta[key]) for key in ('deltas', 'statistics',
+                    'lag_targets', 'observed_date_witness', 'historical_context') if key in delta}
+                for delta_name, item in context['comparisons'].get('deltas', {}).items():
+                    if delta_name == 'delta_1d' and (not prior_allowed or not _same_pair(
+                            _dict(_dict(delta.get('previous_observed_session')).get('factual')), _dict(previous.get('factual')))):
+                        item.update(status='UNAVAILABLE', reason='previous_observation_not_admitted_or_baseline_mismatch')
+                    if item.get('status') != 'AVAILABLE': item['values'] = None
+                stats = context['comparisons'].get('statistics', {})
+                if stats.get('status') != 'AVAILABLE': stats['variables'] = None
+                for variable in (stats.get('variables') or {}).values():
+                    for window in variable.get('windows', {}).values():
+                        if window.get('status') != 'AVAILABLE':
+                            for field in ('percentile', 'zscore', 'population_mean', 'population_std_ddof_0'): window.pop(field, None)
+            context['comparison_limitation'] = None if context['comparisons'] else 'delta_current_identity_witness_or_admission_unavailable'
+        futoi[name] = context
+
+    component = _dict(components.get('official_news')); data = _dict(component.get('data'))
+    events = []; rejected = 0
+    for event in data.get('events', []):
+        if not isinstance(event, dict): rejected += 1; continue
+        stamps = [event.get(key) for key in ('published_at', 'available_at', 'ingested_at')]
+        if (component.get('status') != 'READY' or not all(_causal(stamp, now) for stamp in stamps)
+                or not all(datetime.fromisoformat(a) <= datetime.fromisoformat(b) for a, b in zip(stamps, stamps[1:]))):
+            rejected += 1; continue
+        item = {key: deepcopy(event[key]) for key in ('event_id', 'source_id', 'source_reference',
+            'source_tier', 'published_at', 'available_at', 'ingested_at', 'headline', 'event_type',
+            'entities', 'source_provenance', 'source_provenance_truncated') if key in event}
+        item.update(direction='UNKNOWN', classification_status='NOT_ANALYZED',
+            content_status='AVAILABLE' if item.get('headline') else 'HEADLINE_NOT_PRESERVED_BY_SOURCE',
+            event_semantics='source_publication_not_verified_economic_actual_or_consensus')
+        events.append(item)
+    news = {'events': events, 'summary': deepcopy(data.get('summary', {})),
+        'classification_status': 'NOT_ANALYZED', 'direction': 'UNKNOWN',
+        'selection_scope': 'existing_source_selected_events_no_relevance_acceptance_claim',
+        'excluded_event_count': rejected, 'source_as_of': component.get('data_as_of'),
+        'status': 'AVAILABLE' if events else 'UNAVAILABLE'}
+
+    position = _dict(snapshot.get('user_position_context'))
+    valid = (position.get('status') == 'AVAILABLE' and position.get('explicit_user_input') is True
+        and position.get('instrument') == 'USDRUBF' and _causal(position.get('user_input_updated_at'), now))
+    price = position.get('average_entry_price'); direction = position.get('direction')
+    valid = valid and ((direction == 'FLAT' and price is None) or (direction in ('LONG', 'SHORT')
+        and isinstance(price, (int, float)) and not isinstance(price, bool) and isfinite(price) and price > 0))
+    if valid:
+        position = {key: position[key] for key in ('instrument', 'direction', 'average_entry_price', 'user_input_updated_at')}
+        position.update(status='AVAILABLE', explicit_user_input=True)
+    else:
+        position = {'status': 'UNAVAILABLE', 'availability': 'INVALID_EXPLICIT_USER_INPUT' if position.get('explicit_user_input') is True
+            or position.get('availability') == 'INVALID_EXPLICIT_USER_INPUT' else 'NO_EXPLICIT_USER_INPUT',
+            'direction': None, 'average_entry_price': None, 'explicit_user_input': False}
+    return {'market_usability': market_context, 'market_structure': structure, 'timeframe_context': timeframes,
+        'futoi_context': futoi, 'news_context': news, 'user_position_context': position}

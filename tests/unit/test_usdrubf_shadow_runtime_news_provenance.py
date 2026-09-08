@@ -36,6 +36,7 @@ def _event() -> NewsEvent:
         ),
     )
     return NewsEvent(
+        headline="Original published headline",
         event_id="event_1",
         cluster_id="cluster_1",
         source_id="official_b",
@@ -69,6 +70,7 @@ def test_shadow_news_restore_preserves_durable_source_provenance() -> None:
     assert restored.source_provenance == original.source_provenance
     assert restored.source_provenance_total_count == 2
     assert restored.source_provenance_truncated is False
+    assert restored.headline == original.headline
 
 
 def test_shadow_news_restore_keeps_legacy_event_compatible() -> None:
@@ -76,12 +78,21 @@ def test_shadow_news_restore_keeps_legacy_event_compatible() -> None:
     payload.pop("source_provenance")
     payload.pop("source_provenance_total_count")
     payload.pop("source_provenance_truncated")
+    payload.pop("headline")
 
     restored = _news_event(payload, 0)
 
     assert restored.source_provenance == ()
     assert restored.source_provenance_total_count == 0
     assert restored.source_provenance_truncated is False
+    assert restored.headline == ""
+
+
+def test_shadow_news_restore_rejects_nontext_headline() -> None:
+    payload = asdict(_event())
+    payload['headline'] = 123
+    with pytest.raises(ShadowRuntimeError, match='headline must be a string'):
+        _news_event(payload, 0)
 
 
 def test_shadow_news_restore_rejects_partial_provenance_metadata() -> None:

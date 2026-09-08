@@ -33,7 +33,8 @@ def test_busy_feed_cannot_displace_other_sources_and_selection_replays(tmp_path)
     raw = Path(evidence['path']).read_bytes()
     assert sha256(raw).hexdigest() == evidence['sha256']
     assert len(json.loads(raw)['candidates']) == 102
-    assert b'headline' not in raw and b'body' not in raw
+    assert b'body' not in raw
+    assert all(item['headline'] == '' for item in json.loads(raw)['candidates'])
 
 
 def test_one_event_per_cluster_and_no_bad_quality():

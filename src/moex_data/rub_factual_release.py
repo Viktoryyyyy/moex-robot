@@ -6,7 +6,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
-from moex_data.rub_factual_projection import spot_usable, basis_metrics
+from moex_data.rub_factual_projection import spot_usable, basis_metrics, market_values, IDENTITY_FIELDS, consumer_context, fresh
 
 SCHEMA = 'rub_factual_release.v1'
 
@@ -31,13 +31,11 @@ def describe(snapshot):
             target_now = None
     except (ValueError, TypeError, KeyError):
         target_now = None
-    if target_now is not None and 'live_basis_carry' in snapshot['components']:
+    if target_now is not None:
         from moex_data.rub_snapshot_read_freshness import apply_read_freshness
-        try:
-            projected = apply_read_freshness(snapshot, now=target_now)
-            snapshot['components']['live_basis_carry'] = projected['components']['live_basis_carry']
-        except (ValueError, TypeError, KeyError, AttributeError):
-            snapshot['components']['live_basis_carry'] = {'status': 'UNAVAILABLE', 'data': {}}
+        # A failed read-view reconciliation cannot fall back to persisted flags:
+        # those flags may admit expired current pairs from the old generation.
+        snapshot = apply_read_freshness(snapshot, now=target_now)
     snapshot = reconcile_components(snapshot, now=target_now)
     if 'external_cny' in snapshot['components']:
         from moex_research.external_data.fred_cny_factual import reconcile as reconcile_cny
@@ -50,11 +48,11 @@ def describe(snapshot):
     facts = []
     market = (components.get('synchronized_live_market_oi', {}).get('data') or {}).get('instruments', {})
     for key, item in market.items():
-        if (spot_usable(snapshot) if key == 'cnyrub_tom' else item.get('price_oi_usable') is True):
+        if (spot_usable(snapshot) if key == 'cnyrub_tom' else item.get('price_oi_usable') is True and fresh(item, target_now)):
             facts.append({'factor': key, 'scope': 'current_source_row',
                 'snapshot_path': f'components.synchronized_live_market_oi.data.instruments.{key}',
-                'source_identity': {k: item.get(k) for k in ('secid', 'timestamp', 'source_trade_date')},
-                'values': {k: item[k] for k in (('last',) if key == 'cnyrub_tom' else ('last', 'oi')) if k in item}})
+                'source_identity': {k: item.get(k) for k in IDENTITY_FIELDS if k in item},
+                'values': market_values(item, spot=key == 'cnyrub_tom')})
     metrics = basis_metrics(snapshot)
     if metrics:
         facts.append({'factor': 'basis_carry', 'scope': 'individual_READY_metrics_only',
@@ -97,7 +95,7 @@ def describe(snapshot):
             'model_probability': None, 'forecast_generated': False}
     freshness = snapshot.get('live_read_freshness')
     return {'schema_version': SCHEMA, 'as_of_utc': freshness.get('read_at_utc') if isinstance(freshness, dict) else None,
-        'status': 'INCOMPLETE', 'facts': facts, 'horizons': horizons,
+        'status': 'INCOMPLETE', 'facts': facts, 'horizons': horizons, **consumer_context(snapshot),
         'macro_evidence_inventory': describe_macro(snapshot, now=target_now),
         'blocking_required_factors': matrix['blocking_required_blocks'],
         'matrix': matrix['rows'], 'session_completion_proven': False,
