@@ -35,3 +35,10 @@ to the `PUBLISHED_CALENDAR_ONLY` scope. All actual-session, completion, forecast
 historical, full-forecast and action authority stays false; actual_session_state is
 UNKNOWN. A published mapped trading day is not evidence that its sessions happened
 or completed. This collector does not call the current-day session-schedule endpoint.
+
+The legacy Stage10 and materializer prohibition on calendar-dependent observed
+trade-date selection remains in force. The architecture regression test permits
+only this exact authenticated route in this plan-only module, retaining all other
+legacy-token bans and the behavioral tests for history and observed dates. This
+exception follows a successful server capture with the configured trusted CA;
+it does not restore legacy calendar-based session-completion inference.

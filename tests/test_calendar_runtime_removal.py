@@ -44,6 +44,18 @@ def test_active_src_has_no_legacy_calendar_runtime_dependency() -> None:
     violations: list[str] = []
     for path in sorted(Path("src").rglob("*.py")):
         text = path.read_text(encoding="utf-8")
+        if path.as_posix() == 'src/moex_data/rub_futures_calendar.py':
+            # A separately verified authenticated published plan is permitted.
+            # Every other legacy token remains banned, including in this module;
+            # Stage10/materializer runtime date selection remains independent.
+            from moex_data import rub_futures_calendar as published
+            approved = 'https://apim.moex.com/iss/calendars/futures.json'
+            assert published.BASE_URL == approved
+            assert published.SCOPE == 'PUBLISHED_CALENDAR_ONLY'
+            assert {'session_completion_proven', 'forecast_trading_targets_accepted',
+                    'historical_pit_acceptance', 'action_authority'} <= set(published.DENIED)
+            assert text.count(approved) == 1
+            text = text.replace(approved, '')
         for token in forbidden:
             if token in text:
                 violations.append(path.as_posix() + ":" + token)
