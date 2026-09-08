@@ -57,3 +57,12 @@ def test_source_native_oi_field_is_preserved():
                      'last': 86748., 'oi': 123456}}}}
     fact = describe(value)['facts'][0]
     assert fact['values'] == {'last': 86748., 'oi': 123456}
+
+
+def test_missing_components_are_incomplete_without_breaking_legacy_read():
+    value = snapshot()
+    del value['components']
+    result = build(value, now=NOW, code_revision=COMMIT)
+    assert result['facts'] == []
+    assert result['status'] == 'INCOMPLETE'
+    assert 'components' not in value

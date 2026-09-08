@@ -16,6 +16,9 @@ def _encoded(value):
 
 def describe(snapshot):
     from moex_data.rub_production_source_matrix import build as matrix_build
+    snapshot = dict(snapshot)
+    if not isinstance(snapshot.get('components'), dict):
+        snapshot['components'] = {}
     matrix = matrix_build(snapshot)
     components = snapshot['components']
     facts = []
