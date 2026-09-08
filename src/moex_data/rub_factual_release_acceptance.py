@@ -17,6 +17,7 @@ REQUIRED_FACTORS = ('rosstat_monthly_cpi', 'cbr_liquidity_verified')
 AUTHORITY = ('session_completion_proven', 'historical_dataset_accepted',
              'model_validated', 'training_authorized', 'broker_execution')
 ADMISSION = {
+    'basis_carry': ('basis_carry', 'factual_context_usable'),
     'rosstat_monthly_cpi': ('rosstat_macro', 'monthly_cpi_factual_context_usable'),
     'cbr_liquidity_verified': ('cbr_rates', 'liquidity_factual_context_usable'),
     'rosstat_cpi': ('rosstat_macro', 'factual_context_usable'),
@@ -33,6 +34,46 @@ def _require(condition, message):
 
 def _factors(value):
     return {row['factor'] for row in value['facts']}
+
+
+def projection_completeness(snapshot, value, *, now):
+    """Independent reverse oracle over the read-time input, not exported fact counts."""
+    from math import isfinite
+    view = apply_read_freshness(snapshot, now=now)
+    components = view.get('components', {})
+    market = components.get('synchronized_live_market_oi', {}).get('data', {})
+    spot = market.get('instruments', {}).get('cnyrub_tom', {})
+    price = spot.get('last')
+    expected_spot = (market.get('quality', {}).get('spot_price_usable') is True
+        and spot.get('spot_price_usable') is not False and spot.get('stale') is False
+        and isinstance(price, (int, float)) and not isinstance(price, bool) and isfinite(price) and price > 0)
+    facts = {fact['factor']: fact for fact in value['facts']}
+    rows = {row['block_id']: row for row in value['matrix']}
+    _require(('cnyrub_tom' in facts) == expected_spot == rows['cnyrub_tom']['usable_for_full_forecast'], 'spot completeness')
+    if expected_spot: _require(facts['cnyrub_tom']['values'] == {'last': price}, 'spot values')
+    basis = components.get('live_basis_carry', {})
+    grouped = {}
+    if basis.get('status') in {'READY', 'PARTIAL'}:
+        for key, pair in (basis.get('data') or {}).get('pairs', {}).items():
+            for index, metric in enumerate(pair.get('metrics', [])):
+                if isinstance(metric, dict) and isinstance(metric.get('metric_id'), str) and metric['metric_id']:
+                    grouped.setdefault(metric['metric_id'], []).append((key, index, metric))
+    expected = {}
+    for identity, copies in grouped.items():
+        metric = copies[0][2]; number = metric.get('value')
+        if (all(copy[2] == metric for copy in copies) and metric.get('status') == 'READY'
+                and isinstance(number, (int, float)) and not isinstance(number, bool) and isfinite(number)):
+            expected[identity] = metric
+    _require(set(rows['basis_carry']['admitted_metric_ids']) == set(expected), 'basis matrix completeness')
+    _require(('basis_carry' in facts) == bool(expected), 'basis fact completeness')
+    actual = facts.get('basis_carry', {}).get('values', {}).get('metrics', [])
+    _require(len(actual) == len(expected), 'basis exactly once')
+    _require({entry['values']['metric_id'] for entry in actual} == set(expected), 'basis IDs')
+    for entry in actual:
+        metric = entry['values']; node = view
+        for part in entry['snapshot_path'].split('.'):
+            node = node[int(part)] if isinstance(node, list) else node[part]
+        _require(metric == node == expected[metric['metric_id']], 'basis lossless values and source path')
 
 
 def run(snapshot, *, now, code_revision, output, required_factors=REQUIRED_FACTORS):
@@ -108,6 +149,7 @@ def run(snapshot, *, now, code_revision, output, required_factors=REQUIRED_FACTO
                 _require(event['event_status'] == 'SCHEDULED'
                          and event['actual_event_time'] is None, 'planned event is not actual')
         check('all_facts_matrix_paths_and_scheduled_events', matrix)
+        check('spot_and_basis_projection_completeness', lambda: projection_completeness(snapshot, value, now=now))
 
         def uncertainty():
             rows = [row for row in value['macro_evidence_inventory']['facts']

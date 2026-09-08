@@ -6,6 +6,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
+from moex_data.rub_factual_projection import spot_usable, basis_metrics
 
 SCHEMA = 'rub_factual_release.v1'
 
@@ -30,6 +31,13 @@ def describe(snapshot):
             target_now = None
     except (ValueError, TypeError, KeyError):
         target_now = None
+    if target_now is not None and 'live_basis_carry' in snapshot['components']:
+        from moex_data.rub_snapshot_read_freshness import apply_read_freshness
+        try:
+            projected = apply_read_freshness(snapshot, now=target_now)
+            snapshot['components']['live_basis_carry'] = projected['components']['live_basis_carry']
+        except (ValueError, TypeError, KeyError, AttributeError):
+            snapshot['components']['live_basis_carry'] = {'status': 'UNAVAILABLE', 'data': {}}
     snapshot = reconcile_components(snapshot, now=target_now)
     if 'external_cny' in snapshot['components']:
         from moex_research.external_data.fred_cny_factual import reconcile as reconcile_cny
@@ -42,11 +50,16 @@ def describe(snapshot):
     facts = []
     market = (components.get('synchronized_live_market_oi', {}).get('data') or {}).get('instruments', {})
     for key, item in market.items():
-        if item.get('price_oi_usable') is True or (key == 'cnyrub_tom' and item.get('spot_price_usable') is True):
+        if (spot_usable(snapshot) if key == 'cnyrub_tom' else item.get('price_oi_usable') is True):
             facts.append({'factor': key, 'scope': 'current_source_row',
                 'snapshot_path': f'components.synchronized_live_market_oi.data.instruments.{key}',
                 'source_identity': {k: item.get(k) for k in ('secid', 'timestamp', 'source_trade_date')},
-                'values': {k: item[k] for k in ('last', 'oi') if k in item}})
+                'values': {k: item[k] for k in (('last',) if key == 'cnyrub_tom' else ('last', 'oi')) if k in item}})
+    metrics = basis_metrics(snapshot)
+    if metrics:
+        facts.append({'factor': 'basis_carry', 'scope': 'individual_READY_metrics_only',
+            'snapshot_path': 'components.live_basis_carry.data',
+            'values': {'metrics': [{'snapshot_path': path, 'values': deepcopy(metric)} for path, metric in metrics]}})
     for key in ('oil', 'external_cny', 'rosstat_cpi', 'cbr_rates_verified', 'rosstat_monthly_cpi', 'cbr_liquidity_verified', 'futoi_live', 'futoi_live_cr'):
         component = components.get(key, {})
         data = component.get('data') or {}
