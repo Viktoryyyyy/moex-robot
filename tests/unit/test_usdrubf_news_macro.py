@@ -77,6 +77,7 @@ def test_exact_duplicates_are_removed_before_classifier() -> None:
     assert len(calls) == 1
     assert len(result.events) == 1
     assert result.events[0].source_id == "cbr"
+    assert result.events[0].headline == first.headline
 
 
 def test_semantically_similar_headlines_cluster_before_classifier() -> None:

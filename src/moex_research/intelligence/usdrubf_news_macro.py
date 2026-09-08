@@ -200,6 +200,7 @@ class NewsEvent:
     source_provenance: tuple[NewsSourceProvenance, ...] = ()
     source_provenance_total_count: int = 0
     source_provenance_truncated: bool = False
+    headline: str = ""
 
     def __post_init__(self) -> None:
         if self.quality_status not in _ALLOWED_NEWS_QUALITY:
@@ -507,6 +508,7 @@ def process_news_batch(
                 horizon=bounded["horizon"],
                 confidence=bounded["confidence"],
                 mechanism=bounded["mechanism"],
+                headline=representative.headline,
                 source_provenance=source_provenance,
                 source_provenance_total_count=source_provenance_total_count,
                 source_provenance_truncated=source_provenance_truncated,
