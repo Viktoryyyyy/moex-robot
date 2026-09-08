@@ -137,3 +137,13 @@ def test_canonical_default_producer_calls_loader(monkeypatch, tmp_path):
     from moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as runner
     monkeypatch.setattr(source, 'load', lambda **kwargs: {'received_at': NOW.isoformat()})
     assert runner.default_producers()['rosstat_cpi'](NOW).data_as_of == NOW.isoformat()
+
+
+@pytest.mark.parametrize('freshness', [None, 'invalid', 7, [], True, {}, {'read_at_utc': ''}, {'read_at_utc': None}])
+def test_malformed_freshness_blocks_rosstat_without_crashing_matrix(tmp_path, freshness):
+    from moex_data.rub_production_source_matrix import build
+    snapshot = {'identity': {'generated_at_utc': NOW.isoformat()},
+                'live_read_freshness': freshness, 'components': {'rosstat_cpi': component(tmp_path)}}
+    result = build(snapshot)
+    row = next(r for r in result['rows'] if r['block_id'] == 'rosstat_macro')
+    assert row['factual_context_usable'] is False

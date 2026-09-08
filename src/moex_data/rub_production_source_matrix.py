@@ -47,7 +47,13 @@ def build(snapshot):
     from moex_research.external_data import rosstat_cpi_factual as rosstat
     rosstat_component = components.get('rosstat_cpi', {})
     try:
-        reference = snapshot.get('live_read_freshness', {}).get('read_at_utc') or snapshot['identity']['generated_at_utc']
+        if 'live_read_freshness' in snapshot:
+            rosstat_freshness = snapshot['live_read_freshness']
+            if not isinstance(rosstat_freshness, dict):
+                raise ValueError('invalid freshness block')
+            reference = rosstat_freshness['read_at_utc']
+        else:
+            reference = snapshot['identity']['generated_at_utc']
         view = rosstat.reconcile(rosstat_component, now=datetime.fromisoformat(reference))
         rosstat_usable = view.get('status') == 'READY' and (view.get('data') or {}).get('consumer_factual_use_allowed') is True
     except (ValueError, TypeError, KeyError):
