@@ -59,6 +59,21 @@ def build(snapshot):
         admitted_metric_ids=admitted_metrics if basis_factual else [])
     macro=components.get('cbr_macro',{}).get('data',{}).get('state',{})
     add('cbr_rates','required',bool(macro.get('observations')),False,'key_rate_and_ruonia_present_but_full_macro_acceptance_pending','components.cbr_macro')
+    from moex_research.external_data import cbr_rates_factual as cbr_rates
+    verified_rates = components.get('cbr_rates_verified', {})
+    try:
+        if 'live_read_freshness' in snapshot:
+            rates_freshness = snapshot['live_read_freshness']
+            if not isinstance(rates_freshness, dict): raise ValueError('invalid freshness block')
+            reference = rates_freshness['read_at_utc']
+        else:
+            reference = snapshot['identity']['generated_at_utc']
+        rates_view = cbr_rates.reconcile(verified_rates, now=datetime.fromisoformat(reference))
+        rates_usable = rates_view.get('status') == 'READY' and (rates_view.get('data') or {}).get('consumer_factual_use_allowed') is True
+    except (ValueError, TypeError, KeyError):
+        rates_usable = False
+    rows[-1].update(factual_context_usable=rates_usable, verified_evidence_path='components.cbr_rates_verified',
+        reason='verified_rates_only_forecast_alignment_pending' if rates_usable else 'verified_rates_unavailable_full_macro_pending')
     for block in ('minfin_fx_operations','event_calendar'):
         add(block,'required',False,False,'accepted_block_not_present','components.stage9_daily.data.external_context_required')
     from moex_research.external_data import rosstat_cpi_factual as rosstat
