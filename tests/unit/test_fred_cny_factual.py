@@ -85,3 +85,36 @@ def test_failed_producer_revokes_retained_factual_flags(tmp_path):
     result = runner._component_payload('external_cny', fail, now=NOW, previous=prior)
     assert result['status'] == 'UNAVAILABLE'
     assert result['data']['consumer_factual_use_allowed'] is False
+
+
+@pytest.mark.parametrize('malformed', [None, [], 'bad', 7, True, {},
+    {'status': 'READY', 'data': None}, {'status': 'READY', 'data': []},
+    {'status': 'READY', 'data': 'bad'}, {'status': 'READY', 'data': 7}])
+def test_malformed_components_fail_closed_at_reconcile_and_readtime(malformed):
+    before = deepcopy(malformed)
+    view = fred.reconcile(malformed, now=NOW)
+    assert view['status'] == 'UNAVAILABLE'
+    for flag in ('factual_authority', 'consumer_factual_use_allowed', 'intraday_use_allowed',
+                 'cnh_quote', 'historical_pit_acceptance', 'action_authority'):
+        assert view['data'][flag] is False
+    assert malformed == before
+    snapshot = {'components': {'external_cny': malformed}}
+    read = apply_read_freshness(snapshot, now=NOW)
+    assert read['components']['external_cny']['status'] == 'UNAVAILABLE'
+    assert snapshot['components']['external_cny'] == before
+
+
+@pytest.mark.parametrize('manifest_value', [None, [], 'bad', 7])
+def test_valid_hash_does_not_make_nonobject_manifest_acceptable(tmp_path, manifest_value):
+    from hashlib import sha256
+    import json
+    data = loaded(tmp_path)
+    raw = json.dumps(manifest_value).encode()
+    digest = sha256(raw).hexdigest()
+    path = Path(data['manifest_path']).with_name(digest + '.json')
+    path.write_bytes(raw)
+    data.update(manifest_path=str(path), manifest_sha256=digest)
+    view = fred.reconcile({'status': 'READY', 'data': data}, now=NOW)
+    assert view['status'] == 'UNAVAILABLE'
+    assert view['data']['consumer_factual_use_allowed'] is False
+    assert view['data']['read_freshness_reason'] == 'manifest object required'

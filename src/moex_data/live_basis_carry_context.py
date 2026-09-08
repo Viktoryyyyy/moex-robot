@@ -69,7 +69,8 @@ def _aware_utc(value: object, field: str) -> datetime:
 
 
 def _iso(value: datetime) -> str:
-    return value.astimezone(timezone.utc).replace(microsecond=0).isoformat()
+    # Pairwise synchrony must not round a just-over-threshold difference down.
+    return value.astimezone(timezone.utc).isoformat()
 
 
 def _finite_number(value: object, *, positive: bool) -> float | None:

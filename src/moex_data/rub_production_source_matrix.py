@@ -121,7 +121,9 @@ def build(snapshot):
     add('brent','required',collected,usable,'accepted_latest_published_close_not_live' if usable else reason,'components.oil')
     rows[-1].update(factual_context_usable=bool(usable),price_context_scope='latest_published_history_only',intraday_fresh=False)
     external = components.get('external_cny', {})
-    external_data = external.get('data') or {}
+    external = external if isinstance(external, dict) else {}
+    external_data = external.get('data')
+    external_data = external_data if isinstance(external_data, dict) else {}
     from moex_research.external_data import fred_cny_factual as fred_cny
     try:
         reference = freshness['read_at_utc'] if freshness_present else snapshot['identity']['generated_at_utc']

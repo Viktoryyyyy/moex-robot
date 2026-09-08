@@ -94,10 +94,10 @@ def load(*, root, now_fn=lambda: datetime.now(timezone.utc), opener=urlopen):
 
 
 def reconcile(component, *, now):
-    result = deepcopy(component)
+    result = deepcopy(component) if isinstance(component, dict) else {}
     data = result.get('data')
     if not isinstance(data, dict):
-        return result
+        data = result['data'] = {}
     try:
         now = _utc(now)
         if result.get('status') != 'READY' or result.get('refresh_error') or data.get('consumer_factual_use_allowed') is not True or data.get('factual_authority') is not True:
@@ -118,6 +118,8 @@ def reconcile(component, *, now):
         if len(encoded) > MAX_BYTES or sha256(encoded).hexdigest() != digest:
             raise ValueError('manifest hash mismatch')
         evidence = json.loads(encoded)
+        if not isinstance(evidence, dict):
+            raise ValueError('manifest object required')
         if any(data.get(key) != value for key, value in evidence.items()):
             raise ValueError('fact differs from received evidence')
         raw_hash = evidence['raw_sha256']
@@ -144,5 +146,5 @@ def reconcile(component, *, now):
 
 def apply(snapshot, *, now):
     components = snapshot.get('components', {})
-    if isinstance(components.get('external_cny'), dict):
+    if isinstance(components, dict) and 'external_cny' in components:
         components['external_cny'] = reconcile(components['external_cny'], now=now)

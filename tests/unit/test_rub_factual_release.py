@@ -66,3 +66,65 @@ def test_missing_components_are_incomplete_without_breaking_legacy_read():
     assert result['facts'] == []
     assert result['status'] == 'INCOMPLETE'
     assert 'components' not in value
+
+
+def _external_cny(tmp_path):
+    from moex_research.external_data import fred_cny_factual as fred
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def geturl(self): return fred.URL
+        def read(self, limit): return b'observation_date,DEXCHUS\n2026-08-28,6.7260\n'
+    return {'status': 'READY', 'data': fred.load(root=tmp_path, now_fn=lambda: NOW,
+        opener=lambda *args, **kwargs: Response())}
+
+
+@pytest.mark.parametrize('defect', ['none', 'expired', 'raw_changed', 'manifest_changed',
+    'missing_evidence', 'changed_value', 'retained', 'refresh_failed'])
+def test_direct_describe_external_fact_agrees_with_evidence_matrix(tmp_path, defect):
+    from pathlib import Path
+    from moex_data.rub_factual_release import describe
+    value = snapshot()
+    component = _external_cny(tmp_path)
+    value['components']['external_cny'] = component
+    value['components']['synchronized_live_market_oi'] = {'data': {'instruments': {
+        'si_front': {'price_oi_usable': True, 'last': 80000.0, 'oi': 123}}}}
+    data = component['data']
+    path = Path(data['manifest_path'])
+    if defect == 'expired':
+        value['live_read_freshness'] = {'read_at_utc': (NOW + timedelta(seconds=1201)).isoformat()}
+    elif defect == 'raw_changed': path.with_name(data['raw_sha256'] + '.csv').write_bytes(b'changed')
+    elif defect == 'manifest_changed': path.write_bytes(b'{}')
+    elif defect == 'missing_evidence': path.unlink()
+    elif defect == 'changed_value': data['value'] = 99.0
+    elif defect == 'retained': component['status'] = 'RETAINED_PREVIOUS'
+    elif defect == 'refresh_failed': component['refresh_error'] = 'failed'
+    before = deepcopy(value)
+    release = describe(value)
+    row = next(row for row in release['matrix'] if row['block_id'] == 'external_cny')
+    facts = [fact for fact in release['facts'] if fact['factor'] == 'external_cny']
+    assert row['factual_context_usable'] is (defect == 'none')
+    assert bool(facts) is row['factual_context_usable']
+    assert row['usable_for_full_forecast'] is False
+    if facts:
+        assert facts[0]['values']['units'] == 'CNY_per_USD'
+        assert facts[0]['values']['value'] == 6.726
+    assert any(fact['factor'] == 'si_front' for fact in release['facts'])
+    assert value == before
+
+
+@pytest.mark.parametrize('malformed', [None, [], 'bad', 7, True,
+    {'status': 'READY', 'data': []}, {'status': 'READY', 'data': 'bad'},
+    {'status': 'READY', 'data': True}, {'status': 'READY', 'data': None}])
+def test_malformed_external_shapes_do_not_break_release_or_matrix(malformed):
+    from moex_data.rub_factual_release import describe
+    from moex_data.rub_production_source_matrix import build as matrix_build
+    value = snapshot()
+    value['components']['external_cny'] = malformed
+    before = deepcopy(value)
+    row = next(row for row in matrix_build(value)['rows'] if row['block_id'] == 'external_cny')
+    assert row['factual_context_usable'] is False
+    for result in (describe(value), build(value, now=NOW, code_revision=COMMIT)):
+        assert not any(fact['factor'] == 'external_cny' for fact in result['facts'])
+        assert 'external_cny' in result['blocking_required_factors']
+    assert value == before
