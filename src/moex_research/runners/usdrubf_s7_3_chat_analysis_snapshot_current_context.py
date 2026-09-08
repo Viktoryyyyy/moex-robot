@@ -232,6 +232,7 @@ def refresh_snapshot(
     with base._single_refresh_lock(state_dir):
         previous = base._load_previous(path)
         now = base._aware(now_fn(), "clock")
+        producers = base.bind_futures_calendar_clock(current.current_producers(), started=now, now_fn=now_fn)
         through_date = now.astimezone(base.MOSCOW).date().isoformat()
         run_id = "s7_3_futoi_context_" + now.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         refresh_bundle = context.run_refresh_all(
@@ -247,7 +248,7 @@ def refresh_snapshot(
         snapshot = futoi.build_snapshot(
             now=now,
             previous=previous,
-            producers=current.current_producers(),
+            producers=producers,
             data_root=root,
         )
         _attach_futoi_context(snapshot, refresh_bundle, delta_bundle)

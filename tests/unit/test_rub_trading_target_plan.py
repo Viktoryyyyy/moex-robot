@@ -85,8 +85,8 @@ def test_real_manifest_pipeline_retention_and_factual_release(tmp_path, monkeypa
     data = target.calendar.load(root=tmp_path, env={}, now_fn=lambda: now,
         fetch=lambda url, env: raw)
     monkeypatch.setenv('MOEX_DATA_ROOT', str(tmp_path))
-    monkeypatch.setattr(target.calendar, 'load', lambda **kwargs: data)
-    assert runner.default_producers()['futures_calendar'](now).data == data
+    replay = runner.CalendarClockContext(mode='REPLAY', archived_component={'status': 'READY', 'data': data})
+    assert replay.produce(now).data['manifest_sha256'] == data['manifest_sha256']
     snapshot = {'identity': {'generated_at_utc': now.isoformat()},
         'components': {'futures_calendar': {'status': 'READY', 'data': data}}}
     before = deepcopy(snapshot)

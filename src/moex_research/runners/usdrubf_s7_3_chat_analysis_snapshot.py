@@ -64,6 +64,56 @@ class ProducedComponent:
 ComponentProducer = Callable[[datetime], ProducedComponent]
 
 
+def _live_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+@dataclass(frozen=True)
+class CalendarClockContext:
+    """Explicit live acquisition, simulated transport, or immutable replay."""
+    mode: str = 'LIVE'
+    now_fn: Callable[[], datetime] = _live_now
+    fetch: Callable | None = None
+    archived_component: Mapping[str, object] | None = None
+
+    def __post_init__(self):
+        if self.mode not in {'LIVE', 'TEST', 'REPLAY'} or not callable(self.now_fn):
+            raise ChatAnalysisSnapshotError('invalid calendar clock context')
+        if self.mode == 'TEST' and (not callable(self.fetch) or self.archived_component is not None):
+            raise ChatAnalysisSnapshotError('simulated calendar clock requires explicit test transport')
+        if self.mode == 'LIVE' and (self.fetch is not None or self.archived_component is not None):
+            raise ChatAnalysisSnapshotError('live calendar context cannot carry test or replay evidence')
+        if self.mode == 'REPLAY' and (self.fetch is not None or not isinstance(self.archived_component, Mapping)):
+            raise ChatAnalysisSnapshotError('calendar replay requires archived component without transport')
+
+    def read_time(self) -> datetime:
+        value = _aware(self.now_fn(), 'calendar clock')
+        if self.mode == 'LIVE' and abs((value - _live_now()).total_seconds()) > 5:
+            raise ChatAnalysisSnapshotError('non-live calendar clock requires TEST transport or REPLAY')
+        return value
+
+    def produce(self, now: datetime) -> ProducedComponent:
+        if self.mode == 'REPLAY':
+            view = futures_calendar.reconcile(dict(self.archived_component), now=now)
+            if view.get('status') != 'READY' or (view.get('data') or {}).get('calendar_plan_usable') is not True:
+                raise ChatAnalysisSnapshotError('archived calendar evidence unavailable at replay time')
+            data = view['data']
+        else:
+            data = futures_calendar.load(root=_data_root(), now_fn=self.read_time, fetch=self.fetch)
+        return ProducedComponent(data=data, data_as_of=data['received_at'])
+
+
+def bind_futures_calendar_clock(producers, *, started, now_fn):
+    """Bind calendar at refresh entry, before overlay work or parallel prefetch."""
+    selected = dict(default_producers() if producers is None else producers)
+    if selected.get('futures_calendar') is _futures_calendar_component:
+        anchor = _aware(started, 'calendar refresh start')
+        if abs((anchor - _live_now()).total_seconds()) > 5:
+            raise ChatAnalysisSnapshotError('non-live calendar clock requires TEST transport or REPLAY')
+        selected['futures_calendar'] = CalendarClockContext(now_fn=now_fn).produce
+    return selected
+
+
 def _aware(value: datetime | str, field: str) -> datetime:
     if isinstance(value, str):
         try:
@@ -381,8 +431,9 @@ def _cbr_meeting_calendar_component(now: datetime) -> ProducedComponent:
 
 
 def _futures_calendar_component(now: datetime) -> ProducedComponent:
-    data = futures_calendar.load(root=_data_root())
-    return ProducedComponent(data=data, data_as_of=data['received_at'])
+    if abs((_aware(now, 'calendar anchor') - _live_now()).total_seconds()) > 5:
+        raise ChatAnalysisSnapshotError('non-live calendar anchor requires explicit clock context')
+    return CalendarClockContext().produce(now)
 
 
 def _cbr_rates_verified_component(now: datetime) -> ProducedComponent:
@@ -505,9 +556,17 @@ def build_snapshot(
     now: datetime,
     previous: Mapping[str, object] | None = None,
     producers: Mapping[str, ComponentProducer] | None = None,
+    calendar_context: CalendarClockContext | None = None,
 ) -> dict[str, object]:
     now_utc = _aware(now, "now")
     selected_producers = dict(default_producers() if producers is None else producers)
+    if selected_producers.get('futures_calendar') is _futures_calendar_component:
+        if calendar_context is None or calendar_context.mode == 'LIVE':
+            if abs((now_utc - _live_now()).total_seconds()) > 5:
+                raise ChatAnalysisSnapshotError('non-live snapshot clock requires explicit calendar context')
+        if calendar_context is None:
+            calendar_context = CalendarClockContext()
+        selected_producers['futures_calendar'] = calendar_context.produce
     required = {
         "stage9_daily",
         "stage9_weekly",
@@ -674,9 +733,19 @@ def finalize_snapshot_timing(snapshot: dict[str, object], *, started: datetime, 
 
 def refresh_snapshot(
     *,
-    now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    now_fn: Callable[[], datetime] | None = None,
     producers: Mapping[str, ComponentProducer] | None = None,
+    calendar_context: CalendarClockContext | None = None,
 ) -> tuple[dict[str, object], Path]:
+    selected_producers = dict(default_producers() if producers is None else producers)
+    clock = now_fn or _live_now
+    uses_default_calendar = selected_producers.get('futures_calendar') is _futures_calendar_component
+    if uses_default_calendar:
+        if calendar_context is None:
+            calendar_context = CalendarClockContext(now_fn=clock)
+        elif now_fn is not None and now_fn is not calendar_context.now_fn:
+            raise ChatAnalysisSnapshotError('refresh and calendar must share one clock')
+        clock = calendar_context.read_time
     load_dotenv(PROJECT_ENV_PATH, override=False)
     install_timestamp_policy()
     root = _data_root()
@@ -684,9 +753,10 @@ def refresh_snapshot(
     path = state_dir / CURRENT_FILENAME
     with _single_refresh_lock(state_dir):
         previous = _load_previous(path)
-        now = _aware(now_fn(), "clock")
-        snapshot = build_snapshot(now=now, previous=previous, producers=producers)
-        finalize_snapshot_timing(snapshot, started=now, completed=now_fn())
+        now = _aware(clock(), "clock")
+        snapshot = build_snapshot(now=now, previous=previous, producers=selected_producers,
+                                  calendar_context=calendar_context)
+        finalize_snapshot_timing(snapshot, started=now, completed=clock())
         _atomic_write(path, snapshot)
     return snapshot, path
 

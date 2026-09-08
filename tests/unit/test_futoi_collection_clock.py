@@ -17,6 +17,8 @@ def test_futoi_collection_receipt_uses_advancing_clock(monkeypatch, tmp_path, ru
     monkeypatch.setattr(base, 'snapshot_state_dir', lambda root: tmp_path)
     monkeypatch.setattr(base, '_single_refresh_lock', lambda state: nullcontext())
     monkeypatch.setattr(base, '_load_previous', lambda path: None)
+    # This fixture stops inside FUTOI collection, before unrelated producers.
+    monkeypatch.setattr(context.current, 'current_producers', lambda: {})
     observed = []
 
     class StopAfterCollection(Exception):

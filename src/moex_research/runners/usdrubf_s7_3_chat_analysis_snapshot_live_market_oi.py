@@ -278,6 +278,8 @@ def refresh_snapshot(
     with base._single_refresh_lock(state_dir):
         previous = base._load_previous(path)
         now = base._aware(now_fn(), "clock")
+        calendar_bound_producers = base.bind_futures_calendar_clock(
+            current_context.current.current_producers(), started=now, now_fn=now_fn)
         through_date = now.astimezone(base.MOSCOW).date().isoformat()
         run_id = "s7_3_futoi_context_live_market_oi_" + now.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         refresh_bundle = current_context.context.run_refresh_all(
@@ -291,7 +293,7 @@ def refresh_snapshot(
             as_of=now,
         )
         producers = parallel_prefetch.prefetch_producers(
-            current_context.current.current_producers(),
+            calendar_bound_producers,
             now=now,
         )
         snapshot = futoi.build_snapshot(
