@@ -277,3 +277,35 @@ def test_malformed_basis_cannot_restore_expired_futoi_admission(entrypoint):
         if entrypoint == 'describe': release.describe(original)
         else: release.build(original, now=later, code_revision=COMMIT)
     assert original == before
+
+
+@pytest.mark.parametrize('corruption', ['extrema_empty', 'extrema_high', 'extrema_date', 'extrema_completion', 'position_absent', 'position_unavailable', 'position_price', 'position_direction', 'position_time', 'position_extra'])
+def test_reverse_oracle_rejects_extrema_and_position_loss_or_corruption(corruption):
+    original = core_snapshot(); value = release.build(original, now=NOW, code_revision=COMMIT)
+    extrema = value['market_structure']['values']['observed_extrema']
+    position = value['user_position_context']
+    if corruption == 'extrema_empty': extrema.clear()
+    elif corruption == 'extrema_high': extrema['prior_observed_date']['high'] = 999
+    elif corruption == 'extrema_date': extrema['prior_observed_date']['trade_date'] = '2026-09-01'
+    elif corruption == 'extrema_completion': extrema['prior_observed_date']['session_completion_proven'] = True
+    elif corruption == 'position_absent': value.pop('user_position_context')
+    elif corruption == 'position_unavailable': value['user_position_context'] = {'status': 'UNAVAILABLE', 'availability': 'NO_EXPLICIT_USER_INPUT'}
+    elif corruption == 'position_price': position['average_entry_price'] = 999
+    elif corruption == 'position_direction': position['direction'] = 'SHORT'
+    elif corruption == 'position_time': position['user_input_updated_at'] = '2026-09-01T12:00:00+00:00'
+    else: position['capital'] = 100000
+    with pytest.raises(AssertionError): projection_completeness(original, value, now=NOW)
+
+
+@pytest.mark.parametrize('state', ['absent', 'invalid', 'future', 'flat', 'short'])
+def test_position_oracle_proves_missing_invalid_and_explicit_states(state):
+    original = core_snapshot(); position = original['user_position_context']
+    if state == 'absent': original.pop('user_position_context')
+    elif state == 'invalid': position['average_entry_price'] = True
+    elif state == 'future': position['user_input_updated_at'] = (NOW + timedelta(seconds=1)).isoformat()
+    elif state == 'flat': position.update(direction='FLAT', average_entry_price=None)
+    else: position['direction'] = 'SHORT'
+    value = release.build(original, now=NOW, code_revision=COMMIT)
+    projection_completeness(original, value, now=NOW)
+    value['user_position_context']['availability'] = 'FABRICATED'
+    with pytest.raises(AssertionError): projection_completeness(original, value, now=NOW)

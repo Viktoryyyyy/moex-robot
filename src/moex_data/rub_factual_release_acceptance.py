@@ -88,6 +88,29 @@ def projection_completeness(snapshot, value, *, now):
         for key in ('active_levels', 'level_interactions', 'price_context', 'methodology'):
             _require(actual_levels.get(key) == levels.get(key), 'structure values ' + key)
         _require('prior_completed_session' not in actual_levels.get('observed_extrema', {}), 'no unproven completed session')
+        expected_extrema = deepcopy(levels.get('observed_extrema', {}))
+        if 'prior_completed_session' in expected_extrema:
+            old = expected_extrema.pop('prior_completed_session')
+            expected_extrema['prior_observed_date'] = {key: item for key, item in old.items() if key != 'partial_session'}
+            expected_extrema['prior_observed_date'].update(session_completion_proven=False, session_completion_state='UNKNOWN')
+        _require(actual_levels.get('observed_extrema', {}) == expected_extrema, 'observed extrema completeness and values')
+    position = snapshot.get('user_position_context')
+    position = position if isinstance(position, dict) else {}
+    price = position.get('average_entry_price'); direction = position.get('direction')
+    try: dated = datetime.fromisoformat(position['user_input_updated_at']) <= now
+    except (KeyError, TypeError, ValueError): dated = False
+    valid_position = (position.get('status') == 'AVAILABLE' and position.get('explicit_user_input') is True
+        and position.get('instrument') == 'USDRUBF' and dated and (
+            direction == 'FLAT' and price is None or direction in ('LONG', 'SHORT')
+            and isinstance(price, (int, float)) and not isinstance(price, bool) and isfinite(price) and price > 0))
+    if valid_position:
+        expected_position = {key: position[key] for key in ('instrument', 'direction', 'average_entry_price', 'user_input_updated_at')}
+        expected_position.update(status='AVAILABLE', explicit_user_input=True)
+    else:
+        invalid = position.get('explicit_user_input') is True or position.get('availability') == 'INVALID_EXPLICIT_USER_INPUT'
+        expected_position = {'status': 'UNAVAILABLE', 'availability': 'INVALID_EXPLICIT_USER_INPUT' if invalid else 'NO_EXPLICIT_USER_INPUT',
+            'direction': None, 'average_entry_price': None, 'explicit_user_input': False}
+    _require(value.get('user_position_context') == expected_position, 'explicit position completeness and exclusions')
     expected_blocks = {}
     for name in ('stage9_daily', 'stage9_weekly'):
         component = components.get(name, {})

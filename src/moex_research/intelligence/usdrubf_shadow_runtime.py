@@ -262,7 +262,11 @@ def _news_event(raw: object, index: int) -> NewsEvent:
         source_provenance_total_count = 0
         source_provenance_truncated = False
 
+    headline = item.get("headline", "")
+    if not isinstance(headline, str):
+        raise ShadowRuntimeError(f"{field}.headline must be a string")
     return NewsEvent(
+        headline=headline,
         event_id=_text(item.get("event_id"), f"{field}.event_id"),
         cluster_id=_text(item.get("cluster_id"), f"{field}.cluster_id"),
         source_id=_text(item.get("source_id"), f"{field}.source_id"),
