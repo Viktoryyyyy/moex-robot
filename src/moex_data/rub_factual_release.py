@@ -43,6 +43,14 @@ def describe(snapshot):
             scope = 'latest_published_dated_reference'
         facts.append({'factor': key, 'scope': scope, 'snapshot_path': 'components.' + key + '.data', 'values': fact})
     horizons = {}
+    from moex_data.rub_trading_target_plan import describe as describe_targets
+    try:
+        reference = (snapshot['live_read_freshness']['read_at_utc']
+            if 'live_read_freshness' in snapshot else snapshot['identity']['generated_at_utc'])
+        target_now = datetime.fromisoformat(reference)
+    except (ValueError, TypeError, KeyError):
+        target_now = None
+    target_plan = describe_targets(components.get('futures_calendar', {}), now=target_now)
     for horizon, key in (('D1', 'stage9_daily'), ('W1', 'stage9_weekly')):
         component = components.get(key, {})
         data = component.get('data') or {}
@@ -51,6 +59,7 @@ def describe(snapshot):
             'component_status': component.get('status', 'UNAVAILABLE'),
             'source_as_of': component.get('data_as_of'),
             'source_readiness': deepcopy(data.get('readiness', {})),
+            'planning_candidate': target_plan[horizon],
             'target_trading_date': None, 'target_date_proven': False,
             'model_probability': None, 'forecast_generated': False}
     return {'schema_version': SCHEMA, 'as_of_utc': snapshot.get('live_read_freshness', {}).get('read_at_utc'),

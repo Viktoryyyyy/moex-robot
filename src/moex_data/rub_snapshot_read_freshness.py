@@ -34,6 +34,10 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
     apply_external_cny(result, now=now)
     apply_rosstat_cpi(result, now=now)
     apply_cbr_rates(result, now=now)
+    from moex_data.rub_futures_calendar import apply as apply_calendar
+    apply_calendar(result, now=now)
+    from moex_data.rub_trading_target_plan import apply as apply_target_plan
+    apply_target_plan(result, now=now)
     apply_cr_pair_freshness(result, now=now)
     from moex_data.rub_temporal_applicability import apply as apply_temporal
     apply_temporal(result, now=now)
