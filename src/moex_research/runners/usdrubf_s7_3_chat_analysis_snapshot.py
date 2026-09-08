@@ -103,6 +103,17 @@ class CalendarClockContext:
         return ProducedComponent(data=data, data_as_of=data['received_at'])
 
 
+def bind_futures_calendar_clock(producers, *, started, now_fn):
+    """Bind calendar at refresh entry, before overlay work or parallel prefetch."""
+    selected = dict(default_producers() if producers is None else producers)
+    if selected.get('futures_calendar') is _futures_calendar_component:
+        anchor = _aware(started, 'calendar refresh start')
+        if abs((anchor - _live_now()).total_seconds()) > 5:
+            raise ChatAnalysisSnapshotError('non-live calendar clock requires TEST transport or REPLAY')
+        selected['futures_calendar'] = CalendarClockContext(now_fn=now_fn).produce
+    return selected
+
+
 def _aware(value: datetime | str, field: str) -> datetime:
     if isinstance(value, str):
         try:

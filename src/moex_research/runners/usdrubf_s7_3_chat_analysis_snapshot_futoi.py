@@ -395,10 +395,11 @@ def refresh_snapshot(
     with base._single_refresh_lock(state_dir):
         previous = base._load_previous(path)
         now = base._aware(now_fn(), "clock")
+        selected_producers = base.bind_futures_calendar_clock(producers, started=now, now_fn=now_fn)
         snapshot = build_snapshot(
             now=now,
             previous=previous,
-            producers=producers,
+            producers=selected_producers,
             data_root=root,
         )
         base.finalize_snapshot_timing(snapshot, started=now, completed=now_fn())

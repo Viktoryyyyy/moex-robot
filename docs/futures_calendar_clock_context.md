@@ -5,6 +5,10 @@ receipt times. Snapshot refresh shares that callable with calendar acquisition
 and stamps completion after collection. It never freezes receipt time to the
 snapshot's starting timestamp. Live clock readings must match wall time within
 five seconds; a historical injected clock is rejected before calendar HTTP.
+FUTOI, current-context and live-market overlay refreshes bind this calendar
+clock at entry, before slow context refreshes or parallel prefetch. Their original
+refresh start/run ID remains unchanged. Later acquisition uses fresh clock readings;
+elapsed prework time is not treated as a clock mismatch.
 
 `CalendarClockContext(mode='TEST', now_fn=clock, fetch=test_transport)` explicitly
 allows simulated acquisition. The clock must supply successive start, request,

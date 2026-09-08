@@ -139,3 +139,72 @@ def test_test_clock_requires_transport_and_shared_refresh_clock(tmp_path, monkey
     context = runner.CalendarClockContext(mode='TEST', now_fn=Clock([0]), fetch=lambda url,env: raw())
     with pytest.raises(runner.ChatAnalysisSnapshotError, match='share one clock'):
         runner.refresh_snapshot(producers=producers(), now_fn=Clock([0]), calendar_context=context)
+
+
+@pytest.mark.parametrize('route', ['futoi', 'current_context', 'live_market'])
+def test_overlay_binds_clock_before_slow_prework_and_real_prefetch(tmp_path, monkeypatch, route):
+    from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_futoi as futoi
+    from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_current_context as current_context
+    from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_live_market_oi as live_market
+    base = futoi.base
+    monkeypatch.setenv('MOEX_DATA_ROOT', str(tmp_path))
+    monkeypatch.setattr(base, 'install_timestamp_policy', lambda: None)
+    monkeypatch.setattr(futoi, '_load_governance', lambda: {})
+    monkeypatch.setattr(futoi, '_futoi_component', lambda **kwargs: {'status': 'UNAVAILABLE', 'data': {}})
+    selected = producers(); selected['futures_calendar'] = base._futures_calendar_component
+    clock = Clock([0, 8, 9, 17, 18])
+    monkeypatch.setattr(base, '_live_now', lambda: clock.readings[-1])
+    requests = []
+    def fetch(url, *, env):
+        requests.append(clock.readings[-1]); return raw()
+    monkeypatch.setattr(calendar, '_fetch', fetch)
+    def prework(**kwargs):
+        assert clock() == NOW+timedelta(seconds=8)
+        return {}
+    if route == 'futoi':
+        prior = selected['cbr_macro']
+        def preceding(now):
+            prework(); return prior(now)
+        selected['cbr_macro'] = preceding
+        value, _ = futoi.refresh_snapshot(now_fn=clock, producers=selected)
+    else:
+        monkeypatch.setattr(current_context.current, 'current_producers', lambda: selected)
+        monkeypatch.setattr(current_context.context, 'run_refresh_all', prework)
+        monkeypatch.setattr(current_context.delta_context, 'build_all', lambda **kwargs: {})
+        monkeypatch.setattr(current_context, '_attach_futoi_context', lambda *args: None)
+        if route == 'current_context':
+            value, _ = current_context.refresh_snapshot(now_fn=clock)
+        else:
+            # Keep real prefetch and real futoi/base builders; unrelated attachments
+            # are isolated so this regression exercises only calendar clock wiring.
+            monkeypatch.setattr(live_market, 'attach_live_market_oi_context', lambda *args, **kwargs: None)
+            monkeypatch.setattr(live_market, 'attach_live_basis_carry_context', lambda *args, **kwargs: None)
+            monkeypatch.setattr(live_market.user_position, 'attach_user_position_context', lambda *args, **kwargs: None)
+            value, _ = live_market.refresh_snapshot(now_fn=clock, live_loader=lambda: {})
+    component = value['components']['futures_calendar']; data = component['data']
+    assert component['status'] == 'READY'
+    assert requests == [NOW+timedelta(seconds=9)]
+    assert data['received_at'] == (NOW+timedelta(seconds=17)).isoformat()
+    assert datetime.fromisoformat(value['identity']['refresh_started_at_utc']) == NOW
+    assert datetime.fromisoformat(value['identity']['generated_at_utc']) == NOW+timedelta(seconds=18)
+    assert len(clock.readings) == 5
+
+
+@pytest.mark.parametrize('route', ['futoi', 'current_context', 'live_market'])
+def test_overlay_historical_clock_rejected_before_prework_or_http(monkeypatch, tmp_path, route):
+    from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_futoi as futoi
+    from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_current_context as current_context
+    from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_live_market_oi as live_market
+    base = futoi.base
+    monkeypatch.setenv('MOEX_DATA_ROOT', str(tmp_path))
+    monkeypatch.setattr(base, 'install_timestamp_policy', lambda: None)
+    monkeypatch.setattr(base, '_live_now', lambda: NOW+timedelta(days=1))
+    selected = producers(); selected['futures_calendar'] = base._futures_calendar_component
+    monkeypatch.setattr(current_context.current, 'current_producers', lambda: selected)
+    def forbidden(*args, **kwargs): pytest.fail('historical clock must fail before prework or HTTP')
+    monkeypatch.setattr(current_context.context, 'run_refresh_all', forbidden)
+    monkeypatch.setattr(calendar, '_fetch', forbidden)
+    with pytest.raises(base.ChatAnalysisSnapshotError):
+        if route == 'futoi': futoi.refresh_snapshot(now_fn=Clock([0]), producers=selected)
+        elif route == 'current_context': current_context.refresh_snapshot(now_fn=Clock([0]))
+        else: live_market.refresh_snapshot(now_fn=Clock([0]), live_loader=forbidden)
