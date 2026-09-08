@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from moex_research.external_data import moex_brent_factual as brent
+from moex_data.rub_factual_projection import spot_usable, basis_metrics
 
 
 def unanalyzed_news(events):
@@ -38,7 +39,7 @@ def build(snapshot):
     for key in ('si_front','si_next','cr_front','cr_next','usdrubf','cnyrubf','cnyrub_tom'):
         item=market.get(key,{})
         # A record's mere presence or collector READY never grants freshness.
-        usable=item.get('price_oi_usable') is True if key!='cnyrub_tom' else item.get('last') is not None and item.get('stale') is False
+        usable=item.get('price_oi_usable') is True if key!='cnyrub_tom' else spot_usable(snapshot)
         add(key,'required',bool(item),usable,item.get('read_freshness_reason') or ('ready' if usable else 'freshness_or_identity_not_proven'),
             'components.synchronized_live_market_oi.data.instruments.'+key)
     add('usd_spot','conditional_usd_basis',False,False,'current_live_schema_unsupported','components.live_basis_carry')
@@ -52,11 +53,7 @@ def build(snapshot):
     basis_data = basis_data if isinstance(basis_data, dict) else {}
     pairs = basis_data.get('pairs')
     pairs = pairs if isinstance(pairs, dict) else {}
-    admitted_metrics = sorted({metric['metric_id']
-        for pair in pairs.values() if isinstance(pair, dict)
-        for metric in (pair.get('metrics') if isinstance(pair.get('metrics'), list) else [])
-        if isinstance(metric, dict) and metric.get('status') == 'READY'
-        and isinstance(metric.get('metric_id'), str) and metric['metric_id']})
+    admitted_metrics = [metric['metric_id'] for _, metric in basis_metrics(snapshot)]
     basis_factual = bool(admitted_metrics) and basis.get('status') in {'READY', 'PARTIAL'}
     add('basis_carry','required',bool(basis_data),basis.get('status')=='READY' and basis_factual,
         'ready_current_live_scope' if basis.get('status')=='READY' and basis_factual

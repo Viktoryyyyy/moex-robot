@@ -122,6 +122,29 @@ def test_snapshot_endpoint_preserves_canonical_payload_exactly() -> None:
     assert body["components"]["official_news"]["data_as_of"] == "2026-08-31T15:18:00+00:00"  # type: ignore[index]
 
 
+def test_api_preserves_complete_spot_and_partial_basis_projection(tmp_path, monkeypatch):
+    import runpy
+    from moex_data.rub_factual_release import describe
+    from moex_data.rub_factual_release_acceptance import projection_completeness
+    from moex_research.runners.usdrubf_s7_3_chat_analysis_snapshot import current_snapshot_path, read_current_snapshot
+    from moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as runner
+    monkeypatch.setattr(runner, '_data_root', lambda: tmp_path)
+    helpers = runpy.run_path(str(Path(__file__).with_name('test_rub_factual_projection.py')))
+    original = helpers['snapshot'](); now = helpers['NOW']
+    original['schema_version'] = runner.SCHEMA_VERSION
+    original['identity']['project'] = runner.PROJECT
+    path = current_snapshot_path(tmp_path); path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(original), encoding='utf-8')
+    def loader():
+        return read_current_snapshot(now_fn=lambda: now)[0]
+    with _running_server(loader) as port:
+        status, _, body = _request(port, api.SNAPSHOT_PATH)
+    assert status == 200
+    projection_completeness(original, body['factual_release'], now=now)
+    assert body['factual_release']['facts'] == describe(body)['facts']
+    assert json.loads(path.read_text()) == original
+
+
 @pytest.mark.parametrize(
     ("readiness", "freshness"),
     [("PARTIAL", "FRESH"), ("READY", "STALE"), ("PARTIAL", "STALE")],

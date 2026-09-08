@@ -11,6 +11,23 @@ are excluded. Every displayed fact references its location in the input
 snapshot. Slow published prices retain their observation dates and scopes.
 The matrix lists missing mandatory factors rather than replacing them with zero.
 
+CNY/RUB TOM spot projection uses the same admission as its matrix row: the
+producer's aggregate spot quality must be true, an explicit per-record refusal
+is respected, and its positive finite price and source timestamp must remain
+usable at consumption time. An absent optional per-record spot flag is allowed.
+Spot facts contain price only; no spot open interest or USD TOM is invented.
+
+`basis_carry` projects each admitted READY metric once, including when the
+component is PARTIAL. `values.metrics` contains `{snapshot_path, values}` entries;
+each path resolves to the original metric list index, and values retain the
+metric's units, formula, legs, timestamps and provenance. Identical duplicates
+use their first deterministic path; conflicting copies of one ID are excluded.
+Expired or missing legs remove dependent metrics. Zero and negative basis/carry
+values remain valid. The acceptance gate checks projection completeness in both
+directions against the read-time source, without a fixed expected metric count.
+This projection grants no forecast, historical, session-completion or trading
+authority and does not change metric formulas.
+
 `macro_evidence_inventory` separates replayed CBR/Rosstat observations from
 scheduled publications and unresolved source/series policies. Direct descriptions
 also reconcile these macro components before assembling facts and matrix rows.

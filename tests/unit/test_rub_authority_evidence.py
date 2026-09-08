@@ -90,6 +90,11 @@ def test_component_permissions_revoke_even_without_top_level_authority(name, def
 ])
 def test_basis_matrix_distinguishes_individual_facts_from_complete_scope(status, metrics, factual, forecast):
     source = snapshot()
+    source['components']['synchronized_live_market_oi'] = {'data': {'instruments': {
+        'si_front': {'timestamp': NOW.isoformat(), 'stale': False},
+        'si_next': {'timestamp': NOW.isoformat(), 'stale': False}}}}
+    metrics = [{**metric, 'value': 0.0, 'legs': ['si_front', 'si_next'],
+                'units': 'RUB_per_USD', 'pair_id': 'USD/RUB'} for metric in metrics]
     source['components']['live_basis_carry'] = {'status': status, 'data': {
         'ready_metric_count': 100, 'pairs': {'usd_rub': {'metrics': metrics}}}}
     row = next(row for row in build(source)['rows'] if row['block_id'] == 'basis_carry')
