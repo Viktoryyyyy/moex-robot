@@ -65,14 +65,24 @@ def coverage(release):
     news = release['news_context']; summary = _dict(news.get('summary'))
     events = news['events']
     selected = _dict(summary.get('selection_audit'))
+    counts_valid = (all(type(summary.get(key)) is int and summary[key] >= 0
+        for key in ('source_count', 'ok_source_count', 'failed_source_count'))
+        and summary['source_count'] > 0
+        and summary['ok_source_count'] + summary['failed_source_count'] == summary['source_count'])
+    all_sources_ok = counts_valid and summary['failed_source_count'] == 0 and summary.get('failed_source_ids') == ''
     news_ok = (news.get('source_status') == 'READY' and news.get('acquisition_fresh') is True
-        and summary.get('ok_source_count', 0) > 0 and bool(selected)
+        and all_sources_ok and bool(selected)
         and selected.get('selected_ids') == [event.get('event_id') for event in events]
         and (bool(events) or selected.get('candidate_count') == 0)
         and all(item.get('content_status') == 'AVAILABLE' for item in events)
         and news.get('excluded_event_count') == 0)
-    add('news_content_and_selection', news_ok, 'source_refresh_selection_or_original_headlines_missing', scope='bounded_raw_news_NOT_ANALYZED')
-    rows[-1].update(event_count=len(events), failed_source_count=summary.get('failed_source_count'),
+    news_reason = ('configured_source_counts_missing_or_inconsistent' if not counts_valid else
+        'configured_news_sources_failed_or_failure_ids_inconsistent' if not all_sources_ok else
+        'source_refresh_selection_or_original_headlines_missing')
+    add('news_content_and_selection', news_ok, news_reason, scope='bounded_raw_news_NOT_ANALYZED',
+        status='PARTIAL' if events and not news_ok else None)
+    rows[-1].update(event_count=len(events), source_count=summary.get('source_count'),
+        ok_source_count=summary.get('ok_source_count'), failed_source_count=summary.get('failed_source_count'),
         failed_source_ids=summary.get('failed_source_ids'), events_dropped_by_bound=summary.get('events_dropped_by_bound'))
     position = release['user_position_context']
     add('explicit_position_state', position.get('status') == 'AVAILABLE' or position.get('availability') == 'NO_EXPLICIT_USER_INPUT',

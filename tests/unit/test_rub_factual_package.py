@@ -44,7 +44,8 @@ def admitted_coverage_fixture():
     value['macro_evidence_inventory']['requirements_coverage'] = [
         {'requirement_id': item['requirement_id'], 'current_evidence_present': True} for item in requirements()['requirements']]
     value['news_context'].update(source_status='READY', acquisition_fresh=True,
-        summary={'ok_source_count': 1, 'selection_audit': {'selected_ids': ['one'], 'candidate_count': 1}})
+        summary={'source_count': 1, 'ok_source_count': 1, 'failed_source_count': 0, 'failed_source_ids': '',
+            'selection_audit': {'selected_ids': ['one'], 'candidate_count': 1}})
     return value
 
 
@@ -92,6 +93,27 @@ def test_valid_empty_news_and_explicit_no_position_are_usable_states():
     value['news_context']['summary']['selection_audit'] = {'selected_ids': [], 'candidate_count': 0}
     value['user_position_context'] = {'status': 'UNAVAILABLE', 'availability': 'NO_EXPLICIT_USER_INPUT'}
     assert package.coverage(value)['status'] == 'COMPLETE'
+
+
+@pytest.mark.parametrize('defect', ['all_success', 'one_failed', 'inconsistent', 'missing_total', 'missing_ok', 'missing_failed', 'bool_counter', 'negative', 'failure_ids'])
+def test_news_requires_all_configured_sources_without_discarding_headlines(defect):
+    value = admitted_coverage_fixture(); summary = value['news_context']['summary']
+    summary.update(source_count=2, ok_source_count=2, failed_source_count=0)
+    if defect == 'one_failed': summary.update(ok_source_count=1, failed_source_count=1, failed_source_ids='failed_source')
+    elif defect == 'inconsistent': summary['source_count'] = 3
+    elif defect == 'missing_total': summary.pop('source_count')
+    elif defect == 'missing_ok': summary.pop('ok_source_count')
+    elif defect == 'missing_failed': summary.pop('failed_source_count')
+    elif defect == 'bool_counter': summary['failed_source_count'] = False
+    elif defect == 'negative': summary['failed_source_count'] = -1
+    elif defect == 'failure_ids': summary['failed_source_ids'] = 'unreconciled_failure'
+    before = deepcopy(value)
+    result = package.coverage(value)
+    news = next(row for row in result['requirements'] if row['requirement_id'] == 'news_content_and_selection')
+    assert news['usable'] is (defect == 'all_success')
+    assert news['status'] == ('AVAILABLE' if defect == 'all_success' else 'PARTIAL')
+    assert result['status'] == ('COMPLETE' if defect == 'all_success' else 'PARTIAL')
+    assert value == before and value['news_context']['events'][0]['headline'] == 'Published source fact'
 
 
 def test_empty_upcoming_cbr_calendar_still_proves_its_finite_scope(tmp_path):
