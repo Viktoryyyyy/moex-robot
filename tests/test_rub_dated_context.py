@@ -161,6 +161,48 @@ def test_rehashed_unknown_source_is_not_admitted_despite_matching_derived_basis(
     assert 'market:si_front' not in admitted and 'market:cr_front' in admitted
 
 
+@pytest.mark.parametrize('schema', [None, 'unknown_market.v99'])
+def test_missing_or_unknown_schema_cannot_mint_or_rehash_market_witness(tmp_path, schema):
+    from src.moex_research.runners.usdrubf_s7_3_chat_analysis_snapshot_live_market_oi import _load_basis_carry_or_unavailable
+    value = publish(tmp_path); store = value['accepted_dated_market']
+    frame = deepcopy(store['frames'][store['selections']['market:si_front']])
+    raw = frame['components']['synchronized_live_market_oi']['data']
+    if schema is None: raw.pop('schema_version')
+    else: raw['schema_version'] = schema
+    # Rebuild the matching failed basis shell: equality alone must not admit this schema.
+    frame['components']['live_basis_carry']['data'] = _load_basis_carry_or_unavailable(raw)
+    minted = dated.capture(None, components=frame['components'], now=NOW, kind='market')
+    assert minted['selections'] == {}
+    ref = dated.digest(frame)
+    rehashed = {'schema_version': dated.SCHEMA, 'frames': {ref: frame}, 'selections': {key: ref for key in store['selections']}}
+    admitted, refused = dated.validated(rehashed, NOW)
+    assert admitted == {} and set(refused.values()) == {'unsupported_original_market_schema'}
+
+
+@pytest.mark.parametrize('defect', ['none', 'spread', 'crossed', 'quote_map', 'source_value', 'quote_coherence'])
+def test_rehashed_quote_gate_preserves_price_oi_but_excludes_invalid_book(tmp_path, defect):
+    value = publish(tmp_path); store = value['accepted_dated_market']
+    frame = deepcopy(store['frames'][store['selections']['market:si_front']])
+    raw = frame['components']['synchronized_live_market_oi']['data']; row = raw['instruments']['si_front']
+    assert row['quote_usable'] is True
+    if defect == 'spread': row['spread'] += 1
+    elif defect == 'crossed': row['bid'] = row['ask'] + 1; row['spread'] = -1
+    elif defect == 'quote_map': raw['quality']['quote_usable_by_instrument']['si_front'] = False
+    elif defect == 'source_value': row['bid_source_value'] = row['bid'] + 1
+    elif defect == 'quote_coherence': row['quote_temporal_coherence'] = 'UNKNOWN'
+    ref = dated.digest(frame)
+    rehashed = {'schema_version': dated.SCHEMA, 'frames': {ref: frame}, 'selections': {key: ref for key in store['selections']}}
+    result = dated.describe({'accepted_dated_market': rehashed}, now=NOW)
+    observed = result['observations']['market:si_front']
+    assert observed['values']['last'] == row['last'] and observed['values']['oi'] == row['oi']
+    assert ('bid' in observed['values']) == (defect == 'none')
+    if defect != 'none':
+        assert observed['quote_refusal']
+        for key, item in result['observations'].items():
+            if key.startswith('basis:') and 'si_front' in item['original_legs']:
+                assert 'bid' not in item['original_legs']['si_front']
+
+
 def test_metadata_survives_price_staleness_without_moving_to_new_contract(tmp_path):
     publish(tmp_path)
     value = package(tmp_path, NOW + timedelta(seconds=61))

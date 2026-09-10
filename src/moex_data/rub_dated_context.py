@@ -78,6 +78,9 @@ def eligible(frame):
         from moex_data.rub_snapshot_read_freshness import apply_read_freshness
         component = view['components']['synchronized_live_market_oi']
         raw = component['data']
+        from moex_data.synchronized_live_market_oi_context import SCHEMA_VERSION
+        if raw.get('schema_version') != SCHEMA_VERSION:
+            raise ValueError('unsupported_original_market_schema')
         quality = raw.get('quality', {})
         if (component.get('status') not in ('READY', 'PARTIAL') or raw.get('status') not in ('READY', 'PARTIAL')
                 or not isinstance(quality, dict) or quality.get('status') not in ('PASS', 'PARTIAL')
@@ -85,6 +88,8 @@ def eligible(frame):
             raise ValueError('original_market_component_or_quality_not_admitted')
         original_usable = quality.get('price_oi_usable_by_instrument', {})
         if not isinstance(original_usable, dict): original_usable = {}
+        original_quotes = quality.get('quote_usable_by_instrument', {})
+        if not isinstance(original_quotes, dict): original_quotes = {}
         instruments = raw['instruments']
         if not isinstance(instruments, dict) or set(instruments) - set(MARKETS): raise ValueError('market_scope_mismatch')
         invalid = set()
@@ -104,6 +109,15 @@ def eligible(frame):
         from moex_data.synchronized_live_market_oi_context_partial import _future_price_oi_usable
         keys = {}
         for key, item in projection.market_data(view)['instruments'].items():
+            from moex_data.synchronized_live_market_oi_context import _quote_semantics
+            quote = _quote_semantics(row={'BID': item.get('bid_source_value'), 'OFFER': item.get('offer_source_value')},
+                                     stale=item.get('stale') is not False, rfud_source=key != 'cnyrub_tom')
+            if not (original_quotes.get(key) is True and item.get('quote_usable') is True
+                    and quote['quote_usable'] is True and item.get('quote_status') == 'available'
+                    and item.get('quote_temporal_coherence') == 'same_marketdata_row'
+                    and all(item.get(field) == quote[field] for field in ('bid', 'ask', 'spread'))):
+                item['quote_usable'] = False
+                item['dated_quote_refusal'] = 'original_quote_source_values_quality_or_spread_not_admitted'
             usable = projection.spot_usable(view) if key == 'cnyrub_tom' else original_usable.get(key) is True and item.get('price_oi_usable') is True and projection.fresh(item, accepted) and _future_price_oi_usable(item)
             if key not in invalid and usable and _number(item.get('last'), True) and (key == 'cnyrub_tom' or _number(item.get('oi'))):
                 keys['market:' + key] = item
@@ -226,7 +240,7 @@ def capture_slow(snapshot, previous, *, now):
 def describe(snapshot, *, now):
     """Dated preparation context never contributes values to current facts."""
     now = stamp(now)
-    observations = {}; rejected = {}
+    observations = {}; rejected = {}; leg_views = {}
     for field in ('accepted_dated_slow', 'accepted_dated_market'):
         accepted, errors = validated(snapshot.get(field), now)
         rejected.update({field + ':' + key: value for key, value in errors.items()})
@@ -260,11 +274,19 @@ def describe(snapshot, *, now):
                 from moex_data.rub_factual_projection import market_values, IDENTITY_FIELDS, contract_metadata
                 item['source_identity'] = {name: value[name] for name in IDENTITY_FIELDS if name in value}
                 item['values'] = market_values(value, spot=key == 'market:cnyrub_tom')
+                item['quote_refusal'] = value.get('dated_quote_refusal')
                 item['contract_metadata'] = contract_metadata(_view(frame), key.split(':', 1)[1], value)
             elif key.startswith('basis:'):
                 market = frame['components']['synchronized_live_market_oi']['data']
                 item['original_bindings'] = {leg: market['bindings'][leg] for leg in value['legs']}
-                item['original_legs'] = {leg: deepcopy(market['instruments'][leg]) for leg in value['legs']}
+                if ref not in leg_views: leg_views[ref] = eligible(frame)
+                admitted_legs = leg_views[ref]
+                item['original_legs'] = {}
+                for leg in value['legs']:
+                    original = deepcopy(admitted_legs['market:' + leg])
+                    if original.get('quote_usable') is not True:
+                        for field in ('bid', 'ask', 'spread', 'bid_source_value', 'offer_source_value'): original.pop(field, None)
+                    item['original_legs'][leg] = original
             observations[key] = item
     return {'status': 'AVAILABLE' if observations else 'UNAVAILABLE', 'maximum_source_age_seconds': MAX_AGE_SECONDS,
             'scope': 'preparation_only_not_current_or_completed_session', 'as_of_utc': now.isoformat(),
