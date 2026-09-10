@@ -96,8 +96,10 @@ def describe(snapshot):
             'target_trading_date': None, 'target_date_proven': False,
             'model_probability': None, 'forecast_generated': False}
     freshness = snapshot.get('live_read_freshness')
+    from moex_data.rub_dated_context import describe as dated_context
     return {'schema_version': SCHEMA, 'as_of_utc': freshness.get('read_at_utc') if isinstance(freshness, dict) else None,
         'status': 'INCOMPLETE', 'facts': facts, 'horizons': horizons, **consumer_context(snapshot),
+        'dated_context': dated_context(snapshot, now=target_now) if target_now else {'status': 'UNAVAILABLE', 'observations': {}},
         'macro_evidence_inventory': describe_macro(snapshot, now=target_now),
         'blocking_required_factors': matrix['blocking_required_blocks'],
         'matrix': matrix['rows'], 'session_completion_proven': False,

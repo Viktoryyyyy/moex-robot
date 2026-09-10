@@ -41,6 +41,14 @@ def refresh(root, *, loader=None, clock=lambda: datetime.now(timezone.utc)):
     folder = state_path(root)
     folder.mkdir(parents=True, exist_ok=True)
     with base._single_refresh_lock(folder):
+        previous = None
+        prior_path = folder / "current.json"
+        if prior_path.is_file() and not prior_path.is_symlink() and prior_path.stat().st_size <= MAX_BYTES:
+            try:
+                prior = json.loads(prior_path.read_text(encoding='utf-8'))
+                previous = prior.get('accepted_dated_market') if isinstance(prior, dict) else None
+            except (OSError, ValueError):
+                pass
         started = _time(clock())
         try:
             market = (fetch_live_snapshot if loader is None else loader)()
@@ -54,6 +62,13 @@ def refresh(root, *, loader=None, clock=lambda: datetime.now(timezone.utc)):
         value = dict(schema_version=SCHEMA, started_at=started.isoformat(),
                      completed_at=completed.isoformat(), status=status,
                      error_class=error, market=market, market_sha256=_digest(market))
+        from moex_data.rub_dated_context import capture
+        from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_live_market_oi as live
+        witness = {'components': {}, 'authority': {}, 'analysis_views': {}, 'analysis_workflow': {}}
+        if status == 'COLLECTED':
+            live.attach_live_market_oi_context(witness, market, attempted_at_utc=completed.isoformat())
+            live.attach_live_basis_carry_context(witness, market, attempted_at_utc=completed.isoformat())
+        value['accepted_dated_market'] = capture(previous, components=witness['components'], now=completed, kind='market')
         base._atomic_write(folder / "current.json", value)
         return value
 
@@ -69,6 +84,7 @@ def apply(snapshot, *, root, now):
     result = deepcopy(snapshot)
     now = _time(now)
     completed = None
+    dated = None
     try:
         if marker.is_symlink() or not marker.is_file():
             raise ValueError("invalid enabled marker")
@@ -78,6 +94,8 @@ def apply(snapshot, *, root, now):
         if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_BYTES:
             raise ValueError("missing or invalid fast market file")
         value = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(value, dict) and value.get('schema_version') == SCHEMA:
+            dated = value.get('accepted_dated_market')
         if not isinstance(value, dict) or value.get("schema_version") != SCHEMA or value.get("status") != "COLLECTED":
             raise ValueError("fast market collection unavailable")
         started, completed = _time(value["started_at"]), _time(value["completed_at"])
@@ -111,6 +129,7 @@ def apply(snapshot, *, root, now):
     result["fast_market_read"] = dict(schema_version=SCHEMA, read_at=now.isoformat(),
         completed_at=completed.isoformat() if completed else None,
         error=error, network_fetch_performed=False)
+    result['accepted_dated_market'] = deepcopy(dated)
     return result
 
 

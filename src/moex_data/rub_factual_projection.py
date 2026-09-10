@@ -90,17 +90,27 @@ LEG_METADATA_FIELDS = ('raw_unit', 'normalization_divisor', 'normalized_unit', '
 
 def contract_metadata(snapshot, key, item):
     component = _dict(_dict(snapshot.get('components')).get('live_basis_carry'))
-    if component.get('status') not in ('READY', 'PARTIAL') or not fresh(item, reference(snapshot)): return None
+    from moex_data.synchronized_live_market_oi_context import FORTS_SOURCE_ID, CETS_SOURCE_ID, LOGICAL_ORDER
+    expected_source = CETS_SOURCE_ID if key == 'cnyrub_tom' else FORTS_SOURCE_ID
+    if key not in LOGICAL_ORDER or item.get('source_id') != expected_source:
+        return None
+    now = reference(snapshot)
+    from moex_data.rub_dated_context import MAX_AGE_SECONDS
+    if not _causal(item.get('received_at_utc'), now, MAX_AGE_SECONDS) or not _causal(item.get('timestamp'), now, MAX_AGE_SECONDS): return None
     matches = []
     for pair_id, pair in _dict(_dict(component.get('data')).get('pairs')).items():
         leg = _dict(_dict(_dict(pair).get('legs')).get(key))
-        if (leg.get('status') != 'READY' or not all(item.get(field) is not None and leg.get(field) == item[field]
+        metadata_status = leg.get('status') == 'READY' or (leg.get('status') == 'UNAVAILABLE' and
+            leg.get('unavailable_reason') in ('source_leg_stale', 'source_leg_freshness_exceeds_threshold', 'source_not_fresh_at_read'))
+        if (not metadata_status or not all(item.get(field) is not None and leg.get(field) == item[field]
                 for field in ('secid', 'timestamp', 'received_at_utc', 'source_id')) or leg.get('raw_value') != item.get('last')):
             continue
         metadata = {field: deepcopy(leg[field]) for field in LEG_METADATA_FIELDS if field in leg}
         matches.append((f'components.live_basis_carry.data.pairs.{pair_id}.legs.{key}', metadata))
     if not matches or any(value != matches[0][1] for _, value in matches): return None
-    return {'snapshot_path': matches[0][0], 'values': matches[0][1]}
+    return {'snapshot_path': matches[0][0], 'values': matches[0][1], 'secid': item['secid'],
+        'applicable_source_timestamp_utc': item['timestamp'], 'received_at_utc': item['received_at_utc'],
+        'checked_at_utc': now.isoformat(), 'scope': 'exact_source_contract_metadata_independent_of_live_price'}
 
 
 def market_values(item, *, spot=False):
@@ -151,7 +161,8 @@ def consumer_context(snapshot):
             'quote_reason': item.get('quote_reason'),
             'missing_metadata': (['units'] if not any(item.get(field) for field in ('units', 'price_unit', 'quote_unit')) and not metadata_values.get('raw_unit') else [])
                 + (['expiry_date'] if key in ('si_front', 'si_next', 'cr_front', 'cr_next') and not (item.get('expiry_date') or metadata_values.get('expiry_date')) else []),
-            'missing_reason': None if usable else 'source_missing_stale_or_not_admitted'}
+            'missing_reason': None if usable else item.get('read_freshness_reason') or
+                _dict(components.get('synchronized_live_market_oi')).get('refresh_error') or 'source_missing_stale_or_not_admitted'}
 
     component = _dict(components.get('live_market_structure'))
     levels = _dict(_dict(component.get('data')).get('structural_levels'))
@@ -201,6 +212,13 @@ def consumer_context(snapshot):
             seen.add(identity)
             timeframes.append({'snapshot_path': f'components.{name}.data.server_core.blocks',
                 'scope': 'accepted_dated_observation_not_session_completion', 'values': deepcopy(block)})
+
+    from moex_data.rub_hourly_observation import admitted as admitted_hour
+    hour = admitted_hour(_dict(components.get('live_market_structure')), now=now)
+    if hour is not None:
+        timeframes.append({'snapshot_path': 'components.live_market_structure.data.hourly_observation',
+            'scope': hour['scope'], 'values': {'block_id': 'observed_1H.USDRUBF',
+                'selected_causal_ts_utc': hour['hour_end_utc'], 'selected_causal_time_semantics': 'observed_hour_end_not_availability', **hour}})
 
     futoi = {}
     temporal = _dict(_dict(snapshot.get('temporal_applicability')).get('components'))

@@ -249,6 +249,7 @@ def _usdrubf_live_market_structure_component(now: datetime) -> base.ProducedComp
     current_trade_date = now_moscow.date()
 
     current_raw = tuple(live._load_bars(USDRUBF_SECID, current_trade_date))
+    current_receipt_upper_bound = datetime.now(timezone.utc)
     if not current_raw:
         raise CurrentChatSnapshotError("current observed date has no USDRUBF 5m TradeStats bars")
     current_closed = tuple(base.closed_bars(current_raw, as_of_timestamp=now_moscow))
@@ -328,6 +329,8 @@ def _usdrubf_live_market_structure_component(now: datetime) -> base.ProducedComp
         "stage5_full_mode_ready": False,
         "stage5_pointer_promotion_performed": False,
     }
+    from moex_data.rub_hourly_observation import build as build_hour
+    data['hourly_observation'] = build_hour(current_closed, now=max(now_utc, current_receipt_upper_bound), receipt=current_receipt_upper_bound)
     return base.ProducedComponent(data=data, data_as_of=market_data_as_of)
 
 

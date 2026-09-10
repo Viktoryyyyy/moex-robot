@@ -88,6 +88,13 @@ def coverage(release):
     add('explicit_position_state', position.get('status') == 'AVAILABLE' or position.get('availability') == 'NO_EXPLICIT_USER_INPUT',
         position.get('availability'), scope='explicit_user_input_or_explicit_absence')
     missing = [row['requirement_id'] for row in rows if not row['usable']]
+    dated = release.get('dated_context', {}).get('observations', {})
+    for row in rows:
+        key = row['requirement_id']
+        row['dated_preparation_available'] = ('market:' + key in dated if key in MARKETS else
+            any(item.startswith('basis:') for item in dated) if key == 'basis_carry' else
+            'structure' in dated if key == 'market_structure' else
+            any(item.startswith('timeframe:') for item in dated) if key == 'timeframe_1H' else False)
     return {'status': 'COMPLETE' if not missing else 'PARTIAL', 'requirements': rows,
         'missing_required': missing, 'model_ready': False,
         'scope': 'current_received_facts_and_admitted_dated_context',
@@ -139,7 +146,7 @@ def build_package(snapshot, release, *, now):
         'read_view_sha256': sha256(encoded(value)).hexdigest()}
         for key, value in sorted(components.items()) if isinstance(value, dict)}
     chosen = {key: release[key] for key in ('facts', 'market_usability', 'market_structure',
-        'timeframe_context', 'futoi_context', 'news_context', 'user_position_context')}
+        'timeframe_context', 'futoi_context', 'news_context', 'user_position_context', 'dated_context')}
     macro = release['macro_evidence_inventory']
     chosen['macro_context'] = {key: macro[key] for key in ('facts', 'scheduled_events', 'calendar_coverage')}
     readiness = coverage(release)

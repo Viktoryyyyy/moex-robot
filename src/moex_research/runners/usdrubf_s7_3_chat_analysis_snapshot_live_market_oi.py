@@ -317,6 +317,8 @@ def refresh_snapshot(
         )
         user_position.attach_user_position_context(snapshot, root=root)
         base.finalize_snapshot_timing(snapshot, started=now, completed=now_fn())
+        from moex_data.rub_dated_context import capture_slow
+        capture_slow(snapshot, previous, now=base._aware(snapshot['identity']['generated_at_utc'], 'completed'))
         base._atomic_write(path, snapshot)
     return snapshot, path
 
