@@ -37,6 +37,8 @@ EXPECTED_PHASE83_RECOMMENDATION: Final[str] = (
 )
 EXPECTED_LICENSE_PROVIDER: Final[str] = "MOEX AlgoPack FUTOI"
 EXPECTED_LICENSE_PRODUCT: Final[str] = "AlgoPack FUTOI"
+FROZEN_ELIGIBLE_TARGET_DATE_FROM: Final[str] = "2024-08-05"
+FROZEN_ELIGIBLE_TARGET_DATE_TILL: Final[str] = "2026-06-11"
 REQUIRED_ARGS: Final[tuple[str, ...]] = (
     "--modeling-dataset-path",
     "--dataset-manifest-path",
@@ -276,7 +278,7 @@ def _identity_frames(
             "modeling dataset lacks frozen identity fields",
             blocker="provenance_not_sufficient",
         )
-    eligible = (
+    all_identities = (
         modeling.loc[:, identity_columns]
         .assign(
             target_trade_date=lambda x: pd.to_datetime(x.target_trade_date).dt.strftime("%Y-%m-%d"),
@@ -284,6 +286,18 @@ def _identity_frames(
             target_instrument_id=lambda x: x.target_instrument_id.astype(str),
         )
         .drop_duplicates()
+        .sort_values(["target_trade_date", "target_instrument_id"])
+        .reset_index(drop=True)
+    )
+    eligible = (
+        all_identities.loc[
+            all_identities.target_instrument_id.eq(validation.TARGET_INSTRUMENT_ID)
+            & all_identities.target_trade_date.between(
+                FROZEN_ELIGIBLE_TARGET_DATE_FROM,
+                FROZEN_ELIGIBLE_TARGET_DATE_TILL,
+                inclusive="both",
+            )
+        ]
         .sort_values(["target_trade_date", "target_instrument_id"])
         .reset_index(drop=True)
     )
@@ -307,6 +321,14 @@ def _identity_frames(
         raise validation.FutoiSiSourceValidationError(
             "eligible identity count mismatch", blocker="provenance_not_sufficient"
         )
+    if (
+        eligible.target_trade_date.iloc[0] != FROZEN_ELIGIBLE_TARGET_DATE_FROM
+        or eligible.target_trade_date.iloc[-1] != FROZEN_ELIGIBLE_TARGET_DATE_TILL
+    ):
+        raise validation.FutoiSiSourceValidationError(
+            "eligible identity date window mismatch",
+            blocker="provenance_not_sufficient",
+        )
     if len(validation_ids) != validation.EXPECTED_VALIDATION_IDENTITIES:
         raise validation.FutoiSiSourceValidationError(
             "validation identity count mismatch", blocker="provenance_not_sufficient"
@@ -314,6 +336,11 @@ def _identity_frames(
     if not eligible.target_instrument_id.eq(validation.TARGET_INSTRUMENT_ID).all():
         raise validation.FutoiSiSourceValidationError(
             "eligible identities contain another instrument",
+            blocker="provenance_not_sufficient",
+        )
+    if not validation_ids.target_instrument_id.eq(validation.TARGET_INSTRUMENT_ID).all():
+        raise validation.FutoiSiSourceValidationError(
+            "validation identities contain another instrument",
             blocker="provenance_not_sufficient",
         )
     return eligible, validation_ids
