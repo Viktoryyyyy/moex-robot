@@ -61,10 +61,18 @@ def projection_completeness(snapshot, value, *, now):
         if quote_allowed: _require(quote['values'] == {field: item.get(field) for field in ('bid', 'ask', 'spread')}, 'quote values')
         matching = []
         basis_component = components.get('live_basis_carry', {})
-        if basis_component.get('status') in ('READY', 'PARTIAL') and item.get('stale') is False:
+        try:
+            metadata_causal = all(0 <= (now - datetime.fromisoformat(item[field])).total_seconds() <= 96 * 3600
+                                  for field in ('timestamp', 'received_at_utc'))
+        except (KeyError, TypeError, ValueError): metadata_causal = False
+        expected_metadata_source = 'moex_apim_cets_cnyrub_tom_live_marketdata' if key == 'cnyrub_tom' else 'moex_apim_forts_rfud_live_marketdata'
+        metadata_source_allowed = key in ('usdrubf', 'si_front', 'si_next', 'cnyrubf', 'cr_front', 'cr_next', 'cnyrub_tom') and item.get('source_id') == expected_metadata_source
+        if metadata_causal and metadata_source_allowed:
             for pair in (basis_component.get('data') or {}).get('pairs', {}).values():
                 leg = pair.get('legs', {}).get(key, {})
-                if leg.get('status') == 'READY' and leg.get('raw_value') == item.get('last') and all(
+                metadata_status = leg.get('status') == 'READY' or (leg.get('status') == 'UNAVAILABLE' and
+                    leg.get('unavailable_reason') in ('source_leg_stale', 'source_leg_freshness_exceeds_threshold', 'source_not_fresh_at_read'))
+                if metadata_status and leg.get('raw_value') == item.get('last') and all(
                     item.get(field) is not None and leg.get(field) == item[field] for field in ('secid', 'timestamp', 'received_at_utc', 'source_id')):
                     matching.append({field: leg[field] for field in ('raw_unit', 'normalization_divisor', 'normalized_unit', 'expiry_date', 'expiry_metadata') if field in leg})
         expected_metadata = matching[0] if matching and all(item == matching[0] for item in matching) else None
@@ -143,7 +151,60 @@ def projection_completeness(snapshot, value, *, now):
             if block.get('status') == 'ready' and block.get('stage') == 7 and block.get('timeframe') in ('1H', '1D', '1W') and causal:
                 expected_blocks[(block.get('block_id'), block.get('selected_causal_ts_utc'))] = block
     actual_blocks = {(entry['values'].get('block_id'), entry['values'].get('selected_causal_ts_utc')): entry['values'] for entry in value['timeframe_context']}
+    # Independent source-hour oracle: do not ask the projection's admission helper.
+    hour = None
+    try:
+        component = components['live_market_structure']; data = component['data']; evidence = data['hourly_observation']
+        bars = evidence['source_bars']; ends = [datetime.fromisoformat(row['end']).astimezone(timezone.utc) for row in bars]
+        end = ends[-1]; start = end - timedelta(hours=1)
+        numeric = all(isinstance(row[key], (int, float)) and not isinstance(row[key], bool)
+                      and isfinite(row[key]) and (row[key] >= 0 if key == 'volume' else row[key] > 0)
+                      for row in bars for key in ('open', 'high', 'low', 'close', 'volume'))
+        ohlc = all(row['low'] <= min(row['open'], row['close']) <= max(row['open'], row['close']) <= row['high'] for row in bars)
+        from zoneinfo import ZoneInfo
+        dates = {item.astimezone(ZoneInfo('Europe/Moscow')).date().isoformat() for item in ends}
+        receipt = datetime.fromisoformat(evidence['receipt_upper_bound_utc'])
+        allowed_hour = (component.get('status') == 'READY' and evidence.get('schema_version') == 'rub_observed_clock_hour.v1'
+            and evidence.get('status') == 'AVAILABLE' and data.get('instrument') == data.get('requested_secid') == evidence.get('requested_secid') == 'USDRUBF'
+            and data.get('source_id') == evidence.get('source_id') == 'moex_algopack_fo_tradestats_5m'
+            and data.get('source_contract_ref') == evidence.get('source_contract_ref') == 'contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml'
+            and evidence.get('receipt_semantics') == 'current_loader_return_upper_bound'
+            and len(bars) == 12 and not end.minute and not end.second and not end.microsecond
+            and ends == [start + timedelta(minutes=5 * index) for index in range(1, 13)]
+            and dates == {data.get('trade_date')} and end <= receipt <= now and 0 <= (now - end).total_seconds() <= 96 * 3600
+            and numeric and ohlc and all(set(row) == {'end', 'open', 'high', 'low', 'close', 'volume'} for row in bars))
+        expected_hour = {'instrument': 'USDRUBF', 'timeframe': '1H', 'timezone': 'UTC',
+            'hour_start_utc': start.isoformat(), 'hour_end_utc': end.isoformat(), 'source_observed_moscow_date': next(iter(dates)),
+            'source_bar_count': 12, 'values': {'open': bars[0]['open'], 'high': max(row['high'] for row in bars),
+                'low': min(row['low'] for row in bars), 'close': bars[-1]['close'], 'volume': sum(row['volume'] for row in bars)},
+            'scope': 'complete_observed_clock_hour_not_accepted_HTF_dataset_or_session_completion', 'session_completion_proven': False}
+        if allowed_hour and evidence.get('observation') == expected_hour:
+            hour = {**expected_hour, 'source_id': evidence['source_id'], 'requested_secid': 'USDRUBF',
+                'receipt_upper_bound_utc': receipt.isoformat(), 'receipt_semantics': evidence['receipt_semantics']}
+    except (KeyError, TypeError, ValueError, IndexError, AttributeError): pass
+    if hour is not None:
+        expected_blocks[('observed_1H.USDRUBF', hour['hour_end_utc'])] = {'block_id': 'observed_1H.USDRUBF',
+            'selected_causal_ts_utc': hour['hour_end_utc'], 'selected_causal_time_semantics': 'observed_hour_end_not_availability', **hour}
     _require(actual_blocks == expected_blocks, 'timeframe completeness')
+    from moex_data.rub_dated_context import describe as dated_context
+    _require(value.get('dated_context') == dated_context(view, now=now), 'dated witness projection completeness and values')
+    from moex_data.rub_dated_context import validated as validated_witnesses
+    expected_dated = {}
+    for field in ('accepted_dated_slow', 'accepted_dated_market'):
+        admitted, _ = validated_witnesses(view.get(field), now)
+        expected_dated.update(admitted)
+    actual_dated = value['dated_context']['observations']
+    _require(set(actual_dated) == set(expected_dated), 'dated reverse factor completeness')
+    for key, (ref, frame, source, times, ages) in expected_dated.items():
+        item = actual_dated[key]
+        expected = source
+        if key.startswith('market:'):
+            allowed_fields = fields + (('bid', 'ask', 'spread') if source.get('quote_usable') is True else ())
+            expected = {name: source[name] for name in allowed_fields if name in source and not (key == 'market:cnyrub_tom' and name == 'oi')}
+            _require(item['source_identity']['secid'] == source['secid'], 'dated exact SECID')
+        _require(item['values'] == expected and item['acceptance_evidence_id'] == ref
+                 and item['accepted_at_utc'] == frame['accepted_at_utc'] and item['source_times'] == times
+                 and item['ages'] == ages and item['current_usable'] is False, 'dated reverse values and admission')
     _require(value['futoi_context']['futoi_live_cr']['previous_observation'] is None
         and value['futoi_context']['futoi_live_cr']['comparisons'] is None, 'CR no history grant')
     si_component = components.get('futoi_live', {}); si = si_component.get('data') or {}

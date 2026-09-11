@@ -226,11 +226,11 @@ def test_si_history_admission_and_cr_scope_are_independent(defect):
     assert si['session_completion_proven'] is False
 
 
-@pytest.mark.parametrize('defect', ['none', 'timestamp', 'secid', 'value', 'source', 'receipt', 'quote_only'])
+@pytest.mark.parametrize('defect', ['none', 'timestamp', 'secid', 'value', 'source', 'receipt', 'quote_only', 'unapproved_matched_source', 'wrong_market_source', 'stale_price'])
 def test_same_generation_contract_metadata_and_independent_quotes(defect):
     original = core_snapshot(); components = original['components']
     row = components['synchronized_live_market_oi']['data']['instruments']['cr_front']
-    row.update(source_id='official', received_at_utc=NOW.isoformat())
+    row.update(source_id='moex_apim_forts_rfud_live_marketdata', received_at_utc=NOW.isoformat())
     leg = dict(status='READY', secid=row['secid'], timestamp=row['timestamp'], source_id=row['source_id'],
         received_at_utc=row['received_at_utc'], raw_value=row['last'], raw_unit='source_unit',
         normalized_unit='normalized_source_unit', normalization_divisor=1000, expiry_date='2026-09-17')
@@ -241,12 +241,15 @@ def test_same_generation_contract_metadata_and_independent_quotes(defect):
     elif defect == 'source': leg['source_id'] = 'other'
     elif defect == 'receipt': leg['received_at_utc'] = (NOW - timedelta(seconds=1)).isoformat()
     elif defect == 'quote_only': row['price_oi_usable'] = False; row['oi'] = None
+    elif defect == 'unapproved_matched_source': row['source_id'] = leg['source_id'] = 'UNAPPROVED'
+    elif defect == 'wrong_market_source': row['source_id'] = leg['source_id'] = 'moex_apim_cets_cnyrub_tom_live_marketdata'
+    elif defect == 'stale_price': row['stale'] = True
     value = release.build(original, now=NOW, code_revision=COMMIT)
     projection_completeness(original, value, now=NOW)
     context = value['market_usability']['cr_front']
-    assert (context['contract_metadata'] is not None) == (defect in ('none', 'quote_only'))
-    assert context['quote']['values']['bid'] == 12.79
-    if defect == 'quote_only': assert 'cr_front' not in facts(value)
+    assert (context['contract_metadata'] is not None) == (defect in ('none', 'quote_only', 'stale_price'))
+    if defect != 'stale_price': assert context['quote']['values']['bid'] == 12.79
+    if defect in ('quote_only', 'stale_price'): assert 'cr_front' not in facts(value)
     else: assert facts(value)['cr_front']['values']['last'] == 12.8
 
 
