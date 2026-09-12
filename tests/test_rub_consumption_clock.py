@@ -143,3 +143,32 @@ def test_actual_handler_current_export_and_frozen_builder_share_clock(tmp_path, 
     assert release.compact(source, now=AS_OF, code_revision='a' * 40) == compact
     assert heavy['components']['stage9_daily']['data']['server_core']['blocks'][0]['age_seconds_at_as_of'] == 833.454649
     assert base.current_snapshot_path(tmp_path).read_bytes() == original_bytes
+
+
+@pytest.mark.parametrize('pairs', [[], ['broken'], {'USD/RUB': None}, {'USD/RUB': 'broken'}])
+def test_malformed_basis_does_not_break_read_or_compact(pairs):
+    source = morning()
+    source['components']['live_basis_carry'] = {'status': 'READY', 'data': {'pairs': pairs}}
+    before = deepcopy(source)
+    view = apply_read_freshness(source, now=AS_OF)
+    assert view['components']['live_basis_carry']['data']['status'] == 'UNAVAILABLE'
+    package = release.compact(source, now=AS_OF, code_revision='a' * 40)
+    assert any(item['values']['timeframe'] == '1D' for item in package['timeframe_context'])
+    assert source == before
+
+
+@pytest.mark.parametrize('components', [None, [], {'stage9_daily': []},
+    {'stage9_daily': {'data': []}}, {'stage9_daily': {'data': {'server_core': []}}},
+    {'stage9_daily': {'data': {'server_core': {'blocks': None}}}},
+    {'synchronized_live_market_oi': {'data': {'instruments': []}}},
+    {'live_basis_carry': {'data': {'pairs': {'USD/RUB': {'legs': [], 'metrics': None}}}}},
+    {'live_basis_carry': {'data': {'pairs': {'USD/RUB': {'legs': {'si_front': None},
+        'metrics': [None, {'legs': [None, []], 'freshness': {}}]}}}}},
+    {'live_market_structure': {'data': {'structural_levels': {'active_levels': None}}}}])
+def test_clock_boundary_skips_malformed_containers_without_fabricating_facts(components):
+    from moex_data.rub_consumption_clock import apply
+    source = {'components': components}; original = deepcopy(source)
+    apply(source, now=AS_OF)
+    # The clock never repairs malformed containers into admitted source objects.
+    assert source.get('components') is components
+    assert set(source) == set(original)

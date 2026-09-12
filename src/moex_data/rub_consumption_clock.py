@@ -2,6 +2,14 @@
 from datetime import datetime, timezone
 
 
+def _mapping(value):
+    return value if isinstance(value, dict) else {}
+
+
+def _items(value):
+    return value if isinstance(value, list) else []
+
+
 def age(value, now):
     try:
         parsed = datetime.fromisoformat(value) if isinstance(value, str) else value
@@ -31,8 +39,8 @@ def market(row, now):
 def metric(value, instruments, now):
     freshness = value.get('freshness')
     if isinstance(freshness, dict):
-        freshness['age_seconds_by_leg'] = {key: age(instruments.get(key, {}).get('timestamp'), now)
-                                          for key in value.get('legs', [])}
+        freshness['age_seconds_by_leg'] = {key: age(_mapping(instruments.get(key)).get('timestamp'), now)
+                                          for key in _items(value.get('legs')) if isinstance(key, str)}
         freshness['age_reference_utc'] = now.isoformat()
     value['age_reference_utc'] = now.isoformat()
 
@@ -51,7 +59,7 @@ def structure(levels, now):
             seconds = freshness['age_seconds']; limit = freshness.get('stale_after_seconds')
             if seconds is None or seconds < 0 or (isinstance(limit, (int, float)) and seconds > limit):
                 freshness['status'] = 'STALE'
-    for level in levels.get('active_levels', []):
+    for level in _items(levels.get('active_levels')):
         if isinstance(level, dict):
             level['age_seconds'] = age(level.get('created_at'), now)
             level['age_reference_utc'] = now.isoformat()
@@ -85,20 +93,21 @@ def hour(value, now):
 def apply(snapshot, *, now):
     """Mutate the already-independent canonical read view, not accepted frames."""
     now = now.astimezone(timezone.utc)
-    components = snapshot.get('components', {})
+    components = _mapping(snapshot.get('components'))
     for key in ('stage9_daily', 'stage9_weekly'):
-        data = (components.get(key, {}).get('data') or {})
-        for value in data.get('server_core', {}).get('blocks', []):
+        data = _mapping(_mapping(components.get(key)).get('data'))
+        for value in _items(_mapping(data.get('server_core')).get('blocks')):
             if isinstance(value, dict): block(value, now)
-    instruments = (components.get('synchronized_live_market_oi', {}).get('data') or {}).get('instruments', {})
+    instruments = _mapping(_mapping(_mapping(components.get('synchronized_live_market_oi')).get('data')).get('instruments'))
     for row in instruments.values():
         if isinstance(row, dict): market(row, now)
-    pairs = (components.get('live_basis_carry', {}).get('data') or {}).get('pairs', {})
+    pairs = _mapping(_mapping(_mapping(components.get('live_basis_carry')).get('data')).get('pairs'))
     for pair in pairs.values():
-        for leg in pair.get('legs', {}).values():
+        if not isinstance(pair, dict): continue
+        for leg in _mapping(pair.get('legs')).values():
             if isinstance(leg, dict): market(leg, now)
-        for value in pair.get('metrics', []):
+        for value in _items(pair.get('metrics')):
             if isinstance(value, dict): metric(value, instruments, now)
-    data = components.get('live_market_structure', {}).get('data') or {}
+    data = _mapping(_mapping(components.get('live_market_structure')).get('data'))
     structure(data.get('structural_levels'), now)
     # hourly_observation is an immutable derivation witness. Normalize only its projection.
