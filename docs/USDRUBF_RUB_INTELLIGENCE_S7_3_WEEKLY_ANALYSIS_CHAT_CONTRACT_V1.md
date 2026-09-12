@@ -191,7 +191,7 @@ Return one JSON object with exactly these top-level fields:
 }
 ```
 
-When freshness is verifiable, `snapshot_age_seconds` contains the computed non-negative integer age. When freshness is unverifiable, it must be JSON `null`; never invent `0` as a sentinel.
+When freshness is verifiable, `snapshot_age_seconds` contains the computed non-negative number of seconds, preserving fractional precision for freshness comparisons. When freshness is unverifiable, it must be JSON `null`; never invent `0` as a sentinel.
 
 Scenario probabilities are intentionally not mandatory in v1; do not invent calibrated probabilities before S7.5 calibration.
 
