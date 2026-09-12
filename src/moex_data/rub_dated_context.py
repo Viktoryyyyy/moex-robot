@@ -280,6 +280,7 @@ def describe(snapshot, *, now):
                 item['contract_metadata'] = contract_metadata(_view(frame), key.split(':', 1)[1], value)
             elif key.startswith('basis:'):
                 market = frame['components']['synchronized_live_market_oi']['data']
+                item['values']['status_semantics'] = 'original_accepted_derivation_not_current_admission'
                 item['original_bindings'] = {leg: market['bindings'][leg] for leg in value['legs']}
                 if ref not in leg_views: leg_views[ref] = eligible(frame)
                 admitted_legs = leg_views[ref]
@@ -288,6 +289,10 @@ def describe(snapshot, *, now):
                     original = deepcopy(admitted_legs['market:' + leg])
                     if original.get('quote_usable') is not True:
                         for field in ('bid', 'ask', 'spread', 'bid_source_value', 'offer_source_value'): original.pop(field, None)
+                    original['admission_at_acceptance'] = {'reference_utc': frame['accepted_at_utc'],
+                        **{field: original.pop(field) for field in ('stale', 'quote_stale', 'price_oi_usable',
+                            'quote_usable', 'read_freshness_reason', 'quote_reason') if field in original}}
+                    original['current_usable'] = False
                     item['original_legs'][leg] = original
             observations[key] = item
             from moex_data import rub_consumption_clock as clock

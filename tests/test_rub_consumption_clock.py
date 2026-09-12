@@ -14,6 +14,30 @@ HELPERS = runpy.run_path(str(Path(__file__).parent / 'unit' / 'test_rub_factual_
 AS_OF = datetime.fromisoformat('2026-09-09T03:13:53.454649+00:00')
 
 
+@pytest.mark.parametrize('seconds,limit,expected', [
+    (60, 60, 'FRESH'), (60.000001, 60, 'STALE'),
+    (-.000001, 60, 'UNAVAILABLE'), (None, 60, 'UNAVAILABLE'),
+    (10, None, 'UNAVAILABLE'), (10, True, 'UNAVAILABLE'),
+    (10, float('nan'), 'UNAVAILABLE'), (10, float('inf'), 'UNAVAILABLE'),
+    (10, -1, 'UNAVAILABLE'), (10, '60', 'UNAVAILABLE'),
+])
+def test_basis_consumption_freshness_matches_exact_ages_without_admission_grant(seconds, limit, expected):
+    from moex_data.rub_consumption_clock import metric
+    timestamp = (AS_OF-timedelta(seconds=seconds)).isoformat() if seconds is not None else 'invalid'
+    instruments = {'a': {'timestamp': timestamp}, 'b': {'timestamp': AS_OF.isoformat()}}
+    value = {'legs': ['a', 'b'], 'value': 7, 'status': 'READY',
+        'freshness': {'status': 'FRESH', 'threshold_seconds': limit}}
+    before = deepcopy(instruments)
+    metric(value, instruments, AS_OF)
+    assert value['freshness']['status'] == expected
+    assert value['freshness']['age_seconds_by_leg']['a'] == seconds
+    assert value['value'] == 7 and value['status'] == 'READY'
+    assert instruments == before
+    value['freshness']['status'] = 'UNAVAILABLE'
+    metric(value, instruments, AS_OF)
+    assert value['freshness']['status'] == 'UNAVAILABLE'
+
+
 def morning():
     """Only supplied compact arithmetic, not an exact archived raw replay."""
     source = HELPERS['core_snapshot']()

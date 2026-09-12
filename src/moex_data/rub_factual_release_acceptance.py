@@ -207,6 +207,7 @@ def projection_completeness(snapshot, value, *, now):
         elif key.startswith('basis:'):
             from moex_data.rub_consumption_clock import metric as project_metric_clock
             project_metric_clock(expected, frame['components']['synchronized_live_market_oi']['data']['instruments'], now)
+            expected['status_semantics'] = 'original_accepted_derivation_not_current_admission'
         elif key == 'structure':
             from moex_data.rub_consumption_clock import structure as project_structure_clock
             project_structure_clock(expected['values'], now)
