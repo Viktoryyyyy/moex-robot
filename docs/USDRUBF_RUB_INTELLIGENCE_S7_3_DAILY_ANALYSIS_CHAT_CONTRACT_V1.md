@@ -232,7 +232,7 @@ Return one JSON object with exactly these top-level fields:
 }
 ```
 
-When freshness is verifiable, `snapshot_age_seconds` contains the computed non-negative integer age. When freshness is unverifiable, it must be JSON `null`; never invent `0` as a sentinel.
+When freshness is verifiable, `snapshot_age_seconds` contains the computed non-negative number of seconds, preserving fractional precision for freshness comparisons. When freshness is unverifiable, it must be JSON `null`; never invent `0` as a sentinel.
 
 `BUY` means analytical long-USD/short-RUB preference; `SELL` means analytical short-USD/long-RUB preference; `OUT` means no new directional exposure is recommended by this analysis.
 

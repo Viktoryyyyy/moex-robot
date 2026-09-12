@@ -66,7 +66,7 @@ def _source_freshness(
     source_utc = base._aware(source_timestamp, "live_market_structure.source_timestamp")
     if source_utc > now_utc:
         raise CurrentChatSnapshotError("live market source timestamp is in the future")
-    age_seconds = int((now_utc - source_utc).total_seconds())
+    age_seconds = (now_utc - source_utc).total_seconds()
     return {
         "status": "FRESH" if age_seconds <= base.STALE_AFTER_SECONDS else "STALE",
         "age_seconds": age_seconds,
@@ -125,7 +125,7 @@ def _structural_levels_block(
         active_levels.append(
             {
                 **asdict(zone),
-                "age_seconds": int((now_utc - created_utc).total_seconds()),
+                "age_seconds": (now_utc - created_utc).total_seconds(),
                 "structural_quality": interaction.structural_quality,
                 "provenance": {
                     "component_ref": "components.live_market_structure",
