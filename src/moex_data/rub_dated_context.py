@@ -144,7 +144,9 @@ def eligible(frame):
 
 def _source_times(frame, key, value):
     if key.startswith('market:'):
-        return {'source_event_at_utc': value['timestamp'], 'source_update_at_utc': value.get('source_update_timestamp_utc'),
+        update = value.get('source_update_timestamp_utc')
+        if update is None and value.get('timestamp_semantics') == 'source_row_update_time_not_last_trade_time': update = value['timestamp']
+        return {'source_observation_at_utc': value['timestamp'], 'source_event_at_utc': None, 'source_update_at_utc': update,
                 'received_at_utc': value['received_at_utc'], 'available_at_utc': None}
     if key.startswith('basis:'):
         instruments = frame['components']['synchronized_live_market_oi']['data']['instruments']
@@ -210,7 +212,7 @@ def capture(previous, *, components, now, kind):
             if isinstance(value, dict):
                 return {key: stable(item) for key, item in value.items() if 'age_seconds' not in key
                         and 'receipt' not in key and 'received_at' not in key
-                        and key not in ('freshness_reference_utc', 'checked_at_utc')}
+                        and key not in ('freshness_reference_utc', 'checked_at_utc', 'age_reference_utc', 'source_time_ages')}
             if isinstance(value, list): return [stable(item) for item in value]
             return value
         for key, value in keys.items():
@@ -288,6 +290,14 @@ def describe(snapshot, *, now):
                         for field in ('bid', 'ask', 'spread', 'bid_source_value', 'offer_source_value'): original.pop(field, None)
                     item['original_legs'][leg] = original
             observations[key] = item
+            from moex_data import rub_consumption_clock as clock
+            if key == 'structure':
+                clock.structure(item['values']['values'], now)
+            elif key.startswith('timeframe:'):
+                clock.hour(item['values']['values'], now)
+            elif key.startswith('basis:'):
+                for leg in item['original_legs'].values(): clock.market(leg, now)
+                clock.metric(item['values'], item['original_legs'], now)
     return {'status': 'AVAILABLE' if observations else 'UNAVAILABLE', 'maximum_source_age_seconds': MAX_AGE_SECONDS,
             'scope': 'preparation_only_not_current_or_completed_session', 'as_of_utc': now.isoformat(),
             'observations': observations, 'refusals': rejected, 'current_failures_remain_in_current_coverage': True}

@@ -181,6 +181,8 @@ def projection_completeness(snapshot, value, *, now):
         if allowed_hour and evidence.get('observation') == expected_hour:
             hour = {**expected_hour, 'source_id': evidence['source_id'], 'requested_secid': 'USDRUBF',
                 'receipt_upper_bound_utc': receipt.isoformat(), 'receipt_semantics': evidence['receipt_semantics']}
+            from moex_data.rub_consumption_clock import hour as project_hour_clock
+            project_hour_clock(hour, now)
     except (KeyError, TypeError, ValueError, IndexError, AttributeError): pass
     if hour is not None:
         expected_blocks[('observed_1H.USDRUBF', hour['hour_end_utc'])] = {'block_id': 'observed_1H.USDRUBF',
@@ -197,11 +199,20 @@ def projection_completeness(snapshot, value, *, now):
     _require(set(actual_dated) == set(expected_dated), 'dated reverse factor completeness')
     for key, (ref, frame, source, times, ages) in expected_dated.items():
         item = actual_dated[key]
-        expected = source
+        expected = deepcopy(source)
         if key.startswith('market:'):
             allowed_fields = fields + (('bid', 'ask', 'spread') if source.get('quote_usable') is True else ())
             expected = {name: source[name] for name in allowed_fields if name in source and not (key == 'market:cnyrub_tom' and name == 'oi')}
             _require(item['source_identity']['secid'] == source['secid'], 'dated exact SECID')
+        elif key.startswith('basis:'):
+            from moex_data.rub_consumption_clock import metric as project_metric_clock
+            project_metric_clock(expected, frame['components']['synchronized_live_market_oi']['data']['instruments'], now)
+        elif key == 'structure':
+            from moex_data.rub_consumption_clock import structure as project_structure_clock
+            project_structure_clock(expected['values'], now)
+        elif key.startswith('timeframe:'):
+            from moex_data.rub_consumption_clock import hour as project_hour_clock
+            project_hour_clock(expected['values'], now)
         _require(item['values'] == expected and item['acceptance_evidence_id'] == ref
                  and item['accepted_at_utc'] == frame['accepted_at_utc'] and item['source_times'] == times
                  and item['ages'] == ages and item['current_usable'] is False, 'dated reverse values and admission')

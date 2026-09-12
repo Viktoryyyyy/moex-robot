@@ -152,6 +152,7 @@ def consumer_context(snapshot):
         metadata_values = _dict(_dict(metadata).get('values'))
         quote_allowed = item.get('quote_usable') is True and fresh(item, now)
         market_context[key] = {'price_oi_usable': usable,
+            'source_time_ages': deepcopy(item.get('source_time_ages')),
             'quote_usable': quote_allowed,
             'quote': {'values': {field: item.get(field) for field in QUOTE_FIELDS},
                 'source_identity': {field: item[field] for field in IDENTITY_FIELDS if field in item}} if quote_allowed else None,
@@ -216,6 +217,8 @@ def consumer_context(snapshot):
     from moex_data.rub_hourly_observation import admitted as admitted_hour
     hour = admitted_hour(_dict(components.get('live_market_structure')), now=now)
     if hour is not None:
+        from moex_data.rub_consumption_clock import hour as hour_clock
+        hour_clock(hour, now)
         timeframes.append({'snapshot_path': 'components.live_market_structure.data.hourly_observation',
             'scope': hour['scope'], 'values': {'block_id': 'observed_1H.USDRUBF',
                 'selected_causal_ts_utc': hour['hour_end_utc'], 'selected_causal_time_semantics': 'observed_hour_end_not_availability', **hour}})

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any
+from math import isfinite
 
 from src.moex_research.runners.usdrubf_s7_3_chat_analysis_snapshot import (
     PROJECT,
@@ -46,7 +47,7 @@ def validate_analysis_chat_snapshot(snapshot: Mapping[str, object]) -> None:
     if freshness.get("status") not in {"FRESH", "STALE"}:
         raise ChatSnapshotConsumerError("snapshot read_freshness.status is invalid")
     age = freshness.get("snapshot_age_seconds")
-    if isinstance(age, bool) or not isinstance(age, int) or age < 0:
+    if isinstance(age, bool) or not isinstance(age, (int, float)) or not isfinite(age) or age < 0:
         raise ChatSnapshotConsumerError("snapshot read_freshness.snapshot_age_seconds is invalid")
     read_at = freshness.get("read_at_utc")
     if not isinstance(read_at, str) or not read_at.strip():
