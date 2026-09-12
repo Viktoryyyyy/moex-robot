@@ -83,7 +83,7 @@ def coverage(release):
         status='PARTIAL' if events and not news_ok else None)
     rows[-1].update(event_count=len(events), source_count=summary.get('source_count'),
         ok_source_count=summary.get('ok_source_count'), failed_source_count=summary.get('failed_source_count'),
-        failed_source_ids=summary.get('failed_source_ids'), events_dropped_by_bound=summary.get('events_dropped_by_bound'))
+        failed_source_ids=summary.get('failed_source_ids'), events_dropped_by_bound=selected.get('events_dropped_by_bound'))
     position = release['user_position_context']
     add('explicit_position_state', position.get('status') == 'AVAILABLE' or position.get('availability') == 'NO_EXPLICIT_USER_INPUT',
         position.get('availability'), scope='explicit_user_input_or_explicit_absence')

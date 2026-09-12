@@ -174,6 +174,27 @@ def test_read_selection_preserves_eventless_component():
     assert source == before
 
 
+def test_coverage_drop_count_tracks_consumption_selection_when_news_becomes_background():
+    from moex_data.rub_factual_release import compact
+    source = runpy.run_path(str(Path(__file__).parent/'unit/test_rub_factual_projection.py'))['core_snapshot']()
+    source['identity']['generated_at_utc'] = NOW.isoformat()
+    pool = [compact_primary(asdict(event), identity_proven=True, audit_ref={'sha256':'a'*64})
+            for event in run([record(index) for index in range(10)]).events]
+    source['components']['official_news'] = {'status':'READY', 'refresh_attempted_at':NOW.isoformat(),
+        'data':{'retained_event_pool':pool, 'events':pool,
+                'summary':{'source_count':1,'ok_source_count':1,'failed_source_count':0,
+                           'failed_source_ids':'','events_dropped_by_bound':0}}}
+    before = deepcopy(source)
+    for consumed, expected_count, dropped in [(NOW,10,0),(NOW+timedelta(days=1,seconds=1),4,6)]:
+        package = compact(source,now=consumed,code_revision='a'*40)
+        row = next(item for item in package['factual_coverage']['requirements']
+                   if item['requirement_id'] == 'news_content_and_selection')
+        assert row['event_count'] == expected_count and row['events_dropped_by_bound'] == dropped
+        assert row['events_dropped_by_bound'] == package['news_context']['selection_at_read']['events_dropped_by_bound']
+        assert package['news_context']['summary']['events_dropped_by_bound'] == 0
+    assert source == before
+
+
 def test_partial_feed_failure_keeps_valid_events_and_acquisition_gap(tmp_path, monkeypatch):
     from types import SimpleNamespace
     import socket
