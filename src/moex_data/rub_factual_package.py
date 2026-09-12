@@ -187,7 +187,7 @@ def build_package(snapshot, release, *, now):
             'Dated prior FUTOI observations and timeframe aggregates are not completed-session proof.',
             'Brent is published CLOSE; external CNY is DEXCHUS, not live CNH.',
             'News is original source content with UNKNOWN impact, not neutral analysis.',
-            'News content_status describes preserved headlines; full publication bodies remain in the audit.',
+            'News content_status describes preserved headlines; the audit retains bounded acquired parser bodies, which may be truncated by source adapters.',
             'News available_at is the adapter eligibility timestamp (publication time or acquisition time, depending on source); ingested_at records receipt. Neither proves first historical market availability.',
             'An announced Minfin plan would not prove executed operations.',
             'The report period, dated bar aggregate and prospective horizon are different.'],
