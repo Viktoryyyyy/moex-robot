@@ -186,9 +186,12 @@ def _load_current_live_news(
     if audit_root is not None:
         from moex_research.intelligence.rub_news_selection import select, freeze_audit
         selected_events, audit = select(ordered_events, limit=max_events, as_of=news_as_of)
-        selection_audit = freeze_audit(audit, root=audit_root)
+        selection_audit = freeze_audit(audit, root=audit_root, records=result.acquisition.records,
+            source_results=[{'source_id': item.source_id, 'quality_status': item.quality_status,
+                             'record_count': len(item.records), 'error': item.error} for item in source_results])
     else:
-        selected_events = tuple(ordered_events[-max_events:])
+        from moex_research.intelligence.rub_news_selection import select
+        selected_events, audit = select(ordered_events, limit=max_events, as_of=news_as_of)
     for event in selected_events:
         if _event_time(event.ingested_at, f"news {event.event_id} ingested_at") > news_as_of:
             raise RuntimeError("live News event ingestion is later than News as_of_timestamp")
@@ -208,6 +211,14 @@ def _load_current_live_news(
         "events_excluded_total": len(result.news.events) - len(selected_events),
         "selection_audit": selection_audit,
     }
+    if audit_root is not None:
+        from dataclasses import asdict
+        from moex_data.rub_news_read_view import compact_primary
+        from moex_research.intelligence.rub_news_selection import BACKGROUND_SECONDS
+        summary['_retained_event_pool'] = [compact_primary(asdict(event), identity_proven=True,
+            audit_ref=selection_audit['audit_ref']) for event in ordered_events
+            if event.quality_status == 'OK' and 0 <= (news_as_of - _event_time(event.published_at, 'published_at')).total_seconds() <= BACKGROUND_SECONDS]
+        summary['retained_pool_scope'] = 'all_causal_quality_OK_publications_within_7d_at_capture'
     return selected_events, news_as_of, summary
 
 

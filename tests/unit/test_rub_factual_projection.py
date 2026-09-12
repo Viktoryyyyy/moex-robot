@@ -125,7 +125,7 @@ def core_snapshot():
         {'block_id': tf, 'stage': 7, 'timeframe': tf, 'status': 'ready',
             'selected_causal_ts_utc': stamp, 'selected_observation': {'close': 80}} for tf in ('1H', '1D', '1W')]}}}
     components['official_news'] = {'status': 'READY', 'data_as_of': stamp, 'data': {'events': [{
-        'event_id': 'one', 'headline': 'Published source fact', 'source_reference': 'https://example.org/1',
+        'event_id': 'one', 'source_id': 'official_test', 'content_hash': 'a' * 64, 'headline': 'Published source fact', 'source_reference': 'https://example.org/1',
         'published_at': stamp, 'available_at': stamp, 'ingested_at': stamp, 'direction': 'NEUTRAL'}],
         'summary': {'source_count': 1}}}
     original['user_position_context'] = {'status': 'AVAILABLE', 'explicit_user_input': True,

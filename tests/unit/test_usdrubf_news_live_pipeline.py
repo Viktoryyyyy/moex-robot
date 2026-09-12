@@ -216,6 +216,10 @@ def test_live_pipeline_rejects_future_cluster_history_before_agent_call(tmp_path
             pub_date="Mon, 10 Aug 2026 13:30:00 +0000",
         )
     )
+    prior = run_live_official_news_pipeline(
+        classifier_agent=_classifier_agent, registry_path=registry, source_ids=('one',),
+        opener=lambda request, timeout: _Response(payload, request.full_url), now_fn=lambda: now)
+    publication_cluster = prior.news.events[0].cluster_id
     called = False
 
     def classifier_agent(payload):
@@ -230,9 +234,9 @@ def test_live_pipeline_rejects_future_cluster_history_before_agent_call(tmp_path
             source_ids=("one",),
             opener=lambda request, timeout: _Response(payload, request.full_url),
             now_fn=lambda: now,
-            prior_clusters={"cluster_existing": ("Policy update",)},
+            prior_clusters={publication_cluster: ("Policy update",)},
             prior_event_history={
-                "cluster_existing": (
+                publication_cluster: (
                     {"available_at": (now + timedelta(seconds=1)).isoformat(), "novelty": "NEW"},
                 )
             },

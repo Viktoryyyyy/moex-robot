@@ -203,7 +203,7 @@ def test_fresh_file_does_not_keep_expired_instrument_usable(monkeypatch, tmp_pat
 
 def test_news_collection_does_not_claim_neutral_impact(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(snapshot, '_data_root', lambda: tmp_path)
-    event = {"event_id": "news-1", "direction": "NEUTRAL", "confidence": 0.0,
+    event = {"event_id": "news-1", "source_id": "official_test", "available_at": NOW.isoformat(), "ingested_at": NOW.isoformat(), "direction": "NEUTRAL", "confidence": 0.0,
              "rub_relevance": 0.0, "source_reference": "https://example.org/release",
              "published_at": NOW.isoformat()}
     monkeypatch.setattr(snapshot.live, "_load_current_live_news",

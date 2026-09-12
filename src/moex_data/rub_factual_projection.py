@@ -264,28 +264,30 @@ def consumer_context(snapshot):
         futoi[name] = context
 
     component = _dict(components.get('official_news')); data = _dict(component.get('data'))
-    events = []; rejected = 0
-    for event in data.get('events', []):
-        if not isinstance(event, dict): rejected += 1; continue
-        stamps = [event.get(key) for key in ('published_at', 'available_at', 'ingested_at')]
-        if (component.get('status') != 'READY' or not all(_causal(stamp, now) for stamp in stamps)
-                or not all(datetime.fromisoformat(a) <= datetime.fromisoformat(b) for a, b in zip(stamps, stamps[1:]))):
-            rejected += 1; continue
+    from moex_data.rub_news_read_view import project as project_news
+    news_selection = project_news(component, now=now)
+    events = []
+    for event in news_selection['events']:
         item = {key: deepcopy(event[key]) for key in ('event_id', 'source_id', 'source_reference',
             'source_tier', 'published_at', 'available_at', 'ingested_at', 'headline', 'event_type',
-            'entities', 'source_provenance', 'source_provenance_truncated') if key in event}
+            'entities', 'content_hash', 'primary_provenance', 'publication_identity_policy', 'audit_ref',
+            'publication_age_seconds_at_as_of', 'age_reference_utc', 'selection_band', 'retention_reason') if key in event}
         item.update(direction='UNKNOWN', classification_status='NOT_ANALYZED',
             content_status='AVAILABLE' if item.get('headline') else 'HEADLINE_NOT_PRESERVED_BY_SOURCE',
             event_semantics='source_publication_not_verified_economic_actual_or_consensus')
         events.append(item)
     news = {'events': events, 'summary': deepcopy(data.get('summary', {})),
         'source_status': component.get('status', 'UNAVAILABLE'),
+        'source_acquisition_status': data.get('source_acquisition_status', 'LEGACY_COMPLETENESS_FROM_SUMMARY'),
         'source_refresh_attempted_at': component.get('refresh_attempted_at'),
-        'acquisition_fresh': component.get('status') == 'READY' and _causal(
+        'source_refresh_error_class': component.get('refresh_error_class'),
+        'source_refresh_error': component.get('refresh_error'),
+        'acquisition_fresh': component.get('status') in {'READY', 'PARTIAL'} and _causal(
             component.get('refresh_attempted_at') or _dict(snapshot.get('identity')).get('generated_at_utc'), now, 1200),
         'classification_status': 'NOT_ANALYZED', 'direction': 'UNKNOWN',
-        'selection_scope': 'existing_source_selected_events_no_relevance_acceptance_claim',
-        'excluded_event_count': rejected, 'source_as_of': component.get('data_as_of'),
+        'selection_scope': news_selection['selection_scope'],
+        'selection_at_read': news_selection['selection_at_read'],
+        'excluded_event_count': news_selection['invalid_causal_or_identity_count'], 'source_as_of': component.get('data_as_of'),
         'status': 'AVAILABLE' if events else 'UNAVAILABLE'}
 
     position = _dict(snapshot.get('user_position_context'))

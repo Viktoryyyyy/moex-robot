@@ -345,6 +345,8 @@ def _news_component(now: datetime) -> ProducedComponent:
         max_events=20,
         audit_root=_data_root(),
     )
+    summary = dict(summary)
+    pool = summary.pop('_retained_event_pool', None)
     data = {
         "mode": "LIVE_RSS_UNANALYZED",
         "summary": dict(summary),
@@ -352,7 +354,14 @@ def _news_component(now: datetime) -> ProducedComponent:
         "classification_status": "NOT_ANALYZED",
         "analysis_ready": False,
         "directional_action_authority": False,
+        "source_acquisition_status": 'PARTIAL' if summary.get('failed_source_count', 0) else 'READY',
     }
+    if isinstance(pool, list):
+        data['retained_event_pool'] = unanalyzed_news(pool)
+    from moex_data.rub_news_read_view import project
+    selected = project({'status': 'READY', 'data': data}, now=news_as_of)
+    data['events'] = selected.pop('events')
+    data['consumption_selection'] = selected
     return ProducedComponent(data=data, data_as_of=news_as_of)
 
 
