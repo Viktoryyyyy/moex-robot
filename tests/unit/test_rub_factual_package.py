@@ -17,6 +17,26 @@ def source():
     return HELPERS['core_snapshot']()
 
 
+@pytest.mark.parametrize('audit_ref,expected', [
+    ({'path': '/private/audit.json', 'sha256': 'b'*64}, {'sha256': 'b'*64}),
+    ({'path': '/private/audit.json', 'sha256': 'b'*64, 'schema_version': 'rub_news_capture.v2',
+      'extra': {'body': 'not public'}}, {'sha256': 'b'*64, 'schema_version': 'rub_news_capture.v2'}),
+    ({'sha256': 'b'*64, 'schema_version': '/private/unknown'}, {'sha256': 'b'*64}),
+    ({'sha256': 'B'*64}, None), ({'sha256': 'not-a-digest'}, None), ({'path': '/only/path'}, None),
+    ({'sha256': True}, None), (None, None),
+])
+def test_compact_news_refs_preserve_only_valid_digest_and_known_schema(audit_ref, expected):
+    news = {'events': [{'audit_ref': audit_ref, 'headline': 'Original'}],
+        'summary': {'selection_audit': {'audit_ref': audit_ref}},
+        'unrelated': {'sha256': 'c'*64, 'path': '/private/other'}}
+    before = deepcopy(news)
+    actual = package.compact_news_context(news)
+    assert actual['events'][0] == {'audit_ref': expected, 'headline': 'Original'}
+    assert actual['summary']['selection_audit']['audit_ref'] == expected
+    assert actual['unrelated'] == {}
+    assert news == before
+
+
 def test_compact_facts_source_dates_and_numbers_survive_without_audit_paths():
     original = source(); before = deepcopy(original)
     item = original['components']['synchronized_live_market_oi']['data']['instruments']['cr_front']

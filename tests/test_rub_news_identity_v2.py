@@ -252,7 +252,8 @@ def test_rehashed_capture_or_object_cannot_bypass_reconstruction_contract(tmp_pa
         read_audit(changed, expected_sha256=digest, root=tmp_path)
 
 
-def test_serialized_http_current_frozen_matrix_parity_and_reverse_oracle(tmp_path, monkeypatch):
+@pytest.mark.parametrize('reference_form', ['nested', 'legacy'])
+def test_serialized_http_current_frozen_matrix_parity_and_reverse_oracle(tmp_path, monkeypatch, reference_form):
     from moex_data import rub_factual_release as release
     from moex_data.rub_factual_release_acceptance import projection_completeness
     from moex_data.rub_production_source_matrix import build as matrix
@@ -264,10 +265,14 @@ def test_serialized_http_current_frozen_matrix_parity_and_reverse_oracle(tmp_pat
     source = core['core_snapshot'](); metadata = helpers['_snapshot']()
     for key in ('schema_version','refresh_policy','readiness','authority'): source[key] = metadata[key]
     source['identity'].update(project='MOEX_Bot', generated_at_utc=NOW.isoformat())
-    events = run([record(), record(1,days=6)]).events
+    records = [record(), record(1,days=6)]
+    events = run(records).events
+    _, capture_audit = select(events, limit=20, as_of=NOW)
+    capture = freeze_audit(capture_audit, root=tmp_path, records=records)
+    summary_capture = capture if reference_form == 'nested' else {key: capture[key] for key in ('path', 'sha256')}
     pool = [compact_primary(asdict(e), identity_proven=True, audit_ref={'sha256':'a'*64}) for e in events]
     source['components']['official_news'] = {'status':'READY','refresh_attempted_at':NOW.isoformat(),
-        'data':{'retained_event_pool':pool, 'events':pool, 'summary':{'source_count':1,'ok_source_count':1,'failed_source_count':0,'failed_source_ids':''}}}
+        'data':{'retained_event_pool':pool, 'events':pool, 'summary':{'source_count':1,'ok_source_count':1,'failed_source_count':0,'failed_source_ids':'', 'selection_audit':summary_capture}}}
     source = normalized(source); original = deepcopy(source)
     consumed = NOW+timedelta(days=1, seconds=1)
     monkeypatch.setenv('MOEX_DATA_ROOT',str(tmp_path))
@@ -281,6 +286,12 @@ def test_serialized_http_current_frozen_matrix_parity_and_reverse_oracle(tmp_pat
     assert actual == release.compact(source,now=consumed,code_revision='a'*40)
     exported = release.export_current(output=tmp_path/'exports',now_fn=lambda: consumed,code_revision='a'*40)
     assert json.loads(exported.read_bytes()) == actual
+    expected_ref = {'sha256': capture['sha256']}
+    if reference_form == 'nested': expected_ref['schema_version'] = 'rub_news_capture.v2'
+    assert actual['news_context']['summary']['selection_audit']['audit_ref'] == expected_ref
+    assert all(item['audit_ref'] == expected_ref for item in actual['news_context']['events'])
+    assert all('path' not in item['audit_ref'] for item in actual['news_context']['events'])
+    assert read_audit(capture['path'], expected_sha256=expected_ref['sha256'], root=tmp_path)['audit'] == normalized(capture_audit)
     view = apply_read_freshness(source,now=consumed)
     ids = [e['event_id'] for e in actual['news_context']['events']]
     assert len(ids)==1
