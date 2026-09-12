@@ -129,6 +129,51 @@ def test_legacy_missing_or_malformed_version_never_merges_ambiguous_events():
     assert all('source_provenance' not in e for e in selected)
 
 
+@pytest.mark.parametrize('case', ['conflict', 'conflict_old', 'conflict_quality', 'identical_defaults',
+    'legacy_url', 'proven_url', 'legacy_whitespace', 'proven_whitespace'])
+def test_compact_selectively_refuses_conflicts_and_unproven_references(case):
+    from moex_data.rub_factual_release import compact
+    source = runpy.run_path(str(Path(__file__).parent/'unit/test_rub_factual_projection.py'))['core_snapshot']()
+    source['identity']['generated_at_utc'] = NOW.isoformat()
+    first = asdict(run([record()]).events[0]); events = [first]; expected = 1
+    if case.startswith('conflict'):
+        second = deepcopy(first); second['headline'] = 'Conflicting publication'
+        if case == 'conflict_old': second['published_at'] = (NOW-timedelta(days=8)).isoformat()
+        if case == 'conflict_quality': second['quality_status'] = 'SOURCE_UNAVAILABLE'
+        events.append(second); expected = 0
+    elif case == 'identical_defaults':
+        second = deepcopy(first); second.pop('quality_status'); events.append(second)
+    else:
+        first['source_reference'] = 'https://[invalid' if case.endswith('url') else '   '
+        if case.startswith('proven'):
+            first['publication_identity_policy'] = 'exact_reference_publication_utc_content_hash.v2'; expected = 0
+    source['components']['official_news'] = {'status':'READY', 'data':{'events':events}}
+    before = deepcopy(source)
+    package = compact(source, now=NOW, code_revision='a'*40)
+    assert len(package['news_context']['events']) == expected
+    assert len(package['timeframe_context']) > 0
+    assert source == before
+
+
+@pytest.mark.parametrize('clock', [None, 'invalid', NOW.replace(tzinfo=None), True])
+def test_missing_or_invalid_consumption_clock_never_admits_retained_news(clock):
+    component = {'status':'READY', 'data':{'events':[asdict(run([record()]).events[0])]}}
+    before = deepcopy(component)
+    result = project(component, now=clock)
+    assert result['events'] == [] and result['pool_candidate_count'] == 1
+    assert result['selection_at_read']['as_of'] is None
+    assert result['selection_at_read']['reason'] == 'invalid_consumption_clock'
+    assert component == before
+
+
+def test_read_selection_preserves_eventless_component():
+    from moex_data.rub_news_read_view import apply
+    source = {'components':{'official_news':{'status':'GOVERNED_BLOCKED','data':{'marker':'unchanged'}}}}
+    before = deepcopy(source)
+    apply(source, now=NOW)
+    assert source == before
+
+
 def test_partial_feed_failure_keeps_valid_events_and_acquisition_gap(tmp_path, monkeypatch):
     from types import SimpleNamespace
     import socket

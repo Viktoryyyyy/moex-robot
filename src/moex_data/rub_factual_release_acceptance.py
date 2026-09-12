@@ -271,31 +271,44 @@ def projection_completeness(snapshot, value, *, now):
     news = components.get('official_news', {}); data = news.get('data') or {}
     pool = data.get('retained_event_pool', data.get('legacy_selected_event_pool', data.get('events', [])))
     pool = pool if isinstance(pool, list) else []
-    eligible = []; identities = set()
+    causal = {}; conflicts = set(); publication_keys = {}; identities = set()
     from urllib.parse import urlunsplit
     import re
     for event in pool:
         try:
             stamps = [datetime.fromisoformat(event[key]) for key in ('published_at', 'available_at', 'ingested_at')]
-            seconds = (now - stamps[0]).total_seconds()
             allowed = (news.get('status') in {'READY', 'PARTIAL', 'RETAINED_PREVIOUS'}
                 and all(stamp.utcoffset() is not None for stamp in stamps)
-                and stamps[0] <= stamps[1] <= stamps[2] <= now and seconds <= 604800
-                and event.get('quality_status', 'OK') == 'OK'
+                and stamps[0] <= stamps[1] <= stamps[2] <= now
                 and all(isinstance(event.get(key), str) and event[key] for key in ('event_id', 'source_id', 'source_reference')))
-            valid_hash = isinstance(event.get('content_hash'), str) and re.fullmatch('[0-9a-f]{64}', event['content_hash'])
-            if event.get('publication_identity_policy') == 'exact_reference_publication_utc_content_hash.v2' and not valid_hash: allowed = False
-            if allowed: eligible.append(event)
+            if not allowed: continue
+            normalized = deepcopy(event)
+            normalized.setdefault('quality_status', 'OK'); normalized.setdefault('content_hash', None)
+            hashed = normalized['content_hash']; identity = None
+            if isinstance(hashed, str) and re.fullmatch('[0-9a-f]{64}', hashed):
+                try:
+                    ref = event['source_reference'].strip()
+                    if not ref: raise ValueError('empty publication reference')
+                    parts = urlsplit(ref)
+                    if parts.scheme in ('http', 'https') and parts.netloc:
+                        ref = urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, ''))
+                    identity = (ref, stamps[0].astimezone(timezone.utc), hashed)
+                except ValueError: pass
+            if event.get('publication_identity_policy') == 'exact_reference_publication_utc_content_hash.v2' and identity is None:
+                continue
+            event_id = event['event_id']
+            # Conflicting causal IDs refuse before age/quality selection, including
+            # a conflicting copy that would otherwise fall outside those windows.
+            if event_id in causal and causal[event_id] != normalized: conflicts.add(event_id)
+            causal[event_id] = normalized
+            publication_keys[event_id] = identity if identity is not None else ('legacy', event_id)
         except (KeyError, TypeError, ValueError, OverflowError): pass
+    eligible = [event for event_id, event in causal.items() if event_id not in conflicts
+        and event['quality_status'] == 'OK' and (now-datetime.fromisoformat(event['published_at'])).total_seconds() <= 604800]
     order = lambda event: (datetime.fromisoformat(event['published_at']), event['source_id'], event['event_id'])
     pools = [[], []]
     for event in sorted(eligible, key=order, reverse=True):
-        hashed = event.get('content_hash')
-        if isinstance(hashed, str) and re.fullmatch('[0-9a-f]{64}', hashed):
-            ref = event['source_reference'].strip(); parts = urlsplit(ref)
-            if parts.scheme in ('http', 'https') and parts.netloc: ref = urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, ''))
-            identity = (ref, datetime.fromisoformat(event['published_at']).astimezone(timezone.utc), hashed)
-        else: identity = ('legacy', event['event_id'])
+        identity = publication_keys[event['event_id']]
         if identity in identities: continue
         identities.add(identity)
         pools[int((now - datetime.fromisoformat(event['published_at'])).total_seconds() > 86400)].append(event)

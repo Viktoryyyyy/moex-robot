@@ -2,7 +2,7 @@
 from copy import deepcopy
 from types import SimpleNamespace
 
-from moex_research.intelligence.rub_news_selection import select, _time, CURRENT_POLICY
+from moex_research.intelligence.rub_news_selection import select, _time, CURRENT_POLICY, FRESH_SECONDS, BACKGROUND_SECONDS
 
 PRIMARY = ('source_id', 'source_tier', 'source_reference', 'published_at', 'available_at', 'ingested_at', 'content_hash')
 
@@ -25,6 +25,15 @@ def project(component, *, now):
     scope = 'retained_eligible_publications_at_capture' if isinstance(retained, list) else 'legacy_selected_records_only_no_unselected_candidates'
     pool = retained if isinstance(retained, list) else data.get('legacy_selected_event_pool', data.get('events', []))
     pool = pool if isinstance(pool, list) else []
+    try:
+        now = _time(now)
+    except (ValueError, TypeError, OverflowError):
+        return {'events': [], 'selection_at_read': {'policy': CURRENT_POLICY, 'as_of': None,
+            'status': 'UNAVAILABLE', 'reason': 'invalid_consumption_clock', 'limit': 20,
+            'selected_ids': [], 'selected_bands': {}, 'fresh_horizon_seconds': FRESH_SECONDS,
+            'background_horizon_seconds': BACKGROUND_SECONDS, 'background_limit': 4},
+            'selection_scope': scope, 'invalid_causal_or_identity_count': 0,
+            'pool_candidate_count': len(pool), 'selection_policy': CURRENT_POLICY}
     candidates = []; rejected = 0
     if component.get('status') in {'READY', 'PARTIAL', 'RETAINED_PREVIOUS'}:
         for event in pool:
@@ -71,6 +80,8 @@ def apply(snapshot, *, now):
     component = components.get('official_news') if isinstance(components, dict) else None
     if not isinstance(component, dict) or not isinstance(component.get('data'), dict): return
     data = component['data']
+    if not any(isinstance(data.get(key), list) for key in ('retained_event_pool', 'legacy_selected_event_pool', 'events')):
+        return
     # Freeze the finite legacy input pool before the first read, retaining no raw bodies.
     if 'retained_event_pool' not in data:
         data['legacy_selected_event_pool'] = deepcopy(data.get('legacy_selected_event_pool', data.get('events', [])))
