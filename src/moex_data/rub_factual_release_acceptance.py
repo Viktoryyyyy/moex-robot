@@ -268,17 +268,57 @@ def projection_completeness(snapshot, value, *, now):
         else: _require(comparisons.get('statistics', {}).get('variables') is None, 'Si excluded statistics')
     _require(all(event['direction'] == 'UNKNOWN' and event['classification_status'] == 'NOT_ANALYZED'
         for event in value['news_context']['events']), 'news no neutrality')
-    for event in value['news_context']['events']:
-        _require(any(all(event.get(k) == source.get(k) for k in ('event_id', 'source_reference', 'published_at', 'headline'))
-            for source in (components.get('official_news', {}).get('data') or {}).get('events', [])), 'news source values')
-    news = components.get('official_news', {}); expected_events = []
-    for event in (news.get('data') or {}).get('events', []):
+    news = components.get('official_news', {}); data = news.get('data') or {}
+    pool = data.get('retained_event_pool', data.get('legacy_selected_event_pool', data.get('events', [])))
+    pool = pool if isinstance(pool, list) else []
+    eligible = []; identities = set()
+    from urllib.parse import urlunsplit
+    import re
+    for event in pool:
         try:
-            times = [datetime.fromisoformat(event[key]) for key in ('published_at', 'available_at', 'ingested_at')]
-            allowed = news.get('status') == 'READY' and times[0] <= times[1] <= times[2] <= now
-        except (KeyError, TypeError, ValueError): allowed = False
-        if allowed: expected_events.append(event.get('event_id'))
-    _require([event.get('event_id') for event in value['news_context']['events']] == expected_events, 'news completeness')
+            stamps = [datetime.fromisoformat(event[key]) for key in ('published_at', 'available_at', 'ingested_at')]
+            seconds = (now - stamps[0]).total_seconds()
+            allowed = (news.get('status') in {'READY', 'PARTIAL', 'RETAINED_PREVIOUS'}
+                and all(stamp.utcoffset() is not None for stamp in stamps)
+                and stamps[0] <= stamps[1] <= stamps[2] <= now and seconds <= 604800
+                and event.get('quality_status', 'OK') == 'OK'
+                and all(isinstance(event.get(key), str) and event[key] for key in ('event_id', 'source_id', 'source_reference')))
+            valid_hash = isinstance(event.get('content_hash'), str) and re.fullmatch('[0-9a-f]{64}', event['content_hash'])
+            if event.get('publication_identity_policy') == 'exact_reference_publication_utc_content_hash.v2' and not valid_hash: allowed = False
+            if allowed: eligible.append(event)
+        except (KeyError, TypeError, ValueError, OverflowError): pass
+    order = lambda event: (datetime.fromisoformat(event['published_at']), event['source_id'], event['event_id'])
+    pools = [[], []]
+    for event in sorted(eligible, key=order, reverse=True):
+        hashed = event.get('content_hash')
+        if isinstance(hashed, str) and re.fullmatch('[0-9a-f]{64}', hashed):
+            ref = event['source_reference'].strip(); parts = urlsplit(ref)
+            if parts.scheme in ('http', 'https') and parts.netloc: ref = urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, ''))
+            identity = (ref, datetime.fromisoformat(event['published_at']).astimezone(timezone.utc), hashed)
+        else: identity = ('legacy', event['event_id'])
+        if identity in identities: continue
+        identities.add(identity)
+        pools[int((now - datetime.fromisoformat(event['published_at'])).total_seconds() > 86400)].append(event)
+    selected = []
+    for band, candidates in enumerate(pools):
+        budget = 20 if band == 0 else min(4, 20-len(selected))
+        groups = {}
+        for event in candidates: groups.setdefault(event['source_id'], []).append(event)
+        count = 0
+        while groups and count < budget:
+            for source in sorted(groups, key=lambda key: order(groups[key][0]), reverse=True):
+                if count >= budget: break
+                selected.append(groups[source].pop(0)); count += 1
+                if not groups[source]: del groups[source]
+    selected.sort(key=order)
+    _require([event.get('event_id') for event in value['news_context']['events']] == [event['event_id'] for event in selected], 'news completeness')
+    for actual, original in zip(value['news_context']['events'], selected):
+        _require(all(actual.get(key) == original.get(key) for key in ('event_id', 'source_id', 'source_reference', 'published_at', 'available_at', 'ingested_at', 'content_hash', 'headline')), 'news source values')
+        _require(actual.get('primary_provenance') == {key: original.get(key) for key in ('source_id', 'source_tier', 'source_reference', 'published_at', 'available_at', 'ingested_at', 'content_hash')}, 'news primary provenance')
+        seconds = (now-datetime.fromisoformat(original['published_at'])).total_seconds()
+        _require(actual.get('publication_age_seconds_at_as_of') == seconds, 'news publication age')
+        _require(actual.get('selection_band') == ('fresh' if seconds <= 86400 else 'background'), 'news retention band')
+        _require('source_provenance' not in actual, 'news compact provenance bound')
     basis = components.get('live_basis_carry', {})
     grouped = {}
     if basis.get('status') in {'READY', 'PARTIAL'}:

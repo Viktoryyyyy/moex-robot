@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import pytest
 from moex_research.intelligence.usdrubf_news_macro import NewsEvent
-from moex_research.intelligence.rub_news_selection import select, freeze_audit
+from moex_research.intelligence.rub_news_selection import select_v1 as select, freeze_audit
 
 NOW = datetime(2026, 9, 8, 4, 0, tzinfo=timezone.utc)
 

@@ -65,7 +65,7 @@ def test_exact_duplicates_are_removed_before_classifier() -> None:
 
     first = _record("a", "CBR keeps policy rate unchanged")
     duplicate = _record(
-        "b",
+        "a",
         "CBR keeps policy rate unchanged",
         source_id="agency",
         source_tier="MAJOR_AGENCY_OR_FINANCIAL_MEDIA",
@@ -80,7 +80,7 @@ def test_exact_duplicates_are_removed_before_classifier() -> None:
     assert result.events[0].headline == first.headline
 
 
-def test_semantically_similar_headlines_cluster_before_classifier() -> None:
+def test_semantically_similar_headlines_remain_distinct_publications() -> None:
     calls = []
 
     def classifier(payload):
@@ -98,15 +98,15 @@ def test_semantically_similar_headlines_cluster_before_classifier() -> None:
     ]
     result = process_news_batch(records, as_of_timestamp=T3, classifier=classifier, similarity_threshold=0.6)
 
-    assert result.clusters_classified == 1
-    assert len(calls[0]["cluster_evidence"]) == 2
+    assert result.clusters_classified == 2
+    assert all(len(call["cluster_evidence"]) == 1 for call in calls)
 
 
 def test_classifier_receives_transient_content_for_every_cluster_update() -> None:
     captured = {}
 
     def classifier(payload):
-        captured["evidence"] = payload["cluster_evidence"]
+        captured.setdefault("evidence", []).extend(payload["cluster_evidence"])
         return _classification(novelty="UPDATE")
 
     older = _record(
@@ -139,7 +139,8 @@ def test_classifier_receives_transient_content_for_every_cluster_update() -> Non
     assert len(evidence) == 2
     assert all("normalized_text" in item for item in evidence)
     assert any("updated guidance" in item["normalized_text"] for item in evidence)
-    assert result.events[0].available_at == T2.isoformat()
+    assert len(result.events) == 2
+    assert {event.available_at for event in result.events} == {T1.isoformat(), T2.isoformat()}
 
 
 def test_future_news_is_filtered_before_classifier() -> None:
@@ -201,7 +202,7 @@ def test_prior_cluster_history_is_supplied_to_classifier_not_model_memory() -> N
         return _classification(novelty="UPDATE")
 
     process_news_batch(
-        [_record("b", "New sanctions package officially announced")],
+        [_record("a", "New sanctions package announced")],
         as_of_timestamp=T3,
         classifier=second_classifier,
         prior_clusters={cluster_id: ["New sanctions package announced"]},

@@ -64,7 +64,7 @@ def coverage(release):
         add(key, key in facts, 'accepted_dated_reference_missing', scope='latest_published_dated_reference_not_live')
     news = release['news_context']; summary = _dict(news.get('summary'))
     events = news['events']
-    selected = _dict(summary.get('selection_audit'))
+    selected = _dict(news.get('selection_at_read'))
     counts_valid = (all(type(summary.get(key)) is int and summary[key] >= 0
         for key in ('source_count', 'ok_source_count', 'failed_source_count'))
         and summary['source_count'] > 0

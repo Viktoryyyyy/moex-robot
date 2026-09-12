@@ -44,7 +44,7 @@ def _classification() -> dict[str, object]:
 def test_exact_duplicate_sources_collapse_to_one_event_but_keep_durable_provenance() -> None:
     calls: list[dict[str, object]] = []
     first = _record("official_a", "https://a.example/release", "Same official release")
-    second = _record("official_b", "https://b.example/release", "Same official release")
+    second = _record("official_b", "https://a.example/release", "Same official release")
 
     result = process_news_batch(
         [second, first],
@@ -61,13 +61,13 @@ def test_exact_duplicate_sources_collapse_to_one_event_but_keep_durable_provenan
     assert [item.source_id for item in event.source_provenance] == ["official_a", "official_b"]
     assert [item.source_reference for item in event.source_provenance] == [
         "https://a.example/release",
-        "https://b.example/release",
+        "https://a.example/release",
     ]
     assert event.source_provenance_total_count == 2
     assert event.source_provenance_truncated is False
 
 
-def test_near_duplicate_cluster_persists_all_source_provenance_without_changing_classifier_evidence() -> None:
+def test_near_duplicate_publications_do_not_mix_source_provenance() -> None:
     calls: list[dict[str, object]] = []
     records = [
         _record("official_a", "https://a.example/release", "Policy decision announced"),
@@ -86,17 +86,14 @@ def test_near_duplicate_cluster_persists_all_source_provenance_without_changing_
         similarity_threshold=0.5,
     )
 
-    assert len(result.events) == 1
-    assert len(calls[0]["cluster_evidence"]) == 2
-    assert {item.source_id for item in result.events[0].source_provenance} == {
-        "official_a",
-        "official_b",
-    }
+    assert len(result.events) == 2
+    assert all(len(call["cluster_evidence"]) == 1 for call in calls)
+    assert all(len(event.source_provenance) == 1 for event in result.events)
 
 
 def test_provenance_order_is_deterministic_and_bound_is_explicit() -> None:
     records = [
-        _record(f"source_{index:02d}", f"https://example.test/{index:02d}", "Same bounded release")
+        _record(f"source_{index:02d}", "https://example.test/release", "Same bounded release")
         for index in range(18)
     ]
 
@@ -118,49 +115,18 @@ def test_provenance_order_is_deterministic_and_bound_is_explicit() -> None:
     assert forward.source_provenance_truncated is True
 
 
-def test_truncated_provenance_preserves_distinct_source_before_filling_extra_records() -> None:
-    dominant = [
-        _record(
-            "official_a",
-            f"https://a.example/release/{index:02d}",
-            "Same crowded release",
-        )
-        for index in range(20)
-    ]
-    secondary = _record(
-        "official_b",
-        "https://b.example/release",
-        "Same crowded release",
-        available_at=T2,
-    )
-
-    forward = process_news_batch(
-        [*dominant, secondary],
-        as_of_timestamp=T2,
-        classifier=lambda _payload: _classification(),
-    ).events[0]
-    reverse = process_news_batch(
-        reversed([*dominant, secondary]),
-        as_of_timestamp=T2,
-        classifier=lambda _payload: _classification(),
-    ).events[0]
-
-    assert len(forward.source_provenance) == 16
-    assert {item.source_id for item in forward.source_provenance} == {
-        "official_a",
-        "official_b",
-    }
-    assert sum(item.source_id == "official_b" for item in forward.source_provenance) == 1
-    assert forward.source_provenance == reverse.source_provenance
-    assert forward.source_provenance_total_count == 21
-    assert forward.source_provenance_truncated is True
+def test_repeated_template_with_distinct_references_never_shares_provenance() -> None:
+    records = [_record('official_a', f'https://a.example/release/{i}', 'Same crowded release') for i in range(20)]
+    result = process_news_batch(records, as_of_timestamp=T2, classifier=lambda _: _classification())
+    assert len(result.events) == 20
+    assert all(len(event.source_provenance) == 1 and not event.source_provenance_truncated for event in result.events)
 
 
 def test_snapshot_serializes_provenance_without_raw_content(tmp_path) -> None:
     event = process_news_batch(
         [
             _record("official_a", "https://a.example/release", "Same persisted release"),
-            _record("official_b", "https://b.example/release", "Same persisted release"),
+            _record("official_b", "https://a.example/release", "Same persisted release"),
         ],
         as_of_timestamp=T2,
         classifier=lambda _payload: _classification(),

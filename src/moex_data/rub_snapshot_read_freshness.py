@@ -260,4 +260,6 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
     result["source_observation_context"] = build_context(instruments, now=now)
     from moex_data.rub_consumption_clock import apply as apply_consumption_clock
     apply_consumption_clock(result, now=now)
+    from moex_data.rub_news_read_view import apply as apply_news_selection
+    apply_news_selection(result, now=now)
     return result

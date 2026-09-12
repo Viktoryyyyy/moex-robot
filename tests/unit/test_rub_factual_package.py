@@ -91,6 +91,7 @@ def test_valid_empty_news_and_explicit_no_position_are_usable_states():
     value = admitted_coverage_fixture()
     value['news_context']['events'] = []
     value['news_context']['summary']['selection_audit'] = {'selected_ids': [], 'candidate_count': 0}
+    value['news_context']['selection_at_read'] = {'selected_ids': [], 'candidate_count': 0}
     value['user_position_context'] = {'status': 'UNAVAILABLE', 'availability': 'NO_EXPLICIT_USER_INPUT'}
     assert package.coverage(value)['status'] == 'COMPLETE'
 

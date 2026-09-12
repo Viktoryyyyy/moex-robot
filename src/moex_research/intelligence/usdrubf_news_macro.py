@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from hashlib import sha256
 import re
+from urllib.parse import urlsplit, urlunsplit
 from typing import Callable, Iterable, Mapping, Sequence
 
 
@@ -109,6 +110,21 @@ def _source_rank(tier: str) -> int:
         "OFFICIAL_SECONDARY": 1,
         "MAJOR_AGENCY_OR_FINANCIAL_MEDIA": 2,
     }[tier]
+
+
+def publication_identity(reference: str, published_at, content_hash: str) -> tuple[str, str, str]:
+    """Exact publication/version identity; no headline or topic equivalence."""
+    if not isinstance(content_hash, str) or not re.fullmatch('[0-9a-f]{64}', content_hash):
+        raise ValueError('publication version hash missing or invalid')
+    reference = _required_text(reference, 'source_reference')
+    parts = urlsplit(reference)
+    if parts.scheme in {'http', 'https'} and parts.netloc:
+        reference = urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, ''))
+    return reference, _dt(published_at, 'published_at').astimezone(timezone.utc).isoformat(), content_hash
+
+
+def _publication(record):
+    return publication_identity(record.source_reference, record.published_at, record.content_hash)
 
 
 def _record_order_key(item: NewsSourceRecord) -> tuple[object, ...]:
@@ -329,43 +345,26 @@ def _assign_clusters(
 ) -> dict[str, list[NewsSourceRecord]]:
     if not 0.0 < similarity_threshold <= 1.0:
         raise ValueError("similarity_threshold must be within (0, 1]")
-    cluster_texts: dict[str, list[str]] = {
-        cluster_id: [normalize_text(text) for text in texts]
-        for cluster_id, texts in prior_clusters.items()
-    }
     clusters: dict[str, list[NewsSourceRecord]] = {}
     for record in records:
-        headline = normalize_text(record.headline)
-        best_cluster: str | None = None
-        best_score = 0.0
-        for cluster_id, texts in cluster_texts.items():
-            score = max((_similarity(headline, text) for text in texts), default=0.0)
-            if score >= similarity_threshold and (
-                score > best_score
-                or (score == best_score and (best_cluster is None or cluster_id < best_cluster))
-            ):
-                best_score = score
-                best_cluster = cluster_id
-        if best_cluster is None:
-            best_cluster = _stable_id("cluster", headline)
-            cluster_texts.setdefault(best_cluster, [])
-        clusters.setdefault(best_cluster, []).append(record)
-        cluster_texts[best_cluster].append(headline)
+        cluster_id = _stable_id('publication', *_publication(record))
+        clusters.setdefault(cluster_id, []).append(record)
     return clusters
 
 
 def _build_source_provenance(
     members: Sequence[NewsSourceRecord],
-    exact_records_by_hash: Mapping[str, Sequence[NewsSourceRecord]],
+    exact_records_by_hash: Mapping[tuple[str, str, str], Sequence[NewsSourceRecord]],
+    representative: NewsSourceRecord,
 ) -> tuple[tuple[NewsSourceProvenance, ...], int, bool]:
     expanded = [
         source_record
         for member in members
-        for source_record in exact_records_by_hash.get(member.content_hash, (member,))
+        for source_record in exact_records_by_hash.get(_publication(member), (member,))
     ]
     seen: set[tuple[str, str, str]] = set()
     provenance: list[NewsSourceProvenance] = []
-    for record in sorted(expanded, key=_record_order_key):
+    for record in [representative, *sorted(expanded, key=_record_order_key)]:
         key = (record.source_id, record.source_reference, record.content_hash)
         if key in seen:
             continue
@@ -422,19 +421,20 @@ def process_news_batch(
     as_of = _dt(as_of_timestamp, "as_of_timestamp")
     ordered = sorted(tuple(records), key=_record_order_key)
     eligible: list[NewsSourceRecord] = []
-    exact_records_by_hash: dict[str, list[NewsSourceRecord]] = {}
+    exact_records_by_hash: dict[tuple[str, str, str], list[NewsSourceRecord]] = {}
     future_filtered = 0
     duplicate_count = 0
-    seen_hashes: set[str] = set()
+    seen_hashes: set[tuple[str, str, str]] = set()
     for record in ordered:
-        if record.available_at > as_of:
+        if record.available_at > as_of or record.ingested_at > as_of:
             future_filtered += 1
             continue
-        exact_records_by_hash.setdefault(record.content_hash, []).append(record)
-        if record.content_hash in seen_hashes:
+        identity = _publication(record)
+        exact_records_by_hash.setdefault(identity, []).append(record)
+        if identity in seen_hashes:
             duplicate_count += 1
             continue
-        seen_hashes.add(record.content_hash)
+        seen_hashes.add(identity)
         eligible.append(record)
 
     clusters = _assign_clusters(eligible, prior_clusters or {}, similarity_threshold)
@@ -486,7 +486,7 @@ def process_news_batch(
             representative.content_hash,
         )
         source_provenance, source_provenance_total_count, source_provenance_truncated = (
-            _build_source_provenance(members, exact_records_by_hash)
+            _build_source_provenance(members, exact_records_by_hash, representative)
         )
         events.append(
             NewsEvent(
