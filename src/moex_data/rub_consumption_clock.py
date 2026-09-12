@@ -98,6 +98,11 @@ def apply(snapshot, *, now):
         data = _mapping(_mapping(components.get(key)).get('data'))
         for value in _items(_mapping(data.get('server_core')).get('blocks')):
             if isinstance(value, dict): block(value, now)
+    # JSON persistence separates these assembly aliases from their component blocks.
+    views = _mapping(snapshot.get('analysis_views'))
+    for key in ('carry', 'cny_accepted_context'):
+        for value in _items(views.get(key)):
+            if isinstance(value, dict): block(value, now)
     instruments = _mapping(_mapping(_mapping(components.get('synchronized_live_market_oi')).get('data')).get('instruments'))
     for row in instruments.values():
         if isinstance(row, dict): market(row, now)

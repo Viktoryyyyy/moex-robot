@@ -126,8 +126,20 @@ def test_actual_handler_current_export_and_frozen_builder_share_clock(tmp_path, 
     from src.moex_research.consumers.usdrubf_chat_snapshot_consumer import load_factual_release
     helpers = runpy.run_path(str(Path(__file__).parent / 'unit' / 'test_rub_factual_snapshot_http_server.py'))
     source = morning(); metadata = helpers['_snapshot']()
+    daily = source['components']['stage9_daily']['data']['server_core']['blocks'][0]
+    cny = deepcopy(daily)
+    cny['block_id'] = 'stage3.spot.cny_tom'
+    cny['selected_causal_ts_utc'] = '2026-09-09T03:10:00+00:00'
+    cny['selected_observation']['availability_ts_utc'] = cny['selected_causal_ts_utc']
+    source['analysis_views'] = {'carry': [daily], 'cny_accepted_context': [cny],
+        'levels': [{'created_at': '2026-09-09T03:00:00+00:00', 'price_low': 80}],
+        'level_interactions': [{'event_timestamp': '2026-09-09T03:00:00+00:00'}]}
+    # Persisted aliases are independent objects, unlike the producer's in-memory dict.
+    source = json.loads(json.dumps(source))
+    assert source['analysis_views']['carry'][0] is not source['components']['stage9_daily']['data']['server_core']['blocks'][0]
     for key in ('schema_version', 'refresh_policy', 'readiness', 'authority'): source[key] = metadata[key]
     source['identity']['project'] = 'MOEX_Bot'
+    original = deepcopy(source)
     monkeypatch.setenv('MOEX_DATA_ROOT', str(tmp_path))
     base._atomic_write(base.current_snapshot_path(tmp_path), source)
     original_bytes = base.current_snapshot_path(tmp_path).read_bytes()
@@ -142,7 +154,32 @@ def test_actual_handler_current_export_and_frozen_builder_share_clock(tmp_path, 
     assert len(calls) == 2 and json.loads(exported.read_bytes()) == compact
     assert release.compact(source, now=AS_OF, code_revision='a' * 40) == compact
     assert heavy['components']['stage9_daily']['data']['server_core']['blocks'][0]['age_seconds_at_as_of'] == 833.454649
+    for key, seconds in (('carry', 833.454649), ('cny_accepted_context', 233.454649)):
+        block = heavy['analysis_views'][key][0]
+        assert block['age_seconds_at_as_of'] == seconds
+        assert block['age_reference_utc'] == AS_OF.isoformat()
+        assert block['source_time_ages']['availability']['age_seconds_at_as_of'] == seconds
+        assert block['selected_observation'] == original['analysis_views'][key][0]['selected_observation']
+        assert block['status'] == original['analysis_views'][key][0]['status']
+        assert block == apply_read_freshness(heavy, now=AS_OF)['analysis_views'][key][0]
+    for key in ('levels', 'level_interactions'):
+        assert heavy['analysis_views'][key] == original['analysis_views'][key]
+    assert source == original
     assert base.current_snapshot_path(tmp_path).read_bytes() == original_bytes
+
+
+@pytest.mark.parametrize('views', [None, [], 'broken', {'carry': None},
+    {'carry': {}, 'cny_accepted_context': 'broken'},
+    {'carry': [None, [], 'broken'], 'cny_accepted_context': [None]}])
+def test_malformed_analysis_views_preserve_other_read_and_compact_facts(views):
+    source = morning(); source['analysis_views'] = views
+    source = json.loads(json.dumps(source)); original = deepcopy(source)
+    view = apply_read_freshness(source, now=AS_OF)
+    assert view['analysis_views'] == original['analysis_views']
+    assert view['components']['stage9_daily']['data']['server_core']['blocks'][0]['age_seconds_at_as_of'] == 833.454649
+    compact = release.compact(source, now=AS_OF, code_revision='a' * 40)
+    assert any(item['values']['timeframe'] == '1D' for item in compact['timeframe_context'])
+    assert source == original
 
 
 @pytest.mark.parametrize('pairs', [[], ['broken'], {'USD/RUB': None}, {'USD/RUB': 'broken'}])
