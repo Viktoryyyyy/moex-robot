@@ -18,6 +18,7 @@ def package(root, now):
 def test_last_accepted_simulation_retains_values_but_never_live_after_failure(tmp_path):
     original = publish(tmp_path)
     assert original['accepted_dated_market']['selections']
+    accepted = package(tmp_path, NOW)['dated_context']['observations']
     later = NOW + timedelta(hours=12)
     def failed(): raise TimeoutError()
     fast.refresh(tmp_path, loader=failed, clock=lambda: later)
@@ -30,6 +31,28 @@ def test_last_accepted_simulation_retains_values_but_never_live_after_failure(tm
     assert prior['values']['last'] == original['market']['instruments']['si_front']['last']
     assert prior['current_usable'] is False
     assert not any('futoi' in key for key in value['dated_context']['observations'])
+    basis = value['dated_context']['observations']['basis:usd_rub.front_next_spread_abs']
+    freshness = basis['values']['freshness']
+    assert freshness['age_reference_utc'] == later.isoformat()
+    assert freshness['age_seconds_by_leg'] == {'si_front': 43219.0, 'si_next': 43217.0}
+    assert freshness['status'] == 'STALE'
+    assert basis['current_usable'] is False
+    for key, item in value['dated_context']['observations'].items():
+        if not key.startswith('basis:'): continue
+        first = accepted[key]
+        assert item['values']['freshness']['status'] == 'STALE'
+        assert item['values']['value'] == first['values']['value']
+        assert item['values']['status'] == first['values']['status'] == 'READY'
+        assert item['values']['status_semantics'] == 'original_accepted_derivation_not_current_admission'
+        assert item['values']['source_timestamps'] == first['values']['source_timestamps']
+        assert item['values']['synchronized'] == first['values']['synchronized']
+        assert item['acceptance_evidence_id'] == first['acceptance_evidence_id']
+        for name, leg in item['original_legs'].items():
+            assert leg['current_usable'] is False
+            assert leg['admission_at_acceptance']['reference_utc'] == item['accepted_at_utc']
+            assert leg['admission_at_acceptance'] == first['original_legs'][name]['admission_at_acceptance']
+            assert not any(field in leg for field in ('stale', 'quote_stale', 'price_oi_usable', 'quote_usable'))
+    assert read(tmp_path, later)['accepted_dated_market'] == original['accepted_dated_market']
 
 
 def test_partial_new_frame_preserves_old_spot_and_same_frame_basis(tmp_path):

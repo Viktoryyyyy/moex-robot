@@ -1,5 +1,6 @@
 """Explicit read-view age boundaries; original evidence and values are untouched."""
 from datetime import datetime, timezone
+from math import isfinite
 
 
 def _mapping(value):
@@ -42,6 +43,14 @@ def metric(value, instruments, now):
         freshness['age_seconds_by_leg'] = {key: age(_mapping(instruments.get(key)).get('timestamp'), now)
                                           for key in _items(value.get('legs')) if isinstance(key, str)}
         freshness['age_reference_utc'] = now.isoformat()
+        if freshness.get('status') == 'FRESH':
+            limit = freshness.get('threshold_seconds')
+            ages = list(freshness['age_seconds_by_leg'].values())
+            if (type(limit) not in (int, float) or not isfinite(limit) or limit < 0
+                    or not ages or any(seconds is None or seconds < 0 for seconds in ages)):
+                freshness['status'] = 'UNAVAILABLE'
+            elif any(seconds > limit for seconds in ages):
+                freshness['status'] = 'STALE'
     value['age_reference_utc'] = now.isoformat()
 
 
