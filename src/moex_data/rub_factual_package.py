@@ -3,6 +3,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 from hashlib import sha256
 import json
+import re
 from zoneinfo import ZoneInfo
 
 SCHEMA = 'rub_factual_package.v1'
@@ -26,6 +27,27 @@ def compact_values(value):
 
 def _dict(value):
     return value if isinstance(value, dict) else {}
+
+
+def compact_news_context(news):
+    """Keep content-addressed news references without exposing audit locations."""
+    def reference(value):
+        value = _dict(value)
+        digest = value.get('sha256')
+        if not isinstance(digest, str) or not re.fullmatch('[0-9a-f]{64}', digest):
+            return None
+        result = {'sha256': digest}
+        if value.get('schema_version') == 'rub_news_capture.v2':
+            result['schema_version'] = value['schema_version']
+        return result
+    result = compact_values(news)
+    for original, event in zip(news['events'], result['events']):
+        event['audit_ref'] = reference(original.get('audit_ref'))
+    original = _dict(_dict(news.get('summary')).get('selection_audit'))
+    target = _dict(_dict(result.get('summary')).get('selection_audit'))
+    if 'audit_ref' in original or 'sha256' in original:
+        target['audit_ref'] = reference(original.get('audit_ref', original))
+    return result
 
 
 def coverage(release):
@@ -149,6 +171,8 @@ def build_package(snapshot, release, *, now):
         'timeframe_context', 'futoi_context', 'news_context', 'user_position_context', 'dated_context')}
     macro = release['macro_evidence_inventory']
     chosen['macro_context'] = {key: macro[key] for key in ('facts', 'scheduled_events', 'calendar_coverage')}
+    chosen = compact_values(chosen)
+    chosen['news_context'] = compact_news_context(release['news_context'])
     readiness = coverage(release)
     return {'project': 'MOEX_Bot', 'schema_version': SCHEMA, 'as_of_utc': now.isoformat(),
         'code_revision': release['code_revision'], 'status': readiness['status'],
@@ -156,7 +180,7 @@ def build_package(snapshot, release, *, now):
         'factual_coverage': readiness, 'review_horizons': review_horizons(snapshot, release, now=now),
         'generations': {'slow_snapshot_generated_at_utc': snapshot['identity']['generated_at_utc'],
             'fast_market': deepcopy(snapshot.get('fast_market_read', {'status': 'NOT_ENABLED'})),
-            'components': versions}, **compact_values(chosen),
+            'components': versions}, **chosen,
         'authority': {'model_ready': False, 'forecast_generated': False, 'training_authorized': False,
             'directional_authority': False, 'action_authority': False, 'broker_execution': False},
         'reading_notes': ['Prices and OI are current only where their own usability is true.',
