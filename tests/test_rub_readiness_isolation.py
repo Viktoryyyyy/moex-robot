@@ -141,9 +141,18 @@ def test_real_b_native_hour_delivery_does_not_fill_dated_hour_gap():
     assert any(row['values'].get('timeframe') == '1H' for row in package['timeframe_context'])
     assert package['readiness_dimensions']['preparation']['timeframes'] == {'1H': False, '1D': True, '1W': True}
     assert package['readiness_dimensions']['preparation']['status'] == 'PARTIAL'
+    coverage = {row['requirement_id']: row for row in package['factual_coverage']['requirements']}
+    assert coverage['timeframe_1H']['usable'] is True
+    assert coverage['timeframe_1H']['status'] == 'AVAILABLE'
+    assert 'timeframe_1H' not in package['factual_coverage']['missing_required']
+    assert {tf: coverage['timeframe_' + tf]['dated_preparation_available'] for tf in ('1H', '1D', '1W')} == {'1H': False, '1D': True, '1W': True}
     assert view == before
     selections['timeframe:observed_1H.USDRUBF'] = witness
-    assert release.compact(view, now=now, code_revision='a' * 40)['readiness_dimensions']['preparation']['status'] == 'COMPLETE'
+    restored = release.compact(view, now=now, code_revision='a' * 40)
+    assert restored['readiness_dimensions']['preparation']['status'] == 'COMPLETE'
+    assert all(row['dated_preparation_available'] for row in restored['factual_coverage']['requirements'] if row['requirement_id'].startswith('timeframe_'))
+    assert restored['factual_coverage']['missing_required'] == package['factual_coverage']['missing_required']
+    assert restored['factual_coverage']['status'] == package['factual_coverage']['status']
 
 
 def test_real_b_and_native_d1w1_repeated_compact_preserve_original_input():

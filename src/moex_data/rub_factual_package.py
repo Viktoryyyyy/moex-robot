@@ -50,6 +50,21 @@ def compact_news_context(news):
     return result
 
 
+def _admitted_dated_timeframes(release):
+    dated = release.get('dated_context', {}).get('observations', {})
+    # These observations have already passed dated evidence replay. A current
+    # hourly/structure projection alone is not a dated acceptance witness.
+    dated_timeframes = {_dict(_dict(item.get('values')).get('values')).get('timeframe')
+                        for key, item in dated.items() if key.startswith('timeframe:')}
+    # Existing Stage7 D1/W1 datasets retain their upstream causal/scope admission;
+    # they need neither the bounded witness store nor its 96-hour market TTL.
+    native_timeframes = {row['values'].get('timeframe') for row in release['timeframe_context']
+                        if row.get('scope') == 'accepted_dated_observation_not_session_completion'
+                        and row['values'].get('stage') == 7 and row['values'].get('status') == 'ready'
+                        and row['values'].get('timeframe') in ('1D', '1W')}
+    return {timeframe: timeframe in dated_timeframes or timeframe in native_timeframes for timeframe in ('1H', '1D', '1W')}
+
+
 def coverage(release):
     """Coverage of the approved engineering minimum, independent of model gates."""
     facts = {item['factor']: item for item in release['facts']}
@@ -111,12 +126,13 @@ def coverage(release):
         position.get('availability'), scope='explicit_user_input_or_explicit_absence')
     missing = [row['requirement_id'] for row in rows if not row['usable']]
     dated = release.get('dated_context', {}).get('observations', {})
+    timeframes = _admitted_dated_timeframes(release)
     for row in rows:
         key = row['requirement_id']
         row['dated_preparation_available'] = ('market:' + key in dated if key in MARKETS else
             any(item.startswith('basis:') for item in dated) if key == 'basis_carry' else
             'structure' in dated or 'structure:observed_range_levels.USDRUBF' in dated if key == 'market_structure' else
-            any(item['values'].get('timeframe') == key.removeprefix('timeframe_') for item in release['timeframe_context'])
+            timeframes[key.removeprefix('timeframe_')]
             if key in ('timeframe_1H', 'timeframe_1D', 'timeframe_1W') else False)
     return {'status': 'COMPLETE' if not missing else 'PARTIAL', 'requirements': rows,
         'missing_required': missing, 'model_ready': False,
@@ -136,17 +152,7 @@ def readiness_dimensions(release, coverage):
     if 'basis_carry' in facts:
         current_basis = {'basis:' + metric['values']['metric_id'] for metric in facts['basis_carry']['values']['metrics']}
     missing_basis = sorted(required_basis - available_basis)
-    # These observations have already passed dated evidence replay. A current
-    # hourly/structure projection alone is not a dated acceptance witness.
-    dated_timeframes = {_dict(_dict(item.get('values')).get('values')).get('timeframe')
-                        for key, item in dated.items() if key.startswith('timeframe:')}
-    # Existing Stage7 D1/W1 datasets retain their upstream causal/scope admission;
-    # they need neither the bounded witness store nor its 96-hour market TTL.
-    native_timeframes = {row['values'].get('timeframe') for row in release['timeframe_context']
-                        if row.get('scope') == 'accepted_dated_observation_not_session_completion'
-                        and row['values'].get('stage') == 7 and row['values'].get('status') == 'ready'
-                        and row['values'].get('timeframe') in ('1D', '1W')}
-    timeframes = {timeframe: timeframe in dated_timeframes or timeframe in native_timeframes for timeframe in ('1H', '1D', '1W')}
+    timeframes = _admitted_dated_timeframes(release)
     levels = 'structure' in dated or 'structure:observed_range_levels.USDRUBF' in dated
     complete = all(markets.values()) and not missing_basis and levels and all(timeframes.values())
     live = {key: key in facts for key in MARKETS}

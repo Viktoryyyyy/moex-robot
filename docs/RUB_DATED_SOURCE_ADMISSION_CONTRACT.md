@@ -127,6 +127,11 @@ cannot raise current-live readiness. Existing accepted Stage7 D1/W1 blocks
 retain their own scope and causal rules without migration or a new 96-hour TTL.
 Native Stage7 H1 remains delivered, but preparation H1 requires an admitted
 saved A/B dated hour witness.
+Timeframe coverage `usable` retains the engineering minimum's delivered aggregate
+criterion. Its separate `dated_preparation_available` flag uses the same witness
+rule as preparation readiness; native H1 without a saved witness can therefore
+be usable while unavailable for dated preparation. Overall coverage criteria do
+not change.
 Mandatory Minfin evidence remains an external requirement; no deployment pass
 is asserted by runtime JSON. Overall coverage continues to determine package
 status. B carry metadata describes source row observation/update dates, not
