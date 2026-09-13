@@ -149,6 +149,10 @@ def eligible(frame):
 
 
 def _source_times(frame, key, value):
+    if key == 'structure:observed_range_levels.USDRUBF':
+        return {'first_source_bar_at_utc': value['values']['source_first_bar_end_utc'],
+                'source_observation_at_utc': value['values']['source_last_bar_end_utc'],
+                'source_event_at_utc': None, 'available_at_utc': None, 'received_at_utc': frame['received_at_utc']}
     if key.startswith('market:'):
         update = value.get('source_update_timestamp_utc')
         if update is None and value.get('timestamp_semantics') == 'source_row_update_time_not_last_trade_time': update = value['timestamp']
@@ -251,6 +255,8 @@ def capture_slow(snapshot, previous, *, now, hour_acquisition=None):
     if hour_acquisition is not None:
         from moex_data.rub_dated_hour_source import capture as capture_hour
         snapshot['accepted_dated_slow'] = capture_hour(snapshot['accepted_dated_slow'], hour_acquisition, now=now)
+        from moex_data.rub_observed_range_levels import capture as capture_levels
+        snapshot['accepted_dated_slow'] = capture_levels(snapshot['accepted_dated_slow'], hour_acquisition, now=now)
 
 
 def describe(snapshot, *, now):
@@ -261,6 +267,8 @@ def describe(snapshot, *, now):
         accepted, errors = validated(snapshot.get(field), now)
         rejected.update({field + ':' + key: value for key, value in errors.items()})
         source_store = snapshot.get(field)
+        if isinstance(source_store, dict) and isinstance(source_store.get('last_observed_range_refusal'), str):
+            rejected[field + ':last_observed_range_attempt'] = source_store['last_observed_range_refusal'][:256]
         if isinstance(source_store, dict):
             attempts_hour = source_store.get('last_hour_source_attempts', {})
             if 'last_hour_source_attempts' in source_store and isinstance(attempts_hour, dict) and len(attempts_hour) <= 5:

@@ -103,6 +103,8 @@ def replay(frame):
                     'source_trade_date': next(iter(times.values())).astimezone(basis.MOSCOW).date().isoformat()}
         def add(metric):
             if metric['status'] == 'READY':
+                if 'expiry_metadata' in metric:
+                    metric['expiry_metadata']['source_trade_date_semantics'] = 'source_row_observation_update_date_Europe/Moscow_not_last_trade_event'
                 metric.update(status='DATED_PREPARATION_ONLY', current_usable=False, model_usable=False, historical_pit_usable=False,
                               status_semantics='source_replayed_dated_derivation_not_live', rate_field='last')
                 metric.pop('live_rate_field', None)

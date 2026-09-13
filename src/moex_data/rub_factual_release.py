@@ -99,6 +99,13 @@ def describe(snapshot):
     from moex_data.rub_dated_context import describe as dated_context
     consumers = consumer_context(snapshot)
     accepted_dated = dated_context(snapshot, now=target_now) if target_now else {'status': 'UNAVAILABLE', 'observations': {}}
+    range_item = accepted_dated['observations'].get('structure:observed_range_levels.USDRUBF')
+    range_levels = ({'status': 'AVAILABLE', 'values': deepcopy(range_item['values']['values']),
+                    **{key: deepcopy(range_item[key]) for key in ('origin', 'accepted_at_utc', 'acceptance_evidence_id', 'revision_id',
+                                                                'source_times', 'ages', 'checked_at_utc', 'raw_source_digest')},
+                    'current_usable': False, 'historical_pit_usable': False, 'model_usable': False}
+                   if range_item else {'status': 'UNAVAILABLE', 'reason': next((reason for key, reason in
+                       accepted_dated.get('refusals', {}).items() if 'observed_range' in key), 'observed_range_source_not_admitted')})
     hour_item = accepted_dated['observations'].get('timeframe:observed_1H.USDRUBF')
     if hour_item and hour_item.get('origin') == 'source_observation_acquired_now':
         hour = deepcopy(hour_item['values']['values'])
@@ -112,6 +119,7 @@ def describe(snapshot):
     return {'schema_version': SCHEMA, 'as_of_utc': freshness.get('read_at_utc') if isinstance(freshness, dict) else None,
         'status': 'INCOMPLETE', 'facts': facts, 'horizons': horizons, **consumers,
         'dated_context': accepted_dated,
+        'observed_range_levels': range_levels,
         'macro_evidence_inventory': describe_macro(snapshot, now=target_now),
         'blocking_required_factors': matrix['blocking_required_blocks'],
         'matrix': matrix['rows'], 'session_completion_proven': False,

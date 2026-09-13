@@ -96,6 +96,35 @@ timeframe context with explicit original acceptance/revision references and
 false current, historical-PIT and model use. Release assembly combines the
 independent contexts; consumer admission has no recursive dated lookup.
 
-Observed-date levels, CR history, FUTOI, news and Minfin are outside this
+## Neutral observed range and readiness
+
+Observed range boundaries reuse the same acquired source pages as H1 and
+perform no extra source request. This narrow path requires an admissible H1
+in those pages; it is not a general sparse-range loader. All observed rows
+used by the range must independently pass native identity, strict numeric
+OHLCV, uniqueness/order, closed-bar and 96-hour checks. The range uses the
+observed minimum low and maximum high. Missing five-minute endpoints within
+the observed window are disclosed and never filled; nothing asserts coverage
+outside that window or completion of a session.
+
+These are neutral `RANGE_BOUNDARY` entries, with no support/resistance,
+interactions, EMA, historical pattern or directional claim. Invalid range
+evidence does not erase an independently accepted H1. Range revisions depend
+on their own raw observations; new incomplete-hour rows can update the range
+without renewing the selected H1. The public range section retains original
+acceptance, receipt, source ages and evidence digests, with bidirectional
+projection checks.
+
+Package readiness separates projection delivery, dated preparation, current
+market prices/OI and supported basis, and required external evidence. The
+preparation dimension covers the seven market instruments, all source-supported
+basis metrics, observed levels and exact 1H/1D/1W aggregates. USD spot remains
+unsupported. Current live readiness requires its own admitted rows and metrics.
+Mandatory Minfin evidence remains an external requirement; no deployment pass
+is asserted by runtime JSON. Overall coverage continues to determine package
+status. B carry metadata describes source row observation/update dates, not
+last-trade events; formulas and original A semantics are unchanged.
+
+CR history, FUTOI, news and Minfin source acquisition remain outside this
 change. Tests use labelled synthetic native tables and do not claim archived
 production replay.

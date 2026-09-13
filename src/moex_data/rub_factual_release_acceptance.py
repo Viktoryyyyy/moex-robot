@@ -213,6 +213,16 @@ def projection_completeness(snapshot, value, *, now):
         admitted, _ = validated_witnesses(view.get(field), now)
         expected_dated.update(admitted)
     actual_dated = value['dated_context']['observations']
+    range_evidence = expected_dated.get('structure:observed_range_levels.USDRUBF')
+    actual_range = value.get('observed_range_levels', {})
+    if range_evidence:
+        ref, frame, source, times, ages = range_evidence
+        _require(actual_range == {'status': 'AVAILABLE', 'values': source['values'], 'origin': frame['origin'],
+            'accepted_at_utc': frame['accepted_at_utc'], 'acceptance_evidence_id': ref, 'revision_id': frame['revision_id'],
+            'source_times': times, 'ages': ages, 'checked_at_utc': now.isoformat(), 'raw_source_digest': frame['raw_source_digest'],
+            'current_usable': False, 'historical_pit_usable': False, 'model_usable': False}, 'observed range exact reverse projection')
+    else:
+        _require(actual_range.get('status') == 'UNAVAILABLE' and 'values' not in actual_range, 'observed range cannot invent evidence')
     _require(set(actual_dated) == set(expected_dated), 'dated reverse factor completeness')
     for key, (ref, frame, source, times, ages) in expected_dated.items():
         item = actual_dated[key]
