@@ -1,4 +1,5 @@
 from __future__ import annotations
+from copy import deepcopy
 
 import argparse
 from contextlib import contextmanager
@@ -405,7 +406,10 @@ def _oil_component(now: datetime, previous=None) -> ProducedComponent:
         data['daily_weekly_context'] = brent_daily_context.acquire(data,
             previous=(previous or {}).get('data', {}).get('daily_weekly_context'), audit_root=_data_root())
     except (ChatAnalysisSnapshotError, ValueError, TypeError, KeyError, OSError) as exc:
-        data['daily_weekly_context'] = {'last_attempt': {'status': 'FAILED', 'reason': str(exc)}}
+        prior_context = (previous or {}).get('data', {}).get('daily_weekly_context')
+        data['daily_weekly_context'] = deepcopy(prior_context) if isinstance(prior_context, dict) else {}
+        data['daily_weekly_context']['last_attempt'] = {'status': 'FAILED', 'reason': str(exc),
+            'at': _live_now().isoformat(), 'request_count': 0, 'received_bytes': 0, 'elapsed_seconds': 0}
     return ProducedComponent(data=data, data_as_of=data["received_at"])
 
 

@@ -218,6 +218,18 @@ def test_release_compact_and_reverse_projection_without_network(tmp_path,monkeyp
     before=deepcopy(view)
     monkeypatch.setattr(source,'_fetch',lambda url:pytest.fail('reader must not fetch'))
     full=release.build(view,now=NOW,code_revision='a'*40)
+    for mode in ('omitted', 'duplicated'):
+        altered = deepcopy(full)
+        oil_fact = next(f for f in altered['facts'] if f['factor']=='oil')
+        if mode == 'omitted': altered['facts'].remove(oil_fact)
+        else: altered['facts'].append(deepcopy(oil_fact))
+        with pytest.raises(AssertionError,match='oil fact cardinality'):
+            projection_completeness(view,altered,now=NOW)
+    expired = NOW+timedelta(seconds=1201)
+    unavailable = release.build(view,now=expired,code_revision='a'*40)
+    unavailable['facts'].append(deepcopy(next(f for f in full['facts'] if f['factor']=='oil')))
+    with pytest.raises(AssertionError,match='oil fact cardinality'):
+        projection_completeness(view,unavailable,now=expired)
     package=release.compact(view,now=NOW,code_revision='a'*40)
     fact=next(f for f in package['facts'] if f['factor']=='oil')['values']
     assert fact['price']==129 and fact['expiry']=='2026-10-01' and fact['price_field']=='CLOSE'

@@ -106,6 +106,24 @@ def test_optional_history_root_failure_preserves_latest_oil(monkeypatch):
     assert 'MOEX_DATA_ROOT' in produced.data['daily_weekly_context']['last_attempt']['reason']
 
 
+def test_optional_history_root_failure_retains_previous_evidence(monkeypatch,tmp_path):
+    from test_brent_daily_context import acquire, NOW as HISTORY_NOW
+    history = acquire(tmp_path)
+    prior = {'data': {'daily_weekly_context': history}}
+    before = deepcopy(prior)
+    data = collect()[0]
+    monkeypatch.setattr(brent, 'load_factual_brent', lambda: deepcopy(data))
+    monkeypatch.setattr(snapshot, '_live_now', lambda: HISTORY_NOW)
+    monkeypatch.delenv('MOEX_DATA_ROOT', raising=False)
+    result = snapshot._oil_component(NOW, previous=prior).data['daily_weekly_context']
+    assert result['evidence'] == history['evidence']
+    assert result['anchor'] == history['anchor']
+    assert result['last_attempt']['status'] == 'FAILED'
+    assert result['last_attempt']['at'] == HISTORY_NOW.isoformat()
+    assert result['last_attempt']['request_count'] == result['last_attempt']['received_bytes'] == 0
+    assert prior == before
+
+
 def test_source_semantics_provenance_and_bounded_exact_date_requests():
     data, calls, raw = collect()
     assert len(calls) == 3
