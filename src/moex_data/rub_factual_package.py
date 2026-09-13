@@ -115,12 +115,48 @@ def coverage(release):
         key = row['requirement_id']
         row['dated_preparation_available'] = ('market:' + key in dated if key in MARKETS else
             any(item.startswith('basis:') for item in dated) if key == 'basis_carry' else
-            'structure' in dated if key == 'market_structure' else
-            any(item.startswith('timeframe:') for item in dated) if key == 'timeframe_1H' else False)
+            'structure' in dated or 'structure:observed_range_levels.USDRUBF' in dated if key == 'market_structure' else
+            any(item['values'].get('timeframe') == key.removeprefix('timeframe_') for item in release['timeframe_context'])
+            if key in ('timeframe_1H', 'timeframe_1D', 'timeframe_1W') else False)
     return {'status': 'COMPLETE' if not missing else 'PARTIAL', 'requirements': rows,
         'missing_required': missing, 'model_ready': False,
         'scope': 'current_received_facts_and_admitted_dated_context',
         'external_blockers': [row['requirement_id'] for row in rows if row['status'] == 'EXTERNAL_BLOCKER']}
+
+
+def readiness_dimensions(release, coverage):
+    """Content applicability and projection delivery, never deployment acceptance."""
+    dated = release.get('dated_context', {}).get('observations', {})
+    facts = {row['factor']: row for row in release['facts']}
+    markets = {key: key in facts or 'market:' + key in dated for key in MARKETS}
+    from moex_data.rub_dated_basis_source import refusals
+    required_basis = {key for key, reason in refusals({}, {}).items() if reason != 'usd_spot_source_not_supported'}
+    available_basis = {key for key in dated if key.startswith('basis:')}
+    current_basis = set()
+    if 'basis_carry' in facts:
+        current_basis = {'basis:' + metric['values']['metric_id'] for metric in facts['basis_carry']['values']['metrics']}
+        available_basis.update(current_basis)
+    missing_basis = sorted(required_basis - available_basis)
+    timeframes = {timeframe: any(row['values'].get('timeframe') == timeframe for row in release['timeframe_context'])
+                  for timeframe in ('1H', '1D', '1W')}
+    levels = release.get('observed_range_levels', {}).get('status') == 'AVAILABLE' or release['market_structure']['status'] == 'AVAILABLE'
+    complete = all(markets.values()) and not missing_basis and levels and all(timeframes.values())
+    live = {key: key in facts for key in MARKETS}
+    macro_ids = {row['requirement_id'] for row in release['macro_evidence_inventory']['requirements_coverage']}
+    macro_ids.add('minfin_fx_operations_plan')
+    supplied = {row['requirement_id']: row['usable'] for row in coverage['requirements']}
+    blockers = sorted(key for key in macro_ids if not supplied.get(key, False))
+    return {'delivery': {'status': 'PROJECTION_BUILT', 'operational_acceptance_claimed': False},
+            'preparation': {'status': 'COMPLETE' if complete else 'PARTIAL', 'scope': 'dated_market_basis_observed_levels_timeframes', 'markets': markets,
+                'basis': {'available_metric_ids': sorted(available_basis), 'missing_required_metric_ids': missing_basis,
+                          'complete_for_supported_sources': not missing_basis, 'usd_spot_source_supported': False},
+                'observed_levels_available': levels, 'timeframes': timeframes,
+                'current_or_session_completion_claimed': False, 'model_ready': False},
+            'current_live': {'status': 'AVAILABLE' if all(live.values()) and required_basis <= current_basis else 'PARTIAL' if any(live.values()) else 'UNAVAILABLE',
+                             'scope': 'market_price_oi_and_supported_basis', 'markets': live, 'basis_available': bool(current_basis),
+                             'basis_complete_for_supported_sources': required_basis <= current_basis},
+            'external_required': {'status': 'BLOCKED' if blockers else 'SATISFIED', 'blockers': blockers,
+                                  'minfin_plan_required': True}}
 
 
 def review_horizons(snapshot, release, *, now):
@@ -168,7 +204,7 @@ def build_package(snapshot, release, *, now):
         'read_view_sha256': sha256(encoded(value)).hexdigest()}
         for key, value in sorted(components.items()) if isinstance(value, dict)}
     chosen = {key: release[key] for key in ('facts', 'market_usability', 'market_structure',
-        'timeframe_context', 'futoi_context', 'news_context', 'user_position_context', 'dated_context')}
+        'timeframe_context', 'futoi_context', 'news_context', 'user_position_context', 'dated_context', 'observed_range_levels')}
     macro = release['macro_evidence_inventory']
     chosen['macro_context'] = {key: macro[key] for key in ('facts', 'scheduled_events', 'calendar_coverage')}
     chosen = compact_values(chosen)
@@ -178,6 +214,7 @@ def build_package(snapshot, release, *, now):
         'code_revision': release['code_revision'], 'status': readiness['status'],
         'presentation_integrity': {'status': 'VALIDATED_PROJECTION', 'factual_only': True},
         'factual_coverage': readiness, 'review_horizons': review_horizons(snapshot, release, now=now),
+        'readiness_dimensions': readiness_dimensions(release, readiness),
         'generations': {'slow_snapshot_generated_at_utc': snapshot['identity']['generated_at_utc'],
             'fast_market': deepcopy(snapshot.get('fast_market_read', {'status': 'NOT_ENABLED'})),
             'components': versions}, **chosen,

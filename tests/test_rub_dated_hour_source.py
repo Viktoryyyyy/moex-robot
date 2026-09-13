@@ -98,6 +98,15 @@ def test_96h_every_selected_bar_at_capture_and_read():
     assert not source.capture(None, acquisition(partial=0, now=edge + timedelta(microseconds=1)), now=edge + timedelta(microseconds=1))['selections']
 
 
+def test_finite_native_volumes_cannot_admit_nonfinite_aggregate():
+    raw = acquisition(partial=0)
+    for row in raw['pages'][0]['payload']['data']['data']: row[7] = 1e308
+    selected, hour, skipped = source.select(raw['pages'], DATE, now=NOW)
+    assert selected is None and hour is None
+    assert next(iter(skipped.values()))['reason'] == 'invalid_aggregated_hour_numeric_values'
+    assert source.capture(None, raw, now=NOW)['selections'] == {}
+
+
 def test_acquire_empty_and_error_dates_are_distinct_and_previous_observed_selected():
     class Response:
         status_code = 200

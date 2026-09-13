@@ -83,6 +83,10 @@ def select(pages, source_date, *, now):
                     (('open', 'pr_open'), ('high', 'pr_high'), ('low', 'pr_low'), ('close', 'pr_close'), ('volume', 'vol'))}}
                     for end, raw, _ in group]
             hour = hourly.aggregate(bars)
+            values = hour['values']
+            if (not all(dated._number(values[key], key != 'volume') for key in ('open', 'high', 'low', 'close', 'volume'))
+                    or not values['low'] <= min(values['open'], values['close']) <= max(values['open'], values['close']) <= values['high']):
+                raise ValueError('invalid_aggregated_hour_numeric_values')
             if any(end > receipt for end, _, receipt in group): raise ValueError('native_bar_after_receipt')
             for end, _, _ in group: dated._age(end, dated.stamp(now))
             return {'columns': list(COLUMNS), 'data': [[raw[c] for c in COLUMNS] for _, raw, _ in group]}, hour, diagnostics
