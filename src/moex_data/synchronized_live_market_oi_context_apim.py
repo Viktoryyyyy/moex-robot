@@ -224,6 +224,7 @@ def fetch_live_snapshot(
     http_get: core.HTTPGet = requests.get,
     now_fn: core.NowFn = lambda: datetime.now(timezone.utc),
     env: Mapping[str, str] | None = None,
+    dated_evidence_sink: dict | None = None,
 ) -> dict[str, object]:
     active_env = os.environ if env is None else env
     base = core._api_base_url(base_url, active_env)
@@ -242,6 +243,7 @@ def fetch_live_snapshot(
         "marketdata.columns": ",".join(core.CETS_MARKETDATA_COLUMNS + core.OBSERVATION_MARKETDATA_COLUMNS),
     }
 
+    request_started = core._aware_utc(now_fn(), 'dated_request_start') if dated_evidence_sink is not None else None
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="moex-live-snapshot") as executor:
         forts_future = executor.submit(
             _fetch_forts_verified,
@@ -261,6 +263,16 @@ def fetch_live_snapshot(
             http_get=http_get,
             now_fn=now_fn,
         )
+        if dated_evidence_sink is not None:
+            from moex_data.rub_dated_market_source import collect
+            # Capture each successful source even when the other source fails.
+            for pending, future in ((forts_future, True), (cets_future, False)):
+                try:
+                    response = pending.result()
+                except Exception:
+                    continue
+                collect(dated_evidence_sink, payload=response[0], source_url=response[1],
+                        requested=request_started, received=response[2], future=future)
         forts_payload, forts_source_url, forts_received, completeness = forts_future.result()
         cets_payload, cets_source_url, cets_received = cets_future.result()
 

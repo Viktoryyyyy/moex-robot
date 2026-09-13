@@ -155,6 +155,9 @@ def _source_times(frame, key, value):
         return {'source_observation_at_utc': value['timestamp'], 'source_event_at_utc': None, 'source_update_at_utc': update,
                 'received_at_utc': value['received_at_utc'], 'available_at_utc': None}
     if key.startswith('basis:'):
+        if frame.get('origin') == 'source_observation_acquired_now':
+            from moex_data.rub_dated_market_source import replay
+            return {leg: _source_times(frame, 'market:' + leg, replay(frame['leg_evidence'][leg])) for leg in value['legs']}
         instruments = frame['components']['synchronized_live_market_oi']['data']['instruments']
         return {leg: _source_times(frame, 'market:' + leg, instruments[leg]) for leg in value['legs']}
     if key == 'structure':
@@ -231,7 +234,7 @@ def capture(previous, *, components, now, kind):
                 if key.startswith('timeframe:'):
                     result['source_bars'] = source_frame['components']['live_market_structure']['data']['hourly_observation']['source_bars']
                 return result
-            if prior and observation(prior[1], prior[2]) == observation(frame, value):
+            if prior and prior[1].get('origin', 'previously_accepted_live') == 'previously_accepted_live' and observation(prior[1], prior[2]) == observation(frame, value):
                 continue
             selections[key] = ref
     referenced = set(selections.values())
@@ -252,6 +255,11 @@ def describe(snapshot, *, now):
     for field in ('accepted_dated_slow', 'accepted_dated_market'):
         accepted, errors = validated(snapshot.get(field), now)
         rejected.update({field + ':' + key: value for key, value in errors.items()})
+        source_store = snapshot.get(field)
+        attempts = source_store.get('last_source_admission_refusals', {}) if isinstance(source_store, dict) else {}
+        if isinstance(attempts, dict) and len(attempts) <= 64:
+            rejected.update({field + ':last_source_attempt:' + key: reason for key, reason in attempts.items()
+                             if isinstance(key, str) and isinstance(reason, str) and len(reason) <= 256})
         for key, (ref, frame, value, times, ages) in accepted.items():
             components = snapshot.get('components', {})
             if key.startswith('market:'):
@@ -278,17 +286,29 @@ def describe(snapshot, *, now):
                     'source_generation_at_utc': frame['generation_at_utc'], 'accepted_at_utc': frame['accepted_at_utc'],
                     'checked_at_utc': now.isoformat(), 'acceptance_evidence_id': ref,
                     'source_times': times, 'ages': ages, 'values': deepcopy(value)}
+            acquired_now = frame.get('origin') == 'source_observation_acquired_now'
+            if acquired_now:
+                item.update(origin=frame['origin'], revision_semantics=frame['revision_semantics'],
+                            revision_id=frame['revision_id'], raw_source_digest=frame['raw_source_digest'],
+                            model_usable=False, historical_pit_usable=False,
+                            request_started_at_utc=frame['request_started_at_utc'])
             if key.startswith('market:'):
                 from moex_data.rub_factual_projection import market_values, IDENTITY_FIELDS, contract_metadata
                 item['source_identity'] = {name: value[name] for name in IDENTITY_FIELDS if name in value}
                 item['values'] = market_values(value, spot=key == 'market:cnyrub_tom')
                 item['quote_refusal'] = value.get('dated_quote_refusal')
-                item['contract_metadata'] = contract_metadata(_view(frame), key.split(':', 1)[1], value)
+                item['contract_metadata'] = deepcopy(value['dated_contract_metadata']) if acquired_now else contract_metadata(_view(frame), key.split(':', 1)[1], value)
             elif key.startswith('basis:'):
-                market = frame['components']['synchronized_live_market_oi']['data']
-                item['values']['status_semantics'] = 'original_accepted_derivation_not_current_admission'
-                item['original_bindings'] = {leg: market['bindings'][leg] for leg in value['legs']}
-                if ref not in leg_views: leg_views[ref] = eligible(frame)
+                if acquired_now:
+                    from moex_data.rub_dated_market_source import replay
+                    if ref not in leg_views:
+                        leg_views[ref] = {'market:' + leg: replay(evidence) for leg, evidence in frame['leg_evidence'].items()}
+                    item['original_bindings'] = {leg: leg_views[ref]['market:' + leg]['secid'] for leg in value['legs']}
+                else:
+                    market = frame['components']['synchronized_live_market_oi']['data']
+                    item['values']['status_semantics'] = 'original_accepted_derivation_not_current_admission'
+                    item['original_bindings'] = {leg: market['bindings'][leg] for leg in value['legs']}
+                    if ref not in leg_views: leg_views[ref] = eligible(frame)
                 admitted_legs = leg_views[ref]
                 item['original_legs'] = {}
                 for leg in value['legs']:
@@ -299,6 +319,8 @@ def describe(snapshot, *, now):
                         **{field: original.pop(field) for field in ('stale', 'quote_stale', 'price_oi_usable',
                             'quote_usable', 'read_freshness_reason', 'quote_reason') if field in original}}
                     original['current_usable'] = False
+                    if acquired_now:
+                        original['admission_at_acceptance']['scope'] = 'source_replayed_preparation_only'
                     item['original_legs'][leg] = original
             observations[key] = item
             from moex_data import rub_consumption_clock as clock
