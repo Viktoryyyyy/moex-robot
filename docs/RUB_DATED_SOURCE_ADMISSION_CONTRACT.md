@@ -120,6 +120,11 @@ market prices/OI and supported basis, and required external evidence. The
 preparation dimension covers the seven market instruments, all source-supported
 basis metrics, observed levels and exact 1H/1D/1W aggregates. USD spot remains
 unsupported. Current live readiness requires its own admitted rows and metrics.
+Preparation markets, basis, levels and witnessed H1 use only independently
+validated dated observations (both original live acceptance A and source replay
+B). Current facts cannot fill missing dated witnesses, and dated evidence
+cannot raise current-live readiness. Existing accepted Stage7 timeframe blocks
+retain their own scope and causal rules without migration or a new 96-hour TTL.
 Mandatory Minfin evidence remains an external requirement; no deployment pass
 is asserted by runtime JSON. Overall coverage continues to determine package
 status. B carry metadata describes source row observation/update dates, not

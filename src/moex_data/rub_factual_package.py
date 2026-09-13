@@ -128,18 +128,25 @@ def readiness_dimensions(release, coverage):
     """Content applicability and projection delivery, never deployment acceptance."""
     dated = release.get('dated_context', {}).get('observations', {})
     facts = {row['factor']: row for row in release['facts']}
-    markets = {key: key in facts or 'market:' + key in dated for key in MARKETS}
+    markets = {key: 'market:' + key in dated for key in MARKETS}
     from moex_data.rub_dated_basis_source import refusals
     required_basis = {key for key, reason in refusals({}, {}).items() if reason != 'usd_spot_source_not_supported'}
     available_basis = {key for key in dated if key.startswith('basis:')}
     current_basis = set()
     if 'basis_carry' in facts:
         current_basis = {'basis:' + metric['values']['metric_id'] for metric in facts['basis_carry']['values']['metrics']}
-        available_basis.update(current_basis)
     missing_basis = sorted(required_basis - available_basis)
-    timeframes = {timeframe: any(row['values'].get('timeframe') == timeframe for row in release['timeframe_context'])
-                  for timeframe in ('1H', '1D', '1W')}
-    levels = release.get('observed_range_levels', {}).get('status') == 'AVAILABLE' or release['market_structure']['status'] == 'AVAILABLE'
+    # These observations have already passed dated evidence replay. A current
+    # hourly/structure projection alone is not a dated acceptance witness.
+    dated_timeframes = {_dict(_dict(item.get('values')).get('values')).get('timeframe')
+                        for key, item in dated.items() if key.startswith('timeframe:')}
+    # Existing Stage7 datasets retain their own upstream causal/scope admission;
+    # they need neither the bounded witness store nor its 96-hour market TTL.
+    native_timeframes = {row['values'].get('timeframe') for row in release['timeframe_context']
+                        if row.get('scope') == 'accepted_dated_observation_not_session_completion'
+                        and row['values'].get('stage') == 7 and row['values'].get('status') == 'ready'}
+    timeframes = {timeframe: timeframe in dated_timeframes or timeframe in native_timeframes for timeframe in ('1H', '1D', '1W')}
+    levels = 'structure' in dated or 'structure:observed_range_levels.USDRUBF' in dated
     complete = all(markets.values()) and not missing_basis and levels and all(timeframes.values())
     live = {key: key in facts for key in MARKETS}
     macro_ids = {row['requirement_id'] for row in release['macro_evidence_inventory']['requirements_coverage']}
