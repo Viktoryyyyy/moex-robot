@@ -37,6 +37,11 @@ def _factors(value):
 
 
 def projection_completeness(snapshot, value, *, now):
+    from moex_research.external_data.brent_daily_context import describe as oil_context
+    oil = snapshot.get('components', {}).get('oil', {}).get('data') or {}
+    for fact in value['facts']:
+        if fact['factor'] == 'oil':
+            _require(fact['values'].get('daily_weekly_context') == oil_context(oil.get('daily_weekly_context'), oil, now=now), 'oil history bidirectional projection completeness')
     """Independent reverse oracle over the read-time input, not exported fact counts."""
     from math import isfinite
     view = apply_read_freshness(snapshot, now=now)

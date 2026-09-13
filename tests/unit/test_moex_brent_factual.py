@@ -79,6 +79,8 @@ def component(data=None):
 def use_default_producers(monkeypatch, data=None):
     data = collect()[0] if data is None else deepcopy(data)
     monkeypatch.setattr(brent, "load_factual_brent", lambda: deepcopy(data))
+    from moex_research.external_data import brent_daily_context
+    monkeypatch.setattr(brent_daily_context, 'acquire', lambda *args, **kwargs: {'last_attempt': {'status': 'FAILED', 'reason': 'latest-only test fixture'}})
     producers = dict(snapshot.default_producers())
     assert producers["oil"] is snapshot._oil_component
     for name in producers:
