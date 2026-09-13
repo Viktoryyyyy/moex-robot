@@ -94,7 +94,8 @@ def test_public_projection_exact_dimensions_and_live_separation():
 def test_timeframe_readiness_matches_exact_timeframe():
     from moex_data.rub_factual_package import readiness_dimensions
     release = {'facts': [], 'dated_context': {'observations': {}}, 'market_structure': {'status': 'UNAVAILABLE'},
-               'macro_evidence_inventory': {'requirements_coverage': []}, 'timeframe_context': [{'values': {'timeframe': '1D'}}]}
+               'macro_evidence_inventory': {'requirements_coverage': []}, 'timeframe_context': [
+                   {'scope': 'accepted_dated_observation_not_session_completion', 'values': {'timeframe': '1D', 'stage': 7, 'status': 'ready'}}]}
     dimension = readiness_dimensions(release, {'requirements': [], 'external_blockers': []})
     assert dimension['preparation']['timeframes'] == {'1H': False, '1D': True, '1W': False}
 

@@ -50,6 +50,21 @@ def compact_news_context(news):
     return result
 
 
+def _admitted_dated_timeframes(release):
+    dated = release.get('dated_context', {}).get('observations', {})
+    # These observations have already passed dated evidence replay. A current
+    # hourly/structure projection alone is not a dated acceptance witness.
+    dated_timeframes = {_dict(_dict(item.get('values')).get('values')).get('timeframe')
+                        for key, item in dated.items() if key.startswith('timeframe:')}
+    # Existing Stage7 D1/W1 datasets retain their upstream causal/scope admission;
+    # they need neither the bounded witness store nor its 96-hour market TTL.
+    native_timeframes = {row['values'].get('timeframe') for row in release['timeframe_context']
+                        if row.get('scope') == 'accepted_dated_observation_not_session_completion'
+                        and row['values'].get('stage') == 7 and row['values'].get('status') == 'ready'
+                        and row['values'].get('timeframe') in ('1D', '1W')}
+    return {timeframe: timeframe in dated_timeframes or timeframe in native_timeframes for timeframe in ('1H', '1D', '1W')}
+
+
 def coverage(release):
     """Coverage of the approved engineering minimum, independent of model gates."""
     facts = {item['factor']: item for item in release['facts']}
@@ -111,12 +126,13 @@ def coverage(release):
         position.get('availability'), scope='explicit_user_input_or_explicit_absence')
     missing = [row['requirement_id'] for row in rows if not row['usable']]
     dated = release.get('dated_context', {}).get('observations', {})
+    timeframes = _admitted_dated_timeframes(release)
     for row in rows:
         key = row['requirement_id']
         row['dated_preparation_available'] = ('market:' + key in dated if key in MARKETS else
             any(item.startswith('basis:') for item in dated) if key == 'basis_carry' else
             'structure' in dated or 'structure:observed_range_levels.USDRUBF' in dated if key == 'market_structure' else
-            any(item['values'].get('timeframe') == key.removeprefix('timeframe_') for item in release['timeframe_context'])
+            timeframes[key.removeprefix('timeframe_')]
             if key in ('timeframe_1H', 'timeframe_1D', 'timeframe_1W') else False)
     return {'status': 'COMPLETE' if not missing else 'PARTIAL', 'requirements': rows,
         'missing_required': missing, 'model_ready': False,
@@ -128,18 +144,16 @@ def readiness_dimensions(release, coverage):
     """Content applicability and projection delivery, never deployment acceptance."""
     dated = release.get('dated_context', {}).get('observations', {})
     facts = {row['factor']: row for row in release['facts']}
-    markets = {key: key in facts or 'market:' + key in dated for key in MARKETS}
+    markets = {key: 'market:' + key in dated for key in MARKETS}
     from moex_data.rub_dated_basis_source import refusals
     required_basis = {key for key, reason in refusals({}, {}).items() if reason != 'usd_spot_source_not_supported'}
     available_basis = {key for key in dated if key.startswith('basis:')}
     current_basis = set()
     if 'basis_carry' in facts:
         current_basis = {'basis:' + metric['values']['metric_id'] for metric in facts['basis_carry']['values']['metrics']}
-        available_basis.update(current_basis)
     missing_basis = sorted(required_basis - available_basis)
-    timeframes = {timeframe: any(row['values'].get('timeframe') == timeframe for row in release['timeframe_context'])
-                  for timeframe in ('1H', '1D', '1W')}
-    levels = release.get('observed_range_levels', {}).get('status') == 'AVAILABLE' or release['market_structure']['status'] == 'AVAILABLE'
+    timeframes = _admitted_dated_timeframes(release)
+    levels = 'structure' in dated or 'structure:observed_range_levels.USDRUBF' in dated
     complete = all(markets.values()) and not missing_basis and levels and all(timeframes.values())
     live = {key: key in facts for key in MARKETS}
     macro_ids = {row['requirement_id'] for row in release['macro_evidence_inventory']['requirements_coverage']}
