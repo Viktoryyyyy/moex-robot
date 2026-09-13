@@ -252,3 +252,53 @@ def test_release_compact_and_reverse_projection_without_network(tmp_path,monkeyp
     failed=release.compact(view,now=NOW,code_revision='a'*40)
     fact=next(f for f in failed['facts'] if f['factor']=='oil')['values']
     assert fact['price']==129 and fact['daily_weekly_context']['status']=='UNAVAILABLE'
+
+
+def test_canonical_parallel_refresh_preserves_history_on_second_run(tmp_path, monkeypatch):
+    from test_moex_brent_factual import documents
+    from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_live_market_oi as overlay
+    from moex_data import rub_dated_context, rub_dated_hour_source
+    base = overlay.base
+    docs = documents(published='2026-09-11'); docs[-1]['history'] = block([native_rows()[-1]])
+    calls = []; clock = [NOW]
+    def fetch(url):
+        calls.append(url)
+        if '/history/' in url:
+            return fetcher(native_rows())(url)
+        return json.dumps(docs[0] if '/markets/forts/securities.json' in url else docs[1]).encode()
+    load_latest = source.load_factual_brent
+    acquire_history = context.acquire
+    monkeypatch.setattr(source, 'load_factual_brent', lambda: load_latest(transport=fetch, clock=lambda: clock[0], monotonic=lambda: 0))
+    monkeypatch.setattr(context, 'acquire', lambda *args, **kwargs: acquire_history(*args, **kwargs, transport=fetch, clock=lambda: clock[0], monotonic=lambda: 0))
+    monkeypatch.setattr(base, '_data_root', lambda: tmp_path)
+    monkeypatch.setattr(base, 'load_dotenv', lambda *args, **kwargs: None)
+    monkeypatch.setattr(base, 'install_timestamp_policy', lambda: None)
+    names = ('stage9_daily','stage9_weekly','live_market_structure','cbr_macro','official_news','cnyrub_spot_live','cnyrubf_live')
+    producers = {name: (lambda now: base.ProducedComponent({}, now)) for name in names}
+    producers['oil'] = base._oil_component
+    monkeypatch.setattr(overlay.current_context.current, 'current_producers', lambda: producers)
+    monkeypatch.setattr(overlay.current_context.context, 'run_refresh_all', lambda **kwargs: {})
+    monkeypatch.setattr(overlay.current_context.delta_context, 'build_all', lambda **kwargs: {})
+    monkeypatch.setattr(overlay.current_context, '_attach_futoi_context', lambda *args, **kwargs: None)
+    monkeypatch.setattr(overlay.futoi, '_load_governance', lambda: {})
+    monkeypatch.setattr(overlay.futoi, '_futoi_component', lambda **kwargs: {'status':'UNAVAILABLE','data':None})
+    monkeypatch.setattr(overlay, 'attach_live_market_oi_context', lambda *args, **kwargs: None)
+    monkeypatch.setattr(overlay, 'attach_live_basis_carry_context', lambda *args, **kwargs: None)
+    monkeypatch.setattr(overlay.user_position, 'attach_user_position_context', lambda *args, **kwargs: None)
+    monkeypatch.setattr(rub_dated_hour_source, 'acquire', lambda **kwargs: None)
+    monkeypatch.setattr(rub_dated_context, 'capture_slow', lambda *args, **kwargs: None)
+    first, path = overlay.refresh_snapshot(now_fn=lambda: clock[0], live_loader=lambda: {})
+    first_history = deepcopy(first['components']['oil']['data']['daily_weekly_context'])
+    first_input = deepcopy(first)
+    assert len(calls) == 4 and first_history['last_attempt']['status'] == 'RECEIVED'
+    archives = {p: p.read_bytes() for p in (tmp_path/'audit').rglob('*.json')}
+    calls.clear(); clock[0] += timedelta(seconds=30)
+    second, second_path = overlay.refresh_snapshot(now_fn=lambda: clock[0], live_loader=lambda: {})
+    second_history = second['components']['oil']['data']['daily_weekly_context']
+    assert path == second_path and len(calls) == 3
+    assert second_history['last_attempt']['status'] == 'CACHE_REUSED'
+    assert second_history['evidence'] == first_history['evidence']
+    assert second_history['anchor'] == first_history['anchor']
+    assert first == first_input
+    assert {p: p.read_bytes() for p in (tmp_path/'audit').rglob('*.json')} == archives
+    assert json.loads(path.read_text())['components']['oil']['data']['daily_weekly_context'] == second_history
