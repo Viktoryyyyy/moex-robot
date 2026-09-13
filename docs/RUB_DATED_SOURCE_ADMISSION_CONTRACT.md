@@ -64,5 +64,38 @@ public B entries and basis legs have current/model/historical-PIT use false.
 Live source failure remains visible independently of dated preparation data.
 Original A payloads and default live basis arithmetic are unchanged.
 
-H1, CR history, FUTOI, news and Minfin are outside this change. Tests use
-labelled synthetic native tables and do not claim archived production replay.
+## Observed H1 cold start
+
+The slow producer separately acquires the exact authenticated
+`/iss/datashop/algopack/fo/tradestats/USDRUBF.json` endpoint with explicit
+`from=till` civil dates. It visits at most five Moscow dates intersecting the
+96-hour window, newest first, stopping at the first complete observed hour.
+Weekdays and session completion are never inferred. Limits are four pages,
+1,000 rows and one MB per date. Source errors, empty dates, invalid responses
+and skipped newer incomplete/invalid hours remain distinct diagnostics.
+
+Native data and cursor shape, SECID/date identity, pagination, request/receipt
+ordering and numerical OHLCV invariants are replayed. Native `tradedate` plus
+`tradetime` uses the existing producer's Moscow bar-end interpretation.
+Only twelve unique, ordered, consecutive five-minute ends can form H1; no
+missing interval is filled or corroborated into an observed bar. Every
+selected bar must be within 96 hours at both acceptance and consumer read.
+For example, a newer group with ten observed bars is explicitly skipped.
+
+The selected native twelve-row digest defines the stable revision. Complete
+source pages retain a separate verified digest and remain original custody
+evidence. Refetch timestamps or changes in newer incomplete-hour diagnostics
+cannot renew acceptance. A real correction to the selected hour creates a
+new revision accepted now, never historical availability. The canonical slow
+store keeps latest-attempt diagnostics separately from immutable frames.
+
+Acquisition finishes before canonical snapshot finalization; accepted time
+is therefore after actual source receipt. Existing live structure refusal
+and original A witnesses remain intact. B H1 appears in dated context and
+timeframe context with explicit original acceptance/revision references and
+false current, historical-PIT and model use. Release assembly combines the
+independent contexts; consumer admission has no recursive dated lookup.
+
+Observed-date levels, CR history, FUTOI, news and Minfin are outside this
+change. Tests use labelled synthetic native tables and do not claim archived
+production replay.

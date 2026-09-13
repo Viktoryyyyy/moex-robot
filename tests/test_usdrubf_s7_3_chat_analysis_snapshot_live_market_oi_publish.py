@@ -20,6 +20,7 @@ def _live_ready() -> dict[str, object]:
 
 
 def test_refresh_snapshot_publishes_live_market_oi_inside_canonical_write(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr('moex_data.rub_dated_hour_source.acquire', lambda **kwargs: {'latest_attempts': {}})
     now = datetime(2026, 9, 2, 15, 49, 10, tzinfo=timezone.utc)
     state_dir = tmp_path / "state"
     output_path = state_dir / overlay.base.CURRENT_FILENAME

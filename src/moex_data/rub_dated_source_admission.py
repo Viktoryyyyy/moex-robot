@@ -61,6 +61,9 @@ def validate_envelope(frame, *, now):
 def eligible_source_observation(frame):
     """Dispatch only explicitly supported source-specific semantic replay."""
     validate_envelope(frame, now=frame.get('accepted_at_utc'))
+    if frame.get('source_id') == 'moex_algopack_fo_tradestats_5m' and frame.get('purpose') == 'timeframe:observed_1H.USDRUBF':
+        from moex_data.rub_dated_hour_source import replay
+        return {frame['purpose']: replay(frame)}
     if frame.get('source_id') == 'dated_rfud_cets_same_acquisition_basis':
         from moex_data.rub_dated_basis_source import replay
         from moex_data.synchronized_live_market_oi_context import SynchronizedLiveMarketOIError
