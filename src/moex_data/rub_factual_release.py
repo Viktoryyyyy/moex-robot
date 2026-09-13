@@ -80,6 +80,10 @@ def describe(snapshot):
             fact = {k: data[k] for k in ('secid', 'series_id', 'units', 'value', 'price', 'price_unit', 'ohlc',
                 'observations', 'document_format', 'next_scheduled_release', 'weekly_release_calendar_accepted', 'observation_start', 'observation_end', 'indices', 'weekly_change_percent', 'listed_publication_date', 'index_manifest_sha256', 'document_manifest_sha256', 'source_trade_date', 'observation_date', 'received_at', 'source_url', 'manifest_sha256', 'raw_sha256', 'provenance', 'observation_month', 'changes_percent', 'quality_status', 'limitations', 'arithmetic_residual', 'source_revision_status') if k in data}
             scope = 'latest_published_dated_reference'
+            if key == 'oil':
+                from moex_research.external_data.brent_daily_context import describe as oil_context
+                fact.update({name: deepcopy(data.get(name)) for name in ('expiry', 'price_field', 'price_semantics', 'selection_rule', 'selection_evaluated_date_moscow')})
+                fact['daily_weekly_context'] = oil_context(data.get('daily_weekly_context'), data, now=target_now)
         facts.append({'factor': key, 'scope': scope, 'snapshot_path': 'components.' + key + '.data', 'values': fact})
     horizons = {}
     from moex_data.rub_trading_target_plan import describe as describe_targets

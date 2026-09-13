@@ -38,9 +38,18 @@ def _factors(value):
 
 def projection_completeness(snapshot, value, *, now):
     """Independent reverse oracle over the read-time input, not exported fact counts."""
+    now = now.astimezone(timezone.utc)
     from math import isfinite
     view = apply_read_freshness(snapshot, now=now)
     components = view.get('components', {})
+    from moex_research.external_data.brent_daily_context import describe as oil_context
+    from moex_research.external_data.moex_brent_factual import factual_usable as oil_usable
+    oil_component = components.get('oil', {})
+    oil = oil_component.get('data') or {}
+    oil_facts = [fact for fact in value['facts'] if fact['factor'] == 'oil']
+    _require(len(oil_facts) == int(oil_usable(oil_component)), 'oil fact cardinality must match reconciled admission')
+    if oil_facts:
+        _require(oil_facts[0]['values'].get('daily_weekly_context') == oil_context(oil.get('daily_weekly_context'), oil, now=now), 'oil history bidirectional projection completeness')
     market = components.get('synchronized_live_market_oi', {}).get('data', {})
     spot = market.get('instruments', {}).get('cnyrub_tom', {})
     price = spot.get('last')

@@ -79,6 +79,8 @@ def component(data=None):
 def use_default_producers(monkeypatch, data=None):
     data = collect()[0] if data is None else deepcopy(data)
     monkeypatch.setattr(brent, "load_factual_brent", lambda: deepcopy(data))
+    from moex_research.external_data import brent_daily_context
+    monkeypatch.setattr(brent_daily_context, 'acquire', lambda *args, **kwargs: {'last_attempt': {'status': 'FAILED', 'reason': 'latest-only test fixture'}})
     producers = dict(snapshot.default_producers())
     assert producers["oil"] is snapshot._oil_component
     for name in producers:
@@ -90,6 +92,36 @@ def use_default_producers(monkeypatch, data=None):
 
 def brent_row(context):
     return next(row for row in matrix.build(context)["rows"] if row["block_id"] == "brent")
+
+
+def test_optional_history_root_failure_preserves_latest_oil(monkeypatch):
+    data = collect()[0]
+    monkeypatch.setattr(brent, 'load_factual_brent', lambda: deepcopy(data))
+    monkeypatch.delenv('MOEX_DATA_ROOT', raising=False)
+    produced = snapshot._oil_component(NOW)
+    assert produced.data['price'] == data['price']
+    assert produced.data['received_at'] == data['received_at']
+    assert produced.data['consumer_factual_use_allowed'] is True
+    assert produced.data['daily_weekly_context']['last_attempt']['status'] == 'FAILED'
+    assert 'MOEX_DATA_ROOT' in produced.data['daily_weekly_context']['last_attempt']['reason']
+
+
+def test_optional_history_root_failure_retains_previous_evidence(monkeypatch,tmp_path):
+    from test_brent_daily_context import acquire, NOW as HISTORY_NOW
+    history = acquire(tmp_path)
+    prior = {'data': {'daily_weekly_context': history}}
+    before = deepcopy(prior)
+    data = collect()[0]
+    monkeypatch.setattr(brent, 'load_factual_brent', lambda: deepcopy(data))
+    monkeypatch.setattr(snapshot, '_live_now', lambda: HISTORY_NOW)
+    monkeypatch.delenv('MOEX_DATA_ROOT', raising=False)
+    result = snapshot._oil_component(NOW, previous=prior).data['daily_weekly_context']
+    assert result['evidence'] == history['evidence']
+    assert result['anchor'] == history['anchor']
+    assert result['last_attempt']['status'] == 'FAILED'
+    assert result['last_attempt']['at'] == HISTORY_NOW.isoformat()
+    assert result['last_attempt']['request_count'] == result['last_attempt']['received_bytes'] == 0
+    assert prior == before
 
 
 def test_source_semantics_provenance_and_bounded_exact_date_requests():

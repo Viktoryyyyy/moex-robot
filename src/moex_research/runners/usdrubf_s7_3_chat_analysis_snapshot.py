@@ -1,4 +1,5 @@
 from __future__ import annotations
+from copy import deepcopy
 
 import argparse
 from contextlib import contextmanager
@@ -397,9 +398,18 @@ def _cny_futures_component(now: datetime) -> ProducedComponent:
     return ProducedComponent(data=data, data_as_of=candle.source_available_at)
 
 
-def _oil_component(now: datetime) -> ProducedComponent:
+def _oil_component(now: datetime, previous=None) -> ProducedComponent:
     del now
     data = brent.load_factual_brent()
+    from moex_research.external_data import brent_daily_context
+    try:
+        data['daily_weekly_context'] = brent_daily_context.acquire(data,
+            previous=(previous or {}).get('data', {}).get('daily_weekly_context'), audit_root=_data_root())
+    except (ChatAnalysisSnapshotError, ValueError, TypeError, KeyError, OSError) as exc:
+        prior_context = (previous or {}).get('data', {}).get('daily_weekly_context')
+        data['daily_weekly_context'] = deepcopy(prior_context) if isinstance(prior_context, dict) else {}
+        data['daily_weekly_context']['last_attempt'] = {'status': 'FAILED', 'reason': str(exc),
+            'at': _live_now().isoformat(), 'request_count': 0, 'received_bytes': 0, 'elapsed_seconds': 0}
     return ProducedComponent(data=data, data_as_of=data["received_at"])
 
 
@@ -569,6 +579,8 @@ def build_snapshot(
 ) -> dict[str, object]:
     now_utc = _aware(now, "now")
     selected_producers = dict(default_producers() if producers is None else producers)
+    if selected_producers.get('oil') is _oil_component:
+        selected_producers['oil'] = lambda at: _oil_component(at, _previous_component(previous, 'oil'))
     if selected_producers.get('futures_calendar') is _futures_calendar_component:
         if calendar_context is None or calendar_context.mode == 'LIVE':
             if abs((now_utc - _live_now()).total_seconds()) > 5:
