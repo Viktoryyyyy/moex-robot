@@ -94,6 +94,18 @@ def brent_row(context):
     return next(row for row in matrix.build(context)["rows"] if row["block_id"] == "brent")
 
 
+def test_optional_history_root_failure_preserves_latest_oil(monkeypatch):
+    data = collect()[0]
+    monkeypatch.setattr(brent, 'load_factual_brent', lambda: deepcopy(data))
+    monkeypatch.delenv('MOEX_DATA_ROOT', raising=False)
+    produced = snapshot._oil_component(NOW)
+    assert produced.data['price'] == data['price']
+    assert produced.data['received_at'] == data['received_at']
+    assert produced.data['consumer_factual_use_allowed'] is True
+    assert produced.data['daily_weekly_context']['last_attempt']['status'] == 'FAILED'
+    assert 'MOEX_DATA_ROOT' in produced.data['daily_weekly_context']['last_attempt']['reason']
+
+
 def test_source_semantics_provenance_and_bounded_exact_date_requests():
     data, calls, raw = collect()
     assert len(calls) == 3

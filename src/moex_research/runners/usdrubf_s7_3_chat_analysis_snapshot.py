@@ -404,7 +404,7 @@ def _oil_component(now: datetime, previous=None) -> ProducedComponent:
     try:
         data['daily_weekly_context'] = brent_daily_context.acquire(data,
             previous=(previous or {}).get('data', {}).get('daily_weekly_context'), audit_root=_data_root())
-    except (ValueError, TypeError, KeyError, OSError) as exc:
+    except (ChatAnalysisSnapshotError, ValueError, TypeError, KeyError, OSError) as exc:
         data['daily_weekly_context'] = {'last_attempt': {'status': 'FAILED', 'reason': str(exc)}}
     return ProducedComponent(data=data, data_as_of=data["received_at"])
 
