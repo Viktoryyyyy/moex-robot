@@ -69,6 +69,12 @@ def _structure_valid(component, accepted):
 
 def eligible(frame):
     """Re-run original admission, not a stored accepted=true label."""
+    origin = frame.get('origin', 'previously_accepted_live')
+    if origin == 'source_observation_acquired_now':
+        from moex_data.rub_dated_source_admission import eligible_source_observation
+        return eligible_source_observation(frame)
+    if origin != 'previously_accepted_live':
+        raise ValueError('unsupported_dated_evidence_origin')
     from moex_data import rub_factual_projection as projection
     accepted = stamp(frame['accepted_at_utc'])
     if stamp(frame['generation_at_utc']) > accepted:
