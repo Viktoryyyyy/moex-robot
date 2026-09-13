@@ -150,6 +150,11 @@ def test_real_origin_a_current_and_saved_witness_have_independent_admission():
     from moex_data import rub_dated_context as dated, rub_factual_release as release
     from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_live_market_oi as live
     view = snapshot(); view['identity']['generated_at_utc'] = NOW.isoformat(); raw = market()
+    # The core market fixture omits APIM's native expiry attachment; without it
+    # four carry metrics are correctly unavailable on both base and fixed code.
+    from test_synchronized_live_market_oi_context import _payloads
+    from moex_data.synchronized_live_market_oi_context_apim import _attach_expiry_metadata
+    _attach_expiry_metadata(raw, _payloads()[0])
     live.attach_live_market_oi_context(view, raw, attempted_at_utc=NOW.isoformat())
     live.attach_live_basis_carry_context(view, raw, attempted_at_utc=NOW.isoformat())
     live_only = release.compact(view, now=NOW, code_revision='a' * 40)['readiness_dimensions']
