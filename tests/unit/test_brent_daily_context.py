@@ -176,6 +176,24 @@ def test_extreme_finite_prices_refuse_nonfinite_comparison_only(tmp_path):
     assert result['daily'][-2]['status']=='AVAILABLE'
 
 
+def test_json_exponent_overflow_retains_invalid_ordinal(tmp_path):
+    rows=native_rows(); rows[9]['CLOSE']='OVERFLOW'
+    fetch=fetcher(rows)
+    value=acquire(tmp_path,rows,transport=lambda url:fetch(url).replace(b'"OVERFLOW"',b'1e999'))
+    result=context.describe(value,latest(rows),now=NOW)
+    assert result['daily'][9]['status']=='UNAVAILABLE'
+    assert result['comparisons']['20obs']['reason']=='invalid_source_row_in_observed_lag'
+    assert result['comparisons']['5obs']['change_abs']==5
+
+
+def test_request_before_collection_start_is_refused(tmp_path):
+    stamps=iter([NOW,NOW-timedelta(seconds=1),NOW])
+    result=context.acquire(latest(),audit_root=tmp_path,clock=lambda:next(stamps),
+        transport=lambda url:pytest.fail('regressed request must not fetch'),monotonic=lambda:0)
+    assert result['last_attempt']['status']=='FAILED'
+    assert result['last_attempt']['reason']=='history request clock regressed before collection'
+
+
 def test_same_date_incremental_overlap_and_no_prefix_splice(tmp_path):
     rows=native_rows(); first=acquire(tmp_path,rows)
     newer=deepcopy(rows)

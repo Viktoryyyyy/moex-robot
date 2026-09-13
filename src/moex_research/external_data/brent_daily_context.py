@@ -29,6 +29,13 @@ def payload_digest(value):
     return sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=True).encode()).hexdigest()
 
 
+def parse_raw(raw):
+    def number(text):
+        value = float(text)
+        return value if math.isfinite(value) else text
+    return json.loads(raw, parse_constant=str, parse_float=number)
+
+
 def week(day):
     start = day - timedelta(days=day.weekday())
     return start, start + timedelta(days=6)
@@ -70,7 +77,7 @@ def _page_rows(batch, latest, accepted):
         source._require(page['source_route'] == route(latest['secid'], start.isoformat(), end.isoformat(), offset), 'history page route mismatch')
         raw = page['raw_body'].encode('utf-8')
         source._require(0 < len(raw) <= source.MAX_BODY_BYTES and sha256(raw).hexdigest() == page['raw_source_id'], 'history raw digest mismatch')
-        payload = json.loads(raw, parse_constant=str)
+        payload = parse_raw(raw)
         source._require(payload == page['payload'], 'history raw replay mismatch')
         source._require(page['payload_digest'] == payload_digest(payload), 'history payload digest mismatch')
         rows = source._rows(payload, 'history'); cursors = source._rows(payload, 'history.cursor')
@@ -153,11 +160,12 @@ def acquire(latest, *, previous=None, audit_root, clock=lambda: datetime.now(tim
             source._require(monotonic()-started <= BUDGET_SECONDS, 'history collection budget exceeded')
             url = route(latest['secid'], start.isoformat(), end.isoformat(), offset)
             requested = source._utc(clock()); request_count += 1
+            source._require(requested >= now, 'history request clock regressed before collection')
             raw = (transport or source._fetch)(url); received = source._utc(clock())
             source._require(isinstance(raw, bytes) and 0 < len(raw) <= source.MAX_BODY_BYTES, 'history raw body size invalid')
             byte_count += len(raw)
             raw_id = immutable(audit_root, 'raw', raw)
-            payload = json.loads(raw, parse_constant=str)
+            payload = parse_raw(raw)
             pages.append({'source_route': url, 'requested_at': requested.isoformat(), 'received_at': received.isoformat(),
                 'raw_source_id': raw_id, 'raw_body': raw.decode('utf-8'), 'payload_digest': payload_digest(payload), 'payload': payload})
             rows = source._rows(payload, 'history'); cursor = source._rows(payload, 'history.cursor')
