@@ -123,8 +123,10 @@ unsupported. Current live readiness requires its own admitted rows and metrics.
 Preparation markets, basis, levels and witnessed H1 use only independently
 validated dated observations (both original live acceptance A and source replay
 B). Current facts cannot fill missing dated witnesses, and dated evidence
-cannot raise current-live readiness. Existing accepted Stage7 timeframe blocks
+cannot raise current-live readiness. Existing accepted Stage7 D1/W1 blocks
 retain their own scope and causal rules without migration or a new 96-hour TTL.
+Native Stage7 H1 remains delivered, but preparation H1 requires an admitted
+saved A/B dated hour witness.
 Mandatory Minfin evidence remains an external requirement; no deployment pass
 is asserted by runtime JSON. Overall coverage continues to determine package
 status. B carry metadata describes source row observation/update dates, not

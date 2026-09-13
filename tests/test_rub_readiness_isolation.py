@@ -94,6 +94,24 @@ def test_live_levels_and_hour_do_not_substitute_and_origin_a_keys_remain_support
     assert readiness_dimensions(value, COVERAGE)['preparation']['status'] == 'COMPLETE'
 
 
+@pytest.mark.parametrize('origin', ['previously_accepted_live', 'source_observation_acquired_now'])
+def test_native_stage7_hour_cannot_replace_saved_dated_hour(origin):
+    value = fixture(dated=True)
+    observations = value['dated_context']['observations']
+    witness = observations.pop('timeframe:observed_1H.USDRUBF')
+    witness['origin'] = origin
+    native_hour = deepcopy(value['timeframe_context'][0])
+    native_hour['values']['timeframe'] = '1H'
+    value['timeframe_context'].append(native_hour)
+    before = deepcopy(value)
+    prep = readiness_dimensions(value, COVERAGE)['preparation']
+    assert prep['timeframes'] == {'1H': False, '1D': True, '1W': True}
+    assert prep['status'] == 'PARTIAL'
+    assert value == before
+    observations['timeframe:observed_1H.USDRUBF'] = witness
+    assert readiness_dimensions(value, COVERAGE)['preparation']['status'] == 'COMPLETE'
+
+
 def real_b_snapshot():
     from test_rub_fast_market import snapshot
     from test_rub_observed_range_levels import store, NOW
@@ -106,6 +124,26 @@ def real_b_snapshot():
         {'block_id': 'native.' + tf, 'timeframe': tf, 'stage': 7, 'status': 'ready', 'selected_causal_ts_utc': '2026-01-01T00:00:00+00:00'}
         for tf in ('1D', '1W')]}}}
     return value, NOW
+
+
+def test_real_b_native_hour_delivery_does_not_fill_dated_hour_gap():
+    from moex_data import rub_factual_release as release
+    view, now = real_b_snapshot()
+    selections = view['accepted_dated_slow']['selections']
+    witness = selections.pop('timeframe:observed_1H.USDRUBF')
+    blocks = view['components']['stage9_daily']['data']['server_core']['blocks']
+    native_hour = deepcopy(blocks[0])
+    native_hour.update(block_id='native.1H', timeframe='1H')
+    blocks.append(native_hour)
+    before = deepcopy(view)
+    package = release.compact(view, now=now, code_revision='a' * 40)
+    assert 'timeframe:observed_1H.USDRUBF' not in package['dated_context']['observations']
+    assert any(row['values'].get('timeframe') == '1H' for row in package['timeframe_context'])
+    assert package['readiness_dimensions']['preparation']['timeframes'] == {'1H': False, '1D': True, '1W': True}
+    assert package['readiness_dimensions']['preparation']['status'] == 'PARTIAL'
+    assert view == before
+    selections['timeframe:observed_1H.USDRUBF'] = witness
+    assert release.compact(view, now=now, code_revision='a' * 40)['readiness_dimensions']['preparation']['status'] == 'COMPLETE'
 
 
 def test_real_b_and_native_d1w1_repeated_compact_preserve_original_input():

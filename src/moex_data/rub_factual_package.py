@@ -140,11 +140,12 @@ def readiness_dimensions(release, coverage):
     # hourly/structure projection alone is not a dated acceptance witness.
     dated_timeframes = {_dict(_dict(item.get('values')).get('values')).get('timeframe')
                         for key, item in dated.items() if key.startswith('timeframe:')}
-    # Existing Stage7 datasets retain their own upstream causal/scope admission;
+    # Existing Stage7 D1/W1 datasets retain their upstream causal/scope admission;
     # they need neither the bounded witness store nor its 96-hour market TTL.
     native_timeframes = {row['values'].get('timeframe') for row in release['timeframe_context']
                         if row.get('scope') == 'accepted_dated_observation_not_session_completion'
-                        and row['values'].get('stage') == 7 and row['values'].get('status') == 'ready'}
+                        and row['values'].get('stage') == 7 and row['values'].get('status') == 'ready'
+                        and row['values'].get('timeframe') in ('1D', '1W')}
     timeframes = {timeframe: timeframe in dated_timeframes or timeframe in native_timeframes for timeframe in ('1H', '1D', '1W')}
     levels = 'structure' in dated or 'structure:observed_range_levels.USDRUBF' in dated
     complete = all(markets.values()) and not missing_basis and levels and all(timeframes.values())
