@@ -25,7 +25,7 @@ def _number(value, positive=False):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value) and (value > 0 if positive else value >= 0)
 
 
-def aggregate(frame, spec, *, available):
+def aggregate(frame, spec, *, available, binding_available):
     """Require original per-row identity, observed times and finite coherent OHLCV."""
     import pandas as pd
     if len(frame) != spec.row_count or frame.empty:
@@ -41,6 +41,7 @@ def aggregate(frame, spec, *, available):
     if receipts.dt.tz is None or receipts.isna().any(): raise ValueError('contract_invalid_source_receipt')
     receipts = receipts.dt.tz_convert('UTC')
     if (receipts > available).any() or (timestamps > receipts).any(): raise ValueError('contract_noncausal_source_receipt')
+    if (receipts < binding_available).any(): raise ValueError('contract_binding_after_source_receipt')
     if timestamps.isna().any() or timestamps.duplicated().any() or not timestamps.is_monotonic_increasing:
         raise ValueError('contract_duplicate_invalid_or_unordered_times')
     if (timestamps > available).any() or not timestamps.dt.tz_convert('Europe/Moscow').dt.date.eq(date.fromisoformat(spec.trade_date)).all():
@@ -55,6 +56,7 @@ def aggregate(frame, spec, *, available):
     result = {'secid': spec.secid, 'instrument_id_at_source': spec.instrument_id,
         'source_date': spec.trade_date, 'source_bar_count': len(rows),
         'source_first_bar_at_utc': timestamps.iloc[0].isoformat(), 'source_last_bar_at_utc': timestamps.iloc[-1].isoformat(),
+        'source_receipt_lower_bound_utc': receipts.min().isoformat(),
         'source_receipt_upper_bound_utc': receipts.max().isoformat(),
         'open': rows[0]['open'], 'high': max(row['high'] for row in rows), 'low': min(row['low'] for row in rows),
         'close': rows[-1]['close'], 'volume': sum(row['volume'] for row in rows),
@@ -147,7 +149,7 @@ def collect(root, *, now):
                 if spec.dataset_id != 'futures_raw_5m': continue
                 for path in (spec.partition_path, spec.manifest_path, spec.quality_path):
                     step9._resolve_root_ref(step9.ROOT_REF_PREFIX + path.relative_to(root).as_posix(), 'archive_artifact', root)
-                values = aggregate(pd.read_parquet(spec.partition_path), spec, available=finished)
+                values = aggregate(pd.read_parquet(spec.partition_path), spec, available=finished, binding_available=binding)
                 hashes = stage3._pointer_values(spec, acceptance_run_id=run, binding_availability_ts_utc=binding.isoformat())
                 values.update(binding_observed_at_utc=binding.isoformat(), parent_finished_at_utc=finished.isoformat(),
                     binding_at_source=deepcopy(next(item for item in pilot['bindings'] if item['instrument_id'] == spec.instrument_id)),
@@ -208,7 +210,8 @@ def describe(evidence, *, now):
             if any(not _number(row[key], True) for key in ('open', 'high', 'low', 'close')) or not _number(row['volume']): raise ValueError('invalid_contract_values')
             if not row['low'] <= min(row['open'], row['close']) <= max(row['open'], row['close']) <= row['high']: raise ValueError('invalid_contract_ohlc')
             if not (_stamp(row['source_first_bar_at_utc']) <= _stamp(row['source_last_bar_at_utc']) <= _stamp(row['source_receipt_upper_bound_utc']) <= _stamp(row['parent_finished_at_utc']) <= now
-                    and _stamp(row['binding_observed_at_utc']) <= _stamp(row['parent_finished_at_utc'])): continue
+                    and _stamp(row['binding_observed_at_utc']) <= _stamp(row['source_receipt_lower_bound_utc'])
+                    <= _stamp(row['source_receipt_upper_bound_utc'])): continue
             causal.append(deepcopy(row))
         for secid in sorted({row['secid'] for row in causal}):
             part = sorted((row for row in causal if row['secid'] == secid), key=lambda row: row['source_date'])
