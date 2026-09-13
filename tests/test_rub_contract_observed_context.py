@@ -188,7 +188,9 @@ def test_release_compact_export_oracle_same_input(archive, tmp_path):
     ('mapping_fixed_ts_utc', '2026-08-24T08:00:00+00:00')])
 def test_retained_binding_field_tamper_refused(archive, field, value):
     source = context.collect(archive[0], now=NOW)
-    source['rows'][0]['binding_at_source'][field] = value
+    row = next(row for row in source['rows'] if row['secid'] == 'SiU6')
+    assert row['binding_at_source'][field] != value
+    row['binding_at_source'][field] = value
     assert context.describe(source, now=NOW)['status'] == 'UNAVAILABLE'
 
 
