@@ -38,6 +38,7 @@ def _factors(value):
 
 def projection_completeness(snapshot, value, *, now):
     """Independent reverse oracle over the read-time input, not exported fact counts."""
+    now = now.astimezone(timezone.utc)
     from math import isfinite
     view = apply_read_freshness(snapshot, now=now)
     components = view.get('components', {})

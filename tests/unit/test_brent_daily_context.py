@@ -218,6 +218,14 @@ def test_release_compact_and_reverse_projection_without_network(tmp_path,monkeyp
     before=deepcopy(view)
     monkeypatch.setattr(source,'_fetch',lambda url:pytest.fail('reader must not fetch'))
     full=release.build(view,now=NOW,code_revision='a'*40)
+    for seconds in (0, 1200, 1201):
+        at = NOW+timedelta(seconds=seconds)
+        expected = release.build(view,now=at,code_revision='a'*40)
+        assert any(f['factor']=='oil' for f in expected['facts']) is (seconds <= 1200)
+        for offset in (3, -14, 14):
+            same_instant = at.astimezone(timezone(timedelta(hours=offset)))
+            assert release.build(view,now=same_instant,code_revision='a'*40) == expected
+            projection_completeness(view,expected,now=same_instant)
     for mode in ('omitted', 'duplicated'):
         altered = deepcopy(full)
         oil_fact = next(f for f in altered['facts'] if f['factor']=='oil')
