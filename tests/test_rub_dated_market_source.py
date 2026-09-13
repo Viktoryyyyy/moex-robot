@@ -121,7 +121,7 @@ def test_compact_and_reverse_acceptance_support_b_basis_without_live_components(
     view['accepted_dated_market'] = source.capture(None, acquisitions(), now=NOW)
     result = release.compact(view, now=NOW, code_revision='a' * 40)
     assert len(result['dated_context']['observations']) == 29
-    projection_completeness(view, result, now=NOW)
+    projection_completeness(view, release.build(view, now=NOW, code_revision='a' * 40), now=NOW)
 
 
 def test_missing_spot_and_invalid_instrument_do_not_erase_other_futures():
