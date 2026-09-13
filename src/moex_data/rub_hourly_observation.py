@@ -11,8 +11,9 @@ SOURCE = 'moex_algopack_fo_tradestats_5m'
 CONTRACT = 'contracts/sources/futures/moex_algopack_fo_tradestats_5m.v1.yaml'
 
 
-def aggregate(rows):
+def aggregate(rows, *, secid='USDRUBF'):
     """Reuse numeric OHLCV aggregation after strict complete-hour validation."""
+    if secid not in ('USDRUBF', 'CNYRUBF'): raise ValueError('unsupported_hour_instrument')
     if not isinstance(rows, list) or len(rows) != 12: raise ValueError('hour_requires_12_observed_bars')
     parsed = []
     for row in rows:
@@ -35,7 +36,7 @@ def aggregate(rows):
     inputs = tuple({**row, 'ts': row['end'] - timedelta(minutes=5),
                     'trade_date': next(iter(dates)), 'session_date': next(iter(dates))} for row in parsed)
     result = _aggregate_group(inputs, request=request)
-    return {'instrument': 'USDRUBF', 'timeframe': '1H', 'timezone': 'UTC',
+    return {'instrument': secid, 'timeframe': '1H', 'timezone': 'UTC',
             'hour_start_utc': start.isoformat(), 'hour_end_utc': finish.isoformat(),
             'source_observed_moscow_date': next(iter(dates)).isoformat(),
             'source_bar_count': 12, 'values': {key: result[key] for key in ('open', 'high', 'low', 'close', 'volume')},

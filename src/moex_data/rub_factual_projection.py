@@ -199,9 +199,16 @@ def consumer_context(snapshot):
 
     timeframes = []
     seen = set()
+    from moex_data.rub_contract_observed_context import describe as describe_contract_dates
+    contract_context = describe_contract_dates(None, now=now) if now is not None else {'status': 'UNAVAILABLE'}
+    contract_source_selected = False
     for name in ('stage9_daily', 'stage9_weekly'):
         component = _dict(components.get(name)); data = _dict(component.get('data'))
         if component.get('status') != 'READY': continue
+        core = _dict(data.get('server_core'))
+        if not contract_source_selected and 'contract_price_evidence' in core and now is not None:
+            contract_context = describe_contract_dates(core['contract_price_evidence'], now=now)
+            contract_source_selected = True
         for block in _dict(data.get('server_core')).get('blocks', []):
             if not isinstance(block, dict): continue
             if (block.get('status') != 'ready' or block.get('stage') != 7
@@ -211,8 +218,12 @@ def consumer_context(snapshot):
             identity = (block.get('block_id'), block.get('selected_causal_ts_utc'))
             if identity in seen: continue
             seen.add(identity)
+            projected_block = deepcopy(block)
+            from moex_data.rub_fx_observed_context import apply as apply_fx_context
+            apply_fx_context(projected_block, now)
+            projected_block.pop('observed_context_evidence', None)
             timeframes.append({'snapshot_path': f'components.{name}.data.server_core.blocks',
-                'scope': 'accepted_dated_observation_not_session_completion', 'values': deepcopy(block)})
+                'scope': 'accepted_dated_observation_not_session_completion', 'values': projected_block})
 
     from moex_data.rub_hourly_observation import admitted as admitted_hour
     hour = admitted_hour(_dict(components.get('live_market_structure')), now=now)
@@ -304,4 +315,5 @@ def consumer_context(snapshot):
             or position.get('availability') == 'INVALID_EXPLICIT_USER_INPUT' else 'NO_EXPLICIT_USER_INPUT',
             'direction': None, 'average_entry_price': None, 'explicit_user_input': False}
     return {'market_usability': market_context, 'market_structure': structure, 'timeframe_context': timeframes,
+        'contract_price_context': contract_context,
         'futoi_context': futoi, 'news_context': news, 'user_position_context': position}

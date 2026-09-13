@@ -36,6 +36,54 @@ def _factors(value):
     return {row['factor'] for row in value['facts']}
 
 
+def _fx_arithmetic_completeness(block, *, now):
+    """Independent arithmetic oracle over retained source rows, not output counts."""
+    evidence = block.get('observed_context_evidence')
+    if evidence is None:
+        return
+    context = block.get('observed_context')
+    _require(isinstance(context, dict), 'FX observed context omitted')
+    if context.get('status') != 'AVAILABLE':
+        return
+    timeframe = block['timeframe']
+    rows = [row for row in evidence['rows'] if datetime.fromisoformat(row['availability_ts_utc']) <= now
+            and (row.get('build_ts_utc') is None or datetime.fromisoformat(row['build_ts_utc']) <= now)]
+    _require(context['observations'] == rows and len(rows) <= (30 if timeframe == '1D' else 8),
+             'FX bounded causal observations')
+    _require(context['historical_pit_usable'] is False and context['session_completion_proven'] is False
+             and context['first_accepted_at_utc'] is None, 'FX scope and unknown first acceptance')
+    lags = (1, 5, 20) if timeframe == '1D' else (1,)
+    _require(set(context['comparisons']) == {str(lag) for lag in lags}, 'FX exact lag coverage')
+    for lag in lags:
+        comparison = context['comparisons'][str(lag)]
+        if len(rows) <= lag:
+            _require(comparison['status'] == 'UNAVAILABLE', 'FX insufficient lag refusal')
+            continue
+        first, last = rows[-1-lag], rows[-1]
+        _require(comparison['status'] == 'AVAILABLE'
+                 and comparison['target_date'] == first['period_end_date']
+                 and comparison['source_date'] == last['period_end_date']
+                 and comparison['target_close'] == first['close']
+                 and comparison['source_close'] == last['close']
+                 and comparison['absolute_change'] == last['close'] - first['close']
+                 and comparison['percent_change'] == (last['close'] / first['close'] - 1) * 100
+                 and comparison['observed_date_witness'] == [row['period_end_date'] for row in rows[-1-lag:]],
+                 'FX exact observed lag arithmetic and witness')
+    if timeframe == '1D':
+        today = now.astimezone(timezone(timedelta(hours=3))).date()
+        monday = today - timedelta(days=today.weekday())
+        part = [row for row in rows if monday.isoformat() <= row['trade_date'] <= today.isoformat()]
+        wtd = context['week_to_date']
+        _require(wtd['source_dates'] == [row['trade_date'] for row in part]
+                 and wtd['source_period_count'] == len(part)
+                 and wtd['week_start_date'] == monday.isoformat()
+                 and wtd['as_of_moscow_date'] == today.isoformat()
+                 and wtd['week_completion_proven'] is False, 'FX dynamic WTD dates and scope')
+        if part:
+            _require([wtd[key] for key in ('open', 'high', 'low', 'close')] == [part[0]['open'],
+                max(row['high'] for row in part), min(row['low'] for row in part), part[-1]['close']], 'FX WTD OHLC')
+
+
 def projection_completeness(snapshot, value, *, now):
     """Independent reverse oracle over the read-time input, not exported fact counts."""
     now = now.astimezone(timezone.utc)
@@ -151,6 +199,23 @@ def projection_completeness(snapshot, value, *, now):
             'direction': None, 'average_entry_price': None, 'explicit_user_input': False}
     _require(value.get('user_position_context') == expected_position, 'explicit position completeness and exclusions')
     expected_blocks = {}
+    from moex_data.rub_contract_observed_context import describe as describe_contract_dates
+    contract_evidence = None
+    for name in ('stage9_daily', 'stage9_weekly'):
+        component = components.get(name, {})
+        core = (component.get('data') or {}).get('server_core', {})
+        if component.get('status') == 'READY' and 'contract_price_evidence' in core:
+            contract_evidence = core['contract_price_evidence']
+            break
+    expected_contracts = describe_contract_dates(contract_evidence, now=now)
+    _require(value.get('contract_price_context') == expected_contracts, 'contract observed date completeness')
+    if expected_contracts['status'] == 'AVAILABLE':
+        for contract in expected_contracts['contracts']:
+            for week in contract['observed_weeks']:
+                originals = [row for row in contract['observations'] if row['source_date'] in week['source_dates']]
+                _require(len(originals) == len(week['source_dates']) and [week[k] for k in ('open', 'high', 'low', 'close')] ==
+                    [originals[0]['open'], max(row['high'] for row in originals), min(row['low'] for row in originals), originals[-1]['close']],
+                    'contract sparse weekly arithmetic')
     for name in ('stage9_daily', 'stage9_weekly'):
         component = components.get(name, {})
         if component.get('status') != 'READY': continue
@@ -158,7 +223,10 @@ def projection_completeness(snapshot, value, *, now):
             try: causal = datetime.fromisoformat(block['selected_causal_ts_utc']) <= now
             except (KeyError, ValueError, TypeError): causal = False
             if block.get('status') == 'ready' and block.get('stage') == 7 and block.get('timeframe') in ('1H', '1D', '1W') and causal:
-                expected_blocks[(block.get('block_id'), block.get('selected_causal_ts_utc'))] = block
+                _fx_arithmetic_completeness(block, now=now)
+                expected_block = deepcopy(block)
+                expected_block.pop('observed_context_evidence', None)
+                expected_blocks.setdefault((block.get('block_id'), block.get('selected_causal_ts_utc')), expected_block)
     actual_blocks = {(entry['values'].get('block_id'), entry['values'].get('selected_causal_ts_utc')): entry['values'] for entry in value['timeframe_context']}
     # Independent source-hour oracle: do not ask the projection's admission helper.
     hour = None
@@ -198,21 +266,22 @@ def projection_completeness(snapshot, value, *, now):
             'selected_causal_ts_utc': hour['hour_end_utc'], 'selected_causal_time_semantics': 'observed_hour_end_not_availability', **hour}
     from moex_data.rub_dated_context import validated as validated_hour_witnesses
     hour_witnesses, _ = validated_hour_witnesses(view.get('accepted_dated_slow'), now)
-    acquired_hour = hour_witnesses.get('timeframe:observed_1H.USDRUBF')
-    if acquired_hour and acquired_hour[1].get('origin') == 'source_observation_acquired_now':
-        hour = deepcopy(acquired_hour[2]['values'])
-        from moex_data.rub_consumption_clock import hour as project_hour_clock
-        project_hour_clock(hour, now)
-        key = ('observed_1H.USDRUBF', hour['hour_end_utc'])
-        if key not in expected_blocks:
-            entries = [entry for entry in value['timeframe_context'] if
-                       (entry['values'].get('block_id'), entry['values'].get('selected_causal_ts_utc')) == key]
-            _require(len(entries) == 1 and all(entries[0].get(name) == expected for name, expected in
-                {'origin': acquired_hour[1]['origin'], 'accepted_at_utc': acquired_hour[1]['accepted_at_utc'],
-                 'acceptance_evidence_id': acquired_hour[0], 'revision_id': acquired_hour[1]['revision_id']}.items()),
-                'dated H1 timeframe original acceptance evidence')
-        expected_blocks.setdefault(key, {'block_id': key[0], 'selected_causal_ts_utc': key[1],
-            'selected_causal_time_semantics': 'observed_hour_end_not_availability', **hour})
+    for secid in ('USDRUBF', 'CNYRUBF'):
+        acquired_hour = hour_witnesses.get('timeframe:observed_1H.' + secid)
+        if acquired_hour and acquired_hour[1].get('origin') == 'source_observation_acquired_now':
+            hour = deepcopy(acquired_hour[2]['values'])
+            from moex_data.rub_consumption_clock import hour as project_hour_clock
+            project_hour_clock(hour, now)
+            key = ('observed_1H.' + secid, hour['hour_end_utc'])
+            if key not in expected_blocks:
+                entries = [entry for entry in value['timeframe_context'] if
+                           (entry['values'].get('block_id'), entry['values'].get('selected_causal_ts_utc')) == key]
+                _require(len(entries) == 1 and all(entries[0].get(name) == expected for name, expected in
+                    {'origin': acquired_hour[1]['origin'], 'accepted_at_utc': acquired_hour[1]['accepted_at_utc'],
+                     'acceptance_evidence_id': acquired_hour[0], 'revision_id': acquired_hour[1]['revision_id']}.items()),
+                    'dated H1 timeframe original acceptance evidence')
+            expected_blocks.setdefault(key, {'block_id': key[0], 'selected_causal_ts_utc': key[1],
+                'selected_causal_time_semantics': 'observed_hour_end_not_availability', **hour})
     _require(actual_blocks == expected_blocks, 'timeframe completeness')
     from moex_data.rub_dated_context import describe as dated_context
     _require(value.get('dated_context') == dated_context(view, now=now), 'dated witness projection completeness and values')

@@ -16,6 +16,14 @@ MAX_ROWS = 1000
 MAX_BYTES = 1_000_000
 
 
+def _identity(secid):
+    if secid not in ('USDRUBF', 'CNYRUBF'):
+        raise ValueError('unsupported_native_hour_instrument')
+    return ('/iss/datashop/algopack/fo/tradestats/' + secid + '.json',
+            'timeframe:observed_1H.' + secid,
+            {'price': 'RUB_per_USD' if secid == 'USDRUBF' else 'RUB_per_CNY', 'volume': 'contracts'})
+
+
 def _table(payload, name):
     block = payload[name]; columns = block['columns']; rows = block['data']
     if (not isinstance(columns, list) or not all(isinstance(c, str) for c in columns)
@@ -25,8 +33,9 @@ def _table(payload, name):
     return [c.lower() for c in columns], rows
 
 
-def native_rows(pages, source_date):
+def native_rows(pages, source_date, *, secid='USDRUBF'):
     """Fail closed on ambiguous identity/cursor; numerical defects stay per hour."""
+    endpoint, _, _ = _identity(secid)
     if not isinstance(pages, list) or not 1 <= len(pages) <= MAX_PAGES:
         raise ValueError('unbounded_native_pages')
     if len(json.dumps(pages, allow_nan=False).encode()) > MAX_BYTES:
@@ -38,7 +47,7 @@ def native_rows(pages, source_date):
         if last_receipt is not None and requested < last_receipt: raise ValueError('noncausal_native_pagination')
         last_receipt = received
         url = urlsplit(page['source_url']); query = parse_qs(url.query)
-        if (url.scheme, url.netloc, url.path) != ('https', 'apim.moex.com', ENDPOINT):
+        if (url.scheme, url.netloc, url.path) != ('https', 'apim.moex.com', endpoint):
             raise ValueError('native_endpoint_mismatch')
         if any(key in query and query[key] != [source_date] for key in ('from', 'till')):
             raise ValueError('native_response_date_mismatch')
@@ -59,7 +68,7 @@ def native_rows(pages, source_date):
         if len(rows) != min(size, total - index): raise ValueError('native_cursor_row_count_mismatch')
         for values in rows:
             raw = dict(zip(columns, values))
-            if raw['secid'] != 'USDRUBF' or raw['tradedate'] != source_date:
+            if raw['secid'] != secid or raw['tradedate'] != source_date:
                 raise ValueError('native_identity_or_date_mismatch')
             end = datetime.fromisoformat(source_date + 'T' + raw['tradetime'])
             if end.utcoffset() is not None or end.second or end.microsecond or end.minute % 5:
@@ -70,8 +79,8 @@ def native_rows(pages, source_date):
     return result
 
 
-def select(pages, source_date, *, now):
-    rows = native_rows(pages, source_date)
+def select(pages, source_date, *, now, secid='USDRUBF'):
+    rows = native_rows(pages, source_date, secid=secid)
     groups = {}; diagnostics = {}
     for end, raw, receipt in rows:
         start = (end - timedelta(microseconds=1)).replace(minute=0, second=0, microsecond=0)
@@ -82,7 +91,7 @@ def select(pages, source_date, *, now):
             bars = [{'end': end.isoformat(), **{target: raw[name] for target, name in
                     (('open', 'pr_open'), ('high', 'pr_high'), ('low', 'pr_low'), ('close', 'pr_close'), ('volume', 'vol'))}}
                     for end, raw, _ in group]
-            hour = hourly.aggregate(bars)
+            hour = hourly.aggregate(bars, secid=secid)
             values = hour['values']
             if (not all(dated._number(values[key], key != 'volume') for key in ('open', 'high', 'low', 'close', 'volume'))
                     or not values['low'] <= min(values['open'], values['close']) <= max(values['open'], values['close']) <= values['high']):
@@ -95,9 +104,10 @@ def select(pages, source_date, *, now):
     return None, None, diagnostics
 
 
-def acquire(*, now_fn=lambda: datetime.now(timezone.utc), http_get=None, env=None):
+def acquire(*, now_fn=lambda: datetime.now(timezone.utc), http_get=None, env=None, secid='USDRUBF'):
     import os
     import requests
+    endpoint, _, _ = _identity(secid)
     clock = dated.stamp(now_fn()); earliest = (clock - timedelta(seconds=dated.MAX_AGE_SECONDS)).astimezone(transport.MOSCOW).date()
     candidate = clock.astimezone(transport.MOSCOW).date(); attempts = {}
     active_env = os.environ if env is None else env
@@ -111,7 +121,7 @@ def acquire(*, now_fn=lambda: datetime.now(timezone.utc), http_get=None, env=Non
             for _ in range(MAX_PAGES):
                 params = {'from': source_date, 'till': source_date, 'start': start, 'iss.meta': 'off'}
                 requested = dated.stamp(now_fn())
-                payload, url, received = transport._fetch_json(url=base + ENDPOINT, params=params, headers=headers,
+                payload, url, received = transport._fetch_json(url=base + endpoint, params=params, headers=headers,
                     timeout=12.0, http_get=requests.get if http_get is None else http_get, now_fn=now_fn)
                 pages.append({'payload': payload, 'source_url': url, 'request_params': params,
                               'request_started_at_utc': requested.isoformat(), 'received_at_utc': received.isoformat()})
@@ -121,27 +131,29 @@ def acquire(*, now_fn=lambda: datetime.now(timezone.utc), http_get=None, env=Non
                 start += len(payload['data']['data'])
                 if start >= cursor['total']: break
                 if not payload['data']['data']: raise ValueError('native_pagination_no_progress')
-            selected, hour, skipped = select(pages, source_date, now=now_fn())
-            attempts[source_date] = {'status': 'SELECTED' if hour else 'EMPTY' if not native_rows(pages, source_date) else 'NO_COMPLETE_HOUR',
+            selected, hour, skipped = select(pages, source_date, now=now_fn(), secid=secid)
+            attempts[source_date] = {'status': 'SELECTED' if hour else 'EMPTY' if not native_rows(pages, source_date, secid=secid) else 'NO_COMPLETE_HOUR',
                                      'skipped_hours': skipped}
             if hour:
-                return {'source_date': source_date, 'pages': pages, 'selected': selected, 'latest_attempts': attempts}
+                return {'secid': secid, 'source_date': source_date, 'pages': pages, 'selected': selected, 'latest_attempts': attempts}
         except Exception as exc:
             attempts[source_date] = {'status': 'INVALID' if isinstance(exc, (ValueError, KeyError, TypeError, IndexError)) else 'ERROR',
                                      'reason': str(exc)[:160] if isinstance(exc, ValueError) else type(exc).__name__}
-    return {'latest_attempts': attempts}
+    return {'secid': secid, 'latest_attempts': attempts}
 
 
 def make_frame(acquisition, *, now):
+    secid = acquisition.get('secid', 'USDRUBF')
+    endpoint, purpose, units = _identity(secid)
     pages = acquisition['pages']; source_date = acquisition['source_date']
-    selected, hour, _ = select(pages, source_date, now=now)
+    selected, hour, _ = select(pages, source_date, now=now, secid=secid)
     if hour is None: raise ValueError('no_admissible_observed_hour')
     frame = {'schema_version': envelope.SCHEMA, 'origin': envelope.ORIGIN, 'kind': 'slow',
-             'purpose': PURPOSE, 'source_id': hourly.SOURCE, 'scope': 'preparation_only',
+             'purpose': purpose, 'source_id': hourly.SOURCE, 'scope': 'preparation_only',
              'revision_semantics': 'observed_now_not_historical_pit', 'current_usable': False,
              'historical_pit_usable': False, 'model_usable': False,
-             'identity': {'secid': 'USDRUBF', 'source_date': source_date, 'source_url': 'https://apim.moex.com' + ENDPOINT},
-             'units': {'price': 'RUB_per_USD', 'volume': 'contracts'},
+             'identity': {'secid': secid, 'source_date': source_date, 'source_url': 'https://apim.moex.com' + endpoint},
+             'units': units,
              'raw_source_payload': selected, 'raw_source_digest': dated.digest(selected), 'source_pages': deepcopy(pages),
              'source_pages_digest': dated.digest(pages),
              'source_observation_at_utc': hour['hour_end_utc'], 'accepted_at_utc': now.isoformat(), 'generation_at_utc': now.isoformat(),
@@ -154,20 +166,22 @@ def make_frame(acquisition, *, now):
 
 def replay(frame):
     accepted = dated.stamp(frame['accepted_at_utc']); envelope.validate_envelope(frame, now=accepted)
+    secid = frame['identity']['secid']
+    endpoint, purpose, units = _identity(secid)
     source_date = frame['identity']['source_date']
-    if (frame['purpose'] != PURPOSE or frame['source_id'] != hourly.SOURCE or
-            frame['identity'] != {'secid': 'USDRUBF', 'source_date': source_date, 'source_url': 'https://apim.moex.com' + ENDPOINT}
-            or frame['units'] != {'price': 'RUB_per_USD', 'volume': 'contracts'} or dated.stamp(frame['generation_at_utc']) != accepted):
+    if (frame['purpose'] != purpose or frame['source_id'] != hourly.SOURCE or
+            frame['identity'] != {'secid': secid, 'source_date': source_date, 'source_url': 'https://apim.moex.com' + endpoint}
+            or frame['units'] != units or dated.stamp(frame['generation_at_utc']) != accepted):
         raise ValueError('hour_source_identity_units_or_generation_mismatch')
     pages = frame['source_pages']
     if dated.digest(pages) != frame['source_pages_digest']: raise ValueError('native_source_pages_digest_mismatch')
-    selected, hour, _ = select(pages, source_date, now=accepted)
+    selected, hour, _ = select(pages, source_date, now=accepted, secid=secid)
     if (selected != frame['raw_source_payload'] or hour is None or hour['hour_end_utc'] != frame['source_observation_at_utc']
             or frame['request_started_at_utc'] != pages[0]['request_started_at_utc']
             or frame['received_at_utc'] != max((p['received_at_utc'] for p in pages), key=dated.stamp)
             or any(dated.stamp(p['received_at_utc']) > accepted for p in pages)):
         raise ValueError('hour_source_replay_mismatch')
-    return {'values': {**hour, 'source_id': hourly.SOURCE, 'requested_secid': 'USDRUBF',
+    return {'values': {**hour, 'source_id': hourly.SOURCE, 'requested_secid': secid, 'units': deepcopy(units),
                       'receipt_upper_bound_utc': frame['received_at_utc'], 'receipt_semantics': 'dated_native_response_completion_upper_bound',
                       'current_usable': False, 'historical_pit_usable': False, 'model_usable': False,
                       'accepted_at_utc': frame['accepted_at_utc'], 'request_started_at_utc': frame['request_started_at_utc'],
@@ -178,11 +192,12 @@ def capture(previous, acquisition, *, now):
     admitted, _ = dated.validated(previous, now)
     frames = {ref: deepcopy(frame) for ref, frame, *_ in admitted.values()}; selections = {key: value[0] for key, value in admitted.items()}
     try:
-        frame = make_frame(acquisition, now=now); value = replay(frame); prior = admitted.get(PURPOSE)
+        frame = make_frame(acquisition, now=now); value = replay(frame); purpose = frame['purpose']; prior = admitted.get(purpose)
         newer = not prior or dated.stamp(prior[2]['values']['hour_end_utc']) < dated.stamp(value['values']['hour_end_utc'])
         revised = prior and prior[1].get('origin') == envelope.ORIGIN and prior[1].get('revision_id') != frame['revision_id'] and prior[2]['values']['hour_end_utc'] == value['values']['hour_end_utc']
         if newer or revised:
-            ref = dated.digest(frame); frames[ref] = frame; selections[PURPOSE] = ref
+            ref = dated.digest(frame); frames[ref] = frame; selections[purpose] = ref
     except (KeyError, TypeError, ValueError, AttributeError, IndexError): pass
-    return {'schema_version': dated.SCHEMA, 'frames': {ref: frame for ref, frame in frames.items() if ref in selections.values()},
-            'selections': selections, 'last_hour_source_attempts': deepcopy(acquisition.get('latest_attempts', {}))}
+    attempt_key = 'last_cny_hour_source_attempts' if acquisition.get('secid') == 'CNYRUBF' else 'last_hour_source_attempts'
+    return {**(previous if isinstance(previous, dict) else {}), 'schema_version': dated.SCHEMA, 'frames': {ref: frame for ref, frame in frames.items() if ref in selections.values()},
+            'selections': selections, attempt_key: deepcopy(acquisition.get('latest_attempts', {}))}

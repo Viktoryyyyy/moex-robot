@@ -248,7 +248,7 @@ def capture(previous, *, components, now, kind):
             'selections': selections}
 
 
-def capture_slow(snapshot, previous, *, now, hour_acquisition=None):
+def capture_slow(snapshot, previous, *, now, hour_acquisition=None, cny_hour_acquisition=None):
     names = ('live_market_structure',)
     components = {key: snapshot['components'][key] for key in names if key in snapshot['components']}
     snapshot['accepted_dated_slow'] = capture((previous or {}).get('accepted_dated_slow'), components=components, now=now, kind='slow')
@@ -257,12 +257,15 @@ def capture_slow(snapshot, previous, *, now, hour_acquisition=None):
         snapshot['accepted_dated_slow'] = capture_hour(snapshot['accepted_dated_slow'], hour_acquisition, now=now)
         from moex_data.rub_observed_range_levels import capture as capture_levels
         snapshot['accepted_dated_slow'] = capture_levels(snapshot['accepted_dated_slow'], hour_acquisition, now=now)
+    if cny_hour_acquisition is not None:
+        from moex_data.rub_dated_hour_source import capture as capture_hour
+        snapshot['accepted_dated_slow'] = capture_hour(snapshot['accepted_dated_slow'], cny_hour_acquisition, now=now)
 
 
 def describe(snapshot, *, now):
     """Dated preparation context never contributes values to current facts."""
     now = stamp(now)
-    observations = {}; rejected = {}; leg_views = {}; hour_attempts = {}
+    observations = {}; rejected = {}; leg_views = {}; hour_attempts = {}; cny_hour_attempts = {}
     for field in ('accepted_dated_slow', 'accepted_dated_market'):
         accepted, errors = validated(snapshot.get(field), now)
         rejected.update({field + ':' + key: value for key, value in errors.items()})
@@ -273,6 +276,9 @@ def describe(snapshot, *, now):
             attempts_hour = source_store.get('last_hour_source_attempts', {})
             if 'last_hour_source_attempts' in source_store and isinstance(attempts_hour, dict) and len(attempts_hour) <= 5:
                 hour_attempts = deepcopy(attempts_hour)
+            attempts_cny = source_store.get('last_cny_hour_source_attempts')
+            if isinstance(attempts_cny, dict) and len(attempts_cny) <= 5:
+                cny_hour_attempts = deepcopy(attempts_cny)
         attempts = source_store.get('last_source_admission_refusals', {}) if isinstance(source_store, dict) else {}
         if isinstance(attempts, dict) and len(attempts) <= 64:
             rejected.update({field + ':last_source_attempt:' + key: reason for key, reason in attempts.items()
@@ -295,7 +301,10 @@ def describe(snapshot, *, now):
                     if not metrics: current_reason = current_reason or 'current_metric_missing'
                 elif key.startswith('timeframe:'):
                     from moex_data.rub_hourly_observation import admitted
-                    if admitted(current, now=now) is None:
+                    if key == 'timeframe:observed_1H.CNYRUBF':
+                        current_status = 'UNAVAILABLE'
+                        current_reason = 'no_current_CNYRUBF_structure_component_dated_source_only'
+                    elif admitted(current, now=now) is None:
                         current_reason = current_reason or (current.get('data') or {}).get('hourly_observation', {}).get('reason') or 'current_hour_missing_expired_or_evidence_not_admitted'
                 elif current_status != 'READY': current_reason = current_reason or 'current_structure_component_not_ready'
             item = {'scope': 'LAST_ACCEPTED_DATED_PREPARATION_ONLY', 'current_usable': False,
@@ -351,4 +360,5 @@ def describe(snapshot, *, now):
     return {'status': 'AVAILABLE' if observations else 'UNAVAILABLE', 'maximum_source_age_seconds': MAX_AGE_SECONDS,
             'scope': 'preparation_only_not_current_or_completed_session', 'as_of_utc': now.isoformat(),
             'observations': observations, 'refusals': rejected, 'current_failures_remain_in_current_coverage': True,
+            **({'last_cny_hour_source_attempts': cny_hour_attempts} if cny_hour_attempts else {}),
             **({'last_hour_source_attempts': hour_attempts} if hour_attempts else {})}
