@@ -59,6 +59,20 @@ def validate_envelope(frame, *, now):
 
 
 def eligible_source_observation(frame):
-    """No B purpose is admitted before a source-specific semantic replay exists."""
+    """Dispatch only explicitly supported source-specific semantic replay."""
     validate_envelope(frame, now=frame.get('accepted_at_utc'))
+    if frame.get('source_id') == 'dated_rfud_cets_same_acquisition_basis':
+        from moex_data.rub_dated_basis_source import replay
+        from moex_data.synchronized_live_market_oi_context import SynchronizedLiveMarketOIError
+        try:
+            return replay(frame)
+        except SynchronizedLiveMarketOIError as exc:
+            raise ValueError('native_source_replay_failed') from exc
+    if frame.get('source_id') in ('moex_apim_forts_rfud_live_marketdata', 'moex_apim_cets_cnyrub_tom_live_marketdata'):
+        from moex_data.rub_dated_market_source import replay
+        from moex_data.synchronized_live_market_oi_context import SynchronizedLiveMarketOIError
+        try:
+            return {frame['purpose']: replay(frame)}
+        except SynchronizedLiveMarketOIError as exc:
+            raise ValueError('native_source_replay_failed') from exc
     raise ValueError('unsupported_source_replay')

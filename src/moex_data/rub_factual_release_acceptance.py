@@ -206,8 +206,13 @@ def projection_completeness(snapshot, value, *, now):
             _require(item['source_identity']['secid'] == source['secid'], 'dated exact SECID')
         elif key.startswith('basis:'):
             from moex_data.rub_consumption_clock import metric as project_metric_clock
-            project_metric_clock(expected, frame['components']['synchronized_live_market_oi']['data']['instruments'], now)
-            expected['status_semantics'] = 'original_accepted_derivation_not_current_admission'
+            if frame.get('origin') == 'source_observation_acquired_now':
+                from moex_data.rub_dated_market_source import replay
+                instruments = {leg: replay(evidence) for leg, evidence in frame['leg_evidence'].items()}
+                project_metric_clock(expected, instruments, now)
+            else:
+                project_metric_clock(expected, frame['components']['synchronized_live_market_oi']['data']['instruments'], now)
+                expected['status_semantics'] = 'original_accepted_derivation_not_current_admission'
         elif key == 'structure':
             from moex_data.rub_consumption_clock import structure as project_structure_clock
             project_structure_clock(expected['values'], now)

@@ -50,8 +50,9 @@ def refresh(root, *, loader=None, clock=lambda: datetime.now(timezone.utc)):
             except (OSError, ValueError):
                 pass
         started = _time(clock())
+        dated_evidence = {}
         try:
-            market = (fetch_live_snapshot if loader is None else loader)()
+            market = fetch_live_snapshot(dated_evidence_sink=dated_evidence) if loader is None else loader()
             _digest(market)
             status, error = "COLLECTED", None
         except Exception as exc:
@@ -69,6 +70,8 @@ def refresh(root, *, loader=None, clock=lambda: datetime.now(timezone.utc)):
             live.attach_live_market_oi_context(witness, market, attempted_at_utc=completed.isoformat())
             live.attach_live_basis_carry_context(witness, market, attempted_at_utc=completed.isoformat())
         value['accepted_dated_market'] = capture(previous, components=witness['components'], now=completed, kind='market')
+        from moex_data.rub_dated_market_source import capture as capture_source
+        value['accepted_dated_market'] = capture_source(value['accepted_dated_market'], dated_evidence, now=completed)
         base._atomic_write(folder / "current.json", value)
         return value
 
@@ -133,6 +136,16 @@ def apply(snapshot, *, root, now):
     return result
 
 
+def collection_summary(value):
+    """Bounded CLI diagnostics; raw dated evidence stays only in canonical state."""
+    result = {key: item for key, item in value.items() if key not in ('market', 'accepted_dated_market')}
+    store = value.get('accepted_dated_market') or {}
+    result['accepted_dated_market'] = {'frame_count': len(store.get('frames', {})),
+        'selected_observation_ids': sorted(store.get('selections', {})),
+        'last_source_refusal_count': len(store.get('last_source_admission_refusals', {}))}
+    return result
+
+
 def main():
     from dotenv import load_dotenv
     from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as base
@@ -149,7 +162,7 @@ def main():
         if marker.is_symlink():
             raise ValueError("enabled marker must not be a symlink")
         marker.write_text(SCHEMA, encoding="utf-8")
-    print(json.dumps({k: v for k, v in value.items() if k != "market"}))
+    print(json.dumps(collection_summary(value)))
     return 0 if value["status"] == "COLLECTED" else 1
 
 

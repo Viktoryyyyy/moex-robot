@@ -272,8 +272,9 @@ def _basis_metric(
     comparison: str,
     reference: str,
     kind: str,
+    *, sync_override: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    sync = _sync(observations, (comparison, reference))
+    sync = _sync(observations, (comparison, reference)) if sync_override is None else sync_override
     if kind == "abs":
         formula = "comparison_rate - reference_rate"
         units = spec.unit
@@ -307,6 +308,7 @@ def _carry_metric(
     comparison: str,
     reference: str,
     horizon: str,
+    *, sync_override: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     formulas = {
         "front_spot": (
@@ -324,7 +326,7 @@ def _carry_metric(
     }
     if horizon not in formulas:
         raise LiveBasisCarryContextError("unsupported carry horizon")
-    sync = _sync(observations, (comparison, reference))
+    sync = _sync(observations, (comparison, reference)) if sync_override is None else sync_override
     formula, formula_ref = formulas[horizon]
     metric = _metric_shell(
         spec, stage4_id, (comparison, reference), sync,
