@@ -1,6 +1,6 @@
 """Bounded acceptance witnesses in the canonical snapshot, never live fallback."""
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from hashlib import sha256
 import json
 from math import isfinite
@@ -169,7 +169,9 @@ def _source_times(frame, key, value):
     block = value['values']
     return {'source_event_at_utc': block['hour_end_utc'], 'source_update_at_utc': None,
             'available_at_utc': None, 'received_at_utc': block['receipt_upper_bound_utc'],
-            'receipt_semantics': block['receipt_semantics']}
+            'receipt_semantics': block['receipt_semantics'],
+            **({'first_source_bar_at_utc': (stamp(block['hour_start_utc']) + timedelta(minutes=5)).isoformat()}
+               if frame.get('origin') == 'source_observation_acquired_now' else {})}
 
 
 def _ages(times, now):
@@ -242,20 +244,27 @@ def capture(previous, *, components, now, kind):
             'selections': selections}
 
 
-def capture_slow(snapshot, previous, *, now):
+def capture_slow(snapshot, previous, *, now, hour_acquisition=None):
     names = ('live_market_structure',)
     components = {key: snapshot['components'][key] for key in names if key in snapshot['components']}
     snapshot['accepted_dated_slow'] = capture((previous or {}).get('accepted_dated_slow'), components=components, now=now, kind='slow')
+    if hour_acquisition is not None:
+        from moex_data.rub_dated_hour_source import capture as capture_hour
+        snapshot['accepted_dated_slow'] = capture_hour(snapshot['accepted_dated_slow'], hour_acquisition, now=now)
 
 
 def describe(snapshot, *, now):
     """Dated preparation context never contributes values to current facts."""
     now = stamp(now)
-    observations = {}; rejected = {}; leg_views = {}
+    observations = {}; rejected = {}; leg_views = {}; hour_attempts = {}
     for field in ('accepted_dated_slow', 'accepted_dated_market'):
         accepted, errors = validated(snapshot.get(field), now)
         rejected.update({field + ':' + key: value for key, value in errors.items()})
         source_store = snapshot.get(field)
+        if isinstance(source_store, dict):
+            attempts_hour = source_store.get('last_hour_source_attempts', {})
+            if 'last_hour_source_attempts' in source_store and isinstance(attempts_hour, dict) and len(attempts_hour) <= 5:
+                hour_attempts = deepcopy(attempts_hour)
         attempts = source_store.get('last_source_admission_refusals', {}) if isinstance(source_store, dict) else {}
         if isinstance(attempts, dict) and len(attempts) <= 64:
             rejected.update({field + ':last_source_attempt:' + key: reason for key, reason in attempts.items()
@@ -333,4 +342,5 @@ def describe(snapshot, *, now):
                 clock.metric(item['values'], item['original_legs'], now)
     return {'status': 'AVAILABLE' if observations else 'UNAVAILABLE', 'maximum_source_age_seconds': MAX_AGE_SECONDS,
             'scope': 'preparation_only_not_current_or_completed_session', 'as_of_utc': now.isoformat(),
-            'observations': observations, 'refusals': rejected, 'current_failures_remain_in_current_coverage': True}
+            'observations': observations, 'refusals': rejected, 'current_failures_remain_in_current_coverage': True,
+            **({'last_hour_source_attempts': hour_attempts} if hour_attempts else {})}

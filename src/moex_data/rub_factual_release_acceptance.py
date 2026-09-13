@@ -187,6 +187,23 @@ def projection_completeness(snapshot, value, *, now):
     if hour is not None:
         expected_blocks[('observed_1H.USDRUBF', hour['hour_end_utc'])] = {'block_id': 'observed_1H.USDRUBF',
             'selected_causal_ts_utc': hour['hour_end_utc'], 'selected_causal_time_semantics': 'observed_hour_end_not_availability', **hour}
+    from moex_data.rub_dated_context import validated as validated_hour_witnesses
+    hour_witnesses, _ = validated_hour_witnesses(view.get('accepted_dated_slow'), now)
+    acquired_hour = hour_witnesses.get('timeframe:observed_1H.USDRUBF')
+    if acquired_hour and acquired_hour[1].get('origin') == 'source_observation_acquired_now':
+        hour = deepcopy(acquired_hour[2]['values'])
+        from moex_data.rub_consumption_clock import hour as project_hour_clock
+        project_hour_clock(hour, now)
+        key = ('observed_1H.USDRUBF', hour['hour_end_utc'])
+        if key not in expected_blocks:
+            entries = [entry for entry in value['timeframe_context'] if
+                       (entry['values'].get('block_id'), entry['values'].get('selected_causal_ts_utc')) == key]
+            _require(len(entries) == 1 and all(entries[0].get(name) == expected for name, expected in
+                {'origin': acquired_hour[1]['origin'], 'accepted_at_utc': acquired_hour[1]['accepted_at_utc'],
+                 'acceptance_evidence_id': acquired_hour[0], 'revision_id': acquired_hour[1]['revision_id']}.items()),
+                'dated H1 timeframe original acceptance evidence')
+        expected_blocks.setdefault(key, {'block_id': key[0], 'selected_causal_ts_utc': key[1],
+            'selected_causal_time_semantics': 'observed_hour_end_not_availability', **hour})
     _require(actual_blocks == expected_blocks, 'timeframe completeness')
     from moex_data.rub_dated_context import describe as dated_context
     _require(value.get('dated_context') == dated_context(view, now=now), 'dated witness projection completeness and values')

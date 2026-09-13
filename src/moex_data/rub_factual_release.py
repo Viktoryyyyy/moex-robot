@@ -97,9 +97,21 @@ def describe(snapshot):
             'model_probability': None, 'forecast_generated': False}
     freshness = snapshot.get('live_read_freshness')
     from moex_data.rub_dated_context import describe as dated_context
+    consumers = consumer_context(snapshot)
+    accepted_dated = dated_context(snapshot, now=target_now) if target_now else {'status': 'UNAVAILABLE', 'observations': {}}
+    hour_item = accepted_dated['observations'].get('timeframe:observed_1H.USDRUBF')
+    if hour_item and hour_item.get('origin') == 'source_observation_acquired_now':
+        hour = deepcopy(hour_item['values']['values'])
+        identity = ('observed_1H.USDRUBF', hour['hour_end_utc'])
+        existing = {(entry['values'].get('block_id'), entry['values'].get('selected_causal_ts_utc')) for entry in consumers['timeframe_context']}
+        if identity not in existing:
+            consumers['timeframe_context'].append({'snapshot_path': 'accepted_dated_slow', 'scope': hour['scope'],
+                **{key: hour_item[key] for key in ('origin', 'accepted_at_utc', 'acceptance_evidence_id', 'revision_id')},
+                'values': {'block_id': identity[0], 'selected_causal_ts_utc': identity[1],
+                           'selected_causal_time_semantics': 'observed_hour_end_not_availability', **hour}})
     return {'schema_version': SCHEMA, 'as_of_utc': freshness.get('read_at_utc') if isinstance(freshness, dict) else None,
-        'status': 'INCOMPLETE', 'facts': facts, 'horizons': horizons, **consumer_context(snapshot),
-        'dated_context': dated_context(snapshot, now=target_now) if target_now else {'status': 'UNAVAILABLE', 'observations': {}},
+        'status': 'INCOMPLETE', 'facts': facts, 'horizons': horizons, **consumers,
+        'dated_context': accepted_dated,
         'macro_evidence_inventory': describe_macro(snapshot, now=target_now),
         'blocking_required_factors': matrix['blocking_required_blocks'],
         'matrix': matrix['rows'], 'session_completion_proven': False,

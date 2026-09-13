@@ -16,6 +16,7 @@ def isolate_unrelated_cny_timestamp_policy(monkeypatch):
     # Clock tests use injected non-CNY producers. Installing the process-global
     # CNY adapter patch here would leak into independent source contract tests.
     monkeypatch.setattr(runner, 'install_timestamp_policy', lambda: None)
+    monkeypatch.setattr('moex_data.rub_dated_hour_source.acquire', lambda **kwargs: {'latest_attempts': {}})
 
 
 class Clock:
