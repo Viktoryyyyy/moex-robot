@@ -6,6 +6,7 @@ now as cryptographic proof of original acceptance, or these dates as a full seri
 from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
 from math import isfinite
+from pathlib import Path
 import re
 
 SCHEMA = 'rub_contract_observed_dates.v1'
@@ -23,6 +24,31 @@ def _stamp(value):
 
 def _number(value, positive=False):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value) and (value > 0 if positive else value >= 0)
+
+
+def _retained_chain(provenance):
+    """Validate portable custody metadata without reopening mutable current pointers."""
+    run = provenance['acceptance_run_id']
+    if not isinstance(run, str) or not re.fullmatch(r'[A-Za-z0-9_-][A-Za-z0-9_.-]*_stage3', run):
+        raise ValueError('invalid_retained_acceptance_run')
+    producer = provenance['run_id']
+    if not isinstance(producer, str) or not re.fullmatch(r'[A-Za-z0-9_-][A-Za-z0-9_.-]*', producer):
+        raise ValueError('invalid_retained_producer_run')
+    prefix = '${MOEX_DATA_ROOT}/'
+    if (provenance['accepted_marker_ref'] != prefix+'state/acceptance/step3_canonical_raw/run_id='+run+'/accepted_pointers.json'
+            or provenance['parent_manifest_ref'] != prefix+'runs/step10_rub_daily_refresh/run_id='+run[:-7]+'/run_manifest.json'):
+        raise ValueError('retained_acceptance_parent_reference_mismatch')
+    artifact_prefix = prefix+'runs/step3_canonical_raw/run_id='+run+'/'
+    for field in ('partition_ref', 'manifest_ref', 'quality_report_ref'):
+        value = provenance[field]
+        if (not isinstance(value, str) or not value.startswith(artifact_prefix) or '\\' in value
+                or any(part in ('', '.', '..') for part in value[len(artifact_prefix):].split('/'))):
+            raise ValueError('retained_artifact_run_reference_mismatch')
+    for field in ('partition_sha256', 'manifest_sha256', 'quality_report_sha256',
+                  'accepted_marker_sha256_at_revalidation', 'pilot_evidence_sha256_at_revalidation',
+                  'parent_manifest_sha256_at_revalidation'):
+        if not isinstance(provenance.get(field), str) or not re.fullmatch('[0-9a-f]{64}', provenance[field]):
+            raise ValueError('current_revalidation_digest_missing')
 
 
 def aggregate(frame, spec, *, available, binding_available):
@@ -140,6 +166,13 @@ def collect(root, *, now):
                 matches = [item for item in pointers if item.get('dataset_id') == spec.dataset_id and item.get('instrument_id') == spec.instrument_id]
                 if len(matches) != 1: raise ValueError('accepted_marker_pointer_identity')
                 item = matches[0]
+                expected_pointer = stage3._pointer_path(spec)
+                expected_ref = step9.ROOT_REF_PREFIX + expected_pointer.relative_to(root).as_posix()
+                if item.get('pointer_ref') != expected_ref:
+                    raise ValueError('accepted_marker_canonical_pointer_ref_mismatch')
+                if 'pointer_path' in item and (not isinstance(item['pointer_path'], str)
+                        or not Path(item['pointer_path']).is_absolute() or Path(item['pointer_path']) != expected_pointer):
+                    raise ValueError('accepted_marker_canonical_pointer_path_mismatch')
                 if (step9._resolve_root_ref(item['manifest_ref'], 'marker_manifest', root) != spec.manifest_path
                         or step9._resolve_root_ref(item['quality_report_ref'], 'marker_quality', root) != spec.quality_path):
                     raise ValueError('accepted_marker_support_reference_mismatch')
@@ -186,19 +219,45 @@ def describe(evidence, *, now):
         'refusals_omitted_count') if key in evidence}
     result['capture_as_of_utc'] = evidence.get('captured_at_utc')
     try:
-        if _stamp(evidence['captured_at_utc']) > now: return result
-        seen = set(); causal = []
+        captured = _stamp(evidence['captured_at_utc'])
+        if captured > now: return result
+        capture_day = captured.astimezone(MOSCOW).date()
+        earliest = capture_day - timedelta(days=LOOKBACK_DAYS)
+        seen = set(); causal = []; bindings_by_run = {}
         for row in rows:
             secid = row['secid']; day = date.fromisoformat(row['source_date'])
+            if not earliest <= day <= capture_day: raise ValueError('contract_date_outside_capture_window')
             if not re.fullmatch(r'(Si|CR)[HMUZ][0-9]', secid): raise ValueError('invalid_contract_secid')
             prefix = 'si_' if secid.startswith('Si') else 'cr_'
             if row['instrument_id_at_source'] not in (prefix+'front_contract', prefix+'next_contract'):
                 raise ValueError('contract_role_identity_mismatch')
             provenance = row['source_provenance']
+            _retained_chain(provenance)
             if (provenance['secid'] != secid or provenance['instrument_id'] != row['instrument_id_at_source']
                     or provenance['source_id'] != SOURCE or provenance['dataset_id'] != 'futures_raw_5m'
                     or provenance['acceptance_contract_id'] != 'step3_canonical_raw_acceptance.v1'):
                 raise ValueError('contract_source_provenance_mismatch')
+            binding = row['binding_at_source']
+            family = 'Si' if prefix == 'si_' else 'CR'
+            role = 'front' if row['instrument_id_at_source'] == prefix+'front_contract' else 'next'
+            bound_at = _stamp(row['binding_observed_at_utc'])
+            expiry = date.fromisoformat(binding['last_trade_date'])
+            if (binding['root'] != family or binding['role'] != role
+                    or binding['instrument_id'] != row['instrument_id_at_source'] or binding['secid'] != secid
+                    or binding['source_id'] != 'moex_iss_forts_securities_reference'
+                    or date.fromisoformat(binding['as_of_date']) != day or expiry < day
+                    or _stamp(binding['mapping_fixed_ts_utc']) != bound_at
+                    or _stamp(binding['availability_ts_utc']) != bound_at
+                    or _stamp(provenance['binding_availability_ts_utc']) != bound_at
+                    or bound_at.astimezone(MOSCOW).date() < day):
+                raise ValueError('contract_retained_binding_mismatch')
+            if (provenance.get('quality_status') != 'pass' or provenance.get('refresh_status') != 'succeeded'
+                    or provenance.get('hash_semantics') != 'computed_at_current_revalidation_not_original_acceptance_digest'):
+                raise ValueError('contract_retained_admission_mismatch')
+            run_key = (provenance['acceptance_run_id'], day, family)
+            by_role = bindings_by_run.setdefault(run_key, {})
+            if role in by_role: raise ValueError('duplicate_retained_binding_role')
+            by_role[role] = (secid, expiry)
             if any(not isinstance(provenance.get(key), str) or not re.fullmatch('[0-9a-f]{64}', provenance[key])
                    for key in ('partition_sha256', 'manifest_sha256', 'quality_report_sha256')):
                 raise ValueError('current_revalidation_digest_missing')
@@ -207,12 +266,21 @@ def describe(evidence, *, now):
             key = (secid, day)
             if key in seen: raise ValueError('duplicate_contract_date')
             seen.add(key)
+            if (type(row['source_bar_count']) is not int or row['source_bar_count'] <= 0
+                    or type(row['intraday_gap_count']) is not int or not 0 <= row['intraday_gap_count'] < row['source_bar_count']
+                    or row.get('session_completion_proven') is not False):
+                raise ValueError('invalid_retained_bar_count_or_scope')
             if any(not _number(row[key], True) for key in ('open', 'high', 'low', 'close')) or not _number(row['volume']): raise ValueError('invalid_contract_values')
             if not row['low'] <= min(row['open'], row['close']) <= max(row['open'], row['close']) <= row['high']: raise ValueError('invalid_contract_ohlc')
-            if not (_stamp(row['source_first_bar_at_utc']) <= _stamp(row['source_last_bar_at_utc']) <= _stamp(row['source_receipt_upper_bound_utc']) <= _stamp(row['parent_finished_at_utc']) <= now
+            if not (_stamp(row['source_first_bar_at_utc']) <= _stamp(row['source_last_bar_at_utc']) <= _stamp(row['source_receipt_upper_bound_utc']) <= _stamp(row['parent_finished_at_utc']) <= captured
+                    and _stamp(row['source_first_bar_at_utc']) <= _stamp(row['source_receipt_lower_bound_utc'])
                     and _stamp(row['binding_observed_at_utc']) <= _stamp(row['source_receipt_lower_bound_utc'])
-                    <= _stamp(row['source_receipt_upper_bound_utc'])): continue
+                    <= _stamp(row['source_receipt_upper_bound_utc'])): raise ValueError('invalid_retained_causality')
             causal.append(deepcopy(row))
+        for by_role in bindings_by_run.values():
+            if 'front' in by_role and 'next' in by_role:
+                if by_role['front'][0] == by_role['next'][0] or by_role['front'][1] >= by_role['next'][1]:
+                    raise ValueError('retained_front_next_binding_order_mismatch')
         for secid in sorted({row['secid'] for row in causal}):
             part = sorted((row for row in causal if row['secid'] == secid), key=lambda row: row['source_date'])
             if len(part) > 30: raise ValueError('contract_date_bound_exceeded')

@@ -143,6 +143,9 @@ def test_replay_provenance_identity_future_clock_and_sparse_holes(archive):
         source_last_bar_at_utc='2026-08-26T06:45:00+00:00', source_receipt_upper_bound_utc='2026-08-26T09:05:00+00:00',
         source_receipt_lower_bound_utc='2026-08-26T09:05:00+00:00',
         parent_finished_at_utc='2026-08-26T10:00:00+00:00')
+    row['binding_observed_at_utc'] = row['source_provenance']['binding_availability_ts_utc'] = '2026-08-26T09:00:00+00:00'
+    row['binding_at_source'].update(as_of_date='2026-08-26', mapping_fixed_ts_utc='2026-08-26T09:00:00+00:00',
+                                   availability_ts_utc='2026-08-26T09:00:00+00:00')
     source['rows'].append(row)
     view = context.describe(source, now=NOW)
     contract = next(item for item in view['contracts'] if item['secid'] == row['secid'])
@@ -177,3 +180,94 @@ def test_release_compact_export_oracle_same_input(archive, tmp_path):
         else: bad['contract_price_context']['historical_pit_usable'] = True
         with pytest.raises(AssertionError, match='contract observed date completeness'):
             projection_completeness(source, bad, now=NOW)
+
+
+@pytest.mark.parametrize('field,value', [('secid', 'ALIEN'), ('instrument_id', 'cr_front_contract'),
+    ('root', 'CR'), ('role', 'next'), ('source_id', 'unapproved'), ('as_of_date', '2026-08-23'),
+    ('last_trade_date', '1900-01-01'), ('availability_ts_utc', '2026-08-24T08:00:00+00:00'),
+    ('mapping_fixed_ts_utc', '2026-08-24T08:00:00+00:00')])
+def test_retained_binding_field_tamper_refused(archive, field, value):
+    source = context.collect(archive[0], now=NOW)
+    source['rows'][0]['binding_at_source'][field] = value
+    assert context.describe(source, now=NOW)['status'] == 'UNAVAILABLE'
+
+
+@pytest.mark.parametrize('field', ['acceptance_run_id', 'run_id', 'accepted_marker_ref', 'parent_manifest_ref',
+    'manifest_ref', 'partition_ref', 'quality_report_ref', 'accepted_marker_sha256_at_revalidation',
+    'pilot_evidence_sha256_at_revalidation', 'parent_manifest_sha256_at_revalidation', 'hash_semantics'])
+def test_retained_chain_cannot_be_stripped(archive, field):
+    source = context.collect(archive[0], now=NOW)
+    source['rows'][0]['source_provenance'].pop(field)
+    assert context.describe(source, now=NOW)['status'] == 'UNAVAILABLE'
+
+
+@pytest.mark.parametrize('defect', ['parent_after_capture', 'receipt_before_first_bar', 'zero_count', 'negative_gap', 'completed_session'])
+def test_adjacent_capture_causality_and_scope_refused(archive, defect):
+    source = context.collect(archive[0], now=NOW)
+    row = source['rows'][0]
+    if defect == 'parent_after_capture': source['captured_at_utc'] = '2026-08-24T09:30:00+00:00'
+    elif defect == 'receipt_before_first_bar': row['source_receipt_lower_bound_utc'] = '2026-08-24T05:30:00+00:00'
+    elif defect == 'zero_count': row['source_bar_count'] = 0
+    elif defect == 'negative_gap': row['intraday_gap_count'] = -1
+    else: row['session_completion_proven'] = True
+    assert context.describe(source, now=NOW)['status'] == 'UNAVAILABLE'
+
+
+@pytest.mark.parametrize('offset,expected', [(45, 'AVAILABLE'), (46, 'UNAVAILABLE')])
+def test_retained_window_anchored_to_capture_moscow_date(archive, offset, expected):
+    source = context.collect(archive[0], now=NOW)
+    # One day alone has zero span, but still must be inside the capture window.
+    source['rows'] = source['rows'][:1]
+    captured = datetime(2026, 8, 24, 21, tzinfo=timezone.utc) + timedelta(days=offset-1)
+    source['captured_at_utc'] = captured.isoformat()
+    assert context.describe(source, now=captured+timedelta(days=30))['status'] == expected
+
+
+@pytest.mark.parametrize('defect', ['missing_ref', 'other_ref', 'traversal_ref', 'other_path', 'relative_path', 'null_path'])
+def test_marker_canonical_pointer_identity_required(archive, defect):
+    root, _, _ = archive
+    path = stage3.acceptance_evidence_path(RUN)
+    marker = json.loads(path.read_text())
+    item = marker['pointers'][0]
+    if defect == 'missing_ref': item.pop('pointer_ref')
+    elif defect == 'other_ref': item['pointer_ref'] = marker['pointers'][1]['pointer_ref']
+    elif defect == 'traversal_ref': item['pointer_ref'] = '${MOEX_DATA_ROOT}/../current_accepted_manifest.json'
+    elif defect == 'other_path': item['pointer_path'] = marker['pointers'][1]['pointer_path']
+    elif defect == 'relative_path': item['pointer_path'] = 'current_accepted_manifest.json'
+    else: item['pointer_path'] = None
+    _write_json(path, marker)
+    evidence = context.collect(root, now=NOW)
+    assert not evidence['rows'] and evidence['refusals']
+
+
+def test_portable_pointer_ref_does_not_require_optional_absolute_path(archive):
+    root, _, _ = archive
+    path = stage3.acceptance_evidence_path(RUN)
+    marker = json.loads(path.read_text())
+    for item in marker['pointers']: item.pop('pointer_path')
+    _write_json(path, marker)
+    assert len(context.collect(root, now=NOW)['rows']) == 4
+
+
+@pytest.mark.parametrize('defect', ['one_contract', 'one_row', 'all_contracts', 'invalid_binding_admitted'])
+def test_independent_oracle_detects_shared_descriptor_fault(archive, monkeypatch, defect):
+    from moex_data import rub_factual_release as release
+    from moex_data.rub_factual_release_acceptance import projection_completeness
+    evidence = context.collect(archive[0], now=NOW)
+    admitted = context.describe(evidence, now=NOW)
+    if defect == 'invalid_binding_admitted': evidence['rows'][0]['binding_at_source']['last_trade_date'] = '1900-01-01'
+    source = {'identity': {'generated_at_utc': NOW.isoformat()}, 'components': {'stage9_daily': {'status': 'READY',
+        'data': {'server_core': {'blocks': [], 'contract_price_evidence': evidence}}}}}
+    def faulty_descriptor(*args, **kwargs):
+        result = deepcopy(admitted)
+        if defect == 'one_contract': result['contracts'].pop()
+        elif defect == 'one_row':
+            result['contracts'][0]['observations'] = []
+            result['contracts'][0]['observed_date_count'] = 0
+            result['contracts'][0]['observed_weeks'] = []
+        elif defect == 'all_contracts': result.update(status='UNAVAILABLE', contracts=[])
+        return result
+    monkeypatch.setattr(context, 'describe', faulty_descriptor)
+    built = release.build(source, now=NOW, code_revision='a'*40)
+    with pytest.raises(AssertionError, match='contract independent source-to-output completeness'):
+        projection_completeness(source, built, now=NOW)
