@@ -54,3 +54,12 @@ def test_prefetch_returns_deterministic_name_order() -> None:
     )
 
     assert list(cached) == ["a", "m", "z"]
+
+
+def test_oil_binding_preserves_injected_producer_and_input_mapping():
+    custom = lambda now: base.ProducedComponent({'custom': True}, now)
+    producers = {'oil': custom}
+    bound = base.bind_oil_history(producers, {'components': {'oil': {'data': {}}}})
+    assert bound is not producers and bound['oil'] is custom
+    assert producers == {'oil': custom}
+    assert base.bind_oil_history({}, None) == {}

@@ -433,6 +433,14 @@ def default_producers() -> Mapping[str, ComponentProducer]:
     }
 
 
+def bind_oil_history(producers, previous):
+    """Bind prior oil evidence before a caller may execute/prefetch producers."""
+    selected = dict(producers)
+    if selected.get('oil') is _oil_component:
+        selected['oil'] = lambda at: _oil_component(at, _previous_component(previous, 'oil'))
+    return selected
+
+
 def _monthly_cpi_component(now: datetime) -> ProducedComponent:
     data = rosstat_monthly_cpi.load(root=_data_root())
     return ProducedComponent(data=data, data_as_of=data['received_at'])
@@ -579,8 +587,7 @@ def build_snapshot(
 ) -> dict[str, object]:
     now_utc = _aware(now, "now")
     selected_producers = dict(default_producers() if producers is None else producers)
-    if selected_producers.get('oil') is _oil_component:
-        selected_producers['oil'] = lambda at: _oil_component(at, _previous_component(previous, 'oil'))
+    selected_producers = bind_oil_history(selected_producers, previous)
     if selected_producers.get('futures_calendar') is _futures_calendar_component:
         if calendar_context is None or calendar_context.mode == 'LIVE':
             if abs((now_utc - _live_now()).total_seconds()) > 5:

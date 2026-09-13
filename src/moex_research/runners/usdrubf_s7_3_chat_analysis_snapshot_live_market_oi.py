@@ -293,7 +293,7 @@ def refresh_snapshot(
             as_of=now,
         )
         producers = parallel_prefetch.prefetch_producers(
-            calendar_bound_producers,
+            base.bind_oil_history(calendar_bound_producers, previous),
             now=now,
         )
         snapshot = futoi.build_snapshot(
