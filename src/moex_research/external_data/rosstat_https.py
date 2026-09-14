@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import json
 from pathlib import Path
+import re
 import ssl
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener
@@ -15,6 +16,7 @@ CERTIFICATES = {
 }
 MAX_BYTES = 2_000_000
 POLICY = 'rosstat_verified_https.v1'
+_HASH = re.compile(r'[0-9a-f]{64}')
 
 
 def validate_url(url):
@@ -94,6 +96,87 @@ def capture(url, *, output, timeout=10):
     manifest = directory / (digest + '.json')
     _freeze(manifest, encoded)
     return {**evidence, 'manifest_path': str(manifest), 'manifest_sha256': digest}
+
+
+def prune_source_receipts(output, *, source_url, keep_manifests=()):
+    """Remove superseded polling receipts for one URL without touching release documents.
+
+    Only valid content-addressed manifests using this transport policy are eligible.
+    Raw HTML is removed only when no retained valid manifest references its hash.
+    Unknown, malformed, non-file and symlink entries are left untouched.
+    """
+    validate_url(source_url)
+    directory = Path(output)
+    if not directory.exists():
+        return {'manifests_removed': 0, 'raw_removed': 0, 'bytes_removed': 0}
+    if directory.is_symlink() or not directory.is_dir():
+        raise ValueError('evidence directory must be a regular directory')
+    resolved = directory.resolve(strict=True)
+    keep_names = set()
+    for value in keep_manifests:
+        path = Path(value)
+        if not path.exists():
+            continue
+        if path.is_symlink() or not path.is_file():
+            raise ValueError('retained evidence manifest must be a regular file')
+        actual = path.resolve(strict=True)
+        if actual.parent != resolved or not _HASH.fullmatch(actual.stem) or actual.suffix != '.json':
+            raise ValueError('retained evidence manifest outside target directory')
+        keep_names.add(actual.name)
+
+    receipts = []
+    for path in resolved.iterdir():
+        if path.is_symlink() or not path.is_file() or path.suffix != '.json' or not _HASH.fullmatch(path.stem):
+            continue
+        try:
+            encoded = path.read_bytes()
+            if sha256(encoded).hexdigest() != path.stem:
+                continue
+            receipt = json.loads(encoded)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(receipt, dict):
+            continue
+        raw_sha = receipt.get('raw_sha256')
+        if not isinstance(raw_sha, str) or not _HASH.fullmatch(raw_sha):
+            continue
+        receipts.append((path, receipt, raw_sha))
+
+    removable = [(path, raw_sha) for path, receipt, raw_sha in receipts
+                 if receipt.get('policy') == POLICY and receipt.get('source_url') == source_url
+                 and path.name not in keep_names]
+    removable_names = {path.name for path, _ in removable}
+    retained_raw = {raw_sha for path, _, raw_sha in receipts if path.name not in removable_names}
+    candidate_raw = {raw_sha for _, raw_sha in removable if raw_sha not in retained_raw}
+
+    bytes_removed = 0
+    manifests_removed = 0
+    raw_removed = 0
+    for path, _ in removable:
+        try:
+            bytes_removed += path.stat().st_size
+            path.unlink()
+            manifests_removed += 1
+        except FileNotFoundError:
+            pass
+    for raw_sha in candidate_raw:
+        path = resolved / (raw_sha + '.html')
+        if path.is_symlink() or not path.is_file():
+            continue
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            continue
+        if sha256(raw).hexdigest() != raw_sha:
+            continue
+        try:
+            bytes_removed += path.stat().st_size
+            path.unlink()
+            raw_removed += 1
+        except FileNotFoundError:
+            pass
+    return {'manifests_removed': manifests_removed, 'raw_removed': raw_removed,
+            'bytes_removed': bytes_removed}
 
 
 if __name__ == '__main__':
