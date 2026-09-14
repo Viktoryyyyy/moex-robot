@@ -2,6 +2,7 @@
 import argparse
 from datetime import date, datetime, timezone
 from decimal import Decimal
+import gzip
 from hashlib import sha256
 from html.parser import HTMLParser
 import json
@@ -138,9 +139,23 @@ def _read(path, expected, suffix):
         raise ValueError('invalid evidence hash')
     if path.name != expected + suffix or path.is_symlink():
         raise ValueError('invalid evidence path')
-    with path.open('rb') as stream:
-        raw = stream.read(MAX_BYTES + 1)
-    if len(raw) > MAX_BYTES or sha256(raw).hexdigest() != expected:
+    source_path = path
+    compressed = False
+    if not source_path.exists() and suffix == '.html':
+        source_path = path.with_name(path.name + '.gz')
+        compressed = True
+    if source_path.is_symlink() or not source_path.is_file():
+        raise ValueError('evidence file missing or invalid')
+    try:
+        if compressed:
+            with gzip.open(source_path, 'rb') as stream:
+                raw = stream.read(MAX_BYTES + 1)
+        else:
+            with source_path.open('rb') as stream:
+                raw = stream.read(MAX_BYTES + 1)
+    except (OSError, EOFError, gzip.BadGzipFile) as exc:
+        raise ValueError('evidence read failed') from exc
+    if not 0 < len(raw) <= MAX_BYTES or sha256(raw).hexdigest() != expected:
         raise ValueError('evidence hash mismatch')
     return raw
 
