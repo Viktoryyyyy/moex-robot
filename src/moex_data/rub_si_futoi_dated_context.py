@@ -169,13 +169,16 @@ def _validated(evidence, now):
     if any(evidence.get(k) is not False for k in FLAGS):
         raise ValueError("dated_authority_mismatch")
     accepted = _stamp(evidence["accepted_at_utc"])
+    cutoff = _stamp(evidence["causal_cutoff_at_utc"])
+    if cutoff > accepted:
+        raise ValueError("capture_cutoff_after_acceptance")
     _bounded(accepted, now)
     _governance(evidence["governance_at_acceptance"])
     anchor = evidence["anchor"]
     if anchor.get("source_kind") != "previous_observed":
         raise ValueError("previous_observed_anchor_required")
     day = _day(anchor["factual"]["trade_date"])
-    anchor_values = _fact(anchor, day, accepted)
+    anchor_values = _fact(anchor, day, cutoff)
     _proof(anchor)
     event_age = _bounded(anchor["factual"]["snapshot_ts"], now)
     witness = evidence["observed_date_witness"]
@@ -210,7 +213,7 @@ def _validated(evidence, now):
             if target is None:
                 raise ValueError("baseline_without_observed_target")
             _proof(baseline)
-            values = _fact(baseline, target, accepted)
+            values = _fact(baseline, target, cutoff)
             item.update(status="AVAILABLE",
                         values={k: anchor_values[k] - values[k] for k in anchor_values},
                         baseline=deepcopy(baseline))
@@ -226,12 +229,41 @@ def _validated(evidence, now):
         "scope": "SI_ACCEPTED_DATED_PREPARATION_ONLY",
         "anchor": deepcopy(anchor), "deltas": result,
         "accepted_at_utc": evidence["accepted_at_utc"],
+        "causal_cutoff_at_utc": evidence["causal_cutoff_at_utc"],
         "source_event_age_seconds": event_age,
         "maximum_anchor_source_age_seconds": MAX_AGE,
         "observed_date_witness": deepcopy(witness),
         "participant_count_semantics": "side_counts_not_unique_participants",
         **FLAGS,
     }
+
+
+def _latest_diagnostics(store, evidence, now):
+    """Operational refusals are dated separately from accepted economic facts."""
+    diagnostics = store.get("latest_baseline_diagnostics")
+    if diagnostics is None:
+        return None
+    try:
+        checked = _stamp(diagnostics["checked_at_utc"])
+        if not _stamp(evidence["accepted_at_utc"]) <= checked <= now:
+            return None
+        rows = diagnostics["baselines"]
+        if not isinstance(rows, dict) or set(rows) != {str(lag) for lag in LAGS}:
+            return None
+        for key, row in rows.items():
+            accepted = evidence["baselines"][key]
+            if (not isinstance(row, dict) or set(row) != {"status", "target_trade_date", "reason"}
+                    or row["status"] != accepted["status"]
+                    or row["target_trade_date"] != accepted["target_trade_date"]):
+                return None
+            if row["status"] == "UNAVAILABLE":
+                if not isinstance(row["reason"], str) or not row["reason"]:
+                    return None
+            elif row["reason"] is not None:
+                return None
+        return deepcopy(diagnostics)
+    except (KeyError, TypeError, ValueError, OverflowError, AttributeError):
+        return None
 
 
 def describe(store, *, now, governance):
@@ -247,7 +279,8 @@ def describe(store, *, now, governance):
         result = _validated(evidence, now)
         result.update(checked_at_utc=now.isoformat(),
                       evidence_sha256=store["evidence_sha256"],
-                      last_capture_error=store.get("last_capture_error"))
+                      last_capture_error=store.get("last_capture_error"),
+                      latest_baseline_diagnostics=_latest_diagnostics(store, evidence, now))
         return result
     except (KeyError, TypeError, ValueError, OverflowError, AttributeError) as exc:
         return {"status": "UNAVAILABLE", "scope": "SI_ACCEPTED_DATED_PREPARATION_ONLY",
@@ -262,7 +295,7 @@ def _semantic(evidence):
             fact.pop("availability_ts_utc", None)
             fact.pop("ingest_ts_utc", None)
         return {"status": record.get("status"), "target_trade_date": record.get("target_trade_date"),
-                "factual": fact, "reason": record.get("reason")}
+                "factual": fact}
     return {"anchor": observation(evidence["anchor"]),
             "dates": evidence["observed_date_witness"]["observed_trade_dates"],
             "baselines": {key: observation(value) for key, value in evidence["baselines"].items()}}
@@ -283,7 +316,12 @@ def retain(previous, candidate, *, now, governance, error=None):
         else:
             chosen = deepcopy(candidate)
         return {"schema_version": SCHEMA, "evidence": chosen, "evidence_sha256": _digest(chosen),
-                "last_capture_attempt_at_utc": now.isoformat(), "last_capture_error": None}
+                "last_capture_attempt_at_utc": now.isoformat(), "last_capture_error": None,
+                "latest_baseline_diagnostics": {
+                    "checked_at_utc": now.isoformat(),
+                    "baselines": {key: {field: record.get(field) for field in
+                        ("status", "target_trade_date", "reason")}
+                        for key, record in candidate["baselines"].items()}}}
     except (KeyError, TypeError, ValueError, OverflowError, AttributeError) as exc:
         original["last_capture_error"] = str(exc)
         original["last_capture_attempt_at_utc"] = _stamp(now).isoformat()
@@ -389,7 +427,10 @@ def _capture_candidate(component, *, now):
     candidate = {
         "schema_version": SCHEMA, "contract_ref": CONTRACT,
         "instrument_id": INSTRUMENT, "source_id": SOURCE,
-        "accepted_at_utc": now.isoformat(), "anchor": anchor, "baselines": baselines,
+        # Provisional candidate clock for cutoff validation; capture_snapshot
+        # replaces acceptance only after every source check has completed.
+        "accepted_at_utc": now.isoformat(), "causal_cutoff_at_utc": now.isoformat(),
+        "anchor": anchor, "baselines": baselines,
         "observed_date_witness": witness, "governance_at_acceptance": deepcopy(data["governance"]),
         "accepted_eod_load_error": eod_error, **FLAGS,
     }
@@ -397,20 +438,28 @@ def _capture_candidate(component, *, now):
     return candidate
 
 
-def capture_snapshot(snapshot, previous, *, now):
+def capture_snapshot(snapshot, previous, *, now_fn):
     """Attach one bounded Si witness to the existing canonical slow snapshot."""
     component = snapshot.get("components", {}).get("futoi_live")
     if not isinstance(component, dict):
         return
     data = component.get("data")
     governance = data.get("governance") if isinstance(data, dict) else None
+    cutoff = _stamp(now_fn())
     candidate, error = None, None
     try:
-        candidate = _capture_candidate(component, now=_stamp(now))
+        candidate = _capture_candidate(component, now=cutoff)
     except Exception as exc:
         error = type(exc).__name__ + ": " + str(exc)
+    completed = _stamp(now_fn())
+    if completed < cutoff:
+        raise ValueError("si_dated_capture_clock_went_backwards")
+    if candidate is not None:
+        candidate = deepcopy(candidate)
+        candidate["causal_cutoff_at_utc"] = cutoff.isoformat()
+        candidate["accepted_at_utc"] = completed.isoformat()
     snapshot[STORE_KEY] = retain((previous or {}).get(STORE_KEY), candidate,
-                                now=now, governance=governance, error=error)
+                                now=completed, governance=governance, error=error)
 
 
 def attach_consumer(snapshot, consumers, *, now):
@@ -450,6 +499,8 @@ def verify_projection(snapshot, release, *, now):
     assert output["status"] == admission["status"], "Si dated status completeness"
     assert output["anchor"] == evidence["anchor"], "Si dated anchor changed"
     assert output["accepted_at_utc"] == evidence["accepted_at_utc"], "Si dated acceptance time changed"
+    assert output["causal_cutoff_at_utc"] == evidence["causal_cutoff_at_utc"], "Si dated cutoff changed"
+    assert output.get("latest_baseline_diagnostics") == _latest_diagnostics(stored, evidence, _stamp(now)), "Si dated diagnostics changed"
     assert output["evidence_sha256"] == stored["evidence_sha256"], "Si dated identity changed"
     assert output["observed_date_witness"] == evidence["observed_date_witness"], "Si dated witness changed"
     assert all(output.get(k) is False for k in FLAGS), "Si dated authority expanded"
