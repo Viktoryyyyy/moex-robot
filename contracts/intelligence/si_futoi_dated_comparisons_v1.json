@@ -1,0 +1,44 @@
+{
+  "project": "MOEX_Bot",
+  "task_id": "si_futoi_dated_comparisons_v1",
+  "schema_version": "si_futoi_dated_comparisons.v1",
+  "status": "implementation_candidate_not_production_acceptance",
+  "decision": "PM_L1 scoped implementation under Owner rub_analytical_data_gaps_v1 delegation",
+  "instrument_id": "si_futures_family",
+  "source_id": "moex_algopack_futoi",
+  "anchor": "last independently admitted previous observed source date, not an inferred completed session",
+  "lags": [1, 5, 20],
+  "target_rule": "exact prior ordinal dates from accepted FO TradeStats witness; missing target is not substituted",
+  "capture": {
+    "requires_si_governance_factual_use_allowed": true,
+    "requires_independent_previous_record_temporal_validation": true,
+    "current_intraday_required": false,
+    "baseline_load": "existing accepted EOD or exact canonical raw only; no network or full backfill",
+    "baseline_receipt_must_precede_capture": true,
+    "freeze_original_provenance": true,
+    "repeat_identical_observation_must_not_renew_first_acceptance": true,
+    "preserve_previous_evidence_on_collection_failure": true
+  },
+  "read": {
+    "independent_of_current_live_ttl": true,
+    "maximum_anchor_source_age_seconds": 345600,
+    "maximum_first_acceptance_age_seconds": 345600,
+    "historical_baselines_subject_to_causality_not_96h_source_ttl": true,
+    "current_failure_remains_visible": true,
+    "source_date_and_acceptance_time_must_not_be_relabelled": true,
+    "independent_factual_validation_and_exact_arithmetic_required": true,
+    "cr_previous_history_and_comparisons_allowed": false
+  },
+  "boundaries": {
+    "live_ttl_unchanged": true,
+    "current_usable": false,
+    "session_completion_proven": false,
+    "historical_pit_usable": false,
+    "model_usable": false,
+    "directional_authority": false,
+    "action_authority": false,
+    "standalone_buy_sell_authority": false,
+    "stage5_full_mode_ready": false,
+    "stage5_pointer_promotion_performed": false
+  }
+}
