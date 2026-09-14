@@ -1,4 +1,5 @@
 from copy import deepcopy
+from decimal import Decimal
 import json
 from pathlib import Path
 
@@ -14,7 +15,7 @@ def weekly(received='2026-09-09T16:00:05+00:00', value='100.05'):
         'observation_start': '2026-09-01',
         'observation_end': '2026-09-07',
         'indices': {'previous_registration': value, 'month_start': value, 'year_start': '104.72'},
-        'weekly_change_percent': str(float(value) - 100).rstrip('0').rstrip('.') if value != '100.00' else '0',
+        'weekly_change_percent': str(Decimal(value) - Decimal('100')),
         'units': 'index_percent_base_100',
         'document_format': 'three_explicit_bases',
         'monthly_final': False,
