@@ -171,3 +171,128 @@ def test_same_input_release_projection_oracle_and_export_parity(tmp_path):
         else: context['week_to_date']['source_dates'].append('2026-09-12')
         with pytest.raises(AssertionError, match='timeframe completeness'):
             projection_completeness(source, bad, now=NOW)
+
+
+@pytest.mark.parametrize('timeframe,count', [('1D', 30), ('1W', 8)])
+@pytest.mark.parametrize('defect', ['missing', 'null', 'naive', 'empty', 'invalid', 'number', 'bool'])
+def test_required_build_timestamp_refuses_entire_retained_window(timeframe, count, defect):
+    source = evidence(count, timeframe)
+    row = source['rows'][-2]
+    if defect == 'missing':
+        row.pop('build_ts_utc')
+    else:
+        row['build_ts_utc'] = {
+            'null': None, 'naive': '2026-09-12T21:34:30',
+            'empty': '', 'invalid': 'invalid', 'number': 0, 'bool': True,
+        }[defect]
+    before = deepcopy(source)
+    result = fx.describe(source, now=NOW)
+    assert result['status'] == 'UNAVAILABLE'
+    assert result['reason'] == 'invalid_retained_row_no_lag_shift'
+    assert result['observations'] == []
+    assert result['comparisons'] == {}
+    assert source == before
+
+
+@pytest.mark.parametrize('timeframe', ['1D', '1W'])
+def test_removing_build_clock_does_not_admit_prebuild_frozen_history(timeframe):
+    source = evidence(2, timeframe)
+    before_build = datetime(2026, 9, 12, 12, tzinfo=timezone.utc)
+    assert fx.describe(source, now=before_build)['status'] == 'UNAVAILABLE'
+    for row in source['rows']:
+        row.pop('build_ts_utc')
+    before = deepcopy(source)
+    result = fx.describe(source, now=before_build)
+    assert result['status'] == 'UNAVAILABLE'
+    assert result['observations'] == []
+    assert result['comparisons'] == {}
+    assert source == before
+
+
+@pytest.mark.parametrize('timeframe', ['1D', '1W'])
+@pytest.mark.parametrize('offset_hours', [-7, 0, 3, 14])
+def test_build_clock_boundary_and_offset_preserve_original_rows(timeframe, offset_hours):
+    source = evidence(2, timeframe)
+    built = datetime(2026, 9, 12, 21, 34, 30, 123456, tzinfo=timezone.utc)
+    for row in source['rows']:
+        row['build_ts_utc'] = built.astimezone(timezone(timedelta(hours=offset_hours))).isoformat()
+    before = deepcopy(source)
+    assert fx.describe(source, now=built-timedelta(microseconds=1))['status'] == 'UNAVAILABLE'
+    accepted = fx.describe(source, now=built)
+    assert accepted['status'] == 'AVAILABLE'
+    assert accepted['observations'] == source['rows']
+    assert fx.describe(source, now=built+timedelta(microseconds=1))['observations'] == source['rows']
+    assert source == before
+
+
+@pytest.mark.parametrize('timeframe', ['1D', '1W'])
+@pytest.mark.parametrize('defect', ['missing', 'null', 'naive', 'empty', 'invalid', 'number', 'bool'])
+def test_independent_fx_oracle_refuses_corrupt_build_clock(timeframe, defect):
+    from moex_data.rub_factual_release_acceptance import _fx_arithmetic_completeness
+    source = evidence(2, timeframe)
+    value = block(source)
+    value['observed_context'] = fx.describe(source, now=NOW)
+    assert value['observed_context']['status'] == 'AVAILABLE'
+    # Inject the same fault into evidence and claimed output. The independent
+    # oracle must refuse even if a faulty shared descriptor emits matching rows.
+    for row in (source['rows'][0], value['observed_context']['observations'][0]):
+        if defect == 'missing':
+            row.pop('build_ts_utc')
+        else:
+            row['build_ts_utc'] = {
+                'null': None, 'naive': '2026-09-12T21:34:30',
+                'empty': '', 'invalid': 'invalid', 'number': 0, 'bool': True,
+            }[defect]
+    before = deepcopy(value)
+    with pytest.raises(AssertionError, match='FX required build timestamp refusal'):
+        _fx_arithmetic_completeness(value, now=NOW)
+    assert value == before
+    # A truthful refusal remains a valid partial package, not an acceptance crash.
+    fx.apply(value, NOW)
+    assert value['observed_context']['status'] == 'UNAVAILABLE'
+    _fx_arithmetic_completeness(value, now=NOW)
+
+
+@pytest.mark.parametrize('timeframe', ['1D', '1W'])
+@pytest.mark.parametrize('defect', ['missing', 'null'])
+def test_required_build_clock_full_release_and_frozen_export(timeframe, defect, tmp_path):
+    import json
+    from moex_data import rub_factual_release as release
+    from moex_data.rub_factual_release_acceptance import projection_completeness
+    retained = evidence(2, timeframe)
+    value = block(retained)
+    # Keep the selected latest observation intact: only the retained historical
+    # row is damaged, so its removal cannot silently shift historical lags.
+    if defect == 'missing':
+        retained['rows'][0].pop('build_ts_utc')
+    else:
+        retained['rows'][0]['build_ts_utc'] = None
+    component = 'stage9_daily' if timeframe == '1D' else 'stage9_weekly'
+    snapshot = {'identity': {'generated_at_utc': NOW.isoformat()}, 'components': {
+        component: {'status': 'READY', 'data': {'server_core': {'blocks': [value]}}}}}
+    before = deepcopy(snapshot)
+    built = release.build(snapshot, now=NOW, code_revision='a'*40)
+    context = built['timeframe_context'][0]['values']['observed_context']
+    assert context['status'] == 'UNAVAILABLE'
+    assert context['reason'] == 'invalid_retained_row_no_lag_shift'
+    assert context['observations'] == [] and context['comparisons'] == {}
+    projection_completeness(snapshot, built, now=NOW)
+    directory = release.export(snapshot, now=NOW, code_revision='a'*40, output=tmp_path)
+    frozen = json.loads((directory / 'input_snapshot.json').read_text())
+    assert release.build(frozen, now=NOW, code_revision='a'*40) == built
+    assert snapshot == before
+
+
+@pytest.mark.parametrize('timeframe', ['1D', '1W'])
+def test_required_build_clock_also_applies_to_cny(timeframe):
+    source = evidence(2, timeframe)
+    source['instrument_id'] = 'cnyrubf_futures_family'
+    for row in source['rows']:
+        row.update(instrument_id='cnyrubf_futures_family', secid='CNYRUBF')
+    assert fx.describe(source, now=NOW)['status'] == 'AVAILABLE'
+    source['rows'][0].pop('build_ts_utc')
+    before = deepcopy(source)
+    refused = fx.describe(source, now=NOW)
+    assert refused['status'] == 'UNAVAILABLE'
+    assert refused['observations'] == [] and refused['comparisons'] == {}
+    assert source == before

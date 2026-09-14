@@ -30,8 +30,8 @@ def _row_valid(row, instrument, timeframe):
     try:
         start, end = date.fromisoformat(row['period_start_date']), date.fromisoformat(row['period_end_date'])
         available = _time(row['availability_ts_utc'])
-        if row.get('build_ts_utc') is not None:
-            _time(row['build_ts_utc'])
+        # Stage7 rows require their original build clock, including on replay.
+        _time(row['build_ts_utc'])
         if (row['instrument_id'] != instrument or row['secid'] != INSTRUMENTS[instrument]
                 or row['timeframe'] != timeframe or end < start
                 or available.astimezone(MOSCOW).date() <= end):
@@ -76,7 +76,7 @@ def describe(evidence, *, now):
     if dates != sorted(set(dates)):
         return {**result, 'reason': 'duplicate_or_unordered_period_no_lag_shift'}
     eligible = [deepcopy(row) for row in rows if _time(row['availability_ts_utc']) <= now
-                and (row.get('build_ts_utc') is None or _time(row['build_ts_utc']) <= now)]
+                and _time(row['build_ts_utc']) <= now]
     # Build availability may differ by row. A hole is not a shorter observed lag.
     if eligible and eligible != rows[:len(eligible)]:
         return {**result, 'reason': 'noncausal_hole_no_lag_shift'}
@@ -127,9 +127,7 @@ def describe(evidence, *, now):
                 low=min(row['low'] for row in part), close=part[-1]['close'],
                 open_to_close_percent=(part[-1]['close']/part[0]['open']-1)*100,
                 availability_upper_bound_utc=max(_time(row['availability_ts_utc']) for row in part).isoformat(),
-                build_upper_bound_utc=max((_time(row['build_ts_utc']) for row in part if row.get('build_ts_utc')), default=None))
-            if wtd['build_upper_bound_utc'] is not None:
-                wtd['build_upper_bound_utc'] = wtd['build_upper_bound_utc'].isoformat()
+                build_upper_bound_utc=max(_time(row['build_ts_utc']) for row in part).isoformat())
             for field in ('volume', 'value', 'num_trades'):
                 wtd[field] = sum(row[field] for row in part) if all(row.get(field) is not None for row in part) else None
             prior = [row for row in eligible if row['trade_date'] < monday.isoformat()]

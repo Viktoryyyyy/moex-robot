@@ -110,12 +110,23 @@ def _fx_arithmetic_completeness(block, *, now):
         return
     context = block.get('observed_context')
     _require(isinstance(context, dict), 'FX observed context omitted')
+    # Validate contracted build clocks independently of the shared descriptor.
+    # A malformed retained row invalidates the window; it cannot shorten a lag.
+    try:
+        build_times = [datetime.fromisoformat(row['build_ts_utc']) for row in evidence['rows']]
+        if any(stamp.utcoffset() is None for stamp in build_times):
+            raise ValueError('timezone required')
+    except (KeyError, TypeError, ValueError, OverflowError):
+        _require(context.get('status') == 'UNAVAILABLE'
+                 and context.get('observations') == [] and context.get('comparisons') == {},
+                 'FX required build timestamp refusal')
+        return
     if context.get('status') != 'AVAILABLE':
         return
     timeframe = block['timeframe']
-    rows = [row for row in evidence['rows'] if datetime.fromisoformat(row['availability_ts_utc']) <= now
-            and (row.get('build_ts_utc') is None or datetime.fromisoformat(row['build_ts_utc']) <= now)]
-    _require(context['observations'] == rows and len(rows) <= (30 if timeframe == '1D' else 8),
+    rows = [row for row, built in zip(evidence['rows'], build_times)
+            if datetime.fromisoformat(row['availability_ts_utc']) <= now and built <= now]
+    _require(bool(rows) and context['observations'] == rows and len(rows) <= (30 if timeframe == '1D' else 8),
              'FX bounded causal observations')
     _require(context['historical_pit_usable'] is False and context['session_completion_proven'] is False
              and context['first_accepted_at_utc'] is None, 'FX scope and unknown first acceptance')
