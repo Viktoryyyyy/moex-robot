@@ -121,6 +121,19 @@ def _fx_arithmetic_completeness(block, *, now):
                  and context.get('observations') == [] and context.get('comparisons') == {},
                  'FX required build timestamp refusal')
         return
+    # The separately retained selected row witnesses the common Stage7 build.
+    # Do not delegate this test to the producer or shared describe/apply helper.
+    try:
+        selected_build = datetime.fromisoformat(block['selected_observation']['build_ts_utc'])
+        build_matches = selected_build.utcoffset() is not None and all(
+            stamp == selected_build for stamp in build_times)
+    except (KeyError, TypeError, ValueError, OverflowError):
+        build_matches = False
+    if not build_matches:
+        _require(context.get('status') == 'UNAVAILABLE'
+                 and context.get('observations') == [] and context.get('comparisons') == {},
+                 'FX retained build witness refusal')
+        return
     if context.get('status') != 'AVAILABLE':
         return
     timeframe = block['timeframe']
