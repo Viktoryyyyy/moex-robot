@@ -152,12 +152,13 @@ def compact_source_receipts(output, *, source_url, keep_manifests=()):
                      if path.name in keep_names or receipt.get('policy') != POLICY
                      or receipt.get('source_url') != source_url}
     all_candidates = sorted(target_raw - protected_raw)
-    candidates = all_candidates[:MAX_COMPACT_RAW_PER_CALL]
 
     compacted = 0
     before = 0
     after = 0
-    for raw_sha in candidates:
+    for raw_sha in all_candidates:
+        if compacted >= MAX_COMPACT_RAW_PER_CALL:
+            break
         raw_path = resolved / (raw_sha + '.html')
         gzip_path = resolved / (raw_sha + '.html.gz')
         if raw_path.is_symlink() or gzip_path.is_symlink():
@@ -181,9 +182,12 @@ def compact_source_receipts(output, *, source_url, keep_manifests=()):
         after += len(encoded)
         raw_path.unlink()
         compacted += 1
+    remaining = sum(1 for raw_sha in all_candidates
+                    if not (resolved / (raw_sha + '.html')).is_symlink()
+                    and (resolved / (raw_sha + '.html')).is_file())
     return {'raw_compacted': compacted, 'raw_candidates': len(all_candidates),
-            'raw_remaining': max(0, len(all_candidates) - compacted),
-            'bytes_before': before, 'bytes_after': after, 'bytes_saved': before - after}
+            'raw_remaining': remaining, 'bytes_before': before, 'bytes_after': after,
+            'bytes_saved': before - after}
 
 
 if __name__ == '__main__':
