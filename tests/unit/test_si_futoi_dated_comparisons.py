@@ -359,7 +359,7 @@ def test_capture_acceptance_uses_post_validation_clock(monkeypatch):
 
     monkeypatch.setattr(dated, "_capture_candidate", checked)
     snapshot = {"components": {"futoi_live": {"data": {"governance": deepcopy(GOV)}}}}
-    dated.capture_snapshot(snapshot, None, now_fn=clock)
+    dated.capture_snapshot(snapshot, None, now_fn=clock, refresh_started_at=NOW)
     assert events == [("clock", NOW), ("source_validation", NOW), ("clock", completed)]
     stored = snapshot[dated.STORE_KEY]
     assert stored["evidence"]["accepted_at_utc"] == completed.isoformat()
@@ -377,7 +377,7 @@ def test_later_acceptance_cannot_admit_post_cutoff_baseline(monkeypatch, field):
     monkeypatch.setattr(dated, "_capture_candidate", lambda *args, **kwargs: value)
     clocks = iter((NOW, NOW+timedelta(seconds=2)))
     snapshot = {"components": {"futoi_live": {"data": {"governance": deepcopy(GOV)}}}}
-    dated.capture_snapshot(snapshot, None, now_fn=lambda: next(clocks))
+    dated.capture_snapshot(snapshot, None, now_fn=lambda: next(clocks), refresh_started_at=NOW)
     assert "evidence" not in snapshot[dated.STORE_KEY]
     assert snapshot[dated.STORE_KEY]["last_capture_error"]
 
@@ -388,7 +388,7 @@ def test_capture_clock_reversal_cannot_publish_new_evidence(monkeypatch):
     snapshot = {"components": {"futoi_live": {"data": {"governance": deepcopy(GOV)}}}}
     before = deepcopy(snapshot)
     with pytest.raises(ValueError, match="clock_went_backwards"):
-        dated.capture_snapshot(snapshot, None, now_fn=lambda: next(clocks))
+        dated.capture_snapshot(snapshot, None, now_fn=lambda: next(clocks), refresh_started_at=NOW)
     assert snapshot == before
 
 
@@ -411,7 +411,7 @@ def test_failed_capture_records_completion_and_preserves_old_witness(monkeypatch
     monkeypatch.setattr(dated, "_capture_candidate", failed)
     clocks = iter((NOW+timedelta(seconds=1), NOW+timedelta(seconds=4)))
     snapshot = {"components": {"futoi_live": {"data": {"governance": deepcopy(GOV)}}}}
-    dated.capture_snapshot(snapshot, {dated.STORE_KEY: first}, now_fn=lambda: next(clocks))
+    dated.capture_snapshot(snapshot, {dated.STORE_KEY: first}, now_fn=lambda: next(clocks), refresh_started_at=NOW)
     actual = snapshot[dated.STORE_KEY]
     assert actual["evidence"] == first["evidence"]
     assert actual["evidence_sha256"] == first["evidence_sha256"]
@@ -464,3 +464,157 @@ def test_slow_runner_final_clock_follows_si_source_capture():
     assert captures[0].lineno < finals[0].lineno
     assert any(k.arg == "now_fn" and isinstance(k.value, ast.Name) and k.value.id == "now_fn" for k in captures[0].keywords)
     assert not any(k.arg == "now" for k in captures[0].keywords)
+
+
+@pytest.mark.parametrize("boundary", ["refresh", "accepted", "cutoff", "attempt", "diagnostic"])
+def test_capture_rejects_global_clock_rollback_before_source_access(monkeypatch, boundary):
+    previous = {dated.STORE_KEY: dated.retain(None, candidate(), now=NOW, governance=GOV)}
+    future = (NOW + timedelta(seconds=1)).isoformat()
+    start = NOW
+    prior = previous[dated.STORE_KEY]
+    if boundary == "refresh":
+        start = future
+    elif boundary in ("accepted", "cutoff"):
+        prior["evidence"]["accepted_at_utc" if boundary == "accepted" else "causal_cutoff_at_utc"] = future
+    elif boundary == "attempt":
+        prior["last_capture_attempt_at_utc"] = future
+    else:
+        prior["latest_baseline_diagnostics"] = {"checked_at_utc": future}
+    monkeypatch.setattr(dated, "_capture_candidate", lambda *a, **k: pytest.fail("source read before clock admission"))
+    snapshot = {"components": {"futoi_live": {"data": {"governance": deepcopy(GOV)}}}}
+    before = deepcopy(snapshot)
+    with pytest.raises(ValueError, match="precedes_refresh_or_prior_timeline"):
+        dated.capture_snapshot(snapshot, previous, now_fn=lambda: NOW, refresh_started_at=start)
+    assert snapshot == before
+
+
+def test_transient_baseline_refusal_keeps_valid_accepted_fact_and_clock():
+    first = dated.retain(None, candidate(), now=NOW, governance=GOV)
+    later = NOW + timedelta(minutes=2)
+    retry = candidate()
+    retry["accepted_at_utc"] = retry["causal_cutoff_at_utc"] = later.isoformat()
+    retry["baselines"]["5"] = {"status": "UNAVAILABLE", "target_trade_date": retry["baselines"]["5"]["target_trade_date"], "factual": None, "reason": "temporary_read_error"}
+    second = dated.retain(first, retry, now=later, governance=GOV)
+    assert second["evidence"] == first["evidence"]
+    assert second["evidence_sha256"] == first["evidence_sha256"]
+    output = dated.describe(second, now=later, governance=GOV)
+    assert output["status"] == "AVAILABLE"
+    assert output["accepted_at_utc"] == NOW.isoformat()
+    assert output["deltas"]["delta_5d"]["values"]["fiz.net"] == 5
+    assert output["latest_baseline_diagnostics"]["baselines"]["5"]["reason"] == "temporary_read_error"
+
+
+def test_units_and_family_scope_are_verified():
+    snapshot = {dated.STORE_KEY: store(candidate()), "components": {"futoi_live": {"data": {"governance": GOV}}}}
+    output = dated.describe(snapshot[dated.STORE_KEY], now=NOW, governance=GOV)
+    release = {"futoi_context": {"futoi_live": {"dated_comparisons": output}}}
+    assert output["units"]["net_share_of_oi"] == "fraction_of_total_open_interest"
+    dated.verify_projection(snapshot, release, now=NOW)
+    output["units"]["participant_fields"] = "unique_people"
+    with pytest.raises(AssertionError, match="units"):
+        dated.verify_projection(snapshot, release, now=NOW)
+
+
+def test_projection_checks_survive_optimized_python(tmp_path):
+    import subprocess
+    import sys
+    snapshot = {dated.STORE_KEY: store(candidate()), "components": {"futoi_live": {"data": {"governance": GOV}}}}
+    output = dated.describe(snapshot[dated.STORE_KEY], now=NOW, governance=GOV)
+    output["deltas"]["delta_5d"]["values"]["fiz.net"] = 999
+    fixture = tmp_path / "witness.json"
+    fixture.write_text(json.dumps([snapshot, {"futoi_context": {"futoi_live": {"dated_comparisons": output}}}]))
+    script = """import runpy,json,sys
+from datetime import datetime
+m=runpy.run_path(sys.argv[1]); snapshot,release=json.load(open(sys.argv[2]))
+try: m['verify_projection'](snapshot,release,now=datetime.fromisoformat(sys.argv[3]))
+except AssertionError: sys.exit(0)
+sys.exit(7)
+"""
+    result = subprocess.run([sys.executable, "-O", "-c", script, str(path), str(fixture), NOW.isoformat()], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_verified_frame_decodes_checked_buffer_despite_path_replacement(tmp_path, monkeypatch):
+    import pandas as pd
+    from hashlib import sha256
+    from moex_data.futures import futoi_delta_statistics_context as engine
+    partition = tmp_path / "source.parquet"
+    pd.DataFrame({"value": [1]}).to_parquet(partition)
+    provenance = {"partition_ref": "${MOEX_DATA_ROOT}/source.parquet", "partition_sha256": sha256(partition.read_bytes()).hexdigest()}
+    read = engine.pd.read_parquet
+    def replace_then_decode(buffer):
+        pd.DataFrame({"value": [999]}).to_parquet(partition)
+        return read(buffer)
+    monkeypatch.setattr(engine.pd, "read_parquet", replace_then_decode)
+    assert dated._verified_frame(tmp_path, provenance, "partition")["value"].tolist() == [1]
+    with pytest.raises(ValueError, match="digest_mismatch"):
+        dated._verified_frame(tmp_path, provenance, "partition")
+
+
+@pytest.mark.parametrize("corruption", [None, "raw", "eod", "witness"])
+def test_capture_facts_and_dates_must_match_verified_partition_bytes(tmp_path, monkeypatch, corruption):
+    import pandas as pd
+    from hashlib import sha256
+    from moex_data import rub_temporal_applicability as temporal
+    from moex_data.futures import futoi_delta_statistics_context as engine
+    from moex_data.futures import futoi_live_factual_refresh_source_native as source
+    e = candidate()
+    dates = e["observed_date_witness"]["observed_trade_dates"]
+    def write_frame(name, frame, prefix="partition"):
+        filename = name + ".parquet"
+        frame.to_parquet(tmp_path / filename)
+        return {prefix + "_ref": "${MOEX_DATA_ROOT}/" + filename,
+                prefix + "_sha256": sha256((tmp_path / filename).read_bytes()).hexdigest()}
+    def raw(day):
+        return pd.DataFrame([dict(trade_date=day, ts=day+" 23:50:00", systime=day+" 23:55:00",
+            availability_ts_utc=day+"T20:56:00+00:00", ingest_ts=day+"T20:57:00+00:00",
+            sess_id=1, seqnum=1, clgroup=side, pos=net, pos_long=long, pos_short=short,
+            pos_long_num=10, pos_short_num=11, source_id=dated.SOURCE,
+            instrument_id=dated.INSTRUMENT, source_ticker="si", secid="SiU6")
+            for side, net, long, short in (("FIZ",20,100,-80),("YUR",-20,80,-100))])
+    identity = {"source_ticker": "si", "secid": "SiU6"}
+    monkeypatch.setattr(source, "source_identity", lambda *a: identity)
+    monkeypatch.setattr(source, "_data_root", lambda: tmp_path)
+    monkeypatch.setattr(temporal, "_previous_witness", lambda *a: dates[-1])
+    monkeypatch.setattr(temporal, "_previous_reason", lambda *a, **k: None)
+    anchor_frame = raw(dates[-1])
+    anchor_fact = source.latest_aligned_factual(anchor_frame, expected_trade_date=dates[-1], expected_instrument_id=dated.INSTRUMENT, expected_source_ticker="si", expected_secid="SiU6")
+    anchor_proof = write_frame("anchor", anchor_frame, "raw_partition")
+    for prefix in ("raw_quality_report", "raw_refresh_manifest"):
+        (tmp_path / (prefix+".json")).write_text("{}")
+        anchor_proof.update({prefix+"_ref": "${MOEX_DATA_ROOT}/"+prefix+".json", prefix+"_sha256": sha256(b"{}").hexdigest()})
+    anchor_proof["accepted_state_kind"] = "source_native_exact_date_raw_quality_pass"
+    witness = deepcopy(e["observed_date_witness"])
+    witness["provenance"].update(write_frame("dates", pd.DataFrame({"trade_date": dates})))
+    for prefix in ("manifest", "quality_report"):
+        witness["provenance"].update({prefix+"_ref": anchor_proof["raw_quality_report_ref"], prefix+"_sha256": anchor_proof["raw_quality_report_sha256"]})
+    if corruption == "witness":
+        witness["observed_trade_dates"].pop(1)
+    monkeypatch.setattr(engine, "_observed_witness", lambda *a, **k: deepcopy(witness))
+    monkeypatch.setattr(engine, "_accepted_eod", lambda *a, **k: (pd.DataFrame(), {}))
+    def baseline(*args, trade_date, **kwargs):
+        frame = raw(trade_date)
+        fact = source.latest_aligned_factual(frame, expected_trade_date=trade_date, expected_instrument_id=dated.INSTRUMENT, expected_source_ticker="si", expected_secid="SiU6")
+        fact = engine._normalized_factual(fact, field="test")
+        proof = write_frame(trade_date, frame, "raw_partition")
+        proof.update(source_id=dated.SOURCE, factual_validation="PASS")
+        if corruption == "raw":
+            fact["fiz"]["long_participants"] += 1
+        if corruption == "eod":
+            pointer = write_frame("eod_"+trade_date, pd.DataFrame({"trade_date": [trade_date], "net": [20]}))
+            for prefix in ("manifest", "quality_report"):
+                pointer.update({prefix+"_ref": anchor_proof["raw_quality_report_ref"], prefix+"_sha256": anchor_proof["raw_quality_report_sha256"]})
+            return {"status": "AVAILABLE", "source_kind": "accepted_stage5_eod_historical_context_only", "factual": fact, "provenance": {"accepted_pointer": pointer}}
+        return {"status": "AVAILABLE", "factual": fact, "provenance": proof}
+    monkeypatch.setattr(engine, "_factual_for_date", baseline)
+    monkeypatch.setattr(engine, "_eod_factual", lambda row, **kwargs: {"different_verified_fact": int(row["net"])})
+    component = {"data": {"instrument_id": dated.INSTRUMENT, "source_id": dated.SOURCE, "governance": GOV,
+        "previous_completed_session": {"factual": anchor_fact, "provenance": anchor_proof}, "context_refresh": {}}}
+    if corruption == "witness":
+        with pytest.raises(ValueError, match="dates_differ"):
+            dated._capture_candidate(component, now=NOW)
+    else:
+        captured = dated._capture_candidate(component, now=NOW)
+        assert {row["status"] for row in captured["baselines"].values()} == ({"AVAILABLE"} if corruption is None else {"UNAVAILABLE"})
+        if corruption:
+            assert all("differs_from" in row["reason"] for row in captured["baselines"].values())

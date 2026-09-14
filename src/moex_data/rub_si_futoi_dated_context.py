@@ -8,6 +8,7 @@ from copy import deepcopy
 from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 from hashlib import sha256
+from io import BytesIO
 import json
 from math import isfinite
 import re
@@ -27,6 +28,19 @@ FLAGS = {
     "standalone_buy_sell_authority": False, "stage5_full_mode_ready": False,
     "stage5_pointer_promotion_performed": False,
 }
+UNITS = {
+    "position_and_total_open_interest": "contracts",
+    "participant_fields": "participant_side_counts_not_unique_participants",
+    "net_share_of_oi": "fraction_of_total_open_interest",
+    "delta_net_share_of_oi": "fraction_difference_not_percentage_points",
+    "delta_position_and_total_open_interest": "contracts",
+    "delta_participant_fields": "participant_side_count_change_not_unique_participants",
+}
+
+
+def _require(condition, message):
+    if not condition:
+        raise AssertionError(message)
 
 
 def _stamp(value):
@@ -234,6 +248,8 @@ def _validated(evidence, now):
         "maximum_anchor_source_age_seconds": MAX_AGE,
         "observed_date_witness": deepcopy(witness),
         "participant_count_semantics": "side_counts_not_unique_participants",
+        "units": deepcopy(UNITS),
+        "instrument_scope": "Si_family_aggregate_FUTOI_not_individual_contract_market_OI",
         **FLAGS,
     }
 
@@ -253,7 +269,7 @@ def _latest_diagnostics(store, evidence, now):
         for key, row in rows.items():
             accepted = evidence["baselines"][key]
             if (not isinstance(row, dict) or set(row) != {"status", "target_trade_date", "reason"}
-                    or row["status"] != accepted["status"]
+                    or row["status"] not in ("AVAILABLE", "UNAVAILABLE")
                     or row["target_trade_date"] != accepted["target_trade_date"]):
                 return None
             if row["status"] == "UNAVAILABLE":
@@ -311,7 +327,15 @@ def retain(previous, candidate, *, now, governance, error=None):
             raise ValueError(error or "no_new_admitted_previous_observation")
         _validated(candidate, now)
         old = describe(original, now=now, governance=governance)
-        if old["status"] in ("AVAILABLE", "PARTIAL") and _semantic(original["evidence"]) == _semantic(candidate):
+        old_semantics = _semantic(original["evidence"]) if old["status"] in ("AVAILABLE", "PARTIAL") else None
+        new_semantics = _semantic(candidate)
+        retry_refusal_only = (old_semantics is not None
+            and old_semantics["anchor"] == new_semantics["anchor"] and old_semantics["dates"] == new_semantics["dates"]
+            and all(new_semantics["baselines"][key] == prior or (
+                candidate["baselines"][key]["status"] == "UNAVAILABLE"
+                and candidate["baselines"][key]["target_trade_date"] == original["evidence"]["baselines"][key]["target_trade_date"])
+                for key, prior in old_semantics["baselines"].items()))
+        if old_semantics is not None and (old_semantics == new_semantics or retry_refusal_only):
             chosen = original["evidence"]
         else:
             chosen = deepcopy(candidate)
@@ -342,6 +366,38 @@ def _check_source_refs(root, provenance, prefixes):
             raise ValueError("source_evidence_digest_mismatch")
 
 
+def _verified_frame(root, provenance, prefix):
+    """Decode exactly the byte buffer whose digest was checked, never a second path read."""
+    from moex_data.futures import futoi_delta_statistics_context as engine
+    ref, expected = provenance[prefix + "_ref"], provenance[prefix + "_sha256"]
+    _ref(ref)
+    _hash(expected)
+    path = root / ref[len("${MOEX_DATA_ROOT}/"):]
+    if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root.resolve()):
+        raise ValueError("source_evidence_missing_or_escaped_root")
+    content = path.read_bytes()
+    if sha256(content).hexdigest() != expected:
+        raise ValueError("source_evidence_digest_mismatch")
+    return engine.pd.read_parquet(BytesIO(content))
+
+
+def _freeze_raw_fact(root, provenance, expected, *, normalized):
+    from moex_data.futures import futoi_delta_statistics_context as engine
+    from moex_data.futures import futoi_live_factual_refresh_source_native as source
+    proof = deepcopy(provenance)
+    _check_source_refs(root, proof, ("raw_partition",))
+    path = root / proof["raw_partition_ref"][len("${MOEX_DATA_ROOT}/"):]
+    frozen = source._freeze_artifact(root, path, proof["raw_partition_sha256"])
+    proof["raw_partition_ref"] = source._rooted_ref(root, frozen)
+    identity = source.source_identity(INSTRUMENT)
+    fact = source.latest_aligned_factual(_verified_frame(root, proof, "raw_partition"),
+        expected_trade_date=expected, expected_instrument_id=INSTRUMENT,
+        expected_source_ticker=identity["source_ticker"], expected_secid=identity["secid"])
+    if normalized:
+        fact = engine._normalized_factual(fact, field="frozen_raw." + expected)
+    return fact, proof
+
+
 def _capture_candidate(component, *, now):
     """Reuse the canonical source/observed-date/accepted-EOD loaders; no network."""
     from moex_data import rub_temporal_applicability as temporal
@@ -362,15 +418,9 @@ def _capture_candidate(component, *, now):
     root = source._data_root()
     proof = deepcopy(previous["provenance"])
     _check_source_refs(root, proof, ("raw_partition", "raw_quality_report", "raw_refresh_manifest"))
-    path = root / proof["raw_partition_ref"][len("${MOEX_DATA_ROOT}/"):]
-    identity = source.source_identity(INSTRUMENT)
-    factual = source.latest_aligned_factual(
-        engine.pd.read_parquet(path), expected_trade_date=expected,
-        expected_instrument_id=INSTRUMENT,
-        expected_source_ticker=identity["source_ticker"], expected_secid=identity["secid"])
+    factual, proof = _freeze_raw_fact(root, proof, expected, normalized=False)
     if factual != previous["factual"]:
         raise ValueError("previous_fact_differs_from_frozen_raw")
-    _check_source_refs(root, proof, ("raw_partition",))
     anchor = {"instrument_id": INSTRUMENT, "source_id": SOURCE,
               "status": "AVAILABLE", "source_kind": "previous_observed",
               "factual": deepcopy(factual), "provenance": proof}
@@ -385,6 +435,10 @@ def _capture_candidate(component, *, now):
     witness["source_current_observed_trade_date"] = witness.pop("current_observed_trade_date", None)
     witness["retained_scope"] = "anchor_and_exact_20_prior_observed_dates"
     dates = witness["observed_trade_dates"]
+    observed_frame = _verified_frame(root, witness["provenance"], "partition")
+    verified_dates = sorted({_day(str(day)) for day in observed_frame["trade_date"] if str(day) <= expected})
+    if dates != verified_dates[-21:] or not verified_dates or verified_dates[-1] != expected:
+        raise ValueError("observed_dates_differ_from_verified_partition_bytes")
     eod_error = None
     try:
         eod, eod_proof = engine._accepted_eod(root, instrument_id=INSTRUMENT, as_of=now)
@@ -409,12 +463,15 @@ def _capture_candidate(component, *, now):
                 if loaded.get("source_kind") == "accepted_stage5_eod_historical_context_only":
                     kind = "accepted_eod"
                     _check_source_refs(root, provenance["accepted_pointer"], ("partition", "manifest", "quality_report"))
+                    verified = _verified_frame(root, provenance["accepted_pointer"], "partition")
+                    matched = verified.loc[verified["trade_date"].astype(str).eq(target)]
+                    if len(matched) != 1 or fact != engine._eod_factual(matched.iloc[0], instrument_id=INSTRUMENT):
+                        raise ValueError("accepted_eod_fact_differs_from_verified_partition_bytes")
                 else:
                     kind = "canonical_raw"
-                    _check_source_refs(root, provenance, ("raw_partition",))
-                    path = root / provenance["raw_partition_ref"][len("${MOEX_DATA_ROOT}/"):]
-                    frozen = source._freeze_artifact(root, path, provenance["raw_partition_sha256"])
-                    provenance["raw_partition_ref"] = source._rooted_ref(root, frozen)
+                    verified_fact, provenance = _freeze_raw_fact(root, provenance, target, normalized=True)
+                    if fact != verified_fact:
+                        raise ValueError("baseline_fact_differs_from_frozen_raw")
                 record = {"instrument_id": INSTRUMENT, "source_id": SOURCE,
                           "source_kind": kind, "status": "AVAILABLE",
                           "target_trade_date": target, "factual": fact, "provenance": provenance}
@@ -438,7 +495,7 @@ def _capture_candidate(component, *, now):
     return candidate
 
 
-def capture_snapshot(snapshot, previous, *, now_fn):
+def capture_snapshot(snapshot, previous, *, now_fn, refresh_started_at):
     """Attach one bounded Si witness to the existing canonical slow snapshot."""
     component = snapshot.get("components", {}).get("futoi_live")
     if not isinstance(component, dict):
@@ -446,6 +503,19 @@ def capture_snapshot(snapshot, previous, *, now_fn):
     data = component.get("data")
     governance = data.get("governance") if isinstance(data, dict) else None
     cutoff = _stamp(now_fn())
+    floor = [_stamp(refresh_started_at)]
+    prior = (previous or {}).get(STORE_KEY)
+    if isinstance(prior, dict):
+        if prior.get("last_capture_attempt_at_utc") is not None:
+            floor.append(_stamp(prior["last_capture_attempt_at_utc"]))
+        evidence = prior.get("evidence")
+        if isinstance(evidence, dict):
+            floor.extend(_stamp(evidence[field]) for field in ("accepted_at_utc", "causal_cutoff_at_utc"))
+        diagnostics = prior.get("latest_baseline_diagnostics")
+        if isinstance(diagnostics, dict):
+            floor.append(_stamp(diagnostics["checked_at_utc"]))
+    if cutoff < max(floor):
+        raise ValueError("si_dated_capture_clock_precedes_refresh_or_prior_timeline")
     candidate, error = None, None
     try:
         candidate = _capture_candidate(component, now=cutoff)
@@ -492,46 +562,48 @@ def verify_projection(snapshot, release, *, now):
         admission = _validated(evidence, _stamp(now))
     except (KeyError, TypeError, ValueError, OverflowError, AttributeError):
         if output is not None:
-            assert output.get("status") == "UNAVAILABLE", "Si dated refusal completeness"
-            assert "anchor" not in output and "deltas" not in output, "Si dated refused values leaked"
+            _require(output.get("status") == "UNAVAILABLE", "Si dated refusal completeness")
+            _require("anchor" not in output and "deltas" not in output, "Si dated refused values leaked")
         return
-    assert isinstance(output, dict), "Si dated admitted context omitted"
-    assert output["status"] == admission["status"], "Si dated status completeness"
-    assert output["anchor"] == evidence["anchor"], "Si dated anchor changed"
-    assert output["accepted_at_utc"] == evidence["accepted_at_utc"], "Si dated acceptance time changed"
-    assert output["causal_cutoff_at_utc"] == evidence["causal_cutoff_at_utc"], "Si dated cutoff changed"
-    assert output.get("latest_baseline_diagnostics") == _latest_diagnostics(stored, evidence, _stamp(now)), "Si dated diagnostics changed"
-    assert output["evidence_sha256"] == stored["evidence_sha256"], "Si dated identity changed"
-    assert output["observed_date_witness"] == evidence["observed_date_witness"], "Si dated witness changed"
-    assert all(output.get(k) is False for k in FLAGS), "Si dated authority expanded"
+    _require(isinstance(output, dict), "Si dated admitted context omitted")
+    _require(output["status"] == admission["status"], "Si dated status completeness")
+    _require(output["anchor"] == evidence["anchor"], "Si dated anchor changed")
+    _require(output["accepted_at_utc"] == evidence["accepted_at_utc"], "Si dated acceptance time changed")
+    _require(output["causal_cutoff_at_utc"] == evidence["causal_cutoff_at_utc"], "Si dated cutoff changed")
+    _require(output.get("latest_baseline_diagnostics") == _latest_diagnostics(stored, evidence, _stamp(now)), "Si dated diagnostics changed")
+    _require(output["evidence_sha256"] == stored["evidence_sha256"], "Si dated identity changed")
+    _require(output["observed_date_witness"] == evidence["observed_date_witness"], "Si dated witness changed")
+    _require(all(output.get(k) is False for k in FLAGS), "Si dated authority expanded")
+    _require(output.get("units") == UNITS, "Si dated units changed")
+    _require(output.get("instrument_scope") == "Si_family_aggregate_FUTOI_not_individual_contract_market_OI", "Si dated family scope changed")
     dates = evidence["observed_date_witness"]["observed_trade_dates"]
     anchor = evidence["anchor"]["factual"]
     deltas = output["deltas"]
-    assert set(deltas) == {"delta_" + str(lag) + "d" for lag in (1, 5, 20)}, "Si dated missing lag"
+    _require(set(deltas) == {"delta_" + str(lag) + "d" for lag in (1, 5, 20)}, "Si dated missing lag")
     for lag in (1, 5, 20):
         d = deltas["delta_" + str(lag) + "d"]
         original = evidence["baselines"][str(lag)]
         expected = dates[len(dates)-1-lag] if len(dates) > lag else None
-        assert d["target_trade_date"] == expected and d["anchor_trade_date"] == anchor["trade_date"], "Si dated target shifted"
-        assert d["session_lag"] == lag, "Si dated lag changed"
+        _require(d["target_trade_date"] == expected and d["anchor_trade_date"] == anchor["trade_date"], "Si dated target shifted")
+        _require(d["session_lag"] == lag, "Si dated lag changed")
         if original["status"] != "AVAILABLE":
-            assert d["status"] == "UNAVAILABLE" and d["values"] is None, "Si dated missing target became value"
-            assert d["reason"] == original["reason"], "Si dated target reason lost"
+            _require(d["status"] == "UNAVAILABLE" and d["values"] is None, "Si dated missing target became value")
+            _require(d["reason"] == original["reason"], "Si dated target reason lost")
             continue
-        assert d["status"] == "AVAILABLE" and d["baseline"] == original, "Si dated baseline omitted or changed"
+        _require(d["status"] == "AVAILABLE" and d["baseline"] == original, "Si dated baseline omitted or changed")
         baseline, values = original["factual"], d["values"]
         expected_fields = {"total_open_interest"}
         for side in ("fiz", "yur"):
             for field in SIDE_FIELDS:
                 key = side + "." + field
                 expected_fields.add(key)
-                assert type(values[key]) is int, "Si dated noninteger position delta"
-                assert values[key] == int(anchor[side][field]) - int(baseline[side][field]), "Si dated position arithmetic"
+                _require(type(values[key]) is int, "Si dated noninteger position delta")
+                _require(values[key] == int(anchor[side][field]) - int(baseline[side][field]), "Si dated position arithmetic")
             key = side + ".net_share_of_oi"
             expected_fields.add(key)
             ratio = (Decimal(str(anchor[side]["net"])) / Decimal(str(anchor["total_open_interest"]))
                      - Decimal(str(baseline[side]["net"])) / Decimal(str(baseline["total_open_interest"])))
-            assert type(values[key]) in (int, float) and isclose(values[key], float(ratio), abs_tol=1e-12, rel_tol=0), "Si dated share arithmetic"
-        assert set(values) == expected_fields, "Si dated field coverage"
-        assert type(values["total_open_interest"]) is int, "Si dated noninteger OI delta"
-        assert values["total_open_interest"] == anchor["total_open_interest"] - baseline["total_open_interest"], "Si dated OI arithmetic"
+            _require(type(values[key]) in (int, float) and isclose(values[key], float(ratio), abs_tol=1e-12, rel_tol=0), "Si dated share arithmetic")
+        _require(set(values) == expected_fields, "Si dated field coverage")
+        _require(type(values["total_open_interest"]) is int, "Si dated noninteger OI delta")
+        _require(values["total_open_interest"] == anchor["total_open_interest"] - baseline["total_open_interest"], "Si dated OI arithmetic")
