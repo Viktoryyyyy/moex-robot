@@ -16,6 +16,7 @@ CERTIFICATES = {
     'rosstat_sub2024.pem': '6f9d829c8e6712444fce3624658d8788672849c5d5b7b53fd9cf7e83eac4193e',
 }
 MAX_BYTES = 2_000_000
+MAX_COMPACT_RAW_PER_CALL = 128
 POLICY = 'rosstat_verified_https.v1'
 _HASH = re.compile(r'[0-9a-f]{64}')
 
@@ -100,7 +101,7 @@ def capture(url, *, output, timeout=10):
 
 
 def compact_source_receipts(output, *, source_url, keep_manifests=()):
-    """Losslessly gzip superseded raw polling pages without deleting receipts.
+    """Losslessly gzip a bounded batch of superseded raw polling pages.
 
     Every content-addressed receipt is retained so frozen snapshots remain replayable.
     Only raw HTML referenced exclusively by superseded receipts for ``source_url`` is
@@ -109,7 +110,8 @@ def compact_source_receipts(output, *, source_url, keep_manifests=()):
     validate_url(source_url)
     directory = Path(output)
     if not directory.exists():
-        return {'raw_compacted': 0, 'bytes_before': 0, 'bytes_after': 0, 'bytes_saved': 0}
+        return {'raw_compacted': 0, 'raw_candidates': 0, 'raw_remaining': 0,
+                'bytes_before': 0, 'bytes_after': 0, 'bytes_saved': 0}
     if directory.is_symlink() or not directory.is_dir():
         raise ValueError('evidence directory must be a regular directory')
     resolved = directory.resolve(strict=True)
@@ -149,7 +151,8 @@ def compact_source_receipts(output, *, source_url, keep_manifests=()):
     protected_raw = {raw_sha for path, receipt, raw_sha in receipts
                      if path.name in keep_names or receipt.get('policy') != POLICY
                      or receipt.get('source_url') != source_url}
-    candidates = target_raw - protected_raw
+    all_candidates = sorted(target_raw - protected_raw)
+    candidates = all_candidates[:MAX_COMPACT_RAW_PER_CALL]
 
     compacted = 0
     before = 0
@@ -159,9 +162,7 @@ def compact_source_receipts(output, *, source_url, keep_manifests=()):
         gzip_path = resolved / (raw_sha + '.html.gz')
         if raw_path.is_symlink() or gzip_path.is_symlink():
             continue
-        if not raw_path.exists():
-            continue
-        if not raw_path.is_file():
+        if not raw_path.exists() or not raw_path.is_file():
             continue
         try:
             raw = raw_path.read_bytes()
@@ -169,7 +170,7 @@ def compact_source_receipts(output, *, source_url, keep_manifests=()):
             continue
         if not 0 < len(raw) <= MAX_BYTES or sha256(raw).hexdigest() != raw_sha:
             continue
-        encoded = gzip.compress(raw, compresslevel=9, mtime=0)
+        encoded = gzip.compress(raw, compresslevel=6, mtime=0)
         _freeze(gzip_path, encoded)
         try:
             if gzip.decompress(gzip_path.read_bytes()) != raw:
@@ -180,8 +181,9 @@ def compact_source_receipts(output, *, source_url, keep_manifests=()):
         after += len(encoded)
         raw_path.unlink()
         compacted += 1
-    return {'raw_compacted': compacted, 'bytes_before': before, 'bytes_after': after,
-            'bytes_saved': before - after}
+    return {'raw_compacted': compacted, 'raw_candidates': len(all_candidates),
+            'raw_remaining': max(0, len(all_candidates) - compacted),
+            'bytes_before': before, 'bytes_after': after, 'bytes_saved': before - after}
 
 
 if __name__ == '__main__':
