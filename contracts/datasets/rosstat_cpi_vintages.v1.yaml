@@ -157,6 +157,8 @@ retention:
   pre_gc_epoch_evidence_is_never_deleted: true
   polling_frequency_must_not_create_unbounded_semantic_history: true
   unreferenced_post_epoch_receipt_gc_allowed: true
+  unreferenced_polling_grace_seconds: 1200
+  in_flight_acquisition_protected_during_grace: true
   raw_gc_requires_zero_remaining_receipt_references: true
 
 current_pointer:
