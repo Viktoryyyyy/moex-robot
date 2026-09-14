@@ -52,6 +52,23 @@ def test_latest_as_of_selects_latest_available_observation_not_future_one(tmp_pa
     assert after['observation_key'] == '2026-09-08__2026-09-14'
 
 
+def test_late_revision_of_old_observation_does_not_replace_newer_observation(tmp_path):
+    old = weekly('2026-09-09T16:00:05+00:00', '100.05')
+    new = weekly('2026-09-16T16:00:05+00:00', '100.10', start='2026-09-08', end='2026-09-14')
+    new['listed_publication_date'] = '2026-09-16'
+    revised_old = deepcopy(old)
+    revised_old['received_at'] = revised_old['system_available_at'] = '2026-09-17T16:00:05+00:00'
+    revised_old['indices']['previous_registration'] = '100.06'
+    store.record(tmp_path, old)
+    store.record(tmp_path, new)
+    store.record(tmp_path, revised_old)
+
+    selected = history.latest_as_of(tmp_path, series_id='ROSSTAT_WEEKLY_CPI_ESTIMATE',
+                                    as_of='2026-09-18T12:00:00+00:00')
+    assert selected['observation_key'] == '2026-09-08__2026-09-14'
+    assert selected['revision_seq'] == 0
+
+
 def test_history_preserves_all_revisions(tmp_path):
     first = weekly('2026-09-09T16:00:05+00:00', '100.05')
     second = deepcopy(first)
