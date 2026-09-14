@@ -67,8 +67,12 @@ def write_snapshot(root, *, weekly=None, monthly=None):
     return path
 
 
+def gc(root, now):
+    return source.garbage_collect(root, now=now, invoked_at=now)
+
+
 def initialize(root):
-    result = source.garbage_collect(root, now=T0)
+    result = gc(root, T0)
     assert result['status'] == 'INITIALIZED'
 
 
@@ -78,7 +82,7 @@ def test_gc_deletes_only_post_epoch_unreferenced_receipt_and_raw(tmp_path):
     drop = freeze_receipt(tmp_path, WEEKLY_DIR, raw=b'drop', received=T0 + timedelta(minutes=2))
     write_snapshot(tmp_path, weekly=refs(keep))
 
-    result = source.garbage_collect(tmp_path, now=T0 + timedelta(minutes=30))
+    result = gc(tmp_path, T0 + timedelta(minutes=30))
 
     assert result['status'] == 'READY'
     assert result['deleted_manifests'] == 1
@@ -97,7 +101,7 @@ def test_shared_raw_survives_when_any_retained_receipt_still_references_it(tmp_p
     assert keep['raw_sha'] == drop['raw_sha']
     write_snapshot(tmp_path, weekly=refs(keep))
 
-    result = source.garbage_collect(tmp_path, now=T0 + timedelta(minutes=30))
+    result = gc(tmp_path, T0 + timedelta(minutes=30))
 
     assert result['deleted_manifests'] == 1
     assert result['deleted_raw_files'] == 0
@@ -106,20 +110,39 @@ def test_shared_raw_survives_when_any_retained_receipt_still_references_it(tmp_p
     assert not Path(drop['path']).exists()
 
 
+def test_same_raw_hash_in_other_evidence_directory_does_not_pin_orphan_copy(tmp_path):
+    initialize(tmp_path)
+    raw = b'shared archive body'
+    weekly = freeze_receipt(tmp_path, WEEKLY_DIR, raw=raw, received=T0 + timedelta(minutes=1))
+    monthly = freeze_receipt(tmp_path, MONTHLY_DIR, raw=raw, received=T0 + timedelta(minutes=2))
+    assert weekly['raw_sha'] == monthly['raw_sha']
+    write_snapshot(tmp_path, monthly=refs(monthly))
+
+    result = gc(tmp_path, T0 + timedelta(minutes=30))
+
+    assert result['status'] == 'READY'
+    assert result['deleted_manifests'] == 1
+    assert result['deleted_raw_files'] == 1
+    assert not Path(weekly['path']).exists()
+    assert not weekly['raw_path'].exists()
+    assert Path(monthly['path']).exists()
+    assert monthly['raw_path'].exists()
+
+
 def test_unreferenced_receipt_is_protected_for_live_replay_grace(tmp_path):
     initialize(tmp_path)
     candidate = freeze_receipt(tmp_path, WEEKLY_DIR, raw=b'in-flight',
                                received=T0 + timedelta(minutes=1))
     write_snapshot(tmp_path)
 
-    early = source.garbage_collect(tmp_path, now=T0 + timedelta(minutes=20))
+    early = gc(tmp_path, T0 + timedelta(minutes=20))
     assert early['status'] == 'READY'
     assert early['grace_seconds'] == 1200
     assert early['deleted_manifests'] == 0
     assert Path(candidate['path']).exists()
     assert candidate['raw_path'].exists()
 
-    late = source.garbage_collect(tmp_path, now=T0 + timedelta(minutes=21))
+    late = gc(tmp_path, T0 + timedelta(minutes=21))
     assert late['status'] == 'READY'
     assert late['deleted_manifests'] == 1
     assert late['deleted_raw_files'] == 1
@@ -127,12 +150,24 @@ def test_unreferenced_receipt_is_protected_for_live_replay_grace(tmp_path):
     assert not candidate['raw_path'].exists()
 
 
+def test_epoch_uses_invocation_clock_not_trigger_receipt_time(tmp_path):
+    historical_trigger = T0 - timedelta(days=30)
+
+    result = source.garbage_collect(tmp_path, now=historical_trigger, invoked_at=T0)
+
+    assert result['status'] == 'INITIALIZED'
+    assert result['trigger_time_utc'] == historical_trigger.isoformat()
+    assert result['epoch_started_at_utc'] == T0.isoformat()
+    epoch = json.loads((tmp_path / source.GC_STATE_RELATIVE_DIR / source.EPOCH_FILENAME).read_text())
+    assert epoch['started_at_utc'] == T0.isoformat()
+
+
 def test_pre_epoch_evidence_is_never_deleted_by_migration_gc(tmp_path):
     old = freeze_receipt(tmp_path, WEEKLY_DIR, raw=b'legacy', received=T0 - timedelta(days=1))
     initialize(tmp_path)
     write_snapshot(tmp_path)
 
-    result = source.garbage_collect(tmp_path, now=T0 + timedelta(minutes=1))
+    result = gc(tmp_path, T0 + timedelta(minutes=30))
 
     assert result['status'] == 'READY'
     assert result['deleted_manifests'] == 0
@@ -155,7 +190,7 @@ def test_immutable_vintage_and_current_pointer_both_pin_evidence(tmp_path):
     pointer.write_text(json.dumps({'latest_provenance': refs(pointer_evidence)}), encoding='utf-8')
     write_snapshot(tmp_path)
 
-    result = source.garbage_collect(tmp_path, now=T0 + timedelta(minutes=30))
+    result = gc(tmp_path, T0 + timedelta(minutes=30))
 
     assert result['status'] == 'READY'
     assert result['deleted_manifests'] == 0
@@ -171,7 +206,7 @@ def test_frozen_snapshot_pin_survives_after_current_snapshot_moves(tmp_path):
     assert pin['manifest_count'] == 1
     write_snapshot(tmp_path)
 
-    result = source.garbage_collect(tmp_path, now=T0 + timedelta(minutes=30))
+    result = gc(tmp_path, T0 + timedelta(minutes=30))
 
     assert result['status'] == 'READY'
     assert Path(frozen['path']).exists()
@@ -187,7 +222,7 @@ def test_malformed_pin_blocks_gc_without_deleting_candidate(tmp_path):
     pin_dir.mkdir(parents=True)
     (pin_dir / ('b' * 64 + '.json')).write_text('{}', encoding='utf-8')
 
-    result = source.garbage_collect(tmp_path, now=T0 + timedelta(minutes=30))
+    result = gc(tmp_path, T0 + timedelta(minutes=30))
 
     assert result['status'] == 'BLOCKED'
     assert result['deleted_manifests'] == 0
@@ -202,13 +237,13 @@ def test_delete_batch_is_bounded_and_converges(tmp_path):
                        received=T0 + timedelta(minutes=1, microseconds=index))
     write_snapshot(tmp_path)
 
-    first = source.garbage_collect(tmp_path, now=T0 + timedelta(minutes=30))
+    first = gc(tmp_path, T0 + timedelta(minutes=30))
     remaining = list((tmp_path / WEEKLY_DIR).glob('*.json'))
     assert first['deleted_manifests'] == source.MAX_DELETE_MANIFESTS_PER_CALL
     assert len(remaining) == 2
     assert (tmp_path / WEEKLY_DIR / (sha256(b'shared').hexdigest() + '.html')).exists()
 
-    second = source.garbage_collect(tmp_path, now=T0 + timedelta(minutes=31))
+    second = gc(tmp_path, T0 + timedelta(minutes=31))
     assert second['deleted_manifests'] == 2
     assert not list((tmp_path / WEEKLY_DIR).glob('*.json'))
     assert not (tmp_path / WEEKLY_DIR / (sha256(b'shared').hexdigest() + '.html')).exists()
