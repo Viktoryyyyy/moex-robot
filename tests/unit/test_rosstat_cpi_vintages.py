@@ -8,19 +8,20 @@ import pytest
 from moex_research.external_data import rosstat_cpi_vintages as source
 
 
-def weekly(received='2026-09-09T16:00:05+00:00', value='100.05'):
+def weekly(received='2026-09-09T16:00:05+00:00', value='100.05',
+           start='2026-09-01', end='2026-09-07', published_date='2026-09-09'):
     return {
         'series_id': 'ROSSTAT_WEEKLY_CPI_ESTIMATE',
         'geography': 'RU',
-        'observation_start': '2026-09-01',
-        'observation_end': '2026-09-07',
+        'observation_start': start,
+        'observation_end': end,
         'indices': {'previous_registration': value, 'month_start': value, 'year_start': '104.72'},
         'weekly_change_percent': str(Decimal(value) - Decimal('100')),
         'units': 'index_percent_base_100',
         'document_format': 'three_explicit_bases',
         'monthly_final': False,
         'source_publication_time': None,
-        'listed_publication_date': '2026-09-09',
+        'listed_publication_date': published_date,
         'source_url': 'https://rosstat.gov.ru/storage/mediabank/137_09-09-2026.html',
         'raw_sha256': 'a' * 64,
         'document_manifest_path': '/evidence/weekly.json',
@@ -121,6 +122,21 @@ def test_new_month_is_new_initial_observation_not_revision(tmp_path):
     assert second['revision_seq'] == 0
 
 
+def test_late_revision_of_old_observation_does_not_roll_back_series_pointer(tmp_path):
+    old = weekly()
+    new = weekly(received='2026-09-16T16:00:05+00:00', value='100.10',
+                 start='2026-09-08', end='2026-09-14', published_date='2026-09-16')
+    revised_old = weekly(received='2026-09-17T16:00:05+00:00', value='100.06')
+    source.record(tmp_path, old)
+    new_ref = source.record(tmp_path, new)
+    old_revision_ref = source.record(tmp_path, revised_old)
+    pointer_path = Path(new_ref['vintage_path']).parents[1] / 'current.json'
+    pointer = json.loads(pointer_path.read_text())
+    assert old_revision_ref['revision_seq'] == 1
+    assert pointer['observation_key'] == '2026-09-08__2026-09-14'
+    assert pointer['vintage_id'] == new_ref['vintage_id']
+
+
 def test_monthly_values_are_stored_as_published_not_derived_from_weekly(tmp_path):
     ref = source.record(tmp_path, monthly())
     artifact = json.loads(Path(ref['vintage_path']).read_text())
@@ -139,12 +155,18 @@ def test_tampered_vintage_reference_fails_closed(tmp_path):
         source.validate_reference(ref, data)
 
 
-@pytest.mark.parametrize('change', ['naive_time', 'missing_provenance', 'unknown_series', 'future_availability'])
+@pytest.mark.parametrize('change', [
+    'naive_time', 'missing_provenance', 'unknown_series', 'future_availability',
+    'wrong_source', 'wrong_units', 'bad_monthly_arithmetic',
+])
 def test_invalid_normalized_input_fails_closed(tmp_path, change):
-    data = deepcopy(weekly())
+    data = deepcopy(monthly() if change == 'bad_monthly_arithmetic' else weekly())
     if change == 'naive_time': data['received_at'] = data['system_available_at'] = '2026-09-09T16:00:05'
     elif change == 'missing_provenance': data.pop('document_manifest_sha256')
     elif change == 'unknown_series': data['series_id'] = 'ROSSTAT_UNKNOWN'
-    else: data['system_available_at'] = '2026-09-09T16:00:06+00:00'
+    elif change == 'future_availability': data['system_available_at'] = '2026-09-09T16:00:06+00:00'
+    elif change == 'wrong_source': data['source_url'] = 'https://example.org/release.html'
+    elif change == 'wrong_units': data['units'] = 'percent_change'
+    else: data['changes_percent']['previous_month'] = '-0.07'
     with pytest.raises(source.RosstatVintageError):
         source.record(tmp_path, data)
