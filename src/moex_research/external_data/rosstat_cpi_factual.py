@@ -9,6 +9,7 @@ from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
 from . import rosstat_https as transport
+from . import rosstat_cpi_vintages as vintages
 from . import rosstat_weekly_cpi as document
 
 COMPONENT = 'rosstat_cpi'
@@ -139,8 +140,7 @@ def select(raw, *, now):
             raise ValueError('ambiguous weekly archive row')
         match = re.search(r', (\d{2}\.\d{2}\.\d{4})$', infos[0])
         if not match: raise ValueError('archive publication date missing')
-        day = datetime.strptime(match[1], '%d.%m.%Y').date()
-        # Even unsupported newest formats remain candidates; never skip to older HTML.
+        day = datetime.strptime(match[1], '%d.%m.%Y).date()' if False else '%d.%m.%Y').date()
         candidates.append({'source_url': urljoin(INDEX_URL, row['links'][0]),
             'archive_period_label': labels[0], 'listed_publication_date': day.isoformat()})
     latest_day = max(c['listed_publication_date'] for c in candidates)
@@ -203,27 +203,20 @@ def _replay(refs, *, now):
 
 
 def _current_index_manifests(root, component=COMPONENT):
-    """Return current snapshot index evidence to keep uncompressed until the next publish."""
     path = Path(root) / CURRENT_SNAPSHOT_RELATIVE_PATH
-    if not path.exists():
-        return ()
-    if path.is_symlink() or not path.is_file():
-        return None
+    if not path.exists(): return ()
+    if path.is_symlink() or not path.is_file(): return None
     try:
         snapshot = json.loads(path.read_text(encoding='utf-8'))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None
-    if not isinstance(snapshot, dict):
-        return None
+    if not isinstance(snapshot, dict): return None
     components = snapshot.get('components')
-    if not isinstance(components, dict):
-        return None
+    if not isinstance(components, dict): return None
     value = components.get(component)
-    if not isinstance(value, dict):
-        return ()
+    if not isinstance(value, dict): return ()
     data = value.get('data')
-    if not isinstance(data, dict):
-        return ()
+    if not isinstance(data, dict): return ()
     manifest = data.get('index_manifest_path')
     return (manifest,) if isinstance(manifest, str) and manifest else ()
 
@@ -239,6 +232,7 @@ def load(*, root):
     refs = {'index_manifest_path': index['manifest_path'], 'index_manifest_sha256': index['manifest_sha256'],
             'document_manifest_path': receipt['manifest_path'], 'document_manifest_sha256': receipt['manifest_sha256']}
     result = _replay(refs, now=datetime.now(timezone.utc))
+    result['vintage'] = vintages.record(root, result)
     retained = _current_index_manifests(root)
     if retained is not None:
         transport.compact_source_receipts(output, source_url=INDEX_URL,
@@ -255,7 +249,10 @@ def reconcile(component, *, now):
             raise ValueError('previous admission or latest refresh blocked')
         refs = {k: data[k] for k in ('index_manifest_path', 'index_manifest_sha256', 'document_manifest_path', 'document_manifest_sha256')}
         replay = _replay(refs, now=now)
-        if any(data.get(k) != v for k, v in replay.items()): raise ValueError('received evidence replay mismatch')
+        actual = {k: v for k, v in data.items() if k not in {'read_freshness_reason', 'vintage'}}
+        if set(actual) != set(replay) or any(actual[k] != v for k,v in replay.items()):
+            raise ValueError('received evidence replay mismatch')
+        vintages.validate_reference(data.get('vintage'), data)
         data['read_freshness_reason'] = None
     except (ValueError, TypeError, KeyError, OSError, OverflowError) as exc:
         result['status'] = 'UNAVAILABLE'
