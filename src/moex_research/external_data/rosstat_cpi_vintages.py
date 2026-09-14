@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import json
 import os
@@ -18,6 +19,9 @@ SOURCE_ID = 'rosstat_cpi'
 DATASET_RELATIVE_ROOT = Path('state/datasets/dataset_id=rosstat_cpi_vintages')
 _HASH = re.compile(r'[0-9a-f]{64}')
 _MONTH = re.compile(r'\d{4}-\d{2}')
+_INDEX = re.compile(r'\d{1,3}\.\d{2}')
+_CHANGE = re.compile(r'-?\d{1,3}\.\d{2}')
+_RELEASE_URL = re.compile(r'https://rosstat\.gov\.ru/storage/mediabank/[^/]+\.html')
 
 SERIES = {
     'ROSSTAT_WEEKLY_CPI_ESTIMATE': {
@@ -76,6 +80,61 @@ def _canonical_copy(value):
         raise RosstatVintageError('normalized value must be finite JSON') from exc
 
 
+def _decimal(value, *, field, pattern, positive=False):
+    if not isinstance(value, str) or not pattern.fullmatch(value):
+        raise RosstatVintageError(f'{field} must be a canonical decimal string')
+    try:
+        number = Decimal(value)
+    except InvalidOperation as exc:
+        raise RosstatVintageError(f'{field} must be a finite decimal') from exc
+    if not number.is_finite() or (positive and number <= 0):
+        raise RosstatVintageError(f'{field} has invalid numeric value')
+    return value
+
+
+def _validate_value(series_id, value):
+    if value.get('units') != 'index_percent_base_100':
+        raise RosstatVintageError('unsupported Rosstat CPI units')
+    if series_id == 'ROSSTAT_WEEKLY_CPI_ESTIMATE':
+        indices = value.get('indices')
+        if not isinstance(indices, dict) or set(indices) != {'previous_registration', 'month_start', 'year_start'}:
+            raise RosstatVintageError('invalid weekly CPI indices shape')
+        document_format = value.get('document_format')
+        if document_format not in {'three_explicit_bases', 'january_initial_month_index'}:
+            raise RosstatVintageError('unsupported weekly CPI document format')
+        if value.get('monthly_final') is not False:
+            raise RosstatVintageError('weekly CPI estimate cannot be monthly final')
+        _decimal(indices.get('month_start'), field='indices.month_start', pattern=_INDEX, positive=True)
+        if document_format == 'january_initial_month_index':
+            if indices.get('previous_registration') is not None or indices.get('year_start') is not None:
+                raise RosstatVintageError('January initial weekly format must preserve absent bases')
+            if value.get('weekly_change_percent') is not None:
+                raise RosstatVintageError('January initial weekly format cannot invent weekly change')
+        else:
+            _decimal(indices.get('previous_registration'), field='indices.previous_registration', pattern=_INDEX, positive=True)
+            _decimal(indices.get('year_start'), field='indices.year_start', pattern=_INDEX, positive=True)
+            _decimal(value.get('weekly_change_percent'), field='weekly_change_percent', pattern=_CHANGE)
+    else:
+        indices = value.get('indices')
+        changes = value.get('changes_percent')
+        expected = {'previous_month', 'previous_december', 'same_month_previous_year'}
+        if not isinstance(indices, dict) or set(indices) != expected:
+            raise RosstatVintageError('invalid monthly CPI indices shape')
+        if not isinstance(changes, dict) or set(changes) != expected:
+            raise RosstatVintageError('invalid monthly CPI changes shape')
+        for key in sorted(expected):
+            _decimal(indices[key], field='indices.' + key, pattern=_INDEX, positive=True)
+            _decimal(changes[key], field='changes_percent.' + key, pattern=_CHANGE)
+            if Decimal(changes[key]) != Decimal(indices[key]) - Decimal('100'):
+                raise RosstatVintageError('monthly CPI change/index arithmetic mismatch')
+        if value.get('estimate_kind') != 'PUBLISHED_MONTHLY_INDEX':
+            raise RosstatVintageError('monthly CPI estimate kind mismatch')
+        if value.get('decimal_places') != 2:
+            raise RosstatVintageError('monthly CPI printed precision mismatch')
+        if value.get('precision_scope') != 'printed_granularity_not_error_bound':
+            raise RosstatVintageError('monthly CPI precision scope mismatch')
+
+
 def _series_shape(data):
     if not isinstance(data, dict):
         raise RosstatVintageError('Rosstat normalized data must be an object')
@@ -107,6 +166,7 @@ def _series_shape(data):
         if field not in data:
             raise RosstatVintageError(f'missing normalized value field: {field}')
         value[field] = _canonical_copy(data[field])
+    _validate_value(series_id, value)
     return series_id, spec['frequency'], observation_key, observation, value
 
 
@@ -119,6 +179,8 @@ def _publication(data):
     available_at = _utc_iso(data.get('system_available_at', received_at), 'system_available_at')
     if _utc(available_at, 'available_at') > _utc(received_at, 'received_at'):
         raise RosstatVintageError('available_at cannot follow receipt used to establish it')
+    if published_at is not None and _utc(published_at, 'published_at') > _utc(received_at, 'received_at'):
+        raise RosstatVintageError('official publication time cannot follow verified receipt')
     return published_at, published_date, available_at, received_at
 
 
@@ -127,13 +189,16 @@ def _provenance(data, received_at):
     missing = [field for field in required if not isinstance(data.get(field), str) or not data[field]]
     if missing:
         raise RosstatVintageError('missing Rosstat release provenance: ' + ','.join(missing))
+    source_url = data['source_url']
+    if not _RELEASE_URL.fullmatch(source_url):
+        raise RosstatVintageError('Rosstat normalized vintage requires official release document URL')
     raw_sha = data['raw_sha256']
     document_sha = data['document_manifest_sha256']
     if not _HASH.fullmatch(raw_sha) or not _HASH.fullmatch(document_sha):
         raise RosstatVintageError('invalid Rosstat provenance hash')
     result = {
         'source_id': SOURCE_ID,
-        'source_url': data['source_url'],
+        'source_url': source_url,
         'raw_sha256': raw_sha,
         'document_manifest_path': data['document_manifest_path'],
         'document_manifest_sha256': document_sha,
@@ -259,8 +324,43 @@ def _pointer_ref(record, path, artifact_sha, *, last_verified_at, latest_provena
     }
 
 
+def _validate_pointer(pointer, series_id):
+    if not isinstance(pointer, dict):
+        raise RosstatVintageError('Rosstat current pointer must be an object')
+    if (pointer.get('schema_version') != SCHEMA_VERSION or pointer.get('dataset_id') != DATASET_ID
+            or pointer.get('contract_ref') != CONTRACT_REF or pointer.get('series_id') != series_id):
+        raise RosstatVintageError('Rosstat current pointer identity mismatch')
+    if not isinstance(pointer.get('observation_key'), str) or not pointer['observation_key']:
+        raise RosstatVintageError('Rosstat current pointer observation missing')
+    seq = pointer.get('revision_seq')
+    if isinstance(seq, bool) or not isinstance(seq, int) or seq < 0:
+        raise RosstatVintageError('Rosstat current pointer revision invalid')
+    _utc(pointer.get('last_verified_at'), 'pointer last_verified_at')
+    return pointer
+
+
+def _should_promote_pointer(prior, candidate):
+    if prior is None:
+        return True
+    prior = _validate_pointer(prior, candidate['series_id'])
+    if candidate['observation_key'] != prior['observation_key']:
+        return candidate['observation_key'] > prior['observation_key']
+    if candidate['revision_seq'] != prior['revision_seq']:
+        return candidate['revision_seq'] > prior['revision_seq']
+    if candidate['vintage_id'] != prior.get('vintage_id'):
+        raise RosstatVintageError('same Rosstat observation/revision has conflicting vintage identity')
+    return _utc(candidate['last_verified_at'], 'candidate last_verified_at') >= _utc(
+        prior['last_verified_at'], 'pointer last_verified_at')
+
+
+def _promote_pointer(path, ref):
+    prior = _read_json(path) if path.exists() else None
+    if _should_promote_pointer(prior, ref):
+        _atomic_write(path, ref)
+
+
 def record(root, data):
-    """Persist or reuse a semantic CPI vintage and atomically refresh its series pointer."""
+    """Persist/reuse a CPI vintage and promote only the newest observation/revision pointer."""
     root = _root(root)
     series_id, frequency, observation_key, observation, current_value = _series_shape(data)
     published_at, published_date, available_at, received_at = _publication(data)
@@ -271,6 +371,7 @@ def record(root, data):
     series_dir = _ensure_dir(root / DATASET_RELATIVE_ROOT / ('series_id=' + series_id), root)
     observation_dir = _ensure_dir(series_dir / ('observation_key=' + observation_key), root)
     records = _vintages(observation_dir, series_id=series_id, observation_key=observation_key)
+    current_path = series_dir / 'current.json'
 
     if records:
         initial = records[0][2]
@@ -281,10 +382,7 @@ def record(root, data):
             artifact_sha = sha256(latest_path.read_bytes()).hexdigest()
             ref = _pointer_ref(latest, latest_path, artifact_sha,
                                last_verified_at=received_at, latest_provenance=provenance)
-            current_path = series_dir / 'current.json'
-            prior_pointer = _read_json(current_path) if current_path.exists() else None
-            if prior_pointer is None or _utc(received_at, 'received_at') >= _utc(prior_pointer['last_verified_at'], 'pointer last_verified_at'):
-                _atomic_write(current_path, ref)
+            _promote_pointer(current_path, ref)
             return ref
         revision_seq = latest_seq + 1
         revision_status = 'REVISED'
@@ -336,11 +434,25 @@ def record(root, data):
     artifact_sha = _write_immutable(vintage_path, record_value)
     ref = _pointer_ref(record_value, vintage_path, artifact_sha,
                        last_verified_at=received_at, latest_provenance=provenance)
-    current_path = series_dir / 'current.json'
-    prior_pointer = _read_json(current_path) if current_path.exists() else None
-    if prior_pointer is None or _utc(received_at, 'received_at') >= _utc(prior_pointer['last_verified_at'], 'pointer last_verified_at'):
-        _atomic_write(current_path, ref)
+    _promote_pointer(current_path, ref)
     return ref
+
+
+def _validate_reference_path(path, reference, *, series_id, observation_key):
+    vintage_id = reference.get('vintage_id')
+    if not isinstance(vintage_id, str) or not _HASH.fullmatch(vintage_id):
+        raise RosstatVintageError('invalid Rosstat vintage id')
+    if not path.is_absolute() or path.name != 'vintage_id=' + vintage_id + '.json':
+        raise RosstatVintageError('Rosstat vintage path identity mismatch')
+    observation_dir = path.parent
+    series_dir = observation_dir.parent
+    dataset_dir = series_dir.parent
+    if (observation_dir.name != 'observation_key=' + observation_key
+            or series_dir.name != 'series_id=' + series_id
+            or dataset_dir.name != 'dataset_id=' + DATASET_ID):
+        raise RosstatVintageError('Rosstat vintage path structure mismatch')
+    if any(parent.is_symlink() for parent in (observation_dir, series_dir, dataset_dir)):
+        raise RosstatVintageError('Rosstat vintage parent symlink refused')
 
 
 def validate_reference(reference, data):
@@ -353,6 +465,7 @@ def validate_reference(reference, data):
     if not isinstance(path_value, str) or not isinstance(artifact_sha, str) or not _HASH.fullmatch(artifact_sha):
         raise RosstatVintageError('invalid Rosstat vintage reference path or hash')
     path = Path(path_value)
+    _validate_reference_path(path, reference, series_id=series_id, observation_key=observation_key)
     record_value = _read_json(path)
     if sha256(path.read_bytes()).hexdigest() != artifact_sha:
         raise RosstatVintageError('Rosstat vintage artifact hash mismatch')
@@ -366,7 +479,8 @@ def validate_reference(reference, data):
     }
     if any(reference.get(key) != value or record_value.get(key) != value for key, value in expected.items()):
         raise RosstatVintageError('Rosstat vintage reference identity mismatch')
-    if reference.get('vintage_id') != record_value.get('vintage_id') or reference.get('semantic_sha256') != record_value.get('semantic_sha256'):
+    if (reference.get('vintage_id') != record_value.get('vintage_id')
+            or reference.get('semantic_sha256') != record_value.get('semantic_sha256')):
         raise RosstatVintageError('Rosstat vintage reference digest mismatch')
     if record_value.get('value_current') != current_value:
         raise RosstatVintageError('Rosstat vintage normalized value mismatch')
