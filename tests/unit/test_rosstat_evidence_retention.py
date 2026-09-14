@@ -55,5 +55,5 @@ def test_missing_explicit_keep_manifest_blocks_cleanup(tmp_path):
     evidence.mkdir(parents=True)
     missing = evidence / ('a' * 64 + '.json')
     with pytest.raises(ValueError, match='retained evidence manifest missing'):
-        transport.prune_source_receipts(evidence, source_url=weekly.INDEX_URL,
-                                        keep_manifests=(missing,))
+        transport.compact_source_receipts(evidence, source_url=weekly.INDEX_URL,
+                                          keep_manifests=(missing,))
