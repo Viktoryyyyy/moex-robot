@@ -95,6 +95,25 @@ def test_verified_pair_admits_only_weekly_dated_context(tmp_path):
     assert 'read_freshness_reason' not in original['data']
 
 
+def test_compacted_archive_raw_preserves_exact_frozen_replay(tmp_path):
+    value = component(tmp_path)
+    data = value['data']
+    refs = {key: data[key] for key in ('index_manifest_path', 'index_manifest_sha256',
+                                       'document_manifest_path', 'document_manifest_sha256')}
+    before = source._replay(refs, now=NOW)
+    index_manifest = Path(refs['index_manifest_path'])
+    receipt = json.loads(index_manifest.read_text())
+    raw_path = index_manifest.parent / (receipt['raw_sha256'] + '.html')
+
+    result = transport.compact_source_receipts(tmp_path, source_url=source.INDEX_URL)
+
+    assert result['raw_compacted'] == 1
+    assert index_manifest.exists()
+    assert not raw_path.exists()
+    assert Path(str(raw_path) + '.gz').exists()
+    assert source._replay(refs, now=NOW) == before
+
+
 @pytest.mark.parametrize('defect', ['expired', 'refresh', 'retained', 'blocked', 'numbers', 'authority', 'raw', 'index', 'manifest'])
 def test_consumer_downgrades_expired_failed_tampered_or_unaccepted(tmp_path, defect):
     value = component(tmp_path)
