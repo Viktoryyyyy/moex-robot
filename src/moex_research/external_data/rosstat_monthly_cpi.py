@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from . import rosstat_https as transport
 from . import rosstat_cpi_factual as weekly
+from . import rosstat_cpi_vintages as vintages
 from . import rosstat_weekly_cpi as document
 
 COMPONENT = 'rosstat_monthly_cpi'
@@ -22,6 +23,7 @@ DATIVE = 'январю февралю марту апрелю маю июню и
 INSTRUMENTAL = 'январем февралем мартом апрелем маем июнем июлем августом сентябрем октябрем ноябрем декабрем'.split()
 MAX_OBSERVATION_DAYS = 62
 MAX_RECEIPT_SECONDS = weekly.MAX_RECEIPT_SECONDS
+EVIDENCE_RELATIVE_DIR = Path('raw/external/rosstat_monthly_cpi')
 DENIED = ('historical_pit_acceptance', 'action_authority', 'forecast_alignment_accepted',
           'full_rosstat_macro_accepted', 'calendar_accepted', 'intraday_use_allowed')
 
@@ -138,7 +140,6 @@ def parse(raw, *, received_at):
         (p.startswith(f'Индекс потребительских цен в {LOCATIVE[m-1]} {y} г.') or p.startswith(f'В {LOCATIVE[m-1]} {y} г.'))]
     if len(candidates) != 1: raise ValueError('one monthly CPI summary required')
     summary = candidates[0].split('(в ', 1)[0]
-    # Both actual source introductory formats identify the preceding month/year.
     if not any(term in summary for term in (f'к {headings[0]}', f'с {INSTRUMENTAL[previous_month-1]} {previous_year} г.')):
         raise ValueError('summary previous-month identity mismatch')
     summary_values = re.findall(r'(\d{1,3},\d{2})%', summary)
@@ -176,7 +177,7 @@ def _replay(refs, *, now):
 
 
 def load(*, root):
-    root = Path(root).resolve(); output = root / 'raw/external/rosstat_monthly_cpi'
+    root = Path(root).resolve(); output = root / EVIDENCE_RELATIVE_DIR
     if not output.resolve().is_relative_to(root): raise ValueError('evidence directory escapes root')
     index = transport.capture(INDEX_URL, output=output)
     _, raw = weekly._receipt(index['manifest_path'], index['manifest_sha256'], now=datetime.now(timezone.utc), expected_url=INDEX_URL)
@@ -184,7 +185,13 @@ def load(*, root):
     receipt = transport.capture(selected['source_url'], output=output)
     refs = {'index_manifest_path': index['manifest_path'], 'index_manifest_sha256': index['manifest_sha256'],
         'document_manifest_path': receipt['manifest_path'], 'document_manifest_sha256': receipt['manifest_sha256']}
-    return _replay(refs, now=datetime.now(timezone.utc))
+    result = _replay(refs, now=datetime.now(timezone.utc))
+    result['vintage'] = vintages.record(root, result)
+    retained = weekly._current_index_manifests(root, COMPONENT)
+    if retained is not None:
+        transport.compact_source_receipts(output, source_url=INDEX_URL,
+            keep_manifests=(index['manifest_path'], *retained))
+    return result
 
 
 def reconcile(component, *, now):
@@ -195,8 +202,10 @@ def reconcile(component, *, now):
             raise ValueError('monthly component admission blocked')
         refs = {k: data[k] for k in ('index_manifest_path', 'index_manifest_sha256', 'document_manifest_path', 'document_manifest_sha256')}
         expected = _replay(refs, now=now)
-        if set(data)-{'read_freshness_reason'} != set(expected) or any(data[k] != v for k,v in expected.items()):
+        actual = {k: v for k, v in data.items() if k not in {'read_freshness_reason', 'vintage'}}
+        if set(actual) != set(expected) or any(actual[k] != v for k,v in expected.items()):
             raise ValueError('monthly normalized evidence mismatch')
+        vintages.validate_reference(data.get('vintage'), data)
         data['read_freshness_reason'] = None
     except (ValueError, TypeError, KeyError, OSError, OverflowError, AttributeError) as exc:
         result['status'] = 'UNAVAILABLE'; data.update(dict.fromkeys(DENIED, False))

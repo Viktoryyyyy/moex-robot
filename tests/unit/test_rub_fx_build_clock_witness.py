@@ -152,7 +152,7 @@ def test_full_release_and_export_refuse_rewritten_builds_without_archive_changes
     value = retained_block(timeframe, count)
     change_rows(value, "all")
     snapshot = {
-        "identity": {"generated_at_utc": NOW.isoformat()},
+        "identity": {"generated_at_utc": PREBUILD.isoformat()},
         "components": {"stage9_daily": {"status": "READY", "data": {
             "server_core": {"blocks": [value]}}}},
     }
