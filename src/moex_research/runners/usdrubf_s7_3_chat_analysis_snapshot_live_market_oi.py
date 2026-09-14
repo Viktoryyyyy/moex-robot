@@ -320,6 +320,8 @@ def refresh_snapshot(
         hour_acquisition = acquire_hour(now_fn=now_fn)
         cny_hour_acquisition = acquire_hour(now_fn=now_fn, secid='CNYRUBF')
         base.finalize_snapshot_timing(snapshot, started=now, completed=now_fn())
+        from moex_data.rub_si_futoi_dated_context import capture_snapshot as capture_si_dated
+        capture_si_dated(snapshot, previous, now=base._aware(snapshot["identity"]["generated_at_utc"], "si_dated_capture"))
         from moex_data.rub_dated_context import capture_slow
         capture_slow(snapshot, previous, now=base._aware(snapshot['identity']['generated_at_utc'], 'completed'),
                      hour_acquisition=hour_acquisition, cny_hour_acquisition=cny_hour_acquisition)

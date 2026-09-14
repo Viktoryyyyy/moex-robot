@@ -178,6 +178,8 @@ def _fx_arithmetic_completeness(block, *, now):
 def projection_completeness(snapshot, value, *, now):
     """Independent reverse oracle over the read-time input, not exported fact counts."""
     now = now.astimezone(timezone.utc)
+    from moex_data.rub_si_futoi_dated_context import verify_projection as verify_si_dated
+    verify_si_dated(snapshot, value, now=now)
     from math import isfinite
     view = apply_read_freshness(snapshot, now=now)
     components = view.get('components', {})

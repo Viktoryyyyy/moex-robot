@@ -102,6 +102,8 @@ def describe(snapshot):
     freshness = snapshot.get('live_read_freshness')
     from moex_data.rub_dated_context import describe as dated_context
     consumers = consumer_context(snapshot)
+    from moex_data.rub_si_futoi_dated_context import attach_consumer as attach_si_dated
+    attach_si_dated(snapshot, consumers, now=target_now)
     accepted_dated = dated_context(snapshot, now=target_now) if target_now else {'status': 'UNAVAILABLE', 'observations': {}}
     range_item = accepted_dated['observations'].get('structure:observed_range_levels.USDRUBF')
     range_levels = ({'status': 'AVAILABLE', 'values': deepcopy(range_item['values']['values']),
