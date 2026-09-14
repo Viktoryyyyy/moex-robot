@@ -22,6 +22,7 @@ DATIVE = 'январю февралю марту апрелю маю июню и
 INSTRUMENTAL = 'январем февралем мартом апрелем маем июнем июлем августом сентябрем октябрем ноябрем декабрем'.split()
 MAX_OBSERVATION_DAYS = 62
 MAX_RECEIPT_SECONDS = weekly.MAX_RECEIPT_SECONDS
+EVIDENCE_RELATIVE_DIR = Path('raw/external/rosstat_monthly_cpi')
 DENIED = ('historical_pit_acceptance', 'action_authority', 'forecast_alignment_accepted',
           'full_rosstat_macro_accepted', 'calendar_accepted', 'intraday_use_allowed')
 
@@ -176,7 +177,7 @@ def _replay(refs, *, now):
 
 
 def load(*, root):
-    root = Path(root).resolve(); output = root / 'raw/external/rosstat_monthly_cpi'
+    root = Path(root).resolve(); output = root / EVIDENCE_RELATIVE_DIR
     if not output.resolve().is_relative_to(root): raise ValueError('evidence directory escapes root')
     index = transport.capture(INDEX_URL, output=output)
     _, raw = weekly._receipt(index['manifest_path'], index['manifest_sha256'], now=datetime.now(timezone.utc), expected_url=INDEX_URL)
@@ -184,7 +185,12 @@ def load(*, root):
     receipt = transport.capture(selected['source_url'], output=output)
     refs = {'index_manifest_path': index['manifest_path'], 'index_manifest_sha256': index['manifest_sha256'],
         'document_manifest_path': receipt['manifest_path'], 'document_manifest_sha256': receipt['manifest_sha256']}
-    return _replay(refs, now=datetime.now(timezone.utc))
+    result = _replay(refs, now=datetime.now(timezone.utc))
+    retained = weekly._current_index_manifests(root, COMPONENT)
+    if retained is not None:
+        transport.prune_source_receipts(output, source_url=INDEX_URL,
+            keep_manifests=(index['manifest_path'], *retained))
+    return result
 
 
 def reconcile(component, *, now):
