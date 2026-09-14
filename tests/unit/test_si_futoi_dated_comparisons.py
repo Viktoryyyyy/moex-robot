@@ -67,7 +67,8 @@ def candidate():
     return {
         "schema_version": dated.SCHEMA, "contract_ref": dated.CONTRACT,
         "instrument_id": dated.INSTRUMENT, "source_id": dated.SOURCE,
-        "accepted_at_utc": NOW.isoformat(), "governance_at_acceptance": deepcopy(GOV),
+        "accepted_at_utc": NOW.isoformat(), "causal_cutoff_at_utc": NOW.isoformat(),
+        "governance_at_acceptance": deepcopy(GOV),
         "anchor": anchor, "baselines": baselines,
         "observed_date_witness": {
             "status": "PASS", "authority_source_id": "moex_algopack_fo_tradestats_5m",
@@ -203,6 +204,7 @@ def test_repeat_receipt_does_not_renew_first_acceptance():
     second = candidate()
     later = NOW + timedelta(minutes=3)
     second["accepted_at_utc"] = later.isoformat()
+    second["causal_cutoff_at_utc"] = later.isoformat()
     second["anchor"]["factual"]["availability_ts_utc"] = later.isoformat()
     second["anchor"]["factual"]["ingest_ts_utc"] = later.isoformat()
     second["anchor"]["provenance"]["raw_partition_sha256"] = "a"*64
@@ -338,3 +340,127 @@ def test_integration_release_and_compact_preserve_dated_without_current(minutes)
     assert row["usable"] is False and row["dated_preparation_available"] is True
     assert compact["futoi_context"]["futoi_live_cr"]["comparisons"] is None
     assert snapshot == original
+
+
+def test_capture_acceptance_uses_post_validation_clock(monkeypatch):
+    events = []
+    completed = NOW + timedelta(seconds=9, microseconds=125)
+    clocks = iter((NOW, completed))
+    original = candidate()
+
+    def clock():
+        value = next(clocks)
+        events.append(("clock", value))
+        return value
+
+    def checked(component, *, now):
+        events.append(("source_validation", now))
+        return original
+
+    monkeypatch.setattr(dated, "_capture_candidate", checked)
+    snapshot = {"components": {"futoi_live": {"data": {"governance": deepcopy(GOV)}}}}
+    dated.capture_snapshot(snapshot, None, now_fn=clock)
+    assert events == [("clock", NOW), ("source_validation", NOW), ("clock", completed)]
+    stored = snapshot[dated.STORE_KEY]
+    assert stored["evidence"]["accepted_at_utc"] == completed.isoformat()
+    assert stored["evidence"]["causal_cutoff_at_utc"] == NOW.isoformat()
+    assert stored["last_capture_attempt_at_utc"] == completed.isoformat()
+    assert original == candidate()
+    assert dated.describe(stored, now=completed-timedelta(microseconds=1), governance=GOV)["status"] == "UNAVAILABLE"
+    assert dated.describe(stored, now=completed, governance=GOV)["status"] == "AVAILABLE"
+
+
+@pytest.mark.parametrize("field", ["availability_ts_utc", "ingest_ts_utc"])
+def test_later_acceptance_cannot_admit_post_cutoff_baseline(monkeypatch, field):
+    value = candidate()
+    value["baselines"]["20"]["factual"][field] = (NOW+timedelta(seconds=1)).isoformat()
+    monkeypatch.setattr(dated, "_capture_candidate", lambda *args, **kwargs: value)
+    clocks = iter((NOW, NOW+timedelta(seconds=2)))
+    snapshot = {"components": {"futoi_live": {"data": {"governance": deepcopy(GOV)}}}}
+    dated.capture_snapshot(snapshot, None, now_fn=lambda: next(clocks))
+    assert "evidence" not in snapshot[dated.STORE_KEY]
+    assert snapshot[dated.STORE_KEY]["last_capture_error"]
+
+
+def test_capture_clock_reversal_cannot_publish_new_evidence(monkeypatch):
+    monkeypatch.setattr(dated, "_capture_candidate", lambda *args, **kwargs: candidate())
+    clocks = iter((NOW, NOW-timedelta(microseconds=1)))
+    snapshot = {"components": {"futoi_live": {"data": {"governance": deepcopy(GOV)}}}}
+    before = deepcopy(snapshot)
+    with pytest.raises(ValueError, match="clock_went_backwards"):
+        dated.capture_snapshot(snapshot, None, now_fn=lambda: next(clocks))
+    assert snapshot == before
+
+
+@pytest.mark.parametrize("invalid", [None, "bad", "2026-09-14T17:30:00", "2026-09-14T17:30:01+00:00"])
+def test_cutoff_is_required_aware_and_not_after_acceptance(invalid):
+    value = candidate()
+    if invalid is None:
+        value.pop("causal_cutoff_at_utc")
+    else:
+        value["causal_cutoff_at_utc"] = invalid
+    assert dated.describe(store(value), now=NOW, governance=GOV)["status"] == "UNAVAILABLE"
+
+
+def test_failed_capture_records_completion_and_preserves_old_witness(monkeypatch):
+    first = dated.retain(None, candidate(), now=NOW, governance=GOV)
+
+    def failed(*args, **kwargs):
+        raise ValueError("actual_capture_failure")
+
+    monkeypatch.setattr(dated, "_capture_candidate", failed)
+    clocks = iter((NOW+timedelta(seconds=1), NOW+timedelta(seconds=4)))
+    snapshot = {"components": {"futoi_live": {"data": {"governance": deepcopy(GOV)}}}}
+    dated.capture_snapshot(snapshot, {dated.STORE_KEY: first}, now_fn=lambda: next(clocks))
+    actual = snapshot[dated.STORE_KEY]
+    assert actual["evidence"] == first["evidence"]
+    assert actual["evidence_sha256"] == first["evidence_sha256"]
+    assert actual["last_capture_attempt_at_utc"] == (NOW+timedelta(seconds=4)).isoformat()
+    assert "actual_capture_failure" in actual["last_capture_error"]
+
+
+def test_changed_refusal_preserves_identity_but_exposes_latest_diagnostic():
+    e = candidate()
+    e["baselines"]["20"] = {"status": "UNAVAILABLE", "target_trade_date": "2026-08-22",
+                           "factual": None, "reason": "raw_partition_missing"}
+    first = dated.retain(None, e, now=NOW, governance=GOV)
+    original = deepcopy(first)
+    changed = deepcopy(e)
+    later = NOW+timedelta(minutes=3)
+    changed["accepted_at_utc"] = later.isoformat()
+    changed["causal_cutoff_at_utc"] = later.isoformat()
+    changed["baselines"]["20"]["reason"] = "parquet_read_failed"
+    second = dated.retain(first, changed, now=later, governance=GOV)
+    assert second["evidence"] == first["evidence"]
+    assert second["evidence_sha256"] == first["evidence_sha256"]
+    assert first == original
+    result = dated.describe(second, now=later, governance=GOV)
+    assert result["status"] == "PARTIAL"
+    assert result["accepted_at_utc"] == NOW.isoformat()
+    assert result["deltas"]["delta_20d"]["reason"] == "raw_partition_missing"
+    assert result["latest_baseline_diagnostics"]["baselines"]["20"]["reason"] == "parquet_read_failed"
+    assert result["latest_baseline_diagnostics"]["checked_at_utc"] == later.isoformat()
+    assert result["deltas"]["delta_1d"]["values"]["fiz.net"] == 1
+    before_diagnostic = dated.describe(second, now=NOW, governance=GOV)
+    assert before_diagnostic["latest_baseline_diagnostics"] is None
+    snapshot = {"components": {"futoi_live": {"data": {"governance": deepcopy(GOV)}}},
+                dated.STORE_KEY: second}
+    output = {"futoi_context": {"futoi_live": {"dated_comparisons": result}}}
+    dated.verify_projection(snapshot, output, now=later)
+    result["latest_baseline_diagnostics"]["baselines"]["20"]["reason"] = "forged"
+    with pytest.raises(AssertionError, match="diagnostics"):
+        dated.verify_projection(snapshot, output, now=later)
+
+
+def test_slow_runner_final_clock_follows_si_source_capture():
+    import ast
+    runner = Path(__file__).resolve().parents[2] / "src/moex_research/runners/usdrubf_s7_3_chat_analysis_snapshot_live_market_oi.py"
+    tree = ast.parse(runner.read_text(encoding="utf-8"))
+    refresh = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "refresh_snapshot")
+    calls = [n for n in ast.walk(refresh) if isinstance(n, ast.Call)]
+    captures = [n for n in calls if isinstance(n.func, ast.Name) and n.func.id == "capture_si_dated"]
+    finals = [n for n in calls if isinstance(n.func, ast.Attribute) and n.func.attr == "finalize_snapshot_timing"]
+    assert len(captures) == len(finals) == 1
+    assert captures[0].lineno < finals[0].lineno
+    assert any(k.arg == "now_fn" and isinstance(k.value, ast.Name) and k.value.id == "now_fn" for k in captures[0].keywords)
+    assert not any(k.arg == "now" for k in captures[0].keywords)
