@@ -36,6 +36,7 @@ EPOCH_FILENAME = 'epoch.json'
 STATUS_FILENAME = 'current.json'
 LOCK_FILENAME = '.lock'
 MAX_DELETE_MANIFESTS_PER_CALL = 128
+MIN_UNREFERENCED_AGE_SECONDS = 1200
 _HASH = re.compile(r'[0-9a-f]{64}')
 _COMPONENTS = ('rosstat_cpi', 'rosstat_monthly_cpi')
 
@@ -361,11 +362,24 @@ def _write_status(root: Path, status: dict) -> None:
     _atomic_write(state_dir / STATUS_FILENAME, status)
 
 
+def _eligible_unreferenced(receipts: list[dict], *, protected: set[Path], epoch_start: datetime,
+                           now: datetime) -> list[dict]:
+    result = []
+    for record in receipts:
+        age = (now - record['received_at']).total_seconds()
+        if (record['received_at'] >= epoch_start and record['path'] not in protected
+                and age >= MIN_UNREFERENCED_AGE_SECONDS):
+            result.append(record)
+    return result
+
+
 def garbage_collect(root, *, now) -> dict:
-    """Delete only post-epoch Rosstat polling evidence with no live/replay references.
+    """Delete only old post-epoch Rosstat polling evidence with no live/replay references.
 
     The first call creates an epoch and deletes nothing.  This protects all historical
     evidence that may be referenced by exports created before this policy existed.
+    A receipt also remains protected for the full 20-minute live replay window so a
+    concurrent capture cannot be collected before its load transaction publishes it.
     """
     root = _root(root)
     now_utc = _utc(now, 'retention now')
@@ -382,6 +396,7 @@ def garbage_collect(root, *, now) -> dict:
                     'deleted_manifests': 0,
                     'deleted_raw_files': 0,
                     'bytes_saved': 0,
+                    'grace_seconds': MIN_UNREFERENCED_AGE_SECONDS,
                 }
                 _write_status(root, status)
                 return status
@@ -395,10 +410,10 @@ def garbage_collect(root, *, now) -> dict:
                 raise RosstatPollingRetentionError('protected Rosstat receipt missing from governed inventory')
 
             epoch_start = _utc(epoch['started_at_utc'], 'retention epoch started_at_utc')
-            candidates = [record for record in receipts
-                          if record['received_at'] >= epoch_start and record['path'] not in protected]
-            candidates.sort(key=lambda item: (item['received_at'], str(item['path'])))
-            candidates = candidates[:MAX_DELETE_MANIFESTS_PER_CALL]
+            eligible = _eligible_unreferenced(receipts, protected=protected,
+                                              epoch_start=epoch_start, now=now_utc)
+            eligible.sort(key=lambda item: (item['received_at'], str(item['path'])))
+            candidates = eligible[:MAX_DELETE_MANIFESTS_PER_CALL]
             delete_paths = {record['path'] for record in candidates}
             remaining_raw = {record['raw_sha256'] for record in receipts if record['path'] not in delete_paths}
             raw_targets: dict[Path, str] = {}
@@ -433,12 +448,12 @@ def garbage_collect(root, *, now) -> dict:
                 'epoch_started_at_utc': epoch['started_at_utc'],
                 'protected_manifests': len(protected),
                 'inventory_manifests': len(receipts),
-                'eligible_unreferenced_manifests': len([record for record in receipts
-                    if record['received_at'] >= epoch_start and record['path'] not in protected]),
+                'eligible_unreferenced_manifests': len(eligible),
                 'deleted_manifests': len(candidates),
                 'deleted_raw_files': len(raw_targets),
                 'bytes_saved': bytes_saved,
                 'delete_limit': MAX_DELETE_MANIFESTS_PER_CALL,
+                'grace_seconds': MIN_UNREFERENCED_AGE_SECONDS,
                 'pre_epoch_evidence_preserved': True,
             }
             _write_status(root, status)
@@ -452,6 +467,7 @@ def garbage_collect(root, *, now) -> dict:
                 'deleted_manifests': 0,
                 'deleted_raw_files': 0,
                 'bytes_saved': 0,
+                'grace_seconds': MIN_UNREFERENCED_AGE_SECONDS,
                 'reason': str(exc),
             }
             _write_status(root, status)
