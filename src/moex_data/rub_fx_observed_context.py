@@ -80,6 +80,10 @@ def describe(evidence, *, now):
     # Build availability may differ by row. A hole is not a shorter observed lag.
     if eligible and eligible != rows[:len(eligible)]:
         return {**result, 'reason': 'noncausal_hole_no_lag_shift'}
+    # Every row in an accepted Stage7 partition shares its producer build clock.
+    # Parsing a syntactically valid replacement must not create an earlier build.
+    if any(_time(row['build_ts_utc']) != _time(rows[-1]['build_ts_utc']) for row in rows):
+        return {**result, 'reason': 'retained_build_witness_mismatch'}
     result.update(instrument_id=instrument, secid=INSTRUMENTS[instrument], timeframe=timeframe,
         units={'price': 'RUB_per_USD' if instrument == 'usdrubf_futures_family' else 'RUB_per_CNY',
                'volume': 'contracts', 'value': 'RUB', 'num_trades': 'trades'},
@@ -154,7 +158,19 @@ def apply(block, now):
                 or evidence.get('timeframe') != block.get('timeframe')
                 or evidence.get('source_provenance') != block.get('provenance')):
             evidence = None
-        block['observed_context'] = describe(evidence, now=now)
+        context = describe(evidence, now=now)
+        if context['status'] == 'AVAILABLE':
+            # selected_observation is retained separately from the bounded tail
+            # and came from the same hash-validated accepted Stage7 partition.
+            try:
+                selected_build = _time(block['selected_observation']['build_ts_utc'])
+                matches = all(_time(row['build_ts_utc']) == selected_build for row in evidence['rows'])
+            except (KeyError, TypeError, ValueError, OverflowError):
+                matches = False
+            if not matches:
+                context = describe(None, now=now)
+                context['reason'] = 'retained_build_witness_mismatch'
+        block['observed_context'] = context
 
 
 def capture(frame, spec, provenance, *, now):
