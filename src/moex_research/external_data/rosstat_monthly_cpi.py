@@ -188,7 +188,7 @@ def load(*, root):
     result = _replay(refs, now=datetime.now(timezone.utc))
     retained = weekly._current_index_manifests(root, COMPONENT)
     if retained is not None:
-        transport.prune_source_receipts(output, source_url=INDEX_URL,
+        transport.compact_source_receipts(output, source_url=INDEX_URL,
             keep_manifests=(index['manifest_path'], *retained))
     return result
 
