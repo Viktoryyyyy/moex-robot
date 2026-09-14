@@ -126,6 +126,8 @@ pit:
   no_lookahead_required: true
   feature_eligibility_rule: vintage.available_at <= prediction_as_of
   use_latest_eligible_revision_only: true
+  latest_observation_rule: newest_observation_period_then_latest_eligible_revision
+  late_revision_of_older_observation_does_not_replace_newer_current_observation: true
   later_revision_must_not_rewrite_earlier_vintage: true
   publication_timestamp_without_system_receipt_does_not_grant_availability: true
   reader_operations:
@@ -147,6 +149,11 @@ provenance:
 current_pointer:
   mutable: true
   atomic_replace_required: true
+  promotion_order:
+    - newest_observation_key
+    - highest_revision_seq_for_same_observation
+    - latest_verification_time_for_same_vintage
+  older_observation_must_not_replace_newer_pointer: true
   required_fields:
     - schema_version
     - dataset_id
@@ -166,7 +173,11 @@ current_pointer:
 consumer_contract:
   raw_html_not_consumer_interface: true
   normalized_vintage_is_macro_history_interface: true
-  live_component_exposes_vintage_reference: true
+  new_live_acquisition_exposes_vintage_reference: true
+  pre_contract_replay_valid_component_without_vintage_reference:
+    factual_replay_allowed: true
+    normalized_history_linked: false
+    migration_breakage_forbidden: true
   expectations_consensus_and_surprise:
     stored_here: false
     separate_verified_source_required: true
@@ -176,6 +187,9 @@ consumer_contract:
 failure_semantics:
   unknown_series_id: fail_closed
   malformed_observation_identity: fail_closed
+  invalid_units_or_precision: fail_closed
+  monthly_index_change_arithmetic_mismatch: fail_closed
+  non_rosstat_release_url: fail_closed
   missing_release_provenance: fail_closed
   non_utc_or_naive_available_at: fail_closed
   conflicting_existing_vintage_id: fail_closed
