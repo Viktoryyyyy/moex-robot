@@ -33,6 +33,8 @@ retention:
   trigger: after_normalized_vintage_current_pointer_promotion
   first_run_creates_local_gc_epoch: true
   pre_epoch_evidence_deletion_allowed: false
+  unreferenced_receipt_grace_seconds: 1200
+  grace_reason: protect_in_flight_acquisition_and_full_live_replay_freshness_window
   protected_reference_roots:
     - current_chat_analysis_snapshot
     - normalized_series_current_pointer
