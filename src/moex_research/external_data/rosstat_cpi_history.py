@@ -27,6 +27,21 @@ def _with_ref(path, record):
     return result
 
 
+def _observation_sort_key(record):
+    observation = record.get('observation')
+    if not isinstance(observation, dict):
+        raise store.RosstatVintageError('Rosstat vintage observation must be an object')
+    if record.get('series_id') == 'ROSSTAT_WEEKLY_CPI_ESTIMATE':
+        value = observation.get('observation_end')
+    elif record.get('series_id') == 'ROSSTAT_MONTHLY_CPI':
+        value = observation.get('observation_month')
+    else:
+        raise store.RosstatVintageError('unsupported Rosstat CPI series')
+    if not isinstance(value, str) or not value:
+        raise store.RosstatVintageError('Rosstat vintage observation sort key missing')
+    return value
+
+
 def history(root, *, series_id, observation_key):
     """Return all immutable revisions for one observation in revision order."""
     root, series_dir = _series_dir(root, series_id)
@@ -52,7 +67,7 @@ def as_of(root, *, series_id, observation_key, as_of):
 
 
 def latest_as_of(root, *, series_id, as_of):
-    """Return the latest Rosstat CPI observation/revision available at the PIT cutoff."""
+    """Return newest observation and its latest revision available at the PIT cutoff."""
     cutoff = store._utc(as_of, 'as_of')
     root, series_dir = _series_dir(root, series_id)
     if series_dir is None:
@@ -68,6 +83,5 @@ def latest_as_of(root, *, series_id, as_of):
             candidates.append(eligible[-1])
     if not candidates:
         return None
-    candidates.sort(key=lambda record: (store._utc(record['available_at'], 'available_at'),
-                                        record['observation_key'], record['revision_seq']))
+    candidates.sort(key=lambda record: (_observation_sort_key(record), record['revision_seq']))
     return candidates[-1]
