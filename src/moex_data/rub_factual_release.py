@@ -152,8 +152,8 @@ def export(snapshot, *, now, code_revision, output):
     release = build(snapshot, now=now, code_revision=code_revision)
     raw = _encoded(release)
     release_sha = sha256(raw).hexdigest()
-    from moex_research.external_data import rosstat_polling_retention as rosstat_retention
-    evidence_pin = rosstat_retention.pin_snapshot(snapshot, pin_id=release_sha, created_at=now)
+    from moex_research.external_data import rosstat_factual_export_pin
+    evidence_pin = rosstat_factual_export_pin.pin(snapshot, pin_id=release_sha, created_at=now)
     directory = Path(output) / release_sha
     directory.mkdir(parents=True, exist_ok=False)
     (directory / 'input_snapshot.json').write_bytes(_encoded(snapshot))
