@@ -1,10 +1,14 @@
 from email.message import Message
+from hashlib import sha256
+import json
 from pathlib import Path
 import ssl
+
 import pytest
 from moex_research.external_data import rosstat_https as source
 
 URL = 'https://rosstat.gov.ru/storage/mediabank/134_02-09-2026.html'
+INDEX_URL = 'https://rosstat.gov.ru/compendium/document/50798'
 
 
 @pytest.mark.parametrize('url', [
@@ -82,3 +86,75 @@ def test_invalid_document_cannot_be_captured(monkeypatch, tmp_path, defect):
     monkeypatch.setattr(source, 'build_opener', lambda *a: Opener())
     with pytest.raises(ValueError): source.capture(URL, output=tmp_path)
     assert not list(tmp_path.iterdir())
+
+
+def _receipt(root, *, url, raw, requested):
+    raw_sha = sha256(raw).hexdigest()
+    (root / (raw_sha + '.html')).write_bytes(raw)
+    receipt = {
+        'policy': source.POLICY,
+        'source_url': url,
+        'requested_at_utc': requested,
+        'received_at_utc': requested,
+        'raw_sha256': raw_sha,
+        'certificate_sha256': dict(source.CERTIFICATES),
+        'tls_chain_and_hostname_verified': True,
+        'factual_authority': False,
+        'historical_pit_acceptance': False,
+        'semantic_validation_status': 'NOT_PARSED',
+        'action_authority': False,
+    }
+    encoded = json.dumps(receipt, sort_keys=True, separators=(',', ':')).encode()
+    manifest_sha = sha256(encoded).hexdigest()
+    path = root / (manifest_sha + '.json')
+    path.write_bytes(encoded)
+    return path, root / (raw_sha + '.html')
+
+
+def test_prune_source_receipts_removes_only_superseded_target_polling_evidence(tmp_path):
+    old_manifest, old_raw = _receipt(tmp_path, url=INDEX_URL, raw=b'<html>old index</html>',
+                                     requested='2026-09-14T08:00:00+00:00')
+    keep_manifest, keep_raw = _receipt(tmp_path, url=INDEX_URL, raw=b'<html>current index</html>',
+                                       requested='2026-09-14T08:10:00+00:00')
+    release_manifest, release_raw = _receipt(tmp_path, url=URL, raw=b'<html>weekly release</html>',
+                                             requested='2026-09-14T08:10:01+00:00')
+    malformed = tmp_path / ('f' * 64 + '.json')
+    malformed.write_bytes(b'not-json')
+
+    result = source.prune_source_receipts(tmp_path, source_url=INDEX_URL,
+                                          keep_manifests=(keep_manifest,))
+
+    assert result['manifests_removed'] == 1
+    assert result['raw_removed'] == 1
+    assert result['bytes_removed'] > 0
+    assert not old_manifest.exists() and not old_raw.exists()
+    assert keep_manifest.exists() and keep_raw.exists()
+    assert release_manifest.exists() and release_raw.exists()
+    assert malformed.exists()
+
+
+def test_prune_source_receipts_keeps_raw_referenced_by_retained_receipt(tmp_path):
+    raw = b'<html>shared index body</html>'
+    old_manifest, raw_path = _receipt(tmp_path, url=INDEX_URL, raw=raw,
+                                      requested='2026-09-14T08:00:00+00:00')
+    keep_manifest, same_raw_path = _receipt(tmp_path, url=INDEX_URL, raw=raw,
+                                            requested='2026-09-14T08:10:00+00:00')
+    assert same_raw_path == raw_path
+
+    result = source.prune_source_receipts(tmp_path, source_url=INDEX_URL,
+                                          keep_manifests=(keep_manifest,))
+
+    assert result['manifests_removed'] == 1
+    assert result['raw_removed'] == 0
+    assert not old_manifest.exists()
+    assert keep_manifest.exists()
+    assert raw_path.exists()
+
+
+def test_prune_source_receipts_refuses_keep_manifest_outside_target(tmp_path):
+    evidence = tmp_path / 'evidence'; evidence.mkdir()
+    outside = tmp_path / 'outside'; outside.mkdir()
+    keep, _ = _receipt(outside, url=INDEX_URL, raw=b'<html>x</html>',
+                       requested='2026-09-14T08:00:00+00:00')
+    with pytest.raises(ValueError, match='outside target'):
+        source.prune_source_receipts(evidence, source_url=INDEX_URL, keep_manifests=(keep,))
