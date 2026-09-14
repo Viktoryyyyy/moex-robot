@@ -10,7 +10,7 @@ endpoints:
   archive_index: https://rosstat.gov.ru/compendium/document/50798
   weekly_release_pattern: https://rosstat.gov.ru/storage/mediabank/{document}.html
   monthly_release_pattern: https://rosstat.gov.ru/storage/mediabank/{document}.html
-  announcements: https://rosstat.gov.ru/announcements
+  announcements_reference: https://rosstat.gov.ru/announcements
 
 transport:
   implementation_ref: src/moex_research/external_data/rosstat_https.py
@@ -60,6 +60,10 @@ series:
       - changes_percent.same_month_previous_year
 
 publication_time_semantics:
+  runtime_announcement_enrichment:
+    status: NOT_IMPLEMENTED_IN_V1
+    consequence: published_at_remains_null_until_exact_official_timestamp_is_verified_by_supported_acquisition
+    must_not_block_received_at_based_pit: true
   published_at:
     meaning: official_source_publication_timestamp
     nullable: true
@@ -139,6 +143,7 @@ provenance_required:
 consumer_scope:
   factual_context_allowed_after_existing_component_admission: true
   normalized_vintage_reference_required_for_new_live_acquisition: true
+  legacy_pre_contract_component_may_replay_without_vintage_reference: true
   directional_authority: false
   action_authority: false
   expectation_consensus_scope: separate_source_required
