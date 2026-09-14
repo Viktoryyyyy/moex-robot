@@ -515,12 +515,45 @@ def test_units_and_family_scope_are_verified():
         dated.verify_projection(snapshot, release, now=NOW)
 
 
-def test_projection_checks_survive_optimized_python(tmp_path):
+@pytest.mark.parametrize("state", ["missing", "expired", "malformed", "governance"])
+@pytest.mark.parametrize("tamper", [None, "omitted", "reason", "scope", "authority", "facts"])
+def test_refused_projection_requires_complete_canonical_refusal(state, tamper):
+    snapshot = {dated.STORE_KEY: store(candidate()), "components": {"futoi_live": {"data": {"governance": deepcopy(GOV)}}}}
+    at = NOW
+    if state == "missing":
+        snapshot.pop(dated.STORE_KEY)
+    elif state == "expired":
+        at += timedelta(days=5)
+    elif state == "malformed":
+        snapshot[dated.STORE_KEY]["evidence_sha256"] = "bad"
+    else:
+        snapshot["components"]["futoi_live"]["data"]["governance"]["factual_use_allowed"] = False
+    output = dated.describe(snapshot.get(dated.STORE_KEY), now=at, governance=snapshot["components"]["futoi_live"]["data"]["governance"])
+    assert output["status"] == "UNAVAILABLE"
+    if tamper == "omitted": output = None
+    elif tamper == "reason": output["reason"] = "invented"
+    elif tamper == "scope": output["scope"] = "CURRENT_USABLE"
+    elif tamper == "authority": output["model_usable"] = True
+    elif tamper == "facts": output["anchor"] = candidate()["anchor"]
+    release = {"futoi_context": {"futoi_live": {"dated_comparisons": output}}}
+    if tamper is None:
+        dated.verify_projection(snapshot, release, now=at)
+    else:
+        with pytest.raises(AssertionError, match="Si dated refusal"):
+            dated.verify_projection(snapshot, release, now=at)
+
+
+@pytest.mark.parametrize("defect", ["arithmetic", "refusal_omitted", "refusal_authority", "refusal_facts"])
+def test_projection_checks_survive_optimized_python(tmp_path, defect):
     import subprocess
     import sys
     snapshot = {dated.STORE_KEY: store(candidate()), "components": {"futoi_live": {"data": {"governance": GOV}}}}
-    output = dated.describe(snapshot[dated.STORE_KEY], now=NOW, governance=GOV)
-    output["deltas"]["delta_5d"]["values"]["fiz.net"] = 999
+    at = NOW if defect == "arithmetic" else NOW + timedelta(days=5)
+    output = dated.describe(snapshot[dated.STORE_KEY], now=at, governance=GOV)
+    if defect == "arithmetic": output["deltas"]["delta_5d"]["values"]["fiz.net"] = 999
+    elif defect == "refusal_omitted": output = None
+    elif defect == "refusal_authority": output["action_authority"] = True
+    else: output["anchor"] = candidate()["anchor"]
     fixture = tmp_path / "witness.json"
     fixture.write_text(json.dumps([snapshot, {"futoi_context": {"futoi_live": {"dated_comparisons": output}}}]))
     script = """import runpy,json,sys
@@ -530,7 +563,7 @@ try: m['verify_projection'](snapshot,release,now=datetime.fromisoformat(sys.argv
 except AssertionError: sys.exit(0)
 sys.exit(7)
 """
-    result = subprocess.run([sys.executable, "-O", "-c", script, str(path), str(fixture), NOW.isoformat()], capture_output=True, text=True)
+    result = subprocess.run([sys.executable, "-O", "-c", script, str(path), str(fixture), at.isoformat()], capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
 
 

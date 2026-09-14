@@ -561,9 +561,13 @@ def verify_projection(snapshot, release, *, now):
             raise ValueError("bad_digest")
         admission = _validated(evidence, _stamp(now))
     except (KeyError, TypeError, ValueError, OverflowError, AttributeError):
-        if output is not None:
-            _require(output.get("status") == "UNAVAILABLE", "Si dated refusal completeness")
-            _require("anchor" not in output and "deltas" not in output, "Si dated refused values leaked")
+        refusal = describe(stored, now=now, governance=data.get("governance"))
+        _require(isinstance(output, dict), "Si dated refusal omitted")
+        _require(refusal.get("status") == "UNAVAILABLE" and output.get("status") == "UNAVAILABLE", "Si dated refusal completeness")
+        _require(set(output) == {"status", "scope", "reason", *FLAGS}, "Si dated refusal shape or values leaked")
+        _require(output.get("scope") == "SI_ACCEPTED_DATED_PREPARATION_ONLY", "Si dated refusal scope changed")
+        _require(isinstance(output.get("reason"), str) and bool(output["reason"]) and output["reason"] == refusal["reason"], "Si dated refusal reason changed")
+        _require(all(output.get(key) is False for key in FLAGS), "Si dated refusal authority expanded")
         return
     _require(isinstance(output, dict), "Si dated admitted context omitted")
     _require(output["status"] == admission["status"], "Si dated status completeness")
