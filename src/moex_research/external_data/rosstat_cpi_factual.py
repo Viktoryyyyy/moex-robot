@@ -11,11 +11,14 @@ from zoneinfo import ZoneInfo
 from . import rosstat_https as transport
 from . import rosstat_weekly_cpi as document
 
+COMPONENT = 'rosstat_cpi'
 INDEX_URL = 'https://rosstat.gov.ru/compendium/document/50798'
 TITLE = 'Об оценке индекса потребительских цен (еженедельная)'
 POLICY = 'rosstat_latest_listed_weekly_cpi.v1'
 MAX_RECEIPT_SECONDS = 1200
 MAX_PUBLICATION_DAYS = 10
+EVIDENCE_RELATIVE_DIR = Path('raw/external/rosstat_weekly_cpi')
+CURRENT_SNAPSHOT_RELATIVE_PATH = Path('state/rub_intelligence/chat_analysis_snapshot/current.json')
 
 
 class Index(HTMLParser):
@@ -199,9 +202,35 @@ def _replay(refs, *, now):
         'remaining_admission': ['full_rosstat_macro', 'release_calendar', 'forecast_horizon_alignment']}
 
 
+def _current_index_manifests(root, component=COMPONENT):
+    """Return current snapshot index evidence to keep uncompressed until the next publish."""
+    path = Path(root) / CURRENT_SNAPSHOT_RELATIVE_PATH
+    if not path.exists():
+        return ()
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        snapshot = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(snapshot, dict):
+        return None
+    components = snapshot.get('components')
+    if not isinstance(components, dict):
+        return None
+    value = components.get(component)
+    if not isinstance(value, dict):
+        return ()
+    data = value.get('data')
+    if not isinstance(data, dict):
+        return ()
+    manifest = data.get('index_manifest_path')
+    return (manifest,) if isinstance(manifest, str) and manifest else ()
+
+
 def load(*, root):
     root = Path(root).resolve()
-    output = root / 'raw/external/rosstat_weekly_cpi'
+    output = root / EVIDENCE_RELATIVE_DIR
     if not output.resolve().is_relative_to(root): raise ValueError('archive escapes data root')
     index = transport.capture(INDEX_URL, output=output)
     _, raw = _receipt(index['manifest_path'], index['manifest_sha256'], now=datetime.now(timezone.utc), expected_url=INDEX_URL)
@@ -209,7 +238,12 @@ def load(*, root):
     receipt = transport.capture(selected['source_url'], output=output)
     refs = {'index_manifest_path': index['manifest_path'], 'index_manifest_sha256': index['manifest_sha256'],
             'document_manifest_path': receipt['manifest_path'], 'document_manifest_sha256': receipt['manifest_sha256']}
-    return _replay(refs, now=datetime.now(timezone.utc))
+    result = _replay(refs, now=datetime.now(timezone.utc))
+    retained = _current_index_manifests(root)
+    if retained is not None:
+        transport.compact_source_receipts(output, source_url=INDEX_URL,
+            keep_manifests=(index['manifest_path'], *retained))
+    return result
 
 
 def reconcile(component, *, now):
