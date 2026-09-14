@@ -140,7 +140,8 @@ def select(raw, *, now):
             raise ValueError('ambiguous weekly archive row')
         match = re.search(r', (\d{2}\.\d{2}\.\d{4})$', infos[0])
         if not match: raise ValueError('archive publication date missing')
-        day = datetime.strptime(match[1], '%d.%m.%Y).date()' if False else '%d.%m.%Y').date()
+        day = datetime.strptime(match[1], '%d.%m.%Y').date()
+        # Even unsupported newest formats remain candidates; never skip to older HTML.
         candidates.append({'source_url': urljoin(INDEX_URL, row['links'][0]),
             'archive_period_label': labels[0], 'listed_publication_date': day.isoformat()})
     latest_day = max(c['listed_publication_date'] for c in candidates)
@@ -203,6 +204,7 @@ def _replay(refs, *, now):
 
 
 def _current_index_manifests(root, component=COMPONENT):
+    """Return current snapshot index evidence to keep uncompressed until the next publish."""
     path = Path(root) / CURRENT_SNAPSHOT_RELATIVE_PATH
     if not path.exists(): return ()
     if path.is_symlink() or not path.is_file(): return None
