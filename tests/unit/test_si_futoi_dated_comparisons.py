@@ -559,6 +559,54 @@ def test_admitted_projection_cannot_omit_metadata_even_when_none(field):
         dated.verify_projection(snapshot, release, now=NOW)
 
 
+@pytest.mark.parametrize("error", [None, "", "temporary_source_error", True, False, {}, [], 7, 1.5])
+def test_persisted_capture_error_is_nullable_text(error):
+    snapshot = {dated.STORE_KEY: store(candidate()), "components": {"futoi_live": {"data": {"governance": GOV}}}}
+    snapshot[dated.STORE_KEY]["last_capture_error"] = error
+    output = dated.describe(snapshot[dated.STORE_KEY], now=NOW, governance=GOV)
+    if error is None or isinstance(error, str):
+        assert output["status"] == "AVAILABLE"
+        assert output["last_capture_error"] == error
+    else:
+        assert output["status"] == "UNAVAILABLE"
+        assert output["reason"] == "si_dated_last_capture_error_must_be_nullable_text"
+        assert "last_capture_error" not in output and "anchor" not in output
+    release = {"futoi_context": {"futoi_live": {"dated_comparisons": output}}}
+    dated.verify_projection(snapshot, release, now=NOW)
+
+
+def test_diagnostic_extra_metadata_is_filtered_without_changing_accepted_evidence():
+    stored = dated.retain(None, candidate(), now=NOW, governance=GOV)
+    evidence = deepcopy(stored["evidence"])
+    stored["latest_baseline_diagnostics"]["invented_fact"] = {"current_usable": True}
+    snapshot = {dated.STORE_KEY: stored, "components": {"futoi_live": {"data": {"governance": GOV}}}}
+    output = dated.describe(stored, now=NOW, governance=GOV)
+    assert output["status"] == "AVAILABLE"
+    assert output["latest_baseline_diagnostics"] is None
+    assert stored["evidence"] == evidence
+    release = {"futoi_context": {"futoi_live": {"dated_comparisons": output}}}
+    dated.verify_projection(snapshot, release, now=NOW)
+    output["latest_baseline_diagnostics"] = deepcopy(stored["latest_baseline_diagnostics"])
+    with pytest.raises(AssertionError, match="diagnostics"):
+        dated.verify_projection(snapshot, release, now=NOW)
+
+
+def test_diagnostic_cannot_claim_available_over_unavailable_accepted_baseline():
+    value = candidate()
+    value["baselines"]["5"] = {"status": "UNAVAILABLE", "target_trade_date": value["baselines"]["5"]["target_trade_date"], "factual": None, "reason": "missing_exact_source"}
+    stored = dated.retain(None, value, now=NOW, governance=GOV)
+    stored["latest_baseline_diagnostics"]["baselines"]["5"].update(status="AVAILABLE", reason=None)
+    snapshot = {dated.STORE_KEY: stored, "components": {"futoi_live": {"data": {"governance": GOV}}}}
+    output = dated.describe(stored, now=NOW, governance=GOV)
+    assert output["status"] == "PARTIAL"
+    assert output["latest_baseline_diagnostics"] is None
+    release = {"futoi_context": {"futoi_live": {"dated_comparisons": output}}}
+    dated.verify_projection(snapshot, release, now=NOW)
+    output["latest_baseline_diagnostics"] = deepcopy(stored["latest_baseline_diagnostics"])
+    with pytest.raises(AssertionError, match="diagnostics"):
+        dated.verify_projection(snapshot, release, now=NOW)
+
+
 @pytest.mark.parametrize("state", ["missing", "expired", "malformed", "governance"])
 @pytest.mark.parametrize("tamper", [None, "omitted", "reason", "scope", "authority", "facts"])
 def test_refused_projection_requires_complete_canonical_refusal(state, tamper):
@@ -587,16 +635,20 @@ def test_refused_projection_requires_complete_canonical_refusal(state, tamper):
             dated.verify_projection(snapshot, release, now=at)
 
 
-@pytest.mark.parametrize("defect", ["arithmetic", "admitted_scope", "admitted_extra", "refusal_omitted", "refusal_authority", "refusal_facts"])
+@pytest.mark.parametrize("defect", ["arithmetic", "admitted_scope", "admitted_extra", "refusal_omitted", "refusal_authority", "refusal_facts", "malformed_error_admitted", "malformed_error_refusal_omitted"])
 def test_projection_checks_survive_optimized_python(tmp_path, defect):
     import subprocess
     import sys
     snapshot = {dated.STORE_KEY: store(candidate()), "components": {"futoi_live": {"data": {"governance": GOV}}}}
     at = NOW if not defect.startswith("refusal_") else NOW + timedelta(days=5)
     output = dated.describe(snapshot[dated.STORE_KEY], now=at, governance=GOV)
+    if defect.startswith("malformed_error"):
+        snapshot[dated.STORE_KEY]["last_capture_error"] = {"bad": "object"}
     if defect == "arithmetic": output["deltas"]["delta_5d"]["values"]["fiz.net"] = 999
     elif defect == "admitted_scope": output["scope"] = "CURRENT_USABLE"
     elif defect == "admitted_extra": output["anchor"]["invented_fact"] = 17
+    elif defect == "malformed_error_admitted": output["last_capture_error"] = {"bad": "object"}
+    elif defect == "malformed_error_refusal_omitted": output = None
     elif defect == "refusal_omitted": output = None
     elif defect == "refusal_authority": output["action_authority"] = True
     else: output["anchor"] = candidate()["anchor"]

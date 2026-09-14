@@ -43,6 +43,12 @@ def _require(condition, message):
         raise AssertionError(message)
 
 
+def _capture_error(value):
+    if value is not None and not isinstance(value, str):
+        raise ValueError("si_dated_last_capture_error_must_be_nullable_text")
+    return value
+
+
 def _stamp(value):
     parsed = datetime.fromisoformat(value) if isinstance(value, str) else value
     if not isinstance(parsed, datetime) or parsed.utcoffset() is None:
@@ -260,6 +266,8 @@ def _latest_diagnostics(store, evidence, now):
     if diagnostics is None:
         return None
     try:
+        if not isinstance(diagnostics, dict) or set(diagnostics) != {"checked_at_utc", "baselines"}:
+            return None
         checked = _stamp(diagnostics["checked_at_utc"])
         if not _stamp(evidence["accepted_at_utc"]) <= checked <= now:
             return None
@@ -275,7 +283,7 @@ def _latest_diagnostics(store, evidence, now):
             if row["status"] == "UNAVAILABLE":
                 if not isinstance(row["reason"], str) or not row["reason"]:
                     return None
-            elif row["reason"] is not None:
+            elif row["reason"] is not None or accepted["status"] != "AVAILABLE":
                 return None
         return deepcopy(diagnostics)
     except (KeyError, TypeError, ValueError, OverflowError, AttributeError):
@@ -292,10 +300,11 @@ def describe(store, *, now, governance):
         evidence = store["evidence"]
         if _digest(evidence) != store["evidence_sha256"]:
             raise ValueError("dated_evidence_digest_mismatch")
+        capture_error = _capture_error(store.get("last_capture_error"))
         result = _validated(evidence, now)
         result.update(checked_at_utc=now.isoformat(),
                       evidence_sha256=store["evidence_sha256"],
-                      last_capture_error=store.get("last_capture_error"),
+                      last_capture_error=capture_error,
                       latest_baseline_diagnostics=_latest_diagnostics(store, evidence, now))
         return result
     except (KeyError, TypeError, ValueError, OverflowError, AttributeError) as exc:
@@ -559,6 +568,7 @@ def verify_projection(snapshot, release, *, now):
         evidence = stored["evidence"]
         if _digest(evidence) != stored.get("evidence_sha256"):
             raise ValueError("bad_digest")
+        capture_error = _capture_error(stored.get("last_capture_error"))
         admission = _validated(evidence, _stamp(now))
     except (KeyError, TypeError, ValueError, OverflowError, AttributeError):
         refusal = describe(stored, now=now, governance=data.get("governance"))
@@ -613,6 +623,6 @@ def verify_projection(snapshot, release, *, now):
         _require(values["total_open_interest"] == anchor["total_open_interest"] - baseline["total_open_interest"], "Si dated OI arithmetic")
     canonical = deepcopy(admission)
     canonical.update(checked_at_utc=_stamp(now).isoformat(), evidence_sha256=stored["evidence_sha256"],
-                     last_capture_error=stored.get("last_capture_error"),
+                     last_capture_error=capture_error,
                      latest_baseline_diagnostics=_latest_diagnostics(stored, evidence, _stamp(now)))
     _require(output == canonical and _digest(output) == _digest(canonical), "Si dated canonical projection changed")
