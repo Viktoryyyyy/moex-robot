@@ -1,6 +1,7 @@
 """Host-scoped verified Rosstat transport; acquisition grants no macro authority."""
 import argparse
 from datetime import datetime, timezone
+import gzip
 from hashlib import sha256
 import json
 from pathlib import Path
@@ -98,17 +99,17 @@ def capture(url, *, output, timeout=10):
     return {**evidence, 'manifest_path': str(manifest), 'manifest_sha256': digest}
 
 
-def prune_source_receipts(output, *, source_url, keep_manifests=()):
-    """Remove superseded polling receipts for one URL without touching release documents.
+def compact_source_receipts(output, *, source_url, keep_manifests=()):
+    """Losslessly gzip superseded raw polling pages without deleting receipts.
 
-    Only valid content-addressed manifests using this transport policy are eligible.
-    Raw HTML is removed only when no retained valid manifest references its hash.
-    Unknown, malformed, non-file and symlink entries are left untouched.
+    Every content-addressed receipt is retained so frozen snapshots remain replayable.
+    Only raw HTML referenced exclusively by superseded receipts for ``source_url`` is
+    compacted. Unknown, malformed, non-file and symlink entries are left untouched.
     """
     validate_url(source_url)
     directory = Path(output)
     if not directory.exists():
-        return {'manifests_removed': 0, 'raw_removed': 0, 'bytes_removed': 0}
+        return {'raw_compacted': 0, 'bytes_before': 0, 'bytes_after': 0, 'bytes_saved': 0}
     if directory.is_symlink() or not directory.is_dir():
         raise ValueError('evidence directory must be a regular directory')
     resolved = directory.resolve(strict=True)
@@ -142,41 +143,45 @@ def prune_source_receipts(output, *, source_url, keep_manifests=()):
             continue
         receipts.append((path, receipt, raw_sha))
 
-    removable = [(path, raw_sha) for path, receipt, raw_sha in receipts
-                 if receipt.get('policy') == POLICY and receipt.get('source_url') == source_url
-                 and path.name not in keep_names]
-    removable_names = {path.name for path, _ in removable}
-    retained_raw = {raw_sha for path, _, raw_sha in receipts if path.name not in removable_names}
-    candidate_raw = {raw_sha for _, raw_sha in removable if raw_sha not in retained_raw}
+    target_raw = {raw_sha for path, receipt, raw_sha in receipts
+                  if receipt.get('policy') == POLICY and receipt.get('source_url') == source_url
+                  and path.name not in keep_names}
+    protected_raw = {raw_sha for path, receipt, raw_sha in receipts
+                     if path.name in keep_names or receipt.get('policy') != POLICY
+                     or receipt.get('source_url') != source_url}
+    candidates = target_raw - protected_raw
 
-    bytes_removed = 0
-    manifests_removed = 0
-    raw_removed = 0
-    for path, _ in removable:
-        try:
-            bytes_removed += path.stat().st_size
-            path.unlink()
-            manifests_removed += 1
-        except FileNotFoundError:
-            pass
-    for raw_sha in candidate_raw:
-        path = resolved / (raw_sha + '.html')
-        if path.is_symlink() or not path.is_file():
+    compacted = 0
+    before = 0
+    after = 0
+    for raw_sha in candidates:
+        raw_path = resolved / (raw_sha + '.html')
+        gzip_path = resolved / (raw_sha + '.html.gz')
+        if raw_path.is_symlink() or gzip_path.is_symlink():
+            continue
+        if not raw_path.exists():
+            continue
+        if not raw_path.is_file():
             continue
         try:
-            raw = path.read_bytes()
+            raw = raw_path.read_bytes()
         except OSError:
             continue
-        if sha256(raw).hexdigest() != raw_sha:
+        if not 0 < len(raw) <= MAX_BYTES or sha256(raw).hexdigest() != raw_sha:
             continue
+        encoded = gzip.compress(raw, compresslevel=9, mtime=0)
+        _freeze(gzip_path, encoded)
         try:
-            bytes_removed += path.stat().st_size
-            path.unlink()
-            raw_removed += 1
-        except FileNotFoundError:
-            pass
-    return {'manifests_removed': manifests_removed, 'raw_removed': raw_removed,
-            'bytes_removed': bytes_removed}
+            if gzip.decompress(gzip_path.read_bytes()) != raw:
+                raise ValueError('compressed evidence verification failed')
+        except (OSError, EOFError, gzip.BadGzipFile) as exc:
+            raise ValueError('compressed evidence verification failed') from exc
+        before += len(raw)
+        after += len(encoded)
+        raw_path.unlink()
+        compacted += 1
+    return {'raw_compacted': compacted, 'bytes_before': before, 'bytes_after': after,
+            'bytes_saved': before - after}
 
 
 if __name__ == '__main__':
