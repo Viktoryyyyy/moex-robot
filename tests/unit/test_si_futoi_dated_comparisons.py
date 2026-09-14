@@ -551,6 +551,46 @@ def test_verified_frame_decodes_checked_buffer_despite_path_replacement(tmp_path
         dated._verified_frame(tmp_path, provenance, "partition")
 
 
+@pytest.mark.parametrize("capture_fails", [False, True])
+def test_runner_refuses_generation_before_completed_si_attempt(tmp_path, monkeypatch, capture_fails):
+    from moex_data import rub_si_futoi_dated_context as integrated
+    from moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_live_market_oi as live
+    base = live.base
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(base, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(base, "install_timestamp_policy", lambda: None)
+    monkeypatch.setattr(base, "bind_futures_calendar_clock", lambda *a, **k: {})
+    monkeypatch.setattr(base, "bind_oil_history", lambda *a, **k: {})
+    monkeypatch.setattr(live.current_context.current, "current_producers", lambda: {})
+    monkeypatch.setattr(live.current_context.context, "run_refresh_all", lambda **k: {})
+    monkeypatch.setattr(live.current_context.delta_context, "build_all", lambda **k: {})
+    monkeypatch.setattr(live.parallel_prefetch, "prefetch_producers", lambda *a, **k: {})
+    monkeypatch.setattr(live.current_context, "_attach_futoi_context", lambda *a: None)
+    monkeypatch.setattr(live, "attach_live_market_oi_context", lambda *a, **k: None)
+    monkeypatch.setattr(live, "attach_live_basis_carry_context", lambda *a, **k: None)
+    monkeypatch.setattr(live.user_position, "attach_user_position_context", lambda *a, **k: None)
+    monkeypatch.setattr("moex_data.rub_dated_hour_source.acquire", lambda **k: {})
+    previous = {dated.STORE_KEY: dated.retain(None, candidate(), now=NOW, governance=GOV)} if capture_fails else {}
+    monkeypatch.setattr(base, "_load_previous", lambda *a: previous)
+    snapshot = {"identity": {}, "components": {"futoi_live": {"data": {"governance": GOV}}}}
+    monkeypatch.setattr(live.futoi, "build_snapshot", lambda **k: snapshot)
+    def collect(*a, **k):
+        if capture_fails:
+            raise ValueError("temporary_source_failure")
+        return candidate()
+    monkeypatch.setattr(integrated, "_capture_candidate", collect)
+    monkeypatch.setattr(base, "_atomic_write", lambda *a: pytest.fail("regressed generation must not publish"))
+    ticks = iter(NOW + timedelta(seconds=n) for n in (0, 1, 3, 2))
+    with pytest.raises(base.ChatAnalysisSnapshotError, match="precedes Si capture completion"):
+        live.refresh_snapshot(now_fn=lambda: next(ticks), live_loader=lambda: {})
+    assert snapshot[dated.STORE_KEY]["last_capture_attempt_at_utc"] == (NOW+timedelta(seconds=3)).isoformat()
+    if capture_fails:
+        assert snapshot[dated.STORE_KEY]["evidence"] == previous[dated.STORE_KEY]["evidence"]
+    else:
+        assert snapshot[dated.STORE_KEY]["evidence"]["accepted_at_utc"] == (NOW+timedelta(seconds=3)).isoformat()
+    assert "generated_at_utc" not in snapshot["identity"]
+
+
 @pytest.mark.parametrize("corruption", [None, "raw", "eod", "witness"])
 def test_capture_facts_and_dates_must_match_verified_partition_bytes(tmp_path, monkeypatch, corruption):
     import pandas as pd
