@@ -1,0 +1,149 @@
+contract_id: rosstat_cpi.v1
+schema_version: source_contract.v1
+status: active_received_at_pit_v1
+source_id: rosstat_cpi
+source_system: rosstat
+source_kind: official_macro_release
+country: RU
+
+endpoints:
+  archive_index: https://rosstat.gov.ru/compendium/document/50798
+  weekly_release_pattern: https://rosstat.gov.ru/storage/mediabank/{document}.html
+  monthly_release_pattern: https://rosstat.gov.ru/storage/mediabank/{document}.html
+  announcements_reference: https://rosstat.gov.ru/announcements
+
+transport:
+  implementation_ref: src/moex_research/external_data/rosstat_https.py
+  https_required: true
+  certificate_pinning_required: true
+  redirects_allowed: false
+  response_content_type: text/html
+  raw_body_max_bytes: 2000000
+  immutable_receipt_required: true
+  immutable_raw_required: true
+  superseded_archive_raw_lossless_compaction_allowed: true
+  receipt_deletion_allowed: false
+  release_document_raw_deletion_allowed: false
+
+series:
+  weekly:
+    series_id: ROSSTAT_WEEKLY_CPI_ESTIMATE
+    frequency: WEEKLY
+    semantic_kind: official_weekly_cpi_estimate
+    observation_identity:
+      - observation_start
+      - observation_end
+    publication_date_source: archive_index
+    publication_time_source: official_announcement_only
+    release_selection: latest_unique_supported_weekly_archive_entry
+    values:
+      - indices.previous_registration
+      - indices.month_start
+      - indices.year_start
+      - weekly_change_percent
+    monthly_final: false
+  monthly:
+    series_id: ROSSTAT_MONTHLY_CPI
+    frequency: MONTHLY
+    semantic_kind: official_monthly_cpi_index
+    observation_identity:
+      - observation_month
+    publication_date_source: official_announcement_or_verified_archive_metadata_only
+    publication_time_source: official_announcement_only
+    release_selection: latest_unique_supported_monthly_archive_entry
+    values:
+      - indices.previous_month
+      - indices.previous_december
+      - indices.same_month_previous_year
+      - changes_percent.previous_month
+      - changes_percent.previous_december
+      - changes_percent.same_month_previous_year
+
+publication_time_semantics:
+  runtime_announcement_enrichment:
+    status: NOT_IMPLEMENTED_IN_V1
+    consequence: published_at_remains_null_until_exact_official_timestamp_is_verified_by_supported_acquisition
+    must_not_block_received_at_based_pit: true
+  published_at:
+    meaning: official_source_publication_timestamp
+    nullable: true
+    invention_or_inference_forbidden: true
+    timezone_when_present: Europe/Moscow_source_then_UTC_normalized
+  published_date:
+    meaning: official_source_publication_calendar_date
+    nullable: true
+  available_at:
+    meaning: first_system_receipt_time_for_this_semantic_vintage
+    required: true
+    timezone: UTC
+    pit_authority_when_published_at_missing: true
+  received_at:
+    meaning: transport_receipt_time_for_current_verification
+    required: true
+    timezone: UTC
+
+normalization:
+  implementation_ref: src/moex_research/external_data/rosstat_cpi_vintages.py
+  pit_reader_ref: src/moex_research/external_data/rosstat_cpi_history.py
+  parse_before_authority_required: true
+  decimal_representation: canonical_decimal_string
+  silent_rounding_forbidden: true
+  silent_unit_conversion_forbidden: true
+  weekly_and_monthly_must_not_be_conflated: true
+  monthly_index_must_not_be_derived_from_weekly_estimates: true
+  weekly_estimate_must_not_be_promoted_to_monthly_final: true
+  expectation_or_consensus_inference_from_rosstat_fact_forbidden: true
+  adjusted_series_must_be_separate_dataset: true
+
+revision_semantics:
+  revision_identity: same_series_and_same_observation_identity_with_different_normalized_value_from_latest_vintage
+  exact_same_as_latest_normalized_value: semantic_duplicate_not_new_vintage
+  return_to_an_older_nonlatest_value: new_revision_event
+  html_or_transport_change_without_normalized_value_change: not_a_revision
+  initial_vintage:
+    revision_seq: 0
+    revision_status: INITIAL
+    value_initial: current_normalized_value
+    value_revised: null
+    revision_at: null
+  revised_vintage:
+    revision_seq: previous_revision_seq_plus_one
+    revision_status: REVISED
+    value_initial: immutable_first_vintage_value
+    value_previous: immediately_previous_normalized_value
+    value_revised: current_normalized_value
+    revision_at: first_system_observation_time_of_revision
+    revision_at_official_publication_time_claim_allowed: false
+  detection_scope:
+    live_refresh: selected_latest_release_is_checked_on_every_successful_refresh
+    current_observation_revision_detection: supported_while_release_is_selected
+    older_observation_revision_after_newer_release: not_claimed_by_live_loader
+    historical_revision_backfill: separate_explicit_evidence_replay_job_required
+
+pit_policy:
+  no_lookahead_required: true
+  usable_at_time_t_only_if_available_at_lte_t: true
+  official_published_at_must_not_replace_later_system_availability: true
+  latest_as_of_means_newest_observation_period_then_latest_eligible_revision: true
+  later_revision_of_older_observation_must_not_replace_newer_observation: true
+  future_archive_entries_forbidden: true
+  missing_or_ambiguous_source_identity: fail_closed
+  malformed_or_unverified_receipt: fail_closed
+  parse_failure: fail_closed
+
+provenance_required:
+  - source_id
+  - source_url
+  - raw_sha256
+  - document_manifest_path
+  - document_manifest_sha256
+  - available_at
+  - contract_ref
+
+consumer_scope:
+  factual_context_allowed_after_existing_component_admission: true
+  normalized_vintage_reference_required_for_new_live_acquisition: true
+  legacy_pre_contract_component_may_replay_without_vintage_reference: true
+  directional_authority: false
+  action_authority: false
+  expectation_consensus_scope: separate_source_required
