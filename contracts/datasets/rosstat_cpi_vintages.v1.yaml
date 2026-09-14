@@ -1,0 +1,173 @@
+dataset_id: rosstat_cpi_vintages
+schema_version: rosstat_cpi_vintages.v1
+status: active_live_normalized_v1
+producer: moex_research.external_data.rosstat_cpi_vintages
+source_contract_ref: contracts/sources/macro/rosstat_cpi.v1.yaml
+
+paths:
+  root: ${MOEX_DATA_ROOT}/state/datasets/dataset_id=rosstat_cpi_vintages
+  series_root: ${MOEX_DATA_ROOT}/state/datasets/dataset_id=rosstat_cpi_vintages/series_id={series_id}
+  observation_root: ${MOEX_DATA_ROOT}/state/datasets/dataset_id=rosstat_cpi_vintages/series_id={series_id}/observation_key={observation_key}
+  immutable_vintage: ${observation_root}/vintage_id={vintage_id}.json
+  series_current_pointer: ${series_root}/current.json
+
+layers:
+  raw:
+    canonical_location: ${MOEX_DATA_ROOT}/raw/external/rosstat_weekly_cpi_or_rosstat_monthly_cpi
+    mutable: false
+    normalized_values_allowed: false
+  normalized_official:
+    canonical_location: ${MOEX_DATA_ROOT}/state/datasets/dataset_id=rosstat_cpi_vintages
+    mutable_vintage_files: false
+    semantic_deduplication_required: true
+  adjusted:
+    in_this_dataset: false
+    silent_adjustment_forbidden: true
+    separate_dataset_required: true
+
+series:
+  ROSSTAT_WEEKLY_CPI_ESTIMATE:
+    frequency: WEEKLY
+    observation_key_fields:
+      - observation_start
+      - observation_end
+    value_fields:
+      - indices
+      - weekly_change_percent
+      - units
+      - document_format
+      - monthly_final
+  ROSSTAT_MONTHLY_CPI:
+    frequency: MONTHLY
+    observation_key_fields:
+      - observation_month
+    value_fields:
+      - indices
+      - changes_percent
+      - units
+      - estimate_kind
+      - decimal_places
+      - precision_scope
+
+required_vintage_fields:
+  - schema_version
+  - dataset_id
+  - contract_ref
+  - source_contract_ref
+  - series_id
+  - frequency
+  - geography
+  - observation_key
+  - observation
+  - vintage_id
+  - semantic_sha256
+  - revision_seq
+  - revision_status
+  - published_at
+  - published_date
+  - available_at
+  - value_initial
+  - value_previous
+  - value_revised
+  - value_current
+  - provenance
+  - pit
+
+revision_rules:
+  identity_scope: same_series_id_and_observation_key
+  semantic_identity_fields:
+    - series_id
+    - observation_key
+    - value_current
+  repeated_same_semantic_sha256:
+    create_new_vintage: false
+    current_pointer_refresh_allowed: true
+  first_semantic_value:
+    revision_seq: 0
+    revision_status: INITIAL
+    value_initial_equals_value_current: true
+    value_previous: null
+    value_revised: null
+    revision_at: null
+  changed_semantic_value:
+    create_new_vintage: true
+    revision_seq: previous_plus_one
+    revision_status: REVISED
+    preserve_original_value_initial: true
+    value_previous_equals_previous_vintage_value_current: true
+    value_revised_equals_value_current: true
+    revision_at_equals_first_system_available_at_for_revision: true
+
+publication_semantics:
+  published_at:
+    nullable: true
+    exact_official_timestamp_only: true
+    inferred_from_filename_forbidden: true
+    inferred_from_received_at_forbidden: true
+  published_date:
+    nullable: true
+    verified_calendar_date_only: true
+  available_at:
+    required: true
+    source: verified_transport_received_at
+    controls_pit_availability: true
+  last_verified_at:
+    pointer_only: true
+    source: current_verified_transport_received_at
+    does_not_create_vintage_when_values_unchanged: true
+
+pit:
+  no_lookahead_required: true
+  feature_eligibility_rule: vintage.available_at <= prediction_as_of
+  use_latest_eligible_revision_only: true
+  later_revision_must_not_rewrite_earlier_vintage: true
+  publication_timestamp_without_system_receipt_does_not_grant_availability: true
+
+provenance:
+  required:
+    - source_id
+    - source_url
+    - raw_sha256
+    - document_manifest_path
+    - document_manifest_sha256
+    - received_at
+  archive_index_evidence_optional_in_normalized_vintage: true
+  release_document_evidence_required: true
+
+current_pointer:
+  mutable: true
+  atomic_replace_required: true
+  required_fields:
+    - schema_version
+    - dataset_id
+    - series_id
+    - observation_key
+    - vintage_id
+    - vintage_path
+    - vintage_sha256
+    - revision_seq
+    - revision_status
+    - published_at
+    - published_date
+    - available_at
+    - last_verified_at
+    - latest_provenance
+
+consumer_contract:
+  raw_html_not_consumer_interface: true
+  normalized_vintage_is_macro_history_interface: true
+  live_component_may_expose_vintage_reference: true
+  expectations_consensus_and_surprise:
+    stored_here: false
+    separate_verified_source_required: true
+  directional_authority: false
+  action_authority: false
+
+failure_semantics:
+  unknown_series_id: fail_closed
+  malformed_observation_identity: fail_closed
+  missing_release_provenance: fail_closed
+  non_utc_or_naive_available_at: fail_closed
+  conflicting_existing_vintage_id: fail_closed
+  invalid_existing_vintage: fail_closed
+  symlink_in_dataset_path: fail_closed
