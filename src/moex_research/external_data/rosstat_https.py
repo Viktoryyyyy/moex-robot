@@ -116,7 +116,7 @@ def prune_source_receipts(output, *, source_url, keep_manifests=()):
     for value in keep_manifests:
         path = Path(value)
         if not path.exists():
-            continue
+            raise ValueError('retained evidence manifest missing')
         if path.is_symlink() or not path.is_file():
             raise ValueError('retained evidence manifest must be a regular file')
         actual = path.resolve(strict=True)
