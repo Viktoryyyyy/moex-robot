@@ -32,6 +32,7 @@ retention:
   policy: post_publish_reference_aware_gc_v1
   trigger: after_normalized_vintage_current_pointer_promotion
   first_run_creates_local_gc_epoch: true
+  epoch_clock_authority: actual_gc_invocation_time_utc_not_source_received_at
   pre_epoch_evidence_deletion_allowed: false
   unreferenced_receipt_grace_seconds: 1200
   grace_reason: protect_in_flight_acquisition_and_full_live_replay_freshness_window
@@ -43,7 +44,8 @@ retention:
   frozen_factual_release_pin_registry: ${MOEX_DATA_ROOT}/state/retention/rosstat_evidence_pins
   gc_state: ${MOEX_DATA_ROOT}/state/retention/rosstat_polling_gc
   delete_manifest_only_when_unreferenced: true
-  delete_raw_only_when_no_remaining_receipt_references_raw_sha256: true
+  raw_reference_identity: evidence_directory_plus_raw_sha256
+  delete_raw_only_when_no_remaining_receipt_in_same_evidence_directory_references_raw_sha256: true
   content_hash_verification_before_raw_delete: true
   symlink_or_malformed_reference_policy: fail_closed_no_delete
   bounded_delete_batch: 128
