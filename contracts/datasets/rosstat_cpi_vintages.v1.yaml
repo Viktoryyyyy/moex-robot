@@ -146,6 +146,23 @@ provenance:
   archive_index_evidence_optional_in_normalized_vintage: true
   release_document_evidence_required: true
 
+retention:
+  implementation_ref: src/moex_research/external_data/rosstat_polling_retention.py
+  semantic_vintage_evidence_is_permanently_referenced: true
+  current_pointer_latest_provenance_is_referenced: true
+  current_snapshot_evidence_is_referenced: true
+  frozen_factual_release_requires_evidence_pin: true
+  frozen_pin_registry: ${MOEX_DATA_ROOT}/state/retention/rosstat_evidence_pins
+  polling_gc_state: ${MOEX_DATA_ROOT}/state/retention/rosstat_polling_gc
+  gc_epoch_clock_authority: actual_gc_invocation_time_utc
+  pre_gc_epoch_evidence_is_never_deleted: true
+  polling_frequency_must_not_create_unbounded_semantic_history: true
+  unreferenced_post_epoch_receipt_gc_allowed: true
+  unreferenced_polling_grace_seconds: 1200
+  in_flight_acquisition_protected_during_grace: true
+  raw_reference_identity: evidence_directory_plus_raw_sha256
+  raw_gc_requires_zero_remaining_same_directory_receipt_references: true
+
 current_pointer:
   mutable: true
   atomic_replace_required: true
@@ -195,3 +212,4 @@ failure_semantics:
   conflicting_existing_vintage_id: fail_closed
   invalid_existing_vintage: fail_closed
   symlink_in_dataset_path: fail_closed
+  retention_reference_uncertainty: fail_closed_no_delete

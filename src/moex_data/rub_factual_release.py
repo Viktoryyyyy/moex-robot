@@ -151,13 +151,18 @@ def build(snapshot, *, now, code_revision):
 def export(snapshot, *, now, code_revision, output):
     release = build(snapshot, now=now, code_revision=code_revision)
     raw = _encoded(release)
-    directory = Path(output) / sha256(raw).hexdigest()
+    release_sha = sha256(raw).hexdigest()
+    from moex_research.external_data import rosstat_factual_export_pin
+    evidence_pin = rosstat_factual_export_pin.pin(snapshot, pin_id=release_sha, created_at=now)
+    directory = Path(output) / release_sha
     directory.mkdir(parents=True, exist_ok=False)
     (directory / 'input_snapshot.json').write_bytes(_encoded(snapshot))
     (directory / 'release.json').write_bytes(raw)
-    (directory / 'manifest.json').write_bytes(_encoded({
-        'release_sha256': sha256(raw).hexdigest(), 'input_snapshot_sha256': release['input_snapshot_sha256'],
-        'code_revision': code_revision, 'as_of_utc': release['as_of_utc']}))
+    manifest = {'release_sha256': release_sha, 'input_snapshot_sha256': release['input_snapshot_sha256'],
+        'code_revision': code_revision, 'as_of_utc': release['as_of_utc']}
+    if evidence_pin is not None:
+        manifest['rosstat_evidence_pin'] = evidence_pin
+    (directory / 'manifest.json').write_bytes(_encoded(manifest))
     return directory
 
 

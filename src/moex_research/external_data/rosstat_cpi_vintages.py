@@ -359,6 +359,11 @@ def _promote_pointer(path, ref):
         _atomic_write(path, ref)
 
 
+def _apply_polling_retention(root, received_at):
+    from . import rosstat_polling_retention
+    rosstat_polling_retention.garbage_collect(root, now=_utc(received_at, 'retention received_at'))
+
+
 def record(root, data):
     """Persist/reuse a CPI vintage and promote only the newest observation/revision pointer."""
     root = _root(root)
@@ -383,6 +388,7 @@ def record(root, data):
             ref = _pointer_ref(latest, latest_path, artifact_sha,
                                last_verified_at=received_at, latest_provenance=provenance)
             _promote_pointer(current_path, ref)
+            _apply_polling_retention(root, received_at)
             return ref
         revision_seq = latest_seq + 1
         revision_status = 'REVISED'
@@ -435,6 +441,7 @@ def record(root, data):
     ref = _pointer_ref(record_value, vintage_path, artifact_sha,
                        last_verified_at=received_at, latest_provenance=provenance)
     _promote_pointer(current_path, ref)
+    _apply_polling_retention(root, received_at)
     return ref
 
 

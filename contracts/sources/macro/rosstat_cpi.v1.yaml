@@ -1,6 +1,6 @@
 contract_id: rosstat_cpi.v1
 schema_version: source_contract.v1
-status: active_received_at_pit_v1
+status: active_received_at_pit_retention_v1
 source_id: rosstat_cpi
 source_system: rosstat
 source_kind: official_macro_release
@@ -22,8 +22,34 @@ transport:
   immutable_receipt_required: true
   immutable_raw_required: true
   superseded_archive_raw_lossless_compaction_allowed: true
-  receipt_deletion_allowed: false
-  release_document_raw_deletion_allowed: false
+  receipt_deletion_allowed: true
+  receipt_deletion_scope: post_epoch_unreferenced_polling_only
+  release_document_raw_deletion_allowed: true
+  release_document_raw_deletion_scope: only_when_no_retained_receipt_references_raw
+
+retention:
+  implementation_ref: src/moex_research/external_data/rosstat_polling_retention.py
+  policy: post_publish_reference_aware_gc_v1
+  trigger: after_normalized_vintage_current_pointer_promotion
+  first_run_creates_local_gc_epoch: true
+  epoch_clock_authority: actual_gc_invocation_time_utc_not_source_received_at
+  pre_epoch_evidence_deletion_allowed: false
+  unreferenced_receipt_grace_seconds: 1200
+  grace_reason: protect_in_flight_acquisition_and_full_live_replay_freshness_window
+  protected_reference_roots:
+    - current_chat_analysis_snapshot
+    - normalized_series_current_pointer
+    - every_immutable_normalized_vintage
+    - frozen_factual_release_evidence_pin
+  frozen_factual_release_pin_registry: ${MOEX_DATA_ROOT}/state/retention/rosstat_evidence_pins
+  gc_state: ${MOEX_DATA_ROOT}/state/retention/rosstat_polling_gc
+  delete_manifest_only_when_unreferenced: true
+  raw_reference_identity: evidence_directory_plus_raw_sha256
+  delete_raw_only_when_no_remaining_receipt_in_same_evidence_directory_references_raw_sha256: true
+  content_hash_verification_before_raw_delete: true
+  symlink_or_malformed_reference_policy: fail_closed_no_delete
+  bounded_delete_batch: 128
+  semantic_history_must_not_depend_on_poll_frequency: true
 
 series:
   weekly:
