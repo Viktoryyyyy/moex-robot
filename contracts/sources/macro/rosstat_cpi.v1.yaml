@@ -79,6 +79,8 @@ publication_time_semantics:
     timezone: UTC
 
 normalization:
+  implementation_ref: src/moex_research/external_data/rosstat_cpi_vintages.py
+  pit_reader_ref: src/moex_research/external_data/rosstat_cpi_history.py
   parse_before_authority_required: true
   decimal_representation: canonical_decimal_string
   silent_rounding_forbidden: true
@@ -90,8 +92,9 @@ normalization:
   adjusted_series_must_be_separate_dataset: true
 
 revision_semantics:
-  revision_identity: same_series_and_same_observation_identity_with_different_normalized_value
-  exact_same_normalized_value: semantic_duplicate_not_new_vintage
+  revision_identity: same_series_and_same_observation_identity_with_different_normalized_value_from_latest_vintage
+  exact_same_as_latest_normalized_value: semantic_duplicate_not_new_vintage
+  return_to_an_older_nonlatest_value: new_revision_event
   html_or_transport_change_without_normalized_value_change: not_a_revision
   initial_vintage:
     revision_seq: 0
@@ -107,11 +110,18 @@ revision_semantics:
     value_revised: current_normalized_value
     revision_at: first_system_observation_time_of_revision
     revision_at_official_publication_time_claim_allowed: false
+  detection_scope:
+    live_refresh: selected_latest_release_is_checked_on_every_successful_refresh
+    current_observation_revision_detection: supported_while_release_is_selected
+    older_observation_revision_after_newer_release: not_claimed_by_live_loader
+    historical_revision_backfill: separate_explicit_evidence_replay_job_required
 
 pit_policy:
   no_lookahead_required: true
   usable_at_time_t_only_if_available_at_lte_t: true
   official_published_at_must_not_replace_later_system_availability: true
+  latest_as_of_means_newest_observation_period_then_latest_eligible_revision: true
+  later_revision_of_older_observation_must_not_replace_newer_observation: true
   future_archive_entries_forbidden: true
   missing_or_ambiguous_source_identity: fail_closed
   malformed_or_unverified_receipt: fail_closed
@@ -128,6 +138,7 @@ provenance_required:
 
 consumer_scope:
   factual_context_allowed_after_existing_component_admission: true
+  normalized_vintage_reference_required_for_new_live_acquisition: true
   directional_authority: false
   action_authority: false
   expectation_consensus_scope: separate_source_required
