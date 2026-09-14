@@ -488,7 +488,7 @@ def _read_pointer_block(root: Path, spec: PointerSpec, as_of: datetime) -> dict[
     if selected_causal_value is None:
         _fail(spec.block_id + " selected observation lost causal field")
 
-    return {
+    block = {
         "block_id": spec.block_id,
         "stage": spec.stage,
         "dataset_id": spec.dataset_id,
@@ -512,6 +512,11 @@ def _read_pointer_block(root: Path, spec: PointerSpec, as_of: datetime) -> dict[
             **observed_hashes,
         },
     }
+    if spec.stage == 7 and spec.dataset_id == 'rub_native_ohlcv_htf':
+        from moex_data.rub_fx_observed_context import capture, apply
+        block['observed_context_evidence'] = capture(frame, spec, block['provenance'], now=as_of)
+        apply(block, as_of)
+    return block
 
 
 def _load_position_risk(path_value: str | None, as_of: datetime) -> dict[str, Any]:
@@ -599,6 +604,8 @@ def build_analysis_bundle(
     position_risk = _load_position_risk(position_risk_input, as_of_dt)
     external = _external_context_required()
     gaps = _policy_gaps(scope)
+    from moex_data.rub_contract_observed_context import collect as collect_contract_dates, describe as describe_contract_dates
+    contract_dates = collect_contract_dates(root, now=as_of_dt)
 
     if gaps:
         bundle_status = "partial_external_context_and_policy_gaps"
@@ -618,6 +625,8 @@ def build_analysis_bundle(
             "status": "not_ready_policy_gap",
             "block_count": len(blocks),
             "blocks": blocks,
+            "contract_price_evidence": contract_dates,
+            "contract_price_context": describe_contract_dates(contract_dates, now=as_of_dt),
             "freshness_alignment": freshness_alignment,
         },
         "position_risk": position_risk,

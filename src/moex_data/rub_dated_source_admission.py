@@ -64,7 +64,7 @@ def eligible_source_observation(frame):
     if frame.get('source_id') == 'moex_algopack_fo_tradestats_5m' and frame.get('purpose') == 'structure:observed_range_levels.USDRUBF':
         from moex_data.rub_observed_range_levels import replay
         return {frame['purpose']: replay(frame)}
-    if frame.get('source_id') == 'moex_algopack_fo_tradestats_5m' and frame.get('purpose') == 'timeframe:observed_1H.USDRUBF':
+    if frame.get('source_id') == 'moex_algopack_fo_tradestats_5m' and frame.get('purpose') in ('timeframe:observed_1H.USDRUBF', 'timeframe:observed_1H.CNYRUBF'):
         from moex_data.rub_dated_hour_source import replay
         return {frame['purpose']: replay(frame)}
     if frame.get('source_id') == 'dated_rfud_cets_same_acquisition_basis':

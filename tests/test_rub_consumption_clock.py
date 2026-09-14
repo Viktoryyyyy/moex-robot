@@ -50,7 +50,8 @@ def morning():
                 'block_id': timeframe, 'stage': 7, 'status': 'ready', 'timeframe': timeframe,
                 'causal_field': 'availability_ts_utc', 'selected_causal_ts_utc': selected,
                 'age_seconds_at_as_of': old, 'selected_observation': {'close': 80,
-                    'availability_ts_utc': selected, 'ingest_ts_utc': selected}}]}}}
+                    'availability_ts_utc': selected, 'ingest_ts_utc': selected,
+                    'build_ts_utc': '2026-09-09T03:05:00+00:00'}}]}}}
     return source
 
 

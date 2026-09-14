@@ -161,15 +161,84 @@ def test_slow_canonical_capture_finishes_after_hour_network_receipt(monkeypatch,
         'identity': {'generated_at_utc': NOW.isoformat()}, 'components': {}, 'authority': {}, 'analysis_views': {}, 'analysis_workflow': {}})
     written = {}
     monkeypatch.setattr(base, '_atomic_write', lambda path, value: written.update(snapshot=value))
-    ticks = iter(NOW + timedelta(seconds=n) for n in (0, 1, 2, 3))
+    ticks = iter(NOW + timedelta(seconds=n) for n in range(6))
     def acquire(**kwargs):
         requested = kwargs['now_fn'](); received = kwargs['now_fn']()
         value = acquisition(now=received)
+        if kwargs.get('secid') == 'CNYRUBF':
+            value = cny_acquisition(value)
         value['pages'][0].update(request_started_at_utc=requested.isoformat(), received_at_utc=received.isoformat())
         return value
     monkeypatch.setattr(source, 'acquire', acquire)
     value, _ = overlay.refresh_snapshot(now_fn=lambda: next(ticks), live_loader=lambda: {'status': 'UNAVAILABLE'})
     frame = value['accepted_dated_slow']['frames'][value['accepted_dated_slow']['selections'][source.PURPOSE]]
     assert frame['received_at_utc'] == (NOW + timedelta(seconds=2)).isoformat()
-    assert frame['accepted_at_utc'] == value['identity']['generated_at_utc'] == (NOW + timedelta(seconds=3)).isoformat()
+    assert frame['accepted_at_utc'] == value['identity']['generated_at_utc'] == (NOW + timedelta(seconds=5)).isoformat()
+    cny = value['accepted_dated_slow']['frames'][value['accepted_dated_slow']['selections']['timeframe:observed_1H.CNYRUBF']]
+    assert cny['received_at_utc'] == (NOW + timedelta(seconds=4)).isoformat()
+    assert cny['accepted_at_utc'] == frame['accepted_at_utc']
     assert written['snapshot'] is value
+
+
+def cny_acquisition(value=None):
+    raw = deepcopy(value if value is not None else acquisition(partial=0))
+    raw['secid'] = 'CNYRUBF'
+    for item in raw['pages']:
+        item['source_url'] = item['source_url'].replace('USDRUBF', 'CNYRUBF')
+        for row in item['payload']['data']['data']:
+            row[0] = 'CNYRUBF'
+            for index in (3, 4, 5, 6): row[index] /= 6
+    return raw
+
+
+def test_cny_hour_is_separate_identity_and_first_acceptance_survives_reingestion():
+    usd = source.capture(None, acquisition(), now=NOW)
+    both = source.capture(usd, cny_acquisition(), now=NOW)
+    accepted, rejected = dated.validated(both, NOW)
+    assert not rejected and set(accepted) == {source.PURPOSE, 'timeframe:observed_1H.CNYRUBF'}
+    cny = accepted['timeframe:observed_1H.CNYRUBF']
+    assert cny[2]['values']['instrument'] == cny[2]['values']['requested_secid'] == 'CNYRUBF'
+    assert cny[1]['units'] == {'price': 'RUB_per_CNY', 'volume': 'contracts'}
+    assert cny[2]['values']['values']['close'] == 13.5
+    later = NOW + timedelta(minutes=1)
+    again = source.capture(both, cny_acquisition(acquisition(partial=0, now=later)), now=later)
+    assert again['frames'] == both['frames'] and again['selections'] == both['selections']
+    assert both['frames'][usd['selections'][source.PURPOSE]] == usd['frames'][usd['selections'][source.PURPOSE]]
+
+
+@pytest.mark.parametrize('defect', ['endpoint', 'raw_identity', 'units', 'purpose', 'gap', 'duplicate', 'future_receipt'])
+def test_cny_rehashed_source_mismatch_and_incomplete_hour_refused(defect):
+    frame = source.make_frame(cny_acquisition(), now=NOW)
+    page = frame['source_pages'][0]
+    if defect == 'endpoint': page['source_url'] = page['source_url'].replace('CNYRUBF', 'USDRUBF')
+    elif defect == 'raw_identity': page['payload']['data']['data'][0][0] = 'USDRUBF'
+    elif defect == 'units': frame['units']['price'] = 'RUB_per_USD'
+    elif defect == 'purpose': frame['purpose'] = source.PURPOSE
+    elif defect == 'gap': page['payload']['data']['data'].pop(2)
+    elif defect == 'duplicate': page['payload']['data']['data'][2] = deepcopy(page['payload']['data']['data'][1])
+    else: page['received_at_utc'] = (NOW+timedelta(seconds=1)).isoformat()
+    frame['source_pages_digest'] = dated.digest(frame['source_pages'])
+    from moex_data.rub_dated_market_source import _revision
+    frame['revision_id'] = _revision(frame)
+    ref = dated.digest(frame)
+    valid, rejected = dated.validated({'schema_version': dated.SCHEMA, 'frames': {ref: frame},
+        'selections': {frame['purpose']: ref}}, NOW)
+    assert not valid and rejected
+
+
+def test_both_hour_release_frozen_export_and_completeness(tmp_path):
+    import json
+    from moex_data import rub_factual_release as release
+    from moex_data.rub_factual_release_acceptance import projection_completeness
+    store = source.capture(source.capture(None, acquisition(), now=NOW), cny_acquisition(), now=NOW)
+    snapshot = {'identity': {'generated_at_utc': NOW.isoformat()}, 'components': {}, 'accepted_dated_slow': store}
+    original = deepcopy(snapshot)
+    value = release.build(snapshot, now=NOW, code_revision='a'*40)
+    projection_completeness(snapshot, value, now=NOW)
+    assert {row['values']['block_id'] for row in value['timeframe_context']} == {'observed_1H.USDRUBF', 'observed_1H.CNYRUBF'}
+    directory = release.export(snapshot, now=NOW, code_revision='a'*40, output=tmp_path)
+    replay = release.build(json.loads((directory/'input_snapshot.json').read_text()), now=NOW, code_revision='a'*40)
+    assert replay == value and snapshot == original
+    bad = deepcopy(value)
+    bad['timeframe_context'] = [row for row in bad['timeframe_context'] if row['values']['block_id'] != 'observed_1H.CNYRUBF']
+    with pytest.raises(AssertionError): projection_completeness(snapshot, bad, now=NOW)

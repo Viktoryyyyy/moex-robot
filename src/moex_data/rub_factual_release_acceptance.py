@@ -36,6 +36,145 @@ def _factors(value):
     return {row['factor'] for row in value['facts']}
 
 
+def _contract_source_keys(evidence, now):
+    """Independent eligible-key oracle, including an all-output omission check."""
+    from collections import Counter
+    from datetime import date
+    from math import isfinite
+    import re
+    try:
+        if evidence['schema_version'] != 'rub_contract_observed_dates.v1': return None
+        rows = evidence['rows']; capture = datetime.fromisoformat(evidence['captured_at_utc'])
+        if not isinstance(rows, list) or len(rows) > 240 or not capture <= now: return None
+        capture_date = capture.astimezone(timezone(timedelta(hours=3))).date()
+        keys = []; roles = {}
+        for row in rows:
+            secid = row['secid']; day = date.fromisoformat(row['source_date'])
+            if not re.fullmatch(r'(Si|CR)[HMUZ][0-9]', secid): return None
+            family = 'Si' if secid.startswith('Si') else 'CR'
+            binding = row['binding_at_source']; provenance = row['source_provenance']
+            role = binding['role']; instrument = family.lower()+'_'+role+'_contract'
+            ref = datetime.fromisoformat(row['binding_observed_at_utc'])
+            first, last, low, high, finished = [datetime.fromisoformat(row[key]) for key in
+                ('source_first_bar_at_utc', 'source_last_bar_at_utc', 'source_receipt_lower_bound_utc',
+                 'source_receipt_upper_bound_utc', 'parent_finished_at_utc')]
+            expiry = date.fromisoformat(binding['last_trade_date'])
+            if not (role in ('front', 'next') and binding['root'] == family
+                    and binding['secid'] == provenance['secid'] == secid
+                    and binding['instrument_id'] == provenance['instrument_id'] == row['instrument_id_at_source'] == instrument
+                    and binding['source_id'] == 'moex_iss_forts_securities_reference'
+                    and date.fromisoformat(binding['as_of_date']) == day <= expiry
+                    and datetime.fromisoformat(binding['mapping_fixed_ts_utc']) == ref
+                    == datetime.fromisoformat(binding['availability_ts_utc'])
+                    == datetime.fromisoformat(provenance['binding_availability_ts_utc'])
+                    and capture_date-timedelta(days=45) <= day <= capture_date
+                    and ref.astimezone(timezone(timedelta(hours=3))).date() >= day
+                    and first <= last <= high <= finished <= capture and first <= low <= high and ref <= low
+                    and first.astimezone(timezone(timedelta(hours=3))).date() == last.astimezone(timezone(timedelta(hours=3))).date() == day): return None
+            if any(type(row[key]) not in (int, float) or not isfinite(row[key]) or row[key] <= 0 for key in ('open','high','low','close')): return None
+            if (type(row['volume']) not in (int,float) or not isfinite(row['volume']) or row['volume'] < 0
+                    or not row['low'] <= min(row['open'], row['close']) <= max(row['open'], row['close']) <= row['high']
+                    or type(row['source_bar_count']) is not int or row['source_bar_count'] <= 0
+                    or type(row['intraday_gap_count']) is not int or not 0 <= row['intraday_gap_count'] < row['source_bar_count']
+                    or row['session_completion_proven'] is not False): return None
+            if (provenance['source_id'] != 'moex_algopack_fo_tradestats_5m' or provenance['dataset_id'] != 'futures_raw_5m'
+                    or provenance['acceptance_contract_id'] != 'step3_canonical_raw_acceptance.v1'
+                    or provenance['quality_status'] != 'pass' or provenance['refresh_status'] != 'succeeded'
+                    or provenance['hash_semantics'] != 'computed_at_current_revalidation_not_original_acceptance_digest'): return None
+            run = provenance['acceptance_run_id']; root = '${MOEX_DATA_ROOT}/'
+            if not re.fullmatch(r'[A-Za-z0-9_-][A-Za-z0-9_.-]*_stage3', run) or not re.fullmatch(r'[A-Za-z0-9_-][A-Za-z0-9_.-]*', provenance['run_id']): return None
+            if (provenance['accepted_marker_ref'] != root+'state/acceptance/step3_canonical_raw/run_id='+run+'/accepted_pointers.json'
+                    or provenance['parent_manifest_ref'] != root+'runs/step10_rub_daily_refresh/run_id='+run[:-7]+'/run_manifest.json'): return None
+            prefix = root+'runs/step3_canonical_raw/run_id='+run+'/'
+            for field in ('partition_ref','manifest_ref','quality_report_ref'):
+                path = provenance[field]
+                if not path.startswith(prefix) or '\\' in path or any(p in ('','.','..') for p in path[len(prefix):].split('/')): return None
+            for field in ('partition_sha256','manifest_sha256','quality_report_sha256',
+                          'accepted_marker_sha256_at_revalidation','pilot_evidence_sha256_at_revalidation','parent_manifest_sha256_at_revalidation'):
+                if not re.fullmatch('[0-9a-f]{64}', provenance[field]): return None
+            group = roles.setdefault((run, day, family), {})
+            if role in group: return None
+            group[role] = expiry
+            keys.append((secid, row['source_date']))
+        if len(keys) != len(set(keys)) or any(count > 30 for count in Counter(key[0] for key in keys).values()): return None
+        if any('front' in group and 'next' in group and group['front'] >= group['next'] for group in roles.values()): return None
+        return Counter(keys)
+    except (KeyError, TypeError, ValueError, AttributeError, OverflowError):
+        return None
+
+
+def _fx_arithmetic_completeness(block, *, now):
+    """Independent arithmetic oracle over retained source rows, not output counts."""
+    evidence = block.get('observed_context_evidence')
+    if evidence is None:
+        return
+    context = block.get('observed_context')
+    _require(isinstance(context, dict), 'FX observed context omitted')
+    # Validate contracted build clocks independently of the shared descriptor.
+    # A malformed retained row invalidates the window; it cannot shorten a lag.
+    try:
+        build_times = [datetime.fromisoformat(row['build_ts_utc']) for row in evidence['rows']]
+        if any(stamp.utcoffset() is None for stamp in build_times):
+            raise ValueError('timezone required')
+    except (KeyError, TypeError, ValueError, OverflowError):
+        _require(context.get('status') == 'UNAVAILABLE'
+                 and context.get('observations') == [] and context.get('comparisons') == {},
+                 'FX required build timestamp refusal')
+        return
+    # The separately retained selected row witnesses the common Stage7 build.
+    # Do not delegate this test to the producer or shared describe/apply helper.
+    try:
+        selected_build = datetime.fromisoformat(block['selected_observation']['build_ts_utc'])
+        build_matches = selected_build.utcoffset() is not None and all(
+            stamp == selected_build for stamp in build_times)
+    except (KeyError, TypeError, ValueError, OverflowError):
+        build_matches = False
+    if not build_matches:
+        _require(context.get('status') == 'UNAVAILABLE'
+                 and context.get('observations') == [] and context.get('comparisons') == {},
+                 'FX retained build witness refusal')
+        return
+    if context.get('status') != 'AVAILABLE':
+        return
+    timeframe = block['timeframe']
+    rows = [row for row, built in zip(evidence['rows'], build_times)
+            if datetime.fromisoformat(row['availability_ts_utc']) <= now and built <= now]
+    _require(bool(rows) and context['observations'] == rows and len(rows) <= (30 if timeframe == '1D' else 8),
+             'FX bounded causal observations')
+    _require(context['historical_pit_usable'] is False and context['session_completion_proven'] is False
+             and context['first_accepted_at_utc'] is None, 'FX scope and unknown first acceptance')
+    lags = (1, 5, 20) if timeframe == '1D' else (1,)
+    _require(set(context['comparisons']) == {str(lag) for lag in lags}, 'FX exact lag coverage')
+    for lag in lags:
+        comparison = context['comparisons'][str(lag)]
+        if len(rows) <= lag:
+            _require(comparison['status'] == 'UNAVAILABLE', 'FX insufficient lag refusal')
+            continue
+        first, last = rows[-1-lag], rows[-1]
+        _require(comparison['status'] == 'AVAILABLE'
+                 and comparison['target_date'] == first['period_end_date']
+                 and comparison['source_date'] == last['period_end_date']
+                 and comparison['target_close'] == first['close']
+                 and comparison['source_close'] == last['close']
+                 and comparison['absolute_change'] == last['close'] - first['close']
+                 and comparison['percent_change'] == (last['close'] / first['close'] - 1) * 100
+                 and comparison['observed_date_witness'] == [row['period_end_date'] for row in rows[-1-lag:]],
+                 'FX exact observed lag arithmetic and witness')
+    if timeframe == '1D':
+        today = now.astimezone(timezone(timedelta(hours=3))).date()
+        monday = today - timedelta(days=today.weekday())
+        part = [row for row in rows if monday.isoformat() <= row['trade_date'] <= today.isoformat()]
+        wtd = context['week_to_date']
+        _require(wtd['source_dates'] == [row['trade_date'] for row in part]
+                 and wtd['source_period_count'] == len(part)
+                 and wtd['week_start_date'] == monday.isoformat()
+                 and wtd['as_of_moscow_date'] == today.isoformat()
+                 and wtd['week_completion_proven'] is False, 'FX dynamic WTD dates and scope')
+        if part:
+            _require([wtd[key] for key in ('open', 'high', 'low', 'close')] == [part[0]['open'],
+                max(row['high'] for row in part), min(row['low'] for row in part), part[-1]['close']], 'FX WTD OHLC')
+
+
 def projection_completeness(snapshot, value, *, now):
     """Independent reverse oracle over the read-time input, not exported fact counts."""
     now = now.astimezone(timezone.utc)
@@ -151,14 +290,75 @@ def projection_completeness(snapshot, value, *, now):
             'direction': None, 'average_entry_price': None, 'explicit_user_input': False}
     _require(value.get('user_position_context') == expected_position, 'explicit position completeness and exclusions')
     expected_blocks = {}
+    from moex_data.rub_contract_observed_context import describe as describe_contract_dates
+    contract_evidence = None
+    for name in ('stage9_daily', 'stage9_weekly'):
+        component = components.get(name, {})
+        core = (component.get('data') or {}).get('server_core', {})
+        if component.get('status') == 'READY' and 'contract_price_evidence' in core:
+            contract_evidence = core['contract_price_evidence']
+            break
+    expected_contracts = describe_contract_dates(contract_evidence, now=now)
+    _require(value.get('contract_price_context') == expected_contracts, 'contract observed date completeness')
+    from collections import Counter
+    source_keys = _contract_source_keys(contract_evidence, now)
+    emitted_keys = Counter((row['secid'], row['source_date']) for contract in expected_contracts['contracts'] for row in contract['observations'])
+    _require(emitted_keys == (source_keys or Counter()), 'contract independent source-to-output completeness')
+    if expected_contracts['status'] == 'AVAILABLE':
+        # Independent retained-binding/capture oracle: do not trust shared describe
+        # to establish admissibility of its own output.
+        from datetime import date
+        captured = datetime.fromisoformat(contract_evidence['captured_at_utc'])
+        capture_day = captured.astimezone(timezone(timedelta(hours=3))).date()
+        _require(captured <= now, 'contract independent capture causality')
+        for contract in expected_contracts['contracts']:
+            for row in contract['observations']:
+                binding = row['binding_at_source']; provenance = row['source_provenance']
+                observed_date = date.fromisoformat(row['source_date'])
+                family = 'Si' if contract['secid'].startswith('Si') else 'CR'
+                role = 'front' if row['instrument_id_at_source'].endswith('_front_contract') else 'next'
+                reference = datetime.fromisoformat(row['binding_observed_at_utc'])
+                first = datetime.fromisoformat(row['source_first_bar_at_utc'])
+                last = datetime.fromisoformat(row['source_last_bar_at_utc'])
+                receipt_min = datetime.fromisoformat(row['source_receipt_lower_bound_utc'])
+                receipt_max = datetime.fromisoformat(row['source_receipt_upper_bound_utc'])
+                finished = datetime.fromisoformat(row['parent_finished_at_utc'])
+                _require(binding['root'] == family and binding['role'] == role
+                    and row['secid'] == binding['secid'] == provenance['secid'] == contract['secid']
+                    and binding['instrument_id'] == row['instrument_id_at_source'] == provenance['instrument_id']
+                    == family.lower() + '_' + role + '_contract'
+                    and binding['source_id'] == 'moex_iss_forts_securities_reference'
+                    and date.fromisoformat(binding['as_of_date']) == observed_date
+                    and date.fromisoformat(binding['last_trade_date']) >= observed_date
+                    and datetime.fromisoformat(binding['mapping_fixed_ts_utc']) == reference
+                    == datetime.fromisoformat(binding['availability_ts_utc'])
+                    == datetime.fromisoformat(provenance['binding_availability_ts_utc'])
+                    and reference.astimezone(timezone(timedelta(hours=3))).date() >= observed_date,
+                    'contract independent retained binding identity and dates')
+                _require(capture_day - timedelta(days=45) <= observed_date <= capture_day
+                    and first <= last <= receipt_max <= finished <= captured
+                    and first <= receipt_min <= receipt_max and reference <= receipt_min,
+                    'contract independent capture window and causal bounds')
+            for week in contract['observed_weeks']:
+                originals = [row for row in contract['observations'] if row['source_date'] in week['source_dates']]
+                _require(len(originals) == len(week['source_dates']) and [week[k] for k in ('open', 'high', 'low', 'close')] ==
+                    [originals[0]['open'], max(row['high'] for row in originals), min(row['low'] for row in originals), originals[-1]['close']],
+                    'contract sparse weekly arithmetic')
     for name in ('stage9_daily', 'stage9_weekly'):
         component = components.get(name, {})
         if component.get('status') != 'READY': continue
         for block in (component.get('data') or {}).get('server_core', {}).get('blocks', []):
-            try: causal = datetime.fromisoformat(block['selected_causal_ts_utc']) <= now
-            except (KeyError, ValueError, TypeError): causal = False
+            try:
+                selected_clock = datetime.fromisoformat(block['selected_causal_ts_utc'])
+                build_clock = datetime.fromisoformat(block['selected_observation']['build_ts_utc'])
+                causal = (selected_clock.utcoffset() is not None and build_clock.utcoffset() is not None
+                          and selected_clock <= now and build_clock <= now)
+            except (KeyError, ValueError, TypeError, AttributeError, OverflowError): causal = False
             if block.get('status') == 'ready' and block.get('stage') == 7 and block.get('timeframe') in ('1H', '1D', '1W') and causal:
-                expected_blocks[(block.get('block_id'), block.get('selected_causal_ts_utc'))] = block
+                _fx_arithmetic_completeness(block, now=now)
+                expected_block = deepcopy(block)
+                expected_block.pop('observed_context_evidence', None)
+                expected_blocks.setdefault((block.get('block_id'), block.get('selected_causal_ts_utc')), expected_block)
     actual_blocks = {(entry['values'].get('block_id'), entry['values'].get('selected_causal_ts_utc')): entry['values'] for entry in value['timeframe_context']}
     # Independent source-hour oracle: do not ask the projection's admission helper.
     hour = None
@@ -198,21 +398,22 @@ def projection_completeness(snapshot, value, *, now):
             'selected_causal_ts_utc': hour['hour_end_utc'], 'selected_causal_time_semantics': 'observed_hour_end_not_availability', **hour}
     from moex_data.rub_dated_context import validated as validated_hour_witnesses
     hour_witnesses, _ = validated_hour_witnesses(view.get('accepted_dated_slow'), now)
-    acquired_hour = hour_witnesses.get('timeframe:observed_1H.USDRUBF')
-    if acquired_hour and acquired_hour[1].get('origin') == 'source_observation_acquired_now':
-        hour = deepcopy(acquired_hour[2]['values'])
-        from moex_data.rub_consumption_clock import hour as project_hour_clock
-        project_hour_clock(hour, now)
-        key = ('observed_1H.USDRUBF', hour['hour_end_utc'])
-        if key not in expected_blocks:
-            entries = [entry for entry in value['timeframe_context'] if
-                       (entry['values'].get('block_id'), entry['values'].get('selected_causal_ts_utc')) == key]
-            _require(len(entries) == 1 and all(entries[0].get(name) == expected for name, expected in
-                {'origin': acquired_hour[1]['origin'], 'accepted_at_utc': acquired_hour[1]['accepted_at_utc'],
-                 'acceptance_evidence_id': acquired_hour[0], 'revision_id': acquired_hour[1]['revision_id']}.items()),
-                'dated H1 timeframe original acceptance evidence')
-        expected_blocks.setdefault(key, {'block_id': key[0], 'selected_causal_ts_utc': key[1],
-            'selected_causal_time_semantics': 'observed_hour_end_not_availability', **hour})
+    for secid in ('USDRUBF', 'CNYRUBF'):
+        acquired_hour = hour_witnesses.get('timeframe:observed_1H.' + secid)
+        if acquired_hour and acquired_hour[1].get('origin') == 'source_observation_acquired_now':
+            hour = deepcopy(acquired_hour[2]['values'])
+            from moex_data.rub_consumption_clock import hour as project_hour_clock
+            project_hour_clock(hour, now)
+            key = ('observed_1H.' + secid, hour['hour_end_utc'])
+            if key not in expected_blocks:
+                entries = [entry for entry in value['timeframe_context'] if
+                           (entry['values'].get('block_id'), entry['values'].get('selected_causal_ts_utc')) == key]
+                _require(len(entries) == 1 and all(entries[0].get(name) == expected for name, expected in
+                    {'origin': acquired_hour[1]['origin'], 'accepted_at_utc': acquired_hour[1]['accepted_at_utc'],
+                     'acceptance_evidence_id': acquired_hour[0], 'revision_id': acquired_hour[1]['revision_id']}.items()),
+                    'dated H1 timeframe original acceptance evidence')
+            expected_blocks.setdefault(key, {'block_id': key[0], 'selected_causal_ts_utc': key[1],
+                'selected_causal_time_semantics': 'observed_hour_end_not_availability', **hour})
     _require(actual_blocks == expected_blocks, 'timeframe completeness')
     from moex_data.rub_dated_context import describe as dated_context
     _require(value.get('dated_context') == dated_context(view, now=now), 'dated witness projection completeness and values')

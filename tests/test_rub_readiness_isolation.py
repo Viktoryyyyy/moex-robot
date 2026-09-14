@@ -121,7 +121,7 @@ def real_b_snapshot():
     value['accepted_dated_market'] = capture(None, acquisitions(), now=NOW)
     value['accepted_dated_slow'] = store()
     value['components']['stage9_daily'] = {'status': 'READY', 'data': {'server_core': {'blocks': [
-        {'block_id': 'native.' + tf, 'timeframe': tf, 'stage': 7, 'status': 'ready', 'selected_causal_ts_utc': '2026-01-01T00:00:00+00:00'}
+        {'block_id': 'native.' + tf, 'selected_observation': {'build_ts_utc': '2026-01-01T00:00:00+00:00'}, 'timeframe': tf, 'stage': 7, 'status': 'ready', 'selected_causal_ts_utc': '2026-01-01T00:00:00+00:00'}
         for tf in ('1D', '1W')]}}}
     return value, NOW
 

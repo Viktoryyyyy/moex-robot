@@ -75,6 +75,8 @@ def structure(levels, now):
 
 
 def block(value, now):
+    from moex_data.rub_fx_observed_context import apply as apply_fx_context
+    apply_fx_context(value, now)
     selected = value.get('selected_causal_ts_utc')
     value['age_seconds_at_as_of'] = age(selected, now)
     value['age_reference_utc'] = now.isoformat()
@@ -105,6 +107,10 @@ def apply(snapshot, *, now):
     components = _mapping(snapshot.get('components'))
     for key in ('stage9_daily', 'stage9_weekly'):
         data = _mapping(_mapping(components.get(key)).get('data'))
+        core = _mapping(data.get('server_core'))
+        if 'contract_price_evidence' in core:
+            from moex_data.rub_contract_observed_context import describe as contract_context
+            core['contract_price_context'] = contract_context(core['contract_price_evidence'], now=now)
         for value in _items(_mapping(data.get('server_core')).get('blocks')):
             if isinstance(value, dict): block(value, now)
     # JSON persistence separates these assembly aliases from their component blocks.

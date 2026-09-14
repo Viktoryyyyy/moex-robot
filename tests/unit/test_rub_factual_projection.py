@@ -123,7 +123,7 @@ def core_snapshot():
             'prior_completed_session': {'high': 82, 'low': 78, 'partial_session': False, 'trade_date': '2026-09-07'}}}}}
     components['stage9_daily'] = {'status': 'READY', 'data': {'server_core': {'blocks': [
         {'block_id': tf, 'stage': 7, 'timeframe': tf, 'status': 'ready',
-            'selected_causal_ts_utc': stamp, 'selected_observation': {'close': 80}} for tf in ('1H', '1D', '1W')]}}}
+            'selected_causal_ts_utc': stamp, 'selected_observation': {'close': 80, 'build_ts_utc': stamp}} for tf in ('1H', '1D', '1W')]}}}
     components['official_news'] = {'status': 'READY', 'data_as_of': stamp, 'data': {'events': [{
         'event_id': 'one', 'source_id': 'official_test', 'content_hash': 'a' * 64, 'headline': 'Published source fact', 'source_reference': 'https://example.org/1',
         'published_at': stamp, 'available_at': stamp, 'ingested_at': stamp, 'direction': 'NEUTRAL'}],

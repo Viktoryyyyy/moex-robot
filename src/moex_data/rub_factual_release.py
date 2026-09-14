@@ -110,16 +110,17 @@ def describe(snapshot):
                     'current_usable': False, 'historical_pit_usable': False, 'model_usable': False}
                    if range_item else {'status': 'UNAVAILABLE', 'reason': next((reason for key, reason in
                        accepted_dated.get('refusals', {}).items() if 'observed_range' in key), 'observed_range_source_not_admitted')})
-    hour_item = accepted_dated['observations'].get('timeframe:observed_1H.USDRUBF')
-    if hour_item and hour_item.get('origin') == 'source_observation_acquired_now':
-        hour = deepcopy(hour_item['values']['values'])
-        identity = ('observed_1H.USDRUBF', hour['hour_end_utc'])
-        existing = {(entry['values'].get('block_id'), entry['values'].get('selected_causal_ts_utc')) for entry in consumers['timeframe_context']}
-        if identity not in existing:
-            consumers['timeframe_context'].append({'snapshot_path': 'accepted_dated_slow', 'scope': hour['scope'],
-                **{key: hour_item[key] for key in ('origin', 'accepted_at_utc', 'acceptance_evidence_id', 'revision_id')},
-                'values': {'block_id': identity[0], 'selected_causal_ts_utc': identity[1],
-                           'selected_causal_time_semantics': 'observed_hour_end_not_availability', **hour}})
+    for secid in ('USDRUBF', 'CNYRUBF'):
+        hour_item = accepted_dated['observations'].get('timeframe:observed_1H.' + secid)
+        if hour_item and hour_item.get('origin') == 'source_observation_acquired_now':
+            hour = deepcopy(hour_item['values']['values'])
+            identity = ('observed_1H.' + secid, hour['hour_end_utc'])
+            existing = {(entry['values'].get('block_id'), entry['values'].get('selected_causal_ts_utc')) for entry in consumers['timeframe_context']}
+            if identity not in existing:
+                consumers['timeframe_context'].append({'snapshot_path': 'accepted_dated_slow', 'scope': hour['scope'],
+                    **{key: hour_item[key] for key in ('origin', 'accepted_at_utc', 'acceptance_evidence_id', 'revision_id')},
+                    'values': {'block_id': identity[0], 'selected_causal_ts_utc': identity[1],
+                               'selected_causal_time_semantics': 'observed_hour_end_not_availability', **hour}})
     return {'schema_version': SCHEMA, 'as_of_utc': freshness.get('read_at_utc') if isinstance(freshness, dict) else None,
         'status': 'INCOMPLETE', 'facts': facts, 'horizons': horizons, **consumers,
         'dated_context': accepted_dated,
