@@ -203,7 +203,7 @@ def _replay(refs, *, now):
 
 
 def _current_index_manifests(root, component=COMPONENT):
-    """Return current snapshot index evidence to protect until the next publish."""
+    """Return current snapshot index evidence to keep uncompressed until the next publish."""
     path = Path(root) / CURRENT_SNAPSHOT_RELATIVE_PATH
     if not path.exists():
         return ()
@@ -241,7 +241,7 @@ def load(*, root):
     result = _replay(refs, now=datetime.now(timezone.utc))
     retained = _current_index_manifests(root)
     if retained is not None:
-        transport.prune_source_receipts(output, source_url=INDEX_URL,
+        transport.compact_source_receipts(output, source_url=INDEX_URL,
             keep_manifests=(index['manifest_path'], *retained))
     return result
 
