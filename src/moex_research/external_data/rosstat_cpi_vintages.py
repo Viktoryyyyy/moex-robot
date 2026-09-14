@@ -456,7 +456,9 @@ def _validate_reference_path(path, reference, *, series_id, observation_key):
 
 
 def validate_reference(reference, data):
-    """Verify that a live component references the exact normalized immutable vintage."""
+    """Validate a normalized vintage; return False for replay-valid pre-contract legacy data."""
+    if reference is None:
+        return False
     if not isinstance(reference, dict):
         raise RosstatVintageError('Rosstat vintage reference must be an object')
     series_id, frequency, observation_key, _, current_value = _series_shape(data)
