@@ -1,7 +1,8 @@
 import json
-from pathlib import Path
 
+import pytest
 from moex_research.external_data import rosstat_cpi_factual as weekly
+from moex_research.external_data import rosstat_https as transport
 from moex_research.external_data import rosstat_monthly_cpi as monthly
 
 
@@ -47,3 +48,12 @@ def test_nonregular_current_snapshot_disables_cleanup(tmp_path):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.mkdir()
     assert weekly._current_index_manifests(tmp_path) is None
+
+
+def test_missing_explicit_keep_manifest_blocks_cleanup(tmp_path):
+    evidence = tmp_path / weekly.EVIDENCE_RELATIVE_DIR
+    evidence.mkdir(parents=True)
+    missing = evidence / ('a' * 64 + '.json')
+    with pytest.raises(ValueError, match='retained evidence manifest missing'):
+        transport.prune_source_receipts(evidence, source_url=weekly.INDEX_URL,
+                                        keep_manifests=(missing,))
