@@ -6,6 +6,7 @@ import ssl
 
 import pytest
 from moex_research.external_data import rosstat_https as source
+from moex_research.external_data import rosstat_weekly_cpi as document
 
 URL = 'https://rosstat.gov.ru/storage/mediabank/134_02-09-2026.html'
 INDEX_URL = 'https://rosstat.gov.ru/compendium/document/50798'
@@ -111,8 +112,9 @@ def _receipt(root, *, url, raw, requested):
     return path, root / (raw_sha + '.html')
 
 
-def test_prune_source_receipts_removes_only_superseded_target_polling_evidence(tmp_path):
-    old_manifest, old_raw = _receipt(tmp_path, url=INDEX_URL, raw=b'<html>old index</html>',
+def test_compact_source_receipts_preserves_manifests_and_release_evidence(tmp_path):
+    old_body = b'<html>' + (b'old-index-row-' * 1000) + b'</html>'
+    old_manifest, old_raw = _receipt(tmp_path, url=INDEX_URL, raw=old_body,
                                      requested='2026-09-14T08:00:00+00:00')
     keep_manifest, keep_raw = _receipt(tmp_path, url=INDEX_URL, raw=b'<html>current index</html>',
                                        requested='2026-09-14T08:10:00+00:00')
@@ -121,19 +123,22 @@ def test_prune_source_receipts_removes_only_superseded_target_polling_evidence(t
     malformed = tmp_path / ('f' * 64 + '.json')
     malformed.write_bytes(b'not-json')
 
-    result = source.prune_source_receipts(tmp_path, source_url=INDEX_URL,
-                                          keep_manifests=(keep_manifest,))
+    result = source.compact_source_receipts(tmp_path, source_url=INDEX_URL,
+                                            keep_manifests=(keep_manifest,))
 
-    assert result['manifests_removed'] == 1
-    assert result['raw_removed'] == 1
-    assert result['bytes_removed'] > 0
-    assert not old_manifest.exists() and not old_raw.exists()
+    assert result['raw_compacted'] == 1
+    assert result['bytes_saved'] > 0
+    assert old_manifest.exists()
+    assert not old_raw.exists()
+    assert Path(str(old_raw) + '.gz').exists()
+    assert document._read(old_raw, sha256(old_body).hexdigest(), '.html') == old_body
     assert keep_manifest.exists() and keep_raw.exists()
+    assert not Path(str(keep_raw) + '.gz').exists()
     assert release_manifest.exists() and release_raw.exists()
     assert malformed.exists()
 
 
-def test_prune_source_receipts_keeps_raw_referenced_by_retained_receipt(tmp_path):
+def test_compact_source_receipts_keeps_raw_referenced_by_retained_receipt(tmp_path):
     raw = b'<html>shared index body</html>'
     old_manifest, raw_path = _receipt(tmp_path, url=INDEX_URL, raw=raw,
                                       requested='2026-09-14T08:00:00+00:00')
@@ -141,20 +146,19 @@ def test_prune_source_receipts_keeps_raw_referenced_by_retained_receipt(tmp_path
                                             requested='2026-09-14T08:10:00+00:00')
     assert same_raw_path == raw_path
 
-    result = source.prune_source_receipts(tmp_path, source_url=INDEX_URL,
-                                          keep_manifests=(keep_manifest,))
+    result = source.compact_source_receipts(tmp_path, source_url=INDEX_URL,
+                                            keep_manifests=(keep_manifest,))
 
-    assert result['manifests_removed'] == 1
-    assert result['raw_removed'] == 0
-    assert not old_manifest.exists()
-    assert keep_manifest.exists()
+    assert result['raw_compacted'] == 0
+    assert old_manifest.exists() and keep_manifest.exists()
     assert raw_path.exists()
+    assert not Path(str(raw_path) + '.gz').exists()
 
 
-def test_prune_source_receipts_refuses_keep_manifest_outside_target(tmp_path):
+def test_compact_source_receipts_refuses_keep_manifest_outside_target(tmp_path):
     evidence = tmp_path / 'evidence'; evidence.mkdir()
     outside = tmp_path / 'outside'; outside.mkdir()
     keep, _ = _receipt(outside, url=INDEX_URL, raw=b'<html>x</html>',
                        requested='2026-09-14T08:00:00+00:00')
     with pytest.raises(ValueError, match='outside target'):
-        source.prune_source_receipts(evidence, source_url=INDEX_URL, keep_manifests=(keep,))
+        source.compact_source_receipts(evidence, source_url=INDEX_URL, keep_manifests=(keep,))
