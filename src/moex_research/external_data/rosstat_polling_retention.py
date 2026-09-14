@@ -1,8 +1,8 @@
-"""Reference-aware post-publish GC for Rosstat polling evidence.
+"""Reference-aware post-promotion GC for Rosstat polling evidence.
 
 The collector never deletes evidence that may still be replayed by the current
 snapshot, immutable CPI vintages, series current pointers, or frozen factual
-release pins.  Evidence that predates the local GC epoch is also retained so
+release pins. Evidence that predates the local GC epoch is also retained so
 pre-existing exports remain valid without requiring retroactive discovery.
 """
 from __future__ import annotations
@@ -373,25 +373,28 @@ def _eligible_unreferenced(receipts: list[dict], *, protected: set[Path], epoch_
     return result
 
 
-def garbage_collect(root, *, now) -> dict:
+def garbage_collect(root, *, now, invoked_at=None) -> dict:
     """Delete only old post-epoch Rosstat polling evidence with no live/replay references.
 
-    The first call creates an epoch and deletes nothing.  This protects all historical
-    evidence that may be referenced by exports created before this policy existed.
-    A receipt also remains protected for the full 20-minute live replay window so a
-    concurrent capture cannot be collected before its load transaction publishes it.
+    ``now`` is the source/evidence trigger timestamp and is retained for audit context.
+    The migration epoch and age decisions use the actual GC invocation clock. Tests may
+    inject ``invoked_at`` explicitly; production callers omit it. This prevents replayed
+    or backfilled evidence timestamps from backdating the retention epoch.
     """
     root = _root(root)
-    now_utc = _utc(now, 'retention now')
+    trigger_utc = _utc(now, 'retention trigger time')
+    invocation_utc = (_utc(invoked_at, 'retention invocation time') if invoked_at is not None
+                      else datetime.now(timezone.utc))
     with _lock(root):
         try:
-            epoch, created = _load_epoch(root, now_utc)
+            epoch, created = _load_epoch(root, invocation_utc)
             if created:
                 status = {
                     'schema_version': SCHEMA_VERSION,
                     'policy': GC_POLICY,
                     'status': 'INITIALIZED',
-                    'checked_at_utc': now_utc.isoformat(),
+                    'checked_at_utc': invocation_utc.isoformat(),
+                    'trigger_time_utc': trigger_utc.isoformat(),
                     'epoch_started_at_utc': epoch['started_at_utc'],
                     'deleted_manifests': 0,
                     'deleted_raw_files': 0,
@@ -411,17 +414,18 @@ def garbage_collect(root, *, now) -> dict:
 
             epoch_start = _utc(epoch['started_at_utc'], 'retention epoch started_at_utc')
             eligible = _eligible_unreferenced(receipts, protected=protected,
-                                              epoch_start=epoch_start, now=now_utc)
+                                              epoch_start=epoch_start, now=invocation_utc)
             eligible.sort(key=lambda item: (item['received_at'], str(item['path'])))
             candidates = eligible[:MAX_DELETE_MANIFESTS_PER_CALL]
             delete_paths = {record['path'] for record in candidates}
-            remaining_raw = {record['raw_sha256'] for record in receipts if record['path'] not in delete_paths}
+            remaining_raw = {(record['path'].parent, record['raw_sha256']) for record in receipts
+                             if record['path'] not in delete_paths}
             raw_targets: dict[Path, str] = {}
             for record in candidates:
                 raw_sha = record['raw_sha256']
-                if raw_sha in remaining_raw:
-                    continue
                 directory = record['path'].parent
+                if (directory, raw_sha) in remaining_raw:
+                    continue
                 for suffix in ('.html', '.html.gz'):
                     candidate = directory / (raw_sha + suffix)
                     if candidate.exists():
@@ -444,7 +448,8 @@ def garbage_collect(root, *, now) -> dict:
                 'schema_version': SCHEMA_VERSION,
                 'policy': GC_POLICY,
                 'status': 'READY',
-                'checked_at_utc': now_utc.isoformat(),
+                'checked_at_utc': invocation_utc.isoformat(),
+                'trigger_time_utc': trigger_utc.isoformat(),
                 'epoch_started_at_utc': epoch['started_at_utc'],
                 'protected_manifests': len(protected),
                 'inventory_manifests': len(receipts),
@@ -463,7 +468,8 @@ def garbage_collect(root, *, now) -> dict:
                 'schema_version': SCHEMA_VERSION,
                 'policy': GC_POLICY,
                 'status': 'BLOCKED',
-                'checked_at_utc': now_utc.isoformat(),
+                'checked_at_utc': invocation_utc.isoformat(),
+                'trigger_time_utc': trigger_utc.isoformat(),
                 'deleted_manifests': 0,
                 'deleted_raw_files': 0,
                 'bytes_saved': 0,
@@ -500,8 +506,8 @@ def _derive_root_from_refs(refs: list[tuple[str, str]]) -> Path:
 def pin_snapshot(snapshot: dict, *, pin_id: str, created_at) -> dict | None:
     """Pin Rosstat evidence referenced by a frozen factual input snapshot.
 
-    Snapshots without Rosstat evidence require no pin.  A pin is immutable and is
-    consumed by post-publish GC before any referenced receipt can be removed.
+    Snapshots without Rosstat evidence require no pin. A pin is immutable and is
+    consumed by GC before any referenced receipt can be removed.
     """
     if not isinstance(snapshot, dict):
         raise RosstatPollingRetentionError('frozen snapshot must be an object')
