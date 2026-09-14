@@ -2,6 +2,7 @@ dataset_id: rosstat_cpi_vintages
 schema_version: rosstat_cpi_vintages.v1
 status: active_live_normalized_v1
 producer: moex_research.external_data.rosstat_cpi_vintages
+reader: moex_research.external_data.rosstat_cpi_history
 source_contract_ref: contracts/sources/macro/rosstat_cpi.v1.yaml
 
 paths:
@@ -13,7 +14,8 @@ paths:
 
 layers:
   raw:
-    canonical_location: ${MOEX_DATA_ROOT}/raw/external/rosstat_weekly_cpi_or_rosstat_monthly_cpi
+    weekly_location: ${MOEX_DATA_ROOT}/raw/external/rosstat_weekly_cpi
+    monthly_location: ${MOEX_DATA_ROOT}/raw/external/rosstat_monthly_cpi
     mutable: false
     normalized_values_allowed: false
   normalized_official:
@@ -66,6 +68,7 @@ required_vintage_fields:
   - published_at
   - published_date
   - available_at
+  - revision_at
   - value_initial
   - value_previous
   - value_revised
@@ -79,9 +82,12 @@ revision_rules:
     - series_id
     - observation_key
     - value_current
-  repeated_same_semantic_sha256:
+  repeated_same_as_latest_semantic_value:
     create_new_vintage: false
     current_pointer_refresh_allowed: true
+  same_as_older_but_not_latest_semantic_value:
+    create_new_vintage: true
+    reason: reverting_to_an_older_value_is_still_a_new_revision_event
   first_semantic_value:
     revision_seq: 0
     revision_status: INITIAL
@@ -122,6 +128,10 @@ pit:
   use_latest_eligible_revision_only: true
   later_revision_must_not_rewrite_earlier_vintage: true
   publication_timestamp_without_system_receipt_does_not_grant_availability: true
+  reader_operations:
+    - history_by_observation
+    - latest_revision_as_of_for_observation
+    - latest_observation_and_revision_as_of
 
 provenance:
   required:
@@ -156,7 +166,7 @@ current_pointer:
 consumer_contract:
   raw_html_not_consumer_interface: true
   normalized_vintage_is_macro_history_interface: true
-  live_component_may_expose_vintage_reference: true
+  live_component_exposes_vintage_reference: true
   expectations_consensus_and_surprise:
     stored_here: false
     separate_verified_source_required: true
