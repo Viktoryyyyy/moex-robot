@@ -15,6 +15,11 @@
     "current_intraday_required": false,
     "baseline_load": "existing accepted EOD or exact canonical raw only; no network or full backfill",
     "baseline_receipt_must_precede_capture": true,
+    "causal_cutoff_fixed_before_source_validation": true,
+    "first_acceptance_clock_sampled_after_source_validation": true,
+    "snapshot_generation_follows_dated_capture": true,
+    "operational_refusal_text_is_not_economic_revision_identity": true,
+    "latest_baseline_diagnostics_separate_from_accepted_evidence": true,
     "freeze_original_provenance": true,
     "repeat_identical_observation_must_not_renew_first_acceptance": true,
     "preserve_previous_evidence_on_collection_failure": true
