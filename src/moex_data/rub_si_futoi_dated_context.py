@@ -611,3 +611,8 @@ def verify_projection(snapshot, release, *, now):
         _require(set(values) == expected_fields, "Si dated field coverage")
         _require(type(values["total_open_interest"]) is int, "Si dated noninteger OI delta")
         _require(values["total_open_interest"] == anchor["total_open_interest"] - baseline["total_open_interest"], "Si dated OI arithmetic")
+    canonical = deepcopy(admission)
+    canonical.update(checked_at_utc=_stamp(now).isoformat(), evidence_sha256=stored["evidence_sha256"],
+                     last_capture_error=stored.get("last_capture_error"),
+                     latest_baseline_diagnostics=_latest_diagnostics(stored, evidence, _stamp(now)))
+    _require(output == canonical and _digest(output) == _digest(canonical), "Si dated canonical projection changed")

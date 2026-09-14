@@ -511,7 +511,51 @@ def test_units_and_family_scope_are_verified():
     assert output["units"]["net_share_of_oi"] == "fraction_of_total_open_interest"
     dated.verify_projection(snapshot, release, now=NOW)
     output["units"]["participant_fields"] = "unique_people"
-    with pytest.raises(AssertionError, match="units"):
+    with pytest.raises(AssertionError, match="canonical projection|units"):
+        dated.verify_projection(snapshot, release, now=NOW)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("scope", "CURRENT_USABLE"), ("source_event_age_seconds", 0),
+    ("maximum_anchor_source_age_seconds", 99999999), ("maximum_first_acceptance_age_seconds", 99999999),
+    ("checked_at_utc", "1900-01-01T00:00:00+00:00"), ("invented_fact", 17),
+    ("anchor.invented_fact", 17), ("deltas.delta_5d.invented_fact", 17),
+])
+def test_admitted_projection_requires_complete_canonical_shape(field, value):
+    snapshot = {dated.STORE_KEY: store(candidate()), "components": {"futoi_live": {"data": {"governance": GOV}}}}
+    output = dated.describe(snapshot[dated.STORE_KEY], now=NOW, governance=GOV)
+    target = output
+    parts = field.split(".")
+    for key in parts[:-1]: target = target[key]
+    assert target.get(parts[-1]) != value
+    target[parts[-1]] = value
+    release = {"futoi_context": {"futoi_live": {"dated_comparisons": output}}}
+    with pytest.raises(AssertionError, match="canonical projection|anchor changed"):
+        dated.verify_projection(snapshot, release, now=NOW)
+
+
+def test_canonical_shape_verification_is_independent_of_producer_describe(monkeypatch):
+    snapshot = {dated.STORE_KEY: store(candidate()), "components": {"futoi_live": {"data": {"governance": GOV}}}}
+    describe = dated.describe
+    def faulty(*args, **kwargs):
+        value = describe(*args, **kwargs)
+        value["scope"] = "CURRENT_USABLE"
+        return value
+    monkeypatch.setattr(dated, "describe", faulty)
+    output = dated.describe(snapshot[dated.STORE_KEY], now=NOW, governance=GOV)
+    release = {"futoi_context": {"futoi_live": {"dated_comparisons": output}}}
+    with pytest.raises(AssertionError, match="canonical projection"):
+        dated.verify_projection(snapshot, release, now=NOW)
+
+
+@pytest.mark.parametrize("field", ["scope", "source_event_age_seconds", "maximum_anchor_source_age_seconds",
+    "participant_count_semantics", "checked_at_utc", "last_capture_error", "latest_baseline_diagnostics"])
+def test_admitted_projection_cannot_omit_metadata_even_when_none(field):
+    snapshot = {dated.STORE_KEY: store(candidate()), "components": {"futoi_live": {"data": {"governance": GOV}}}}
+    output = dated.describe(snapshot[dated.STORE_KEY], now=NOW, governance=GOV)
+    del output[field]
+    release = {"futoi_context": {"futoi_live": {"dated_comparisons": output}}}
+    with pytest.raises(AssertionError, match="canonical projection"):
         dated.verify_projection(snapshot, release, now=NOW)
 
 
@@ -543,14 +587,16 @@ def test_refused_projection_requires_complete_canonical_refusal(state, tamper):
             dated.verify_projection(snapshot, release, now=at)
 
 
-@pytest.mark.parametrize("defect", ["arithmetic", "refusal_omitted", "refusal_authority", "refusal_facts"])
+@pytest.mark.parametrize("defect", ["arithmetic", "admitted_scope", "admitted_extra", "refusal_omitted", "refusal_authority", "refusal_facts"])
 def test_projection_checks_survive_optimized_python(tmp_path, defect):
     import subprocess
     import sys
     snapshot = {dated.STORE_KEY: store(candidate()), "components": {"futoi_live": {"data": {"governance": GOV}}}}
-    at = NOW if defect == "arithmetic" else NOW + timedelta(days=5)
+    at = NOW if not defect.startswith("refusal_") else NOW + timedelta(days=5)
     output = dated.describe(snapshot[dated.STORE_KEY], now=at, governance=GOV)
     if defect == "arithmetic": output["deltas"]["delta_5d"]["values"]["fiz.net"] = 999
+    elif defect == "admitted_scope": output["scope"] = "CURRENT_USABLE"
+    elif defect == "admitted_extra": output["anchor"]["invented_fact"] = 17
     elif defect == "refusal_omitted": output = None
     elif defect == "refusal_authority": output["action_authority"] = True
     else: output["anchor"] = candidate()["anchor"]
