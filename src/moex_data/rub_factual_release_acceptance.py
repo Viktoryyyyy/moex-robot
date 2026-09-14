@@ -348,8 +348,12 @@ def projection_completeness(snapshot, value, *, now):
         component = components.get(name, {})
         if component.get('status') != 'READY': continue
         for block in (component.get('data') or {}).get('server_core', {}).get('blocks', []):
-            try: causal = datetime.fromisoformat(block['selected_causal_ts_utc']) <= now
-            except (KeyError, ValueError, TypeError): causal = False
+            try:
+                selected_clock = datetime.fromisoformat(block['selected_causal_ts_utc'])
+                build_clock = datetime.fromisoformat(block['selected_observation']['build_ts_utc'])
+                causal = (selected_clock.utcoffset() is not None and build_clock.utcoffset() is not None
+                          and selected_clock <= now and build_clock <= now)
+            except (KeyError, ValueError, TypeError, AttributeError, OverflowError): causal = False
             if block.get('status') == 'ready' and block.get('stage') == 7 and block.get('timeframe') in ('1H', '1D', '1W') and causal:
                 _fx_arithmetic_completeness(block, now=now)
                 expected_block = deepcopy(block)

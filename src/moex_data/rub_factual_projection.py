@@ -213,7 +213,8 @@ def consumer_context(snapshot):
             if not isinstance(block, dict): continue
             if (block.get('status') != 'ready' or block.get('stage') != 7
                     or block.get('timeframe') not in ('1H', '1D', '1W')
-                    or not _causal(block.get('selected_causal_ts_utc'), now)):
+                    or not _causal(block.get('selected_causal_ts_utc'), now)
+                    or not _causal(_dict(block.get('selected_observation')).get('build_ts_utc'), now)):
                 continue
             identity = (block.get('block_id'), block.get('selected_causal_ts_utc'))
             if identity in seen: continue

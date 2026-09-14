@@ -158,14 +158,60 @@ def test_full_release_and_export_refuse_rewritten_builds_without_archive_changes
     }
     before = deepcopy(snapshot)
     result = release.build(snapshot, now=PREBUILD, code_revision="a" * 40)
-    context = result["timeframe_context"][0]["values"]["observed_context"]
-    assert context["status"] == "UNAVAILABLE"
-    assert context["reason"] == "retained_build_witness_mismatch"
-    assert context["observations"] == [] and context["comparisons"] == {}
+    assert result["timeframe_context"] == []
+    assert release.compact(snapshot, now=PREBUILD, code_revision="a" * 40)["timeframe_context"] == []
+    later = release.build(snapshot, now=NOW, code_revision="a" * 40)
+    selected = later["timeframe_context"][0]["values"]
+    assert selected["selected_observation"] == before["components"]["stage9_daily"]["data"]["server_core"]["blocks"][0]["selected_observation"]
+    assert selected["observed_context"]["status"] == "UNAVAILABLE"
     projection_completeness(snapshot, result, now=PREBUILD)
     directory = release.export(snapshot, now=PREBUILD, code_revision="a" * 40, output=tmp_path)
     frozen_bytes = (directory / "input_snapshot.json").read_bytes()
     frozen = json.loads(frozen_bytes)
     assert release.build(frozen, now=PREBUILD, code_revision="a" * 40) == result
     assert (directory / "input_snapshot.json").read_bytes() == frozen_bytes
+    assert snapshot == before
+
+
+@pytest.mark.parametrize("component", ["stage9_daily", "stage9_weekly"])
+@pytest.mark.parametrize("timeframe", ["1H", "1D", "1W"])
+@pytest.mark.parametrize("kind", ["ohlcv", "technical"])
+@pytest.mark.parametrize("defect", ["future", "missing", "null", "naive", "invalid", "equal", "offset"])
+def test_whole_stage7_build_gate_and_independent_oracle(component, timeframe, kind, defect):
+    from moex_data import rub_factual_release as release
+    from moex_data.rub_factual_release_acceptance import projection_completeness
+
+    value = {
+        "block_id": "stage7." + kind + "." + timeframe,
+        "stage": 7, "timeframe": timeframe, "status": "ready",
+        "dataset_id": "rub_native_ohlcv_htf" if kind == "ohlcv" else "rub_technical_features_htf",
+        "selected_causal_ts_utc": EARLIER.isoformat(),
+        "selected_observation": {"close": 81.0, "build_ts_utc": EARLIER.isoformat()},
+    }
+    valid = deepcopy(value)
+    valid["block_id"] += ".independent"
+    if defect == "missing":
+        value["selected_observation"].pop("build_ts_utc")
+    else:
+        value["selected_observation"]["build_ts_utc"] = {
+            "future": (PREBUILD + timedelta(microseconds=1)).isoformat(),
+            "null": None, "naive": PREBUILD.replace(tzinfo=None).isoformat(),
+            "invalid": "bad-clock", "equal": PREBUILD.isoformat(),
+            "offset": PREBUILD.astimezone(timezone(timedelta(hours=3))).isoformat(),
+        }[defect]
+    snapshot = {"identity": {"generated_at_utc": PREBUILD.isoformat()}, "components": {
+        component: {"status": "READY", "data": {"server_core": {"blocks": [value, valid]}}}}}
+    before = deepcopy(snapshot)
+    result = release.build(snapshot, now=PREBUILD, code_revision="a" * 40)
+    allowed = defect in ("equal", "offset")
+    expected_ids = {valid["block_id"]} | ({value["block_id"]} if allowed else set())
+    assert {entry["values"]["block_id"] for entry in result["timeframe_context"]} == expected_ids
+    projection_completeness(snapshot, result, now=PREBUILD)
+    compact = release.compact(snapshot, now=PREBUILD, code_revision="a" * 40)
+    assert {entry["values"]["block_id"] for entry in compact["timeframe_context"]} == expected_ids
+    if not allowed:
+        forged = deepcopy(result)
+        forged["timeframe_context"].append({"values": deepcopy(value)})
+        with pytest.raises(AssertionError, match="timeframe completeness"):
+            projection_completeness(snapshot, forged, now=PREBUILD)
     assert snapshot == before
