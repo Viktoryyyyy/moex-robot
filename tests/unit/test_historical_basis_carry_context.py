@@ -326,3 +326,39 @@ def test_original_parquet_metadata_exact_bound_remains_readable(tmp_path,rows,co
     source=resolver.Source(tmp_path)
     assert source.frame(path).shape==(rows,columns)
     assert resolver.Source(proof=source.proof,buffers=source.buffers).frame(path).shape==(rows,columns)
+
+
+def test_public_formula_conventions_match_units_arithmetic_and_preserve_evidence(tmp_path):
+    snapshot=fixture(tmp_path);before=deepcopy(snapshot);out=read(snapshot)
+    assert out['formula_conventions']=={
+        'normalized_rate':'own_close / normalization_divisor',
+        'absolute_basis_or_spread':'comparison_normalized_rate - reference_normalized_rate',
+        'basis_points':'(comparison_normalized_rate / reference_normalized_rate - 1) * 10000',
+        'annualized_fraction':'(comparison_normalized_rate / reference_normalized_rate - 1) * 365 / calendar_tenor_days',
+        'annualization':'simple_not_compounded; 365_calendar_days_per_year',
+        'tenor_day_count':'calendar_days_not_business_days',
+        'front_or_next_spot_tenor':'own_contract_expiry_date - source_trade_date',
+        'front_next_term_tenor':'next_contract_expiry_date - front_contract_expiry_date'}
+    for pair in out['dated']['pairs'].values():
+        for metric in pair['metrics'].values():
+            if metric['status']!='AVAILABLE':continue
+            anchor=metric['anchor'];comparison=anchor['comparison_leg'];reference=anchor['reference_leg']
+            a=Decimal(str(comparison['price']))/Decimal(comparison['normalization_divisor'])
+            b=Decimal(str(reference['price']))/Decimal(reference['normalization_divisor'])
+            unit=anchor['unit']
+            expected=(a-b) if unit=='normalized_rate_difference' else ((a/b-1)*10000) if unit=='basis_points' else (a/b-1)*365/Decimal(anchor['calendar_tenor_days'])
+            assert anchor['value']==float(expected)
+    assert snapshot==before
+    assert out['evidence_sha256']==before[m.STORE_KEY]['evidence_sha256']
+
+
+def test_independent_oracle_refuses_formula_and_clock_metadata_mutations(tmp_path):
+    snapshot=fixture(tmp_path);out=read(snapshot)
+    for section in ('formula_conventions','clock_conventions'):
+        for key in out[section]:
+            changed=deepcopy(out);changed[section][key]='invented_or_reversed_convention'
+            with pytest.raises(ValueError,match='independent projection'):
+                m.verify_projection(snapshot,{m.OUTPUT_KEY:changed},now=NOW)
+        changed=deepcopy(out);changed.pop(section)
+        with pytest.raises(ValueError,match='independent projection'):
+            m.verify_projection(snapshot,{m.OUTPUT_KEY:changed},now=NOW)

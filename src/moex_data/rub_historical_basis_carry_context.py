@@ -290,6 +290,21 @@ def _describe(snapshot,now,*,oracle=False):
             'source_custody_scope':'original_run_bytes_revalidated_now_not_historical_digest_or_full_binding_response_proof',
             'price_semantics':'own_exact_two_leg_5m_CLOSE_endpoints_not_official_session_close; Si_expiring_price_divided_by_1000',
             'change_semantics':'anchor_minus_exact_baseline_in_normalized_rate_units_basis_points_or_annualized_fraction_not_percentage_return',
+            'formula_conventions':{
+                'normalized_rate':'own_close / normalization_divisor',
+                'absolute_basis_or_spread':'comparison_normalized_rate - reference_normalized_rate',
+                'basis_points':'(comparison_normalized_rate / reference_normalized_rate - 1) * 10000',
+                'annualized_fraction':'(comparison_normalized_rate / reference_normalized_rate - 1) * 365 / calendar_tenor_days',
+                'annualization':'simple_not_compounded; 365_calendar_days_per_year',
+                'tenor_day_count':'calendar_days_not_business_days',
+                'front_or_next_spot_tenor':'own_contract_expiry_date - source_trade_date',
+                'front_next_term_tenor':'next_contract_expiry_date - front_contract_expiry_date'},
+            'clock_conventions':{
+                'source_timestamp_utc':'own_pair_source_bar_endpoint_not_publication_receipt_binding_or_first_acceptance',
+                'price_publication_at_utc':'unknown_not_inferred_from_bar_endpoint',
+                'received_at_utc':'original_leg_receipt_not_bar_endpoint_or_first_acceptance',
+                'role_binding_as_of_utc':'original_binding_reference_observation_not_bar_endpoint',
+                'accepted_at_utc':'first_C1_admission_after_validation_not_original_source_receipt'},
             'latest_capture_error':store['last_capture_error'] if stamp(store['last_capture_attempt_at_utc'])<=now else None,
             'source_errors':deepcopy(e['source_errors']),**FLAGS}
         if result['dated']['status']=='UNAVAILABLE':result['status']='UNAVAILABLE'
@@ -317,6 +332,21 @@ def _oracle_description(snapshot,now):
             'source_custody_scope':'original_run_bytes_revalidated_now_not_historical_digest_or_full_binding_response_proof',
             'price_semantics':'own_exact_two_leg_5m_CLOSE_endpoints_not_official_session_close; Si_expiring_price_divided_by_1000',
             'change_semantics':'anchor_minus_exact_baseline_in_normalized_rate_units_basis_points_or_annualized_fraction_not_percentage_return',
+            'formula_conventions':{
+                'normalized_rate':'own_close / normalization_divisor',
+                'absolute_basis_or_spread':'comparison_normalized_rate - reference_normalized_rate',
+                'basis_points':'(comparison_normalized_rate / reference_normalized_rate - 1) * 10000',
+                'annualized_fraction':'(comparison_normalized_rate / reference_normalized_rate - 1) * 365 / calendar_tenor_days',
+                'annualization':'simple_not_compounded; 365_calendar_days_per_year',
+                'tenor_day_count':'calendar_days_not_business_days',
+                'front_or_next_spot_tenor':'own_contract_expiry_date - source_trade_date',
+                'front_next_term_tenor':'next_contract_expiry_date - front_contract_expiry_date'},
+            'clock_conventions':{
+                'source_timestamp_utc':'own_pair_source_bar_endpoint_not_publication_receipt_binding_or_first_acceptance',
+                'price_publication_at_utc':'unknown_not_inferred_from_bar_endpoint',
+                'received_at_utc':'original_leg_receipt_not_bar_endpoint_or_first_acceptance',
+                'role_binding_as_of_utc':'original_binding_reference_observation_not_bar_endpoint',
+                'accepted_at_utc':'first_C1_admission_after_validation_not_original_source_receipt'},
             'latest_capture_error':store['last_capture_error'] if stamp(store['last_capture_attempt_at_utc'])<=now else None,
             'source_errors':deepcopy(e['source_errors']),**FLAGS}
         if result['dated']['status']=='UNAVAILABLE':result['status']='UNAVAILABLE'
