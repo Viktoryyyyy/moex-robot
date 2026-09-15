@@ -180,6 +180,8 @@ def projection_completeness(snapshot, value, *, now):
     now = now.astimezone(timezone.utc)
     from moex_data.rub_si_futoi_dated_context import verify_projection as verify_si_dated
     verify_si_dated(snapshot, value, now=now)
+    from moex_data.rub_si_futoi_observed_statistics import verify_projection as verify_si_statistics
+    verify_si_statistics(snapshot, value, now=now)
     from math import isfinite
     view = apply_read_freshness(snapshot, now=now)
     components = view.get('components', {})

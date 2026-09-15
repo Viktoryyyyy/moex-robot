@@ -686,6 +686,7 @@ def test_verified_frame_decodes_checked_buffer_despite_path_replacement(tmp_path
 def test_runner_refuses_generation_before_completed_si_attempt(tmp_path, monkeypatch, capture_fails):
     from moex_data import rub_si_futoi_dated_context as integrated
     from moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_live_market_oi as live
+    monkeypatch.setattr("moex_data.rub_si_futoi_observed_statistics.capture_snapshot", lambda *a, **k: None)
     base = live.base
     monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
     monkeypatch.setattr(base, "load_dotenv", lambda *a, **k: None)
