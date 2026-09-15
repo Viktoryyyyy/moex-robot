@@ -83,7 +83,7 @@ FORBIDDEN_FEATURE_TOKENS: Final[tuple[str, ...]] = (
     "probability",
     "candidate_y_pred",
     "future_",
-    "fwd_usdrubf",
+    "fwd_usdrub",
 )
 
 
@@ -265,6 +265,10 @@ def build_feature_frame(
 ) -> pd.DataFrame:
     if mode not in {"brent_only", "oil_fx_full"}:
         raise OilFxRubFeatureError("mode must be brent_only or oil_fx_full")
+    if mode == "oil_fx_full":
+        raise OilFxRubFeatureError(
+            "oil_fx_full is blocked by contract v1.0 pending a separate additive admission contract"
+        )
     identities = prepare_identity_panel(identity_panel)
 
     _require_columns(brent_matrix, BRENT_REQUIRED, "Brent PIT matrix")
