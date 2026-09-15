@@ -161,6 +161,8 @@ def test_slow_canonical_capture_finishes_after_hour_network_receipt(monkeypatch,
         'identity': {'generated_at_utc': NOW.isoformat()}, 'components': {}, 'authority': {}, 'analysis_views': {}, 'analysis_workflow': {}})
     written = {}
     monkeypatch.setattr(base, '_atomic_write', lambda path, value: written.update(snapshot=value))
+    # This fixture owns the hour network and acceptance clocks; C1 is tested separately.
+    monkeypatch.setattr('moex_data.rub_historical_basis_carry_context.capture_snapshot', lambda *args, **kwargs: None)
     ticks = iter(NOW + timedelta(seconds=n) for n in range(6))
     def acquire(**kwargs):
         requested = kwargs['now_fn'](); received = kwargs['now_fn']()

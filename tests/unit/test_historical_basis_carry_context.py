@@ -362,3 +362,43 @@ def test_independent_oracle_refuses_formula_and_clock_metadata_mutations(tmp_pat
         changed=deepcopy(out);changed.pop(section)
         with pytest.raises(ValueError,match='independent projection'):
             m.verify_projection(snapshot,{m.OUTPUT_KEY:changed},now=NOW)
+
+
+@pytest.mark.parametrize('reversed_completion',[False,True])
+def test_c1_real_capture_completion_bounds_canonical_generation(tmp_path,monkeypatch,reversed_completion):
+    from contextlib import nullcontext
+    from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_live_market_oi as overlay
+    from moex_data.futures import futoi_live_factual_refresh_source_native as source
+    base=overlay.base
+    for name in ('load_dotenv','install_timestamp_policy'):
+        monkeypatch.setattr(base,name,lambda *args,**kwargs:None)
+    monkeypatch.setattr(base,'_data_root',lambda:tmp_path)
+    monkeypatch.setattr(source,'_data_root',lambda:tmp_path)
+    monkeypatch.setattr(base,'snapshot_state_dir',lambda root:tmp_path)
+    monkeypatch.setattr(base,'_single_refresh_lock',lambda folder:nullcontext())
+    monkeypatch.setattr(base,'_load_previous',lambda path:None)
+    monkeypatch.setattr(overlay.current_context.current,'current_producers',lambda:{})
+    monkeypatch.setattr(overlay.current_context.context,'run_refresh_all',lambda **kwargs:{})
+    monkeypatch.setattr(overlay.current_context.delta_context,'build_all',lambda **kwargs:{})
+    monkeypatch.setattr(overlay.current_context,'_attach_futoi_context',lambda *args:None)
+    monkeypatch.setattr(overlay.user_position,'attach_user_position_context',lambda *args,**kwargs:None)
+    monkeypatch.setattr(overlay.futoi,'build_snapshot',lambda **kwargs:{
+        'identity':{'generated_at_utc':NOW.isoformat()},'components':{},'authority':{},'analysis_views':{},'analysis_workflow':{}})
+    monkeypatch.setattr('moex_data.rub_dated_hour_source.acquire',lambda **kwargs:None)
+    for module in ('rub_si_futoi_dated_context','rub_si_futoi_observed_statistics','rub_cr_futoi_dated_context',
+                   'rub_cr_futoi_observed_statistics','rub_contract_price_market_oi_observed'):
+        monkeypatch.setattr('moex_data.'+module+'.capture_snapshot',lambda *args,**kwargs:None)
+    def refused_source(*args):raise resolver.Stage4SourceReadError('synthetic source unavailable')
+    monkeypatch.setattr(m,'_capture',refused_source)
+    written=[];monkeypatch.setattr(base,'_atomic_write',lambda path,value:written.append(value))
+    final=NOW+timedelta(seconds=1 if reversed_completion else 3)
+    ticks=iter((NOW,NOW+timedelta(seconds=1),NOW+timedelta(seconds=2),final))
+    if reversed_completion:
+        with pytest.raises(base.ChatAnalysisSnapshotError,match='precedes historical basis capture completion'):
+            overlay.refresh_snapshot(now_fn=lambda:next(ticks),live_loader=lambda:{'status':'UNAVAILABLE'})
+        assert not written
+    else:
+        value,_=overlay.refresh_snapshot(now_fn=lambda:next(ticks),live_loader=lambda:{'status':'UNAVAILABLE'})
+        assert value['historical_basis_capture_error']['checked_at_utc']==(NOW+timedelta(seconds=2)).isoformat()
+        assert value['identity']['generated_at_utc']==final.isoformat()
+        assert written==[value]
