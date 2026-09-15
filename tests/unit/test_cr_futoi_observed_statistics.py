@@ -268,7 +268,8 @@ def test_optimized_oracle_refuses_omission():
 
 
 @pytest.mark.parametrize("invalid_latest", [False, True])
-def test_source_row_is_bound_to_actual_frozen_latest_raw_bytes(monkeypatch, tmp_path, invalid_latest):
+@pytest.mark.parametrize("atomic_replacement", [False, True])
+def test_source_row_is_bound_to_actual_frozen_latest_raw_bytes(monkeypatch, tmp_path, invalid_latest, atomic_replacement):
     import pandas as pd
     from moex_data.futures import futoi_delta_statistics_context as engine
     from moex_data.futures import futoi_live_factual_refresh_source_native as source
@@ -282,11 +283,29 @@ def test_source_row_is_bound_to_actual_frozen_latest_raw_bytes(monkeypatch, tmp_
         for r in later: r.update(ts=day+" 23:51:00", seqnum=2)
         later[1].update(pos_long=81, pos=-19); rows += later
     pd.DataFrame(rows).to_parquet(path); original_hash = sha256(path.read_bytes()).hexdigest()
+    if atomic_replacement:
+        replacement = tmp_path/"replacement.parquet"
+        replaced_rows = deepcopy(rows[:2])
+        if not invalid_latest: replaced_rows[1].update(pos_long=81, pos=-19)
+        pd.DataFrame(replaced_rows).to_parquet(replacement)
+        original_hash = sha256(replacement.read_bytes()).hexdigest()
+        read_parquet = pd.read_parquet
+        def replace_after_read(value, *args, **kwargs):
+            frame = read_parquet(value, *args, **kwargs)
+            if value == path and replacement.exists(): replacement.replace(path)
+            return frame
+        monkeypatch.setattr(pd, "read_parquet", replace_after_read)
     monkeypatch.setattr(engine.raw_materializer, "_partition_path", lambda *a: path)
     monkeypatch.setattr(source, "source_identity", lambda *a: {"source_ticker": "cr", "secid": "CRU6"})
     row, proof = stats._source_row(tmp_path, day, None, None, None, NOW)
-    assert row["status"] == ("UNAVAILABLE" if invalid_latest else "AVAILABLE")
-    assert proof["source_kind"] == ("excluded_raw" if invalid_latest else "canonical_raw")
+    expected_available = invalid_latest if atomic_replacement else not invalid_latest
+    assert row["status"] == ("AVAILABLE" if expected_available else "UNAVAILABLE")
+    if atomic_replacement and not invalid_latest:
+        assert proof is None  # No invalidity proof may be assigned to unvalidated replacement bytes.
+        assert not row["reason"].startswith(dated.TRANSIENT_READ)
+        return
+    assert proof["source_kind"] == ("canonical_raw" if expected_available else "excluded_raw")
+    if expected_available: assert row["clocks"]["ingest_ts_utc"] == day+"T20:57:00+00:00"
     frozen = tmp_path/proof["provenance"]["raw_partition_ref"][len("${MOEX_DATA_ROOT}/"):]
     assert sha256(frozen.read_bytes()).hexdigest() == proof["provenance"]["raw_partition_sha256"] == original_hash
     assert sha256(path.read_bytes()).hexdigest() == original_hash

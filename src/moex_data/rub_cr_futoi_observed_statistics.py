@@ -233,16 +233,30 @@ def _source_row(root, day, eod, eod_proof, eod_error, cutoff):
         else:
             if loaded.get("status") != "AVAILABLE":
                 if loaded.get("error_class") in ("OSError", "IOError", "PermissionError", "FileNotFoundError"): raise OSError(loaded.get("error") or "raw source read failed")
-                source_rejection = loaded.get("reason") or "invalid_latest_cr_raw_no_fallback"
                 p = loaded.get("provenance")
-                if p:
-                    common._check_source_refs(root, p, ("raw_partition",))
-                    frozen = source._freeze_artifact(root, root/p["raw_partition_ref"][len("${MOEX_DATA_ROOT}/"):], p["raw_partition_sha256"])
-                    proof = {"source_kind": "excluded_raw", "provenance": {"raw_partition_ref": source._rooted_ref(root, frozen), "raw_partition_sha256": p["raw_partition_sha256"]}}
-                raise ValueError(source_rejection)
-            fact, p = common._freeze_raw_fact(root, loaded["provenance"], day, normalized=True, instrument_id=PROFILE.instrument_id)
-            if fact != loaded["factual"]: raise ValueError("cr_statistics_frozen_raw_fact_mismatch")
-            proof = {"source_kind": "canonical_raw", "provenance": p}
+                source_rejection = loaded.get("reason") or "invalid_latest_cr_raw_no_fallback"
+                if not p: raise ValueError("cr_statistics_raw_rejection_proof_missing")
+                common._check_source_refs(root, p, ("raw_partition",))
+                frozen = source._freeze_artifact(root, root/p["raw_partition_ref"][len("${MOEX_DATA_ROOT}/"):], p["raw_partition_sha256"])
+                p = {"raw_partition_ref": source._rooted_ref(root, frozen), "raw_partition_sha256": p["raw_partition_sha256"]}
+                frame = common._verified_frame(root, p, "raw_partition")
+                identity = source.source_identity(PROFILE.instrument_id)
+                try:
+                    fact = source.latest_aligned_factual(frame, expected_trade_date=day,
+                        expected_instrument_id=PROFILE.instrument_id, expected_source_ticker=identity["source_ticker"], expected_secid=identity["secid"])
+                    fact = engine._normalized_factual(fact, field="frozen_raw."+day)
+                except (ValueError, TypeError, KeyError) as exc:
+                    source_rejection = "canonical_raw_partition_failed_factual_validation"
+                    proof = {"source_kind": "excluded_raw", "provenance": p}
+                    raise ValueError(str(exc)) from exc
+                p.update(source_state_kind="validated_existing_canonical_raw_partition", source_id=dated.SOURCE,
+                    source_ticker=identity["source_ticker"], secid=identity["secid"], factual_validation="PASS")
+                source_rejection = None
+                proof = {"source_kind": "canonical_raw", "provenance": p}
+            else:
+                fact, p = common._freeze_raw_fact(root, loaded["provenance"], day, normalized=True, instrument_id=PROFILE.instrument_id)
+                if fact != loaded["factual"]: raise ValueError("cr_statistics_frozen_raw_fact_mismatch")
+                proof = {"source_kind": "canonical_raw", "provenance": p}
         dated._valid_record(dated._record(fact, proof["source_kind"], proof["provenance"], day), day, cutoff)
         _proof(proof); row = core._encode_row(fact, common._digest(proof))
     except Exception as exc:
