@@ -262,3 +262,18 @@ def test_current_export_one_clock_exact_bytes_and_no_overwrite(tmp_path):
     before = path.read_bytes()
     with pytest.raises(FileExistsError): release.export_current(output=tmp_path, now_fn=clock, reader=reader, code_revision=COMMIT)
     assert path.read_bytes() == before
+
+
+def test_compact_paired_context_keeps_content_address_and_consumer_meanings():
+    from test_contract_price_market_oi_observed import snapshot as paired_snapshot, NOW as paired_now
+    from moex_data import rub_contract_price_market_oi_observed as paired
+    original=source();original.update(paired_snapshot());before=deepcopy(original)
+    value=release.compact(original,now=paired_now,code_revision=COMMIT)
+    block=value['contract_price_market_oi_context']
+    assert block['status']=='AVAILABLE'
+    assert block['evidence_sha256']==original[paired.STORE_KEY]['evidence_sha256']
+    assert block['audit_reference']=='input_snapshot.json#/'+paired.STORE_KEY+'/evidence'
+    assert block['consumer_semantics']['dated_lifetime_seconds']==345600
+    assert block['dated_valid_until_utc']
+    assert 'original_byte_buffers' not in json.dumps(block)
+    assert original==before
