@@ -869,3 +869,143 @@ def test_bounded_resolver_preserves_legacy_utf8_and_object_requirement(tmp_path,
 def test_witness_source_objects_preserve_utf8_and_mapping_contract(tmp_path,raw):
     pointer,_,_=_restore_witness(tmp_path);pointer.write_bytes(raw)
     with pytest.raises(ValueError):m._witness(tmp_path,NOW)
+
+
+
+@pytest.mark.parametrize('defect',[None,'failed','rollback','project','run','source_status','source_run','source_date','missing_finish','missing_parent'])
+def test_newest_parent_attempt_is_decisive_before_admission_filter(tmp_path,monkeypatch,defect):
+    import shutil
+    _restore_archive(tmp_path,dates={'2026-09-13','2026-09-14'});monkeypatch.setenv('MOEX_DATA_ROOT',str(tmp_path))
+    old='step10_20260914';new=old+'_retry'
+    for prefix in ('runs/step3_canonical_raw','state/acceptance/step3_canonical_raw'):
+        origin=tmp_path/prefix/('run_id='+old+'_stage3');target=tmp_path/prefix/('run_id='+new+'_stage3')
+        shutil.copytree(origin,target)
+        for path in target.rglob('*.json'):path.write_text(path.read_text().replace(old,new))
+    origin=tmp_path/'runs/step10_rub_daily_refresh'/('run_id='+old)/'run_manifest.json'
+    parent=json.loads(origin.read_text().replace(old,new));parent['finished_at_utc']='2026-09-14T17:01:00+00:00'
+    if defect=='failed':parent['status']='failed'
+    elif defect=='rollback':parent['current_pointer_rollback_status']='rolled_back'
+    elif defect=='project':parent['project']='other'
+    elif defect=='run':parent['run_id']='other'
+    elif defect=='source_status':parent['source_refresh']['status']='failed'
+    elif defect=='source_run':parent['source_refresh']['stage3_run_id']='other'
+    elif defect=='source_date':parent['source_refresh']['trade_date']='2026-09-13'
+    elif defect=='missing_finish':parent.pop('finished_at_utc')
+    path=tmp_path/'runs/step10_rub_daily_refresh'/('run_id='+new)/'run_manifest.json'
+    path.parent.mkdir(parents=True)
+    if defect!='missing_parent':path.write_text(json.dumps(parent))
+    records,errors=m._historical(tmp_path,NOW)
+    assert '2026-09-13' in records
+    if defect is None:
+        assert records['2026-09-14']['SiU6']['proof']['acceptance_run_id']==new+'_stage3'
+    else:
+        assert '2026-09-14' not in records and errors['2026-09-14']
+
+
+@pytest.mark.parametrize('previous_available',[False,True])
+@pytest.mark.parametrize('stage',['candidate_buffers','current_buffers','native_inventory'])
+def test_incomplete_capture_preserves_original_error_and_never_enters_admission(tmp_path,monkeypatch,previous_available,stage):
+    from moex_data.futures import futoi_live_factual_refresh_source_native as source
+    source_snapshot=snapshot();e=source_snapshot[m.STORE_KEY]['evidence'];previous=source_snapshot if previous_available else {}
+    current={'components':{'synchronized_live_market_oi':{'data':_native_body()}}}
+    monkeypatch.setattr(source,'_data_root',lambda:tmp_path)
+    monkeypatch.setattr(m,'_witness',lambda *a:(e['observed_dates'],e['witness_proof']))
+    monkeypatch.setattr(m,'_historical',lambda *a:(e['history'],{}))
+    buffers=m._decode_buffers(e['original_byte_buffers'])
+    monkeypatch.setattr(m,'_read_bytes',lambda root,ref,expected=None:buffers[expected])
+    original_table=m._buffer_table;original_native=m._native_buffers;calls=[]
+    def table(root,value,**kwargs):
+        if (stage=='candidate_buffers' and 'history' in value) or (stage=='current_buffers' and 'SiU6' in value):
+            raise PermissionError('exact '+stage+' source read refused')
+        return original_table(root,value,**kwargs)
+    native_calls=[]
+    def native(body):
+        native_calls.append(1)
+        if stage=='native_inventory' and len(native_calls)==2:raise ValueError('exact native_inventory exceeded')
+        return original_native(body)
+    monkeypatch.setattr(m,'_buffer_table',table);monkeypatch.setattr(m,'_native_buffers',native)
+    original_admit=m._admit
+    def admit(*args,**kwargs):calls.append(1);return original_admit(*args,**kwargs)
+    monkeypatch.setattr(m,'_admit',admit)
+    ticks=iter((NOW+timedelta(seconds=1),NOW+timedelta(seconds=2)))
+    completed=m.capture_snapshot(current,previous,now_fn=lambda:next(ticks),refresh_started_at=NOW)
+    assert calls==[]
+    message=current['contract_price_market_oi_capture_error']['error']
+    assert 'exact '+stage in message and 'paired_evidence_shape' not in message
+    if previous_available:
+        assert current[m.STORE_KEY]['evidence']==e
+        assert current[m.STORE_KEY]['evidence_sha256']==previous[m.STORE_KEY]['evidence_sha256']
+        assert current[m.STORE_KEY]['last_capture_error']==message
+    else:assert m.STORE_KEY not in current
+    monkeypatch.setattr(m,'_admit',original_admit)
+    out=release(current,now=completed)
+    assert message==(out['last_capture_error'] if previous_available else out['reason'])
+
+
+def _replace_native_payload(response,payload):
+    import base64
+    raw=json.dumps(payload).encode();response['sha256']=m.sha256(raw).hexdigest();response['content_base64']=base64.b64encode(raw).decode()
+
+
+@pytest.mark.parametrize('defect',['probe_cursor','extra_security','extra_market'])
+def test_native_full_response_reuses_source_universe_and_probe_mode_guards(defect):
+    import base64
+    body=_native_body()
+    for response in body['original_forts_http_evidence']['responses']:
+        payload=json.loads(base64.b64decode(response['content_base64']))
+        if defect=='probe_cursor' and response['role']=='completeness_probe':
+            payload['securities.cursor']={'columns':['INDEX','TOTAL','PAGESIZE'],'data':[[0,4,4]]}
+        elif defect in ('extra_security','extra_market'):
+            block=payload['securities' if defect=='extra_security' else 'marketdata'];row=list(block['data'][0]);row[block['columns'].index('SECID')]='OTHER';block['data'].append(row)
+        _replace_native_payload(response,payload)
+    with pytest.raises(ValueError):m._original_current(None,body,NOW)
+
+
+@pytest.mark.parametrize('field',['LAST','OPENPOSITION','LASTTRADEDATE','STEPPRICE','secid_case'])
+def test_source_probe_value_changes_do_not_invent_full_row_equality_policy(field):
+    import base64
+    body=_native_body();probe=body['original_forts_http_evidence']['responses'][1]
+    payload=json.loads(base64.b64decode(probe['content_base64']))
+    if field=='secid_case':
+        for name in ('securities','marketdata'):
+            for row in payload[name]['data']:row[payload[name]['columns'].index('SECID')]=row[payload[name]['columns'].index('SECID')].lower()
+    else:
+        block=payload['marketdata' if field in ('LAST','OPENPOSITION') else 'securities'];index=block['columns'].index(field)
+        block['data'][0][index]='2026-09-18' if field=='LASTTRADEDATE' else block['data'][0][index]+1
+    _replace_native_payload(probe,payload)
+    facts=m._original_current(None,body,NOW)
+    assert len(facts)==4 and facts['SiU6']['price']==body['instruments']['si_front']['last']
+
+
+def test_portable_probe_cannot_introduce_cursor_after_capture():
+    import base64
+    s=install_current(snapshot());store=s[m.STORE_KEY];carrier=store['current_capture'];facts=carrier['facts']
+    inventory=facts['SiU6']['proof']['retained_http_inventory'];probe=inventory[1]
+    raw=base64.b64decode(carrier['original_byte_buffers'][probe['response']['sha256']]);payload=json.loads(raw)
+    payload['securities.cursor']={'columns':['INDEX','TOTAL','PAGESIZE'],'data':[[0,4,4]]}
+    raw=json.dumps(payload).encode();new=m._inline_ref(raw);probe['response']=new
+    carrier['original_byte_buffers'][new['sha256']]=base64.b64encode(raw).decode()
+    store['current_sha256']=m.common._digest(carrier)
+    out=release(s)
+    assert out['dated']['status']=='AVAILABLE' and out['current']['status']=='UNAVAILABLE'
+    assert 'current_probe_pagination_changed' in out['current']['reason']
+
+
+@pytest.mark.parametrize('defect',[None,'columns','request_start'])
+def test_native_cursor_inventory_preserves_source_column_and_request_progress(defect):
+    import base64
+    payload=json.loads(base64.b64decode(_native_body()['original_forts_http_evidence']['responses'][0]['content_base64']))
+    inventory=[]
+    for index in range(2):
+        page=deepcopy(payload)
+        for block in ('securities','marketdata'):page[block]['data']=page[block]['data'][index*2:index*2+2]
+        page['securities.cursor']={'columns':['INDEX','TOTAL','PAGESIZE'],'data':[[index*2,4,2]]}
+        params={} if index==0 else {'start':2}
+        if index==1 and defect=='columns':
+            page['marketdata']['columns'].reverse()
+            for row in page['marketdata']['data']:row.reverse()
+        if index==1 and defect=='request_start':params['start']=3
+        inventory.append(({'role':'selected_values','params':params},page))
+    if defect is None:m._validate_native_inventory(inventory)
+    else:
+        with pytest.raises(ValueError,match='current_cursor_'):m._validate_native_inventory(inventory)

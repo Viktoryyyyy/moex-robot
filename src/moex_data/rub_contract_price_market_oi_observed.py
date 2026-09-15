@@ -658,32 +658,33 @@ def _bounded_archive_markers(base):
 def _historical(root, now):
     from moex_data import rub_accepted_stage3_resolver as resolver
     base=root/'state/acceptance/step3_canonical_raw'; earliest=now.astimezone(archive.MOSCOW).date()-timedelta(days=45)
-    candidates=[]; errors={}; records={}
+    candidates=[]; errors={}; records={}; unordered_dates=set()
     for marker in _bounded_archive_markers(base):
+        day=None; parent_required=False
         try:
             pilot=marker.with_name('pilot_evidence.json')
             value=_source_object(_read_bytes(root,'${MOEX_DATA_ROOT}/'+pilot.relative_to(root).as_posix())); day=_day(value['trade_date'])
             run=marker.parent.name.removeprefix('run_id=')
             if earliest.isoformat()<=day<=now.astimezone(archive.MOSCOW).date().isoformat() and run.endswith('_stage3'):
-                parent_run=run[:-7]
+                parent_required=True; parent_run=run[:-7]
                 parent=_source_object(_read_bytes(root,'${MOEX_DATA_ROOT}/runs/step10_rub_daily_refresh/run_id='+parent_run+'/run_manifest.json'))
-                refresh=parent.get('source_refresh',{})
-                if (parent.get('project')!='MOEX_Bot' or parent.get('stage')!=10 or parent.get('run_id')!=parent_run
-                    or parent.get('status')!='succeeded' or parent.get('current_pointer_rollback_status') not in (None,'not_needed')
-                    or refresh.get('status')!='refreshed' or refresh.get('stage3_run_id')!=run or refresh.get('trade_date')!=day): continue
+                # Rank observed attempts before validation: invalid newer parents remain decisive.
                 finished=_stamp(parent['finished_at_utc'])
                 if finished<=now: candidates.append((day,finished.timestamp(),run,marker))
-        except (OSError,ValueError,KeyError,TypeError) as exc:
+        except (OSError,ValueError,KeyError,TypeError,OverflowError) as exc:
             if isinstance(exc,(json.JSONDecodeError,UnicodeError)) or (isinstance(exc,ValueError) and any(
                 reason in str(exc) for reason in ('duplicate JSON object member:','JSON numeric constant must be finite:','source_JSON_must_contain_object'))):
                 raise ValueError('accepted_archive_metadata_strict_json_refusal') from exc
             if isinstance(exc,ValueError) and str(exc)=='source_artifact_byte_limit':
                 raise ValueError('accepted_archive_metadata_byte_limit') from exc
+            if parent_required:
+                unordered_dates.add(day);errors[day]='accepted_archive_parent_inventory_unavailable: '+type(exc).__name__+': '+str(exc)
             continue
     # Latest run per date is decisive; a rejected newer run cannot expose an older run.
     selected={}
     for day,finished,run,marker in sorted(candidates): selected[day]=marker
     for day,marker in selected.items():
+        if day in unordered_dates:continue
         try:
             reader=_memoized_source_reader(root)
             resolved=resolver.resolve(root,marker,now=now,earliest=earliest,byte_reader=reader)
@@ -698,7 +699,7 @@ def _historical(root, now):
         return records,errors
     for entry in entries:
         day='2026-08-23' if entry['kind']=='official_paginated_tradestats' else '2026-08-24'
-        if day in selected: continue
+        if day in selected or day in unordered_dates: continue
         try:
             if entry['kind']=='official_paginated_tradestats': pairs,_=_official_pages(root,entry,accepted_at=accepted,now=now)
             else:
@@ -969,7 +970,7 @@ def capture_snapshot(snapshot,previous,*,now_fn,refresh_started_at,previous_capt
         _capture_failure(previous,cutoff)
         floors.append(_stamp(previous['contract_price_market_oi_capture_error']['checked_at_utc']))
     _require(cutoff>=max(floors),'paired_capture_clock_reversed')
-    candidate=None; error=None; current=None; current_error='current_capture_not_attempted'
+    candidate=None; error=None; current=None; current_buffers={}; current_error='current_capture_not_attempted'
     try:
         root=source._data_root(); dates,witness=_witness(root,cutoff); history,errors=_historical(root,cutoff)
         bindings={role:body['bindings'][role] for role in ROLES}
@@ -977,18 +978,21 @@ def capture_snapshot(snapshot,previous,*,now_fn,refresh_started_at,previous_capt
         try: current=_original_current(root,body,cutoff,binding_sink=binding_proof)
         except Exception as exc: current_error=type(exc).__name__+': '+str(exc)
         _require(bool(binding_proof),'original_native_role_binding_proof_unavailable')
-        candidate={'binding_proof':binding_proof,'schema_version':SCHEMA,'accepted_at_utc':cutoff.isoformat(),'causal_cutoff_at_utc':cutoff.isoformat(),
+        construction={'binding_proof':binding_proof,'schema_version':SCHEMA,'accepted_at_utc':cutoff.isoformat(),'causal_cutoff_at_utc':cutoff.isoformat(),
             'contract_text':_contract(),'bindings':bindings,'role_binding_as_of_utc':body['snapshot_received_at_utc'],
             'observed_dates':dates,'witness_proof':witness,
             'history':{day:{secid:r for secid,r in pairs.items() if secid in bindings.values()} for day,pairs in history.items() if day in dates},
             'source_errors':{day:reason for day,reason in errors.items() if day in dates}}
-        candidate['original_byte_buffers']=_buffer_table(root,candidate,available=_native_buffers(body))
+        available=_native_buffers(body)
+        construction['original_byte_buffers']=_buffer_table(root,construction,available=available)
+        current_buffers=_buffer_table(root,current,available=available) if current else {}
+        candidate=construction  # Only complete, byte-validated construction can reach admission.
     except Exception as exc: error=type(exc).__name__+': '+str(exc)
     completed=_stamp(now_fn()); _require(completed>=cutoff,'paired_capture_completion_reversed')
     if candidate is not None:
         candidate['accepted_at_utc']=completed.isoformat()
         current_carrier={'causal_cutoff_at_utc':cutoff.isoformat(),'captured_at_utc':completed.isoformat(),'bindings':candidate['bindings'],'facts':current,'error':current_error,
-            'original_byte_buffers':_buffer_table(root,current,available=_native_buffers(body)) if current else {}}
+            'original_byte_buffers':current_buffers}
         store={'evidence':candidate,'evidence_sha256':common._digest(candidate),'last_capture_attempt_at_utc':completed.isoformat(),'last_capture_error':None,
             'current_capture':current_carrier,'current_sha256':common._digest(current_carrier),'latest_source_errors':candidate['source_errors']}
         try:
@@ -1085,17 +1089,23 @@ def _validate_native_inventory(inventory):
     selected=[(i,p) for i,p in inventory if i['role']=='selected_values']
     probes=[(i,p) for i,p in inventory if i['role']=='completeness_probe']
     _require(bool(selected),'current_selected_http_bytes_missing')
-    if 'securities.cursor' not in selected[0][1]:
+    if not isinstance(selected[0][1].get('securities.cursor'),dict):
         _require(len(selected)==len(probes)==1 and probes[0][0]['params'].get('start')==1_000_000_000,'current_full_response_probe_missing')
-        for name in ('securities','marketdata'):
-            a=[r['SECID'] for r in _table(selected[0][1],name)]; b=[r['SECID'] for r in _table(probes[0][1],name)]
-            _require(a==b and len(a)==len(set(a)),'current_probe_universe_mismatch')
+        from moex_data import synchronized_live_market_oi_context_apim as apim
+        _require(not isinstance(probes[0][1].get('securities.cursor'),dict),'current_probe_pagination_changed')
+        # The source compares normalized SECID sequences, not live value equality.
+        first=apim._validate_apim_full_response(selected[0][1])
+        second=apim._validate_apim_full_response(probes[0][1])
+        _require(first==second,'current_probe_universe_mismatch')
     else:
         _require(not probes,'current_cursor_probe_mixed')
         total=size=None; count=0; seen=set()
         for index,(item,payload) in enumerate(selected):
             cursor=_table(payload,'securities.cursor'); _require(len(cursor)==1,'current_cursor_shape'); cursor=cursor[0]
             if index==0: total,size=cursor['TOTAL'],cursor['PAGESIZE']
+            _require(('start' not in item['params']) if index==0 else item['params'].get('start')==index*size,'current_cursor_request_progress')
+            for name in ('securities','marketdata'):
+                _require(payload[name]['columns']==selected[0][1][name]['columns'],'current_cursor_columns_changed')
             _require(type(total) is int and type(size) is int and total>0 and size>0 and cursor=={'INDEX':index*size,'TOTAL':total,'PAGESIZE':size},'current_cursor_progress')
             rows=_table(payload,'securities'); _require(len(rows)==min(size,total-index*size),'current_cursor_page_rows')
             count+=len(rows); seen.update(r['SECID'] for r in rows)
