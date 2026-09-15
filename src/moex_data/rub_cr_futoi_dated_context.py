@@ -364,11 +364,13 @@ def describe(snapshot, *, now):
         return {"schema_version": SCHEMA, "status": "UNAVAILABLE", "scope": SCOPE, "reason": str(exc), "latest_capture_diagnostics": capture_diagnostics, **FLAGS}
 
 
-def _load_record(root, day, eod, eod_proof, cutoff):
+def _load_record(root, day, eod, eod_proof, cutoff, *, eod_error=None):
     from moex_data.futures import futoi_delta_statistics_context as engine
     try:
         loaded = engine._raw_factual(root, instrument_id=INSTRUMENT, trade_date=day)
         if loaded.get("reason") == "canonical_raw_partition_missing":
+            if eod_error is not None:
+                raise eod_error
             rows = eod.loc[eod["trade_date"].astype(str).eq(day)] if eod is not None else []
             if len(rows) != 1: raise ValueError("exact_cr_raw_and_eod_date_missing_or_duplicate")
             fact = engine._eod_factual(rows.iloc[0], instrument_id=INSTRUMENT)
@@ -407,15 +409,17 @@ def _capture(snapshot, cutoff):
     dates = sorted({common._day(str(day)) for day in frame["trade_date"] if str(day) <= expected})[-21:]
     if not dates or dates[-1] != expected or dates != [day for day in witness["observed_trade_dates"] if day <= expected][-21:] or witness["previous_observed_trade_date"] != expected:
         raise ValueError("cr_verified_observed_dates_mismatch")
+    eod_error = None
     try:
         _, eod_proof = engine._accepted_eod(root, instrument_id=INSTRUMENT, as_of=cutoff)
         common._check_source_refs(root, eod_proof, ("partition", "manifest", "quality_report"))
         eod = common._verified_frame(root, eod_proof, "partition")
-    except Exception: eod, eod_proof = None, None
+    except Exception as exc:
+        eod, eod_proof, eod_error = None, None, exc
     return {"schema_version": SCHEMA, "instrument_id": INSTRUMENT, "source_id": SOURCE, "admission": artifact,
         "accepted_at_utc": cutoff.isoformat(), "causal_cutoff_at_utc": cutoff.isoformat(),
         "witness": {"dates": dates, "previous_observed_trade_date": expected, "current_observed_trade_date": witness.get("current_observed_trade_date"), "provenance": deepcopy(witness["provenance"])},
-        "records": [_load_record(root, day, eod, eod_proof, cutoff) for day in dates]}
+        "records": [_load_record(root, day, eod, eod_proof, cutoff, eod_error=eod_error) for day in dates]}
 
 
 def _capture_current(snapshot, cutoff):

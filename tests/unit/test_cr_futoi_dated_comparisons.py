@@ -660,3 +660,104 @@ def test_current_source_attempt_must_match_original_capture(monkeypatch):
     assert out["dated"]["status"] == "AVAILABLE" and out["current"]["status"] == "UNAVAILABLE"
     assert "original_source_attempt_mismatch" in out["current"]["reason"]
     verify(s)
+
+
+@pytest.mark.parametrize("raw_status", ["valid", "invalid", "missing"])
+@pytest.mark.parametrize("eod_failure", [None, PermissionError("EOD read denied"), ValueError("EOD digest invalid")])
+def test_raw_precedence_and_eod_failure_classification(monkeypatch, raw_status, eod_failure):
+    from moex_data.futures import futoi_delta_statistics_context as engine
+    day = "2026-09-11"; selected = record(day)
+    loaded = selected if raw_status == "valid" else {"status": "UNAVAILABLE", "reason":
+        "canonical_raw_partition_missing" if raw_status == "missing" else "canonical_raw_partition_failed_factual_validation"}
+    monkeypatch.setattr(engine, "_raw_factual", lambda *a, **k: deepcopy(loaded))
+    monkeypatch.setattr(cr.common, "_freeze_raw_fact", lambda *a, **k: (deepcopy(selected["factual"]), deepcopy(selected["provenance"])))
+    result = cr._load_record(Path("."), day, None, None, NOW, eod_error=eod_failure)
+    if raw_status == "valid": assert result["status"] == "AVAILABLE"
+    else:
+        assert result["status"] == "UNAVAILABLE"
+        assert result["reason"].startswith(cr.TRANSIENT_READ) is (raw_status == "missing" and isinstance(eod_failure, OSError))
+        if raw_status == "invalid": assert "canonical_raw_partition_failed_factual_validation" in result["reason"]
+
+
+def test_exact_valid_eod_is_used_only_when_raw_missing(monkeypatch):
+    import pandas as pd
+    from moex_data.futures import futoi_delta_statistics_context as engine
+    day = "2026-09-11"; expected = fact(day)
+    expected.update(source_publication_time=None, ingest_ts_utc=None)
+    eod_proof = {**proof(("partition", "manifest", "quality_report")), "acceptance_contract_id": "step5_futoi_positioning_acceptance.v1"}
+    monkeypatch.setattr(engine, "_raw_factual", lambda *a, **k: {"status": "UNAVAILABLE", "reason": "canonical_raw_partition_missing"})
+    monkeypatch.setattr(engine, "_eod_factual", lambda *a, **k: deepcopy(expected))
+    result = cr._load_record(Path("."), day, pd.DataFrame({"trade_date": [day]}), eod_proof, NOW)
+    assert result["status"] == "AVAILABLE" and result["source_kind"] == "accepted_eod"
+    assert result["factual"] == expected
+
+
+@pytest.mark.parametrize("phase", ["accepted_loader", "source_refs", "verified_frame"])
+@pytest.mark.parametrize("index", [-6, -1])
+@pytest.mark.parametrize("transient", [True, False])
+def test_capture_preserves_eod_io_classification_for_needed_dates(monkeypatch, tmp_path, phase, index, transient):
+    import pandas as pd
+    from moex_data import rub_temporal_applicability as temporal
+    from moex_data.futures import futoi_delta_statistics_context as engine
+    from moex_data.futures import futoi_live_factual_refresh_source_native as source
+    previous = snapshot(); previous["components"]["futoi_live_cr"]["data"]["context_refresh"] = {}
+    e = previous[cr.STORE_KEY]["evidence"]; target = e["records"][index]["trade_date"]
+    eod_proof = {**proof(("partition", "manifest", "quality_report")), "acceptance_contract_id": "step5_futoi_positioning_acceptance.v1"}
+    e["records"][index]["source_kind"] = "accepted_eod"
+    e["records"][index]["factual"].update(source_publication_time=None, ingest_ts_utc=None)
+    e["records"][index]["provenance"] = {"source_kind": "accepted_stage5_eod_historical_context_only", "accepted_pointer": eod_proof}
+    rehash(previous)
+    witness = {"observed_trade_dates": e["witness"]["dates"], "previous_observed_trade_date": e["witness"]["dates"][-1],
+        "current_observed_trade_date": e["witness"]["current_observed_trade_date"], "provenance": e["witness"]["provenance"]}
+    failure = PermissionError("accepted EOD source read denied") if transient else ValueError("accepted EOD source digest invalid")
+    monkeypatch.setattr(source, "_data_root", lambda: tmp_path)
+    monkeypatch.setattr(temporal, "_previous_witness", lambda *a: witness["previous_observed_trade_date"])
+    monkeypatch.setattr(engine, "_observed_witness", lambda *a, **k: deepcopy(witness))
+    def accepted(*a, **k):
+        if phase == "accepted_loader": raise failure
+        return None, deepcopy(eod_proof)
+    def refs(root, p, prefixes):
+        if phase == "source_refs" and p["acceptance_contract_id"] == eod_proof["acceptance_contract_id"]: raise failure
+    def frame(root, p, key):
+        if p["acceptance_contract_id"] == eod_proof["acceptance_contract_id"]:
+            if phase == "verified_frame": raise failure
+            return pd.DataFrame({"trade_date": [target]})
+        return pd.DataFrame({"trade_date": witness["observed_trade_dates"]})
+    monkeypatch.setattr(engine, "_accepted_eod", accepted)
+    monkeypatch.setattr(cr.common, "_check_source_refs", refs)
+    monkeypatch.setattr(cr.common, "_verified_frame", frame)
+    records = {r["trade_date"]: r for r in e["records"]}
+    monkeypatch.setattr(engine, "_raw_factual", lambda root, instrument_id, trade_date: (
+        {"status": "UNAVAILABLE", "reason": "canonical_raw_partition_missing"} if trade_date == target else deepcopy(records[trade_date])))
+    monkeypatch.setattr(cr.common, "_freeze_raw_fact", lambda root, p, day, **k: (deepcopy(records[day]["factual"]), deepcopy(records[day]["provenance"])))
+    monkeypatch.setattr(cr, "_capture_current", lambda *a: (_ for _ in ()).throw(OSError("current read unavailable")))
+    current = deepcopy(previous); times = iter([NOW+timedelta(seconds=1), NOW+timedelta(seconds=2)])
+    completed = cr.capture_snapshot(current, previous, now_fn=lambda: next(times), refresh_started_at=NOW)
+    out = cr.describe(current, now=completed)
+    if transient:
+        assert out["status"] == "AVAILABLE"
+        assert current[cr.STORE_KEY]["evidence_sha256"] == previous[cr.STORE_KEY]["evidence_sha256"]
+        assert current[cr.STORE_KEY]["latest_source_rejection"] is None
+        diagnostics = out["latest_diagnostics"] if index == -6 else out["latest_capture_diagnostics"]
+        assert "accepted EOD source read denied" in json.dumps(diagnostics)
+    elif index == -6:
+        assert out["dated"]["changes"]["5"]["status"] == "UNAVAILABLE"
+        assert "digest invalid" in out["dated"]["changes"]["5"]["reason"]
+    else:
+        assert out["status"] == "UNAVAILABLE" and "digest invalid" in out["reason"]
+    verify(current, now=completed)
+
+
+def test_observed_witness_io_failure_preserves_original_context_and_cause(monkeypatch):
+    from moex_data import rub_temporal_applicability as temporal
+    from moex_data.futures import futoi_delta_statistics_context as engine
+    previous = snapshot(); previous["components"]["futoi_live_cr"]["data"]["context_refresh"] = {}
+    monkeypatch.setattr(temporal, "_previous_witness", lambda *a: "2026-09-11")
+    def fail(*a, **k): raise PermissionError("observed witness read denied")
+    monkeypatch.setattr(engine, "_observed_witness", fail)
+    monkeypatch.setattr(cr, "_capture_current", fail)
+    current = deepcopy(previous); times = iter([NOW+timedelta(seconds=1), NOW+timedelta(seconds=2)])
+    completed = cr.capture_snapshot(current, previous, now_fn=lambda: next(times), refresh_started_at=NOW)
+    assert current[cr.STORE_KEY]["evidence_sha256"] == previous[cr.STORE_KEY]["evidence_sha256"]
+    assert "observed witness read denied" in cr.describe(current, now=completed)["latest_capture_diagnostics"]["dated_error"]
+    verify(current, now=completed)
