@@ -318,7 +318,7 @@ def test_capture_retention_tracks_fact_versions_not_attempts(monkeypatch,tmp_pat
     monkeypatch.setattr(m,'_original_current',unavailable)
     buffers=m._decode_buffers(e['original_byte_buffers'])
     monkeypatch.setattr(m,'_read_bytes',lambda root,ref,expected=None:buffers[expected])
-    current=deepcopy(old);current['components']={'synchronized_live_market_oi':{'data':{'instruments':dict.fromkeys(m.ROLES,{}),'bindings':BINDINGS,'snapshot_received_at_utc':NOW.isoformat()}}}
+    current=deepcopy(old);current['components']={'synchronized_live_market_oi':{'data':_native_body()}}
     ticks=iter((NOW+timedelta(seconds=1),NOW+timedelta(seconds=2)))
     completed=m.capture_snapshot(current,old,now_fn=lambda:next(ticks),refresh_started_at=NOW)
     if change in ('same','diagnostic_only'):
@@ -356,7 +356,7 @@ def test_malformed_first_capture_diagnostic_refuses_without_leaking(error):
 def test_original_first_acceptance_expiry_is_not_renewed_by_same_history(monkeypatch,tmp_path):
     from moex_data.futures import futoi_live_factual_refresh_source_native as source
     old=snapshot();e=old[m.STORE_KEY]['evidence'];later=NOW+timedelta(days=4,seconds=1)
-    current=deepcopy(old);current['components']={'synchronized_live_market_oi':{'data':{'instruments':dict.fromkeys(m.ROLES,{}),'bindings':BINDINGS,'snapshot_received_at_utc':NOW.isoformat()}}}
+    current=deepcopy(old);current['components']={'synchronized_live_market_oi':{'data':_native_body()}}
     monkeypatch.setattr(source,'_data_root',lambda:tmp_path)
     monkeypatch.setattr(m,'_witness',lambda *a:(e['observed_dates'],e['witness_proof']))
     monkeypatch.setattr(m,'_historical',lambda *a:(e['history'],{}))
@@ -761,9 +761,13 @@ def test_bounded_resolver_preserves_legacy_strict_json_hooks(tmp_path,monkeypatc
 def test_bounded_witness_strict_source_json(tmp_path,kind,defect):
     path,pointer,_=_restore_witness(tmp_path)
     target=path if kind=='pointer' else tmp_path/pointer[kind+'_ref'].removeprefix('${MOEX_DATA_ROOT}/')
-    raw=_invalid_json_member(target.read_bytes(),defect);target.write_bytes(raw)
-    if kind!='pointer':
-        pointer[kind+'_sha256']=m.sha256(raw).hexdigest();path.write_text(json.dumps(pointer))
+    raw=_invalid_json_member(target.read_bytes(),defect)
+    if kind=='pointer':target.write_bytes(raw)
+    else:
+        # Manifest and quality may share original bytes; mutate only the selected proof.
+        proof=m._freeze(tmp_path,raw)
+        pointer[kind+'_ref']=proof['ref'];pointer[kind+'_sha256']=proof['sha256']
+        path.write_text(json.dumps(pointer))
     with pytest.raises(ValueError,match='duplicate JSON|must be finite'):m._witness(tmp_path,NOW)
 
 
