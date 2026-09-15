@@ -379,3 +379,41 @@ def test_contract_missing_admission_field_revokes(key):
     s = snapshot(); doc = json.loads(s[cr.ADMISSION_KEY]["artifact_text"]); doc["admission"].pop(key)
     text = json.dumps(doc); s[cr.ADMISSION_KEY].update(artifact_text=text, artifact_sha256=sha256(text.encode()).hexdigest())
     assert cr.describe(s, now=NOW)["status"] == "UNAVAILABLE"; verify(s)
+
+
+@pytest.mark.parametrize("next_reason", ["ValueError: latest pair balance failed", "ValueError: latest source identity failed", cr.TRANSIENT_READ + "OSError: temporary read failure"])
+def test_first_anchor_rejection_survives_retries_until_valid_recovery(monkeypatch, next_reason):
+    original = snapshot()
+    valid = deepcopy(original[cr.STORE_KEY]["evidence"])
+    first_reason = "ValueError: latest pair balance failed"
+    candidate = deepcopy(valid)
+    candidate["records"][-1].update(status="UNAVAILABLE", factual=None, provenance=None, source_kind=None, reason=first_reason)
+    monkeypatch.setattr(cr, "_capture", lambda *a: deepcopy(candidate))
+    monkeypatch.setattr(cr, "_capture_current", lambda *a: (_ for _ in ()).throw(OSError("current read unavailable")))
+    def refresh(previous, offset):
+        current = deepcopy(previous)
+        times = iter([NOW+timedelta(seconds=offset), NOW+timedelta(seconds=offset+1)])
+        cr.capture_snapshot(current, previous, now_fn=lambda: next(times), refresh_started_at=NOW)
+        return current
+    first = refresh(original, 1)
+    first_rejection = deepcopy(first[cr.STORE_KEY]["latest_source_rejection"])
+    between = NOW+timedelta(seconds=3)
+    assert cr.describe(first, now=between)["status"] == "UNAVAILABLE"
+    candidate["records"][-1]["reason"] = next_reason
+    second = refresh(first, 4)
+    assert second[cr.STORE_KEY]["latest_source_rejection"] == first_rejection
+    assert first_rejection["checked_at_utc"] == (NOW+timedelta(seconds=2)).isoformat()
+    assert first_rejection["reason"] == first_reason
+    assert cr.describe(second, now=between)["status"] == "UNAVAILABLE"
+    assert second[cr.STORE_KEY]["evidence_sha256"] == original[cr.STORE_KEY]["evidence_sha256"]
+    if not next_reason.startswith(cr.TRANSIENT_READ):
+        assert next_reason in second[cr.STORE_KEY]["last_capture_error"]
+    verify(second, now=between)
+    verify(second, now=NOW+timedelta(seconds=5))
+    candidate = deepcopy(valid)
+    recovered = refresh(second, 6)
+    assert recovered[cr.STORE_KEY]["latest_source_rejection"] is None
+    assert recovered[cr.STORE_KEY]["last_capture_error"] is None
+    assert recovered[cr.STORE_KEY]["evidence"]["accepted_at_utc"] == (NOW+timedelta(seconds=7)).isoformat()
+    assert cr.describe(recovered, now=NOW+timedelta(seconds=7))["status"] == "AVAILABLE"
+    verify(recovered, now=NOW+timedelta(seconds=7))
