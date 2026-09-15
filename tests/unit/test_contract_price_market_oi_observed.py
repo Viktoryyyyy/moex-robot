@@ -1244,3 +1244,18 @@ def test_consumer_semantics_oracle_rejects_changed_dated_deadline():
     s=snapshot();r={};m.attach_consumer(s,r,now=NOW)
     r['contract_price_market_oi_context']['dated_valid_until_utc']=(NOW+timedelta(days=5)).isoformat()
     with pytest.raises(AssertionError):m.verify_projection(s,r,now=NOW)
+
+
+@pytest.mark.parametrize('kind,meaning',[
+    ('CURRENT_NATIVE_SAME_RESPONSE_ROW','price_and_OI_share_the_same_retained_response_receipt'),
+    ('CURRENT_ACCEPTED_OFFICIAL_PAGINATED_TRADESTATS','price_and_OI_share_the_selected_page_response_receipt; whole_paginated_archive_not_atomic'),
+    ('CURRENT_REVALIDATED_ACCEPTED_STAGE10_RUN','maximum_of_separate_price_and_OI_receipts; not_atomic_simultaneous_receipt'),
+    ('REVALIDATED_STANDALONE_STAGE3_PILOT','maximum_of_separate_price_and_OI_receipts; not_atomic_simultaneous_receipt')])
+def test_receipt_semantics_follow_each_original_source_kind(kind,meaning):
+    s=snapshot();before=deepcopy(s);r={};m.attach_consumer(s,r,now=NOW)
+    meanings=r['contract_price_market_oi_context']['consumer_semantics']['clock_meanings']['received_at_utc']
+    assert set(meanings)==set(m.CONTRACT_DOCUMENT['admission']['source_kinds'])
+    assert meanings[kind]==meaning and s==before
+    m.verify_projection(s,r,now=NOW)
+    meanings[kind]='one_receipt_means_atomic_whole_archive'
+    with pytest.raises(AssertionError):m.verify_projection(s,r,now=NOW)
