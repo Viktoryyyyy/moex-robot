@@ -1,0 +1,194 @@
+{
+  "contract_identity": {
+    "contract_id": "usdrubf_oil_fx_rub_v1_pit_research_dataset",
+    "contract_version": "1.0",
+    "project": "MOEX_Bot",
+    "task_id": "STRAT_OIL_FX_RUB_V1_02B_RESEARCH_DATASET",
+    "execution_mode": "browser_controlled_github_route",
+    "status": "repository_implementation_only"
+  },
+  "approved_branch": "research/oil-fx-rub/v1-pit-research-dataset",
+  "purpose": {
+    "objective": "Build a point-in-time research dataset for oil and CNY/RUB hypotheses without modifying or weakening existing source contracts.",
+    "hypotheses": [
+      "H1_oil_impulse",
+      "H2_oil_lag",
+      "H3_fx_confirmation",
+      "H4_oil_fx_interaction",
+      "H5_divergence",
+      "H6_regime"
+    ],
+    "model_fit_allowed": false,
+    "strategy_promotion_allowed": false,
+    "trading_allowed": false
+  },
+  "upstream_contracts": {
+    "identity_panel": {
+      "contract": "contracts/datasets/usdrubf_phase6_internal_modeling_dataset.v1.yaml",
+      "identity_count": 472,
+      "instrument": "forts.usdrubf",
+      "required_columns": [
+        "target_trade_date",
+        "target_instrument_id",
+        "prior_trade_date"
+      ],
+      "target_or_prediction_fields_must_not_enter_feature_output": true
+    },
+    "brent": {
+      "source_contract": "contracts/experiments/usdrubf_phase8_4a_moex_brent_source_validation_v1.json",
+      "consumer_contract": "contracts/experiments/usdrubf_phase8_5_brent_incremental_value_v1.json",
+      "source_id": "moex_brent_futures_daily",
+      "admission_status": "accepted_for_stage_A_from_frozen_phase8_4a_evidence",
+      "runtime_must_not_be_repeated": true,
+      "source_artifact_regeneration_allowed": false,
+      "required_phase8_4a_status": "candidate_for_phase8_5",
+      "required_all_G1_through_G9_passed": true
+    },
+    "cnyrubf": {
+      "source_contract": "contracts/experiments/usdrubf_phase8_6a_algopack_cnyrubf_fo_source_correction_v1.json",
+      "source_id": "moex_algopack_cnyrubf_fo_tradestats_5m",
+      "security_id": "CNYRUBF",
+      "provider_asset_code": "CNYRUBTOM",
+      "admission_status": "blocked_pending_post_fix_controlled_runtime_acceptance",
+      "required_final_gate": "G9_final_source_readiness",
+      "required_status": "moex_algopack_cnyrubf_source_candidate_for_phase8_6b",
+      "all_G1_through_G8_must_pass": true,
+      "spot_cnyrub_tom_allowed": false,
+      "synthetic_cross_allowed": false,
+      "cbr_official_fx_rate_allowed_as_causal_input": false
+    },
+    "usdrubf_label_price_panel": {
+      "source": "existing Phase 3.4 internal D1 panel parquet referenced by contracts/datasets/usdrubf_phase6_internal_modeling_dataset.v1.yaml",
+      "admission_status": "path_and_hash_must_be_explicit_at_real_materialization",
+      "implicit_file_selection_allowed": false,
+      "same_panel_lineage_as_phase6_required": true,
+      "required_columns": [
+        "trade_date",
+        "close"
+      ]
+    }
+  },
+  "staged_modes": {
+    "brent_only": {
+      "authorized_now": true,
+      "hypotheses": [
+        "H1_oil_impulse",
+        "H2_oil_lag",
+        "H6_regime"
+      ],
+      "cnyrubf_input_allowed": false
+    },
+    "oil_fx_full": {
+      "authorized_now": false,
+      "authorization_condition": "post-fix CNYRUBF gate_results proves G1-G9 PASS and required candidate status",
+      "hypotheses": [
+        "H1_oil_impulse",
+        "H2_oil_lag",
+        "H3_fx_confirmation",
+        "H4_oil_fx_interaction",
+        "H5_divergence",
+        "H6_regime"
+      ]
+    }
+  },
+  "point_in_time_policy": {
+    "timezone": "Europe/Moscow",
+    "identity_join": "exact target_trade_date + target_instrument_id",
+    "source_trade_date": "must equal frozen prior_trade_date",
+    "target_day_source_data_allowed": false,
+    "forward_fill_allowed": false,
+    "backward_fill_allowed": false,
+    "interpolation_allowed": false,
+    "arbitrary_latest_allowed": false,
+    "brent_cross_contract_return_allowed": false,
+    "brent_cross_contract_return_policy": "return is null unless every selected contract code across the complete lookback window is identical"
+  },
+  "feature_outputs": {
+    "brent": [
+      "ext_brent_intraday_return",
+      "ext_brent_range_pct",
+      "ext_brent_close_location",
+      "ext_log1p_brent_volume",
+      "ext_brent_same_contract_close_return_1session",
+      "ext_brent_same_contract_close_return_3session",
+      "ext_brent_same_contract_close_return_5session"
+    ],
+    "cnyrubf": [
+      "ext_cnyrubf_intraday_return",
+      "ext_cnyrubf_range_pct",
+      "ext_cnyrubf_close_location",
+      "ext_cnyrubf_log1p_volume",
+      "ext_cnyrubf_volume_imbalance",
+      "ext_cnyrubf_close_return_1session",
+      "ext_cnyrubf_close_return_3session",
+      "ext_cnyrubf_close_return_5session",
+      "ext_cnyrubf_open_interest_change_1session"
+    ],
+    "interactions": [
+      "ext_brent_cnyrubf_intraday_interaction",
+      "ext_brent_cnyrubf_return_1session_interaction"
+    ],
+    "structural_nulls_allowed": [
+      "Brent same-contract close returns at insufficient lookback or any roll-crossing window",
+      "CNYRUBF lagged returns/open-interest change at insufficient lookback"
+    ]
+  },
+  "label_policy": {
+    "feature_and_label_artifacts_separate": true,
+    "forward_return_horizons_sessions": [
+      1,
+      3,
+      5,
+      10
+    ],
+    "labels": [
+      "fwd_usdrubf_close_return_1session",
+      "fwd_usdrubf_close_return_3session",
+      "fwd_usdrubf_close_return_5session",
+      "fwd_usdrubf_close_return_10session"
+    ],
+    "labels_forbidden_from_feature_artifact": true,
+    "labels_may_use_future_prices_only_inside_label_artifact": true
+  },
+  "runtime_artifacts": [
+    "oil_fx_rub_features.parquet",
+    "oil_fx_rub_labels.parquet",
+    "oil_fx_rub_join_manifest.json",
+    "gate_results.json"
+  ],
+  "gates": {
+    "G1_identity": "exact 472 frozen identities, deterministic order, no duplicate or loss",
+    "G2_brent_admission": "Phase 8.4A accepted evidence only; exact prior-session rows; no regeneration",
+    "G3_cnyrubf_admission": "brent_only forbids CNYRUBF; oil_fx_full requires post-fix G1-G9 PASS and exact candidate status",
+    "G4_pit": "all source rows equal prior_trade_date; no same-day/future/fill/interpolation/latest fallback",
+    "G5_brent_roll_integrity": "cross-contract return is never computed; structural null is required across a roll",
+    "G6_leakage": "feature artifact contains no labels, targets, predictions, probabilities or future prices",
+    "G7_numerical": "non-null derived numeric features are finite and source OHLC/volume/OI inputs pass local sanity checks",
+    "G8_label_separation": "forward labels are produced only in a separate artifact and preserve identity order",
+    "G9_final": "mode is ready only if all mode-applicable gates pass"
+  },
+  "approved_file_scope": {
+    "create_only": [
+      "contracts/experiments/usdrubf_oil_fx_rub_v1_pit_research_dataset.json",
+      "src/moex_research/features/oil_fx_rub_v1_features.py",
+      "src/moex_research/runners/usdrubf_oil_fx_rub_v1_pit_research_dataset.py",
+      "tests/unit/test_oil_fx_rub_v1_features.py",
+      "tests/unit/test_usdrubf_oil_fx_rub_v1_pit_research_dataset.py",
+      "tests/contract/test_usdrubf_oil_fx_rub_v1_pit_research_dataset_contract.py"
+    ],
+    "existing_files_to_modify": [],
+    "exact_file_count": 6,
+    "scope_widening_allowed": false
+  },
+  "authority_boundary": {
+    "direct_main_write_allowed": false,
+    "merge_allowed": false,
+    "server_apply_allowed": false,
+    "real_external_data_acquisition_allowed": false,
+    "accepted_upstream_artifact_mutation_allowed": false,
+    "model_fit_allowed": false,
+    "strategy_promotion_allowed": false,
+    "broker_action_allowed": false,
+    "trading_allowed": false
+  }
+}
