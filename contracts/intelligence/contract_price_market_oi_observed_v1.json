@@ -36,6 +36,10 @@
     "max_original_audit_bytes": 64000000,
     "max_original_buffer_count": 1024,
     "native_current_byte_storage": "inline_deduplicated_original_HTTP_bytes",
-    "fast_current_total_state_max_bytes": 2000000
+    "fast_current_total_state_max_bytes": 2000000,
+    "max_archive_directory_entries_before_content_reads": 256,
+    "archive_inventory_scope": "all_entries_including_outside_lookback_before_pilot_date_filter",
+    "current_exact_comparison_max_calendar_gap_from_witness": 1,
+    "current_gap_policy": "retain_fresh_anchor_refuse_exact_lags_without_non_session_inference"
   }
 }

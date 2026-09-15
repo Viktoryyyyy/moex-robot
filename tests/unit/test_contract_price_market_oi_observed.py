@@ -11,13 +11,13 @@ BINDINGS=dict(zip(m.ROLES,('SiU6','SiZ6','CRU6','CRZ6')))
 REF={'ref':'${MOEX_DATA_ROOT}/immutable/test.bin','sha256':'a'*64}
 
 
-def _native_body():
+def _native_body(now=NOW,trade_date=None):
     import base64
     from moex_data import synchronized_live_market_oi_context as live
-    event=NOW-timedelta(seconds=30); received=NOW-timedelta(seconds=20)
+    event=now-timedelta(seconds=30); received=now-timedelta(seconds=20)
     rows=[]; nodes={}
     for index,(role,secid) in enumerate(BINDINGS.items()):
-        row={'SECID':secid,'TRADEDATE':NOW.date().isoformat(),'SYSTIME':event.astimezone(m.archive.MOSCOW).strftime('%Y-%m-%d %H:%M:%S'),
+        row={'SECID':secid,'TRADEDATE':trade_date or now.date().isoformat(),'SYSTIME':event.astimezone(m.archive.MOSCOW).strftime('%Y-%m-%d %H:%M:%S'),
             'LAST':130.+index,'OPENPOSITION':1100+index,'TIME':None}
         rows.append(row)
         nodes[role]={'secid':secid,'last':row['LAST'],'oi':row['OPENPOSITION'],'timestamp':event.isoformat(),
@@ -30,8 +30,8 @@ def _native_body():
     responses=[{'content_base64':base64.b64encode(raw).decode(),'sha256':digest,'source_url':'https://apim.moex.com'+live.FORTS_ENDPOINT,
         'params':{} if role=='selected_values' else {'start':1_000_000_000},'received_at_utc':received.isoformat(),'http_status':200,'role':role}
         for role in ('selected_values','completeness_probe')]
-    return {'bindings':dict(BINDINGS),'instruments':nodes,'snapshot_received_at_utc':NOW.isoformat(),
-        'original_forts_http_evidence':{'request_started_lower_bound_utc':(NOW-timedelta(seconds=40)).isoformat(),
+    return {'bindings':dict(BINDINGS),'instruments':nodes,'snapshot_received_at_utc':now.isoformat(),
+        'original_forts_http_evidence':{'request_started_lower_bound_utc':(now-timedelta(seconds=40)).isoformat(),
             'request_clock_semantics':'batch_start_before_each_retained_request','responses':responses}}
 
 
@@ -68,8 +68,8 @@ def _consumer_bounded_sources(root,history):
 from functools import lru_cache
 
 
-@lru_cache(maxsize=4)
-def _source_snapshot(revised=False,zero_oi=False,consumer=False):
+@lru_cache(maxsize=8)
+def _source_snapshot(revised=False,zero_oi=False,consumer=False,witness_end=None):
     """Real Parquet/JSON buffers; no admission or membership validator is mocked."""
     import tempfile
     import pandas as pd
@@ -80,6 +80,7 @@ def _source_snapshot(revised=False,zero_oi=False,consumer=False):
         root=Path(folder); history={}
         dates=[(NOW.date()-timedelta(days=i)).isoformat() for i in reversed(range(1,24 if consumer else 23))]
         if consumer:dates=[d for d in dates if d not in ('2026-09-12','2026-09-13')]
+        if witness_end:dates=[d for d in dates if d<=witness_end]
         for index,day in enumerate(dates):
             run='step3_pilot_20260824_1705' if consumer and day=='2026-08-24' else 'step10_'+day.replace('-','')+'_stage3';pilot=_evidence(root,run)
             publication=day+('T14:05:48+00:00' if consumer and day=='2026-08-24' else 'T16:00:49+00:00' if revised and index==21 else 'T16:00:48+00:00')
@@ -493,10 +494,10 @@ def test_real_archive_inventory_derives_run_from_marker_not_optional_pilot_field
     assert not (set(errors)&set(e['observed_dates']))
     for marker in tmp_path.glob('state/acceptance/step3_canonical_raw/run_id=*/pilot_evidence.json'):
         assert 'run_id' not in json.loads(marker.read_text())
-    # Many newer attempts on one date cannot consume the retained date budget.
+    # Within the admitted inventory, retries cannot displace other observed dates.
     from test_step3_raw_acceptance import _write_json
     day=e['observed_dates'][-1]
-    for number in range(257):
+    for number in range(100):
         run=f'burst_{number}_stage3';folder=tmp_path/'state/acceptance/step3_canonical_raw'/('run_id='+run)
         _write_json(folder/'accepted_pointers.json',{})
         _write_json(folder/'pilot_evidence.json',{'trade_date':day})
@@ -507,3 +508,116 @@ def test_real_archive_inventory_derives_run_from_marker_not_optional_pilot_field
     records,errors=m._historical(tmp_path,NOW)
     assert set(records)==set(e['observed_dates'])-{day}
     assert day in errors  # Newest invalid source never falls back to that day's older run.
+
+
+def _archive_inventory(root,count):
+    base=root/'state/acceptance/step3_canonical_raw'
+    for number in range(count):
+        folder=base/f'run_id=old_retry_{number}_stage3';folder.mkdir(parents=True)
+        (folder/'accepted_pointers.json').write_text('{}')
+    return base
+
+
+def test_archive_inventory_boundary_256_is_checked_before_date_filter(tmp_path,monkeypatch):
+    _archive_inventory(tmp_path,256);reads=[]
+    def read(root,ref,expected=None):
+        if ref.endswith('/pilot_evidence.json'):
+            reads.append(ref);return b'{"trade_date":"2020-01-01"}'
+        if ref.endswith('/'+m.SOURCE_ADMISSION):raise FileNotFoundError('fixture has no bounded admission')
+        pytest.fail('outside-lookback pilot must not cause a parent read: '+ref)
+    monkeypatch.setattr(m,'_read_bytes',read)
+    records,_=m._historical(tmp_path,NOW)
+    assert records=={} and len(reads)==256
+
+
+@pytest.mark.parametrize('extra_kind',['run_directory','other_entry'])
+def test_archive_inventory_257_refuses_before_any_pilot_or_parent_file_read(tmp_path,monkeypatch,extra_kind):
+    base=_archive_inventory(tmp_path,256)
+    if extra_kind=='run_directory':(base/'run_id=newest_retry_stage3').mkdir()
+    else:(base/'unclassified-entry').write_text('all directory entries count')
+    reads=[];original=Path.open
+    def tracked(path,*args,**kwargs):
+        if path.name in ('pilot_evidence.json','run_manifest.json'):
+            reads.append(str(path));pytest.fail('content read before archive inventory refusal')
+        return original(path,*args,**kwargs)
+    monkeypatch.setattr(Path,'open',tracked)
+    monkeypatch.setattr(m,'_read_bytes',lambda *a,**kw:pytest.fail('source content read on oversized inventory'))
+    with pytest.raises(ValueError,match='accepted_archive_inventory_limit_before_content_reads'):
+        m._historical(tmp_path,NOW)
+    assert reads==[]
+
+
+def test_inventory_refusal_preserves_prior_first_acceptance_without_new_admission(tmp_path,monkeypatch):
+    from moex_data.futures import futoi_live_factual_refresh_source_native as source
+    _archive_inventory(tmp_path,257)
+    old=snapshot();before=deepcopy(old);e=old[m.STORE_KEY]['evidence']
+    current={'components':{'synchronized_live_market_oi':{'data':_native_body()}}}
+    monkeypatch.setattr(source,'_data_root',lambda:tmp_path)
+    monkeypatch.setattr(m,'_witness',lambda *a:(e['observed_dates'],e['witness_proof']))
+    ticks=iter((NOW+timedelta(seconds=1),NOW+timedelta(seconds=2)))
+    completed=m.capture_snapshot(current,old,now_fn=lambda:next(ticks),refresh_started_at=NOW)
+    assert old==before
+    assert current[m.STORE_KEY]['evidence']==e
+    assert current[m.STORE_KEY]['evidence_sha256']==old[m.STORE_KEY]['evidence_sha256']
+    assert 'accepted_archive_inventory_limit_before_content_reads' in current[m.STORE_KEY]['last_capture_error']
+    out=release(current,now=completed)
+    assert out['dated']['status']=='AVAILABLE' and out['current']['status']=='UNAVAILABLE'
+    assert out['accepted_at_utc']==e['accepted_at_utc']
+
+
+@pytest.mark.parametrize('kind',['pilot','parent'])
+def test_archive_metadata_byte_overflow_is_explicit_not_silent_older_fallback(tmp_path,kind):
+    base=_archive_inventory(tmp_path,1)
+    pilot=base/'run_id=old_retry_0_stage3'/'pilot_evidence.json'
+    pilot.write_text('{"trade_date":"2026-09-14"}')
+    target=pilot if kind=='pilot' else tmp_path/'runs/step10_rub_daily_refresh/run_id=old_retry_0/run_manifest.json'
+    target.parent.mkdir(parents=True,exist_ok=True)
+    with target.open('wb') as output:output.truncate(m.MAX_BUFFER_BYTES+1)
+    with pytest.raises(ValueError,match='accepted_archive_metadata_byte_limit'):
+        m._historical(tmp_path,NOW)
+
+
+@pytest.mark.parametrize('witness_end,trade_day,advance,covered',[
+    (None,'2026-09-14',0,True),
+    (None,'2026-09-15',0,True),
+    (None,'2026-09-16',1,False),
+    ('2026-09-11','2026-09-14',0,False),  # Friday -> Monday is uncertainty, not a non-session assertion.
+])
+def test_current_original_bytes_witness_continuity_keeps_anchor_but_refuses_unproven_lags(witness_end,trade_day,advance,covered):
+    from moex_data.rub_factual_package import compact_values
+    s=install_current(deepcopy(_source_snapshot(witness_end=witness_end)))
+    original=deepcopy(s[m.STORE_KEY]);now=NOW+timedelta(days=advance)
+    body=_native_body(now,trade_day)
+    s[m.CURRENT_KEY]=m.capture_current(body,started=now-timedelta(seconds=40),completed=now)
+    assert s[m.CURRENT_KEY]['capture']['error'] is None
+    s['fast_market_read']={'completed_at':now.isoformat(),'error':None}
+    body.pop('original_forts_http_evidence')
+    s['components']={'synchronized_live_market_oi':{'data':body}}
+    before=deepcopy(s);out=release(s,now=now)
+    assert s==before and s[m.STORE_KEY]==original
+    assert out['dated']['status']=='AVAILABLE' and out['current']['status']=='AVAILABLE'
+    current=out['current']
+    assert current['observed_witness_continuity_status']==('AVAILABLE' if covered else 'UNAVAILABLE')
+    reason=None if covered else 'insufficient_observed_witness_coverage_for_exact_current_comparisons'
+    assert current['observed_witness_continuity_reason']==reason
+    for contract in current['contracts'].values():
+        assert contract['anchor']['trade_date']==trade_day
+        for lag,change in contract['changes'].items():
+            if covered:
+                assert change['target_observed_trade_date'] is not None and change['values'] is not None
+            else:
+                assert change['target_observed_trade_date'] is None
+                assert change['baseline'] is None and change['values'] is None and change['reason']==reason
+    compact=compact_values({'contract_price_market_oi_context':out})
+    assert compact['contract_price_market_oi_context']['current']==out['current']
+    assert compact['contract_price_market_oi_context']['dated']==out['dated']
+    m.verify_projection(s,json.loads(json.dumps({'contract_price_market_oi_context':out})),now=now)
+    if not covered:
+        tampered=deepcopy(out)
+        tampered['current']['observed_witness_continuity_status']='AVAILABLE'
+        with pytest.raises(AssertionError):
+            m.verify_projection(s,{'contract_price_market_oi_context':tampered},now=now)
+        tampered=deepcopy(out)
+        tampered['current']['contracts']['si_front']['changes']['1']['target_observed_trade_date']=s[m.STORE_KEY]['evidence']['observed_dates'][-1]
+        with pytest.raises(AssertionError):
+            m.verify_projection(s,{'contract_price_market_oi_context':tampered},now=now)

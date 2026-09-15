@@ -24,6 +24,7 @@ FLAGS = dict(session_completion_authority=False, historical_pit_authority=False,
 MAX_BUFFER_BYTES = 8_000_000
 MAX_AUDIT_BYTES = 64_000_000
 MAX_AUDIT_BUFFERS = 1024
+MAX_ARCHIVE_DIRECTORY_ENTRIES = 256
 
 
 def _inline_ref(raw):
@@ -335,7 +336,11 @@ CONTRACT_DOCUMENT = {'schema_version': 'contract_price_market_oi_observed_admiss
                'native_current_byte_storage': 'inline_deduplicated_original_HTTP_bytes',
                'fast_current_total_state_max_bytes': 2000000,
                'max_accepted_run_candidates': 256,
+               'max_archive_directory_entries_before_content_reads': 256,
+               'archive_inventory_scope': 'all_entries_including_outside_lookback_before_pilot_date_filter',
                'lookback_calendar_days': 45,
+               'current_exact_comparison_max_calendar_gap_from_witness': 1,
+               'current_gap_policy': 'retain_fresh_anchor_refuse_exact_lags_without_non_session_inference',
                'dated_max_age_seconds': 345600,
                'price_oi_exact_join_required': True,
                'baseline_role_semantics': 'same_SECID_selected_at_explicit_role_binding_as_of_not_historical_role_proof',
@@ -577,28 +582,51 @@ def _witness(root, now):
     return dates[-22:],proof
 
 
+def _bounded_archive_markers(base):
+    """Bound directory enumeration before opening any source metadata.
+
+    Dates live inside pilots, so outside-lookback entries must count too.
+    Overflow is a refusal of the inventory, never a truncated sample of it.
+    """
+    import os
+    from itertools import islice
+    _require(not base.is_symlink(),'accepted_archive_directory_symlink')
+    if not base.exists(): return []
+    _require(base.is_dir(),'accepted_archive_directory_invalid')
+    with os.scandir(base) as iterator:
+        entries=list(islice(iterator,MAX_ARCHIVE_DIRECTORY_ENTRIES+1))
+    _require(len(entries)<=MAX_ARCHIVE_DIRECTORY_ENTRIES,
+        'accepted_archive_inventory_limit_before_content_reads: maximum=256; scope=all_directory_entries_including_outside_lookback')
+    return sorted(base/entry.name/'accepted_pointers.json' for entry in entries
+        if entry.name.startswith('run_id=') and entry.is_dir(follow_symlinks=False)
+        and (base/entry.name/'accepted_pointers.json').is_file())
+
+
 def _historical(root, now):
     from moex_data import rub_accepted_stage3_resolver as resolver
     base=root/'state/acceptance/step3_canonical_raw'; earliest=now.astimezone(archive.MOSCOW).date()-timedelta(days=45)
     candidates=[]; errors={}; records={}
-    for marker in sorted(base.glob('run_id=*/accepted_pointers.json')):
+    for marker in _bounded_archive_markers(base):
         try:
-            pilot=marker.with_name('pilot_evidence.json'); value=json.loads(pilot.read_bytes()); day=_day(value['trade_date'])
+            pilot=marker.with_name('pilot_evidence.json')
+            value=json.loads(_read_bytes(root,'${MOEX_DATA_ROOT}/'+pilot.relative_to(root).as_posix())); day=_day(value['trade_date'])
             run=marker.parent.name.removeprefix('run_id=')
             if earliest.isoformat()<=day<=now.astimezone(archive.MOSCOW).date().isoformat() and run.endswith('_stage3'):
                 parent_run=run[:-7]
-                parent=json.loads((root/'runs/step10_rub_daily_refresh'/('run_id='+parent_run)/'run_manifest.json').read_bytes())
+                parent=json.loads(_read_bytes(root,'${MOEX_DATA_ROOT}/runs/step10_rub_daily_refresh/run_id='+parent_run+'/run_manifest.json'))
                 refresh=parent.get('source_refresh',{})
                 if (parent.get('project')!='MOEX_Bot' or parent.get('stage')!=10 or parent.get('run_id')!=parent_run
                     or parent.get('status')!='succeeded' or parent.get('current_pointer_rollback_status') not in (None,'not_needed')
                     or refresh.get('status')!='refreshed' or refresh.get('stage3_run_id')!=run or refresh.get('trade_date')!=day): continue
                 finished=_stamp(parent['finished_at_utc'])
                 if finished<=now: candidates.append((day,finished.timestamp(),run,marker))
-        except (OSError,ValueError,KeyError,TypeError): continue
+        except (OSError,ValueError,KeyError,TypeError) as exc:
+            if isinstance(exc,ValueError) and str(exc)=='source_artifact_byte_limit':
+                raise ValueError('accepted_archive_metadata_byte_limit') from exc
+            continue
     # Latest run per date is decisive; a rejected newer run cannot expose an older run.
     selected={}
     for day,finished,run,marker in sorted(candidates): selected[day]=marker
-    _require(len(selected)<=256,'accepted_date_candidate_limit')
     for day,marker in selected.items():
         try:
             resolved=resolver.resolve(root,marker,now=now,earliest=earliest)
@@ -806,16 +834,16 @@ def _change(anchor,baseline):
         'market_open_interest_fraction_reason':None if old else 'zero_baseline_market_open_interest'}
 
 
-def _view(e,anchor_day,anchors,dates):
+def _view(e,anchor_day,anchors,dates,*,comparison_refusal=None):
     contracts={}
     for role in ROLES:
         secid=e['bindings'][role]; anchor=anchors.get(secid); changes={}
         for lag in LAGS:
-            target=dates[-1-lag] if len(dates)>lag else None
+            target=dates[-1-lag] if comparison_refusal is None and len(dates)>lag else None
             baseline=e['history'].get(target,{}).get(secid)
             changes[str(lag)]={'target_observed_trade_date':target,'baseline':_compact_record(baseline),
                 'values':_change(anchor,baseline) if anchor is not None else None,
-                'reason':None if anchor is not None and baseline is not None else 'exact_anchor_or_observed_baseline_unavailable'}
+                'reason':comparison_refusal or (None if anchor is not None and baseline is not None else 'exact_anchor_or_observed_baseline_unavailable')}
         contracts[role]={'secid':secid,'status':'AVAILABLE' if anchor else 'UNAVAILABLE','anchor':_compact_record(anchor),'changes':changes}
     distributions={}
     for root in ('si','cr'):
@@ -853,7 +881,11 @@ def describe(snapshot,*,now):
             days={r['trade_date'] for r in current.values()}; _require(len(days)==1,'current_contract_trade_date_mismatch'); day=next(iter(days))
             _require(day>=dated_day,'current_observed_date_precedes_witness')
             current_dates=dates if day==dated_day else (dates+[day])[-22:]
-            result['current']=_view(e,day,current,current_dates)
+            gap=(date.fromisoformat(day)-date.fromisoformat(dated_day)).days
+            refusal='insufficient_observed_witness_coverage_for_exact_current_comparisons' if gap>1 else None
+            result['current']=_view(e,day,current,current_dates,comparison_refusal=refusal)
+            result['current'].update(observed_witness_continuity_status='UNAVAILABLE' if refusal else 'AVAILABLE',
+                observed_witness_continuity_reason=refusal)
         except (ValueError,TypeError,KeyError) as exc: result['current']={'status':'UNAVAILABLE','reason':str(exc)}
         result['dated'].update(anchor_role='accepted_observed_bar_endpoint',current_pair_usable_at_read=False)
         result['current'].update(anchor_role='native_source_row_update',current_pair_usable_at_read=result['current']['status']=='AVAILABLE')
@@ -1006,12 +1038,12 @@ def _validate_native_inventory(inventory):
             count+=len(rows); seen.update(r['SECID'] for r in rows)
         _require(count==total==len(seen),'current_cursor_incomplete')
 
-def _oracle_view(e,day,anchors,dates):
+def _oracle_view(e,day,anchors,dates,*,comparison_refusal=None):
     contracts={}
     for role,secid in e['bindings'].items():
         anchor=anchors.get(secid); changes={}
         for lag in (1,5,20):
-            target=dates[len(dates)-1-lag] if len(dates)>lag else None
+            target=dates[len(dates)-1-lag] if comparison_refusal is None and len(dates)>lag else None
             baseline=e['history'].get(target,{}).get(secid); values=None
             if anchor is not None and baseline is not None:
                 a,b=Decimal(str(anchor['price'])),Decimal(str(baseline['price'])); oi,old=anchor['market_open_interest'],baseline['market_open_interest']
@@ -1019,7 +1051,7 @@ def _oracle_view(e,day,anchors,dates):
                     'market_open_interest_change_fraction':float(Decimal(oi-old)/old) if old else None,
                     'market_open_interest_fraction_reason':None if old else 'zero_baseline_market_open_interest'}
             changes[str(lag)]={'target_observed_trade_date':target,'baseline':{k:deepcopy(v) for k,v in baseline.items() if k!='proof'} if baseline else None,
-                'values':values,'reason':None if values is not None else 'exact_anchor_or_observed_baseline_unavailable'}
+                'values':values,'reason':comparison_refusal or (None if values is not None else 'exact_anchor_or_observed_baseline_unavailable')}
         contracts[role]={'secid':secid,'status':'AVAILABLE' if anchor else 'UNAVAILABLE',
             'anchor':{k:deepcopy(v) for k,v in anchor.items() if k!='proof'} if anchor else None,'changes':changes}
     distributions={}
@@ -1058,7 +1090,12 @@ def verify_projection(snapshot,release,*,now):
             _require(all(0<=(now-_stamp(r['source_timestamp_utc'])).total_seconds()<=MAX_LIVE_AGE_SECONDS for r in current.values()),'current_native_pair_expired')
             days={r['trade_date'] for r in current.values()}; _require(len(days)==1,'current_contract_trade_date_mismatch'); current_day=next(iter(days))
             _require(current_day>=day,'current_observed_date_precedes_witness')
-            expected['current']=_oracle_view(e,current_day,current,dates if current_day==day else (dates+[current_day])[-22:])
+            # Derive coverage independently of the producer's rendering branch.
+            covered=date.fromisoformat(current_day)<=date.fromisoformat(day)+timedelta(days=1)
+            refusal=None if covered else 'insufficient_observed_witness_coverage_for_exact_current_comparisons'
+            expected['current']=_oracle_view(e,current_day,current,dates if current_day==day else (dates+[current_day])[-22:],comparison_refusal=refusal)
+            expected['current'].update(observed_witness_continuity_status='AVAILABLE' if covered else 'UNAVAILABLE',
+                observed_witness_continuity_reason=refusal)
         except (ValueError,TypeError,KeyError) as exc: expected['current']={'status':'UNAVAILABLE','reason':str(exc)}
         expected['dated'].update(anchor_role='accepted_observed_bar_endpoint',current_pair_usable_at_read=False)
         expected['current'].update(anchor_role='native_source_row_update',current_pair_usable_at_read=expected['current']['status']=='AVAILABLE')
