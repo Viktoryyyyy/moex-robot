@@ -84,11 +84,25 @@ def refresh(root, *, loader=None, clock=lambda: datetime.now(timezone.utc)):
             value['completed_at']=value[paired.CURRENT_KEY]['capture']['captured_at_utc']
             market.pop('original_forts_http_evidence',None)
             value['market_sha256']=_digest(market)
-        if len(json.dumps(value,sort_keys=True,ensure_ascii=False,allow_nan=False,separators=(',',':')).encode())+1>MAX_BYTES:
-            # Preserve the existing total-state bound; never publish a payload
-            # which every reader is required to reject as oversized.
-            value=dict(schema_version=SCHEMA,started_at=started.isoformat(),completed_at=value['completed_at'],
-                status='FAILED',error_class='FastMarketByteLimit',market=None,market_sha256=_digest(None))
+        def fits(candidate):
+            return len(json.dumps(candidate,sort_keys=True,ensure_ascii=False,allow_nan=False,
+                                  separators=(',',':')).encode('utf-8'))+1<=MAX_BYTES
+        if not fits(value):
+            # Optional paired proof must not evict independently admitted facts.
+            value.pop(paired.CURRENT_KEY,None)
+            value['optional_current_proof_error']='FastMarketByteLimit'
+        if not fits(value):
+            value.update(status='FAILED',error_class='FastMarketByteLimit',
+                         market=None,market_sha256=_digest(None))
+        if not fits(value):
+            # Re-admit only the previous independent witnesses at this read clock;
+            # capture with no new components preserves their original timestamps.
+            value['accepted_dated_market']=capture(previous,components={},
+                now=_time(value['completed_at']),kind='market')
+        if not fits(value):
+            value['accepted_dated_market']=None
+        if not fits(value):
+            raise ValueError('FastMarketByteLimit')
         base._atomic_write(folder / "current.json", value)
         return value
 
@@ -106,6 +120,7 @@ def apply(snapshot, *, root, now):
     completed = None
     dated = None
     paired_current = None
+    optional_current_proof_error = None
     try:
         if marker.is_symlink() or not marker.is_file():
             raise ValueError("invalid enabled marker")
@@ -117,6 +132,8 @@ def apply(snapshot, *, root, now):
         value = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(value, dict) and value.get('schema_version') == SCHEMA:
             dated = value.get('accepted_dated_market')
+            if value.get('optional_current_proof_error')=='FastMarketByteLimit':
+                optional_current_proof_error='FastMarketByteLimit'
         if not isinstance(value, dict) or value.get("schema_version") != SCHEMA or value.get("status") != "COLLECTED":
             raise ValueError("fast market collection unavailable")
         started, completed = _time(value["started_at"]), _time(value["completed_at"])
@@ -151,7 +168,8 @@ def apply(snapshot, *, root, now):
     live.attach_live_basis_carry_context(result, market, attempted_at_utc=attempted)
     result["fast_market_read"] = dict(schema_version=SCHEMA, read_at=now.isoformat(),
         completed_at=completed.isoformat() if completed else None,
-        error=error, network_fetch_performed=False)
+        error=error, network_fetch_performed=False,
+        optional_current_proof_error=optional_current_proof_error)
     result['accepted_dated_market'] = deepcopy(dated)
     from moex_data.rub_contract_price_market_oi_observed import CURRENT_KEY
     result[CURRENT_KEY]=deepcopy(paired_current)
