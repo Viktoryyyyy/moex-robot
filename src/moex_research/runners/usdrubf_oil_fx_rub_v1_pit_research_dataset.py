@@ -166,7 +166,7 @@ def validate_phase6_source_panel_replay(
     frozen_modeling_dataset: pd.DataFrame,
     source_panel: pd.DataFrame,
 ) -> None:
-    """Bind the explicit OHLC source panel to the exact frozen Phase 6 dataset semantics."""
+    """Bind every source row that can project into frozen lagged Phase 6 features."""
     required = (
         "target_trade_date",
         "target_instrument_id",
@@ -232,6 +232,40 @@ def validate_phase6_source_panel_replay(
             raise OilFxRubDatasetError(f"Phase 6 replay mismatch: {column}")
 
 
+def _mask_unbound_terminal_label_endpoints(
+    labels: pd.DataFrame,
+    identity_panel: pd.DataFrame,
+    source_panel: pd.DataFrame,
+) -> pd.DataFrame:
+    """Never publish a label that consumes the terminal close not bound by lagged replay."""
+    required = ("trade_date", "instrument_id", "close")
+    missing = [column for column in required if column not in source_panel.columns]
+    if missing:
+        raise OilFxRubDatasetError(
+            "Phase 6 source panel missing label columns: " + ", ".join(missing)
+        )
+    trade_dates = _normalized_dates(
+        source_panel["trade_date"], label="Phase 6 source panel trade_date"
+    )
+    if trade_dates.duplicated().any() or not trade_dates.is_monotonic_increasing:
+        raise OilFxRubDatasetError("Phase 6 source panel trade dates must be unique/increasing")
+    identities = prepare_identity_panel(identity_panel)
+    index_by_date = {value: index for index, value in enumerate(trade_dates.astype(str))}
+    terminal_index = len(trade_dates) - 1
+    safe = labels.copy()
+    for row_index, target_date in enumerate(identities["target_trade_date"]):
+        base_index = index_by_date.get(str(target_date))
+        if base_index is None:
+            raise OilFxRubDatasetError(
+                f"Phase 6 source panel missing target date {target_date}"
+            )
+        for horizon in (1, 3, 5, 10):
+            endpoint = base_index + horizon
+            if endpoint >= terminal_index:
+                safe.at[row_index, f"fwd_usdrubf_close_return_{horizon}session"] = np.nan
+    return safe
+
+
 def _finite_or_null(frame: pd.DataFrame, columns: list[str]) -> bool:
     if not columns:
         return True
@@ -281,7 +315,12 @@ def build_research_dataset(
             brent_matrix,
             mode="brent_only",
         )
-        labels = build_forward_return_labels(
+        raw_labels = build_forward_return_labels(
+            frozen_modeling_dataset,
+            phase6_source_panel,
+        )
+        labels = _mask_unbound_terminal_label_endpoints(
+            raw_labels,
             frozen_modeling_dataset,
             phase6_source_panel,
         )
@@ -315,6 +354,7 @@ def build_research_dataset(
     gates: dict[str, dict[str, Any]] = {
         "G1_identity_and_phase6_lineage": {
             "passed": identity_ok and phase6_lineage_verified,
+            "terminal_unbound_source_close_used_for_labels": False,
         },
         "G2_brent_admission": {
             "passed": brent_artifacts_verified,
@@ -459,6 +499,7 @@ def main(argv: list[str] | None = None) -> int:
         "input_sha256": {name: _sha256(path) for name, path in paths.items()},
         "immutable_upstream_sha256_verified": observed_immutable,
         "phase6_source_panel_semantic_replay_verified": True,
+        "phase6_source_panel_terminal_row_used_for_labels": False,
         "network_access_performed": False,
         "upstream_artifact_mutation_performed": False,
         "model_fit_performed": False,
