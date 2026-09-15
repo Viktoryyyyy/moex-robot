@@ -872,7 +872,7 @@ def test_witness_source_objects_preserve_utf8_and_mapping_contract(tmp_path,raw)
 
 
 
-@pytest.mark.parametrize('defect',[None,'failed','rollback','project','run','source_status','source_run','source_date','missing_finish','missing_parent'])
+@pytest.mark.parametrize('defect',[None,'failed','rollback','project','run','source_status','source_run','source_date','missing_finish','missing_parent','future_finish'])
 def test_newest_parent_attempt_is_decisive_before_admission_filter(tmp_path,monkeypatch,defect):
     import shutil
     _restore_archive(tmp_path,dates={'2026-09-13','2026-09-14'});monkeypatch.setenv('MOEX_DATA_ROOT',str(tmp_path))
@@ -891,6 +891,7 @@ def test_newest_parent_attempt_is_decisive_before_admission_filter(tmp_path,monk
     elif defect=='source_run':parent['source_refresh']['stage3_run_id']='other'
     elif defect=='source_date':parent['source_refresh']['trade_date']='2026-09-13'
     elif defect=='missing_finish':parent.pop('finished_at_utc')
+    elif defect=='future_finish':parent['finished_at_utc']=(NOW+timedelta(seconds=1)).isoformat()
     path=tmp_path/'runs/step10_rub_daily_refresh'/('run_id='+new)/'run_manifest.json'
     path.parent.mkdir(parents=True)
     if defect!='missing_parent':path.write_text(json.dumps(parent))
@@ -900,6 +901,7 @@ def test_newest_parent_attempt_is_decisive_before_admission_filter(tmp_path,monk
         assert records['2026-09-14']['SiU6']['proof']['acceptance_run_id']==new+'_stage3'
     else:
         assert '2026-09-14' not in records and errors['2026-09-14']
+        if defect=='future_finish':assert 'future_binding_or_parent_completion' in errors['2026-09-14']
 
 
 @pytest.mark.parametrize('previous_available',[False,True])

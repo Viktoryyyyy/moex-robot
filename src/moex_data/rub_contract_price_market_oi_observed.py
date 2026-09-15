@@ -670,7 +670,8 @@ def _historical(root, now):
                 parent=_source_object(_read_bytes(root,'${MOEX_DATA_ROOT}/runs/step10_rub_daily_refresh/run_id='+parent_run+'/run_manifest.json'))
                 # Rank observed attempts before validation: invalid newer parents remain decisive.
                 finished=_stamp(parent['finished_at_utc'])
-                if finished<=now: candidates.append((day,finished.timestamp(),run,marker))
+                _require(finished<=now,'future_binding_or_parent_completion')
+                candidates.append((day,finished.timestamp(),run,marker))
         except (OSError,ValueError,KeyError,TypeError,OverflowError) as exc:
             if isinstance(exc,(json.JSONDecodeError,UnicodeError)) or (isinstance(exc,ValueError) and any(
                 reason in str(exc) for reason in ('duplicate JSON object member:','JSON numeric constant must be finite:','source_JSON_must_contain_object'))):
