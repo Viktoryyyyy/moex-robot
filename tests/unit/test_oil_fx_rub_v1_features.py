@@ -63,21 +63,17 @@ def test_brent_roll_window_returns_are_structural_nulls() -> None:
     assert np.isfinite(features.loc[15, "ext_brent_same_contract_close_return_5session"])
 
 
-def test_full_feature_builder_preserves_future_stage_cny_semantics() -> None:
-    features = build_feature_frame(
-        _identities(), _brent(), mode="oil_fx_full", cnyrubf_matrix=_cnyrubf()
-    )
-    assert "ext_cnyrubf_close_return_5session" in features
-    assert "ext_brent_cnyrubf_intraday_interaction" in features
-    assert features.loc[1:, "ext_cnyrubf_close_return_1session"].notna().all()
-
-
-def test_wrong_cnyrubf_security_is_rejected() -> None:
-    cny = _cnyrubf()
-    cny.loc[0, "cnyrubf_security_id"] = "CNYRUB_TOM"
-    with pytest.raises(OilFxRubFeatureError, match="security identity mismatch"):
+def test_full_feature_builder_is_fail_closed_in_v1() -> None:
+    with pytest.raises(OilFxRubFeatureError, match="oil_fx_full is blocked"):
         build_feature_frame(
-            _identities(), _brent(), mode="oil_fx_full", cnyrubf_matrix=cny
+            _identities(), _brent(), mode="oil_fx_full", cnyrubf_matrix=_cnyrubf()
+        )
+
+
+def test_brent_only_rejects_cnyrubf_input() -> None:
+    with pytest.raises(OilFxRubFeatureError, match="forbidden in brent_only"):
+        build_feature_frame(
+            _identities(), _brent(), mode="brent_only", cnyrubf_matrix=_cnyrubf()
         )
 
 
