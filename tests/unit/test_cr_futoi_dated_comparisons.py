@@ -748,10 +748,12 @@ def test_capture_preserves_eod_io_classification_for_needed_dates(monkeypatch, t
     verify(current, now=completed)
 
 
-def test_observed_witness_io_failure_preserves_original_context_and_cause(monkeypatch):
+def test_observed_witness_io_failure_preserves_original_context_and_cause(monkeypatch, tmp_path):
     from moex_data import rub_temporal_applicability as temporal
     from moex_data.futures import futoi_delta_statistics_context as engine
+    from moex_data.futures import futoi_live_factual_refresh_source_native as source
     previous = snapshot(); previous["components"]["futoi_live_cr"]["data"]["context_refresh"] = {}
+    monkeypatch.setattr(source, "_data_root", lambda: tmp_path)
     monkeypatch.setattr(temporal, "_previous_witness", lambda *a: "2026-09-11")
     def fail(*a, **k): raise PermissionError("observed witness read denied")
     monkeypatch.setattr(engine, "_observed_witness", fail)
