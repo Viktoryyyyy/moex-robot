@@ -32,6 +32,7 @@ EXPECTED_IMMUTABLE_SHA256: Final[dict[str, str]] = {
     "phase6_dataset_manifest": "fcbbb5e5ed0549c5c6f397e34f203f01836271f6bf471f90cab5a2fd64ace082",
     "brent_pit_acceptance_matrix": "78b60c9542fc08667267849b9ce03fdf161d2dc971fe99e1ab9d6a8d56266c43",
     "phase84a_gate_results": "aceaefb4d2e2a236539dd527c98464ddd1ea6bf5f1cdb8121662e1ce087f9c4c",
+    "phase84a_input_identity": "3fa20b2daf45f196937064b5f1cc6a58b8009e544d6141e32a77d841d68b65ae",
 }
 DECLARED_OUTPUTS: Final[tuple[str, ...]] = (
     "oil_fx_rub_features.parquet",
@@ -395,6 +396,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--phase6-source-panel-path", required=True)
     parser.add_argument("--brent-matrix-path", required=True)
     parser.add_argument("--brent-gate-results-path", required=True)
+    parser.add_argument("--brent-input-identity-path", required=True)
     parser.add_argument(
         "--mode",
         choices=("brent_only", "oil_fx_full"),
@@ -419,6 +421,7 @@ def main(argv: list[str] | None = None) -> int:
         "phase6_source_panel": Path(args.phase6_source_panel_path),
         "brent_pit_acceptance_matrix": Path(args.brent_matrix_path),
         "phase84a_gate_results": Path(args.brent_gate_results_path),
+        "phase84a_input_identity": Path(args.brent_input_identity_path),
     }
     contract = _read_json(paths["contract"])
     _validate_contract(contract)
@@ -432,6 +435,7 @@ def main(argv: list[str] | None = None) -> int:
     phase6_source_panel = pd.read_parquet(paths["phase6_source_panel"])
     brent_matrix = pd.read_parquet(paths["brent_pit_acceptance_matrix"])
     brent_gates = _read_json(paths["phase84a_gate_results"])
+    _read_json(paths["phase84a_input_identity"])
     validate_phase6_source_panel_replay(
         frozen_modeling_dataset,
         phase6_source_panel,
