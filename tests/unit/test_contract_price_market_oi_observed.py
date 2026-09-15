@@ -1211,3 +1211,35 @@ def test_native_normalization_preserves_typed_refusal_for_fractional_oi():
         m._native_numbers({'SECID':'SiU6','LAST':84462,'OPENPOSITION':1.5})
     from moex_data import synchronized_live_market_oi_context as live
     assert isinstance(caught.value.__cause__,live.SynchronizedLiveMarketOIError)
+
+
+def test_consumer_semantics_preserve_all_original_values_and_evidence():
+    import ast
+    # Frozen pre-presentation renderer; no git repository or external file needed.
+    source="def describe(snapshot,*,now):\n    try:\n        now=_stamp(now)\n        failure=_capture_failure(snapshot,now)\n        if STORE_KEY not in snapshot and failure is not None: raise ValueError(failure['error'])\n        e=_admit(snapshot,now)\n        dates=e['observed_dates']; dated_day=dates[-1]\n        result={'schema_version':SCHEMA,'status':'AVAILABLE','scope':SCOPE,'checked_at_utc':now.isoformat(),\n            'accepted_at_utc':e['accepted_at_utc'],'evidence_sha256':snapshot[STORE_KEY]['evidence_sha256'],\n            'role_binding_as_of_utc':e['role_binding_as_of_utc'],'baseline_role_semantics':'same_SECID_selected_at_explicit_role_binding_as_of_not_historical_role_proof',\n            'units':{'price_by_root':{'si':'RUB_per_1000_USD','cr':'RUB_per_CNY'},'price_return_fraction':'dimensionless_fraction','market_open_interest':'source_native_market_open_position_count_as_reported','market_open_interest_counting_basis':'no_rescaling_not_family_futoi_total','shares':'dimensionless_fraction'},\n            'observed_trade_dates':dates,'audit_reference':'input_snapshot.json#/'+STORE_KEY+'/evidence',\n            'last_capture_error':snapshot[STORE_KEY]['last_capture_error'] if _stamp(snapshot[STORE_KEY]['last_capture_attempt_at_utc'])<=now else None,\n            'latest_source_errors':deepcopy(snapshot[STORE_KEY]['latest_source_errors']) if _stamp(snapshot[STORE_KEY]['last_capture_attempt_at_utc'])<=now else {},\n            'dated':_view(e,dated_day,e['history'].get(dated_day,{}),dates),**FLAGS}\n        try:\n            current=_current_capture(snapshot,now,e)\n            from moex_data.rub_snapshot_read_freshness import MAX_LIVE_AGE_SECONDS\n            _require(all(0<=(now-_stamp(r['source_timestamp_utc'])).total_seconds()<=MAX_LIVE_AGE_SECONDS for r in current.values()),'current_native_pair_expired')\n            days={r['trade_date'] for r in current.values()}; _require(len(days)==1,'current_contract_trade_date_mismatch'); day=next(iter(days))\n            _require(day>=dated_day,'current_observed_date_precedes_witness')\n            current_dates=dates if day==dated_day else (dates+[day])[-22:]\n            gap=(date.fromisoformat(day)-date.fromisoformat(dated_day)).days\n            refusal='insufficient_observed_witness_coverage_for_exact_current_comparisons' if gap>1 else None\n            result['current']=_view(e,day,current,current_dates,comparison_refusal=refusal)\n            result['current'].update(observed_witness_continuity_status='UNAVAILABLE' if refusal else 'AVAILABLE',\n                observed_witness_continuity_reason=refusal)\n        except (ValueError,TypeError,KeyError) as exc: result['current']={'status':'UNAVAILABLE','reason':str(exc)}\n        result['dated'].update(anchor_role='accepted_observed_bar_endpoint',current_pair_usable_at_read=False)\n        result['current'].update(anchor_role='native_source_row_update',current_pair_usable_at_read=result['current']['status']=='AVAILABLE')\n        return result\n    except (ValueError,TypeError,KeyError,AttributeError,OverflowError) as exc:\n        return {'schema_version':SCHEMA,'status':'UNAVAILABLE','scope':SCOPE,'reason':str(exc),**FLAGS}"
+    tree=ast.parse(source);old_function=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='describe')
+    old_function.name='old_describe';namespace=dict(m.__dict__)
+    exec(compile(ast.Module(body=[old_function],type_ignores=[]),'original_describe','exec'),namespace)
+    for with_current in (False,True):
+        s=install_current(snapshot()) if with_current else snapshot();before=deepcopy(s)
+        out=release(s);expected=namespace['old_describe'](s,now=NOW)
+        stripped=deepcopy(out);semantics=stripped.pop('consumer_semantics');expiry=stripped.pop('dated_valid_until_utc')
+        assert stripped==expected and s==before
+        assert expiry==(m._stamp(out['accepted_at_utc'])+timedelta(hours=96)).isoformat()
+        assert semantics['price_fields']['CURRENT_NATIVE_SAME_RESPONSE_ROW']=='marketdata.LAST_last_trade_price'
+        assert semantics['price_fields']['CURRENT_REVALIDATED_ACCEPTED_STAGE10_RUN']=='quote.close_5m_bar_CLOSE'
+        assert semantics['dated_lifetime_seconds']==345600
+
+
+@pytest.mark.parametrize('field',['price_fields','clock_meanings','horizon_basis','current_date_policy','missing_target_policy',
+    'accepted_at_utc_scope','dated_lifetime_seconds','current_lifetime','current_pair_usable_at_read','role_selection','audit_hash_scope','oi_counting_side_convention'])
+def test_consumer_semantics_oracle_rejects_omitted_or_invented_meaning(field):
+    s=snapshot();r={};m.attach_consumer(s,r,now=NOW)
+    r['contract_price_market_oi_context']['consumer_semantics'][field]='invented_meaning'
+    with pytest.raises(AssertionError):m.verify_projection(s,r,now=NOW)
+
+
+def test_consumer_semantics_oracle_rejects_changed_dated_deadline():
+    s=snapshot();r={};m.attach_consumer(s,r,now=NOW)
+    r['contract_price_market_oi_context']['dated_valid_until_utc']=(NOW+timedelta(days=5)).isoformat()
+    with pytest.raises(AssertionError):m.verify_projection(s,r,now=NOW)

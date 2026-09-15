@@ -223,6 +223,10 @@ def build_package(snapshot, release, *, now):
     macro = release['macro_evidence_inventory']
     chosen['macro_context'] = {key: macro[key] for key in ('facts', 'scheduled_events', 'calendar_coverage')}
     chosen = compact_values(chosen)
+    # B's existing content address makes its retained original-byte audit locatable.
+    paired=release.get('contract_price_market_oi_context') or {}
+    if paired.get('status')=='AVAILABLE':
+        chosen['contract_price_market_oi_context']['evidence_sha256']=paired['evidence_sha256']
     chosen['news_context'] = compact_news_context(release['news_context'])
     readiness = coverage(release)
     return {'project': 'MOEX_Bot', 'schema_version': SCHEMA, 'as_of_utc': now.isoformat(),
