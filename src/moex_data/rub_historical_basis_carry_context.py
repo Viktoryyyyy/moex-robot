@@ -127,12 +127,12 @@ def _capture(root,now):
         'original_artifacts':source.proof,'original_byte_buffers':{key:base64.b64encode(raw).decode('ascii') for key,raw in sorted(buffers.items())}}
 
 
-def _validate_evidence(e,now):
+def _validate_evidence(e,now,*,enforce_lifetime=True):
     require(isinstance(e,dict) and set(e)=={'schema_version','contract','causal_cutoff_at_utc','accepted_at_utc','observed_dates','witness_proof',
         'runs','history','source_errors','original_artifacts','original_byte_buffers','discovery_runs'},'historical_basis_evidence_shape')
     require(e['schema_version']==SCHEMA and digest(e['contract'])==digest(_contract()),'historical_basis_contract_revoked')
     cutoff,accepted=stamp(e['causal_cutoff_at_utc']),stamp(e['accepted_at_utc'])
-    require(cutoff<=accepted<=now and (now-accepted).total_seconds()<=TTL,'historical_basis_clock_or_expired')
+    require(cutoff<=accepted<=now and (not enforce_lifetime or (now-accepted).total_seconds()<=TTL),'historical_basis_clock_or_expired')
     buffers=bytesource._decode_buffers(e['original_byte_buffers']);bytesource._portable_witness(e,buffers,cutoff)
     dates=e['observed_dates'];require(isinstance(dates,list) and 1<=len(dates)<=22,'historical_basis_witness_scope')
     require(isinstance(e['runs'],dict) and isinstance(e['history'],dict) and set(e['runs'])==set(e['history']) and set(e['runs'])<=set(dates),'historical_basis_run_date_inventory')
@@ -151,11 +151,11 @@ def _validate_evidence(e,now):
     return e
 
 
-def _admit(snapshot,now):
+def _admit(snapshot,now,*,enforce_lifetime=True):
     store=snapshot[STORE_KEY]
     require(isinstance(store,dict) and set(store)=={'evidence','evidence_sha256','last_capture_attempt_at_utc','last_capture_error'},'historical_basis_store_shape')
     require(digest(store['evidence'])==store['evidence_sha256'],'historical_basis_evidence_hash')
-    e=_validate_evidence(store['evidence'],now)
+    e=_validate_evidence(store['evidence'],now,enforce_lifetime=enforce_lifetime)
     require(stamp(store['last_capture_attempt_at_utc'])>=stamp(e['accepted_at_utc']),'historical_basis_capture_chronology')
     require(store['last_capture_error'] is None or isinstance(store['last_capture_error'],str),'historical_basis_error_type')
     return e
@@ -183,14 +183,15 @@ def capture_snapshot(snapshot,previous,*,now_fn,refresh_started_at,previous_capt
         _validate_evidence(candidate,start)
         if old is not None:
             try:
-                previous_e=_admit({STORE_KEY:old},start)
+                previous_e=_admit({STORE_KEY:old},start,enforce_lifetime=False)
                 if digest(_semantic(previous_e))==digest(_semantic(candidate)):retained=deepcopy(previous_e)
             except (ValueError,TypeError,KeyError,AttributeError,OverflowError):pass
     except Exception as exc:error=type(exc).__name__+': '+str(exc)
     completed=stamp(now_fn());require(completed>=start,'historical_basis_validation_clock_reversed')
     if error is None:
         candidate['accepted_at_utc']=completed.isoformat()
-        if retained is not None and (completed-stamp(retained['accepted_at_utc'])).total_seconds()<=TTL:candidate=retained
+        # Expiry changes readability, never the first acceptance of unchanged sources.
+        if retained is not None:candidate=retained
         snapshot[STORE_KEY]={'evidence':candidate,'evidence_sha256':digest(candidate),
             'last_capture_attempt_at_utc':completed.isoformat(),'last_capture_error':None}
         snapshot.pop('historical_basis_capture_error',None)

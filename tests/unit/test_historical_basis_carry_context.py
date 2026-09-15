@@ -95,9 +95,16 @@ def make_run(root,day,*,suffix='000001',finished_hour=22):
     return run
 
 
-def fixture(root):
+def fixture(root,*,weekend_observations=False):
     from test_contract_price_market_oi_observed import _restore_witness
-    _restore_witness(root)
+    pointer_path,pointer,_=_restore_witness(root)
+    if not weekend_observations:
+        partition=root/pointer['partition_ref'].removeprefix('${MOEX_DATA_ROOT}/')
+        frame=pd.read_parquet(partition)
+        frame=frame[~frame.trade_date.astype(str).isin(['2026-09-12','2026-09-13'])]
+        frame.to_parquet(partition,index=False)
+        pointer['partition_sha256']=m.bytesource.sha256(partition.read_bytes()).hexdigest()
+        write_json(pointer_path,pointer)
     for day in ('2026-09-07','2026-09-08','2026-09-11','2026-09-14'):make_run(root,day)
     e=m._capture(root,NOW);e['accepted_at_utc']=NOW.isoformat()
     return {m.STORE_KEY:{'evidence':e,'evidence_sha256':m.digest(e),'last_capture_attempt_at_utc':NOW.isoformat(),'last_capture_error':None}}
@@ -267,3 +274,33 @@ def test_capture_cannot_accept_before_validation_completion(tmp_path,monkeypatch
 def test_portable_original_run_path_keeps_nested_state_support_directory():
     value='/source/root/runs/step4_rub_basis_carry/run_id=test_stage4/state/refresh/manifest.json'
     assert resolver.logical(value)=='runs/step4_rub_basis_carry/run_id=test_stage4/state/refresh/manifest.json'
+
+
+def test_expired_unchanged_original_sources_never_rejuvenate_first_acceptance(tmp_path,monkeypatch):
+    previous=fixture(tmp_path);before=deepcopy(previous)
+    from moex_data.futures import futoi_live_factual_refresh_source_native as source
+    monkeypatch.setattr(source,'_data_root',lambda:tmp_path)
+    later=NOW+timedelta(hours=97);ticks=iter((later,later+timedelta(seconds=1)));out={}
+    m.capture_snapshot(out,previous,now_fn=lambda:next(ticks),refresh_started_at=later)
+    assert previous==before
+    assert out[m.STORE_KEY]['last_capture_error'] is None
+    assert out[m.STORE_KEY]['evidence']==previous[m.STORE_KEY]['evidence']
+    assert out[m.STORE_KEY]['evidence_sha256']==previous[m.STORE_KEY]['evidence_sha256']
+    assert read(out,later+timedelta(seconds=1))['status']=='UNAVAILABLE'
+    # A new original admitted run is a real source version, even if prices agree.
+    make_run(tmp_path,'2026-09-14',suffix='000002',finished_hour=23)
+    ticks=iter((later+timedelta(seconds=2),later+timedelta(seconds=3)));recovered={}
+    m.capture_snapshot(recovered,out,now_fn=lambda:next(ticks),refresh_started_at=later)
+    assert recovered[m.STORE_KEY]['last_capture_error'] is None
+    assert recovered[m.STORE_KEY]['evidence_sha256']!=out[m.STORE_KEY]['evidence_sha256']
+    assert recovered[m.STORE_KEY]['evidence']['accepted_at_utc']==(later+timedelta(seconds=3)).isoformat()
+    assert read(recovered,later+timedelta(seconds=3))['dated']['status']=='AVAILABLE'
+
+
+def test_explicit_weekend_observations_are_not_removed_by_calendar_assumption(tmp_path):
+    out=read(fixture(tmp_path,weekend_observations=True))
+    metric=out['dated']['pairs']['cny_rub']['metrics']['front_next_spread_abs']
+    assert metric['changes']['1']['target_observed_trade_date']=='2026-09-13'
+    assert metric['changes']['1']['change'] is None
+    assert metric['previous_comparable']['trade_date']=='2026-09-11'
+    assert metric['previous_comparable']['is_exact_previous_observation'] is False
