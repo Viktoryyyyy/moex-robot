@@ -22,6 +22,23 @@ CLOCKS = ("snapshot_ts", "source_publication_time", "availability_ts_utc", "inge
 UNITS = {"positions_and_open_interest": "contracts", "participants": "side_counts_not_unique_people",
     "long_short_net_shares": "fraction_of_open_interest", "gross_share": "fraction_of_two_sided_open_interest",
     "share_changes": "fraction_difference_not_percentage_points"}
+TRANSIENT_READ = "transient_source_read_failure: "
+
+
+def _expected_contract():
+    return {"schema_version": "cr_futoi_dated_admission.v1", "task_id": "cr_futoi_dated_comparisons_v1",
+        "instrument_id": INSTRUMENT, "source_id": SOURCE, "scope": SCOPE,
+        "admission": {
+            **{key: True for key in ("dated_factual_use_allowed", "current_comparisons_require_existing_current_pair_admission",
+                "legacy_current_pair_governance_unchanged", "earlier_invalid_pairs_do_not_prove_latest_pair_invalid",
+                "source_byte_binding_required", "raw_publication_and_ingest_clocks_required",
+                "first_acceptance_after_source_validation", "exact_missing_dates_never_substituted")},
+            **{key: False for key in ("whole_partition_or_session_acceptance", "session_completion_proven", "historical_pit_usable",
+                "model_usable", "directional_authority", "action_authority", "stage5_pointer_promotion_performed", "statistics_authority")},
+            "maximum_dated_age_seconds": 345600, "maximum_retained_observed_dates": 21, "lags": [1, 5, 20],
+            "source_selection": "latest aligned FIZ/YUR pair on exact witnessed date; invalid latest pair refuses without older pair or EOD fallback"},
+        "deployment_gate": "scoped PM_L1 authorization; code review, tests, merge and separate runtime acceptance required",
+        "limitations": "Current-pair-only legacy fields remain unchanged. A4 statistics and whole-history backfill are outside this contract. A valid latest pair does not admit earlier invalid intraday pairs."}
 
 
 def _admission(artifact):
@@ -30,6 +47,8 @@ def _admission(artifact):
     if not isinstance(artifact["artifact_text"], str) or sha256(artifact["artifact_text"].encode()).hexdigest() != artifact["artifact_sha256"]:
         raise ValueError("cr_admission_artifact_digest")
     doc = json.loads(artifact["artifact_text"])
+    if common._digest(doc) != common._digest(_expected_contract()):
+        raise ValueError("cr_scoped_contract_policy_or_inventory_mismatch")
     if doc.get("schema_version") != "cr_futoi_dated_admission.v1" or doc.get("instrument_id") != INSTRUMENT or doc.get("source_id") != SOURCE or doc.get("scope") != SCOPE:
         raise ValueError("cr_dated_scope_not_admitted")
     grant = doc["admission"]
@@ -71,7 +90,7 @@ def _valid_record(record, day, at):
 def _admit(store, now, *, current_admission):
     now = common._stamp(now)
     _admission(current_admission)
-    if not isinstance(store, dict) or set(store) != {"schema_version", "evidence", "evidence_sha256", "last_capture_attempt_at_utc", "last_capture_error", "latest_diagnostics"}:
+    if not isinstance(store, dict) or set(store) != {"schema_version", "evidence", "evidence_sha256", "last_capture_attempt_at_utc", "last_capture_error", "latest_diagnostics", "latest_source_rejection"}:
         raise ValueError("cr_dated_store_not_captured_or_malformed")
     e = store["evidence"]
     if store["schema_version"] != SCHEMA or common._digest(e) != store["evidence_sha256"]:
@@ -84,6 +103,16 @@ def _admit(store, now, *, current_admission):
         raise ValueError("cr_dated_acceptance_future_or_expired")
     attempted = common._stamp(store["last_capture_attempt_at_utc"])
     if attempted < accepted: raise ValueError("cr_attempt_precedes_acceptance")
+    rejection = store["latest_source_rejection"]
+    if rejection is not None:
+        if not isinstance(rejection, dict) or set(rejection) != {"checked_at_utc", "trade_date", "reason"}:
+            raise ValueError("cr_latest_source_rejection_shape")
+        checked = common._stamp(rejection["checked_at_utc"])
+        common._day(rejection["trade_date"])
+        if not accepted <= checked <= attempted or not isinstance(rejection["reason"], str) or not rejection["reason"] or rejection["reason"].startswith(TRANSIENT_READ):
+            raise ValueError("cr_latest_source_rejection_metadata")
+        if checked <= now:
+            raise ValueError("cr_latest_anchor_source_rejected: " + rejection["trade_date"] + ": " + rejection["reason"])
     error = common._capture_error(store["last_capture_error"])
     if attempted > now: error = None
     witness = e["witness"]
@@ -239,7 +268,10 @@ def _load_record(root, day, eod, eod_proof, cutoff):
             fact = engine._eod_factual(rows.iloc[0], instrument_id=INSTRUMENT)
             result = _record(fact, "accepted_eod", {"source_kind": "accepted_stage5_eod_historical_context_only", "accepted_pointer": eod_proof}, day)
         else:
-            if loaded.get("status") != "AVAILABLE": raise ValueError(loaded.get("reason") or "cr_latest_raw_pair_invalid_no_fallback")
+            if loaded.get("status") != "AVAILABLE":
+                if loaded.get("error_class") in ("OSError", "IOError", "PermissionError", "FileNotFoundError"):
+                    raise OSError(loaded.get("error") or "raw_source_read_failed")
+                raise ValueError(loaded.get("reason") or "cr_latest_raw_pair_invalid_no_fallback")
             fact, proof = common._freeze_raw_fact(root, loaded["provenance"], day, normalized=True, instrument_id=INSTRUMENT)
             if fact != loaded["factual"]: raise ValueError("cr_frozen_raw_fact_mismatch")
             result = _record(fact, "canonical_raw", proof, day)
@@ -247,7 +279,7 @@ def _load_record(root, day, eod, eod_proof, cutoff):
         return result
     except Exception as exc:
         return {"instrument_id": INSTRUMENT, "source_id": SOURCE, "trade_date": day, "status": "UNAVAILABLE", "source_kind": None,
-                "factual": None, "provenance": None, "reason": type(exc).__name__ + ": " + str(exc)}
+                "factual": None, "provenance": None, "reason": (TRANSIENT_READ if isinstance(exc, OSError) else "") + type(exc).__name__ + ": " + str(exc)}
 
 
 def _capture(snapshot, cutoff):
@@ -345,7 +377,7 @@ def capture_snapshot(snapshot, previous, *, now_fn, refresh_started_at, previous
     if candidate is not None:
         candidate["accepted_at_utc"] = completed.isoformat()
         store = {"schema_version": SCHEMA, "evidence": candidate, "evidence_sha256": common._digest(candidate),
-            "last_capture_attempt_at_utc": completed.isoformat(), "last_capture_error": None,
+            "last_capture_attempt_at_utc": completed.isoformat(), "last_capture_error": None, "latest_source_rejection": None,
             "latest_diagnostics": {"checked_at_utc": completed.isoformat(), "records": {r["trade_date"]: {"status": r["status"], "reason": r["reason"]} for r in candidate["records"]}}}
         try:
             _admit(store, completed, current_admission=snapshot.get(ADMISSION_KEY))
@@ -354,7 +386,7 @@ def capture_snapshot(snapshot, previous, *, now_fn, refresh_started_at, previous
                     prior, _, _ = _admit(old, completed, current_admission=snapshot.get(ADMISSION_KEY))
                     a, b = _semantic(prior), _semantic(candidate)
                     if a == b or (a["dates"] == b["dates"] and a["current_date"] == b["current_date"] and a["admission_sha256"] == b["admission_sha256"]
-                        and a["records"][-1] == b["records"][-1] and all(left == right or right["status"] == "UNAVAILABLE" for left, right in zip(a["records"], b["records"]))):
+                        and a["records"][-1] == b["records"][-1] and all(left == right or (candidate["records"][index]["status"] == "UNAVAILABLE" and candidate["records"][index]["reason"].startswith(TRANSIENT_READ)) for index, (left, right) in enumerate(zip(a["records"], b["records"])))):
                         store["evidence"] = prior; store["evidence_sha256"] = old["evidence_sha256"]
                 except (KeyError, TypeError, ValueError, OverflowError, AttributeError): pass
             snapshot[STORE_KEY] = store
@@ -362,6 +394,8 @@ def capture_snapshot(snapshot, previous, *, now_fn, refresh_started_at, previous
         except Exception as exc: error = type(exc).__name__ + ": " + str(exc)
     if old is not None:
         old.update(last_capture_attempt_at_utc=completed.isoformat(), last_capture_error=error)
+        if candidate is not None and candidate["records"][-1]["status"] == "UNAVAILABLE" and not candidate["records"][-1]["reason"].startswith(TRANSIENT_READ):
+            old["latest_source_rejection"] = {"checked_at_utc": completed.isoformat(), "trade_date": candidate["records"][-1]["trade_date"], "reason": candidate["records"][-1]["reason"]}
         snapshot[STORE_KEY] = old
     return completed
 

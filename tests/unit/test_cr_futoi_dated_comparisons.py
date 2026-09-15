@@ -49,7 +49,7 @@ def snapshot():
         "records": [record(day, 100+i) for i, day in enumerate(dates)]}
     return {cr.ADMISSION_KEY: grant,
         cr.STORE_KEY: {"schema_version": cr.SCHEMA, "evidence": e, "evidence_sha256": cr.common._digest(e),
-            "last_capture_attempt_at_utc": NOW.isoformat(), "last_capture_error": None, "latest_diagnostics": None},
+            "last_capture_attempt_at_utc": NOW.isoformat(), "last_capture_error": None, "latest_diagnostics": None, "latest_source_rejection": None},
         "components": {"futoi_live_cr": {"status": "UNAVAILABLE", "data": {"instrument_id": cr.INSTRUMENT, "source_id": cr.SOURCE}}}}
 
 
@@ -244,7 +244,7 @@ def test_frozen_raw_must_match_selected_fact(monkeypatch):
 @pytest.mark.parametrize("failed_baseline", [False, True])
 def test_repeat_preserves_first_acceptance_and_retry_diagnostics(monkeypatch, failed_baseline):
     previous = snapshot(); candidate = deepcopy(previous[cr.STORE_KEY]["evidence"])
-    if failed_baseline: candidate["records"][-6].update(status="UNAVAILABLE", factual=None, provenance=None, source_kind=None, reason="temporary_read_error")
+    if failed_baseline: candidate["records"][-6].update(status="UNAVAILABLE", factual=None, provenance=None, source_kind=None, reason=cr.TRANSIENT_READ + "PermissionError: temporary read error")
     monkeypatch.setattr(cr, "_capture", lambda *a: deepcopy(candidate))
     monkeypatch.setattr(cr, "_capture_current", lambda *a: (_ for _ in ()).throw(ValueError("current unavailable")))
     times = iter([NOW+timedelta(seconds=1), NOW+timedelta(seconds=2)])
@@ -282,3 +282,100 @@ def test_oracle_refusal_remains_enabled_under_optimization():
     code = "from moex_data import rub_cr_futoi_dated_context as c; c.verify_projection({}, {'futoi_context': {'futoi_live_cr': {}}}, now=None)"
     result = subprocess.run([sys.executable, "-O", "-c", code], text=True, capture_output=True)
     assert result.returncode != 0 and "CR canonical refusal" in result.stderr
+
+
+@pytest.mark.parametrize("index", [-6, -1])
+def test_new_latest_invalid_pair_never_restores_old_available(monkeypatch, tmp_path, index):
+    import pandas as pd
+    from moex_data.futures import futoi_delta_statistics_context as engine
+    from moex_data.futures import futoi_live_factual_refresh_source_native as source
+    previous = snapshot(); day = previous[cr.STORE_KEY]["evidence"]["records"][index]["trade_date"]
+    path = tmp_path / "raw.parquet"
+    monkeypatch.setattr(engine.raw_materializer, "_partition_path", lambda *a: path)
+    monkeypatch.setattr(source, "source_identity", lambda *a: {"source_ticker": "cr", "secid": "CRU6"})
+    rows = [dict(trade_date=day, ts=day+" 23:50:00", systime=day+" 23:55:00",
+        availability_ts_utc=day+"T20:56:00+00:00", ingest_ts=day+"T20:57:00+00:00",
+        sess_id=1, seqnum=1, clgroup=side, pos=net, pos_long=long, pos_short=short,
+        pos_long_num=10, pos_short_num=11, source_id=cr.SOURCE,
+        instrument_id=cr.INSTRUMENT, source_ticker="cr", secid="CRU6")
+        for side, net, long, short in (("FIZ",20,100,-80),("YUR",-20,80,-100))]
+    pd.DataFrame(rows).to_parquet(path)
+    previous[cr.STORE_KEY]["evidence"]["records"][index] = cr._load_record(tmp_path, day, None, None, NOW)
+    assert previous[cr.STORE_KEY]["evidence"]["records"][index]["status"] == "AVAILABLE"
+    rehash(previous); candidate = deepcopy(previous[cr.STORE_KEY]["evidence"])
+    newer = deepcopy(rows)
+    for row in newer: row.update(ts=day+" 23:51:00", seqnum=2)
+    newer[1].update(pos_long=81, pos=-19)
+    pd.DataFrame(rows+newer).to_parquet(path)
+    candidate["records"][index] = cr._load_record(tmp_path, day, None, None, NOW)
+    assert candidate["records"][index]["status"] == "UNAVAILABLE"
+    monkeypatch.setattr(cr, "_capture", lambda *a: deepcopy(candidate))
+    monkeypatch.setattr(cr, "_capture_current", lambda *a: (_ for _ in ()).throw(ValueError("current unavailable")))
+    current = deepcopy(previous); times = iter([NOW+timedelta(seconds=1), NOW+timedelta(seconds=2)])
+    completed = cr.capture_snapshot(current, previous, now_fn=lambda: next(times), refresh_started_at=NOW)
+    out = cr.describe(current, now=completed)
+    if index == -6:
+        assert out["status"] == "AVAILABLE" and out["dated"]["changes"]["5"]["status"] == "UNAVAILABLE"
+        assert out["dated"]["changes"]["5"]["values"] is None
+    else:
+        assert out["status"] == "UNAVAILABLE" and "latest_anchor_source_rejected" in out["reason"]
+        assert current[cr.STORE_KEY]["evidence"] == previous[cr.STORE_KEY]["evidence"]
+        assert current[cr.STORE_KEY]["evidence"]["accepted_at_utc"] == NOW.isoformat()
+        assert cr.describe(current, now=NOW)["status"] == "AVAILABLE"
+    verify(current, now=completed)
+
+
+@pytest.mark.parametrize("error_class", ["PermissionError", "OSError", "FileNotFoundError"])
+def test_read_error_class_is_explicitly_transient(monkeypatch, error_class):
+    from moex_data.futures import futoi_delta_statistics_context as engine
+    monkeypatch.setattr(engine, "_raw_factual", lambda *a, **k: {"status": "UNAVAILABLE",
+        "reason": "canonical_raw_partition_failed_factual_validation", "error_class": error_class, "error": "read failed"})
+    result = cr._load_record(Path("."), "2026-09-11", None, None, NOW)
+    assert result["status"] == "UNAVAILABLE" and result["reason"].startswith(cr.TRANSIENT_READ)
+
+
+def test_transient_anchor_failure_retains_own_first_acceptance(monkeypatch):
+    previous = snapshot(); candidate = deepcopy(previous[cr.STORE_KEY]["evidence"])
+    candidate["records"][-1].update(status="UNAVAILABLE", factual=None, provenance=None, source_kind=None,
+        reason=cr.TRANSIENT_READ + "PermissionError: cannot read")
+    monkeypatch.setattr(cr, "_capture", lambda *a: deepcopy(candidate))
+    monkeypatch.setattr(cr, "_capture_current", lambda *a: (_ for _ in ()).throw(OSError("cannot read")))
+    current = deepcopy(previous); times = iter([NOW+timedelta(seconds=1), NOW+timedelta(seconds=2)])
+    completed = cr.capture_snapshot(current, previous, now_fn=lambda: next(times), refresh_started_at=NOW)
+    assert current[cr.STORE_KEY]["evidence_sha256"] == previous[cr.STORE_KEY]["evidence_sha256"]
+    assert current[cr.STORE_KEY]["latest_source_rejection"] is None
+    assert cr.describe(current, now=completed)["status"] == "AVAILABLE"
+    assert current[cr.STORE_KEY]["last_capture_error"]
+    verify(current, now=completed)
+
+
+@pytest.mark.parametrize("invalid", [True, {}, {"checked_at_utc": NOW.isoformat(), "trade_date": "invalid", "reason": "bad"},
+    {"checked_at_utc": NOW.isoformat(), "trade_date": "2026-09-11", "reason": True},
+    {"checked_at_utc": (NOW-timedelta(seconds=1)).isoformat(), "trade_date": "2026-09-11", "reason": "bad"}])
+def test_latest_rejection_metadata_must_be_valid(invalid):
+    s = snapshot(); s[cr.STORE_KEY]["latest_source_rejection"] = invalid
+    assert cr.describe(s, now=NOW)["status"] == "UNAVAILABLE"; verify(s)
+
+
+@pytest.mark.parametrize("path,value", [
+    (("task_id",), "alien_task"), (("instrument_id",), "si_futures_family"),
+    (("admission", "source_selection"), "older_valid_pair_fallback"),
+    (("admission", "earlier_invalid_pairs_do_not_prove_latest_pair_invalid"), False),
+    (("admission", "dated_factual_use_allowed"), 1), (("admission", "lags"), [True, 5, 20]),
+    (("admission", "maximum_retained_observed_dates"), 21.0),
+    (("admission", "invented_authority"), True), (("invented_scope",), "trading"),
+    (("limitations",), []), (("deployment_gate",), None)])
+def test_every_contract_identity_policy_inventory_and_type_is_bound(path, value):
+    s = snapshot(); doc = json.loads(s[cr.ADMISSION_KEY]["artifact_text"])
+    target = doc
+    for key in path[:-1]: target = target[key]
+    target[path[-1]] = value
+    text = json.dumps(doc); s[cr.ADMISSION_KEY].update(artifact_text=text, artifact_sha256=sha256(text.encode()).hexdigest())
+    assert cr.describe(s, now=NOW)["status"] == "UNAVAILABLE"; verify(s)
+
+
+@pytest.mark.parametrize("key", list(cr._expected_contract()["admission"]))
+def test_contract_missing_admission_field_revokes(key):
+    s = snapshot(); doc = json.loads(s[cr.ADMISSION_KEY]["artifact_text"]); doc["admission"].pop(key)
+    text = json.dumps(doc); s[cr.ADMISSION_KEY].update(artifact_text=text, artifact_sha256=sha256(text.encode()).hexdigest())
+    assert cr.describe(s, now=NOW)["status"] == "UNAVAILABLE"; verify(s)
