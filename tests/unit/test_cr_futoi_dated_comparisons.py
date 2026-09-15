@@ -561,3 +561,30 @@ def test_successful_capture_diagnostics_survive_later_live_and_dated_expiry(monk
     out = cr.describe(s, now=later)
     assert out["status"] == "UNAVAILABLE" and out["latest_capture_diagnostics"] == s[cr.DIAGNOSTICS_KEY]
     verify(s, now=later)
+
+
+@pytest.mark.parametrize("seconds,allowed", [(1170, True), (1170.000001, False), (86400, False)])
+def test_current_capture_requires_existing_source_ttl_at_original_cutoff(monkeypatch, seconds, allowed):
+    s = snapshot(); install_current(s, monkeypatch)
+    carrier = s[cr.CURRENT_KEY]; cutoff = NOW+timedelta(seconds=seconds)
+    # Fixture event is NOW-30 seconds; 1170 therefore reaches the exact1200 boundary.
+    carrier["evidence"].update(causal_cutoff_at_utc=cutoff.isoformat(), captured_at_utc=cutoff.isoformat())
+    carrier["evidence_sha256"] = cr.common._digest(carrier["evidence"])
+    if allowed:
+        assert cr._validated_current_capture(carrier)["causal_cutoff_at_utc"] == cutoff.isoformat()
+    else:
+        with pytest.raises(ValueError, match="expired_at_capture"):
+            cr._validated_current_capture(carrier)
+        s[cr.STORE_KEY]["last_capture_attempt_at_utc"] = cutoff.isoformat()
+        s[cr.DIAGNOSTICS_KEY] = {"checked_at_utc": cutoff.isoformat(), "dated_error": None, "current_error": None}
+        out = cr.describe(s, now=cutoff)
+        assert out["status"] == "UNAVAILABLE" and out["latest_capture_diagnostics"] is None
+        verify(s, now=cutoff)
+
+
+def test_later_capture_completion_does_not_redate_original_source_freshness(monkeypatch):
+    s = snapshot(); install_current(s, monkeypatch)
+    carrier = s[cr.CURRENT_KEY]
+    carrier["evidence"]["captured_at_utc"] = (NOW+timedelta(hours=1)).isoformat()
+    carrier["evidence_sha256"] = cr.common._digest(carrier["evidence"])
+    assert cr._validated_current_capture(carrier)["causal_cutoff_at_utc"] == NOW.isoformat()

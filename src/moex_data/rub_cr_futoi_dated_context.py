@@ -258,7 +258,11 @@ def _validated_current_capture(stored):
     _valid_record(result, fact["trade_date"], common._stamp(proof["causal_cutoff_at_utc"]))
     if result["provenance"]["raw_partition_sha256"] != proof["original_provenance"]["raw_partition_sha256"]:
         raise ValueError("cr_current_frozen_raw_digest_mismatch")
-    for key in CLOCKS: common._stamp(fact[key])
+    from moex_data.futures.futoi_current_pair_authority import MAX_AGE_SECONDS
+    cutoff = common._stamp(proof["causal_cutoff_at_utc"])
+    for key in CLOCKS:
+        if not 0 <= (cutoff-common._stamp(fact[key])).total_seconds() <= MAX_AGE_SECONDS:
+            raise ValueError("cr_current_factual_clock_future_or_expired_at_capture")
     return proof
 
 
