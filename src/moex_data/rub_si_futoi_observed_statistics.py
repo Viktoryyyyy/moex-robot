@@ -234,8 +234,8 @@ def _render(snapshot, now, e, facts, linked, error):
 
 
 def describe(snapshot, *, now):
-    now = dated._stamp(now)
     try:
+        now = dated._stamp(now)
         return _render(snapshot, now, *_admit(snapshot, now))
     except (KeyError, TypeError, ValueError, OverflowError, AttributeError) as exc:
         return {"schema_version": SCHEMA, "status": "UNAVAILABLE", "reason": str(exc), **dated.FLAGS}
@@ -366,8 +366,9 @@ def capture_snapshot(snapshot, previous, *, now_fn, refresh_started_at):
 def verify_projection(snapshot, release, *, now):
     """Canonical inventory plus separately derived Decimal arithmetic below."""
     output = release["futoi_context"]["futoi_live"].get("observed_statistics")
-    now = dated._stamp(now)
-    try: e, facts, linked, error = _admit(snapshot, now)
+    try:
+        now = dated._stamp(now)
+        e, facts, linked, error = _admit(snapshot, now)
     except (KeyError, TypeError, ValueError, OverflowError, AttributeError) as exc:
         expected = {"schema_version": SCHEMA, "status": "UNAVAILABLE", "reason": str(exc), **dated.FLAGS}
         dated._require(isinstance(output, dict) and dated._digest(output) == dated._digest(expected), "Si statistics canonical refusal")

@@ -191,6 +191,23 @@ def test_raw_receipt_clock_cannot_be_deleted_from_retained_sample(clock):
     stats.verify_projection(value, result, now=NOW)
 
 
+@pytest.mark.parametrize("invalid", [None, [], {}, "invalid", "2026-09-14T17:30:00"])
+def test_invalid_read_clock_refuses_without_generation_fallback(invalid):
+    value = snapshot(30)
+    value["identity"] = {"generated_at_utc": NOW.isoformat()}
+    before = deepcopy(value)
+    result = release(value, now=invalid, comparisons={})
+    context = result["futoi_context"]["futoi_live"]
+    assert context["observed_statistics"]["status"] == "UNAVAILABLE"
+    assert "dated" not in context["observed_statistics"]
+    assert context["comparisons"]["statistics"]["status"] == "UNAVAILABLE"
+    stats.verify_projection(value, result, now=invalid)
+    assert value == before
+    context["observed_statistics"] = stats.describe(value, now=NOW)
+    with pytest.raises(AssertionError, match="canonical refusal"):
+        stats.verify_projection(value, result, now=invalid)
+
+
 def test_current_and_dated_share_slots_and_legacy_statistics_are_replaced(monkeypatch):
     value = snapshot()
     fact = HELPERS["factual"]("2026-09-14", 450)
