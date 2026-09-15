@@ -181,6 +181,7 @@ def test_overlay_binds_clock_before_slow_prework_and_real_prefetch(tmp_path, mon
             monkeypatch.setattr(live_market, 'attach_live_market_oi_context', lambda *args, **kwargs: None)
             monkeypatch.setattr(live_market, 'attach_live_basis_carry_context', lambda *args, **kwargs: None)
             monkeypatch.setattr(live_market.user_position, 'attach_user_position_context', lambda *args, **kwargs: None)
+            monkeypatch.setattr('moex_data.rub_si_futoi_dated_context.capture_snapshot', lambda *args, **kwargs: None)
             value, _ = live_market.refresh_snapshot(now_fn=clock, live_loader=lambda: {})
     component = value['components']['futures_calendar']; data = component['data']
     assert component['status'] == 'READY'

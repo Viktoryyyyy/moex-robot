@@ -85,7 +85,7 @@ def coverage(release):
     for key in ('futoi_live', 'futoi_live_cr'):
         context = release['futoi_context'][key]
         add(key, key in facts and context['current_usable'], context['reason'], scope=context['scope'])
-        rows[-1]['previous_dated_observation_available'] = context['previous_observation'] is not None
+        rows[-1]['previous_dated_observation_available'] = context['previous_observation'] is not None or (key == 'futoi_live' and _dict(context.get('dated_comparisons')).get('status') in ('AVAILABLE', 'PARTIAL'))
     add('market_structure', release['market_structure']['status'] == 'AVAILABLE', release['market_structure']['reason'], scope='accepted_dated_USDRUBF_structure')
     for timeframe in ('1H', '1D', '1W'):
         add('timeframe_' + timeframe, any(item['values'].get('timeframe') == timeframe for item in release['timeframe_context']),
@@ -132,7 +132,8 @@ def coverage(release):
         row['dated_preparation_available'] = ('market:' + key in dated if key in MARKETS else
             any(item.startswith('basis:') for item in dated) if key == 'basis_carry' else
             'structure' in dated or 'structure:observed_range_levels.USDRUBF' in dated if key == 'market_structure' else
-            timeframes[key.removeprefix('timeframe_')]
+            _dict(_dict(release['futoi_context'].get('futoi_live')).get('dated_comparisons')).get('status') in ('AVAILABLE', 'PARTIAL')
+            if key == 'futoi_live' else timeframes[key.removeprefix('timeframe_')]
             if key in ('timeframe_1H', 'timeframe_1D', 'timeframe_1W') else False)
     return {'status': 'COMPLETE' if not missing else 'PARTIAL', 'requirements': rows,
         'missing_required': missing, 'model_ready': False,
