@@ -325,6 +325,16 @@ def _portable_witness(e,buffers,now):
     _require(dates[-22:]==e['observed_dates'],'portable_witness_exact_date_inventory')
 
 
+def _native_numbers(row):
+    """Use the original live reader's numeric representation; keep proof rows raw."""
+    from moex_data import synchronized_live_market_oi_context as live
+    try:
+        return (live._nonnegative_price(row['LAST'],secid=row['SECID'],field='LAST'),
+                live._integer(row['OPENPOSITION']))
+    except live.SynchronizedLiveMarketOIError as exc:
+        raise ValueError(str(exc)) from exc
+
+
 def _portable_native_body(binding_proof,buffers,bindings,now,facts=None):
     """Reconstruct the ordinary reader input from original HTTP buffers, not copied rows."""
     from moex_data import synchronized_live_market_oi_context as live
@@ -352,7 +362,8 @@ def _portable_native_body(binding_proof,buffers,bindings,now,facts=None):
     if facts is not None:
         for role,secid in bindings.items():
             row,item=selected[secid]
-            nodes[role]={'secid':secid,'last':row['LAST'],'oi':row['OPENPOSITION'],
+            price,oi=_native_numbers(row)
+            nodes[role]={'secid':secid,'last':price,'oi':oi,
                 'timestamp':live._source_event_time(row['SYSTIME'],'portable.SYSTIME').isoformat(),
                 'received_at_utc':item['received_at_utc'],'source_trade_date':row['TRADEDATE'],
                 'last_trade_time_moscow':live._optional_source_text(row.get('TIME')),
@@ -835,7 +846,8 @@ def _original_current(root, body, now, *, buffers=None, binding_sink=None, budge
         source_time=live._source_event_time(row['SYSTIME'],'B.SYSTIME')
         _require(source_time==_stamp(node['timestamp']) and source_time<=received,'current_original_source_clock_mismatch')
         _require(row.get('TRADEDATE')==node.get('source_trade_date'),'current_native_trade_date_mismatch')
-        fact=_pair(secid,node['source_trade_date'],node['timestamp'],node['timestamp'],node['received_at_utc'],node['last'],node['oi'],
+        price,oi=_native_numbers(row)
+        fact=_pair(secid,node['source_trade_date'],node['timestamp'],node['timestamp'],node['received_at_utc'],price,oi,
             {**proof,'source_row':row,'retained_http_inventory':proofs,
                 'original_bindings':{role:actual_bindings[role] for role in ROLES},'binding_as_of_utc':binding_clock.isoformat()},source_kind='CURRENT_NATIVE_SAME_RESPONSE_ROW')
         fact['timestamp_semantics']='source_row_update_time_not_last_trade_time'
