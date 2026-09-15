@@ -208,6 +208,71 @@ def test_invalid_read_clock_refuses_without_generation_fallback(invalid):
         stats.verify_projection(value, result, now=invalid)
 
 
+def test_json_only_consumer_receives_formulas_ties_and_original_anchor_clocks():
+    value = snapshot(3)
+    rows = value[stats.STORE_KEY]["evidence"]["rows"]
+    for row, net in zip(rows, (400, 500, 400)):
+        fact = HELPERS["factual"](row["trade_date"], net)
+        row.update(stats._encode_row(fact, row["proof_id"]))
+    rehash(value)
+    original = deepcopy(value)
+    payload = json.loads(json.dumps(release(value)))
+    output = payload["futoi_context"]["futoi_live"]["observed_statistics"]
+    assert "current_usable" not in output
+    prior = output["dated"]
+    assert prior["anchor_role"] == "accepted_previous_observed"
+    assert prior["current_pair_usable_at_read"] is False
+    assert prior["source_anchor_clocks"] == rows[-1]["clocks"]
+    semantics = prior["statistical_semantics"]
+    assert semantics["percentile_formula"] == "count(sample_value <= anchor_value) / sample_count"
+    assert semantics["percentile_ties"] == "all_sample_values_equal_to_anchor_are_included_in_numerator"
+    assert semantics["anchor_included_in_sample"] is True
+    assert semantics["zscore_formula"] == "(anchor_value - population_mean) / population_std_ddof_0"
+    assert semantics["standard_deviation_ddof"] == 0
+    assert semantics["minimum_sample_count"] == 2
+    assert semantics["zero_variance_zscore"] is None
+    assert semantics["zero_variance_reason"] == "zero_population_variance"
+    assert prior["windows"]["252"]["variables"]["fiz.net"]["percentile"] == 2/3
+    stats.verify_projection(value, payload, now=NOW)
+    assert value == original
+    assert dated.describe(value[dated.STORE_KEY], now=NOW, governance=GOV)["current_usable"] is False
+
+
+@pytest.mark.parametrize("defect", ["formula", "ties", "inclusion", "ddof", "minimum", "role", "usable", "clock", "extra"])
+def test_shared_consumer_metadata_fault_is_rejected_independently(monkeypatch, defect):
+    original = stats._view_metadata
+    def wrong(*args):
+        result = original(*args)
+        if defect == "formula": result["statistical_semantics"]["percentile_formula"] = "count(sample < anchor) / N"
+        elif defect == "ties": result["statistical_semantics"]["percentile_ties"] = "ignore_equal_values"
+        elif defect == "inclusion": result["statistical_semantics"]["anchor_included_in_sample"] = False
+        elif defect == "ddof": result["statistical_semantics"]["standard_deviation_ddof"] = 1
+        elif defect == "minimum": result["statistical_semantics"]["minimum_sample_count"] = 1
+        elif defect == "role": result["anchor_role"] = "CURRENT_LIVE"
+        elif defect == "usable": result["current_pair_usable_at_read"] = True
+        elif defect == "clock": result["source_anchor_clocks"] = {"snapshot_ts": "1900-01-01T00:00:00Z"}
+        else: result["invented_fact"] = 7
+        return result
+    monkeypatch.setattr(stats, "_view_metadata", wrong)
+    value = snapshot(30)
+    with pytest.raises(AssertionError): stats.verify_projection(value, release(value), now=NOW)
+
+
+@pytest.mark.parametrize("missing_store", [False, True])
+def test_refused_current_semantics_are_explicit_and_canonical(missing_store):
+    value = snapshot(30)
+    if missing_store: value.pop(stats.STORE_KEY)
+    result = release(value, comparisons={})
+    output = result["futoi_context"]["futoi_live"]["observed_statistics"]
+    assert "current_usable" not in output
+    current = result["futoi_context"]["futoi_live"]["comparisons"]["statistics"]
+    assert current["status"] == "UNAVAILABLE" and current["variables"] is None
+    assert current["anchor_role"] == "current_intraday"
+    assert current["current_pair_usable_at_read"] is False
+    assert current["source_anchor_clocks"] is None
+    stats.verify_projection(value, result, now=NOW)
+
+
 def test_current_and_dated_share_slots_and_legacy_statistics_are_replaced(monkeypatch):
     value = snapshot()
     fact = HELPERS["factual"]("2026-09-14", 450)
@@ -221,10 +286,32 @@ def test_current_and_dated_share_slots_and_legacy_statistics_are_replaced(monkey
     context = result["futoi_context"]["futoi_live"]
     current = context["observed_statistics"]["current"]
     assert current["status"] == "AVAILABLE"
+    assert "current_usable" not in context["observed_statistics"]
+    assert current["current_pair_usable_at_read"] is True
+    assert current["anchor_role"] == "current_intraday"
+    assert current["source_anchor_clocks"] == {key: fact[key] for key in stats.CLOCKS}
+    assert context["observed_statistics"]["dated"]["current_pair_usable_at_read"] is False
     assert current["windows"]["504"]["sample_dates"][-1] == "2026-09-14"
     assert len(current["windows"]["504"]["sample_dates"]) == 504
     assert context["comparisons"]["statistics"] == current
     stats.verify_projection(value, result, now=NOW)
+
+
+def test_optimized_python_rejects_forged_consumer_semantics(tmp_path):
+    import subprocess, sys
+    value = snapshot(3); result = release(value)
+    result["futoi_context"]["futoi_live"]["observed_statistics"]["dated"]["statistical_semantics"]["percentile_ties"] = "strict_less_than"
+    fixture = tmp_path / "semantics.json"; fixture.write_text(json.dumps([value, result]))
+    program = """import json,sys
+from datetime import datetime
+from moex_data.rub_si_futoi_observed_statistics import verify_projection
+s,r=json.load(open(sys.argv[1]))
+try: verify_projection(s,r,now=datetime.fromisoformat(sys.argv[2]))
+except AssertionError: sys.exit(0)
+sys.exit(7)
+"""
+    result = subprocess.run([sys.executable, "-O", "-c", program, str(fixture), NOW.isoformat()], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
 
 
 def test_compact_keeps_exact_dates_and_locatable_audit_without_full_rows():

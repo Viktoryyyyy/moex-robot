@@ -19,6 +19,30 @@ UNITS = {"positions_and_open_interest": "contracts", "participant_fields": "side
          "long_short_net_shares": "fraction_of_one_sided_open_interest",
          "gross_share_of_two_sided_oi": "gross_divided_by_2_times_open_interest",
          "share_changes": "fraction_difference_not_percentage_points", "percentile": "fraction", "zscore": "dimensionless"}
+FLAGS = {key: value for key, value in dated.FLAGS.items() if key != "current_usable"}
+SEMANTICS = {
+    "version": "si_statistics_consumer_semantics.v1",
+    "sample": "admitted_subset_within_exact_observed_slots_no_older_gap_substitution",
+    "anchor_included_in_sample": True,
+    "percentile_formula": "count(sample_value <= anchor_value) / sample_count",
+    "percentile_ties": "all_sample_values_equal_to_anchor_are_included_in_numerator",
+    "zscore_formula": "(anchor_value - population_mean) / population_std_ddof_0",
+    "standard_deviation_ddof": 0,
+    "minimum_sample_count": 2,
+    "below_minimum_reason": "minimum_two_admitted_observations_required",
+    "zero_variance_zscore": None,
+    "zero_variance_reason": "zero_population_variance",
+}
+
+
+def _view_metadata(role, anchor):
+    return {"anchor_role": role, "current_pair_usable_at_read": role == "current_intraday" and anchor is not None,
+            "source_anchor_clocks": {key: anchor.get(key) for key in CLOCKS} if anchor is not None else None,
+            "statistical_semantics": deepcopy(SEMANTICS)}
+
+
+def _current_refusal(reason):
+    return {"status": "UNAVAILABLE", "reason": reason, **_view_metadata("current_intraday", None)}
 
 
 def _text(value):
@@ -220,17 +244,19 @@ def _current(snapshot, e, facts, now):
 def _render(snapshot, now, e, facts, linked, error):
         excluded = {row["trade_date"]: row["reason"] for row in e["rows"] if row["status"] == "UNAVAILABLE"}
         prior = _summary(e["slots"], facts, facts[e["slots"][-1]], excluded)
+        prior.update(_view_metadata("accepted_previous_observed", facts[e["slots"][-1]]))
         try:
             slots, current_facts, current = _current(snapshot, e, facts, now)
             live = _summary(slots, current_facts, current, excluded)
+            live.update(_view_metadata("current_intraday", current))
         except (KeyError, TypeError, ValueError, OverflowError, AttributeError) as exc:
-            live = {"status": "UNAVAILABLE", "reason": str(exc)}
+            live = _current_refusal(str(exc))
         return {"schema_version": SCHEMA, "policy": POLICY, "status": "AVAILABLE",
             "scope": "SI_FAMILY_DESCRIPTIVE_OBSERVED_SUBSETS_NOT_STATISTICAL_CONFIDENCE", "minimum_sample_count": 2,
             "units": deepcopy(UNITS), "checked_at_utc": now.isoformat(), "accepted_at_utc": e["accepted_at_utc"],
             "causal_cutoff_at_utc": e["causal_cutoff_at_utc"], "linked_dated_evidence_sha256": linked["evidence_sha256"],
             "statistics_evidence_sha256": snapshot[STORE_KEY]["evidence_sha256"], "last_capture_error": error,
-            "audit_reference": "input_snapshot.json#/" + STORE_KEY + "/evidence", "dated": prior, "current": live, **dated.FLAGS}
+            "audit_reference": "input_snapshot.json#/" + STORE_KEY + "/evidence", "dated": prior, "current": live, **FLAGS}
 
 
 def describe(snapshot, *, now):
@@ -238,7 +264,7 @@ def describe(snapshot, *, now):
         now = dated._stamp(now)
         return _render(snapshot, now, *_admit(snapshot, now))
     except (KeyError, TypeError, ValueError, OverflowError, AttributeError) as exc:
-        return {"schema_version": SCHEMA, "status": "UNAVAILABLE", "reason": str(exc), **dated.FLAGS}
+        return {"schema_version": SCHEMA, "status": "UNAVAILABLE", "reason": str(exc), **FLAGS}
 
 
 def attach_consumer(snapshot, consumers, *, now):
@@ -246,8 +272,7 @@ def attach_consumer(snapshot, consumers, *, now):
     result = describe(snapshot, now=now)
     context["observed_statistics"] = result
     if context.get("comparisons") is not None:
-        context["comparisons"]["statistics"] = deepcopy(result.get("current") or {
-            "status": "UNAVAILABLE", "reason": result["reason"]})
+        context["comparisons"]["statistics"] = deepcopy(result.get("current") or _current_refusal(result["reason"]))
         if context["comparisons"]["statistics"]["status"] == "UNAVAILABLE":
             context["comparisons"]["statistics"]["variables"] = None
         context["comparisons"]["statistics_policy"] = POLICY
@@ -370,11 +395,14 @@ def verify_projection(snapshot, release, *, now):
         now = dated._stamp(now)
         e, facts, linked, error = _admit(snapshot, now)
     except (KeyError, TypeError, ValueError, OverflowError, AttributeError) as exc:
-        expected = {"schema_version": SCHEMA, "status": "UNAVAILABLE", "reason": str(exc), **dated.FLAGS}
+        expected = {"schema_version": SCHEMA, "status": "UNAVAILABLE", "reason": str(exc), **FLAGS}
         dated._require(isinstance(output, dict) and dated._digest(output) == dated._digest(expected), "Si statistics canonical refusal")
         comparisons = release["futoi_context"]["futoi_live"].get("comparisons")
         if comparisons is not None:
-            dated._require(comparisons.get("statistics") == {"status": "UNAVAILABLE", "reason": str(exc), "variables": None}
+            refusal = {"status": "UNAVAILABLE", "reason": str(exc), "variables": None,
+                "anchor_role": "current_intraday", "current_pair_usable_at_read": False,
+                "source_anchor_clocks": None, "statistical_semantics": SEMANTICS}
+            dated._require(dated._digest(comparisons.get("statistics")) == dated._digest(refusal)
                 and comparisons.get("statistics_policy") == POLICY, "Si statistics refused legacy selection")
         return
     expected = _render(snapshot, now, e, facts, linked, error)
@@ -384,7 +412,7 @@ def verify_projection(snapshot, release, *, now):
         "units": UNITS, "checked_at_utc": now.isoformat(), "accepted_at_utc": e["accepted_at_utc"],
         "causal_cutoff_at_utc": e["causal_cutoff_at_utc"], "linked_dated_evidence_sha256": linked["evidence_sha256"],
         "statistics_evidence_sha256": snapshot[STORE_KEY]["evidence_sha256"], "last_capture_error": error,
-        "audit_reference": "input_snapshot.json#/" + STORE_KEY + "/evidence", **dated.FLAGS}
+        "audit_reference": "input_snapshot.json#/" + STORE_KEY + "/evidence", **FLAGS}
     dated._require(set(output) == set(metadata) | {"current", "dated"}
         and dated._digest({key: output[key] for key in metadata}) == dated._digest(metadata), "Si statistics independent metadata")
     comparisons = release["futoi_context"]["futoi_live"].get("comparisons")
@@ -398,11 +426,19 @@ def verify_projection(snapshot, release, *, now):
         slots, live_facts, _ = _current(snapshot, e, facts, dated._stamp(now))
         views["current"] = (slots, live_facts)
     except (KeyError, TypeError, ValueError, OverflowError, AttributeError) as exc:
-        dated._require(output["current"] == {"status": "UNAVAILABLE", "reason": str(exc)}, "Si statistics current refusal completeness")
+        refusal = {"status": "UNAVAILABLE", "reason": str(exc), "anchor_role": "current_intraday",
+            "current_pair_usable_at_read": False, "source_anchor_clocks": None, "statistical_semantics": SEMANTICS}
+        dated._require(dated._digest(output["current"]) == dated._digest(refusal), "Si statistics current refusal completeness")
     for name, (slots, source) in views.items():
         result = output[name]
-        dated._require(set(result) == {"status", "anchor_trade_date", "anchor_values", "changes", "windows"}
+        view_metadata = {"anchor_role": "current_intraday" if name == "current" else "accepted_previous_observed",
+            "current_pair_usable_at_read": name == "current",
+            "source_anchor_clocks": {key: source[slots[-1]].get(key) for key in CLOCKS},
+            "statistical_semantics": SEMANTICS}
+        dated._require(set(result) == {"status", "anchor_trade_date", "anchor_values", "changes", "windows", *view_metadata}
             and result["status"] == "AVAILABLE" and result["anchor_trade_date"] == slots[-1], "Si statistics admitted view inventory")
+        dated._require(dated._digest({key: result[key] for key in view_metadata}) == dated._digest(view_metadata),
+                       "Si statistics independent consumer semantics and anchor clocks")
         dated._require(set(result["changes"]) == {str(lag) for lag in dated.LAGS}
             and set(result["windows"]) == {str(window) for window in WINDOWS}, "Si statistics window and lag inventory")
         def numbers(fact):
