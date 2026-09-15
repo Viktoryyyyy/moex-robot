@@ -77,6 +77,22 @@ def _capture_diagnostics(snapshot, now):
     for key in ("dated_error", "current_error"):
         if value[key] is not None and (not isinstance(value[key], str) or not value[key]):
             raise ValueError("cr_capture_diagnostic_nullable_text_required")
+    store = snapshot.get(STORE_KEY)
+    if store is not None:
+        if checked != common._stamp(store["last_capture_attempt_at_utc"]) or checked < common._stamp(store["evidence"]["accepted_at_utc"]) or value["dated_error"] != store["last_capture_error"]:
+            raise ValueError("cr_diagnostic_capture_attempt_mismatch")
+    elif value["dated_error"] is None:
+        raise ValueError("cr_diagnostic_dated_success_without_store")
+    current = snapshot.get(CURRENT_KEY)
+    if current is not None:
+        if value["current_error"] is not None or checked != common._stamp(current["evidence"]["captured_at_utc"]):
+            raise ValueError("cr_diagnostic_current_proof_contradiction")
+    elif value["current_error"] is None:
+        raise ValueError("cr_diagnostic_current_success_without_proof")
+    identity = snapshot.get("identity") or {}
+    if identity.get("refresh_completed_at_utc") is not None:
+        if not common._stamp(identity["refresh_started_at_utc"]) <= checked <= common._stamp(identity["refresh_completed_at_utc"]):
+            raise ValueError("cr_diagnostic_outside_completed_refresh")
     if checked > now:
         return None
     return deepcopy(value)
@@ -381,6 +397,10 @@ def capture_snapshot(snapshot, previous, *, now_fn, refresh_started_at, previous
     floor = [common._stamp(refresh_started_at)]
     if previous_capture_completed is not None: floor.append(common._stamp(previous_capture_completed))
     if old is not None: floor.append(common._stamp(old["last_capture_attempt_at_utc"]))
+    prior_diagnostics = (previous or {}).get(DIAGNOSTICS_KEY)
+    if prior_diagnostics is not None:
+        _capture_diagnostics(previous, cutoff)
+        floor.append(common._stamp(prior_diagnostics["checked_at_utc"]))
     if cutoff < max(floor): raise ValueError("cr_capture_clock_precedes_refresh_or_prior_capture")
     working = deepcopy(snapshot)
     working.pop(ADMISSION_KEY, None)

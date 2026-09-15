@@ -477,7 +477,46 @@ def test_invalid_read_clock_never_leaks_diagnostics(read_at):
 
 def test_refused_diagnostic_tampering_is_rejected():
     s = snapshot(); s.pop(cr.STORE_KEY)
-    s[cr.DIAGNOSTICS_KEY] = {"checked_at_utc": NOW.isoformat(), "dated_error": "first source failure", "current_error": None}
+    s[cr.DIAGNOSTICS_KEY] = {"checked_at_utc": NOW.isoformat(), "dated_error": "first source failure", "current_error": "current source failure"}
     r = release(s); out = r["futoi_context"]["futoi_live_cr"]["scoped_observed_comparisons"]
     out["latest_capture_diagnostics"]["dated_error"] = "invented different failure"
     with pytest.raises(AssertionError): verify(s, r)
+
+
+@pytest.mark.parametrize("mutation", ["ancient", "dated_error", "current_error_with_proof", "different_proof_clock", "missing_store", "missing_proof", "before_refresh", "after_refresh"])
+def test_diagnostic_producer_coherence_required(monkeypatch, mutation):
+    s = snapshot(); install_current(s, monkeypatch)
+    s[cr.DIAGNOSTICS_KEY] = {"checked_at_utc": NOW.isoformat(), "dated_error": None, "current_error": None}
+    assert cr.describe(s, now=NOW)["status"] == "AVAILABLE"
+    if mutation == "ancient": s[cr.DIAGNOSTICS_KEY]["checked_at_utc"] = "1900-01-01T00:00:00+00:00"
+    elif mutation == "dated_error": s[cr.DIAGNOSTICS_KEY]["dated_error"] = "contradictory dated failure"
+    elif mutation == "current_error_with_proof": s[cr.DIAGNOSTICS_KEY]["current_error"] = "additional current byte validation failed"
+    elif mutation == "different_proof_clock": s[cr.CURRENT_KEY]["evidence"]["captured_at_utc"] = (NOW-timedelta(seconds=1)).isoformat()
+    elif mutation == "missing_store": s.pop(cr.STORE_KEY)
+    elif mutation == "missing_proof": s.pop(cr.CURRENT_KEY)
+    elif mutation == "before_refresh": s["identity"] = {"refresh_started_at_utc": (NOW+timedelta(seconds=1)).isoformat(), "refresh_completed_at_utc": (NOW+timedelta(seconds=2)).isoformat()}
+    elif mutation == "after_refresh": s["identity"] = {"refresh_started_at_utc": (NOW-timedelta(seconds=2)).isoformat(), "refresh_completed_at_utc": (NOW-timedelta(seconds=1)).isoformat()}
+    out = cr.describe(s, now=NOW)
+    assert out["status"] == "UNAVAILABLE" and out["latest_capture_diagnostics"] is None
+    verify(s)
+
+
+def test_coherent_future_diagnostic_is_hidden():
+    s = snapshot(); later = NOW+timedelta(seconds=10)
+    s[cr.STORE_KEY].update(last_capture_attempt_at_utc=later.isoformat(), last_capture_error="future dated read failed")
+    s[cr.DIAGNOSTICS_KEY] = {"checked_at_utc": later.isoformat(), "dated_error": "future dated read failed", "current_error": "future current read failed"}
+    out = cr.describe(s, now=NOW)
+    assert out["status"] == "AVAILABLE" and out["latest_capture_diagnostics"] is None
+    assert "future dated read failed" not in json.dumps(out) and "future current read failed" not in json.dumps(out)
+    verify(s)
+
+
+def test_first_failure_diagnostic_clock_prevents_backward_next_capture(monkeypatch):
+    previous = snapshot(); previous.pop(cr.STORE_KEY)
+    previous[cr.DIAGNOSTICS_KEY] = {"checked_at_utc": (NOW+timedelta(seconds=10)).isoformat(),
+        "dated_error": "first dated read failed", "current_error": "first current read failed"}
+    current = snapshot(); before = deepcopy(current)
+    monkeypatch.setattr(cr, "_capture", lambda *a: pytest.fail("clock reversal must stop before source reads"))
+    with pytest.raises(ValueError, match="precedes_refresh_or_prior_capture"):
+        cr.capture_snapshot(current, previous, now_fn=lambda: NOW+timedelta(seconds=1), refresh_started_at=NOW)
+    assert current == before
