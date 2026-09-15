@@ -94,9 +94,9 @@ def _integer(value):
     return int(value)
 
 
-def _fact(record, expected, at):
+def _fact(record, expected, at, *, instrument_id=INSTRUMENT):
     """Independent retained-fact arithmetic, not the engine's normalizer."""
-    if not isinstance(record, dict) or record.get("instrument_id") != INSTRUMENT:
+    if not isinstance(record, dict) or record.get("instrument_id") != instrument_id:
         raise ValueError("factual_instrument_mismatch")
     if record.get("source_id") != SOURCE:
         raise ValueError("factual_source_mismatch")
@@ -390,7 +390,7 @@ def _verified_frame(root, provenance, prefix):
     return engine.pd.read_parquet(BytesIO(content))
 
 
-def _freeze_raw_fact(root, provenance, expected, *, normalized):
+def _freeze_raw_fact(root, provenance, expected, *, normalized, instrument_id=INSTRUMENT):
     from moex_data.futures import futoi_delta_statistics_context as engine
     from moex_data.futures import futoi_live_factual_refresh_source_native as source
     proof = deepcopy(provenance)
@@ -398,9 +398,9 @@ def _freeze_raw_fact(root, provenance, expected, *, normalized):
     path = root / proof["raw_partition_ref"][len("${MOEX_DATA_ROOT}/"):]
     frozen = source._freeze_artifact(root, path, proof["raw_partition_sha256"])
     proof["raw_partition_ref"] = source._rooted_ref(root, frozen)
-    identity = source.source_identity(INSTRUMENT)
+    identity = source.source_identity(instrument_id)
     fact = source.latest_aligned_factual(_verified_frame(root, proof, "raw_partition"),
-        expected_trade_date=expected, expected_instrument_id=INSTRUMENT,
+        expected_trade_date=expected, expected_instrument_id=instrument_id,
         expected_source_ticker=identity["source_ticker"], expected_secid=identity["secid"])
     if normalized:
         fact = engine._normalized_factual(fact, field="frozen_raw." + expected)

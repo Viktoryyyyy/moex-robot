@@ -323,7 +323,15 @@ def refresh_snapshot(
         capture_si_dated(snapshot, previous, now_fn=now_fn, refresh_started_at=now)
         from moex_data.rub_si_futoi_observed_statistics import capture_snapshot as capture_si_statistics
         statistics_completed = capture_si_statistics(snapshot, previous, now_fn=now_fn, refresh_started_at=now)
+        from moex_data.rub_cr_futoi_dated_context import capture_snapshot as capture_cr_dated
+        si_attempt_before_cr = (snapshot.get(SI_DATED_STORE_KEY) or {}).get("last_capture_attempt_at_utc")
+        previous_capture_completed = statistics_completed or (
+            base._aware(si_attempt_before_cr, "si_capture_completed_at") if si_attempt_before_cr is not None else now)
+        cr_completed = capture_cr_dated(snapshot, previous, now_fn=now_fn, refresh_started_at=now,
+                                       previous_capture_completed=previous_capture_completed)
         completed = base._aware(now_fn(), "refresh_completed_at")
+        if cr_completed is not None and completed < cr_completed:
+            raise base.ChatAnalysisSnapshotError("refresh completion precedes CR dated capture completion")
         if statistics_completed is not None and completed < statistics_completed:
             raise base.ChatAnalysisSnapshotError("refresh completion precedes Si statistics capture completion")
         si_attempt = (snapshot.get(SI_DATED_STORE_KEY) or {}).get("last_capture_attempt_at_utc")

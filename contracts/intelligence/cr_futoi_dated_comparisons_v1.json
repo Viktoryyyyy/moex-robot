@@ -1,0 +1,31 @@
+{
+  "schema_version": "cr_futoi_dated_admission.v1",
+  "task_id": "cr_futoi_dated_comparisons_v1",
+  "instrument_id": "cr_futures_family",
+  "source_id": "moex_algopack_futoi",
+  "scope": "CR_OBSERVED_PAIR_COMPARISONS_ONLY",
+  "admission": {
+    "dated_factual_use_allowed": true,
+    "current_comparisons_require_existing_current_pair_admission": true,
+    "legacy_current_pair_governance_unchanged": true,
+    "maximum_dated_age_seconds": 345600,
+    "maximum_retained_observed_dates": 21,
+    "lags": [1, 5, 20],
+    "source_selection": "latest aligned FIZ/YUR pair on exact witnessed date; invalid latest pair refuses without older pair or EOD fallback",
+    "earlier_invalid_pairs_do_not_prove_latest_pair_invalid": true,
+    "whole_partition_or_session_acceptance": false,
+    "source_byte_binding_required": true,
+    "raw_publication_and_ingest_clocks_required": true,
+    "first_acceptance_after_source_validation": true,
+    "exact_missing_dates_never_substituted": true,
+    "session_completion_proven": false,
+    "historical_pit_usable": false,
+    "model_usable": false,
+    "directional_authority": false,
+    "action_authority": false,
+    "stage5_pointer_promotion_performed": false,
+    "statistics_authority": false
+  },
+  "deployment_gate": "scoped PM_L1 authorization; code review, tests, merge and separate runtime acceptance required",
+  "limitations": "Current-pair-only legacy fields remain unchanged. A4 statistics and whole-history backfill are outside this contract. A valid latest pair does not admit earlier invalid intraday pairs."
+}
