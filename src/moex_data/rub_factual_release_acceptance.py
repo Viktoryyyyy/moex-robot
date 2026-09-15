@@ -180,6 +180,8 @@ def projection_completeness(snapshot, value, *, now):
     now = now.astimezone(timezone.utc)
     from moex_data.rub_si_futoi_dated_context import verify_projection as verify_si_dated
     verify_si_dated(snapshot, value, now=now)
+    from moex_data.rub_si_futoi_observed_statistics import verify_projection as verify_si_statistics
+    verify_si_statistics(snapshot, value, now=now)
     from math import isfinite
     view = apply_read_freshness(snapshot, now=now)
     components = view.get('components', {})
@@ -503,14 +505,11 @@ def projection_completeness(snapshot, value, *, now):
                 expected_delta.update(status='UNAVAILABLE', reason='previous_observation_not_admitted_or_baseline_mismatch')
             if expected_delta.get('status') != 'AVAILABLE': expected_delta['values'] = None
             _require(comparisons['deltas'][name] == expected_delta, 'Si admitted delta values and exclusions')
-        if engine.get('statistics', {}).get('status') == 'AVAILABLE':
-            _require(comparisons['statistics'].get('semantics') == engine['statistics'].get('semantics'), 'Si statistics semantics')
-            for name, variable in (engine['statistics'].get('variables') or {}).items():
-                for window, item in variable.get('windows', {}).items():
-                    if item.get('status') == 'AVAILABLE': _require(comparisons['statistics']['variables'][name]['windows'][window] == item, 'Si available statistics')
-                    else: _require(all(comparisons['statistics']['variables'][name]['windows'][window].get(field) is None
-                        for field in ('percentile', 'zscore', 'population_mean', 'population_std_ddof_0')), 'Si excluded statistics windows')
-        else: _require(comparisons.get('statistics', {}).get('variables') is None, 'Si excluded statistics')
+        # A2 replaces only statistics. Its exact observed-slot inventory, source
+        # exclusions and independent Decimal arithmetic were verified above;
+        # the obsolete EOD-plus-current sample is retained only in source audit.
+        _require(comparisons.get('statistics_policy') == 'observed_slots_admitted_subset_min2_descriptive.v1',
+                 'Si observed statistics selection required')
     _require(all(event['direction'] == 'UNKNOWN' and event['classification_status'] == 'NOT_ANALYZED'
         for event in value['news_context']['events']), 'news no neutrality')
     news = components.get('official_news', {}); data = news.get('data') or {}
