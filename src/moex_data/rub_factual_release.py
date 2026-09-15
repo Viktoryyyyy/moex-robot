@@ -106,6 +106,8 @@ def describe(snapshot):
     attach_si_dated(snapshot, consumers, now=target_now)
     from moex_data.rub_si_futoi_observed_statistics import attach_consumer as attach_si_statistics
     attach_si_statistics(snapshot, consumers, now=target_now)
+    from moex_data.rub_cr_futoi_dated_context import attach_consumer as attach_cr_dated
+    attach_cr_dated(snapshot, consumers, now=target_now)
     accepted_dated = dated_context(snapshot, now=target_now) if target_now else {'status': 'UNAVAILABLE', 'observations': {}}
     range_item = accepted_dated['observations'].get('structure:observed_range_levels.USDRUBF')
     range_levels = ({'status': 'AVAILABLE', 'values': deepcopy(range_item['values']['values']),
