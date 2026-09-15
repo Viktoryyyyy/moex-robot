@@ -248,6 +248,8 @@ def attach_consumer(snapshot, consumers, *, now):
     if context.get("comparisons") is not None:
         context["comparisons"]["statistics"] = deepcopy(result.get("current") or {
             "status": "UNAVAILABLE", "reason": result["reason"]})
+        if context["comparisons"]["statistics"]["status"] == "UNAVAILABLE":
+            context["comparisons"]["statistics"]["variables"] = None
         context["comparisons"]["statistics_policy"] = POLICY
 
 
@@ -371,7 +373,7 @@ def verify_projection(snapshot, release, *, now):
         dated._require(isinstance(output, dict) and dated._digest(output) == dated._digest(expected), "Si statistics canonical refusal")
         comparisons = release["futoi_context"]["futoi_live"].get("comparisons")
         if comparisons is not None:
-            dated._require(comparisons.get("statistics") == {"status": "UNAVAILABLE", "reason": str(exc)}
+            dated._require(comparisons.get("statistics") == {"status": "UNAVAILABLE", "reason": str(exc), "variables": None}
                 and comparisons.get("statistics_policy") == POLICY, "Si statistics refused legacy selection")
         return
     expected = _render(snapshot, now, e, facts, linked, error)
@@ -386,7 +388,9 @@ def verify_projection(snapshot, release, *, now):
         and dated._digest({key: output[key] for key in metadata}) == dated._digest(metadata), "Si statistics independent metadata")
     comparisons = release["futoi_context"]["futoi_live"].get("comparisons")
     if comparisons is not None:
-        dated._require(comparisons.get("statistics") == output["current"] and comparisons.get("statistics_policy") == POLICY,
+        alias = deepcopy(output["current"])
+        if alias["status"] == "UNAVAILABLE": alias["variables"] = None
+        dated._require(dated._digest(comparisons.get("statistics")) == dated._digest(alias) and comparisons.get("statistics_policy") == POLICY,
                        "Si statistics legacy current selection")
     views = {"dated": (e["slots"], facts)}
     try:
