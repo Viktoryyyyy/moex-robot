@@ -6,12 +6,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from moex_research.features.oil_fx_rub_v1_features import prepare_identity_panel
+from moex_research.runners import usdrubf_phase6_internal_modeling_dataset_builder as phase6_builder
 from moex_research.runners.usdrubf_oil_fx_rub_v1_pit_research_dataset import (
     BRENT_READY_STATUS,
-    CNYRUBF_READY_STATUS,
+    EXPECTED_IMMUTABLE_SHA256,
     OilFxRubDatasetError,
     build_research_dataset,
     validate_brent_admission,
+    validate_immutable_hashes,
+    validate_phase6_source_panel_replay,
 )
 
 
@@ -22,6 +26,13 @@ def _contract() -> dict:
             "contract_version": "1.0",
             "project": "MOEX_Bot",
             "task_id": "STRAT_OIL_FX_RUB_V1_02B_RESEARCH_DATASET",
+        },
+        "staged_modes": {
+            "brent_only": {
+                "authorized_now": True,
+                "cnyrubf_input_allowed": False,
+            },
+            "oil_fx_full": {"authorized_now": False},
         },
         "approved_file_scope": {
             "existing_files_to_modify": [],
@@ -52,20 +63,45 @@ def _gates(status: str) -> dict:
     return result
 
 
-def _identities() -> pd.DataFrame:
-    targets = pd.bdate_range("2024-08-05", periods=472)
-    priors = pd.bdate_range("2024-08-02", periods=472)
+def _phase6_source_panel() -> pd.DataFrame:
+    dates = pd.bdate_range("2024-08-02", periods=491)
+    x = np.arange(len(dates), dtype=float)
+    close = 80.0 + x * 0.05
     return pd.DataFrame(
         {
-            "target_trade_date": targets.strftime("%Y-%m-%d"),
-            "target_instrument_id": "forts.usdrubf",
-            "prior_trade_date": priors.strftime("%Y-%m-%d"),
+            "trade_date": dates.strftime("%Y-%m-%d"),
+            "instrument_id": "forts.usdrubf",
+            "open": close - 0.02,
+            "high": close + 0.10,
+            "low": close - 0.10,
+            "close": close,
+            "volume": 1000.0 + x,
+            "value": 80000.0 + x * 10.0,
+            "num_trades": 100.0 + x,
         }
     )
 
 
-def _brent() -> pd.DataFrame:
-    frame = _identities()
+def _frozen_modeling_dataset(panel: pd.DataFrame) -> pd.DataFrame:
+    prepared = phase6_builder._prepare_internal_d1_panel(panel)
+    diagnostic = phase6_builder._add_past_only_diagnostics(prepared)
+    features = phase6_builder._build_feature_frame(diagnostic)
+    targets = pd.DataFrame(
+        {
+            "target_trade_date": prepared["trade_date"],
+            "target_instrument_id": prepared["instrument_id"],
+            "target_phase_label": None,
+            "target_is_labeled": False,
+            "target_source": "manual_phase_labels_v1",
+        }
+    )
+    targets.loc[1:472, "target_phase_label"] = "B"
+    targets.loc[1:472, "target_is_labeled"] = True
+    return pd.concat([targets, features], axis=1)
+
+
+def _brent(modeling: pd.DataFrame) -> pd.DataFrame:
+    frame = prepare_identity_panel(modeling)
     x = np.arange(len(frame), dtype=float)
     frame["brent_contract_code"] = "BRX4"
     frame["brent_trade_date"] = frame["prior_trade_date"]
@@ -77,89 +113,77 @@ def _brent() -> pd.DataFrame:
     return frame
 
 
-def _cnyrubf() -> pd.DataFrame:
-    frame = _identities()
-    x = np.arange(len(frame), dtype=float)
-    frame["cnyrubf_security_id"] = "CNYRUBF"
-    frame["cnyrubf_trade_date"] = frame["prior_trade_date"]
-    frame["cnyrubf_open"] = 11.0 + x * 0.001
-    frame["cnyrubf_high"] = frame["cnyrubf_open"] + 0.05
-    frame["cnyrubf_low"] = frame["cnyrubf_open"] - 0.05
-    frame["cnyrubf_close"] = frame["cnyrubf_open"] + 0.01
-    frame["cnyrubf_volume"] = 5000.0 + x
-    frame["cnyrubf_volume_imbalance"] = 0.1
-    frame["cnyrubf_open_interest_close"] = 100000.0 + x
-    return frame
-
-
-def _d1() -> pd.DataFrame:
-    dates = pd.bdate_range("2024-08-05", periods=490)
-    return pd.DataFrame(
-        {"trade_date": dates.strftime("%Y-%m-%d"), "close": 80.0 + np.arange(490)}
-    )
-
-
-def test_brent_only_passes_with_admitted_brent_and_no_cny() -> None:
+def test_brent_only_passes_after_lineage_and_hash_admission() -> None:
+    panel = _phase6_source_panel()
+    modeling = _frozen_modeling_dataset(panel)
+    validate_phase6_source_panel_replay(modeling, panel)
     features, labels, gates = build_research_dataset(
         contract=_contract(),
-        identity_panel=_identities(),
-        brent_matrix=_brent(),
+        frozen_modeling_dataset=modeling,
+        phase6_source_panel=panel,
+        brent_matrix=_brent(modeling),
         brent_gate_results=_gates(BRENT_READY_STATUS),
-        usdrubf_d1=_d1(),
+        phase6_lineage_verified=True,
+        brent_artifacts_verified=True,
         mode="brent_only",
     )
     assert len(features) == 472
     assert len(labels) == 472
     assert gates["G9_final"]["passed"] is True
-    assert gates["G3_cnyrubf_admission"]["status"] is None
 
 
-def test_full_mode_refuses_failed_cnyrubf_gate() -> None:
-    cny_gates = _gates(CNYRUBF_READY_STATUS)
-    cny_gates["G4_test"]["passed"] = False
-    with pytest.raises(OilFxRubDatasetError, match="failed gate"):
+def test_oil_fx_full_remains_blocked_even_if_caller_requests_it() -> None:
+    panel = _phase6_source_panel()
+    modeling = _frozen_modeling_dataset(panel)
+    with pytest.raises(OilFxRubDatasetError, match="not authorized by current contract"):
         build_research_dataset(
             contract=_contract(),
-            identity_panel=_identities(),
-            brent_matrix=_brent(),
+            frozen_modeling_dataset=modeling,
+            phase6_source_panel=panel,
+            brent_matrix=_brent(modeling),
             brent_gate_results=_gates(BRENT_READY_STATUS),
-            usdrubf_d1=_d1(),
+            phase6_lineage_verified=True,
+            brent_artifacts_verified=True,
             mode="oil_fx_full",
-            cnyrubf_matrix=_cnyrubf(),
-            cnyrubf_gate_results=cny_gates,
         )
 
 
-def test_full_mode_requires_exact_cnyrubf_candidate_status() -> None:
-    with pytest.raises(OilFxRubDatasetError, match="post-fix source status"):
-        build_research_dataset(
-            contract=_contract(),
-            identity_panel=_identities(),
-            brent_matrix=_brent(),
-            brent_gate_results=_gates(BRENT_READY_STATUS),
-            usdrubf_d1=_d1(),
-            mode="oil_fx_full",
-            cnyrubf_matrix=_cnyrubf(),
-            cnyrubf_gate_results=_gates("moex_algopack_cnyrubf_source_not_ready"),
-        )
+def test_immutable_upstream_hashes_are_exactly_pinned() -> None:
+    validate_immutable_hashes(dict(EXPECTED_IMMUTABLE_SHA256))
+    bad = dict(EXPECTED_IMMUTABLE_SHA256)
+    bad["brent_pit_acceptance_matrix"] = "0" * 64
+    with pytest.raises(OilFxRubDatasetError, match="hash mismatch"):
+        validate_immutable_hashes(bad)
 
 
-def test_upstream_gate_inventory_must_be_exact_g1_to_g9() -> None:
-    brent_gates = _gates(BRENT_READY_STATUS)
-    del brent_gates["G3_test"]
+def test_phase6_source_panel_replay_detects_changed_price_history() -> None:
+    panel = _phase6_source_panel()
+    modeling = _frozen_modeling_dataset(panel)
+    changed = panel.copy()
+    changed.loc[100, "close"] += 1.0
+    changed.loc[100, "high"] = max(changed.loc[100, "high"], changed.loc[100, "close"])
+    with pytest.raises(OilFxRubDatasetError, match="replay mismatch"):
+        validate_phase6_source_panel_replay(modeling, changed)
+
+
+def test_gate_inventory_and_authority_widening_fail_closed() -> None:
+    gates = _gates(BRENT_READY_STATUS)
+    del gates["G3_test"]
     with pytest.raises(OilFxRubDatasetError, match="exactly G1-G9"):
-        validate_brent_admission(brent_gates)
+        validate_brent_admission(gates)
 
-
-def test_authority_boundary_widening_is_rejected() -> None:
     contract = deepcopy(_contract())
     contract["authority_boundary"]["model_fit_allowed"] = True
+    panel = _phase6_source_panel()
+    modeling = _frozen_modeling_dataset(panel)
     with pytest.raises(OilFxRubDatasetError, match="authority boundary was widened"):
         build_research_dataset(
             contract=contract,
-            identity_panel=_identities(),
-            brent_matrix=_brent(),
+            frozen_modeling_dataset=modeling,
+            phase6_source_panel=panel,
+            brent_matrix=_brent(modeling),
             brent_gate_results=_gates(BRENT_READY_STATUS),
-            usdrubf_d1=_d1(),
+            phase6_lineage_verified=True,
+            brent_artifacts_verified=True,
             mode="brent_only",
         )

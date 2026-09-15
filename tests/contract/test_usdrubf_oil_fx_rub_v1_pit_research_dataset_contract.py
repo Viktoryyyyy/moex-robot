@@ -30,28 +30,38 @@ def test_contract_is_additive_create_only_scope() -> None:
     assert all(value is False for value in contract["authority_boundary"].values())
 
 
-def test_contract_reuses_existing_source_lineage_without_redefining_it() -> None:
+def test_contract_pins_existing_phase6_and_brent_evidence() -> None:
+    upstream = _contract()["upstream_contracts"]
+    phase6 = upstream["phase6_identity_and_price_lineage"]
+    assert phase6["frozen_modeling_dataset_sha256"] == (
+        "fdd626f9e0522c6bbb653f9e17fbbbeef7ded77f57ff187b35246a2458d55d00"
+    )
+    assert phase6["frozen_dataset_manifest_sha256"] == (
+        "fcbbb5e5ed0549c5c6f397e34f203f01836271f6bf471f90cab5a2fd64ace082"
+    )
+    brent = upstream["brent"]
+    assert brent["runtime_must_not_be_repeated"] is True
+    assert brent["source_artifact_regeneration_allowed"] is False
+    assert brent["accepted_artifact_sha256"]["brent_pit_acceptance_matrix"] == (
+        "78b60c9542fc08667267849b9ce03fdf161d2dc971fe99e1ab9d6a8d56266c43"
+    )
+    assert brent["accepted_artifact_sha256"]["phase84a_gate_results"] == (
+        "aceaefb4d2e2a236539dd527c98464ddd1ea6bf5f1cdb8121662e1ce087f9c4c"
+    )
+
+
+def test_contract_keeps_cnyrubf_full_mode_blocked_until_separate_admission() -> None:
     contract = _contract()
-    upstream = contract["upstream_contracts"]
-    assert upstream["brent"]["source_contract"].endswith(
-        "usdrubf_phase8_4a_moex_brent_source_validation_v1.json"
-    )
-    assert upstream["brent"]["runtime_must_not_be_repeated"] is True
-    assert upstream["brent"]["source_artifact_regeneration_allowed"] is False
-    assert upstream["cnyrubf"]["source_contract"].endswith(
-        "usdrubf_phase8_6a_algopack_cnyrubf_fo_source_correction_v1.json"
-    )
-    assert upstream["cnyrubf"]["security_id"] == "CNYRUBF"
-    assert upstream["cnyrubf"]["spot_cnyrub_tom_allowed"] is False
-    assert upstream["cnyrubf"]["synthetic_cross_allowed"] is False
-
-
-def test_contract_stages_brent_now_and_full_fx_only_after_post_fix_gate() -> None:
-    modes = _contract()["staged_modes"]
+    modes = contract["staged_modes"]
+    cny = contract["upstream_contracts"]["cnyrubf"]
     assert modes["brent_only"]["authorized_now"] is True
     assert modes["brent_only"]["cnyrubf_input_allowed"] is False
     assert modes["oil_fx_full"]["authorized_now"] is False
-    assert "post-fix CNYRUBF" in modes["oil_fx_full"]["authorization_condition"]
+    assert "separate additive admission contract" in modes["oil_fx_full"]["authorization_condition"]
+    assert "separate additive admission contract" in cny["future_enablement_policy"]
+    assert cny["security_id"] == "CNYRUBF"
+    assert cny["spot_cnyrub_tom_allowed"] is False
+    assert cny["synthetic_cross_allowed"] is False
 
 
 def test_contract_separates_labels_and_forbids_cross_contract_returns() -> None:
@@ -64,5 +74,6 @@ def test_contract_separates_labels_and_forbids_cross_contract_returns() -> None:
     assert pit["interpolation_allowed"] is False
     assert pit["brent_cross_contract_return_allowed"] is False
     assert labels["feature_and_label_artifacts_separate"] is True
+    assert "Phase 6 source D1 panel" in labels["price_source"]
     assert labels["labels_forbidden_from_feature_artifact"] is True
     assert labels["forward_return_horizons_sessions"] == [1, 3, 5, 10]

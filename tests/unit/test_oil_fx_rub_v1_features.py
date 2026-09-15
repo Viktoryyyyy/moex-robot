@@ -9,6 +9,7 @@ from moex_research.features.oil_fx_rub_v1_features import (
     OilFxRubFeatureError,
     build_feature_frame,
     build_forward_return_labels,
+    prepare_identity_panel,
 )
 
 
@@ -62,7 +63,7 @@ def test_brent_roll_window_returns_are_structural_nulls() -> None:
     assert np.isfinite(features.loc[15, "ext_brent_same_contract_close_return_5session"])
 
 
-def test_full_mode_builds_cny_and_interaction_features() -> None:
+def test_full_feature_builder_preserves_future_stage_cny_semantics() -> None:
     features = build_feature_frame(
         _identities(), _brent(), mode="oil_fx_full", cnyrubf_matrix=_cnyrubf()
     )
@@ -80,19 +81,43 @@ def test_wrong_cnyrubf_security_is_rejected() -> None:
         )
 
 
-def test_brent_only_refuses_cnyrubf_input() -> None:
-    with pytest.raises(OilFxRubFeatureError, match="forbidden in brent_only"):
-        build_feature_frame(
-            _identities(), _brent(), mode="brent_only", cnyrubf_matrix=_cnyrubf()
-        )
+def test_phase6_full_dataset_is_filtered_to_exact_eligible_identities() -> None:
+    base = _identities()
+    eligible = base.assign(
+        target_phase_label="B",
+        target_is_labeled=True,
+        target_source="manual_phase_labels_v1",
+    )
+    extra = eligible.iloc[[0]].copy()
+    extra["target_trade_date"] = "2024-08-03"
+    extra["prior_trade_date"] = "2024-08-02"
+    extra["target_is_labeled"] = False
+    combined = pd.concat([extra, eligible], ignore_index=True)
+    prepared = prepare_identity_panel(combined)
+    assert len(prepared) == 472
+    assert prepared.iloc[0]["target_trade_date"] == "2024-08-05"
 
 
 def test_forward_labels_are_separate_session_based_artifact() -> None:
     identities = _identities()
     all_dates = pd.bdate_range("2024-08-05", periods=490)
     close = 80.0 + np.arange(len(all_dates), dtype=float)
-    panel = pd.DataFrame({"trade_date": all_dates, "close": close})
+    panel = pd.DataFrame(
+        {
+            "trade_date": all_dates,
+            "instrument_id": "forts.usdrubf",
+            "close": close,
+        }
+    )
     labels = build_forward_return_labels(identities, panel)
-    assert tuple(column for column in labels if column not in ("target_trade_date", "target_instrument_id")) == LABEL_COLUMNS
-    assert labels.loc[0, "fwd_usdrubf_close_return_1session"] == pytest.approx(81.0 / 80.0 - 1.0)
-    assert labels.loc[0, "fwd_usdrubf_close_return_10session"] == pytest.approx(90.0 / 80.0 - 1.0)
+    assert tuple(
+        column
+        for column in labels
+        if column not in ("target_trade_date", "target_instrument_id")
+    ) == LABEL_COLUMNS
+    assert labels.loc[0, "fwd_usdrubf_close_return_1session"] == pytest.approx(
+        81.0 / 80.0 - 1.0
+    )
+    assert labels.loc[0, "fwd_usdrubf_close_return_10session"] == pytest.approx(
+        90.0 / 80.0 - 1.0
+    )

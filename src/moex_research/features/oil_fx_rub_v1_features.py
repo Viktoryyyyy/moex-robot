@@ -10,6 +10,13 @@ IDENTITY_COLUMNS: Final[tuple[str, str]] = (
     "target_trade_date",
     "target_instrument_id",
 )
+TARGET_FILTER_COLUMNS: Final[tuple[str, ...]] = (
+    "target_phase_label",
+    "target_is_labeled",
+    "target_source",
+)
+TARGET_SOURCE: Final[str] = "manual_phase_labels_v1"
+CLASS_ORDER: Final[tuple[str, str, str]] = ("B", "S", "OUT")
 EXPECTED_INSTRUMENT: Final[str] = "forts.usdrubf"
 EXPECTED_IDENTITY_COUNT: Final[int] = 472
 
@@ -100,12 +107,22 @@ def _date_strings(series: pd.Series, label: str) -> pd.Series:
 
 
 def prepare_identity_panel(identity_panel: pd.DataFrame) -> pd.DataFrame:
-    _require_columns(
-        identity_panel,
-        (*IDENTITY_COLUMNS, "prior_trade_date"),
-        "identity panel",
-    )
-    work = identity_panel.loc[:, (*IDENTITY_COLUMNS, "prior_trade_date")].copy()
+    present_filter_columns = [
+        column for column in TARGET_FILTER_COLUMNS if column in identity_panel.columns
+    ]
+    if present_filter_columns and len(present_filter_columns) != len(TARGET_FILTER_COLUMNS):
+        raise OilFxRubFeatureError("identity panel has partial target filter columns")
+    source = identity_panel
+    if len(present_filter_columns) == len(TARGET_FILTER_COLUMNS):
+        eligible = (
+            identity_panel["target_source"].eq(TARGET_SOURCE)
+            & identity_panel["target_is_labeled"].eq(True)
+            & identity_panel["target_phase_label"].isin(CLASS_ORDER)
+        )
+        source = identity_panel.loc[eligible].copy()
+
+    _require_columns(source, (*IDENTITY_COLUMNS, "prior_trade_date"), "identity panel")
+    work = source.loc[:, (*IDENTITY_COLUMNS, "prior_trade_date")].copy()
     work["target_trade_date"] = _date_strings(
         work["target_trade_date"], "target_trade_date"
     )
@@ -119,7 +136,7 @@ def prepare_identity_panel(identity_panel: pd.DataFrame) -> pd.DataFrame:
     work = work.sort_values(list(IDENTITY_COLUMNS), kind="mergesort").reset_index(drop=True)
     if len(work) != EXPECTED_IDENTITY_COUNT:
         raise OilFxRubFeatureError(
-            f"identity count must equal {EXPECTED_IDENTITY_COUNT}"
+            f"eligible identity count must equal {EXPECTED_IDENTITY_COUNT}"
         )
     if work.duplicated(list(IDENTITY_COLUMNS), keep=False).any():
         raise OilFxRubFeatureError("duplicate identity")
@@ -353,10 +370,8 @@ def build_feature_frame(
     ):
         raise OilFxRubFeatureError("forbidden target/future field entered feature artifact")
     numeric = features.loc[:, feature_columns].apply(pd.to_numeric, errors="coerce")
-    finite_or_null = np.isfinite(numeric.to_numpy(float)) | np.isnan(
-        numeric.to_numpy(float)
-    )
-    if not finite_or_null.all():
+    values = numeric.to_numpy(float)
+    if not (np.isfinite(values) | np.isnan(values)).all():
         raise OilFxRubFeatureError("derived feature contains infinite value")
     return features
 
@@ -366,9 +381,16 @@ def build_forward_return_labels(
     usdrubf_d1: pd.DataFrame,
 ) -> pd.DataFrame:
     identities = prepare_identity_panel(identity_panel)
-    _require_columns(usdrubf_d1, ("trade_date", "close"), "USDRUBF D1 panel")
-    panel = usdrubf_d1.loc[:, ["trade_date", "close"]].copy()
+    _require_columns(
+        usdrubf_d1,
+        ("trade_date", "instrument_id", "close"),
+        "USDRUBF Phase 6 source D1 panel",
+    )
+    panel = usdrubf_d1.loc[:, ["trade_date", "instrument_id", "close"]].copy()
     panel["trade_date"] = _date_strings(panel["trade_date"], "USDRUBF D1 trade_date")
+    instruments = panel["instrument_id"].astype("string").str.strip()
+    if instruments.isna().any() or not instruments.eq(EXPECTED_INSTRUMENT).all():
+        raise OilFxRubFeatureError("USDRUBF D1 instrument identity mismatch")
     if panel.duplicated(["trade_date"], keep=False).any():
         raise OilFxRubFeatureError("USDRUBF D1 panel contains duplicate trade_date")
     panel = panel.sort_values("trade_date", kind="mergesort").reset_index(drop=True)
