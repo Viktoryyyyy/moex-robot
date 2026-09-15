@@ -149,6 +149,9 @@ def test_oil_fx_full_remains_blocked_even_if_caller_requests_it() -> None:
 
 
 def test_immutable_upstream_hashes_are_exactly_pinned() -> None:
+    assert EXPECTED_IMMUTABLE_SHA256["phase84a_input_identity"] == (
+        "3fa20b2daf45f196937064b5f1cc6a58b8009e544d6141e32a77d841d68b65ae"
+    )
     validate_immutable_hashes(dict(EXPECTED_IMMUTABLE_SHA256))
     bad = dict(EXPECTED_IMMUTABLE_SHA256)
     bad["brent_pit_acceptance_matrix"] = "0" * 64
