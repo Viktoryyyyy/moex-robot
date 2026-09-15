@@ -42,6 +42,11 @@
     "current_exact_comparison_max_calendar_gap_from_witness": 1,
     "current_gap_policy": "retain_fresh_anchor_refuse_exact_lags_without_non_session_inference",
     "native_response_inventory_max_decoded_bytes": 64000000,
-    "native_response_inventory_budget_counts_repeated_entries": true
+    "native_response_inventory_budget_counts_repeated_entries": true,
+    "capture_original_artifact_max_bytes": 64000000,
+    "capture_original_artifact_max_count": 1024,
+    "capture_original_artifact_scope": "distinct_verified_buffers_including_discovery_witness_history_alternate_native",
+    "capture_budget_overflow_policy": "sticky_whole_capture_refusal_before_further_parse_or_freeze",
+    "capture_unknown_digest_read_bound_bytes": 8000000
   }
 }

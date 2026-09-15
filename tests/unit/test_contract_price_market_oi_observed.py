@@ -317,7 +317,7 @@ def test_capture_retention_tracks_fact_versions_not_attempts(monkeypatch,tmp_pat
         raise PermissionError('current original byte read denied')
     monkeypatch.setattr(m,'_original_current',unavailable)
     buffers=m._decode_buffers(e['original_byte_buffers'])
-    monkeypatch.setattr(m,'_read_bytes',lambda root,ref,expected=None:buffers[expected])
+    monkeypatch.setattr(m,'_read_bytes',lambda root,ref,expected=None,**kwargs:buffers[expected])
     current=deepcopy(old);current['components']={'synchronized_live_market_oi':{'data':_native_body()}}
     ticks=iter((NOW+timedelta(seconds=1),NOW+timedelta(seconds=2)))
     completed=m.capture_snapshot(current,old,now_fn=lambda:next(ticks),refresh_started_at=NOW)
@@ -362,7 +362,7 @@ def test_original_first_acceptance_expiry_is_not_renewed_by_same_history(monkeyp
     monkeypatch.setattr(m,'_historical',lambda *a:(e['history'],{}))
     monkeypatch.setattr(m,'_original_current',lambda *a,**kw:kw['binding_sink'].update(e['binding_proof']))
     buffers=m._decode_buffers(e['original_byte_buffers'])
-    monkeypatch.setattr(m,'_read_bytes',lambda root,ref,expected=None:buffers[expected])
+    monkeypatch.setattr(m,'_read_bytes',lambda root,ref,expected=None,**kwargs:buffers[expected])
     ticks=iter((later,later+timedelta(seconds=1)))
     m.capture_snapshot(current,old,now_fn=lambda:next(ticks),refresh_started_at=later)
     assert current[m.STORE_KEY]['evidence_sha256']==old[m.STORE_KEY]['evidence_sha256']
@@ -526,7 +526,7 @@ def _archive_inventory(root,count):
 
 def test_archive_inventory_boundary_256_is_checked_before_date_filter(tmp_path,monkeypatch):
     _archive_inventory(tmp_path,256);reads=[]
-    def read(root,ref,expected=None):
+    def read(root,ref,expected=None,**kwargs):
         if ref.endswith('/pilot_evidence.json'):
             reads.append(ref);return b'{"trade_date":"2020-01-01"}'
         if ref.endswith('/'+m.SOURCE_ADMISSION):raise FileNotFoundError('fixture has no bounded admission')
@@ -914,17 +914,17 @@ def test_incomplete_capture_preserves_original_error_and_never_enters_admission(
     monkeypatch.setattr(m,'_witness',lambda *a:(e['observed_dates'],e['witness_proof']))
     monkeypatch.setattr(m,'_historical',lambda *a:(e['history'],{}))
     buffers=m._decode_buffers(e['original_byte_buffers'])
-    monkeypatch.setattr(m,'_read_bytes',lambda root,ref,expected=None:buffers[expected])
+    monkeypatch.setattr(m,'_read_bytes',lambda root,ref,expected=None,**kwargs:buffers[expected])
     original_table=m._buffer_table;original_native=m._native_buffers;calls=[]
     def table(root,value,**kwargs):
         if (stage=='candidate_buffers' and 'history' in value) or (stage=='current_buffers' and 'SiU6' in value):
             raise PermissionError('exact '+stage+' source read refused')
         return original_table(root,value,**kwargs)
     native_calls=[]
-    def native(body):
+    def native(body,*args,**kwargs):
         native_calls.append(1)
         if stage=='native_inventory' and len(native_calls)==2:raise ValueError('exact native_inventory exceeded')
-        return original_native(body)
+        return original_native(body,*args,**kwargs)
     monkeypatch.setattr(m,'_buffer_table',table);monkeypatch.setattr(m,'_native_buffers',native)
     original_admit=m._admit
     def admit(*args,**kwargs):calls.append(1);return original_admit(*args,**kwargs)
@@ -1043,3 +1043,129 @@ def test_cursor_case_duplicate_cardinality_matches_original_source_merge():
     assert source._aggregate_row_count(aggregate,'securities')==4
     assert sum(len(page['securities']['data']) for _,page in inventory)==5
     with pytest.raises(ValueError,match='current_cursor_incomplete'):m._validate_native_inventory(inventory)
+
+
+
+def test_capture_budget_deduplicates_identical_bytes_and_stops_before_directory_write(tmp_path,monkeypatch):
+    budget=m.CaptureBudget(max_bytes=6,max_buffers=2)
+    first=m._freeze(tmp_path,b'abc',budget=budget)
+    assert m._freeze(tmp_path,b'abc',budget=budget)==first
+    m._freeze(tmp_path,b'def',budget=budget)
+    assert budget.total_bytes==6 and len(budget.buffers)==2
+    before={str(p):p.read_bytes() for p in tmp_path.rglob('*.bin')}
+    with pytest.raises(m.CaptureBudgetExceeded):m._freeze(tmp_path,b'new',budget=budget)
+    assert {str(p):p.read_bytes() for p in tmp_path.rglob('*.bin')}==before
+    monkeypatch.setattr(Path,'open',lambda *a,**kw:pytest.fail('read after sticky exhaustion'))
+    monkeypatch.setattr(Path,'mkdir',lambda *a,**kw:pytest.fail('mkdir after sticky exhaustion'))
+    monkeypatch.setattr(m.base64,'b64decode',lambda *a,**kw:pytest.fail('decode after sticky exhaustion'))
+    with pytest.raises(m.CaptureBudgetExceeded):m._decode_buffers({},budget=budget)
+    with pytest.raises(m.CaptureBudgetExceeded):m._read_bytes(tmp_path,first['ref'],budget=budget)
+    with pytest.raises(m.CaptureBudgetExceeded):m._freeze(tmp_path,b'abc',budget=budget)
+
+
+def test_multi_run_budget_cannot_reset_before_each_run_freeze(tmp_path,monkeypatch):
+    _restore_archive(tmp_path,dates={'2026-09-13','2026-09-14'});monkeypatch.setenv('MOEX_DATA_ROOT',str(tmp_path))
+    budget=m.CaptureBudget(max_buffers=40)
+    with pytest.raises(m.CaptureBudgetExceeded,match='capture_original_artifact_budget_exceeded'):
+        m._historical(tmp_path,NOW,budget)
+    files=list((tmp_path/'state/evidence/contract_price_market_oi_observed_v1').rglob('*.bin'))
+    assert files and len(files)<=40 and budget.exhausted
+    assert sum(p.stat().st_size for p in files)<=budget.total_bytes<=budget.max_bytes
+    assert len(budget.buffers)<=40
+
+
+def test_discovery_metadata_consumes_shared_budget_before_any_freeze(tmp_path):
+    base=_archive_inventory(tmp_path,3)
+    for index,pilot in enumerate(sorted(base.glob('run_id=*/accepted_pointers.json'))):
+        pilot.with_name('pilot_evidence.json').write_text(json.dumps({'trade_date':'2020-01-01','different_original_version':index}))
+    budget=m.CaptureBudget(max_buffers=2)
+    with pytest.raises(m.CaptureBudgetExceeded):m._historical(tmp_path,NOW,budget)
+    assert not (tmp_path/'state/evidence/contract_price_market_oi_observed_v1').exists()
+
+
+def test_witness_then_official_buffers_share_the_same_budget(tmp_path):
+    _restore_witness(tmp_path);budget=m.CaptureBudget()
+    m._witness(tmp_path,NOW,budget)
+    e=deepcopy(_source_snapshot(consumer=True)[m.STORE_KEY]['evidence'])
+    buffers=m._decode_buffers(e['original_byte_buffers'])
+    admission=json.loads(buffers[e['history']['2026-08-23']['SiU6']['proof']['source_admission']['sha256']])
+    entry=next(item for item in admission['entries'] if item['kind']=='official_paginated_tradestats')
+    for page in entry['pages']:
+        for key in ('response','receipt'):
+            path=tmp_path/page[key+'_ref'].removeprefix('${MOEX_DATA_ROOT}/');path.parent.mkdir(parents=True,exist_ok=True)
+            path.write_bytes(buffers[page[key+'_sha256']])
+    budget.max_buffers=len(budget.buffers)+1
+    before={str(p) for p in tmp_path.rglob('*.bin')}
+    with pytest.raises(m.CaptureBudgetExceeded):m._official_pages(tmp_path,entry,accepted_at=NOW,now=NOW,budget=budget)
+    assert {str(p) for p in tmp_path.rglob('*.bin')}==before
+
+
+@pytest.mark.parametrize('alternate',['official_paginated_tradestats','standalone_stage3_pilot'])
+def test_alternate_source_budget_refusal_is_not_converted_to_partial_history(tmp_path,monkeypatch,alternate):
+    from moex_data import rub_accepted_stage3_resolver as resolver
+    budget=m.CaptureBudget(max_buffers=1);budget.charge(b'prior witnessed source')
+    marker=tmp_path/'bounded/run_id=step3_pilot_20260824_1705/accepted_pointers.json';marker.parent.mkdir(parents=True)
+    marker.write_bytes(b'{}');pilot=marker.with_name('pilot_evidence.json');pilot.write_bytes(b'{"x":1}')
+    entry={'kind':'standalone_stage3_pilot','run_id':'step3_pilot_20260824_1705',
+        'accepted_marker_ref':'${MOEX_DATA_ROOT}/'+marker.relative_to(tmp_path).as_posix(),'marker_sha256':m.sha256(b'{}').hexdigest(),
+        'pilot_evidence_ref':'${MOEX_DATA_ROOT}/'+pilot.relative_to(tmp_path).as_posix(),'pilot_sha256':m.sha256(b'{"x":1}').hexdigest()}
+    if alternate=='official_paginated_tradestats':
+        def pages(*args,**kwargs):
+            assert kwargs['budget'] is budget
+            m._read_bytes(tmp_path,entry['accepted_marker_ref'],budget=kwargs['budget'])
+        monkeypatch.setattr(m,'_official_pages',pages)
+        selected={'kind':alternate}
+    else:selected=entry
+    def sources(root,*,now,budget=None):
+        assert budget is not None
+        return [selected],NOW,dict(REF)
+    monkeypatch.setattr(m,'_bounded_sources',sources)
+    monkeypatch.setattr(resolver,'resolve_standalone',lambda *a,**kw:pytest.fail('parse after resource overflow'))
+    with pytest.raises(m.CaptureBudgetExceeded):m._historical(tmp_path,NOW,budget)
+    assert budget.exhausted
+
+
+def test_history_and_native_inventory_global_preflight_happens_before_decode(monkeypatch):
+    import base64
+    body=_native_body();raw=base64.b64decode(body['original_forts_http_evidence']['responses'][0]['content_base64'])
+    budget=m.CaptureBudget(max_bytes=len(raw)+2);budget.charge(b'old')
+    monkeypatch.setattr(m.base64,'b64decode',lambda *a,**kw:pytest.fail('native decode after cumulative overflow'))
+    monkeypatch.setattr(m,'_source_object',lambda *a,**kw:pytest.fail('native parse after cumulative overflow'))
+    with pytest.raises(m.CaptureBudgetExceeded):m._original_current(None,body,NOW,budget=budget)
+    assert budget.exhausted
+
+
+def test_capture_resource_refusal_preserves_prior_acceptance_and_original_error(tmp_path,monkeypatch):
+    from moex_data.futures import futoi_live_factual_refresh_source_native as source
+    old=snapshot();before=deepcopy(old)
+    _restore_archive(tmp_path,dates={'2026-09-13','2026-09-14'});_restore_witness(tmp_path)
+    monkeypatch.setenv('MOEX_DATA_ROOT',str(tmp_path));monkeypatch.setattr(source,'_data_root',lambda:tmp_path)
+    budget=m.CaptureBudget(max_buffers=10);monkeypatch.setattr(m,'CaptureBudget',lambda:budget)
+    original_json=m._source_object
+    def source_json(raw):
+        assert not budget.exhausted,'source parse after budget exhaustion'
+        return original_json(raw)
+    monkeypatch.setattr(m,'_source_object',source_json)
+    current={'components':{'synchronized_live_market_oi':{'data':_native_body()}}}
+    ticks=iter((NOW+timedelta(seconds=1),NOW+timedelta(seconds=2)))
+    completed=m.capture_snapshot(current,old,now_fn=lambda:next(ticks),refresh_started_at=NOW)
+    assert old==before and budget.exhausted
+    assert current[m.STORE_KEY]['evidence']==old[m.STORE_KEY]['evidence']
+    assert current[m.STORE_KEY]['evidence_sha256']==old[m.STORE_KEY]['evidence_sha256']
+    error=current['contract_price_market_oi_capture_error']['error']
+    assert error=='CaptureBudgetExceeded: capture_original_artifact_budget_exceeded'
+    assert current[m.STORE_KEY]['last_capture_error']==error
+    monkeypatch.setattr(m,'_source_object',original_json)
+    out=release(current,now=completed)
+    assert out['dated']['status']=='AVAILABLE' and out['accepted_at_utc']==old[m.STORE_KEY]['evidence']['accepted_at_utc']
+
+
+@pytest.mark.parametrize('limit', ['bytes','count'])
+def test_capture_budget_independent_exact_boundaries_and_path_dedup(tmp_path,limit):
+    budget=m.CaptureBudget(max_bytes=6 if limit=='bytes' else 100,max_buffers=2 if limit=='count' else 10)
+    for name,raw in (('a',b'abc'),('alias',b'abc'),('b',b'def')):
+        (tmp_path/name).write_bytes(raw)
+        assert m._read_bytes(tmp_path,'${MOEX_DATA_ROOT}/'+name,budget=budget)==raw
+    assert budget.total_bytes==6 and len(budget.buffers)==2 and not budget.exhausted
+    with pytest.raises(m.CaptureBudgetExceeded):budget.charge(b'x')
+    assert budget.total_bytes==6 and len(budget.buffers)==2 and budget.exhausted

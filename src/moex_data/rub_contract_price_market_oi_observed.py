@@ -27,6 +27,44 @@ MAX_AUDIT_BUFFERS = 1024
 MAX_ARCHIVE_DIRECTORY_ENTRIES = 256
 
 
+class CaptureBudgetExceeded(ValueError):
+    """A whole-capture refusal, never an ordinary per-date source gap."""
+
+
+class CaptureBudget:
+    """Distinct original bytes processed in one capture, including discovery.
+
+    An unknown digest requires one bounded read/hash before charging. This is
+    not a claim that total duplicate reads or peak memory are at most 64 MB.
+    """
+    def __init__(self, *, max_bytes=None, max_buffers=None):
+        self.max_bytes=MAX_AUDIT_BYTES if max_bytes is None else max_bytes
+        self.max_buffers=MAX_AUDIT_BUFFERS if max_buffers is None else max_buffers
+        self.buffers={};self.total_bytes=0;self.exhausted=False
+
+    def ensure_active(self):
+        if self.exhausted:raise CaptureBudgetExceeded('capture_original_artifact_budget_exceeded')
+
+    def _check(self,count,total):
+        self.ensure_active()
+        if count>self.max_buffers or total>self.max_bytes:
+            self.exhausted=True
+            raise CaptureBudgetExceeded('capture_original_artifact_budget_exceeded')
+
+    def preflight(self,sizes):
+        self.ensure_active()
+        new={digest:size for digest,size in sizes.items() if digest not in self.buffers}
+        self._check(len(self.buffers)+len(new),self.total_bytes+sum(new.values()))
+
+    def charge(self,raw):
+        self.ensure_active();digest=sha256(raw).hexdigest()
+        if digest in self.buffers:
+            _require(self.buffers[digest]==raw,'capture_original_digest_bytes_mismatch')
+            return
+        self._check(len(self.buffers)+1,self.total_bytes+len(raw))
+        self.buffers[digest]=raw;self.total_bytes+=len(raw)
+
+
 def _source_json(content):
     from moex_data import step9_rub_analysis_bundle as step9
     if isinstance(content,(bytes,bytearray)): content=content.decode('utf-8')
@@ -60,7 +98,8 @@ def _proof_ref(ref,digest):
     common._ref(ref)
 
 
-def _native_buffers(body):
+def _native_buffers(body, budget=None):
+    if budget is not None:budget.ensure_active()
     from moex_data import synchronized_live_market_oi_context as live
     responses=(body.get('original_forts_http_evidence') or {}).get('responses')
     _require(isinstance(responses,list) and 1<=len(responses)<=live.MAX_FORTS_PAGES+1,'current_response_bound')
@@ -72,7 +111,7 @@ def _native_buffers(body):
         _require(total<=MAX_AUDIT_BYTES,'native_response_inventory_byte_limit')
         if digest in table: _require(table[digest]==encoded,'native_duplicate_digest_bytes_mismatch')
         table[digest]=encoded
-    return _decode_buffers(table)
+    return _decode_buffers(table,budget=budget)
 
 
 CURRENT_KEY='contract_price_market_oi_current_capture'
@@ -82,11 +121,12 @@ def capture_current(body, *, started, completed, now_fn=None):
     """Bounded original-byte current evidence; no filesystem writes or new request."""
     started=_stamp(started); completed=_stamp(completed)
     _require(started<=completed,'current_capture_clock_reversed')
+    budget=CaptureBudget()
     try:
-        facts=_original_current(None,body,completed)
+        facts=_original_current(None,body,completed,budget=budget)
         current={'causal_cutoff_at_utc':completed.isoformat(),'captured_at_utc':completed.isoformat(),
             'bindings':{role:body['bindings'][role] for role in ROLES},'facts':facts,'error':None,
-            'original_byte_buffers':_buffer_table(None,facts,available=_native_buffers(body))}
+            'original_byte_buffers':_buffer_table(None,facts,available=_native_buffers(body,budget),budget=budget)}
     except Exception as exc:
         current={'causal_cutoff_at_utc':completed.isoformat(),'captured_at_utc':completed.isoformat(),
             'bindings':{},'facts':None,'error':type(exc).__name__+': '+str(exc),'original_byte_buffers':{}}
@@ -96,13 +136,15 @@ def capture_current(body, *, started, completed, now_fn=None):
     return {'capture':current,'sha256':common._digest(current)}
 
 
-def _buffer_table(root, value, *, available=None):
+def _buffer_table(root, value, *, available=None, budget=None):
+    if budget is not None:budget.ensure_active()
     """One immutable byte copy per digest; never serialize reconstructed source rows."""
     refs = _proof_references(value)
     result = {}; total=0
     for ref, digest in refs:
         if digest not in result:
-            raw = (available[digest] if available is not None and digest in available else _read_bytes(root, ref, digest))
+            raw = (available[digest] if available is not None and digest in available else _read_bytes(root, ref, digest,budget=budget))
+            if budget is not None:budget.charge(raw)
             total+=len(raw)
             _require(len(result)<MAX_AUDIT_BUFFERS and len(raw) <= MAX_BUFFER_BYTES and total<=MAX_AUDIT_BYTES, 'audit_artifact_byte_limit')
             result[digest] = base64.b64encode(raw).decode('ascii')
@@ -122,15 +164,18 @@ def _proof_references(value):
         for child in value: yield from _proof_references(child)
 
 
-def _decode_buffers(table):
+def _decode_buffers(table, *, budget=None):
+    if budget is not None:budget.ensure_active()
     _require(isinstance(table,dict) and 1<=len(table)<=MAX_AUDIT_BUFFERS,'audit_buffer_count')
     total=0
     for digest,encoded in table.items():
         common._hash(digest);total+=_encoded_size(encoded)
         _require(total<=MAX_AUDIT_BYTES,'audit_total_byte_limit')
+    if budget is not None:budget.preflight({digest:_encoded_size(encoded) for digest,encoded in table.items()})
     result={}
     for digest,encoded in table.items():
         raw=base64.b64decode(encoded,validate=True)
+        if budget is not None:budget.charge(raw)
         _require(len(raw)==_encoded_size(encoded),'audit_decoded_size_mismatch')
         _require(sha256(raw).hexdigest()==digest,'audit_original_buffer_hash')
         result[digest]=raw
@@ -360,6 +405,11 @@ CONTRACT_DOCUMENT = {'schema_version': 'contract_price_market_oi_observed_admiss
                'max_contracts': 4,
                'max_original_buffer_bytes': 8000000,
                'max_original_audit_bytes': 64000000,
+               'capture_original_artifact_max_bytes': 64000000,
+               'capture_original_artifact_max_count': 1024,
+               'capture_original_artifact_scope': 'distinct_verified_buffers_including_discovery_witness_history_alternate_native',
+               'capture_budget_overflow_policy': 'sticky_whole_capture_refusal_before_further_parse_or_freeze',
+               'capture_unknown_digest_read_bound_bytes': 8000000,
                'max_original_buffer_count': 1024,
                'native_current_byte_storage': 'inline_deduplicated_original_HTTP_bytes',
                'native_response_inventory_max_decoded_bytes': 64000000,
@@ -389,32 +439,35 @@ def _require(ok, message):
     if not ok: raise ValueError(message)
 
 
-def _read_bytes(root, ref, expected=None):
+def _read_bytes(root, ref, expected=None, *, budget=None):
+    if budget is not None:budget.ensure_active()
     common._ref(ref)
     path=root/ref[len('${MOEX_DATA_ROOT}/'):]
     _require(not path.is_symlink() and path.is_file() and path.resolve().is_relative_to(root.resolve()), 'source_path_missing_or_escaped')
     _require(path.stat().st_size<=MAX_BUFFER_BYTES,'source_artifact_byte_limit')
     with path.open('rb') as source: content=source.read(MAX_BUFFER_BYTES+1)
     _require(len(content)<=MAX_BUFFER_BYTES,'source_artifact_byte_limit')
+    if budget is not None:budget.charge(content)
     if expected is not None: _require(sha256(content).hexdigest()==expected, 'source_buffer_hash_mismatch')
     return content
 
 
-def _freeze(root, content):
+def _freeze(root, content, *, budget=None):
+    if budget is not None:budget.charge(content)
     digest=sha256(content).hexdigest()
     path=root/'state/evidence/contract_price_market_oi_observed_v1'/digest[:2]/(digest+'.bin')
     path.parent.mkdir(parents=True,exist_ok=True)
     _require(path.parent.resolve().is_relative_to(root.resolve()) and not path.is_symlink(),'immutable_source_copy_path')
-    if path.exists(): _require(_read_bytes(root,'${MOEX_DATA_ROOT}/'+path.relative_to(root).as_posix())==content,'immutable_source_copy_changed')
+    if path.exists(): _require(_read_bytes(root,'${MOEX_DATA_ROOT}/'+path.relative_to(root).as_posix(),budget=budget)==content,'immutable_source_copy_changed')
     else:
         with path.open('xb') as target: target.write(content)
     return {'ref':'${MOEX_DATA_ROOT}/'+path.relative_to(root).as_posix(),'sha256':digest}
 
 
-def _freeze_json(root,path,expected):
-    content=_read_bytes(root,'${MOEX_DATA_ROOT}/'+path.relative_to(root).as_posix())
+def _freeze_json(root,path,expected, *, budget=None):
+    content=_read_bytes(root,'${MOEX_DATA_ROOT}/'+path.relative_to(root).as_posix(),budget=budget)
     _require(common._digest(_source_object(content))==common._digest(expected),'source_json_changed_after_validation')
-    return _freeze(root,content)
+    return _freeze(root,content,budget=budget)
 
 
 def _number(value, *, positive=False, integer=False):
@@ -447,22 +500,23 @@ def _pair(secid, day, timestamp, published, received, price, oi, proof, *, sourc
         'session_completion_proven':False}
 
 
-def _stage3_pairs(root, resolved, *, now, kind, buffers=None):
+def _stage3_pairs(root, resolved, *, now, kind, buffers=None, budget=None):
     """Derive values from the same verified buffers whose digests are retained."""
     import pandas as pd
     from moex_data import step3_raw_acceptance as stage3
     specs=resolved['specs']; result={}; paired_frames={}
     def read(ref, digest=None):
+        if budget is not None:budget.ensure_active()
         if buffers is None:
             reader=resolved.get('byte_reader')
-            raw=reader(root/ref[len('${MOEX_DATA_ROOT}/'):]) if reader is not None else _read_bytes(root,ref,digest)
+            raw=reader(root/ref[len('${MOEX_DATA_ROOT}/'):]) if reader is not None else _read_bytes(root,ref,digest,budget=budget)
             if digest is not None: _require(sha256(raw).hexdigest()==digest,'source_buffer_hash_mismatch')
             return raw
         proof = resolved['source_artifacts'][ref]
         if digest is not None: _require(proof['sha256'] == digest, 'stage3_buffer_reference_changed')
         return _buffer_bytes(buffers, proof)
     def freeze(raw):
-        if buffers is None: return _freeze(root, raw)
+        if buffers is None: return _freeze(root, raw,budget=budget)
         digest = sha256(raw).hexdigest()
         return {'ref':'${MOEX_DATA_ROOT}/state/evidence/contract_price_market_oi_observed_v1/'+digest[:2]+'/'+digest+'.bin','sha256':digest}
     def freeze_json(path, expected):
@@ -478,9 +532,9 @@ def _stage3_pairs(root, resolved, *, now, kind, buffers=None):
         for spec in (quote,oi):
             paths={key:getattr(spec,attr) for key,attr in (('partition','partition_path'),('manifest','manifest_path'),('quality','quality_path'))}
             support={key:freeze(read('${MOEX_DATA_ROOT}/'+path.relative_to(root).as_posix())) for key,path in paths.items()}
-            documents={key:_source_object((buffers[support[key]['sha256']] if buffers is not None else _read_bytes(root,support[key]['ref'],support[key]['sha256']))) for key in ('manifest','quality')}
+            documents={key:_source_object((buffers[support[key]['sha256']] if buffers is not None else _read_bytes(root,support[key]['ref'],support[key]['sha256'],budget=budget))) for key in ('manifest','quality')}
             _validate_support_buffers(spec,documents['manifest'],documents['quality'])
-            frame=pd.read_parquet(BytesIO((buffers[support['partition']['sha256']] if buffers is not None else _read_bytes(root,support['partition']['ref'],support['partition']['sha256']))))
+            frame=pd.read_parquet(BytesIO((buffers[support['partition']['sha256']] if buffers is not None else _read_bytes(root,support['partition']['ref'],support['partition']['sha256'],budget=budget))))
             _require(len(frame)==spec.row_count and not frame.empty,'partition_row_count_mismatch')
             for key,val in (('instrument_id',instrument),('secid',spec.secid),('trade_date',spec.trade_date),('source_id',spec.source_id)):
                 _require(key in frame and frame[key].eq(val).all(),'partition_row_identity_mismatch')
@@ -542,11 +596,12 @@ def _table(payload, name):
     return [dict(zip((str(k).upper() for k in columns),row)) for row in rows]
 
 
-def _official_pages(root, entry, *, accepted_at, now, buffers=None):
+def _official_pages(root, entry, *, accepted_at, now, buffers=None, budget=None):
+    if budget is None and buffers is None:budget=CaptureBudget()
     from urllib.parse import urlsplit,parse_qs
     def read(ref,digest):
-        return _read_bytes(root,ref,digest) if buffers is None else _buffer_bytes(buffers,{'ref':ref,'sha256':digest})
-    def freeze(raw): return _freeze(root,raw) if buffers is None else _frozen_ref(raw)
+        return _read_bytes(root,ref,digest,budget=budget) if buffers is None else _buffer_bytes(buffers,{'ref':ref,'sha256':digest})
+    def freeze(raw): return _freeze(root,raw,budget=budget) if buffers is None else _frozen_ref(raw)
     _require(set(entry)=={'kind','trade_date','expected_total_rows','pages'} and entry['trade_date']=='2026-08-23'
         and type(entry['expected_total_rows']) is int and entry['expected_total_rows']==9683,'bounded_official_admission_identity')
     pages=entry['pages']; _require(isinstance(pages,list) and len(pages)==10,'official_page_count')
@@ -589,46 +644,48 @@ def _official_pages(root, entry, *, accepted_at, now, buffers=None):
     return result,page_proofs
 
 
-def _bounded_sources(root, *, now):
+def _bounded_sources(root, *, now, budget=None):
     ref='${MOEX_DATA_ROOT}/'+SOURCE_ADMISSION
-    content=_read_bytes(root,ref); value=_source_object(content)
+    content=_read_bytes(root,ref,budget=budget); value=_source_object(content)
     _require(set(value)=={'schema_version','project','task_id','accepted_at_utc','entries'},'source_admission_shape')
     _require(value['schema_version']=='contract_price_market_oi_source_admission.v1' and value['project']=='MOEX_Bot'
         and value['task_id']=='contract_price_market_oi_observed_comparisons_v1','source_admission_identity')
     accepted=_stamp(value['accepted_at_utc']); _require(accepted<=now,'source_admission_future')
     entries=value['entries']; _require(isinstance(entries,list) and len(entries)==2,'source_admission_bounded_inventory')
     _require({e.get('kind') for e in entries}=={'official_paginated_tradestats','standalone_stage3_pilot'},'source_admission_kinds')
-    return entries,accepted,_freeze(root,content)
+    return entries,accepted,_freeze(root,content,budget=budget)
 
 
-def _witness(root, now):
+def _witness(root, now, budget=None):
+    if budget is None:budget=CaptureBudget()
     import pandas as pd
     from moex_data import step9_rub_analysis_bundle as step9
     from moex_data.futures import futoi_delta_statistics_context as engine
     spec=engine._spec(stage=7,dataset_id=engine.OBSERVED_DATE_WITNESS_DATASET_ID,
         instrument_id=engine.OBSERVED_DATE_WITNESS_INSTRUMENT_ID,timeframe=engine.OBSERVED_DATE_WITNESS_TIMEFRAME)
     pointer_path=step9._pointer_path(root,spec)
-    pointer_raw=_read_bytes(root,'${MOEX_DATA_ROOT}/'+pointer_path.relative_to(root).as_posix())
+    pointer_raw=_read_bytes(root,'${MOEX_DATA_ROOT}/'+pointer_path.relative_to(root).as_posix(),budget=budget)
     pointer=_source_object(pointer_raw); raw={'pointer':pointer_raw}
     for key in ('partition','manifest','quality_report'):
-        raw[key]=_read_bytes(root,pointer[key+'_ref'],pointer[key+'_sha256'])
+        raw[key]=_read_bytes(root,pointer[key+'_ref'],pointer[key+'_sha256'],budget=budget)
     frame=pd.read_parquet(BytesIO(raw['partition']))
     dates=sorted({_day(str(day)) for day in frame['trade_date']})
     _require(bool(dates) and dates[-1]<=now.astimezone(archive.MOSCOW).date().isoformat(),'observed_witness_dates')
     proof={key:_frozen_ref(content) for key,content in raw.items()}
     _portable_witness({'witness_proof':proof,'observed_dates':dates[-22:]},
         {sha256(content).hexdigest():content for content in raw.values()},now)
-    for content in raw.values(): _freeze(root,content)
+    for content in raw.values(): _freeze(root,content,budget=budget)
     return dates[-22:],proof
 
 
-def _memoized_source_reader(root):
+def _memoized_source_reader(root, budget=None):
     """Each original artifact is bounded before parsing and shared through freeze."""
     cache={}; total=0
     def read(path):
         nonlocal total
+        if budget is not None:budget.ensure_active()
         if path not in cache:
-            raw=_read_bytes(root,'${MOEX_DATA_ROOT}/'+path.relative_to(root).as_posix())
+            raw=_read_bytes(root,'${MOEX_DATA_ROOT}/'+path.relative_to(root).as_posix(),budget=budget)
             _require(len(cache)<MAX_AUDIT_BUFFERS and total+len(raw)<=MAX_AUDIT_BYTES,'audit_artifact_byte_limit')
             cache[path]=raw;total+=len(raw)
         return cache[path]
@@ -655,7 +712,8 @@ def _bounded_archive_markers(base):
         and (base/entry.name/'accepted_pointers.json').is_file())
 
 
-def _historical(root, now):
+def _historical(root, now, budget=None):
+    if budget is None:budget=CaptureBudget()
     from moex_data import rub_accepted_stage3_resolver as resolver
     base=root/'state/acceptance/step3_canonical_raw'; earliest=now.astimezone(archive.MOSCOW).date()-timedelta(days=45)
     candidates=[]; errors={}; records={}; unordered_dates=set()
@@ -663,15 +721,16 @@ def _historical(root, now):
         day=None; parent_required=False
         try:
             pilot=marker.with_name('pilot_evidence.json')
-            value=_source_object(_read_bytes(root,'${MOEX_DATA_ROOT}/'+pilot.relative_to(root).as_posix())); day=_day(value['trade_date'])
+            value=_source_object(_read_bytes(root,'${MOEX_DATA_ROOT}/'+pilot.relative_to(root).as_posix(),budget=budget)); day=_day(value['trade_date'])
             run=marker.parent.name.removeprefix('run_id=')
             if earliest.isoformat()<=day<=now.astimezone(archive.MOSCOW).date().isoformat() and run.endswith('_stage3'):
                 parent_required=True; parent_run=run[:-7]
-                parent=_source_object(_read_bytes(root,'${MOEX_DATA_ROOT}/runs/step10_rub_daily_refresh/run_id='+parent_run+'/run_manifest.json'))
+                parent=_source_object(_read_bytes(root,'${MOEX_DATA_ROOT}/runs/step10_rub_daily_refresh/run_id='+parent_run+'/run_manifest.json',budget=budget))
                 # Rank observed attempts before validation: invalid newer parents remain decisive.
                 finished=_stamp(parent['finished_at_utc'])
                 _require(finished<=now,'future_binding_or_parent_completion')
                 candidates.append((day,finished.timestamp(),run,marker))
+        except CaptureBudgetExceeded:raise
         except (OSError,ValueError,KeyError,TypeError,OverflowError) as exc:
             if isinstance(exc,(json.JSONDecodeError,UnicodeError)) or (isinstance(exc,ValueError) and any(
                 reason in str(exc) for reason in ('duplicate JSON object member:','JSON numeric constant must be finite:','source_JSON_must_contain_object'))):
@@ -687,14 +746,19 @@ def _historical(root, now):
     for day,marker in selected.items():
         if day in unordered_dates:continue
         try:
-            reader=_memoized_source_reader(root)
+            reader=_memoized_source_reader(root,budget)
             resolved=resolver.resolve(root,marker,now=now,earliest=earliest,byte_reader=reader)
             if resolved is not None: resolved['byte_reader']=reader
             if resolved is None: continue
-            records[day]=_stage3_pairs(root,resolved,now=now,kind='CURRENT_REVALIDATED_ACCEPTED_STAGE10_RUN')
-        except Exception as exc: errors[day]=type(exc).__name__+': '+str(exc)
-    try: entries,accepted,admission=_bounded_sources(root,now=now)
+            records[day]=_stage3_pairs(root,resolved,now=now,kind='CURRENT_REVALIDATED_ACCEPTED_STAGE10_RUN',budget=budget)
+        except CaptureBudgetExceeded:raise
+        except Exception as exc:
+            budget.ensure_active()  # Nested legacy validators may wrap the typed budget error.
+            errors[day]=type(exc).__name__+': '+str(exc)
+    try: entries,accepted,admission=_bounded_sources(root,now=now,budget=budget)
+    except CaptureBudgetExceeded:raise
     except Exception as exc:
+        budget.ensure_active()
         for day in ('2026-08-23','2026-08-24'):
             if day not in records: errors[day]='bounded_source_admission_unavailable: '+type(exc).__name__+': '+str(exc)
         return records,errors
@@ -702,10 +766,10 @@ def _historical(root, now):
         day='2026-08-23' if entry['kind']=='official_paginated_tradestats' else '2026-08-24'
         if day in selected or day in unordered_dates: continue
         try:
-            if entry['kind']=='official_paginated_tradestats': pairs,_=_official_pages(root,entry,accepted_at=accepted,now=now)
+            if entry['kind']=='official_paginated_tradestats': pairs,_=_official_pages(root,entry,accepted_at=accepted,now=now,budget=budget)
             else:
                 _require(set(entry)=={'kind','run_id','accepted_marker_ref','pilot_evidence_ref','marker_sha256','pilot_sha256'} and entry['run_id']=='step3_pilot_20260824_1705','standalone_source_admission')
-                reader=_memoized_source_reader(root)
+                reader=_memoized_source_reader(root,budget)
                 for key in ('accepted_marker','pilot_evidence'):
                     expected=entry['marker_sha256' if key=='accepted_marker' else 'pilot_sha256']
                     _require(sha256(reader(root/entry[key+'_ref'][len('${MOEX_DATA_ROOT}/'):])).hexdigest()==expected,'source_buffer_hash_mismatch')
@@ -714,15 +778,18 @@ def _historical(root, now):
                 resolved=resolver.resolve_standalone(root,marker,now=now,earliest=earliest,accepted_at=accepted,byte_reader=reader)
                 if resolved is not None: resolved['byte_reader']=reader
                 _require(resolved is not None and '${MOEX_DATA_ROOT}/'+resolved['pilot_path'].relative_to(root).as_posix()==entry['pilot_evidence_ref'],'standalone_pilot_ref')
-                pairs=_stage3_pairs(root,resolved,now=now,kind='REVALIDATED_STANDALONE_STAGE3_PILOT')
+                pairs=_stage3_pairs(root,resolved,now=now,kind='REVALIDATED_STANDALONE_STAGE3_PILOT',budget=budget)
                 _require(all(r['proof']['marker']['sha256']==entry['marker_sha256'] and r['proof']['pilot']['sha256']==entry['pilot_sha256'] for r in pairs.values()), 'standalone_final_frozen_hash_mismatch')
             for pair in pairs.values(): pair['proof']['source_admission']=admission
             records[day]=pairs
-        except Exception as exc: errors[day]=type(exc).__name__+': '+str(exc)
+        except CaptureBudgetExceeded:raise
+        except Exception as exc:
+            budget.ensure_active()  # Nested legacy validators may wrap the typed budget error.
+            errors[day]=type(exc).__name__+': '+str(exc)
     return records,errors
 
 
-def _original_current(root, body, now, *, buffers=None, binding_sink=None):
+def _original_current(root, body, now, *, buffers=None, binding_sink=None, budget=None):
     from moex_data import synchronized_live_market_oi_context as live
     from moex_data import rub_factual_projection as projection
     carrier=body.get('original_forts_http_evidence')
@@ -730,7 +797,7 @@ def _original_current(root, body, now, *, buffers=None, binding_sink=None):
     _require(set(carrier)=={'request_started_lower_bound_utc','request_clock_semantics','responses'} and carrier['request_clock_semantics']=='batch_start_before_each_retained_request','current_http_carrier_shape')
     requested=_stamp(carrier['request_started_lower_bound_utc']); _require(requested<=now,'current_request_future')
     responses=carrier['responses']; _require(isinstance(responses,list) and 1<=len(responses)<=live.MAX_FORTS_PAGES+1,'current_response_bound')
-    verified_buffers=_native_buffers(body)
+    verified_buffers=_native_buffers(body,budget)
     selected={}; proofs=[]; security_rows={}; payload_inventory=[]
     for item in responses:
         _require(set(item)=={'content_base64','sha256','source_url','params','received_at_utc','http_status','role'},'current_original_response_shape')
@@ -972,11 +1039,13 @@ def capture_snapshot(snapshot,previous,*,now_fn,refresh_started_at,previous_capt
         floors.append(_stamp(previous['contract_price_market_oi_capture_error']['checked_at_utc']))
     _require(cutoff>=max(floors),'paired_capture_clock_reversed')
     candidate=None; error=None; current=None; current_buffers={}; current_error='current_capture_not_attempted'
+    budget=CaptureBudget()
     try:
-        root=source._data_root(); dates,witness=_witness(root,cutoff); history,errors=_historical(root,cutoff)
+        root=source._data_root(); dates,witness=_witness(root,cutoff,budget); history,errors=_historical(root,cutoff,budget)
         bindings={role:body['bindings'][role] for role in ROLES}
         current=current_error=None; binding_proof={}
-        try: current=_original_current(root,body,cutoff,binding_sink=binding_proof)
+        try: current=_original_current(root,body,cutoff,binding_sink=binding_proof,budget=budget)
+        except CaptureBudgetExceeded:raise
         except Exception as exc: current_error=type(exc).__name__+': '+str(exc)
         _require(bool(binding_proof),'original_native_role_binding_proof_unavailable')
         construction={'binding_proof':binding_proof,'schema_version':SCHEMA,'accepted_at_utc':cutoff.isoformat(),'causal_cutoff_at_utc':cutoff.isoformat(),
@@ -984,9 +1053,9 @@ def capture_snapshot(snapshot,previous,*,now_fn,refresh_started_at,previous_capt
             'observed_dates':dates,'witness_proof':witness,
             'history':{day:{secid:r for secid,r in pairs.items() if secid in bindings.values()} for day,pairs in history.items() if day in dates},
             'source_errors':{day:reason for day,reason in errors.items() if day in dates}}
-        available=_native_buffers(body)
-        construction['original_byte_buffers']=_buffer_table(root,construction,available=available)
-        current_buffers=_buffer_table(root,current,available=available) if current else {}
+        available=_native_buffers(body,budget)
+        construction['original_byte_buffers']=_buffer_table(root,construction,available=available,budget=budget)
+        current_buffers=_buffer_table(root,current,available=available,budget=budget) if current else {}
         candidate=construction  # Only complete, byte-validated construction can reach admission.
     except Exception as exc: error=type(exc).__name__+': '+str(exc)
     completed=_stamp(now_fn()); _require(completed>=cutoff,'paired_capture_completion_reversed')
