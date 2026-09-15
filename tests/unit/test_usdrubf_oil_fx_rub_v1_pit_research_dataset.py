@@ -64,7 +64,7 @@ def _gates(status: str) -> dict:
 
 
 def _phase6_source_panel() -> pd.DataFrame:
-    dates = pd.bdate_range("2024-08-02", periods=491)
+    dates = pd.bdate_range("2024-08-02", periods=473)
     x = np.arange(len(dates), dtype=float)
     close = 80.0 + x * 0.05
     return pd.DataFrame(
@@ -113,11 +113,8 @@ def _brent(modeling: pd.DataFrame) -> pd.DataFrame:
     return frame
 
 
-def test_brent_only_passes_after_lineage_and_hash_admission() -> None:
-    panel = _phase6_source_panel()
-    modeling = _frozen_modeling_dataset(panel)
-    validate_phase6_source_panel_replay(modeling, panel)
-    features, labels, gates = build_research_dataset(
+def _build(panel: pd.DataFrame, modeling: pd.DataFrame):
+    return build_research_dataset(
         contract=_contract(),
         frozen_modeling_dataset=modeling,
         phase6_source_panel=panel,
@@ -127,9 +124,19 @@ def test_brent_only_passes_after_lineage_and_hash_admission() -> None:
         brent_artifacts_verified=True,
         mode="brent_only",
     )
+
+
+def test_brent_only_passes_after_lineage_and_hash_admission() -> None:
+    panel = _phase6_source_panel()
+    modeling = _frozen_modeling_dataset(panel)
+    validate_phase6_source_panel_replay(modeling, panel)
+    features, labels, gates = _build(panel, modeling)
     assert len(features) == 472
     assert len(labels) == 472
     assert gates["G9_final"]["passed"] is True
+    assert gates["G1_identity_and_phase6_lineage"][
+        "terminal_unbound_source_close_used_for_labels"
+    ] is False
 
 
 def test_oil_fx_full_remains_blocked_even_if_caller_requests_it() -> None:
@@ -167,6 +174,24 @@ def test_phase6_source_panel_replay_detects_changed_price_history() -> None:
     changed.loc[100, "high"] = max(changed.loc[100, "high"], changed.loc[100, "close"])
     with pytest.raises(OilFxRubDatasetError, match="replay mismatch"):
         validate_phase6_source_panel_replay(modeling, changed)
+
+
+def test_unbound_terminal_close_cannot_change_published_labels() -> None:
+    panel = _phase6_source_panel()
+    modeling = _frozen_modeling_dataset(panel)
+    changed = panel.copy()
+    last = changed.index[-1]
+    changed.loc[last, "close"] += 25.0
+    changed.loc[last, "high"] = max(changed.loc[last, "high"], changed.loc[last, "close"])
+
+    # The terminal same-day OHLC is intentionally absent from lagged Phase 6 features.
+    validate_phase6_source_panel_replay(modeling, changed)
+    _, baseline_labels, _ = _build(panel, modeling)
+    _, changed_labels, _ = _build(changed, modeling)
+    pd.testing.assert_frame_equal(baseline_labels, changed_labels)
+
+    # The penultimate target's 1-session endpoint is the unbound terminal row.
+    assert pd.isna(baseline_labels.iloc[-2]["fwd_usdrubf_close_return_1session"])
 
 
 def test_gate_inventory_and_authority_widening_fail_closed() -> None:
