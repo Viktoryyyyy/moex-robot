@@ -140,7 +140,8 @@ def _admit(snapshot, now):
             raise ValueError("cr_statistics_sample_failure_shape")
         failure_dates.append(item["trade_date"]); row = rows_by_day[item["trade_date"]]
         if row["status"] == "AVAILABLE" and not item["reason"].startswith(dated.TRANSIENT_READ): raise ValueError("cr_statistics_definitive_failure_cannot_restore_fact")
-        if row["status"] == "UNAVAILABLE" and item["reason"] != row["reason"]: raise ValueError("cr_statistics_sample_failure_reason_mismatch")
+        # Latest diagnostic wording is operational; retained evidence keeps its
+        # original reason without turning message changes into fact versions.
     if failure_dates != sorted(set(failure_dates)): raise ValueError("cr_statistics_sample_failure_date_order")
     if slots[-1] not in facts or core._values(facts[slots[-1]]) != core._values(linked["dated"]["anchor"]["factual"]):
         raise ValueError("cr_statistics_anchor_facts_mismatch")
@@ -284,7 +285,7 @@ def _capture(snapshot, cutoff):
 def _semantic(e):
     return {"linked": e["linked_dated_evidence_sha256"], "slots": e["slots"], "grant": e["admission_at_acceptance"]["artifact_sha256"],
         "current_date": e["observed_date_witness"]["current_observed_trade_date"],
-        "rows": [{"trade_date": r["trade_date"], "status": r["status"], "values": r["values"], "reason": r["reason"],
+        "rows": [{"trade_date": r["trade_date"], "status": r["status"], "values": r["values"],
             "excluded_source_sha256": e["proofs"][r["proof_id"]]["provenance"].get("raw_partition_sha256") if r["status"] == "UNAVAILABLE" and r["proof_id"] is not None else None,
             "source_clocks": {key: r["clocks"][key] for key in ("snapshot_ts", "source_publication_time")} if r["clocks"] else None} for r in e["rows"]]}
 

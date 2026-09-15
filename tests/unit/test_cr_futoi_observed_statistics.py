@@ -191,6 +191,32 @@ def test_capture_retains_only_valid_original_semantics(monkeypatch, kind):
     verify(current, now=completed)
 
 
+@pytest.mark.parametrize("source_revision", [False, True])
+def test_exclusion_diagnostic_only_change_preserves_original_acceptance(monkeypatch, source_revision):
+    previous = snapshot(30, missing=(4,))
+    candidate = deepcopy(previous[stats.STORE_KEY]["evidence"])
+    candidate["rows"][4]["reason"] = "latest validation diagnostic wording changed"
+    if source_revision:
+        proof = {"source_kind": "excluded_raw", "provenance": {
+            "raw_partition_ref": "${MOEX_DATA_ROOT}/test/revised-cr.parquet", "raw_partition_sha256": "b"*64}}
+        key = stats.common._digest(proof)
+        candidate["proofs"][key] = proof
+        candidate["rows"][4]["proof_id"] = key
+    monkeypatch.setattr(stats, "_capture", lambda *args: deepcopy(candidate))
+    current = deepcopy(previous)
+    ticks = iter([NOW+timedelta(seconds=1), NOW+timedelta(seconds=2)])
+    completed = stats.capture_snapshot(current, previous, now_fn=lambda: next(ticks), refresh_started_at=NOW)
+    old, new = previous[stats.STORE_KEY], current[stats.STORE_KEY]
+    if source_revision:
+        assert new["evidence_sha256"] != old["evidence_sha256"]
+        assert new["evidence"]["accepted_at_utc"] == completed.isoformat()
+    else:
+        assert new["evidence"] == old["evidence"]
+        assert new["evidence_sha256"] == old["evidence_sha256"]
+    assert stats.describe(current, now=completed)["latest_sample_failures"][0]["reason"] == candidate["rows"][4]["reason"]
+    verify(current, now=completed)
+
+
 @pytest.mark.parametrize("first", [False, True])
 def test_capture_failure_visible_without_rejuvenation(monkeypatch, first):
     previous = snapshot(30); current = deepcopy(previous)
