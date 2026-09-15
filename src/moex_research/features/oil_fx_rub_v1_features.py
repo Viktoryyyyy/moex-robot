@@ -83,7 +83,7 @@ FORBIDDEN_FEATURE_TOKENS: Final[tuple[str, ...]] = (
     "probability",
     "candidate_y_pred",
     "future_",
-    "fwd_usdrub",
+    "fwd_usdrubf",
 )
 
 
