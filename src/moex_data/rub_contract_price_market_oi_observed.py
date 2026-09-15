@@ -27,6 +27,29 @@ MAX_AUDIT_BUFFERS = 1024
 MAX_ARCHIVE_DIRECTORY_ENTRIES = 256
 
 
+def _source_json(content):
+    from moex_data import step9_rub_analysis_bundle as step9
+    if isinstance(content,(bytes,bytearray)): content=content.decode('utf-8')
+    return json.loads(content,object_pairs_hook=step9._reject_duplicate_json_members,
+        parse_constant=step9._reject_json_constant)
+
+
+def _source_object(content):
+    value=_source_json(content)
+    _require(isinstance(value,dict),'source_JSON_must_contain_object')
+    return value
+
+
+def _encoded_size(encoded):
+    # Valid base64 has an exact decoded size determined without decoding it.
+    _require(isinstance(encoded,str) and len(encoded)<=4*((MAX_BUFFER_BYTES+2)//3),'audit_encoded_byte_limit')
+    _require(len(encoded)%4==0,'audit_encoded_padding')
+    padding=2 if encoded.endswith('==') else 1 if encoded.endswith('=') else 0
+    size=len(encoded)//4*3-padding
+    _require(0<=size<=MAX_BUFFER_BYTES,'audit_buffer_byte_limit')
+    return size
+
+
 def _inline_ref(raw):
     digest=sha256(raw).hexdigest()
     return {'ref':'inline-sha256:'+digest,'sha256':digest}
@@ -38,15 +61,18 @@ def _proof_ref(ref,digest):
 
 
 def _native_buffers(body):
-    result={}; total=0
-    for value in (body.get('original_forts_http_evidence') or {}).get('responses',[]):
-        if value['sha256'] in result: continue
-        _require(isinstance(value['content_base64'],str) and len(value['content_base64'])<=4*((MAX_BUFFER_BYTES+2)//3),'native_buffer_encoded_limit')
-        raw=base64.b64decode(value['content_base64'],validate=True);total+=len(raw)
-        _require(len(result)<MAX_AUDIT_BUFFERS and len(raw)<=MAX_BUFFER_BYTES and total<=MAX_AUDIT_BYTES,'native_buffer_total_limit')
-        _require(sha256(raw).hexdigest()==value['sha256'],'native_buffer_source_hash')
-        result[value['sha256']]=raw
-    return result
+    from moex_data import synchronized_live_market_oi_context as live
+    responses=(body.get('original_forts_http_evidence') or {}).get('responses')
+    _require(isinstance(responses,list) and 1<=len(responses)<=live.MAX_FORTS_PAGES+1,'current_response_bound')
+    table={};total=0
+    for value in responses:
+        _require(isinstance(value,dict),'current_original_response_shape')
+        digest=value['sha256'];common._hash(digest);encoded=value['content_base64']
+        total+=_encoded_size(encoded)
+        _require(total<=MAX_AUDIT_BYTES,'native_response_inventory_byte_limit')
+        if digest in table: _require(table[digest]==encoded,'native_duplicate_digest_bytes_mismatch')
+        table[digest]=encoded
+    return _decode_buffers(table)
 
 
 CURRENT_KEY='contract_price_market_oi_current_capture'
@@ -97,16 +123,17 @@ def _proof_references(value):
 
 
 def _decode_buffers(table):
-    _require(isinstance(table, dict) and 1 <= len(table) <= MAX_AUDIT_BUFFERS, 'audit_buffer_count')
-    result = {}; total = 0
-    for digest, encoded in table.items():
-        common._hash(digest)
-        _require(isinstance(encoded, str) and len(encoded) <= 4*((MAX_BUFFER_BYTES+2)//3), 'audit_encoded_byte_limit')
-        raw = base64.b64decode(encoded, validate=True)
-        total += len(raw)
-        _require(len(raw) <= MAX_BUFFER_BYTES and total <= MAX_AUDIT_BYTES, 'audit_total_byte_limit')
-        _require(sha256(raw).hexdigest() == digest, 'audit_original_buffer_hash')
-        result[digest] = raw
+    _require(isinstance(table,dict) and 1<=len(table)<=MAX_AUDIT_BUFFERS,'audit_buffer_count')
+    total=0
+    for digest,encoded in table.items():
+        common._hash(digest);total+=_encoded_size(encoded)
+        _require(total<=MAX_AUDIT_BYTES,'audit_total_byte_limit')
+    result={}
+    for digest,encoded in table.items():
+        raw=base64.b64decode(encoded,validate=True)
+        _require(len(raw)==_encoded_size(encoded),'audit_decoded_size_mismatch')
+        _require(sha256(raw).hexdigest()==digest,'audit_original_buffer_hash')
+        result[digest]=raw
     return result
 
 
@@ -146,7 +173,7 @@ def _portable_stage3(record, buffers, now):
     _require(isinstance(artifacts,dict) and len(artifacts)==(32 if p['parent'] is None else 33),'stage3_audit_inventory')
     def load(path):
         ref='${MOEX_DATA_ROOT}/'+path.relative_to(root).as_posix()
-        return json.loads(_buffer_bytes(buffers,artifacts[ref]))
+        return _source_object(_buffer_bytes(buffers,artifacts[ref]))
     marker_path=root/'state/acceptance/step3_canonical_raw'/('run_id='+run)/'accepted_pointers.json'
     pilot_path=marker_path.with_name('pilot_evidence.json')
     marker=load(marker_path); pilot=load(pilot_path)
@@ -219,7 +246,7 @@ def _portable_stage3(record, buffers, now):
 
 
 def _portable_source_admission(proof,buffers,now):
-    value=json.loads(_buffer_bytes(buffers,proof['source_admission']))
+    value=_source_object(_buffer_bytes(buffers,proof['source_admission']))
     _require(set(value)=={'schema_version','project','task_id','accepted_at_utc','entries'}
         and value['schema_version']=='contract_price_market_oi_source_admission.v1' and value['project']=='MOEX_Bot'
         and value['task_id']=='contract_price_market_oi_observed_comparisons_v1','portable_source_admission_identity')
@@ -234,7 +261,7 @@ def _portable_witness(e,buffers,now):
     from moex_data.futures import futoi_delta_statistics_context as engine
     spec=engine._spec(stage=7,dataset_id=engine.OBSERVED_DATE_WITNESS_DATASET_ID,
         instrument_id=engine.OBSERVED_DATE_WITNESS_INSTRUMENT_ID,timeframe=engine.OBSERVED_DATE_WITNESS_TIMEFRAME)
-    p=e['witness_proof']; pointer=json.loads(_buffer_bytes(buffers,p['pointer']))
+    p=e['witness_proof']; pointer=_source_object(_buffer_bytes(buffers,p['pointer']))
     _require(pointer.get('dataset_id')==spec.dataset_id and pointer.get('instrument_id')==spec.instrument_id
         and pointer.get('timeframe')==spec.timeframe and pointer.get('quality_status')=='pass'
         and pointer.get('refresh_status','succeeded')=='succeeded','portable_witness_pointer_identity')
@@ -242,7 +269,7 @@ def _portable_witness(e,buffers,now):
     for key in ('partition','manifest','quality_report'):
         common._ref(pointer[key+'_ref'])
         _require(pointer[key+'_sha256']==p[key]['sha256'],'portable_witness_pointer_hash')
-        if key!='partition': step9._validate_support_identity(json.loads(_buffer_bytes(buffers,p[key])),spec,key,
+        if key!='partition': step9._validate_support_identity(_source_object(_buffer_bytes(buffers,p[key])),spec,key,
             quality_required=True,support_kind=key,producer_run_id=run)
     frame=pd.read_parquet(BytesIO(_buffer_bytes(buffers,p['partition'])))
     step9._selected_row(frame,spec,now)
@@ -258,10 +285,11 @@ def _portable_native_body(binding_proof,buffers,bindings,now,facts=None):
     from moex_data import synchronized_live_market_oi_context as live
     inventory=binding_proof['retained_http_inventory']; clock=_stamp(binding_proof['binding_as_of_utc'])
     _require(clock<=now and isinstance(inventory,list) and 1<=len(inventory)<=live.MAX_FORTS_PAGES+1,'portable_native_binding_clock_or_count')
+    _require(sum(len(_buffer_bytes(buffers,item['response'])) for item in inventory)<=MAX_AUDIT_BYTES,'native_response_inventory_byte_limit')
     responses=[]; payloads=[]; securities={}; selected={}
     for item in inventory:
         _require(set(item)=={'response','source_url','params','received_at_utc','requested_lower_bound_utc','role'},'portable_native_response_shape')
-        raw=_buffer_bytes(buffers,item['response']); payload=json.loads(raw)
+        raw=_buffer_bytes(buffers,item['response']); payload=_source_object(raw)
         _native_url(item['source_url'],item['params'])
         _require(_stamp(item['requested_lower_bound_utc'])<=_stamp(item['received_at_utc'])<=clock,'portable_native_response_clock')
         response={'content_base64':base64.b64encode(raw).decode('ascii'),'sha256':item['response']['sha256'],
@@ -334,6 +362,8 @@ CONTRACT_DOCUMENT = {'schema_version': 'contract_price_market_oi_observed_admiss
                'max_original_audit_bytes': 64000000,
                'max_original_buffer_count': 1024,
                'native_current_byte_storage': 'inline_deduplicated_original_HTTP_bytes',
+               'native_response_inventory_max_decoded_bytes': 64000000,
+               'native_response_inventory_budget_counts_repeated_entries': True,
                'fast_current_total_state_max_bytes': 2000000,
                'max_accepted_run_candidates': 256,
                'max_archive_directory_entries_before_content_reads': 256,
@@ -383,7 +413,7 @@ def _freeze(root, content):
 
 def _freeze_json(root,path,expected):
     content=_read_bytes(root,'${MOEX_DATA_ROOT}/'+path.relative_to(root).as_posix())
-    _require(common._digest(json.loads(content))==common._digest(expected),'source_json_changed_after_validation')
+    _require(common._digest(_source_object(content))==common._digest(expected),'source_json_changed_after_validation')
     return _freeze(root,content)
 
 
@@ -437,7 +467,7 @@ def _stage3_pairs(root, resolved, *, now, kind, buffers=None):
         return {'ref':'${MOEX_DATA_ROOT}/state/evidence/contract_price_market_oi_observed_v1/'+digest[:2]+'/'+digest+'.bin','sha256':digest}
     def freeze_json(path, expected):
         raw = read('${MOEX_DATA_ROOT}/'+path.relative_to(root).as_posix())
-        _require(common._digest(json.loads(raw)) == common._digest(expected), 'source_json_changed_after_validation')
+        _require(common._digest(_source_object(raw)) == common._digest(expected), 'source_json_changed_after_validation')
         return freeze(raw)
     audit = _stage3_audit(root, resolved, read, freeze)
     for role,instrument in INSTRUMENTS.items():
@@ -448,7 +478,7 @@ def _stage3_pairs(root, resolved, *, now, kind, buffers=None):
         for spec in (quote,oi):
             paths={key:getattr(spec,attr) for key,attr in (('partition','partition_path'),('manifest','manifest_path'),('quality','quality_path'))}
             support={key:freeze(read('${MOEX_DATA_ROOT}/'+path.relative_to(root).as_posix())) for key,path in paths.items()}
-            documents={key:json.loads((buffers[support[key]['sha256']] if buffers is not None else _read_bytes(root,support[key]['ref'],support[key]['sha256']))) for key in ('manifest','quality')}
+            documents={key:_source_object((buffers[support[key]['sha256']] if buffers is not None else _read_bytes(root,support[key]['ref'],support[key]['sha256']))) for key in ('manifest','quality')}
             _validate_support_buffers(spec,documents['manifest'],documents['quality'])
             frame=pd.read_parquet(BytesIO((buffers[support['partition']['sha256']] if buffers is not None else _read_bytes(root,support['partition']['ref'],support['partition']['sha256']))))
             _require(len(frame)==spec.row_count and not frame.empty,'partition_row_count_mismatch')
@@ -487,8 +517,8 @@ def _stage3_pairs(root, resolved, *, now, kind, buffers=None):
             'parent':freeze_json(resolved['parent_path'],resolved['parent']) if resolved['parent_path'] else None,
             'binding_observed_at_utc':resolved['binding'].isoformat(),
             'original_acceptance_digest_available':False,'hash_semantics':'computed_at_current_revalidation',
-            'quote_source_row':json.loads(q.drop(columns=['_event','_receipt']).loc[q['_event'].eq(ts)].to_json(orient='records',date_format='iso'))[0],
-            'oi_source_row':json.loads(o.drop(columns=['_event','_receipt']).loc[o['_event'].eq(ts)].to_json(orient='records',date_format='iso'))[0]}
+            'quote_source_row':_source_json(q.drop(columns=['_event','_receipt']).loc[q['_event'].eq(ts)].to_json(orient='records',date_format='iso'))[0],
+            'oi_source_row':_source_json(o.drop(columns=['_event','_receipt']).loc[o['_event'].eq(ts)].to_json(orient='records',date_format='iso'))[0]}
         result[quote.secid]=_pair(quote.secid,quote.trade_date,ts.isoformat(),pub.isoformat(),receipt.isoformat(),float(qr['close']),int(otr['oi_close']),proof,source_kind=kind)
     common_times=set.intersection(*(entry[2] for entry in paired_frames.values()))
     _require(bool(common_times),'no_exact_common_four_contract_bar')
@@ -496,8 +526,8 @@ def _stage3_pairs(root, resolved, *, now, kind, buffers=None):
     for secid,(q,o,_) in paired_frames.items():
         qr=q.loc[q['_event'].eq(selected_time)].iloc[0]; otr=o.loc[o['_event'].eq(selected_time)].iloc[0]
         proof=result[secid]['proof']
-        proof['quote_source_row']=json.loads(q.drop(columns=['_event','_receipt']).loc[q['_event'].eq(selected_time)].to_json(orient='records',date_format='iso'))[0]
-        proof['oi_source_row']=json.loads(o.drop(columns=['_event','_receipt']).loc[o['_event'].eq(selected_time)].to_json(orient='records',date_format='iso'))[0]
+        proof['quote_source_row']=_source_json(q.drop(columns=['_event','_receipt']).loc[q['_event'].eq(selected_time)].to_json(orient='records',date_format='iso'))[0]
+        proof['oi_source_row']=_source_json(o.drop(columns=['_event','_receipt']).loc[o['_event'].eq(selected_time)].to_json(orient='records',date_format='iso'))[0]
         result[secid]=_pair(secid,result[secid]['trade_date'],selected_time.isoformat(),str(otr['availability_ts_utc']),
             max(qr['_receipt'],otr['_receipt']).isoformat(),float(qr['close']),int(otr['oi_close']),proof,source_kind=kind)
         result[secid]['price_received_at_utc']=qr['_receipt'].isoformat()
@@ -524,14 +554,14 @@ def _official_pages(root, entry, *, accepted_at, now, buffers=None):
     for index,page in enumerate(pages):
         _require(set(page)=={'start','response_ref','response_sha256','receipt_ref','receipt_sha256'} and type(page['start']) is int and page['start']==index*1000,'official_page_inventory')
         raw=read(page['response_ref'],page['response_sha256']); receipt_raw=read(page['receipt_ref'],page['receipt_sha256'])
-        receipt=json.loads(receipt_raw); received=_stamp(receipt['received_at_utc']); requested=_stamp(receipt['requested_at_utc'])
+        receipt=_source_object(receipt_raw); received=_stamp(receipt['received_at_utc']); requested=_stamp(receipt['requested_at_utc'])
         _require(requested<=received<=accepted_at<=now,'official_receipt_causality')
         _require(receipt.get('http_status')==200 and receipt.get('sha256',receipt.get('response_sha256'))==sha256(raw).hexdigest(),'official_transport_or_hash')
         url=urlsplit(receipt['url']); query=parse_qs(url.query)
         _require(url.scheme=='https' and url.hostname=='apim.moex.com' and not url.username and not url.password
             and url.path=='/iss/datashop/algopack/fo/tradestats.json','official_source_url')
         _require(all(query.get(k)==['2026-08-23'] for k in ('date','from','till')) and query.get('start')==[str(index*1000)],'official_request_date_cursor')
-        payload=json.loads(raw); cursor=_table(payload,'data.cursor')
+        payload=_source_object(raw); cursor=_table(payload,'data.cursor')
         _require(cursor==[{'INDEX':index*1000,'TOTAL':9683,'PAGESIZE':1000}],'official_response_cursor')
         rows=_table(payload,'data'); _require(len(rows)==min(1000,9683-index*1000),'official_response_cardinality')
         proof={'response':freeze(raw),'receipt':freeze(receipt_raw),'start':index*1000}
@@ -561,7 +591,7 @@ def _official_pages(root, entry, *, accepted_at, now, buffers=None):
 
 def _bounded_sources(root, *, now):
     ref='${MOEX_DATA_ROOT}/'+SOURCE_ADMISSION
-    content=_read_bytes(root,ref); value=json.loads(content)
+    content=_read_bytes(root,ref); value=_source_object(content)
     _require(set(value)=={'schema_version','project','task_id','accepted_at_utc','entries'},'source_admission_shape')
     _require(value['schema_version']=='contract_price_market_oi_source_admission.v1' and value['project']=='MOEX_Bot'
         and value['task_id']=='contract_price_market_oi_observed_comparisons_v1','source_admission_identity')
@@ -579,7 +609,7 @@ def _witness(root, now):
         instrument_id=engine.OBSERVED_DATE_WITNESS_INSTRUMENT_ID,timeframe=engine.OBSERVED_DATE_WITNESS_TIMEFRAME)
     pointer_path=step9._pointer_path(root,spec)
     pointer_raw=_read_bytes(root,'${MOEX_DATA_ROOT}/'+pointer_path.relative_to(root).as_posix())
-    pointer=json.loads(pointer_raw); raw={'pointer':pointer_raw}
+    pointer=_source_object(pointer_raw); raw={'pointer':pointer_raw}
     for key in ('partition','manifest','quality_report'):
         raw[key]=_read_bytes(root,pointer[key+'_ref'],pointer[key+'_sha256'])
     frame=pd.read_parquet(BytesIO(raw['partition']))
@@ -632,11 +662,11 @@ def _historical(root, now):
     for marker in _bounded_archive_markers(base):
         try:
             pilot=marker.with_name('pilot_evidence.json')
-            value=json.loads(_read_bytes(root,'${MOEX_DATA_ROOT}/'+pilot.relative_to(root).as_posix())); day=_day(value['trade_date'])
+            value=_source_object(_read_bytes(root,'${MOEX_DATA_ROOT}/'+pilot.relative_to(root).as_posix())); day=_day(value['trade_date'])
             run=marker.parent.name.removeprefix('run_id=')
             if earliest.isoformat()<=day<=now.astimezone(archive.MOSCOW).date().isoformat() and run.endswith('_stage3'):
                 parent_run=run[:-7]
-                parent=json.loads(_read_bytes(root,'${MOEX_DATA_ROOT}/runs/step10_rub_daily_refresh/run_id='+parent_run+'/run_manifest.json'))
+                parent=_source_object(_read_bytes(root,'${MOEX_DATA_ROOT}/runs/step10_rub_daily_refresh/run_id='+parent_run+'/run_manifest.json'))
                 refresh=parent.get('source_refresh',{})
                 if (parent.get('project')!='MOEX_Bot' or parent.get('stage')!=10 or parent.get('run_id')!=parent_run
                     or parent.get('status')!='succeeded' or parent.get('current_pointer_rollback_status') not in (None,'not_needed')
@@ -644,6 +674,9 @@ def _historical(root, now):
                 finished=_stamp(parent['finished_at_utc'])
                 if finished<=now: candidates.append((day,finished.timestamp(),run,marker))
         except (OSError,ValueError,KeyError,TypeError) as exc:
+            if isinstance(exc,(json.JSONDecodeError,UnicodeError)) or (isinstance(exc,ValueError) and any(
+                reason in str(exc) for reason in ('duplicate JSON object member:','JSON numeric constant must be finite:','source_JSON_must_contain_object'))):
+                raise ValueError('accepted_archive_metadata_strict_json_refusal') from exc
             if isinstance(exc,ValueError) and str(exc)=='source_artifact_byte_limit':
                 raise ValueError('accepted_archive_metadata_byte_limit') from exc
             continue
@@ -695,14 +728,15 @@ def _original_current(root, body, now, *, buffers=None, binding_sink=None):
     _require(set(carrier)=={'request_started_lower_bound_utc','request_clock_semantics','responses'} and carrier['request_clock_semantics']=='batch_start_before_each_retained_request','current_http_carrier_shape')
     requested=_stamp(carrier['request_started_lower_bound_utc']); _require(requested<=now,'current_request_future')
     responses=carrier['responses']; _require(isinstance(responses,list) and 1<=len(responses)<=live.MAX_FORTS_PAGES+1,'current_response_bound')
+    verified_buffers=_native_buffers(body)
     selected={}; proofs=[]; security_rows={}; payload_inventory=[]
     for item in responses:
         _require(set(item)=={'content_base64','sha256','source_url','params','received_at_utc','http_status','role'},'current_original_response_shape')
-        raw=base64.b64decode(item['content_base64'],validate=True); _require(len(raw)<=8_000_000 and sha256(raw).hexdigest()==item['sha256'],'current_original_response_hash')
+        raw=verified_buffers[item['sha256']]
         received=_stamp(item['received_at_utc']); _require(requested<=received<=now and item['http_status']==200,'current_response_causality')
         _require(item['role'] in ('selected_values','completeness_probe'),'current_response_role')
         _native_url(item['source_url'],item['params'])
-        payload=json.loads(raw); rows=_table(payload,'marketdata'); securities=_table(payload,'securities')
+        payload=_source_object(raw); rows=_table(payload,'marketdata'); securities=_table(payload,'securities')
         payload_inventory.append((item,payload))
         _require(len({r['SECID'] for r in rows})==len(rows),'current_duplicate_response_secid')
         proof={'response':_inline_ref(raw),'source_url':item['source_url'],'params':item['params'],
@@ -816,7 +850,7 @@ def _validate_pair(record, *, now):
 
 def _contract():
     raw=(Path(__file__).resolve().parents[2]/CONTRACT).read_text(encoding='utf-8')
-    _require(common._digest(json.loads(raw))==common._digest(CONTRACT_DOCUMENT),'paired_policy_contract_invalid_or_revoked')
+    _require(common._digest(_source_object(raw))==common._digest(CONTRACT_DOCUMENT),'paired_policy_contract_invalid_or_revoked')
     return raw
 
 
@@ -827,7 +861,7 @@ def _admit(snapshot,now):
     e=store['evidence']; _require(common._digest(e)==store['evidence_sha256'],'paired_evidence_hash')
     expected={'schema_version','accepted_at_utc','causal_cutoff_at_utc','contract_text','bindings','role_binding_as_of_utc','observed_dates','witness_proof','history','source_errors','original_byte_buffers','binding_proof'}
     _require(set(e)==expected and e['schema_version']==SCHEMA,'paired_evidence_shape')
-    _require(_json(json.loads(e['contract_text']))==_json(json.loads(_contract())),'paired_contract_revoked')
+    _require(_json(_source_object(e['contract_text']))==_json(_source_object(_contract())),'paired_contract_revoked')
     accepted=_stamp(e['accepted_at_utc']); cutoff=_stamp(e['causal_cutoff_at_utc']); attempt=_stamp(store['last_capture_attempt_at_utc'])
     _require(cutoff<=accepted<=now and accepted<=attempt and (now-accepted).total_seconds()<=345600,'paired_admission_clock_or_expired')
     _require(store['last_capture_error'] is None or isinstance(store['last_capture_error'],str),'paired_diagnostic_type')

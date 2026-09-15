@@ -40,6 +40,8 @@
     "max_archive_directory_entries_before_content_reads": 256,
     "archive_inventory_scope": "all_entries_including_outside_lookback_before_pilot_date_filter",
     "current_exact_comparison_max_calendar_gap_from_witness": 1,
-    "current_gap_policy": "retain_fresh_anchor_refuse_exact_lags_without_non_session_inference"
+    "current_gap_policy": "retain_fresh_anchor_refuse_exact_lags_without_non_session_inference",
+    "native_response_inventory_max_decoded_bytes": 64000000,
+    "native_response_inventory_budget_counts_repeated_entries": true
   }
 }

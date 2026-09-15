@@ -16,7 +16,8 @@ def _resolve(root, marker_path, *, now, earliest, standalone_accepted_at=None, b
     def load(path, label):
         if byte_reader is None: return step9._load_json(path, label)
         import json
-        value=json.loads(byte_reader(path).decode('utf-8'))
+        value=json.loads(byte_reader(path).decode('utf-8'),
+            object_pairs_hook=step9._reject_duplicate_json_members,parse_constant=step9._reject_json_constant)
         if not isinstance(value,dict): raise ValueError(label+' must be a JSON object')
         return value
     run = marker_path.parent.name.removeprefix('run_id=')

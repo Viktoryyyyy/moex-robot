@@ -733,3 +733,135 @@ def test_existing_frozen_copy_comparison_is_bounded_before_read(tmp_path,monkeyp
         return original(path,*args,**kwargs)
     monkeypatch.setattr(Path,'open',spy)
     with pytest.raises(ValueError,match='source_artifact_byte_limit'):m._freeze(tmp_path,raw)
+
+
+
+def _invalid_json_member(raw,defect):
+    prefix=b'"parser_probe":0,"parser_probe":1,' if defect=='duplicate' else b'"parser_probe":NaN,'
+    assert raw.lstrip().startswith(b'{')
+    return b'{'+prefix+raw.lstrip()[1:]
+
+
+@pytest.mark.parametrize('kind',['marker','pilot','parent'])
+@pytest.mark.parametrize('defect',['duplicate','nonfinite'])
+def test_bounded_resolver_preserves_legacy_strict_json_hooks(tmp_path,monkeypatch,kind,defect):
+    from moex_data import rub_accepted_stage3_resolver as resolver
+    _restore_archive(tmp_path,dates={'2026-09-14'});monkeypatch.setenv('MOEX_DATA_ROOT',str(tmp_path))
+    marker=tmp_path/'state/acceptance/step3_canonical_raw/run_id=step10_20260914_stage3/accepted_pointers.json'
+    path={'marker':marker,'pilot':marker.with_name('pilot_evidence.json'),
+        'parent':tmp_path/'runs/step10_rub_daily_refresh/run_id=step10_20260914/run_manifest.json'}[kind]
+    path.write_bytes(_invalid_json_member(path.read_bytes(),defect))
+    for reader in (None,m._memoized_source_reader(tmp_path)):
+        with pytest.raises(ValueError,match='duplicate JSON|must be finite'):
+            resolver.resolve(tmp_path,marker,now=NOW,earliest=NOW.date()-timedelta(days=45),byte_reader=reader)
+
+
+@pytest.mark.parametrize('kind',['pointer','manifest','quality_report'])
+@pytest.mark.parametrize('defect',['duplicate','nonfinite'])
+def test_bounded_witness_strict_source_json(tmp_path,kind,defect):
+    path,pointer,_=_restore_witness(tmp_path)
+    target=path if kind=='pointer' else tmp_path/pointer[kind+'_ref'].removeprefix('${MOEX_DATA_ROOT}/')
+    raw=_invalid_json_member(target.read_bytes(),defect);target.write_bytes(raw)
+    if kind!='pointer':
+        pointer[kind+'_sha256']=m.sha256(raw).hexdigest();path.write_text(json.dumps(pointer))
+    with pytest.raises(ValueError,match='duplicate JSON|must be finite'):m._witness(tmp_path,NOW)
+
+
+def _replace_audit_buffer(e,old_digest,raw):
+    import base64
+    new=m._frozen_ref(raw)
+    def replace(value):
+        if isinstance(value,dict):
+            if set(value)=={'ref','sha256'} and value['sha256']==old_digest:
+                value.clear();value.update(new)
+            else:
+                for key,child in value.items():
+                    if key!='original_byte_buffers':replace(child)
+        elif isinstance(value,list):
+            for child in value:replace(child)
+    replace(e);e['original_byte_buffers'].pop(old_digest)
+    e['original_byte_buffers'][new['sha256']]=base64.b64encode(raw).decode()
+
+
+@pytest.mark.parametrize('kind',['marker','pilot','parent','witness_pointer'])
+@pytest.mark.parametrize('defect',['duplicate','nonfinite'])
+def test_self_hashed_portable_metadata_cannot_weaken_source_json_policy(kind,defect):
+    s=snapshot();e=s[m.STORE_KEY]['evidence'];row=e['history'][e['observed_dates'][-1]]['SiU6']
+    proof=e['witness_proof']['pointer'] if kind=='witness_pointer' else row['proof'][kind]
+    digest=proof['sha256'];raw=m._decode_buffers(e['original_byte_buffers'])[digest]
+    _replace_audit_buffer(e,digest,_invalid_json_member(raw,defect))
+    s[m.STORE_KEY]['evidence_sha256']=m.common._digest(e)
+    out=release(s)
+    assert out['status']=='UNAVAILABLE' and ('duplicate JSON' in out['reason'] or 'must be finite' in out['reason'])
+
+
+@pytest.mark.parametrize('defect',['encoded_length','aggregate','duplicate_digest_different_bytes'])
+def test_current_inventory_preflight_refuses_before_any_decode_or_json(monkeypatch,defect):
+    import base64
+    body=_native_body();responses=body['original_forts_http_evidence']['responses'];size=len(base64.b64decode(responses[0]['content_base64']))
+    if defect=='encoded_length':responses[-1]['content_base64']='A'*(4*((m.MAX_BUFFER_BYTES+2)//3)+4)
+    elif defect=='aggregate':monkeypatch.setattr(m,'MAX_AUDIT_BYTES',size*2-1)
+    else:responses[-1]['content_base64']='e30='
+    monkeypatch.setattr(m.base64,'b64decode',lambda *a,**kw:pytest.fail('decoder reached before inventory refusal'))
+    monkeypatch.setattr(m,'_source_json',lambda *a,**kw:pytest.fail('JSON parser reached before inventory refusal'))
+    with pytest.raises(ValueError,match='byte_limit|bytes_mismatch'):
+        m._original_current(None,body,NOW)
+
+
+def test_current_inventory_exact_aggregate_boundary_decodes_duplicate_once(monkeypatch):
+    import base64
+    body=_native_body();encoded=body['original_forts_http_evidence']['responses'][0]['content_base64'];raw=base64.b64decode(encoded)
+    monkeypatch.setattr(m,'MAX_BUFFER_BYTES',len(raw));monkeypatch.setattr(m,'MAX_AUDIT_BYTES',len(raw)*2)
+    original=base64.b64decode;calls=[]
+    def tracked(*args,**kwargs):calls.append(1);return original(*args,**kwargs)
+    monkeypatch.setattr(m.base64,'b64decode',tracked)
+    facts=m._original_current(None,body,NOW)
+    assert set(facts)==set(BINDINGS.values()) and len(calls)==1
+
+
+@pytest.mark.parametrize('defect',['first_encoded','last_encoded','aggregate'])
+def test_retained_audit_table_preflights_all_entries_before_first_decode(monkeypatch,defect):
+    import base64
+    raws=[b'first',b'second'];table={m.sha256(raw).hexdigest():base64.b64encode(raw).decode() for raw in raws}
+    if defect=='aggregate':monkeypatch.setattr(m,'MAX_AUDIT_BYTES',sum(map(len,raws))-1)
+    else:
+        key=list(table)[0 if defect=='first_encoded' else -1];table[key]='A'*(4*((m.MAX_BUFFER_BYTES+2)//3)+4)
+    monkeypatch.setattr(m.base64,'b64decode',lambda *a,**kw:pytest.fail('decoder reached before table refusal'))
+    with pytest.raises(ValueError,match='byte_limit'):m._decode_buffers(table)
+
+
+def test_retained_audit_exact_size_boundary_and_bad_encoding_still_checked(monkeypatch):
+    import base64
+    raw=b'12345';table={m.sha256(raw).hexdigest():base64.b64encode(raw).decode()}
+    monkeypatch.setattr(m,'MAX_BUFFER_BYTES',5);monkeypatch.setattr(m,'MAX_AUDIT_BYTES',5)
+    assert m._decode_buffers(table)=={m.sha256(raw).hexdigest():raw}
+    table[m.sha256(raw).hexdigest()]='!!!!!==='  # Small invalid alphabet still reaches strict decoder and is refused.
+    with pytest.raises(ValueError):m._decode_buffers(table)
+
+
+@pytest.mark.parametrize('kind',['pilot','parent'])
+def test_strict_prefilter_error_cannot_skip_newest_run_and_select_older_source(tmp_path,monkeypatch,kind):
+    _restore_archive(tmp_path,dates={'2026-09-13','2026-09-14'});monkeypatch.setenv('MOEX_DATA_ROOT',str(tmp_path))
+    path=(tmp_path/'state/acceptance/step3_canonical_raw/run_id=step10_20260914_stage3/pilot_evidence.json' if kind=='pilot' else
+        tmp_path/'runs/step10_rub_daily_refresh/run_id=step10_20260914/run_manifest.json')
+    path.write_bytes(_invalid_json_member(path.read_bytes(),'duplicate'))
+    with pytest.raises(ValueError,match='accepted_archive_metadata_strict_json_refusal'):m._historical(tmp_path,NOW)
+
+
+@pytest.mark.parametrize('encoding',['utf16','utf8_bom','array','scalar'])
+def test_bounded_resolver_preserves_legacy_utf8_and_object_requirement(tmp_path,monkeypatch,encoding):
+    from moex_data import rub_accepted_stage3_resolver as resolver
+    _restore_archive(tmp_path,dates={'2026-09-14'});monkeypatch.setenv('MOEX_DATA_ROOT',str(tmp_path))
+    marker=tmp_path/'state/acceptance/step3_canonical_raw/run_id=step10_20260914_stage3/accepted_pointers.json'
+    original=marker.read_bytes()
+    malformed={'utf16':original.decode().encode('utf-16'),'utf8_bom':b'\xef\xbb\xbf'+original,'array':b'[]','scalar':b'1'}[encoding]
+    marker.write_bytes(malformed)
+    for reader in (None,m._memoized_source_reader(tmp_path)):
+        with pytest.raises(ValueError):
+            resolver.resolve(tmp_path,marker,now=NOW,earliest=NOW.date()-timedelta(days=45),byte_reader=reader)
+
+
+@pytest.mark.parametrize('raw',[b'[]',b'1',b'\xef\xbb\xbf{}','{}'.encode('utf-16')])
+def test_witness_source_objects_preserve_utf8_and_mapping_contract(tmp_path,raw):
+    pointer,_,_=_restore_witness(tmp_path);pointer.write_bytes(raw)
+    with pytest.raises(ValueError):m._witness(tmp_path,NOW)
