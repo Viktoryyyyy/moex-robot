@@ -1,0 +1,509 @@
+"""Independent exact-SECID/observed-slot and source-proof regressions."""
+from copy import deepcopy
+from datetime import datetime,timedelta,timezone
+import json
+from pathlib import Path
+import pytest
+from moex_data import rub_contract_price_market_oi_observed as m
+
+NOW=datetime(2026,9,15,12,tzinfo=timezone.utc)
+BINDINGS=dict(zip(m.ROLES,('SiU6','SiZ6','CRU6','CRZ6')))
+REF={'ref':'${MOEX_DATA_ROOT}/immutable/test.bin','sha256':'a'*64}
+
+
+def _native_body():
+    import base64
+    from moex_data import synchronized_live_market_oi_context as live
+    event=NOW-timedelta(seconds=30); received=NOW-timedelta(seconds=20)
+    rows=[]; nodes={}
+    for index,(role,secid) in enumerate(BINDINGS.items()):
+        row={'SECID':secid,'TRADEDATE':NOW.date().isoformat(),'SYSTIME':event.astimezone(m.archive.MOSCOW).strftime('%Y-%m-%d %H:%M:%S'),
+            'LAST':130.+index,'OPENPOSITION':1100+index,'TIME':None}
+        rows.append(row)
+        nodes[role]={'secid':secid,'last':row['LAST'],'oi':row['OPENPOSITION'],'timestamp':event.isoformat(),
+            'received_at_utc':received.isoformat(),'source_trade_date':row['TRADEDATE'],
+            'last_trade_time_moscow':None,'price_oi_same_source_row':True,'price_oi_usable':True,'stale':False}
+    payload={'securities':{'columns':['SECID','BOARDID','LASTTRADEDATE','MINSTEP','STEPPRICE'],
+        'data':[[secid,'RFUD','2026-09-17' if secid.endswith('U6') else '2026-12-17',1.,1.] for secid in BINDINGS.values()]},
+        'marketdata':{'columns':list(rows[0]),'data':[list(r.values()) for r in rows]}}
+    raw=json.dumps(payload).encode(); digest=m.sha256(raw).hexdigest()
+    responses=[{'content_base64':base64.b64encode(raw).decode(),'sha256':digest,'source_url':'https://apim.moex.com'+live.FORTS_ENDPOINT,
+        'params':{} if role=='selected_values' else {'start':1_000_000_000},'received_at_utc':received.isoformat(),'http_status':200,'role':role}
+        for role in ('selected_values','completeness_probe')]
+    return {'bindings':dict(BINDINGS),'instruments':nodes,'snapshot_received_at_utc':NOW.isoformat(),
+        'original_forts_http_evidence':{'request_started_lower_bound_utc':(NOW-timedelta(seconds=40)).isoformat(),
+            'request_clock_semantics':'batch_start_before_each_retained_request','responses':responses}}
+
+
+def _consumer_bounded_sources(root,history):
+    """Synthetic source buffers, explicitly for offline consumer examples only."""
+    columns=['SECID','TRADEDATE','TRADETIME','SYSTIME','PR_OPEN','PR_HIGH','PR_LOW','PR_CLOSE','OI_OPEN','OI_HIGH','OI_LOW','OI_CLOSE']
+    rows=[[f'SYNTHETIC{i}','2026-08-23','19:00:00','2026-08-23 19:00:48',100.,100.,100.,100.,1000,1000,1000,1000] for i in range(9683)]
+    for i,secid in enumerate(BINDINGS.values()):rows[i][0]=secid
+    pages=[]
+    for start in range(0,9683,1000):
+        payload={'data':{'columns':columns,'data':rows[start:start+1000]},'data.cursor':{'columns':['INDEX','TOTAL','PAGESIZE'],'data':[[start,9683,1000]]}}
+        raw=json.dumps(payload).encode();response=m._freeze(root,raw)
+        receipt={'requested_at_utc':(NOW-timedelta(seconds=20)).isoformat(),'received_at_utc':(NOW-timedelta(seconds=10)).isoformat(),
+            'http_status':200,'sha256':response['sha256'],
+            'url':f'https://apim.moex.com/iss/datashop/algopack/fo/tradestats.json?date=2026-08-23&from=2026-08-23&till=2026-08-23&start={start}'}
+        receipt_proof=m._freeze(root,json.dumps(receipt).encode())
+        pages.append({'start':start,'response_ref':response['ref'],'response_sha256':response['sha256'],
+            'receipt_ref':receipt_proof['ref'],'receipt_sha256':receipt_proof['sha256']})
+    official={'kind':'official_paginated_tradestats','trade_date':'2026-08-23','expected_total_rows':9683,'pages':pages}
+    old=history['2026-08-24']['SiU6']['proof'];run=old['acceptance_run_id']
+    standalone={'kind':'standalone_stage3_pilot','run_id':run,
+        'accepted_marker_ref':'${MOEX_DATA_ROOT}/state/acceptance/step3_canonical_raw/run_id='+run+'/accepted_pointers.json',
+        'pilot_evidence_ref':'${MOEX_DATA_ROOT}/state/acceptance/step3_canonical_raw/run_id='+run+'/pilot_evidence.json',
+        'marker_sha256':old['marker']['sha256'],'pilot_sha256':old['pilot']['sha256']}
+    accepted=NOW-timedelta(seconds=5)
+    document={'schema_version':'contract_price_market_oi_source_admission.v1','project':'MOEX_Bot',
+        'task_id':'contract_price_market_oi_observed_comparisons_v1','accepted_at_utc':accepted.isoformat(),'entries':[official,standalone]}
+    proof=m._freeze(root,json.dumps(document).encode())
+    history['2026-08-23'],_=m._official_pages(root,official,accepted_at=accepted,now=NOW)
+    for day in ('2026-08-23','2026-08-24'):
+        for record in history[day].values():record['proof']['source_admission']=proof
+
+
+from functools import lru_cache
+
+
+@lru_cache(maxsize=4)
+def _source_snapshot(revised=False,zero_oi=False,consumer=False):
+    """Real Parquet/JSON buffers; no admission or membership validator is mocked."""
+    import tempfile
+    import pandas as pd
+    from test_step3_raw_acceptance import _evidence, _write_json
+    from moex_data import step3_raw_acceptance as stage3
+    from moex_data.futures import futoi_delta_statistics_context as engine
+    with tempfile.TemporaryDirectory() as folder:
+        root=Path(folder); history={}
+        dates=[(NOW.date()-timedelta(days=i)).isoformat() for i in reversed(range(1,24 if consumer else 23))]
+        if consumer:dates=[d for d in dates if d not in ('2026-09-12','2026-09-13')]
+        for index,day in enumerate(dates):
+            run='step3_pilot_20260824_1705' if consumer and day=='2026-08-24' else 'step10_'+day.replace('-','')+'_stage3';pilot=_evidence(root,run)
+            publication=day+('T14:05:48+00:00' if consumer and day=='2026-08-24' else 'T16:00:49+00:00' if revised and index==21 else 'T16:00:48+00:00')
+            # Fixture producer uses Aug24; replace source dates in all original JSON.
+            pilot=json.loads(json.dumps(pilot).replace('2026-08-24',day))
+            run_root=root/'runs/step3_canonical_raw'/('run_id='+run)
+            for path in run_root.rglob('*.json'):
+                path.write_text(path.read_text().replace('2026-08-24',day))
+            specs=[]
+            for field,dataset in [('quote_partitions','futures_raw_5m'),('open_interest_partitions','futures_open_interest_raw_5m'),('tom_partitions','fx_spot_raw_5m')]:
+                for item in pilot[field]:
+                    quote=field=='quote_partitions'
+                    instrument=item['instrument_id_scope'][0] if quote else item['instrument_id']
+                    secid=item['secid_scope'][0] if quote else item['secid']
+                    paths=[Path(item[k]) for k in (('manifest_reference','quality_report_reference','storage_partition_path') if quote else ('manifest_path','quality_report_path','partition_path'))]
+                    manifest=json.loads(paths[0].read_text()); quality=json.loads(paths[1].read_text())
+                    if field!='tom_partitions':
+                        rows=[]
+                        for bar in range(10):
+                            event=datetime.fromisoformat(day+('T13:20:00+00:00' if consumer and day=='2026-08-24' else 'T15:15:00+00:00'))+timedelta(minutes=5*bar)
+                            row={'secid':secid,'trade_date':day,'instrument_id':instrument,'source_id':item['source_id'],
+                                'ts':event.astimezone(m.archive.MOSCOW).replace(tzinfo=None).isoformat(),'ingest_ts':day+('T14:08:00+00:00' if consumer and day=='2026-08-24' else 'T16:01:00+00:00')}
+                            if quote: row.update(open=100.+index,high=100.+index,low=100.+index,close=100.+index)
+                            else: row.update(oi_open=0 if zero_oi else 1000+index,oi_high=0 if zero_oi else 1000+index,oi_low=0 if zero_oi else 1000+index,oi_close=0 if zero_oi else 1000+index,
+                                availability_ts_utc=publication,systime_source=day+' 19:00:48')
+                            rows.append(row)
+                        pd.DataFrame(rows).to_parquet(paths[2],index=False)
+                        if not quote:
+                            for document in (manifest,quality):document.update(min_availability_ts_utc=publication,max_availability_ts_utc=publication)
+                    _write_json(paths[0],manifest);_write_json(paths[1],quality)
+                    specs.append(stage3.PointerSpec(dataset,instrument,item['source_id'],secid,day,10,*paths,manifest['run_id']))
+            pilot_path=root/'state/acceptance/step3_canonical_raw'/('run_id='+run)/'pilot_evidence.json'
+            marker_path=pilot_path.with_name('accepted_pointers.json')
+            marker={'project':'MOEX_Bot','step':3,'status':'accepted','run_id':run,'acceptance_contract_id':stage3.CONTRACT_ID,
+                'artifact_semantics':'immutable_run_scoped','accepted_pointer_count':10,'expected_pointer_count':10,
+                'pilot_evidence_ref':'${MOEX_DATA_ROOT}/'+pilot_path.relative_to(root).as_posix(),'pointers':[
+                    {'dataset_id':s.dataset_id,'instrument_id':s.instrument_id,
+                     'pointer_ref':'${MOEX_DATA_ROOT}/state/datasets/dataset_id='+s.dataset_id+'/instrument_id='+s.instrument_id+'/current_accepted_manifest.json',
+                     'manifest_ref':'${MOEX_DATA_ROOT}/'+s.manifest_path.relative_to(root).as_posix(),
+                     'quality_report_ref':'${MOEX_DATA_ROOT}/'+s.quality_path.relative_to(root).as_posix()} for s in specs]}
+            parent_path=root/'runs/step10_rub_daily_refresh'/('run_id='+run[:-7])/'run_manifest.json'
+            parent={'project':'MOEX_Bot','stage':10,'run_id':run[:-7],'status':'succeeded','finished_at_utc':day+'T17:00:00+00:00',
+                'source_refresh':{'status':'refreshed','stage3_run_id':run,'trade_date':day}}
+            for path,value in ((pilot_path,pilot),(marker_path,marker),(parent_path,parent)):_write_json(path,value)
+            resolved=dict(run=run,marker_path=marker_path,marker=marker,pilot_path=pilot_path,pilot=pilot,parent_path=parent_path,parent=parent,
+                finished=m._stamp(parent['finished_at_utc']),binding=m._stamp(pilot['reference_observed_at_utc']),specs=specs)
+            kind='CURRENT_REVALIDATED_ACCEPTED_STAGE10_RUN'
+            if consumer and day=='2026-08-24':
+                resolved.update(parent_path=None,parent=None,finished=NOW-timedelta(seconds=5));kind='REVALIDATED_STANDALONE_STAGE3_PILOT'
+            history[day]=m._stage3_pairs(root,resolved,now=NOW,kind=kind)
+        if consumer:_consumer_bounded_sources(root,history)
+        frame=pd.DataFrame([{'trade_date':d,'instrument_id':engine.OBSERVED_DATE_WITNESS_INSTRUMENT_ID,'timeframe':'1D',
+            'availability_ts_utc':d+'T18:00:00+00:00','build_ts_utc':NOW.isoformat()} for d in dates])
+        from io import BytesIO
+        stream=BytesIO();frame.to_parquet(stream,index=False)
+        witness={'partition':m._freeze(root,stream.getvalue())}
+        identity={'dataset_id':engine.OBSERVED_DATE_WITNESS_DATASET_ID,'instrument_id':engine.OBSERVED_DATE_WITNESS_INSTRUMENT_ID,
+            'timeframe':'1D','run_id':'witness_test','quality_status':'pass'}
+        for key in ('manifest','quality_report'):witness[key]=m._freeze(root,json.dumps(identity).encode())
+        pointer={**identity,'acceptance_run_id':'accepted_witness_test','acceptance_contract_id':'step7_rub_native_d1_w1_technical_acceptance.v1'}
+        for key,proof in witness.items():pointer[key+'_ref']=proof['ref'];pointer[key+'_sha256']=proof['sha256']
+        witness['pointer']=m._freeze(root,json.dumps(pointer).encode())
+        binding={};m._original_current(root,_native_body(),NOW,binding_sink=binding)
+        e={'schema_version':m.SCHEMA,'accepted_at_utc':NOW.isoformat(),'causal_cutoff_at_utc':NOW.isoformat(),'contract_text':m._contract(),
+            'bindings':dict(BINDINGS),'role_binding_as_of_utc':NOW.isoformat(),'binding_proof':binding,
+            'observed_dates':dates,'witness_proof':witness,'history':history,'source_errors':{}}
+        e['original_byte_buffers']=m._buffer_table(root,e,available=m._native_buffers(_native_body()))
+        return {m.STORE_KEY:{'evidence':e,'evidence_sha256':m.common._digest(e),'last_capture_attempt_at_utc':NOW.isoformat(),
+            'last_capture_error':None,'current_capture':None,'current_sha256':None,'latest_source_errors':{}}}
+
+
+def pair(secid,day,price=100.0,oi=1000):
+    role=next(role for role,value in BINDINGS.items() if value==secid)
+    ts=day+'T19:00:00'; pub=day+'T16:00:48+00:00'; receipt=day+'T16:01:00+00:00'
+    shared={'secid':secid,'trade_date':day,'ts':ts,'instrument_id':m.INSTRUMENTS[role],'ingest_ts':receipt}
+    q={**shared,'close':price,'source_id':'moex_algopack_fo_tradestats_5m'}
+    o={**shared,'oi_close':oi,'availability_ts_utc':pub,'source_id':'moex_algopack_fo_open_interest_5m'}
+    proof={'acceptance_run_id':'step10_'+day.replace('-','')+'_stage3','revalidated_at_utc':NOW.isoformat(),
+        'quote':dict(partition=REF,manifest=REF,quality=REF),'open_interest':dict(partition=REF,manifest=REF,quality=REF),
+        'marker':REF,'pilot':REF,'parent':REF,'binding_observed_at_utc':day+'T06:00:00+00:00',
+        'original_acceptance_digest_available':False,'hash_semantics':'computed_at_current_revalidation',
+        'quote_source_row':q,'oi_source_row':o}
+    return m._pair(secid,day,day+'T16:00:00+00:00',pub,receipt,price,oi,proof,source_kind='CURRENT_REVALIDATED_ACCEPTED_STAGE10_RUN')
+
+
+def snapshot(missing=()):
+    value=deepcopy(_source_snapshot())
+    e=value[m.STORE_KEY]['evidence']
+    for index in missing: e['history'].pop(e['observed_dates'][index],None)
+    _prune_buffers(e)
+    value[m.STORE_KEY]['evidence_sha256']=m.common._digest(e)
+    return value
+
+
+def _prune_buffers(e):
+    needed={digest for _,digest in m._proof_references(e)}
+    e['original_byte_buffers']={k:v for k,v in e['original_byte_buffers'].items() if k in needed}
+
+
+
+
+def release(s,now=NOW):
+    r={};m.attach_consumer(s,r,now=now);m.verify_projection(s,r,now=now);return r['contract_price_market_oi_context']
+
+
+def test_exact_observed_targets_do_not_shift_missing_days():
+    s=snapshot(missing=(16,)); out=release(s)
+    c=out['dated']['contracts']['si_front']
+    assert c['changes']['5']['target_observed_trade_date']==s[m.STORE_KEY]['evidence']['observed_dates'][-6]
+    assert c['changes']['5']['values'] is None
+    assert c['changes']['1']['values']['market_open_interest_change']==1
+    assert c['changes']['20']['values']['market_open_interest_change']==20
+    assert out['units']['price_by_root']=={'si':'RUB_per_1000_USD','cr':'RUB_per_CNY'}
+    assert out['current']['status']=='UNAVAILABLE'
+    assert 'proof' not in c['anchor']
+
+
+@pytest.mark.parametrize('mutation',['hash','foreign_secid','source_date','quote_oi_time','source_value','source_clock','receipt','fractional_oi','authority','contract','future_acceptance','old_witness','unknown_field'])
+def test_self_hashed_retained_mutations_refuse(mutation):
+    s=snapshot();e=s[m.STORE_KEY]['evidence'];r=e['history'][e['observed_dates'][-1]]['SiU6']
+    if mutation=='hash': s[m.STORE_KEY]['evidence_sha256']='b'*64
+    elif mutation=='foreign_secid': r['secid']='SiZ6'
+    elif mutation=='source_date': r['trade_date']='1900-01-01'
+    elif mutation=='quote_oi_time': r['proof']['oi_source_row']['ts']='2026-09-14T18:55:00'
+    elif mutation=='source_value': r['price']+=1
+    elif mutation=='source_clock': r['source_timestamp_utc']='2026-09-14T15:55:00+00:00'
+    elif mutation=='receipt': r['received_at_utc']='2026-09-14T16:02:00+00:00'
+    elif mutation=='fractional_oi': r['market_open_interest']=1000.5
+    elif mutation=='authority': r['session_completion_proven']=True
+    elif mutation=='contract':
+        doc=json.loads(e['contract_text']);doc['admission']['action_authority']=True;e['contract_text']=json.dumps(doc)
+    elif mutation=='future_acceptance': e['accepted_at_utc']=(NOW+timedelta(seconds=1)).isoformat()
+    elif mutation=='old_witness': e['observed_dates']=['1900-01-01']
+    else: r['invented_signal']='BUY'
+    if mutation!='hash': s[m.STORE_KEY]['evidence_sha256']=m.common._digest(e)
+    assert release(s)['status']=='UNAVAILABLE'
+
+
+@pytest.mark.parametrize('tamper',['omit','price','oi','target','scope','authority','extra'])
+def test_projection_tampering_rejected(tamper):
+    s=snapshot();r={};m.attach_consumer(s,r,now=NOW);o=r['contract_price_market_oi_context']
+    if tamper=='omit': r.clear()
+    elif tamper=='scope': o['scope']='ACTIONABLE'
+    elif tamper=='authority': o['action_authority']=True
+    elif tamper=='extra': o['invented_signal']='BUY'
+    else:
+        change=o['dated']['contracts']['si_front']['changes']['1']
+        if tamper=='target': change['target_observed_trade_date']='2026-08-23'
+        elif tamper=='price': change['values']['price_return_fraction']=1
+        else: change['values']['market_open_interest_change']=99
+    with pytest.raises(AssertionError):m.verify_projection(s,r,now=NOW)
+
+
+def install_current(s):
+    import tempfile
+    with tempfile.TemporaryDirectory() as folder:
+        root=Path(folder);body=_native_body()
+        facts=m._original_current(root,body,NOW)
+        carrier={'causal_cutoff_at_utc':NOW.isoformat(),'captured_at_utc':NOW.isoformat(),'bindings':BINDINGS,
+            'facts':facts,'error':None,'original_byte_buffers':m._buffer_table(root,facts,available=m._native_buffers(body))}
+    s[m.STORE_KEY].update(current_capture=carrier,current_sha256=m.common._digest(carrier))
+    body.pop('original_forts_http_evidence')
+    s['components']={'synchronized_live_market_oi':{'data':body}}
+    return s
+
+
+def test_current_has_own_native_proof_and_expires_without_expiring_dated():
+    s=install_current(snapshot());out=release(s)
+    assert out['current']['status']=='AVAILABLE'
+    assert out['current']['contracts']['si_front']['anchor']['timestamp_semantics']=='source_row_update_time_not_last_trade_time'
+    assert out['current']['contracts']['si_front']['anchor']['last_trade_time_moscow'] is None
+    from moex_data.rub_snapshot_read_freshness import MAX_LIVE_AGE_SECONDS
+    later=NOW+timedelta(seconds=MAX_LIVE_AGE_SECONDS+1)
+    expired=release(s,now=later)
+    assert expired['current']['status']=='UNAVAILABLE' and expired['dated']['status']=='AVAILABLE'
+    assert expired['evidence_sha256']==out['evidence_sha256']
+
+
+@pytest.mark.parametrize('mutation',['digest','row_value','row_time','receipt','binding','gate','source_version','extra'])
+def test_current_original_proof_or_read_governance_mutations_refuse(mutation):
+    s=install_current(snapshot());carrier=s[m.STORE_KEY]['current_capture'];r=carrier['facts']['SiU6']
+    if mutation=='digest': s[m.STORE_KEY]['current_sha256']='b'*64
+    elif mutation=='row_value':r['proof']['source_row']['LAST']+=1
+    elif mutation=='row_time':r['proof']['source_row']['SYSTIME']='2026-09-15 12:00:00'
+    elif mutation=='receipt':r['received_at_utc']=NOW.isoformat()
+    elif mutation=='binding':r['proof']['original_bindings']={**BINDINGS,'si_front':'SiZ6'}
+    elif mutation=='gate':s['components']['synchronized_live_market_oi']['data']['instruments']['si_front']['price_oi_usable']=False
+    elif mutation=='source_version':s['components']['synchronized_live_market_oi']['data']['instruments']['si_front']['last']+=1
+    else:r['last_trade_time_moscow']={'invented_fact':'BUY'}
+    if mutation!='digest':s[m.STORE_KEY]['current_sha256']=m.common._digest(carrier)
+    result=release(s)
+    assert result['current']['status']=='UNAVAILABLE' and result['dated']['status']=='AVAILABLE'
+
+
+def test_zero_oi_denominators_are_explicit_and_never_nonfinite():
+    s=deepcopy(_source_snapshot(zero_oi=True))
+    out=release(s)
+    delta=out['dated']['contracts']['si_front']['changes']['1']['values']
+    assert delta['market_open_interest_change_fraction'] is None
+    assert delta['market_open_interest_fraction_reason']=='zero_baseline_market_open_interest'
+    assert out['dated']['front_next_market_oi_distribution']['si']['reason']=='zero_two_contract_oi_denominator'
+    json.dumps(out,allow_nan=False)
+
+
+def test_shared_renderer_omission_and_arithmetic_fault_are_caught(monkeypatch):
+    original=m._view
+    def broken(*args):
+        value=original(*args);value['contracts'].pop('si_next');return value
+    monkeypatch.setattr(m,'_view',broken)
+    s=snapshot();r={};m.attach_consumer(s,r,now=NOW)
+    with pytest.raises(AssertionError):m.verify_projection(s,r,now=NOW)
+
+
+def test_whole_shared_renderer_refusal_is_caught(monkeypatch):
+    monkeypatch.setattr(m,'describe',lambda *args,**kwargs:{'schema_version':m.SCHEMA,'status':'UNAVAILABLE','scope':m.SCOPE,'reason':'invented_refusal',**m.FLAGS})
+    s=snapshot();r={};m.attach_consumer(s,r,now=NOW)
+    with pytest.raises(AssertionError):m.verify_projection(s,r,now=NOW)
+
+
+@pytest.mark.parametrize('change',['same','diagnostic_only','source_publication','missing_anchor'])
+def test_capture_retention_tracks_fact_versions_not_attempts(monkeypatch,tmp_path,change):
+    from moex_data.futures import futoi_live_factual_refresh_source_native as source
+    old=snapshot(missing=(16,) if change=='diagnostic_only' else ())
+    e=deepcopy(old[m.STORE_KEY]['evidence']);history=deepcopy(e['history']);errors={}
+    if change=='diagnostic_only':errors[e['observed_dates'][16]]='ValidationError: latest diagnostic wording'
+    elif change=='source_publication':
+        e=deepcopy(_source_snapshot(True)[m.STORE_KEY]['evidence']);history=deepcopy(e['history'])
+    elif change=='missing_anchor':history.pop(e['observed_dates'][-1]);errors[e['observed_dates'][-1]]='invalid_latest_accepted_source'
+    monkeypatch.setattr(source,'_data_root',lambda:tmp_path)
+    monkeypatch.setattr(m,'_witness',lambda *a:(e['observed_dates'],e['witness_proof']))
+    monkeypatch.setattr(m,'_historical',lambda *a:(history,errors))
+    def unavailable(*args,**kwargs):
+        kwargs['binding_sink'].update(e['binding_proof'])
+        raise PermissionError('current original byte read denied')
+    monkeypatch.setattr(m,'_original_current',unavailable)
+    buffers=m._decode_buffers(e['original_byte_buffers'])
+    monkeypatch.setattr(m,'_read_bytes',lambda root,ref,expected=None:buffers[expected])
+    current=deepcopy(old);current['components']={'synchronized_live_market_oi':{'data':{'instruments':dict.fromkeys(m.ROLES,{}),'bindings':BINDINGS,'snapshot_received_at_utc':NOW.isoformat()}}}
+    ticks=iter((NOW+timedelta(seconds=1),NOW+timedelta(seconds=2)))
+    completed=m.capture_snapshot(current,old,now_fn=lambda:next(ticks),refresh_started_at=NOW)
+    if change in ('same','diagnostic_only'):
+        assert current[m.STORE_KEY]['evidence']==old[m.STORE_KEY]['evidence']
+        assert current[m.STORE_KEY]['evidence_sha256']==old[m.STORE_KEY]['evidence_sha256']
+    else:assert current[m.STORE_KEY]['evidence_sha256']!=old[m.STORE_KEY]['evidence_sha256']
+    out=release(current,now=completed)
+    assert out['latest_source_errors']==errors
+    assert 'current original byte read denied' in out['current']['reason']
+    if change=='missing_anchor':assert out['dated']['status']=='UNAVAILABLE'
+
+
+def test_capture_completion_clock_reversal_is_atomic(monkeypatch,tmp_path):
+    from moex_data.futures import futoi_live_factual_refresh_source_native as source
+    old=snapshot();current=deepcopy(old);e=old[m.STORE_KEY]['evidence']
+    current['components']={'synchronized_live_market_oi':{'data':{'instruments':dict.fromkeys(m.ROLES,{}),'bindings':BINDINGS,'snapshot_received_at_utc':NOW.isoformat()}}}
+    before=deepcopy(current)
+    monkeypatch.setattr(source,'_data_root',lambda:tmp_path)
+    monkeypatch.setattr(m,'_witness',lambda *a:(e['observed_dates'],e['witness_proof']))
+    monkeypatch.setattr(m,'_historical',lambda *a:(e['history'],{}))
+    monkeypatch.setattr(m,'_original_current',lambda *a,**kw:kw['binding_sink'].update(e['binding_proof']))
+    ticks=iter((NOW+timedelta(seconds=1),NOW))
+    with pytest.raises(ValueError,match='completion_reversed'):
+        m.capture_snapshot(current,old,now_fn=lambda:next(ticks),refresh_started_at=NOW)
+    assert current==before
+
+
+@pytest.mark.parametrize('error',[None,True,{},123])
+def test_malformed_first_capture_diagnostic_refuses_without_leaking(error):
+    s={'contract_price_market_oi_capture_error':{'checked_at_utc':NOW.isoformat(),'error':error}}
+    out=release(s)
+    assert out['status']=='UNAVAILABLE' and out['reason']=='paired_capture_failure_shape'
+
+
+def test_original_first_acceptance_expiry_is_not_renewed_by_same_history(monkeypatch,tmp_path):
+    from moex_data.futures import futoi_live_factual_refresh_source_native as source
+    old=snapshot();e=old[m.STORE_KEY]['evidence'];later=NOW+timedelta(days=4,seconds=1)
+    current=deepcopy(old);current['components']={'synchronized_live_market_oi':{'data':{'instruments':dict.fromkeys(m.ROLES,{}),'bindings':BINDINGS,'snapshot_received_at_utc':NOW.isoformat()}}}
+    monkeypatch.setattr(source,'_data_root',lambda:tmp_path)
+    monkeypatch.setattr(m,'_witness',lambda *a:(e['observed_dates'],e['witness_proof']))
+    monkeypatch.setattr(m,'_historical',lambda *a:(e['history'],{}))
+    monkeypatch.setattr(m,'_original_current',lambda *a,**kw:kw['binding_sink'].update(e['binding_proof']))
+    buffers=m._decode_buffers(e['original_byte_buffers'])
+    monkeypatch.setattr(m,'_read_bytes',lambda root,ref,expected=None:buffers[expected])
+    ticks=iter((later,later+timedelta(seconds=1)))
+    m.capture_snapshot(current,old,now_fn=lambda:next(ticks),refresh_started_at=later)
+    assert current[m.STORE_KEY]['evidence_sha256']==old[m.STORE_KEY]['evidence_sha256']
+    assert release(current,now=later+timedelta(seconds=1))['status']=='UNAVAILABLE'
+
+
+@pytest.mark.parametrize('mutation',['joint_price_copy','root_swap','source_buffer','missing_buffer','witness_date','missing_history_contract'])
+def test_frozen_original_bytes_bind_values_roles_and_exact_inventory(mutation):
+    s=snapshot();e=s[m.STORE_KEY]['evidence'];day=e['observed_dates'][-1];row=e['history'][day]['SiU6']
+    if mutation=='joint_price_copy':row['price']=row['proof']['quote_source_row']['close']=777.
+    elif mutation=='root_swap':e['bindings']['si_front'],e['bindings']['cr_front']=e['bindings']['cr_front'],e['bindings']['si_front']
+    elif mutation=='source_buffer':
+        digest=row['proof']['quote']['partition']['sha256'];e['original_byte_buffers'][digest]='e30='
+    elif mutation=='missing_buffer':e['original_byte_buffers'].pop(row['proof']['quote']['partition']['sha256'])
+    elif mutation=='witness_date':e['observed_dates'].pop(0)
+    else:e['history'][day].pop('SiZ6')
+    s[m.STORE_KEY]['evidence_sha256']=m.common._digest(e)
+    assert release(s)['status']=='UNAVAILABLE'
+
+
+@pytest.mark.parametrize('mutation',['joint_price_copy','source_date','probe_missing','binding_copy','source_buffer'])
+def test_current_original_response_membership_and_read_identity(mutation):
+    s=install_current(snapshot());carrier=s[m.STORE_KEY]['current_capture'];fact=carrier['facts']['SiU6']
+    if mutation=='joint_price_copy':
+        fact['price']=fact['proof']['source_row']['LAST']=777.
+        s['components']['synchronized_live_market_oi']['data']['instruments']['si_front']['last']=777.
+    elif mutation=='source_date':s['components']['synchronized_live_market_oi']['data']['instruments']['si_front']['source_trade_date']='1900-01-01'
+    elif mutation=='probe_missing':
+        for r in carrier['facts'].values():r['proof']['retained_http_inventory']=[v for v in r['proof']['retained_http_inventory'] if v['role']=='selected_values']
+    elif mutation=='binding_copy':fact['proof']['original_bindings']['si_front']='CRU6'
+    else:carrier['original_byte_buffers'][fact['proof']['response']['sha256']]='e30='
+    s[m.STORE_KEY]['current_sha256']=m.common._digest(carrier)
+    out=release(s)
+    assert out['dated']['status']=='AVAILABLE' and out['current']['status']=='UNAVAILABLE'
+
+
+def _fast_native_market():
+    from test_rub_fast_market import market
+    value=market(); native=_native_body()
+    value['snapshot_received_at_utc']=NOW.isoformat()
+    for node in value['instruments'].values():
+        node['timestamp']=(NOW-timedelta(seconds=30)).isoformat();node['received_at_utc']=(NOW-timedelta(seconds=10)).isoformat()
+    for role in m.ROLES:value['instruments'][role].update(native['instruments'][role],received_at_utc=(NOW-timedelta(seconds=10)).isoformat())
+    value['original_forts_http_evidence']=native['original_forts_http_evidence']
+    for response in value['original_forts_http_evidence']['responses']:response['received_at_utc']=(NOW-timedelta(seconds=10)).isoformat()
+    return value
+
+
+@pytest.mark.parametrize('defect',[None,'missing','hash','expired','source_date'])
+def test_real_fast_refresh_persist_apply_uses_only_its_own_current_bytes(tmp_path,monkeypatch,defect):
+    from moex_data import rub_fast_market as fast
+    old=install_current(snapshot());original=deepcopy(old)
+    old.update(authority={},analysis_views={},analysis_workflow={})
+    value=fast.refresh(tmp_path,loader=_fast_native_market,clock=lambda:NOW)
+    folder=fast.state_path(tmp_path);(folder/'enabled').write_text(fast.SCHEMA)
+    assert (folder/'current.json').stat().st_size<=fast.MAX_BYTES
+    assert 'original_byte_buffers' not in json.dumps(fast.collection_summary(value))
+    if defect=='missing':value.pop(m.CURRENT_KEY)
+    elif defect=='hash':value[m.CURRENT_KEY]['sha256']='b'*64
+    elif defect=='source_date':
+        value['market']['instruments']['si_front']['source_trade_date']='1900-01-01';value['market_sha256']=fast._digest(value['market'])
+    if defect in ('missing','hash','source_date'):(folder/'current.json').write_text(json.dumps(value))
+    monkeypatch.setattr('moex_data.synchronized_live_market_oi_context_partial.fetch_live_snapshot',lambda **kw:pytest.fail('network on read'))
+    now=NOW+timedelta(seconds=61) if defect=='expired' else NOW
+    before=(folder/'current.json').read_bytes();overlaid=fast.apply(old,root=tmp_path,now=now);out=release(overlaid,now=now)
+    assert overlaid[m.STORE_KEY]['evidence']==original[m.STORE_KEY]['evidence']
+    assert overlaid[m.STORE_KEY]['evidence_sha256']==original[m.STORE_KEY]['evidence_sha256']
+    assert (folder/'current.json').read_bytes()==before
+    assert out['dated']['status']=='AVAILABLE'
+    assert out['current']['status']==('AVAILABLE' if defect is None else 'UNAVAILABLE')
+    if defect is None:
+        assert out['current']['contracts']['si_front']['anchor']['received_at_utc']==(NOW-timedelta(seconds=10)).isoformat()
+
+
+def test_fast_validation_completion_is_after_verification_and_regression_refuses(tmp_path):
+    from moex_data import rub_fast_market as fast
+    ticks=iter((NOW,NOW+timedelta(seconds=1),NOW+timedelta(seconds=2)))
+    value=fast.refresh(tmp_path,loader=_fast_native_market,clock=lambda:next(ticks))
+    assert value[m.CURRENT_KEY]['capture']['causal_cutoff_at_utc']==(NOW+timedelta(seconds=1)).isoformat()
+    assert value[m.CURRENT_KEY]['capture']['captured_at_utc']==value['completed_at']==(NOW+timedelta(seconds=2)).isoformat()
+    before=(fast.state_path(tmp_path)/'current.json').read_bytes()
+    ticks=iter((NOW+timedelta(seconds=3),NOW+timedelta(seconds=4),NOW+timedelta(seconds=3)))
+    with pytest.raises(ValueError,match='validation_clock_reversed'):
+        fast.refresh(tmp_path,loader=_fast_native_market,clock=lambda:next(ticks))
+    assert (fast.state_path(tmp_path)/'current.json').read_bytes()==before
+    with pytest.raises(ValueError,match='before_previous_completion'):
+        fast.refresh(tmp_path,loader=lambda:pytest.fail('fetch after clock reversal'),clock=lambda:NOW)
+    assert (fast.state_path(tmp_path)/'current.json').read_bytes()==before
+
+
+def test_fast_full_state_byte_cap_is_enforced_and_cli_does_not_dump_buffers(tmp_path):
+    from moex_data import rub_fast_market as fast
+    body=_fast_native_market();body['oversized_fixture']='x'*fast.MAX_BYTES
+    value=fast.refresh(tmp_path,loader=lambda:body,clock=lambda:NOW)
+    assert value['status']=='FAILED' and value['error_class']=='FastMarketByteLimit'
+    assert (fast.state_path(tmp_path)/'current.json').stat().st_size<fast.MAX_BYTES
+    assert m.CURRENT_KEY not in value
+
+
+def test_consumer_fixture_distinguishes_official_and_standalone_partial_endpoints():
+    s=install_current(deepcopy(_source_snapshot(consumer=True)));out=release(s)
+    dated=out['dated']['contracts']['si_front']['changes'];current=out['current']['contracts']['si_front']['changes']
+    assert dated['1']['target_observed_trade_date']=='2026-09-11'
+    assert dated['5']['target_observed_trade_date']=='2026-09-07'
+    assert dated['20']['target_observed_trade_date']=='2026-08-23'
+    assert current['20']['target_observed_trade_date']=='2026-08-24'
+    assert dated['20']['baseline']['source_kind']=='CURRENT_ACCEPTED_OFFICIAL_PAGINATED_TRADESTATS'
+    assert dated['20']['baseline']['source_timestamp_moscow']=='2026-08-23T19:00:00+03:00'
+    assert current['20']['baseline']['source_kind']=='REVALIDATED_STANDALONE_STAGE3_PILOT'
+    assert current['20']['baseline']['source_timestamp_moscow']=='2026-08-24T17:05:00+03:00'
+    assert not current['20']['baseline']['session_completion_proven']
+
+
+def test_real_archive_inventory_derives_run_from_marker_not_optional_pilot_field(tmp_path,monkeypatch):
+    e=snapshot()[m.STORE_KEY]['evidence'];buffers=m._decode_buffers(e['original_byte_buffers'])
+    for pairs in e['history'].values():
+        audit=next(iter(pairs.values()))['proof']['stage3_audit']
+        for ref,proof in audit['artifacts'].items():
+            path=tmp_path/ref.removeprefix('${MOEX_DATA_ROOT}/');path.parent.mkdir(parents=True,exist_ok=True)
+            raw=buffers[proof['sha256']]
+            if path.suffix=='.json':
+                # Relocate fixture source paths; source documents genuinely omit run_id.
+                raw=raw.decode().replace(audit['original_root'].replace('\\','/'),tmp_path.as_posix()).encode()
+            path.write_bytes(raw)
+    monkeypatch.setenv('MOEX_DATA_ROOT',str(tmp_path))
+    records,errors=m._historical(tmp_path,NOW)
+    assert set(records)==set(e['observed_dates'])
+    assert all(len(pairs)==4 for pairs in records.values())
+    assert not (set(errors)&set(e['observed_dates']))
+    for marker in tmp_path.glob('state/acceptance/step3_canonical_raw/run_id=*/pilot_evidence.json'):
+        assert 'run_id' not in json.loads(marker.read_text())
+    # Many newer attempts on one date cannot consume the retained date budget.
+    from test_step3_raw_acceptance import _write_json
+    day=e['observed_dates'][-1]
+    for number in range(257):
+        run=f'burst_{number}_stage3';folder=tmp_path/'state/acceptance/step3_canonical_raw'/('run_id='+run)
+        _write_json(folder/'accepted_pointers.json',{})
+        _write_json(folder/'pilot_evidence.json',{'trade_date':day})
+        _write_json(tmp_path/'runs/step10_rub_daily_refresh'/('run_id='+run[:-7])/'run_manifest.json',
+            {'project':'MOEX_Bot','stage':10,'run_id':run[:-7],'status':'succeeded',
+             'finished_at_utc':(datetime.fromisoformat(day+'T18:00:00+00:00')+timedelta(seconds=number)).isoformat(),
+             'source_refresh':{'status':'refreshed','stage3_run_id':run,'trade_date':day}})
+    records,errors=m._historical(tmp_path,NOW)
+    assert set(records)==set(e['observed_dates'])-{day}
+    assert day in errors  # Newest invalid source never falls back to that day's older run.

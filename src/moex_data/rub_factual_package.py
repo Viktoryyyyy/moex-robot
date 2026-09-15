@@ -219,7 +219,7 @@ def build_package(snapshot, release, *, now):
         'read_view_sha256': sha256(encoded(value)).hexdigest()}
         for key, value in sorted(components.items()) if isinstance(value, dict)}
     chosen = {key: release[key] for key in ('facts', 'market_usability', 'market_structure',
-        'timeframe_context', 'contract_price_context', 'futoi_context', 'news_context', 'user_position_context', 'dated_context', 'observed_range_levels')}
+        'timeframe_context', 'contract_price_context', 'contract_price_market_oi_context', 'futoi_context', 'news_context', 'user_position_context', 'dated_context', 'observed_range_levels')}
     macro = release['macro_evidence_inventory']
     chosen['macro_context'] = {key: macro[key] for key in ('facts', 'scheduled_events', 'calendar_coverage')}
     chosen = compact_values(chosen)

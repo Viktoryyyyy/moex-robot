@@ -1,0 +1,41 @@
+{
+  "schema_version": "contract_price_market_oi_observed_admission.v1",
+  "project": "MOEX_Bot",
+  "task_id": "contract_price_market_oi_observed_comparisons_v1",
+  "scope": "EXACT_SECID_FACTUAL_PRICE_MARKET_OI_OBSERVED_COMPARISONS",
+  "admission": {
+    "source_kinds": [
+      "CURRENT_REVALIDATED_ACCEPTED_STAGE10_RUN",
+      "REVALIDATED_STANDALONE_STAGE3_PILOT",
+      "CURRENT_ACCEPTED_OFFICIAL_PAGINATED_TRADESTATS",
+      "CURRENT_NATIVE_SAME_RESPONSE_ROW"
+    ],
+    "standalone_run_id": "step3_pilot_20260824_1705",
+    "official_acquisition_trade_date": "2026-08-23",
+    "official_acquisition_expected_market_rows": 9683,
+    "lag_observations": [
+      1,
+      5,
+      20
+    ],
+    "max_witness_dates": 22,
+    "max_contracts": 4,
+    "max_accepted_run_candidates": 256,
+    "lookback_calendar_days": 45,
+    "dated_max_age_seconds": 345600,
+    "price_oi_exact_join_required": true,
+    "baseline_role_semantics": "same_SECID_selected_at_explicit_role_binding_as_of_not_historical_role_proof",
+    "session_completion_authority": false,
+    "historical_pit_authority": false,
+    "model_input_allowed": false,
+    "signal_eligible": false,
+    "decision_eligible": false,
+    "action_authority": false,
+    "market_open_interest_counting_basis": "source_native_as_reported_no_rescaling_not_family_futoi_total",
+    "max_original_buffer_bytes": 8000000,
+    "max_original_audit_bytes": 64000000,
+    "max_original_buffer_count": 1024,
+    "native_current_byte_storage": "inline_deduplicated_original_HTTP_bytes",
+    "fast_current_total_state_max_bytes": 2000000
+  }
+}

@@ -108,3 +108,30 @@ def test_cursorless_apim_full_response_rejects_duplicate_secid() -> None:
 
     with pytest.raises(core.SynchronizedLiveMarketOIError, match="duplicate SECID"):
         _fetch(malformed, malformed)
+
+
+def test_original_http_entity_bytes_are_retained_without_reencoding_or_headers():
+    import base64
+    import json
+    from hashlib import sha256
+    payload=_payload(['SiU6'])
+    raw=('  '+json.dumps(payload,indent=2)+'\n').encode('utf-8')
+    response=_Response(payload,'https://apim.moex.com'+core.FORTS_ENDPOINT)
+    response.content=raw
+    now=datetime(2026,9,2,10,0,1,tzinfo=timezone.utc)
+    parsed,_,_=core._fetch_json(url=response.url,params={'iss.meta':'off'},headers={'Authorization':'Bearer never-retain'},
+        timeout=1,http_get=lambda *args,**kwargs:response,now_fn=lambda:now)
+    proof=parsed.original_responses[0]
+    assert base64.b64decode(proof['content_base64'])==raw
+    assert proof['sha256']==sha256(raw).hexdigest()
+    assert proof['received_at_utc']==now.isoformat()
+    assert 'never-retain' not in json.dumps(proof) and 'Authorization' not in proof
+    assert dict(parsed)==payload
+
+
+def test_original_http_bytes_disagreement_is_rejected():
+    response=_Response(_payload(['SiU6']),'https://apim.moex.com'+core.FORTS_ENDPOINT)
+    response.content=b'{"different":"entity"}'
+    with pytest.raises(core.SynchronizedLiveMarketOIError,match='original HTTP bytes'):
+        core._fetch_json(url=response.url,params={},headers={},timeout=1,
+            http_get=lambda *args,**kwargs:response,now_fn=lambda:datetime(2026,9,2,tzinfo=timezone.utc))
