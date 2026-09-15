@@ -406,8 +406,8 @@ def test_first_anchor_rejection_survives_retries_until_valid_recovery(monkeypatc
     assert first_rejection["reason"] == first_reason
     assert cr.describe(second, now=between)["status"] == "UNAVAILABLE"
     assert second[cr.STORE_KEY]["evidence_sha256"] == original[cr.STORE_KEY]["evidence_sha256"]
-    if not next_reason.startswith(cr.TRANSIENT_READ):
-        assert next_reason in second[cr.STORE_KEY]["last_capture_error"]
+    assert second[cr.STORE_KEY]["last_capture_error"] == (
+        "cr_latest_anchor_source_rejected: " + candidate["records"][-1]["trade_date"] + ": " + next_reason)
     verify(second, now=between)
     verify(second, now=NOW+timedelta(seconds=5))
     candidate = deepcopy(valid)

@@ -394,9 +394,9 @@ def capture_snapshot(snapshot, previous, *, now_fn, refresh_started_at, previous
         except Exception as exc: error = type(exc).__name__ + ": " + str(exc)
     if old is not None:
         old.update(last_capture_attempt_at_utc=completed.isoformat(), last_capture_error=error)
-        if candidate is not None and candidate["records"][-1]["status"] == "UNAVAILABLE" and not candidate["records"][-1]["reason"].startswith(TRANSIENT_READ):
+        if candidate is not None and candidate["records"][-1]["status"] == "UNAVAILABLE":
             rejected = candidate["records"][-1]
-            if old["latest_source_rejection"] is None:
+            if not rejected["reason"].startswith(TRANSIENT_READ) and old["latest_source_rejection"] is None:
                 old["latest_source_rejection"] = {"checked_at_utc": completed.isoformat(), "trade_date": rejected["trade_date"], "reason": rejected["reason"]}
             old["last_capture_error"] = "cr_latest_anchor_source_rejected: " + rejected["trade_date"] + ": " + rejected["reason"]
         snapshot[STORE_KEY] = old
