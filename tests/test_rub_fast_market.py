@@ -201,10 +201,10 @@ def test_core_state_overflow_retains_bounded_previous_dated_without_reacceptance
     if dated_overflow:
         original=source.capture
         def oversized(*args,**kwargs):
-            value=original(*args,**kwargs);value['oversized_diagnostic']='ÿ'*fast.MAX_BYTES
+            value=original(*args,**kwargs);value['oversized_diagnostic']='\u044f'*fast.MAX_BYTES
             return value
         monkeypatch.setattr(source,'capture',oversized)
-    body=market();body['oversized_field']='ÿ'*fast.MAX_BYTES
+    body=market();body['oversized_field']='\u044f'*fast.MAX_BYTES
     value=fast.refresh(tmp_path,loader=lambda:body,clock=lambda:NOW+timedelta(seconds=1))
     assert value['status']=='FAILED' and value['error_class']=='FastMarketByteLimit'
     assert value['market'] is None and value['market_sha256']==fast._digest(None)
@@ -216,7 +216,7 @@ def test_core_state_overflow_retains_bounded_previous_dated_without_reacceptance
 def test_oversized_dated_fallback_never_resurrects_expired_previous_authority(tmp_path,monkeypatch):
     from moex_data import rub_dated_market_source as source, rub_dated_context as dated
     publish(tmp_path)
-    monkeypatch.setattr(source,'capture',lambda *a,**kw:{'oversized':'ÿ'*fast.MAX_BYTES})
+    monkeypatch.setattr(source,'capture',lambda *a,**kw:{'oversized':'\u044f'*fast.MAX_BYTES})
     later=NOW+timedelta(hours=97)
     def unavailable():raise OSError('source unavailable')
     value=fast.refresh(tmp_path,loader=unavailable,clock=lambda:later)
@@ -227,7 +227,7 @@ def test_oversized_dated_fallback_never_resurrects_expired_previous_authority(tm
 
 def test_even_oversized_independent_dated_carrier_yields_bounded_refusal(tmp_path,monkeypatch):
     from moex_data import rub_dated_context as dated, rub_dated_market_source as source
-    monkeypatch.setattr(dated,'capture',lambda *a,**kw:{'oversized':'ÿ'*fast.MAX_BYTES})
+    monkeypatch.setattr(dated,'capture',lambda *a,**kw:{'oversized':'\u044f'*fast.MAX_BYTES})
     monkeypatch.setattr(source,'capture',lambda value,*a,**kw:value)
     def unavailable():raise OSError('source unavailable')
     value=fast.refresh(tmp_path,loader=unavailable,clock=lambda:NOW)
