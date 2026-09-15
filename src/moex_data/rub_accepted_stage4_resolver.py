@@ -6,6 +6,7 @@ from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 import re
 import pandas as pd
+import pyarrow.parquet as pq
 from moex_data import rub_contract_price_market_oi_observed as custody
 from moex_data import step4_basis_carry_acceptance as stage4
 from moex_data.analytics import validate_rub_basis_carry_partition as physical
@@ -62,6 +63,11 @@ class Source:
                 raw=self.buffers[item['sha256']];self.budget.charge(raw)
                 require(custody.sha256(raw).hexdigest()==item['sha256'],'stage4_original_hash_mismatch')
             if key.endswith('.json'):custody._source_object(raw)
+            if key.endswith('.parquet'):
+                # This reader also feeds the legacy physical validator: preflight
+                # here, before either caller can materialize the verified bytes.
+                metadata=pq.read_metadata(BytesIO(raw))
+                require(0<metadata.num_rows<=5000 and metadata.num_columns<=100,'stage4_physical_frame_bound')
             self.cache[key]=raw
         return self.cache[key]
     def json(self,path):return custody._source_object(self.read(path))

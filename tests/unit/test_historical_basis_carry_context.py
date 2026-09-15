@@ -304,3 +304,25 @@ def test_explicit_weekend_observations_are_not_removed_by_calendar_assumption(tm
     assert metric['changes']['1']['change'] is None
     assert metric['previous_comparable']['trade_date']=='2026-09-11'
     assert metric['previous_comparable']['is_exact_previous_observation'] is False
+
+
+@pytest.mark.parametrize('rows,columns',[(5001,1),(1,101)])
+def test_original_parquet_metadata_bound_precedes_every_frame_decode(tmp_path,monkeypatch,rows,columns):
+    path=tmp_path/resolver.RUNS/'run_id=metadata_bound'/'part.parquet'
+    path.parent.mkdir(parents=True)
+    pd.DataFrame({str(i):range(rows) for i in range(columns)}).to_parquet(path,index=False)
+    monkeypatch.setattr(pd,'read_parquet',lambda *a,**k:pytest.fail('decode before metadata refusal'))
+    source=resolver.Source(tmp_path)
+    with pytest.raises(ValueError,match='stage4_physical_frame_bound'):source.read(path)
+    replay=resolver.Source(proof=source.proof,buffers=source.buffers)
+    with pytest.raises(ValueError,match='stage4_physical_frame_bound'):replay.frame(path)
+
+
+@pytest.mark.parametrize('rows,columns',[(5000,1),(1,100)])
+def test_original_parquet_metadata_exact_bound_remains_readable(tmp_path,rows,columns):
+    path=tmp_path/resolver.RUNS/'run_id=metadata_bound'/'part.parquet'
+    path.parent.mkdir(parents=True)
+    pd.DataFrame({str(i):range(rows) for i in range(columns)}).to_parquet(path,index=False)
+    source=resolver.Source(tmp_path)
+    assert source.frame(path).shape==(rows,columns)
+    assert resolver.Source(proof=source.proof,buffers=source.buffers).frame(path).shape==(rows,columns)
