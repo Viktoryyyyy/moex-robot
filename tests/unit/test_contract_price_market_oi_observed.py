@@ -1229,6 +1229,7 @@ def test_consumer_semantics_preserve_all_original_values_and_evidence():
         assert semantics['price_fields']['CURRENT_NATIVE_SAME_RESPONSE_ROW']=='marketdata.LAST_last_trade_price'
         assert semantics['price_fields']['CURRENT_REVALIDATED_ACCEPTED_STAGE10_RUN']=='quote.close_5m_bar_CLOSE'
         assert semantics['dated_lifetime_seconds']==345600
+        assert semantics['clock_meanings']['source_publication_at_utc']=='native_row_update_time_reused_not_independently_proven_publication; official_SYSTIME_publication; Stage3_OI_publication_does_not_prove_price_publication'
 
 
 @pytest.mark.parametrize('field',['price_fields','clock_meanings','horizon_basis','current_date_policy','missing_target_policy',
