@@ -72,15 +72,23 @@ def install_current(s, monkeypatch):
     r = record("2026-09-14", 121, True)
     original = proof(("raw_partition", "raw_quality_report", "raw_refresh_manifest"))
     report = {"schema_version": audit.SCHEMA, "policy": audit.POLICY, "instrument_id": cr.INSTRUMENT,
-        "latest_status": "PASS", "latest_factual": deepcopy(r["factual"]), "provenance": deepcopy(original)}
+        "latest_status": "PASS", "latest_factual": deepcopy(r["factual"]), "provenance": deepcopy(original), "publication_count": 1, "rejected_count": 0}
     text = json.dumps(report); digest = sha256(text.encode()).hexdigest()
     original["publication_audit"] = {"ref": "${MOEX_DATA_ROOT}/synthetic/audit.json", "sha256": digest}
     s["components"]["futoi_live_cr"] = {"status": "READY", "data": {"instrument_id": cr.INSTRUMENT, "source_id": cr.SOURCE,
         "consumer_factual_use_allowed": True, "factual_authority": True,
-        "current_intraday": {"factual": deepcopy(r["factual"]), "provenance": deepcopy(original)},
+        "current_intraday": {"factual": deepcopy(r["factual"]), "provenance": deepcopy(original), "status": "FRESH", "failed_attempt_at": None, "last_success_at": NOW.isoformat()},
         "current_pair_admission": {"allowed": True, "scope": "current_intraday_latest_pair_only", "audit_sha256": digest}}}
+    repo = Path(__file__).resolve().parents[2]
+    governance_ref = "contracts/intelligence/usdrubf_futoi_live_acceptance_governance_v1.json"
+    governance_bytes = (repo / governance_ref).read_bytes()
+    entry = json.loads(governance_bytes)["instrument_acceptance"][cr.INSTRUMENT]["current_pair_acceptance"]
+    evidence_bytes = (repo / entry["evidence_ref"]).read_bytes()
     e = {"record": r, "captured_at_utc": NOW.isoformat(), "causal_cutoff_at_utc": NOW.isoformat(),
-        "publication_audit": {"text": text, "sha256": digest}, "original_provenance": original}
+        "publication_audit": {"text": text, "sha256": digest}, "original_provenance": original,
+        "original_source_attempt": {"status": "FRESH", "failed_attempt_at": None, "last_success_at": NOW.isoformat()},
+        "original_current_admission": {"governance_ref": governance_ref, "governance_text": governance_bytes.decode(), "governance_sha256": sha256(governance_bytes).hexdigest(),
+            "evidence_ref": entry["evidence_ref"], "evidence_text": evidence_bytes.decode(), "evidence_sha256": sha256(evidence_bytes).hexdigest()}}
     s[cr.CURRENT_KEY] = {"evidence": e, "evidence_sha256": cr.common._digest(e)}
     # Unit fixture isolates existing freshness; its real TTL/admission has separate integration coverage.
     monkeypatch.setattr(freshness, "apply_read_freshness", lambda value, now: deepcopy(value))
@@ -588,3 +596,67 @@ def test_later_capture_completion_does_not_redate_original_source_freshness(monk
     carrier["evidence"]["captured_at_utc"] = (NOW+timedelta(hours=1)).isoformat()
     carrier["evidence_sha256"] = cr.common._digest(carrier["evidence"])
     assert cr._validated_current_capture(carrier)["causal_cutoff_at_utc"] == NOW.isoformat()
+
+
+@pytest.mark.parametrize("field,value", [("status", "STALE"), ("failed_attempt_at", NOW.isoformat()),
+    ("last_success_at", None), ("last_success_at", "2026-09-14T17:30:00"),
+    ("last_success_at", (NOW+timedelta(seconds=1)).isoformat()),
+    ("last_success_at", (NOW-timedelta(seconds=3)).isoformat())])
+def test_original_source_attempt_full_check_time_predicates(monkeypatch, field, value):
+    s = snapshot(); install_current(s, monkeypatch); carrier = s[cr.CURRENT_KEY]
+    carrier["evidence"]["original_source_attempt"][field] = value
+    carrier["evidence_sha256"] = cr.common._digest(carrier["evidence"])
+    with pytest.raises((ValueError, TypeError)):
+        cr._validated_current_capture(carrier)
+    s[cr.DIAGNOSTICS_KEY] = {"checked_at_utc": NOW.isoformat(), "dated_error": None, "current_error": None}
+    assert cr.describe(s, now=NOW)["latest_capture_diagnostics"] is None
+    verify(s)
+
+
+@pytest.mark.parametrize("field", ["status", "failed_attempt_at", "last_success_at"])
+def test_original_source_attempt_fields_cannot_be_removed(monkeypatch, field):
+    s = snapshot(); install_current(s, monkeypatch); carrier = s[cr.CURRENT_KEY]
+    carrier["evidence"]["original_source_attempt"].pop(field)
+    carrier["evidence_sha256"] = cr.common._digest(carrier["evidence"])
+    with pytest.raises(ValueError, match="original_source_attempt_shape"):
+        cr._validated_current_capture(carrier)
+
+
+@pytest.mark.parametrize("mutation", ["accepted", "scope", "required_gate", "no_required_gate", "evidence_hash", "evidence_ref",
+    "evidence_scope", "evidence_policy", "evidence_instrument", "smoke", "negative", "history", "governance_hash", "missing_carrier"])
+def test_all_original_current_admission_predicates_are_retained(monkeypatch, mutation):
+    s = snapshot(); install_current(s, monkeypatch); carrier = s[cr.CURRENT_KEY]
+    retained = carrier["evidence"]["original_current_admission"]
+    gov = json.loads(retained["governance_text"]); evidence = json.loads(retained["evidence_text"])
+    entry = gov["instrument_acceptance"][cr.INSTRUMENT]["current_pair_acceptance"]
+    if mutation == "accepted": entry["accepted"] = False
+    elif mutation == "scope": entry["scope"] = "historical"
+    elif mutation == "required_gate": next(g for g in gov["gates"] if g.get("required") is True)["status"] = "FAIL"
+    elif mutation == "no_required_gate": gov["gates"] = []
+    elif mutation == "evidence_hash": entry["evidence_sha256"] = "0"*64
+    elif mutation == "evidence_ref": entry["evidence_ref"] = "../outside.json"
+    elif mutation == "evidence_scope": evidence["scope"] = "historical"
+    elif mutation == "evidence_policy": evidence["policy"] = "older_pair_fallback"
+    elif mutation == "evidence_instrument": evidence["instrument_id"] = "si_futures_family"
+    elif mutation == "smoke": evidence["canonical_live_smoke"] = "FAIL"
+    elif mutation == "negative": evidence["negative_replay"] = "FAIL"
+    elif mutation == "history": evidence["historical_authority"] = True
+    retained["evidence_text"] = json.dumps(evidence)
+    retained["evidence_sha256"] = sha256(retained["evidence_text"].encode()).hexdigest()
+    if mutation != "evidence_hash": entry["evidence_sha256"] = retained["evidence_sha256"]
+    retained["governance_text"] = json.dumps(gov)
+    retained["governance_sha256"] = sha256(retained["governance_text"].encode()).hexdigest()
+    if mutation == "governance_hash": retained["governance_sha256"] = "0"*64
+    if mutation == "missing_carrier": carrier["evidence"].pop("original_current_admission")
+    carrier["evidence_sha256"] = cr.common._digest(carrier["evidence"])
+    with pytest.raises((ValueError, KeyError)):
+        cr._validated_current_capture(carrier)
+
+
+def test_current_source_attempt_must_match_original_capture(monkeypatch):
+    s = snapshot(); install_current(s, monkeypatch)
+    s["components"]["futoi_live_cr"]["data"]["current_intraday"]["last_success_at"] = (NOW-timedelta(microseconds=1)).isoformat()
+    out = cr.describe(s, now=NOW)
+    assert out["dated"]["status"] == "AVAILABLE" and out["current"]["status"] == "UNAVAILABLE"
+    assert "original_source_attempt_mismatch" in out["current"]["reason"]
+    verify(s)

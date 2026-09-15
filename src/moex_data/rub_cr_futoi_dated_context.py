@@ -236,8 +236,9 @@ def _validated_current_capture(stored):
     if not isinstance(stored, dict) or set(stored) != {"evidence", "evidence_sha256"} or common._digest(stored["evidence"]) != stored["evidence_sha256"]:
         raise ValueError("cr_current_byte_witness_digest")
     proof = stored["evidence"]
-    if set(proof) != {"record", "captured_at_utc", "causal_cutoff_at_utc", "publication_audit", "original_provenance"} or not common._stamp(proof["causal_cutoff_at_utc"]) <= common._stamp(proof["captured_at_utc"]):
+    if set(proof) != {"record", "captured_at_utc", "causal_cutoff_at_utc", "publication_audit", "original_provenance", "original_source_attempt", "original_current_admission"} or not common._stamp(proof["causal_cutoff_at_utc"]) <= common._stamp(proof["captured_at_utc"]):
         raise ValueError("cr_current_byte_witness_shape_or_clock")
+    _validated_original_admission(proof["original_current_admission"])
     fact = proof["record"]["factual"]
     audit = proof["publication_audit"]
     if set(audit) != {"text", "sha256"} or sha256(audit["text"].encode()).hexdigest() != audit["sha256"]:
@@ -246,6 +247,8 @@ def _validated_current_capture(stored):
     from moex_data.futures import futoi_publication_audit as audit_source
     if report.get("schema_version") != audit_source.SCHEMA or report.get("policy") != audit_source.POLICY or report.get("instrument_id") != INSTRUMENT or report.get("latest_status") != "PASS" or report.get("latest_factual") != fact:
         raise ValueError("cr_current_publication_audit_fact_mismatch")
+    if "publication_count" not in report or "rejected_count" not in report:
+        raise ValueError("cr_current_publication_audit_admission_result_missing")
     receipt = proof["original_provenance"]["publication_audit"]
     common._ref(receipt["ref"])
     if receipt["sha256"] != audit["sha256"]:
@@ -263,7 +266,45 @@ def _validated_current_capture(stored):
     for key in CLOCKS:
         if not 0 <= (cutoff-common._stamp(fact[key])).total_seconds() <= MAX_AGE_SECONDS:
             raise ValueError("cr_current_factual_clock_future_or_expired_at_capture")
+    attempt = proof["original_source_attempt"]
+    if not isinstance(attempt, dict) or set(attempt) != {"status", "failed_attempt_at", "last_success_at"}:
+        raise ValueError("cr_original_source_attempt_shape")
+    from moex_data.futures.futoi_current_pair_authority import check_time
+    check_time({**attempt, "factual": fact}, cutoff)
     return proof
+
+
+def _repo_ref(value):
+    if not isinstance(value, str) or not value or "\\" in value or ":" in value or value.startswith("/") or any(part in ("", ".", "..") for part in value.split("/")):
+        raise ValueError("cr_original_admission_unsafe_repository_reference")
+    return value
+
+
+def _validated_original_admission(value):
+    """Original authority.admit predicates applied to retained artifact bytes."""
+    from moex_data.futures import futoi_current_pair_authority as authority
+    if not isinstance(value, dict) or set(value) != {"governance_ref", "governance_text", "governance_sha256", "evidence_ref", "evidence_text", "evidence_sha256"}:
+        raise ValueError("cr_original_admission_shape")
+    if value["governance_ref"] != "contracts/intelligence/usdrubf_futoi_live_acceptance_governance_v1.json":
+        raise ValueError("cr_original_governance_reference")
+    for prefix in ("governance", "evidence"):
+        _repo_ref(value[prefix+"_ref"])
+        if not isinstance(value[prefix+"_text"], str) or sha256(value[prefix+"_text"].encode()).hexdigest() != value[prefix+"_sha256"]:
+            raise ValueError("cr_original_admission_artifact_digest")
+    governance = json.loads(value["governance_text"])
+    entry = governance["instrument_acceptance"][INSTRUMENT]["current_pair_acceptance"]
+    if entry.get("accepted") is not True or entry.get("scope") != authority.SCOPE:
+        raise ValueError("cr_original_current_scope_not_accepted")
+    gates = [gate for gate in governance["gates"] if gate.get("required") is True]
+    if not gates or any(gate.get("status") != "PASS" for gate in gates):
+        raise ValueError("cr_original_required_governance_gate_failed")
+    if entry["evidence_ref"] != value["evidence_ref"] or entry["evidence_sha256"] != value["evidence_sha256"]:
+        raise ValueError("cr_original_admission_reference_or_digest_mismatch")
+    evidence = json.loads(value["evidence_text"])
+    if (evidence.get("scope") != authority.SCOPE or evidence.get("policy") != authority.audit.POLICY
+            or evidence.get("instrument_id") != INSTRUMENT or evidence.get("canonical_live_smoke") != "PASS"
+            or evidence.get("negative_replay") != "PASS" or evidence.get("historical_authority") is not False):
+        raise ValueError("cr_original_evidence_does_not_prove_current_scope")
 
 
 def _current(snapshot, e, now):
@@ -287,6 +328,8 @@ def _current(snapshot, e, now):
         raise ValueError("cr_current_publication_audit_digest")
     if proof["record"]["factual"] != fact or proof["original_provenance"] != record.get("provenance"):
         raise ValueError("cr_current_frozen_source_fact_mismatch")
+    if common._digest(proof["original_source_attempt"]) != common._digest({key: record.get(key) for key in ("status", "failed_attempt_at", "last_success_at")}):
+        raise ValueError("cr_current_original_source_attempt_mismatch")
     result = proof["record"]
     common._fact(result, fact["trade_date"], now, instrument_id=INSTRUMENT)
     return result
@@ -381,9 +424,20 @@ def _capture_current(snapshot, cutoff):
     root = source._data_root(); repo = Path(__file__).resolve().parents[2]
     body = snapshot["components"]["futoi_live_cr"]["data"]
     record = body["current_intraday"]
-    governance = json.loads((repo / "contracts/intelligence/usdrubf_futoi_live_acceptance_governance_v1.json").read_text())
+    governance_ref = "contracts/intelligence/usdrubf_futoi_live_acceptance_governance_v1.json"
+    governance_bytes = (repo / governance_ref).read_bytes()
+    governance = json.loads(governance_bytes)
     allowed = authority.admit(governance, record, root=root, repo_root=repo, now=cutoff)
     if allowed.get("allowed") is not True: raise ValueError(allowed.get("error") or "cr_current_source_audit_refused")
+    entry = governance["instrument_acceptance"][INSTRUMENT]["current_pair_acceptance"]
+    evidence_ref = _repo_ref(entry["evidence_ref"])
+    evidence_path = repo / evidence_ref
+    if evidence_path.is_symlink() or not evidence_path.resolve().is_relative_to(repo.resolve()):
+        raise ValueError("cr_original_admission_evidence_escaped_repository")
+    evidence_bytes = evidence_path.read_bytes()
+    original_admission = {"governance_ref": governance_ref, "governance_text": governance_bytes.decode(), "governance_sha256": sha256(governance_bytes).hexdigest(),
+        "evidence_ref": evidence_ref, "evidence_text": evidence_bytes.decode(), "evidence_sha256": sha256(evidence_bytes).hexdigest()}
+    _validated_original_admission(original_admission)
     original = record["provenance"]
     fact, proof = common._freeze_raw_fact(root, original, record["factual"]["trade_date"], normalized=False, instrument_id=INSTRUMENT)
     if fact != record["factual"]: raise ValueError("cr_current_frozen_byte_fact_mismatch")
@@ -393,8 +447,12 @@ def _capture_current(snapshot, cutoff):
     raw = (root / ref["ref"][len("${MOEX_DATA_ROOT}/"):]).read_bytes()
     if sha256(raw).hexdigest() != ref["sha256"]: raise ValueError("cr_current_audit_byte_mismatch")
     evidence = {"record": _record(fact, "canonical_raw", proof, fact["trade_date"]), "captured_at_utc": cutoff.isoformat(), "causal_cutoff_at_utc": cutoff.isoformat(),
-        "publication_audit": {"text": raw.decode(), "sha256": ref["sha256"]}, "original_provenance": deepcopy(original)}
-    return {"evidence": evidence, "evidence_sha256": common._digest(evidence)}
+        "publication_audit": {"text": raw.decode(), "sha256": ref["sha256"]}, "original_provenance": deepcopy(original),
+        "original_source_attempt": {key: deepcopy(record.get(key)) for key in ("status", "failed_attempt_at", "last_success_at")},
+        "original_current_admission": original_admission}
+    carrier = {"evidence": evidence, "evidence_sha256": common._digest(evidence)}
+    _validated_current_capture(carrier)
+    return carrier
 
 
 def _semantic(e):
