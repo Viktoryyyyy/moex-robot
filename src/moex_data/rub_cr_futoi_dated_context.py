@@ -16,6 +16,7 @@ CONTRACT = "contracts/intelligence/cr_futoi_dated_comparisons_v1.json"
 STORE_KEY = "accepted_dated_futoi_cr"
 ADMISSION_KEY = "cr_dated_scope_admission"
 CURRENT_KEY = "cr_scoped_current_pair_evidence"
+DIAGNOSTICS_KEY = "cr_scoped_capture_diagnostics"
 SCOPE = "CR_OBSERVED_PAIR_COMPARISONS_ONLY"
 FLAGS = {k: v for k, v in common.FLAGS.items() if k != "current_usable"}
 CLOCKS = ("snapshot_ts", "source_publication_time", "availability_ts_utc", "ingest_ts_utc")
@@ -64,6 +65,28 @@ def _admission(artifact):
 def _record(fact, kind, proof, day):
     return {"instrument_id": INSTRUMENT, "source_id": SOURCE, "trade_date": day, "status": "AVAILABLE",
         "source_kind": kind, "factual": fact, "provenance": proof, "reason": None}
+
+
+def _capture_diagnostics(snapshot, now):
+    value = snapshot.get(DIAGNOSTICS_KEY)
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {"checked_at_utc", "dated_error", "current_error"}:
+        raise ValueError("cr_capture_diagnostics_shape")
+    checked = common._stamp(value["checked_at_utc"])
+    for key in ("dated_error", "current_error"):
+        if value[key] is not None and (not isinstance(value[key], str) or not value[key]):
+            raise ValueError("cr_capture_diagnostic_nullable_text_required")
+    if checked > now:
+        return None
+    return deepcopy(value)
+
+
+def _read_admit(snapshot, now):
+    diagnostics = _capture_diagnostics(snapshot, now) or {"dated_error": None}
+    if snapshot.get(STORE_KEY) is None and diagnostics["dated_error"] is not None:
+        raise ValueError("cr_dated_capture_failed: " + diagnostics["dated_error"])
+    return _admit(snapshot.get(STORE_KEY), now, current_admission=snapshot.get(ADMISSION_KEY))
 
 
 def _valid_record(record, day, at):
@@ -198,6 +221,9 @@ def _current(snapshot, e, now):
     record = body["current_intraday"]
     fact = record["factual"]
     if fact["trade_date"] != e["witness"]["current_observed_trade_date"]: raise ValueError("cr_current_observed_witness_mismatch")
+    diagnostics = _capture_diagnostics(snapshot, now) or {"current_error": None}
+    if CURRENT_KEY not in snapshot and diagnostics["current_error"] is not None:
+        raise ValueError("cr_current_capture_failed: " + diagnostics["current_error"])
     stored = snapshot[CURRENT_KEY]
     if set(stored) != {"evidence", "evidence_sha256"} or common._digest(stored["evidence"]) != stored["evidence_sha256"]:
         raise ValueError("cr_current_byte_witness_digest")
@@ -245,17 +271,20 @@ def _metadata(store, e, error, diagnostics, now):
 
 
 def describe(snapshot, *, now):
+    capture_diagnostics = None
     try:
         now = common._stamp(now)
+        capture_diagnostics = _capture_diagnostics(snapshot, now)
         store = snapshot.get(STORE_KEY)
-        e, error, diagnostics = _admit(store, now, current_admission=snapshot.get(ADMISSION_KEY))
+        e, error, diagnostics = _read_admit(snapshot, now)
         result = _metadata(store, e, error, diagnostics, now)
+        result["latest_capture_diagnostics"] = capture_diagnostics
         result["dated"] = _view(e["records"])
         try: result["current"] = _view(e["records"], _current(snapshot, e, now))
         except (KeyError, TypeError, ValueError, OverflowError, AttributeError) as exc: result["current"] = _current_refusal(str(exc))
         return result
     except (KeyError, TypeError, ValueError, OverflowError, AttributeError) as exc:
-        return {"schema_version": SCHEMA, "status": "UNAVAILABLE", "scope": SCOPE, "reason": str(exc), **FLAGS}
+        return {"schema_version": SCHEMA, "status": "UNAVAILABLE", "scope": SCOPE, "reason": str(exc), "latest_capture_diagnostics": capture_diagnostics, **FLAGS}
 
 
 def _load_record(root, day, eod, eod_proof, cutoff):
@@ -363,10 +392,12 @@ def capture_snapshot(snapshot, previous, *, now_fn, refresh_started_at, previous
         candidate = _capture(working, cutoff)
     except Exception as exc: error = type(exc).__name__ + ": " + str(exc)
     working.pop(CURRENT_KEY, None)
+    current_error = None
     try: working[CURRENT_KEY] = _capture_current(working, cutoff)
-    except Exception: pass
+    except Exception as exc: current_error = type(exc).__name__ + ": " + str(exc)
     completed = common._stamp(now_fn())
     if completed < cutoff: raise ValueError("cr_capture_completion_clock_reversed")
+    snapshot[DIAGNOSTICS_KEY] = {"checked_at_utc": completed.isoformat(), "dated_error": None, "current_error": current_error}
     snapshot[ADMISSION_KEY] = working.get(ADMISSION_KEY)
     snapshot.pop(CURRENT_KEY, None)
     if CURRENT_KEY in working:
@@ -392,6 +423,10 @@ def capture_snapshot(snapshot, previous, *, now_fn, refresh_started_at, previous
             snapshot[STORE_KEY] = store
             return completed
         except Exception as exc: error = type(exc).__name__ + ": " + str(exc)
+    if candidate is not None and candidate["records"][-1]["status"] == "UNAVAILABLE":
+        rejected = candidate["records"][-1]
+        error = "cr_latest_anchor_source_rejected: " + rejected["trade_date"] + ": " + rejected["reason"]
+    snapshot[DIAGNOSTICS_KEY]["dated_error"] = error
     if old is not None:
         old.update(last_capture_attempt_at_utc=completed.isoformat(), last_capture_error=error)
         if candidate is not None and candidate["records"][-1]["status"] == "UNAVAILABLE":
@@ -409,10 +444,13 @@ def attach_consumer(snapshot, consumers, *, now):
 
 def verify_projection(snapshot, release, *, now):
     output = release["futoi_context"]["futoi_live_cr"].get("scoped_observed_comparisons")
+    capture_diagnostics = None
     try:
-        now = common._stamp(now); store = snapshot.get(STORE_KEY); e, error, diagnostics = _admit(store, now, current_admission=snapshot.get(ADMISSION_KEY))
+        now = common._stamp(now)
+        capture_diagnostics = _capture_diagnostics(snapshot, now)
+        store = snapshot.get(STORE_KEY); e, error, diagnostics = _read_admit(snapshot, now)
     except (KeyError, TypeError, ValueError, OverflowError, AttributeError) as exc:
-        expected = {"schema_version": SCHEMA, "status": "UNAVAILABLE", "scope": SCOPE, "reason": str(exc), **FLAGS}
+        expected = {"schema_version": SCHEMA, "status": "UNAVAILABLE", "scope": SCOPE, "reason": str(exc), "latest_capture_diagnostics": capture_diagnostics, **FLAGS}
         common._require(isinstance(output, dict) and common._digest(output) == common._digest(expected), "CR canonical refusal")
         return
     witness = {key: e["witness"][key] for key in ("dates", "previous_observed_trade_date", "current_observed_trade_date")}
@@ -434,6 +472,7 @@ def verify_projection(snapshot, release, *, now):
         "accepted_at_utc": e["accepted_at_utc"], "causal_cutoff_at_utc": e["causal_cutoff_at_utc"], "checked_at_utc": now.isoformat(),
         "evidence_sha256": store["evidence_sha256"], "maximum_dated_age_seconds": 345600, "units": UNITS,
         "witness": witness, "latest_diagnostics": diagnostics, "last_capture_error": error,
+        "latest_capture_diagnostics": capture_diagnostics,
         "admission_artifact_sha256": e["admission"]["artifact_sha256"], "legacy_cr_current_pair_fields_unchanged": True, **FLAGS}
     common._require(isinstance(output, dict) and set(output) == set(metadata) | {"dated", "current"}
         and common._digest({k: output[k] for k in metadata}) == common._digest(metadata), "CR independent metadata")

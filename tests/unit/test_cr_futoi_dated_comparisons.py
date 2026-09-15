@@ -408,6 +408,10 @@ def test_first_anchor_rejection_survives_retries_until_valid_recovery(monkeypatc
     assert second[cr.STORE_KEY]["evidence_sha256"] == original[cr.STORE_KEY]["evidence_sha256"]
     assert second[cr.STORE_KEY]["last_capture_error"] == (
         "cr_latest_anchor_source_rejected: " + candidate["records"][-1]["trade_date"] + ": " + next_reason)
+    latest = cr.describe(second, now=NOW+timedelta(seconds=5))
+    assert latest["status"] == "UNAVAILABLE" and first_reason in latest["reason"]
+    assert latest["latest_capture_diagnostics"]["dated_error"] == second[cr.STORE_KEY]["last_capture_error"]
+    assert cr.describe(second, now=between)["latest_capture_diagnostics"] is None
     verify(second, now=between)
     verify(second, now=NOW+timedelta(seconds=5))
     candidate = deepcopy(valid)
@@ -417,3 +421,63 @@ def test_first_anchor_rejection_survives_retries_until_valid_recovery(monkeypatc
     assert recovered[cr.STORE_KEY]["evidence"]["accepted_at_utc"] == (NOW+timedelta(seconds=7)).isoformat()
     assert cr.describe(recovered, now=NOW+timedelta(seconds=7))["status"] == "AVAILABLE"
     verify(recovered, now=NOW+timedelta(seconds=7))
+
+
+@pytest.mark.parametrize("first_capture", [False, True])
+def test_capture_failure_causes_are_portable_without_fabricated_acceptance(monkeypatch, first_capture):
+    s = snapshot(); previous = deepcopy(s); install_current(s, monkeypatch)
+    if first_capture:
+        s.pop(cr.STORE_KEY); previous = {}
+        def dated_fail(*a): raise OSError("first dated source read permission denied")
+        monkeypatch.setattr(cr, "_capture", dated_fail)
+    else:
+        monkeypatch.setattr(cr, "_capture", lambda *a: deepcopy(previous[cr.STORE_KEY]["evidence"]))
+    def current_fail(*a): raise OSError("additional current frozen-byte read failed")
+    monkeypatch.setattr(cr, "_capture_current", current_fail)
+    times = iter([NOW+timedelta(seconds=1), NOW+timedelta(seconds=2)])
+    completed = cr.capture_snapshot(s, previous, now_fn=lambda: next(times), refresh_started_at=NOW)
+    out = cr.describe(s, now=completed)
+    diagnostics = out["latest_capture_diagnostics"]
+    assert diagnostics["checked_at_utc"] == completed.isoformat()
+    assert diagnostics["current_error"] == "OSError: additional current frozen-byte read failed"
+    assert cr.CURRENT_KEY not in s
+    if first_capture:
+        assert cr.STORE_KEY not in s and out["status"] == "UNAVAILABLE"
+        assert "first dated source read permission denied" in out["reason"]
+        assert diagnostics["dated_error"] == "OSError: first dated source read permission denied"
+    else:
+        assert out["dated"]["status"] == "AVAILABLE" and out["current"]["status"] == "UNAVAILABLE"
+        assert "additional current frozen-byte read failed" in out["current"]["reason"]
+        assert s[cr.STORE_KEY]["evidence_sha256"] == previous[cr.STORE_KEY]["evidence_sha256"]
+    verify(s, now=completed)
+    before = cr.describe(s, now=NOW)
+    assert before["latest_capture_diagnostics"] is None
+    assert "read permission denied" not in json.dumps(before) and "frozen-byte read failed" not in json.dumps(before)
+    verify(s, now=NOW)
+
+
+@pytest.mark.parametrize("invalid", [True, {}, {"checked_at_utc": NOW.isoformat(), "dated_error": {}, "current_error": None},
+    {"checked_at_utc": "2026-09-14T17:30:00", "dated_error": None, "current_error": "bad"},
+    {"checked_at_utc": NOW.isoformat(), "dated_error": None, "current_error": True},
+    {"checked_at_utc": NOW.isoformat(), "dated_error": None, "current_error": None, "invented_fact": 1}])
+def test_capture_diagnostics_shape_types_and_clocks_fail_closed(invalid):
+    s = snapshot(); s[cr.DIAGNOSTICS_KEY] = invalid
+    out = cr.describe(s, now=NOW)
+    assert out["status"] == "UNAVAILABLE" and out["latest_capture_diagnostics"] is None
+    verify(s)
+
+
+@pytest.mark.parametrize("read_at", [None, "invalid", "2026-09-14T17:30:00"])
+def test_invalid_read_clock_never_leaks_diagnostics(read_at):
+    s = snapshot(); s[cr.DIAGNOSTICS_KEY] = {"checked_at_utc": NOW.isoformat(), "dated_error": "private source failure", "current_error": None}
+    out = cr.describe(s, now=read_at)
+    assert out["latest_capture_diagnostics"] is None and "private source failure" not in json.dumps(out)
+    verify(s, now=read_at)
+
+
+def test_refused_diagnostic_tampering_is_rejected():
+    s = snapshot(); s.pop(cr.STORE_KEY)
+    s[cr.DIAGNOSTICS_KEY] = {"checked_at_utc": NOW.isoformat(), "dated_error": "first source failure", "current_error": None}
+    r = release(s); out = r["futoi_context"]["futoi_live_cr"]["scoped_observed_comparisons"]
+    out["latest_capture_diagnostics"]["dated_error"] = "invented different failure"
+    with pytest.raises(AssertionError): verify(s, r)
