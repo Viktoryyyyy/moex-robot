@@ -109,12 +109,14 @@ def validate_partition(
     expected_instrument_id: str,
     expected_trade_date: str,
     expected_row_count: int,
+    byte_reader=None,
 ) -> dict[str, object]:
     partition_path = Path(path)
-    if not partition_path.is_file():
+    if byte_reader is None and not partition_path.is_file():
         _fail("derived partition must be an existing regular file")
     try:
-        frame = pd.read_parquet(partition_path)
+        from io import BytesIO
+        frame = pd.read_parquet(partition_path if byte_reader is None else BytesIO(byte_reader(partition_path)))
     except Exception as exc:
         raise BasisCarryPartitionValidationError("derived partition is not readable parquet: " + str(exc)) from exc
 
