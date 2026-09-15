@@ -520,3 +520,44 @@ def test_first_failure_diagnostic_clock_prevents_backward_next_capture(monkeypat
     with pytest.raises(ValueError, match="precedes_refresh_or_prior_capture"):
         cr.capture_snapshot(current, previous, now_fn=lambda: NOW+timedelta(seconds=1), refresh_started_at=NOW)
     assert current == before
+
+
+@pytest.mark.parametrize("mutation", ["current_digest", "current_shape", "current_fact", "current_audit", "current_proof", "dated_digest", "dated_shape", "dated_fact"])
+def test_success_diagnostics_require_valid_capture_evidence(monkeypatch, mutation):
+    s = snapshot(); install_current(s, monkeypatch)
+    s[cr.DIAGNOSTICS_KEY] = {"checked_at_utc": NOW.isoformat(), "dated_error": None, "current_error": None}
+    current = s[cr.CURRENT_KEY]
+    if mutation == "current_digest": current["evidence_sha256"] = "0"*64
+    elif mutation == "current_shape": current["evidence"].pop("publication_audit")
+    elif mutation == "current_fact": current["evidence"]["record"]["factual"]["total_open_interest"] = 1
+    elif mutation == "current_audit": current["evidence"]["publication_audit"]["text"] = "{}"
+    elif mutation == "current_proof": current["evidence"]["record"]["provenance"]["raw_partition_sha256"] = "0"*64
+    elif mutation == "dated_digest": s[cr.STORE_KEY]["evidence_sha256"] = "0"*64
+    elif mutation == "dated_shape": s[cr.STORE_KEY]["evidence"].pop("records")
+    elif mutation == "dated_fact": s[cr.STORE_KEY]["evidence"]["records"][-1]["factual"]["total_open_interest"] = 1
+    if mutation.startswith("current_") and mutation != "current_digest": current["evidence_sha256"] = cr.common._digest(current["evidence"])
+    if mutation.startswith("dated_") and mutation != "dated_digest": rehash(s)
+    out = cr.describe(s, now=NOW)
+    assert out["status"] == "UNAVAILABLE" and out["latest_capture_diagnostics"] is None
+    verify(s)
+
+
+def test_successful_capture_diagnostics_survive_later_live_and_dated_expiry(monkeypatch):
+    from moex_data import rub_snapshot_read_freshness as freshness
+    s = snapshot(); install_current(s, monkeypatch)
+    s[cr.DIAGNOSTICS_KEY] = {"checked_at_utc": NOW.isoformat(), "dated_error": None, "current_error": None}
+    def expired(value, now):
+        result = deepcopy(value)
+        if now > NOW+timedelta(minutes=20): result["components"]["futoi_live_cr"]["status"] = "UNAVAILABLE"
+        return result
+    monkeypatch.setattr(freshness, "apply_read_freshness", expired)
+    later = NOW+timedelta(minutes=21)
+    out = cr.describe(s, now=later)
+    assert out["status"] == "AVAILABLE" and out["current"]["status"] == "UNAVAILABLE"
+    assert out["latest_capture_diagnostics"] == s[cr.DIAGNOSTICS_KEY]
+    assert out["latest_capture_diagnostics"]["current_error"] is None
+    verify(s, now=later)
+    later = NOW+timedelta(days=5)
+    out = cr.describe(s, now=later)
+    assert out["status"] == "UNAVAILABLE" and out["latest_capture_diagnostics"] == s[cr.DIAGNOSTICS_KEY]
+    verify(s, now=later)

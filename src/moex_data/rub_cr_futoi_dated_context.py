@@ -81,10 +81,13 @@ def _capture_diagnostics(snapshot, now):
     if store is not None:
         if checked != common._stamp(store["last_capture_attempt_at_utc"]) or checked < common._stamp(store["evidence"]["accepted_at_utc"]) or value["dated_error"] != store["last_capture_error"]:
             raise ValueError("cr_diagnostic_capture_attempt_mismatch")
+        if value["dated_error"] is None:
+            _admit(store, checked, current_admission=store["evidence"]["admission"])
     elif value["dated_error"] is None:
         raise ValueError("cr_diagnostic_dated_success_without_store")
     current = snapshot.get(CURRENT_KEY)
     if current is not None:
+        _validated_current_capture(current)
         if value["current_error"] is not None or checked != common._stamp(current["evidence"]["captured_at_utc"]):
             raise ValueError("cr_diagnostic_current_proof_contradiction")
     elif value["current_error"] is None:
@@ -228,35 +231,21 @@ def _view(records, current=None):
         "current_pair_usable_at_read": current is not None, "anchor": _public_record(anchor), "anchor_values": values, "changes": changes}
 
 
-def _current(snapshot, e, now):
-    from moex_data.rub_snapshot_read_freshness import apply_read_freshness
-    data = (apply_read_freshness(snapshot, now=now).get("components", {}).get("futoi_live_cr") or {})
-    body = data.get("data") or {}
-    if data.get("status") != "READY" or body.get("consumer_factual_use_allowed") is not True or body.get("factual_authority") is not True or body.get("instrument_id") != INSTRUMENT or body.get("source_id") != SOURCE:
-        raise ValueError("existing_cr_current_pair_not_admitted")
-    record = body["current_intraday"]
-    fact = record["factual"]
-    if fact["trade_date"] != e["witness"]["current_observed_trade_date"]: raise ValueError("cr_current_observed_witness_mismatch")
-    diagnostics = _capture_diagnostics(snapshot, now) or {"current_error": None}
-    if CURRENT_KEY not in snapshot and diagnostics["current_error"] is not None:
-        raise ValueError("cr_current_capture_failed: " + diagnostics["current_error"])
-    stored = snapshot[CURRENT_KEY]
-    if set(stored) != {"evidence", "evidence_sha256"} or common._digest(stored["evidence"]) != stored["evidence_sha256"]:
+def _validated_current_capture(stored):
+    """Validate capture-time proof without consulting live TTL or diagnostics."""
+    if not isinstance(stored, dict) or set(stored) != {"evidence", "evidence_sha256"} or common._digest(stored["evidence"]) != stored["evidence_sha256"]:
         raise ValueError("cr_current_byte_witness_digest")
     proof = stored["evidence"]
-    if set(proof) != {"record", "captured_at_utc", "causal_cutoff_at_utc", "publication_audit", "original_provenance"} or not common._stamp(proof["causal_cutoff_at_utc"]) <= common._stamp(proof["captured_at_utc"]) <= now:
+    if set(proof) != {"record", "captured_at_utc", "causal_cutoff_at_utc", "publication_audit", "original_provenance"} or not common._stamp(proof["causal_cutoff_at_utc"]) <= common._stamp(proof["captured_at_utc"]):
         raise ValueError("cr_current_byte_witness_shape_or_clock")
-    pair = body.get("current_pair_admission") or {}
-    if pair.get("allowed") is not True or pair.get("scope") != "current_intraday_latest_pair_only": raise ValueError("cr_existing_current_scope_not_admitted")
+    fact = proof["record"]["factual"]
     audit = proof["publication_audit"]
-    if set(audit) != {"text", "sha256"} or sha256(audit["text"].encode()).hexdigest() != audit["sha256"] or audit["sha256"] != pair.get("audit_sha256"):
+    if set(audit) != {"text", "sha256"} or sha256(audit["text"].encode()).hexdigest() != audit["sha256"]:
         raise ValueError("cr_current_publication_audit_digest")
     report = json.loads(audit["text"])
     from moex_data.futures import futoi_publication_audit as audit_source
     if report.get("schema_version") != audit_source.SCHEMA or report.get("policy") != audit_source.POLICY or report.get("instrument_id") != INSTRUMENT or report.get("latest_status") != "PASS" or report.get("latest_factual") != fact:
         raise ValueError("cr_current_publication_audit_fact_mismatch")
-    if proof["record"]["factual"] != fact or proof["original_provenance"] != record.get("provenance"):
-        raise ValueError("cr_current_frozen_source_fact_mismatch")
     receipt = proof["original_provenance"]["publication_audit"]
     common._ref(receipt["ref"])
     if receipt["sha256"] != audit["sha256"]:
@@ -269,8 +258,33 @@ def _current(snapshot, e, now):
     _valid_record(result, fact["trade_date"], common._stamp(proof["causal_cutoff_at_utc"]))
     if result["provenance"]["raw_partition_sha256"] != proof["original_provenance"]["raw_partition_sha256"]:
         raise ValueError("cr_current_frozen_raw_digest_mismatch")
-    common._fact(result, fact["trade_date"], now, instrument_id=INSTRUMENT)
     for key in CLOCKS: common._stamp(fact[key])
+    return proof
+
+
+def _current(snapshot, e, now):
+    from moex_data.rub_snapshot_read_freshness import apply_read_freshness
+    data = (apply_read_freshness(snapshot, now=now).get("components", {}).get("futoi_live_cr") or {})
+    body = data.get("data") or {}
+    if data.get("status") != "READY" or body.get("consumer_factual_use_allowed") is not True or body.get("factual_authority") is not True or body.get("instrument_id") != INSTRUMENT or body.get("source_id") != SOURCE:
+        raise ValueError("existing_cr_current_pair_not_admitted")
+    record = body["current_intraday"]
+    fact = record["factual"]
+    if fact["trade_date"] != e["witness"]["current_observed_trade_date"]: raise ValueError("cr_current_observed_witness_mismatch")
+    diagnostics = _capture_diagnostics(snapshot, now) or {"current_error": None}
+    if CURRENT_KEY not in snapshot and diagnostics["current_error"] is not None:
+        raise ValueError("cr_current_capture_failed: " + diagnostics["current_error"])
+    proof = _validated_current_capture(snapshot[CURRENT_KEY])
+    if common._stamp(proof["captured_at_utc"]) > now:
+        raise ValueError("cr_current_byte_witness_shape_or_clock")
+    pair = body.get("current_pair_admission") or {}
+    if pair.get("allowed") is not True or pair.get("scope") != "current_intraday_latest_pair_only": raise ValueError("cr_existing_current_scope_not_admitted")
+    if proof["publication_audit"]["sha256"] != pair.get("audit_sha256"):
+        raise ValueError("cr_current_publication_audit_digest")
+    if proof["record"]["factual"] != fact or proof["original_provenance"] != record.get("provenance"):
+        raise ValueError("cr_current_frozen_source_fact_mismatch")
+    result = proof["record"]
+    common._fact(result, fact["trade_date"], now, instrument_id=INSTRUMENT)
     return result
 
 
