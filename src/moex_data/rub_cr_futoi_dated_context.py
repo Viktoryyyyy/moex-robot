@@ -364,6 +364,20 @@ def describe(snapshot, *, now):
         return {"schema_version": SCHEMA, "status": "UNAVAILABLE", "scope": SCOPE, "reason": str(exc), "latest_capture_diagnostics": capture_diagnostics, **FLAGS}
 
 
+def _transient_read_failure(error):
+    """Follow explicit transport causes, never incidental validation context."""
+    from moex_data.step9_rub_analysis_bundle import Step9AnalysisBundleError
+    seen = set()
+    while error is not None and id(error) not in seen:
+        seen.add(id(error))
+        if isinstance(error, OSError):
+            return True
+        if not isinstance(error, Step9AnalysisBundleError):
+            return False
+        error = error.__cause__
+    return False
+
+
 def _load_record(root, day, eod, eod_proof, cutoff, *, eod_error=None):
     from moex_data.futures import futoi_delta_statistics_context as engine
     try:
@@ -387,7 +401,7 @@ def _load_record(root, day, eod, eod_proof, cutoff, *, eod_error=None):
         return result
     except Exception as exc:
         return {"instrument_id": INSTRUMENT, "source_id": SOURCE, "trade_date": day, "status": "UNAVAILABLE", "source_kind": None,
-                "factual": None, "provenance": None, "reason": (TRANSIENT_READ if isinstance(exc, OSError) else "") + type(exc).__name__ + ": " + str(exc)}
+                "factual": None, "provenance": None, "reason": (TRANSIENT_READ if _transient_read_failure(exc) else "") + type(exc).__name__ + ": " + str(exc)}
 
 
 def _capture(snapshot, cutoff):

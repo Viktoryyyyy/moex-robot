@@ -692,7 +692,7 @@ def test_exact_valid_eod_is_used_only_when_raw_missing(monkeypatch):
     assert result["factual"] == expected
 
 
-@pytest.mark.parametrize("phase", ["accepted_loader", "source_refs", "verified_frame"])
+@pytest.mark.parametrize("phase", ["accepted_loader", "source_refs", "verified_frame", "wrapped_pointer_read"])
 @pytest.mark.parametrize("index", [-6, -1])
 @pytest.mark.parametrize("transient", [True, False])
 def test_capture_preserves_eod_io_classification_for_needed_dates(monkeypatch, tmp_path, phase, index, transient):
@@ -723,7 +723,18 @@ def test_capture_preserves_eod_io_classification_for_needed_dates(monkeypatch, t
             if phase == "verified_frame": raise failure
             return pd.DataFrame({"trade_date": [target]})
         return pd.DataFrame({"trade_date": witness["observed_trade_dates"]})
-    monkeypatch.setattr(engine, "_accepted_eod", accepted)
+    if phase == "wrapped_pointer_read":
+        pointer = tmp_path / "pointer.json"; pointer.write_text("{}")
+        monkeypatch.setattr(engine.step9, "_pointer_path", lambda *a: pointer)
+        read_text = Path.read_text
+        def read_with_fault(path, *args, **kwargs):
+            if path == pointer:
+                if transient: raise PermissionError("accepted EOD source read denied")
+                return "{invalid JSON"
+            return read_text(path, *args, **kwargs)
+        monkeypatch.setattr(Path, "read_text", read_with_fault)
+    else:
+        monkeypatch.setattr(engine, "_accepted_eod", accepted)
     monkeypatch.setattr(cr.common, "_check_source_refs", refs)
     monkeypatch.setattr(cr.common, "_verified_frame", frame)
     records = {r["trade_date"]: r for r in e["records"]}
@@ -742,9 +753,9 @@ def test_capture_preserves_eod_io_classification_for_needed_dates(monkeypatch, t
         assert "accepted EOD source read denied" in json.dumps(diagnostics)
     elif index == -6:
         assert out["dated"]["changes"]["5"]["status"] == "UNAVAILABLE"
-        assert "digest invalid" in out["dated"]["changes"]["5"]["reason"]
+        assert ("is not valid JSON" if phase == "wrapped_pointer_read" else "digest invalid") in out["dated"]["changes"]["5"]["reason"]
     else:
-        assert out["status"] == "UNAVAILABLE" and "digest invalid" in out["reason"]
+        assert out["status"] == "UNAVAILABLE" and ("is not valid JSON" if phase == "wrapped_pointer_read" else "digest invalid") in out["reason"]
     verify(current, now=completed)
 
 
@@ -763,3 +774,34 @@ def test_observed_witness_io_failure_preserves_original_context_and_cause(monkey
     assert current[cr.STORE_KEY]["evidence_sha256"] == previous[cr.STORE_KEY]["evidence_sha256"]
     assert "observed witness read denied" in cr.describe(current, now=completed)["latest_capture_diagnostics"]["dated_error"]
     verify(current, now=completed)
+
+
+@pytest.mark.parametrize("kind", ["permission", "json_syntax", "json_schema"])
+def test_real_step9_json_wrapper_classification(monkeypatch, tmp_path, kind):
+    from moex_data import step9_rub_analysis_bundle as step9
+    path = tmp_path / "accepted.json"; path.write_text("{}")
+    read_text = Path.read_text
+    def read(path_arg, *args, **kwargs):
+        if path_arg == path:
+            if kind == "permission": raise PermissionError("real JSON read denied")
+            return "{invalid" if kind == "json_syntax" else "[]"
+        return read_text(path_arg, *args, **kwargs)
+    monkeypatch.setattr(Path, "read_text", read)
+    with pytest.raises(step9.Step9AnalysisBundleError) as result:
+        step9._load_json(path, "accepted_eod.pointer")
+    assert cr._transient_read_failure(result.value) is (kind == "permission")
+    if kind == "permission": assert isinstance(result.value.__cause__, PermissionError)
+
+
+def test_exception_classifier_ignores_incidental_context_and_cycles():
+    from moex_data.step9_rub_analysis_bundle import Step9AnalysisBundleError
+    schema = Step9AnalysisBundleError("pointer dataset_id mismatch")
+    schema.__context__ = PermissionError("earlier unrelated failure")
+    assert cr._transient_read_failure(schema) is False
+    unrelated = ValueError("definitive schema failure"); unrelated.__cause__ = PermissionError("earlier failure")
+    assert cr._transient_read_failure(unrelated) is False
+    first = Step9AnalysisBundleError("first"); second = Step9AnalysisBundleError("second")
+    first.__cause__ = second; second.__cause__ = first
+    assert cr._transient_read_failure(first) is False
+    second.__cause__ = PermissionError("actual nested read failure")
+    assert cr._transient_read_failure(first) is True
