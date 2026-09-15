@@ -687,6 +687,7 @@ def test_runner_refuses_generation_before_completed_si_attempt(tmp_path, monkeyp
     from moex_data import rub_si_futoi_dated_context as integrated
     from moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_live_market_oi as live
     monkeypatch.setattr("moex_data.rub_si_futoi_observed_statistics.capture_snapshot", lambda *a, **k: None)
+    monkeypatch.setattr("moex_data.rub_historical_basis_carry_context.capture_snapshot", lambda *a, **k: None)
     base = live.base
     monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
     monkeypatch.setattr(base, "load_dotenv", lambda *a, **k: None)

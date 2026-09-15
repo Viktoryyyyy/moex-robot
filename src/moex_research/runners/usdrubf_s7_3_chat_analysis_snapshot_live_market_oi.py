@@ -335,7 +335,12 @@ def refresh_snapshot(
         from moex_data.rub_contract_price_market_oi_observed import capture_snapshot as capture_contract_pairs
         contract_pairs_completed = capture_contract_pairs(snapshot, previous, now_fn=now_fn, refresh_started_at=now,
             previous_capture_completed=cr_statistics_completed or cr_completed or previous_capture_completed)
+        from moex_data.rub_historical_basis_carry_context import capture_snapshot as capture_historical_basis
+        historical_basis_completed = capture_historical_basis(snapshot, previous, now_fn=now_fn, refresh_started_at=now,
+            previous_capture_completed=contract_pairs_completed or cr_statistics_completed or cr_completed or previous_capture_completed)
         completed = base._aware(now_fn(), "refresh_completed_at")
+        if historical_basis_completed is not None and completed < historical_basis_completed:
+            raise base.ChatAnalysisSnapshotError("refresh completion precedes historical basis capture completion")
         if contract_pairs_completed is not None and completed < contract_pairs_completed:
             raise base.ChatAnalysisSnapshotError("refresh completion precedes contract price/OI capture completion")
         if cr_statistics_completed is not None and completed < cr_statistics_completed:

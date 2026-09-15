@@ -70,11 +70,11 @@ def _evidence_dir(run_id: str) -> Path:
     return _data_root() / "state" / "acceptance" / "step4_rub_basis_carry" / ("run_id=" + _require_token(run_id, "run_id"))
 
 
-def _load_json(path: Path, field_name: str) -> Mapping[str, object]:
-    if not path.is_file():
+def _load_json(path: Path, field_name: str, *, byte_reader=None) -> Mapping[str, object]:
+    if byte_reader is None and not path.is_file():
         _fail(field_name + " does not exist")
     try:
-        values = json.loads(path.read_text(encoding="utf-8"))
+        values = json.loads(path.read_text(encoding="utf-8") if byte_reader is None else byte_reader(path).decode("utf-8"))
     except Exception as exc:
         raise Step4AcceptanceError(field_name + " is not valid JSON: " + str(exc)) from exc
     if not isinstance(values, Mapping):
@@ -148,7 +148,7 @@ def _validate_future_expiry_bindings(values: Mapping[str, object]) -> None:
             _fail("Stage 4 carry binding must expire strictly after trade_date")
 
 
-def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[str, object]]:
+def validate_pilot(values: Mapping[str, object], *, run_id: str, byte_reader=None, run_root=None, path_resolver=None) -> list[dict[str, object]]:
     if values.get("project") != "MOEX_Bot" or values.get("step") != 4 or values.get("status") != "pilot_passed":
         _fail("pilot identity/status mismatch")
     if values.get("artifact_version") != run_id:
@@ -178,10 +178,10 @@ def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[st
         if counts.get(field) != expected:
             _fail("pilot count mismatch: " + field)
 
-    run_root = _run_root(run_id)
-    if not run_root.is_dir():
+    run_root = _run_root(run_id) if run_root is None else Path(run_root)
+    if path_resolver is None and not run_root.is_dir():
         _fail("immutable run root does not exist")
-    if Path(str(values.get("materialization_root") or "")).resolve() != run_root.resolve():
+    if (Path(str(values.get("materialization_root") or "")).resolve() if path_resolver is None else path_resolver(values.get("materialization_root"))) != (run_root.resolve() if path_resolver is None else run_root):
         _fail("materialization_root mismatch")
     rows = values.get("derived_partitions")
     if isinstance(rows, (str, bytes)) or not isinstance(rows, Sequence) or len(rows) != 2:
@@ -206,25 +206,29 @@ def validate_pilot(values: Mapping[str, object], *, run_id: str) -> list[dict[st
         manifest_run_id = _require_token(row.get("run_id"), "derived.run_id")
         if row.get("alignment_policy") != "exact_timestamp_inner_join" or row.get("timestamp_policy") != "naive_exchange_localize_europe_moscow_then_utc" or row.get("forward_fill_used") is not False or row.get("asof_join_used") is not False or row.get("continuous_series_used") is not False:
             _fail("derived output causal/timestamp flags mismatch")
-        partition = _require_under_run_root(row.get("partition_path"), run_root, "partition_path")
-        manifest = _require_under_run_root(row.get("manifest_path"), run_root, "manifest_path")
-        quality = _require_under_run_root(row.get("quality_report_path"), run_root, "quality_report_path")
-        manifest_values = _load_json(manifest, "manifest")
-        quality_values = _load_json(quality, "quality")
+        partition = (_require_under_run_root(row.get("partition_path"), run_root, "partition_path") if path_resolver is None else path_resolver(row.get("partition_path")))
+        manifest = (_require_under_run_root(row.get("manifest_path"), run_root, "manifest_path") if path_resolver is None else path_resolver(row.get("manifest_path")))
+        quality = (_require_under_run_root(row.get("quality_report_path"), run_root, "quality_report_path") if path_resolver is None else path_resolver(row.get("quality_report_path")))
+        manifest_values = _load_json(manifest, "manifest", byte_reader=byte_reader)
+        quality_values = _load_json(quality, "quality", byte_reader=byte_reader)
         if manifest_values.get("instrument_id") != instrument_id or manifest_values.get("row_count") != row_count or manifest_values.get("quality_status") != "pass" or manifest_values.get("run_id") != manifest_run_id:
             _fail("manifest identity/count/quality/run mismatch")
         if quality_values.get("instrument_id") != instrument_id or quality_values.get("row_count") != row_count or quality_values.get("quality_status") != "pass" or quality_values.get("run_id") != manifest_run_id:
             _fail("quality identity/count/status/run mismatch")
         if manifest_values.get("timestamp_policy") != "naive_exchange_localize_europe_moscow_then_utc" or quality_values.get("timestamp_policy") != "naive_exchange_localize_europe_moscow_then_utc":
             _fail("manifest/quality timestamp policy mismatch")
-        _same_path(manifest_values.get("partition_path"), partition, "manifest.partition_path")
-        _same_path(manifest_values.get("quality_report_path"), quality, "manifest.quality_report_path")
+        if path_resolver is None:
+            _same_path(manifest_values.get("partition_path"), partition, "manifest.partition_path")
+            _same_path(manifest_values.get("quality_report_path"), quality, "manifest.quality_report_path")
+        elif (path_resolver(manifest_values.get("partition_path")) != partition or path_resolver(manifest_values.get("quality_report_path")) != quality):
+            _fail("manifest support path mismatch")
         try:
             physical_validation = physical.validate_partition(
                 partition,
                 expected_instrument_id=instrument_id,
                 expected_trade_date=pilot_trade_date,
                 expected_row_count=row_count,
+                **({"byte_reader": byte_reader} if byte_reader is not None else {}),
             )
         except physical.BasisCarryPartitionValidationError as exc:
             raise Step4AcceptanceError("physical derived partition validation failed: " + str(exc)) from exc

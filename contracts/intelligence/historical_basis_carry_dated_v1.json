@@ -1,0 +1,32 @@
+{
+  "project": "MOEX_Bot",
+  "schema_version": "historical_basis_carry_dated_admission.v1",
+  "task_id": "historical_basis_carry_observed_comparisons_v1",
+  "scope": "DATED_STAGE4_OWN_LEG_BASIS_CARRY_EXACT_OBSERVED_COMPARISONS",
+  "dated_lifetime_seconds": 345600,
+  "lags": [
+    1,
+    5
+  ],
+  "witness_slots": 22,
+  "archive_directory_limit": 256,
+  "original_buffer_limit": 1024,
+  "original_bytes_limit": 64000000,
+  "original_single_buffer_limit": 8000000,
+  "source_kind": "CURRENT_REVALIDATED_STAGE4_OWN_INPUT_LEGS",
+  "source_hash_scope": "current_revalidation_not_original_historical_digest_attestation",
+  "alignment": "each_metric_exact_two_leg_timestamp_intersection_no_fill",
+  "latest_invalid_run_policy": "refuse_date_without_older_run_fallback",
+  "USD_spot_policy": "production_spot_dependent_metrics_refused",
+  "current_requires_separate_native_contract_and_proof": true,
+  "current_authority": false,
+  "preserve_original_source_clocks": true,
+  "no_original_full_reference_response_claim": true,
+  "current_usable": false,
+  "historical_pit_usable": false,
+  "session_completion_proven": false,
+  "model_input_allowed": false,
+  "signal_eligible": false,
+  "decision_eligible": false,
+  "action_authority": false
+}

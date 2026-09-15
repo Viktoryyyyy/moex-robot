@@ -219,7 +219,7 @@ def build_package(snapshot, release, *, now):
         'read_view_sha256': sha256(encoded(value)).hexdigest()}
         for key, value in sorted(components.items()) if isinstance(value, dict)}
     chosen = {key: release[key] for key in ('facts', 'market_usability', 'market_structure',
-        'timeframe_context', 'contract_price_context', 'contract_price_market_oi_context', 'futoi_context', 'news_context', 'user_position_context', 'dated_context', 'observed_range_levels')}
+        'timeframe_context', 'contract_price_context', 'contract_price_market_oi_context', 'historical_basis_carry_context', 'futoi_context', 'news_context', 'user_position_context', 'dated_context', 'observed_range_levels')}
     macro = release['macro_evidence_inventory']
     chosen['macro_context'] = {key: macro[key] for key in ('facts', 'scheduled_events', 'calendar_coverage')}
     chosen = compact_values(chosen)
@@ -227,6 +227,9 @@ def build_package(snapshot, release, *, now):
     paired=release.get('contract_price_market_oi_context') or {}
     if paired.get('status')=='AVAILABLE':
         chosen['contract_price_market_oi_context']['evidence_sha256']=paired['evidence_sha256']
+    historical=release.get('historical_basis_carry_context') or {}
+    if historical.get('evidence_sha256') is not None:
+        chosen['historical_basis_carry_context']['evidence_sha256']=historical['evidence_sha256']
     chosen['news_context'] = compact_news_context(release['news_context'])
     readiness = coverage(release)
     return {'project': 'MOEX_Bot', 'schema_version': SCHEMA, 'as_of_utc': now.isoformat(),
