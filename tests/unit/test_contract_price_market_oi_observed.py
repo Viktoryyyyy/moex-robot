@@ -1169,3 +1169,45 @@ def test_capture_budget_independent_exact_boundaries_and_path_dedup(tmp_path,lim
     assert budget.total_bytes==6 and len(budget.buffers)==2 and not budget.exhausted
     with pytest.raises(m.CaptureBudgetExceeded):budget.charge(b'x')
     assert budget.total_bytes==6 and len(budget.buffers)==2 and budget.exhausted
+
+
+@pytest.mark.parametrize('oi_as_float',[False,True])
+def test_native_numeric_representation_matches_original_reader_through_portable_replay(oi_as_float):
+    import base64
+    from moex_data import synchronized_live_market_oi_context as live
+    body=_native_body();raw_before={}
+    prices=[84462,85607,12.426,12.637]
+    for response in body['original_forts_http_evidence']['responses']:
+        payload=json.loads(base64.b64decode(response['content_base64']))
+        columns=payload['marketdata']['columns']
+        for index,row in enumerate(payload['marketdata']['data']):
+            row[columns.index('LAST')]=prices[index]
+            row[columns.index('OPENPOSITION')]=float(1100+index) if oi_as_float else 1100+index
+        raw=json.dumps(payload).encode('utf-8');response['sha256']=m.sha256(raw).hexdigest()
+        response['content_base64']=base64.b64encode(raw).decode('ascii');raw_before[response['sha256']]=raw
+    for index,node in enumerate(body['instruments'].values()):
+        node['last']=live._nonnegative_price(prices[index],secid=node['secid'],field='LAST')
+        node['oi']=live._integer(float(1100+index) if oi_as_float else 1100+index)
+    envelope=m.capture_current(body,started=NOW,completed=NOW)
+    carrier=envelope['capture'];facts=carrier['facts']
+    assert carrier['error'] is None
+    for index,secid in enumerate(BINDINGS.values()):
+        assert type(facts[secid]['price']) is float and facts[secid]['price']==prices[index]
+        assert type(facts[secid]['market_open_interest']) is int
+        row=facts[secid]['proof']['source_row']
+        assert type(row['LAST']) is (int if index<2 else float)
+        assert type(row['OPENPOSITION']) is (float if oi_as_float else int)
+    assert m._decode_buffers(carrier['original_byte_buffers'])==raw_before
+    s=snapshot();s[m.STORE_KEY].update(current_capture=carrier,current_sha256=envelope['sha256'])
+    body.pop('original_forts_http_evidence');s['components']={'synchronized_live_market_oi':{'data':body}}
+    assert release(s)['current']['status']=='AVAILABLE'
+    tampered=deepcopy(s);c=tampered[m.STORE_KEY]['current_capture'];c['facts']['SiU6']['price']+=1
+    tampered[m.STORE_KEY]['current_sha256']=m.common._digest(c)
+    assert release(tampered)['current']['status']=='UNAVAILABLE'
+
+
+def test_native_normalization_preserves_typed_refusal_for_fractional_oi():
+    with pytest.raises(ValueError,match='integer value is invalid') as caught:
+        m._native_numbers({'SECID':'SiU6','LAST':84462,'OPENPOSITION':1.5})
+    from moex_data import synchronized_live_market_oi_context as live
+    assert isinstance(caught.value.__cause__,live.SynchronizedLiveMarketOIError)
