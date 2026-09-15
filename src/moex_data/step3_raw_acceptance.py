@@ -147,11 +147,11 @@ def acceptance_evidence_path(run_id: str) -> Path:
     return _evidence_dir(_require_token(run_id, "run_id")) / "accepted_pointers.json"
 
 
-def _load_json(path: Path, field_name: str) -> Mapping[str, object]:
+def _load_json(path: Path, field_name: str, *, byte_reader=None) -> Mapping[str, object]:
     if not path.exists() or not path.is_file():
         _fail(field_name + " does not exist")
     try:
-        values = json.loads(path.read_text(encoding="utf-8"))
+        values = json.loads(path.read_text(encoding="utf-8") if byte_reader is None else byte_reader(path).decode("utf-8"))
     except Exception as exc:
         raise Step3AcceptanceError(field_name + " is not valid JSON: " + str(exc)) from exc
     if not isinstance(values, Mapping):
@@ -260,8 +260,8 @@ def _same_path(value: object, expected: Path, field_name: str) -> None:
         _fail(field_name + " mismatch")
 
 
-def _manifest_run_id(path: Path) -> str:
-    values = _load_json(path, "manifest")
+def _manifest_run_id(path: Path, *, byte_reader=None) -> str:
+    values = _load_json(path, "manifest", byte_reader=byte_reader)
     run_id = _require_token(values.get("run_id"), "manifest.run_id")
     status = values.get("refresh_status", values.get("status"))
     if status != "succeeded":
@@ -276,7 +276,7 @@ def _require_canonical_source(dataset_id: str, source_id: str, context: str) -> 
     return source_id
 
 
-def _quote_spec(values: Mapping[str, object], *, trade_date: str) -> PointerSpec:
+def _quote_spec(values: Mapping[str, object], *, trade_date: str, byte_reader=None) -> PointerSpec:
     if values.get("dataset_id") != "futures_raw_5m":
         _fail("quote dataset_id mismatch")
     if values.get("quality_status") != "pass":
@@ -290,11 +290,11 @@ def _quote_spec(values: Mapping[str, object], *, trade_date: str) -> PointerSpec
     return PointerSpec(
         "futures_raw_5m", instrument_id, source_id, secid, trade_date,
         _positive_row_count(values, "quote"), manifest_path, quality_path, partition_path,
-        _manifest_run_id(manifest_path),
+        _manifest_run_id(manifest_path, byte_reader=byte_reader),
     )
 
 
-def _supplementary_spec(values: Mapping[str, object], *, dataset_id: str, context: str, trade_date: str) -> PointerSpec:
+def _supplementary_spec(values: Mapping[str, object], *, dataset_id: str, context: str, trade_date: str, byte_reader=None) -> PointerSpec:
     if values.get("dataset_id") != dataset_id:
         _fail(context + " dataset_id mismatch")
     if values.get("trade_date") != trade_date:
@@ -310,7 +310,7 @@ def _supplementary_spec(values: Mapping[str, object], *, dataset_id: str, contex
     return PointerSpec(
         dataset_id, instrument_id, source_id, secid, trade_date,
         _positive_row_count(values, context), manifest_path, quality_path, partition_path,
-        _manifest_run_id(manifest_path),
+        _manifest_run_id(manifest_path, byte_reader=byte_reader),
     )
 
 
@@ -380,8 +380,8 @@ def _validate_bindings(values: Mapping[str, object], *, trade_date: str, as_of_d
     return by_instrument
 
 
-def _validate_quote_support(spec: PointerSpec) -> None:
-    manifest = _load_json(spec.manifest_path, "quote.manifest")
+def _validate_quote_support(spec: PointerSpec, *, byte_reader=None) -> None:
+    manifest = _load_json(spec.manifest_path, "quote.manifest", byte_reader=byte_reader)
     if _require_token(manifest.get("run_id"), "quote.manifest.run_id") != spec.manifest_run_id:
         _fail("quote manifest run_id mismatch")
     if manifest.get("refresh_status") != "succeeded":
@@ -407,7 +407,7 @@ def _validate_quote_support(spec: PointerSpec) -> None:
         if source_contract.get(field_name) != expected:
             _fail("quote manifest source_contract mismatch: " + field_name)
 
-    quality = _load_json(spec.quality_path, "quote.quality_report")
+    quality = _load_json(spec.quality_path, "quote.quality_report", byte_reader=byte_reader)
     if _require_token(quality.get("run_id"), "quote.quality_report.run_id") != spec.manifest_run_id:
         _fail("quote quality report run_id mismatch")
     row = _require_list(quality.get("rows"), "quote.quality_report.rows", 1)[0]
@@ -426,8 +426,8 @@ def _validate_quote_support(spec: PointerSpec) -> None:
         _fail("quote quality report row count mismatch")
 
 
-def _validate_supplementary_support(spec: PointerSpec, *, context: str) -> tuple[Mapping[str, object], Mapping[str, object]]:
-    manifest = _load_json(spec.manifest_path, context + ".manifest")
+def _validate_supplementary_support(spec: PointerSpec, *, context: str, byte_reader=None) -> tuple[Mapping[str, object], Mapping[str, object]]:
+    manifest = _load_json(spec.manifest_path, context + ".manifest", byte_reader=byte_reader)
     for field_name, expected in {
         "dataset_id": spec.dataset_id,
         "run_id": spec.manifest_run_id,
@@ -444,7 +444,7 @@ def _validate_supplementary_support(spec: PointerSpec, *, context: str) -> tuple
     _same_path(manifest.get("partition_path"), spec.partition_path, context + ".manifest.partition_path")
     _same_path(manifest.get("quality_report_path"), spec.quality_path, context + ".manifest.quality_report_path")
 
-    quality = _load_json(spec.quality_path, context + ".quality_report")
+    quality = _load_json(spec.quality_path, context + ".quality_report", byte_reader=byte_reader)
     for field_name, expected in {
         "dataset_id": spec.dataset_id,
         "run_id": spec.manifest_run_id,
@@ -462,7 +462,7 @@ def _validate_supplementary_support(spec: PointerSpec, *, context: str) -> tuple
     return manifest, quality
 
 
-def _validate_oi_causal_partition(spec: PointerSpec, manifest: Mapping[str, object], quality: Mapping[str, object]) -> None:
+def _validate_oi_causal_partition(spec: PointerSpec, manifest: Mapping[str, object], quality: Mapping[str, object], *, byte_reader=None) -> None:
     manifest_min = _require_utc_datetime(manifest.get("min_availability_ts_utc"), "open_interest.manifest.min_availability_ts_utc")
     manifest_max = _require_utc_datetime(manifest.get("max_availability_ts_utc"), "open_interest.manifest.max_availability_ts_utc")
     quality_min = _require_utc_datetime(quality.get("min_availability_ts_utc"), "open_interest.quality_report.min_availability_ts_utc")
@@ -473,7 +473,9 @@ def _validate_oi_causal_partition(spec: PointerSpec, manifest: Mapping[str, obje
         _fail("open_interest availability bounds are not ordered")
 
     try:
-        frame = pd.read_parquet(spec.partition_path, columns=["availability_ts_utc", "systime_source"])
+        from io import BytesIO
+        source = spec.partition_path if byte_reader is None else BytesIO(byte_reader(spec.partition_path))
+        frame = pd.read_parquet(source, columns=["availability_ts_utc", "systime_source"])
     except Exception as exc:
         raise Step3AcceptanceError("open_interest partition causal Parquet validation failed: " + str(exc)) from exc
     if len(frame.index) != spec.row_count:
@@ -500,7 +502,7 @@ def _validate_oi_causal_partition(spec: PointerSpec, manifest: Mapping[str, obje
         _fail("open_interest Parquet availability bounds mismatch declared evidence")
 
 
-def validate_pilot_evidence(values: Mapping[str, object], *, run_id: str) -> tuple[PointerSpec, ...]:
+def validate_pilot_evidence(values: Mapping[str, object], *, run_id: str, byte_reader=None) -> tuple[PointerSpec, ...]:
     checked_run = _require_token(run_id, "run_id")
     if values.get("project") != "MOEX_Bot" or values.get("step") != 3:
         _fail("pilot evidence project/step mismatch")
@@ -533,9 +535,9 @@ def validate_pilot_evidence(values: Mapping[str, object], *, run_id: str) -> tup
     oi_rows = _require_list(values.get("open_interest_partitions"), "open_interest_partitions", EXPECTED_COUNTS["open_interest_partitions"])
     tom_rows = _require_list(values.get("tom_partitions"), "tom_partitions", EXPECTED_COUNTS["tom_partitions"])
 
-    specs: list[PointerSpec] = [_quote_spec(item, trade_date=trade_date) for item in quote_rows]
-    specs.extend(_supplementary_spec(item, dataset_id="futures_open_interest_raw_5m", context="open_interest", trade_date=trade_date) for item in oi_rows)
-    specs.extend(_supplementary_spec(item, dataset_id="fx_spot_raw_5m", context="tom", trade_date=trade_date) for item in tom_rows)
+    specs: list[PointerSpec] = [_quote_spec(item, trade_date=trade_date, byte_reader=byte_reader) for item in quote_rows]
+    specs.extend(_supplementary_spec(item, dataset_id="futures_open_interest_raw_5m", context="open_interest", trade_date=trade_date, byte_reader=byte_reader) for item in oi_rows)
+    specs.extend(_supplementary_spec(item, dataset_id="fx_spot_raw_5m", context="tom", trade_date=trade_date, byte_reader=byte_reader) for item in tom_rows)
 
     keys = {(spec.dataset_id, spec.instrument_id) for spec in specs}
     if len(keys) != sum(EXPECTED_POINTER_COUNTS.values()):
@@ -567,12 +569,12 @@ def validate_pilot_evidence(values: Mapping[str, object], *, run_id: str) -> tup
 
     for spec in specs:
         if spec.dataset_id == "futures_raw_5m":
-            _validate_quote_support(spec)
+            _validate_quote_support(spec, byte_reader=byte_reader)
         elif spec.dataset_id == "futures_open_interest_raw_5m":
-            manifest, quality = _validate_supplementary_support(spec, context="open_interest")
-            _validate_oi_causal_partition(spec, manifest, quality)
+            manifest, quality = _validate_supplementary_support(spec, context="open_interest", byte_reader=byte_reader)
+            _validate_oi_causal_partition(spec, manifest, quality, byte_reader=byte_reader)
         elif spec.dataset_id == "fx_spot_raw_5m":
-            _validate_supplementary_support(spec, context="tom")
+            _validate_supplementary_support(spec, context="tom", byte_reader=byte_reader)
         else:
             _fail("unsupported Step 3 dataset_id")
     return tuple(specs)

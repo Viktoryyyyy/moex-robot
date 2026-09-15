@@ -375,7 +375,7 @@ def _freeze(root, content):
     path=root/'state/evidence/contract_price_market_oi_observed_v1'/digest[:2]/(digest+'.bin')
     path.parent.mkdir(parents=True,exist_ok=True)
     _require(path.parent.resolve().is_relative_to(root.resolve()) and not path.is_symlink(),'immutable_source_copy_path')
-    if path.exists(): _require(path.read_bytes()==content,'immutable_source_copy_changed')
+    if path.exists(): _require(_read_bytes(root,'${MOEX_DATA_ROOT}/'+path.relative_to(root).as_posix())==content,'immutable_source_copy_changed')
     else:
         with path.open('xb') as target: target.write(content)
     return {'ref':'${MOEX_DATA_ROOT}/'+path.relative_to(root).as_posix(),'sha256':digest}
@@ -423,7 +423,11 @@ def _stage3_pairs(root, resolved, *, now, kind, buffers=None):
     from moex_data import step3_raw_acceptance as stage3
     specs=resolved['specs']; result={}; paired_frames={}
     def read(ref, digest=None):
-        if buffers is None: return _read_bytes(root, ref, digest)
+        if buffers is None:
+            reader=resolved.get('byte_reader')
+            raw=reader(root/ref[len('${MOEX_DATA_ROOT}/'):]) if reader is not None else _read_bytes(root,ref,digest)
+            if digest is not None: _require(sha256(raw).hexdigest()==digest,'source_buffer_hash_mismatch')
+            return raw
         proof = resolved['source_artifacts'][ref]
         if digest is not None: _require(proof['sha256'] == digest, 'stage3_buffer_reference_changed')
         return _buffer_bytes(buffers, proof)
@@ -568,18 +572,37 @@ def _bounded_sources(root, *, now):
 
 
 def _witness(root, now):
+    import pandas as pd
+    from moex_data import step9_rub_analysis_bundle as step9
     from moex_data.futures import futoi_delta_statistics_context as engine
     spec=engine._spec(stage=7,dataset_id=engine.OBSERVED_DATE_WITNESS_DATASET_ID,
         instrument_id=engine.OBSERVED_DATE_WITNESS_INSTRUMENT_ID,timeframe=engine.OBSERVED_DATE_WITNESS_TIMEFRAME)
-    _,provenance=engine._accepted_frame(root,spec=spec,as_of=now)
-    frame=common._verified_frame(root,provenance,'partition')
+    pointer_path=step9._pointer_path(root,spec)
+    pointer_raw=_read_bytes(root,'${MOEX_DATA_ROOT}/'+pointer_path.relative_to(root).as_posix())
+    pointer=json.loads(pointer_raw); raw={'pointer':pointer_raw}
+    for key in ('partition','manifest','quality_report'):
+        raw[key]=_read_bytes(root,pointer[key+'_ref'],pointer[key+'_sha256'])
+    frame=pd.read_parquet(BytesIO(raw['partition']))
     dates=sorted({_day(str(day)) for day in frame['trade_date']})
     _require(bool(dates) and dates[-1]<=now.astimezone(archive.MOSCOW).date().isoformat(),'observed_witness_dates')
-    proof={key:_freeze(root,_read_bytes(root,provenance[key+'_ref'],provenance[key+'_sha256'])) for key in ('partition','manifest','quality_report')}
-    pointer_raw=_read_bytes(root,provenance['pointer_ref']); pointer=json.loads(pointer_raw)
-    _require(all(pointer.get(key+'_sha256')==proof[key]['sha256'] and pointer.get(key+'_ref')==provenance[key+'_ref'] for key in ('partition','manifest','quality_report')), 'witness_pointer_changed_after_validation')
-    proof['pointer']=_freeze(root,pointer_raw)
+    proof={key:_frozen_ref(content) for key,content in raw.items()}
+    _portable_witness({'witness_proof':proof,'observed_dates':dates[-22:]},
+        {sha256(content).hexdigest():content for content in raw.values()},now)
+    for content in raw.values(): _freeze(root,content)
     return dates[-22:],proof
+
+
+def _memoized_source_reader(root):
+    """Each original artifact is bounded before parsing and shared through freeze."""
+    cache={}; total=0
+    def read(path):
+        nonlocal total
+        if path not in cache:
+            raw=_read_bytes(root,'${MOEX_DATA_ROOT}/'+path.relative_to(root).as_posix())
+            _require(len(cache)<MAX_AUDIT_BUFFERS and total+len(raw)<=MAX_AUDIT_BYTES,'audit_artifact_byte_limit')
+            cache[path]=raw;total+=len(raw)
+        return cache[path]
+    return read
 
 
 def _bounded_archive_markers(base):
@@ -629,7 +652,9 @@ def _historical(root, now):
     for day,finished,run,marker in sorted(candidates): selected[day]=marker
     for day,marker in selected.items():
         try:
-            resolved=resolver.resolve(root,marker,now=now,earliest=earliest)
+            reader=_memoized_source_reader(root)
+            resolved=resolver.resolve(root,marker,now=now,earliest=earliest,byte_reader=reader)
+            if resolved is not None: resolved['byte_reader']=reader
             if resolved is None: continue
             records[day]=_stage3_pairs(root,resolved,now=now,kind='CURRENT_REVALIDATED_ACCEPTED_STAGE10_RUN')
         except Exception as exc: errors[day]=type(exc).__name__+': '+str(exc)
@@ -645,10 +670,14 @@ def _historical(root, now):
             if entry['kind']=='official_paginated_tradestats': pairs,_=_official_pages(root,entry,accepted_at=accepted,now=now)
             else:
                 _require(set(entry)=={'kind','run_id','accepted_marker_ref','pilot_evidence_ref','marker_sha256','pilot_sha256'} and entry['run_id']=='step3_pilot_20260824_1705','standalone_source_admission')
-                _read_bytes(root,entry['accepted_marker_ref'],entry['marker_sha256']); _read_bytes(root,entry['pilot_evidence_ref'],entry['pilot_sha256'])
+                reader=_memoized_source_reader(root)
+                for key in ('accepted_marker','pilot_evidence'):
+                    expected=entry['marker_sha256' if key=='accepted_marker' else 'pilot_sha256']
+                    _require(sha256(reader(root/entry[key+'_ref'][len('${MOEX_DATA_ROOT}/'):])).hexdigest()==expected,'source_buffer_hash_mismatch')
                 marker=root/entry['accepted_marker_ref'][len('${MOEX_DATA_ROOT}/'):]
                 _require(marker.parent.name=='run_id='+entry['run_id'] and marker.name=='accepted_pointers.json','standalone_marker_path')
-                resolved=resolver.resolve_standalone(root,marker,now=now,earliest=earliest,accepted_at=accepted)
+                resolved=resolver.resolve_standalone(root,marker,now=now,earliest=earliest,accepted_at=accepted,byte_reader=reader)
+                if resolved is not None: resolved['byte_reader']=reader
                 _require(resolved is not None and '${MOEX_DATA_ROOT}/'+resolved['pilot_path'].relative_to(root).as_posix()==entry['pilot_evidence_ref'],'standalone_pilot_ref')
                 pairs=_stage3_pairs(root,resolved,now=now,kind='REVALIDATED_STANDALONE_STAGE3_PILOT')
                 _require(all(r['proof']['marker']['sha256']==entry['marker_sha256'] and r['proof']['pilot']['sha256']==entry['pilot_sha256'] for r in pairs.values()), 'standalone_final_frozen_hash_mismatch')

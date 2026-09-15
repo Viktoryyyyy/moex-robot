@@ -476,9 +476,10 @@ def test_consumer_fixture_distinguishes_official_and_standalone_partial_endpoint
     assert not current['20']['baseline']['session_completion_proven']
 
 
-def test_real_archive_inventory_derives_run_from_marker_not_optional_pilot_field(tmp_path,monkeypatch):
+def _restore_archive(tmp_path,dates=None):
     e=snapshot()[m.STORE_KEY]['evidence'];buffers=m._decode_buffers(e['original_byte_buffers'])
-    for pairs in e['history'].values():
+    for day,pairs in e['history'].items():
+        if dates is not None and day not in dates:continue
         audit=next(iter(pairs.values()))['proof']['stage3_audit']
         for ref,proof in audit['artifacts'].items():
             path=tmp_path/ref.removeprefix('${MOEX_DATA_ROOT}/');path.parent.mkdir(parents=True,exist_ok=True)
@@ -487,6 +488,11 @@ def test_real_archive_inventory_derives_run_from_marker_not_optional_pilot_field
                 # Relocate fixture source paths; source documents genuinely omit run_id.
                 raw=raw.decode().replace(audit['original_root'].replace('\\','/'),tmp_path.as_posix()).encode()
             path.write_bytes(raw)
+    return e
+
+
+def test_real_archive_inventory_derives_run_from_marker_not_optional_pilot_field(tmp_path,monkeypatch):
+    e=_restore_archive(tmp_path)
     monkeypatch.setenv('MOEX_DATA_ROOT',str(tmp_path))
     records,errors=m._historical(tmp_path,NOW)
     assert set(records)==set(e['observed_dates'])
@@ -621,3 +627,109 @@ def test_current_original_bytes_witness_continuity_keeps_anchor_but_refuses_unpr
         tampered['current']['contracts']['si_front']['changes']['1']['target_observed_trade_date']=s[m.STORE_KEY]['evidence']['observed_dates'][-1]
         with pytest.raises(AssertionError):
             m.verify_projection(s,{'contract_price_market_oi_context':tampered},now=now)
+
+
+@pytest.mark.parametrize('kind',['marker','quote_manifest','quote_quality','oi_manifest','oi_quality','oi_partition','tom_manifest','tom_quality'])
+def test_real_resolver_nested_first_reads_are_bounded_and_latest_date_never_falls_back(tmp_path,monkeypatch,kind):
+    e=_restore_archive(tmp_path,dates={'2026-09-13','2026-09-14'})
+    monkeypatch.setenv('MOEX_DATA_ROOT',str(tmp_path))
+    audit=e['history']['2026-09-14']['SiU6']['proof']['stage3_audit']
+    marker=tmp_path/'state/acceptance/step3_canonical_raw/run_id=step10_20260914_stage3/accepted_pointers.json'
+    pilot=json.loads(marker.with_name('pilot_evidence.json').read_text())
+    if kind=='marker':target=marker
+    else:
+        group,field=kind.split('_')
+        row=pilot[{'quote':'quote_partitions','oi':'open_interest_partitions','tom':'tom_partitions'}[group]][0]
+        key=({'manifest':'manifest_reference','quality':'quality_report_reference','partition':'storage_partition_path'} if group=='quote' else
+             {'manifest':'manifest_path','quality':'quality_report_path','partition':'partition_path'})[field]
+        target=Path(row[key])
+    with target.open('wb') as handle:handle.truncate(m.MAX_BUFFER_BYTES+1)
+    original=Path.open;reads=[]
+    def bounded_spy(path,*args,**kwargs):
+        if path==target:reads.append(path);pytest.fail('oversized original artifact opened before bound')
+        return original(path,*args,**kwargs)
+    monkeypatch.setattr(Path,'open',bounded_spy)
+    records,errors=m._historical(tmp_path,NOW)
+    assert '2026-09-13' in records and '2026-09-14' not in records
+    assert 'source_artifact_byte_limit' in errors['2026-09-14'] and reads==[]
+
+
+def test_resolver_bounded_reader_preserves_legacy_specs_and_freezes_same_original_buffers(tmp_path,monkeypatch):
+    from moex_data import rub_accepted_stage3_resolver as resolver
+    _restore_archive(tmp_path,dates={'2026-09-14'});monkeypatch.setenv('MOEX_DATA_ROOT',str(tmp_path))
+    marker=tmp_path/'state/acceptance/step3_canonical_raw/run_id=step10_20260914_stage3/accepted_pointers.json'
+    kwargs={'now':NOW,'earliest':NOW.date()-timedelta(days=45)}
+    legacy=resolver.resolve(tmp_path,marker,**kwargs)
+    reader=m._memoized_source_reader(tmp_path)
+    bounded=resolver.resolve(tmp_path,marker,byte_reader=reader,**kwargs)
+    assert bounded==legacy
+    # A replacement after validation cannot change the bytes frozen by this capture.
+    original=reader(marker);marker.write_text('{}')
+    bounded['byte_reader']=reader
+    pairs=m._stage3_pairs(tmp_path,bounded,now=NOW,kind='CURRENT_REVALIDATED_ACCEPTED_STAGE10_RUN')
+    assert all(row['proof']['marker']['sha256']==m.sha256(original).hexdigest() for row in pairs.values())
+    assert marker.read_text()=='{}'
+
+
+def _restore_witness(root):
+    from moex_data.futures import futoi_delta_statistics_context as engine
+    from moex_data import step9_rub_analysis_bundle as step9
+    e=snapshot()[m.STORE_KEY]['evidence'];buffers=m._decode_buffers(e['original_byte_buffers'])
+    p=e['witness_proof'];pointer=json.loads(buffers[p['pointer']['sha256']])
+    for key in ('partition','manifest','quality_report'):
+        path=root/pointer[key+'_ref'].removeprefix('${MOEX_DATA_ROOT}/');path.parent.mkdir(parents=True,exist_ok=True)
+        path.write_bytes(buffers[p[key]['sha256']])
+    spec=engine._spec(stage=7,dataset_id=engine.OBSERVED_DATE_WITNESS_DATASET_ID,
+        instrument_id=engine.OBSERVED_DATE_WITNESS_INSTRUMENT_ID,timeframe=engine.OBSERVED_DATE_WITNESS_TIMEFRAME)
+    path=step9._pointer_path(root,spec);path.parent.mkdir(parents=True,exist_ok=True)
+    path.write_bytes(buffers[p['pointer']['sha256']])
+    return path,pointer,e
+
+
+@pytest.mark.parametrize('kind',['pointer','manifest','quality_report','partition'])
+def test_witness_first_read_is_bounded_before_legacy_or_portable_parsing(tmp_path,monkeypatch,kind):
+    path,pointer,_=_restore_witness(tmp_path)
+    target=path if kind=='pointer' else tmp_path/pointer[kind+'_ref'].removeprefix('${MOEX_DATA_ROOT}/')
+    with target.open('wb') as handle:handle.truncate(m.MAX_BUFFER_BYTES+1)
+    original=Path.open
+    def spy(path,*args,**kwargs):
+        if path==target:pytest.fail('oversized witness opened before bound')
+        return original(path,*args,**kwargs)
+    monkeypatch.setattr(Path,'open',spy)
+    with pytest.raises(ValueError,match='source_artifact_byte_limit'):m._witness(tmp_path,NOW)
+
+
+@pytest.mark.parametrize('defect',[None,'governance','quality','hash','future_availability','future_build'])
+def test_bounded_witness_preserves_pointer_support_and_causal_admission(tmp_path,defect):
+    import pandas as pd
+    from io import BytesIO
+    path,pointer,e=_restore_witness(tmp_path)
+    if defect=='governance':pointer['acceptance_contract_id']='unapproved'
+    elif defect=='hash':pointer['partition_sha256']='0'*64
+    elif defect in ('quality','future_availability','future_build'):
+        key='quality_report' if defect=='quality' else 'partition'
+        target=tmp_path/pointer[key+'_ref'].removeprefix('${MOEX_DATA_ROOT}/')
+        if defect=='quality':
+            value=json.loads(target.read_bytes());value['quality_status']='fail';raw=json.dumps(value).encode()
+        else:
+            frame=pd.read_parquet(target);column='availability_ts_utc' if defect=='future_availability' else 'build_ts_utc'
+            frame.loc[frame.index[-1],column]=(NOW+timedelta(seconds=1)).isoformat()
+            stream=BytesIO();frame.to_parquet(stream,index=False);raw=stream.getvalue()
+        target.write_bytes(raw);pointer[key+'_sha256']=m.sha256(raw).hexdigest()
+    path.write_text(json.dumps(pointer))
+    if defect is None:
+        dates,proof=m._witness(tmp_path,NOW)
+        assert dates==e['observed_dates'] and proof==e['witness_proof']
+    else:
+        with pytest.raises(ValueError):m._witness(tmp_path,NOW)
+
+
+def test_existing_frozen_copy_comparison_is_bounded_before_read(tmp_path,monkeypatch):
+    raw=b'original';proof=m._freeze(tmp_path,raw);target=tmp_path/proof['ref'].removeprefix('${MOEX_DATA_ROOT}/')
+    with target.open('wb') as handle:handle.truncate(m.MAX_BUFFER_BYTES+1)
+    original=Path.open
+    def spy(path,*args,**kwargs):
+        if path==target:pytest.fail('oversized existing immutable copy opened')
+        return original(path,*args,**kwargs)
+    monkeypatch.setattr(Path,'open',spy)
+    with pytest.raises(ValueError,match='source_artifact_byte_limit'):m._freeze(tmp_path,raw)
