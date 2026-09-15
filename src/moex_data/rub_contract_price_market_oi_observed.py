@@ -1095,8 +1095,11 @@ def _validate_native_inventory(inventory):
         from moex_data import synchronized_live_market_oi_context_apim as apim
         _require(not isinstance(probes[0][1].get('securities.cursor'),dict),'current_probe_pagination_changed')
         # The source compares normalized SECID sequences, not live value equality.
-        first=apim._validate_apim_full_response(selected[0][1])
-        second=apim._validate_apim_full_response(probes[0][1])
+        try:
+            first=apim._validate_apim_full_response(selected[0][1])
+            second=apim._validate_apim_full_response(probes[0][1])
+        except apim.core.SynchronizedLiveMarketOIError as exc:
+            raise ValueError(str(exc)) from exc
         _require(first==second,'current_probe_universe_mismatch')
     else:
         _require(not probes,'current_cursor_probe_mixed')

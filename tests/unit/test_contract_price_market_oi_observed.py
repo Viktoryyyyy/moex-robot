@@ -960,7 +960,11 @@ def test_native_full_response_reuses_source_universe_and_probe_mode_guards(defec
         elif defect in ('extra_security','extra_market'):
             block=payload['securities' if defect=='extra_security' else 'marketdata'];row=list(block['data'][0]);row[block['columns'].index('SECID')]='OTHER';block['data'].append(row)
         _replace_native_payload(response,payload)
-    with pytest.raises(ValueError):m._original_current(None,body,NOW)
+    with pytest.raises(ValueError) as failure:m._original_current(None,body,NOW)
+    if defect!='probe_cursor':
+        from moex_data import synchronized_live_market_oi_context as source
+        assert isinstance(failure.value.__cause__,source.SynchronizedLiveMarketOIError)
+        assert str(failure.value)==str(failure.value.__cause__)
 
 
 @pytest.mark.parametrize('field',['LAST','OPENPOSITION','LASTTRADEDATE','STEPPRICE','secid_case'])
@@ -979,18 +983,23 @@ def test_source_probe_value_changes_do_not_invent_full_row_equality_policy(field
     assert len(facts)==4 and facts['SiU6']['price']==body['instruments']['si_front']['last']
 
 
-def test_portable_probe_cannot_introduce_cursor_after_capture():
+@pytest.mark.parametrize('defect',['cursor','universe'])
+def test_portable_probe_cannot_change_source_completeness_after_capture(defect):
     import base64
     s=install_current(snapshot());store=s[m.STORE_KEY];carrier=store['current_capture'];facts=carrier['facts']
     inventory=facts['SiU6']['proof']['retained_http_inventory'];probe=inventory[1]
     raw=base64.b64decode(carrier['original_byte_buffers'][probe['response']['sha256']]);payload=json.loads(raw)
-    payload['securities.cursor']={'columns':['INDEX','TOTAL','PAGESIZE'],'data':[[0,4,4]]}
+    if defect=='cursor':payload['securities.cursor']={'columns':['INDEX','TOTAL','PAGESIZE'],'data':[[0,4,4]]}
+    else:
+        row=list(payload['securities']['data'][0]);row[payload['securities']['columns'].index('SECID')]='OTHER'
+        payload['securities']['data'].append(row)
     raw=json.dumps(payload).encode();new=m._inline_ref(raw);probe['response']=new
     carrier['original_byte_buffers'][new['sha256']]=base64.b64encode(raw).decode()
     store['current_sha256']=m.common._digest(carrier)
     out=release(s)
     assert out['dated']['status']=='AVAILABLE' and out['current']['status']=='UNAVAILABLE'
-    assert 'current_probe_pagination_changed' in out['current']['reason']
+    expected='current_probe_pagination_changed' if defect=='cursor' else 'SECID universe mismatch'
+    assert expected in out['current']['reason']
 
 
 @pytest.mark.parametrize('defect',[None,'columns','request_start'])
