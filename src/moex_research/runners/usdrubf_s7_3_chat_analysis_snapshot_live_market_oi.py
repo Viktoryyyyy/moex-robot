@@ -329,7 +329,12 @@ def refresh_snapshot(
             base._aware(si_attempt_before_cr, "si_capture_completed_at") if si_attempt_before_cr is not None else now)
         cr_completed = capture_cr_dated(snapshot, previous, now_fn=now_fn, refresh_started_at=now,
                                        previous_capture_completed=previous_capture_completed)
+        from moex_data.rub_cr_futoi_observed_statistics import capture_snapshot as capture_cr_statistics
+        cr_statistics_completed = capture_cr_statistics(snapshot, previous, now_fn=now_fn, refresh_started_at=now,
+                                                       previous_capture_completed=cr_completed or previous_capture_completed)
         completed = base._aware(now_fn(), "refresh_completed_at")
+        if cr_statistics_completed is not None and completed < cr_statistics_completed:
+            raise base.ChatAnalysisSnapshotError("refresh completion precedes CR statistics capture completion")
         if cr_completed is not None and completed < cr_completed:
             raise base.ChatAnalysisSnapshotError("refresh completion precedes CR dated capture completion")
         if statistics_completed is not None and completed < statistics_completed:

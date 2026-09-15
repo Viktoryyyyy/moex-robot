@@ -4,10 +4,13 @@ from decimal import Decimal, localcontext
 from math import fsum, sqrt, isclose
 
 from moex_data import rub_si_futoi_dated_context as dated
+from moex_data import rub_futoi_observed_statistics_core as core
 
 SCHEMA = "si_futoi_observed_statistics.v1"
 POLICY = "observed_slots_admitted_subset_min2_descriptive.v1"
 STORE_KEY = "accepted_si_observed_statistics"
+PROFILE = core.StatisticsProfile("si_futures_family", SCHEMA, STORE_KEY,
+    "SI_FAMILY_DESCRIPTIVE_OBSERVED_SUBSETS_NOT_STATISTICAL_CONFIDENCE", "si_statistics_consumer_semantics.v1")
 WINDOWS = (252, 504)
 COLUMNS = ("total_open_interest",) + tuple(side + "." + field for side in ("fiz", "yur") for field in dated.SIDE_FIELDS)
 CLOCKS = ("snapshot_ts", "availability_ts_utc", "source_publication_time", "ingest_ts_utc")
@@ -57,28 +60,15 @@ def _record(fact, kind, proof):
 
 
 def _values(fact):
-    oi = fact["total_open_interest"]
-    result = {"total_open_interest": oi}
-    for side in ("fiz", "yur"):
-        value = fact[side]
-        result.update({side + "." + key: value[key] for key in dated.SIDE_FIELDS})
-        result[side + ".gross"] = value["long"] + value["short"]
-        for key in ("long", "short", "net"):
-            result[side + "." + key + "_share_of_oi"] = value[key] / oi
-        result[side + ".gross_share_of_two_sided_oi"] = (value["long"] + value["short"]) / (2 * oi)
-    return result
+    return core._values(fact)
 
 
 def _encode_row(fact, proof_id):
-    numbers = [fact["total_open_interest"]] + [fact[s][k] for s in ("fiz", "yur") for k in dated.SIDE_FIELDS]
-    return {"trade_date": fact["trade_date"], "status": "AVAILABLE", "values": numbers,
-            "clocks": {key: fact.get(key) for key in CLOCKS}, "proof_id": proof_id, "reason": None}
+    return core._encode_row(fact, proof_id)
 
 
 def _decode_row(row):
-    values = dict(zip(COLUMNS, row["values"]))
-    return {"trade_date": row["trade_date"], **row["clocks"], "total_open_interest": values["total_open_interest"],
-            **{side: {key: values[side + "." + key] for key in dated.SIDE_FIELDS} for side in ("fiz", "yur")}}
+    return core._decode_row(row)
 
 
 def _proof(value):
@@ -183,43 +173,7 @@ def _admit(snapshot, now):
 
 
 def _summary(slots, facts, anchor, excluded):
-    values = {day: _values(facts[day]) for day in slots if day in facts}
-    anchor_day = anchor["trade_date"]
-    if not slots or slots[-1] != anchor_day or anchor_day not in values:
-        raise ValueError("statistics_summary_anchor")
-    anchor_values = values[anchor_day]
-    windows = {}
-    for window in WINDOWS:
-        selected = slots[-window:]
-        days = [day for day in selected if day in values]
-        missing = [{"trade_date": day, "reason": excluded[day]} for day in selected if day not in values]
-        variables = {}
-        for field in STAT_FIELDS:
-            sample = [values[day][field] for day in days]
-            result = {"status": "UNAVAILABLE", "reason": "minimum_two_admitted_observations_required",
-                      "population_mean": None, "population_std_ddof_0": None, "percentile": None, "zscore": None, "zscore_reason": None}
-            if len(sample) >= 2:
-                mean = fsum(sample) / len(sample)
-                std = sqrt(fsum((v-mean)**2 for v in sample) / len(sample)) if len(set(sample)) > 1 else 0.0
-                result.update(status="AVAILABLE", reason=None, population_mean=mean, population_std_ddof_0=std,
-                    percentile=sum(v <= anchor_values[field] for v in sample)/len(sample),
-                    zscore=(anchor_values[field]-mean)/std if std else None,
-                    zscore_reason="zero_population_variance" if not std else None)
-            variables[field] = result
-        windows[str(window)] = {"expected_window_slots": window, "observed_slot_count": len(selected),
-            "sample_count": len(days), "coverage_status": "COMPLETE" if len(days) == window else "PARTIAL",
-            "sample_dates": days, "excluded_dates": missing, "missing_observed_history_slots": max(0, window-len(selected)),
-            "slot_start_date": selected[0], "slot_end_date": selected[-1], "variables": variables}
-    changes = {}
-    for lag in dated.LAGS:
-        target = slots[-1-lag] if len(slots) > lag else None
-        changes[str(lag)] = {"target_trade_date": target, "anchor_trade_date": anchor_day,
-            "status": "AVAILABLE" if target in values else "UNAVAILABLE", "values": None,
-            "reason": None if target in values else (excluded.get(target) or "insufficient_exact_observed_slots")}
-        if target in values:
-            changes[str(lag)]["values"] = {field: anchor_values[field]-values[target][field] for field in FIELDS}
-    return {"status": "AVAILABLE", "anchor_trade_date": anchor_day, "anchor_values": anchor_values,
-            "changes": changes, "windows": windows}
+    return core._summary(slots, facts, anchor, excluded)
 
 
 def _current(snapshot, e, facts, now):
@@ -435,82 +389,4 @@ def verify_projection(snapshot, release, *, now):
             "current_pair_usable_at_read": name == "current",
             "source_anchor_clocks": {key: source[slots[-1]].get(key) for key in CLOCKS},
             "statistical_semantics": SEMANTICS}
-        dated._require(set(result) == {"status", "anchor_trade_date", "anchor_values", "changes", "windows", *view_metadata}
-            and result["status"] == "AVAILABLE" and result["anchor_trade_date"] == slots[-1], "Si statistics admitted view inventory")
-        dated._require(dated._digest({key: result[key] for key in view_metadata}) == dated._digest(view_metadata),
-                       "Si statistics independent consumer semantics and anchor clocks")
-        dated._require(set(result["changes"]) == {str(lag) for lag in dated.LAGS}
-            and set(result["windows"]) == {str(window) for window in WINDOWS}, "Si statistics window and lag inventory")
-        def numbers(fact):
-            oi = Decimal(fact["total_open_interest"])
-            result = {"total_open_interest": oi}
-            for side in ("fiz", "yur"):
-                raw = fact[side]
-                for field in dated.SIDE_FIELDS: result[side + "." + field] = Decimal(raw[field])
-                result[side + ".gross"] = Decimal(raw["long"]) + Decimal(raw["short"])
-                for field in ("long", "short", "net"):
-                    result[side + "." + field + "_share_of_oi"] = Decimal(raw[field]) / oi
-                result[side + ".gross_share_of_two_sided_oi"] = (Decimal(raw["long"]) + Decimal(raw["short"])) / (2*oi)
-            return result
-        decimal_values = {day: numbers(source[day]) for day in slots if day in source}
-        last = decimal_values[slots[-1]]
-        def equal(actual, calculated):
-            dated._require(type(actual) in (int, float) and isclose(actual, float(calculated), rel_tol=1e-11, abs_tol=1e-11), "Si statistics independent arithmetic")
-        dated._require(set(result["anchor_values"]) == set(FIELDS), "Si statistics derived field coverage")
-        for key in FIELDS: equal(result["anchor_values"][key], last[key])
-        for lag in dated.LAGS:
-            target = slots[-1-lag] if len(slots) > lag else None
-            item = result["changes"][str(lag)]
-            dated._require(set(item) == {"target_trade_date", "anchor_trade_date", "status", "values", "reason"}
-                and item["target_trade_date"] == target and item["anchor_trade_date"] == slots[-1], "Si statistics exact lag date")
-            if target in decimal_values:
-                dated._require(item["status"] == "AVAILABLE" and set(item["values"]) == set(FIELDS), "Si statistics lag coverage")
-                dated._require(item["reason"] is None, "Si statistics lag reason")
-                for key in FIELDS:
-                    if "share" not in key: dated._require(type(item["values"][key]) is int, "Si statistics integer delta")
-                    equal(item["values"][key], last[key]-decimal_values[target][key])
-            else:
-                excluded = {row["trade_date"]: row["reason"] for row in e["rows"] if row["status"] == "UNAVAILABLE"}
-                dated._require(item["status"] == "UNAVAILABLE" and item["values"] is None
-                    and item["reason"] == (excluded.get(target) or "insufficient_exact_observed_slots"), "Si statistics missing lag")
-        for window in WINDOWS:
-            item = result["windows"][str(window)]
-            selected = slots[-window:]; days = [day for day in selected if day in source]
-            excluded = {row["trade_date"]: row["reason"] for row in e["rows"] if row["status"] == "UNAVAILABLE"}
-            expected_excluded = [{"trade_date": day, "reason": excluded[day]} for day in selected if day not in source]
-            window_metadata = {"expected_window_slots": window, "observed_slot_count": len(selected), "sample_count": len(days),
-                "coverage_status": "COMPLETE" if len(days) == window else "PARTIAL", "sample_dates": days,
-                "excluded_dates": expected_excluded, "missing_observed_history_slots": max(0, window-len(selected)),
-                "slot_start_date": selected[0], "slot_end_date": selected[-1]}
-            dated._require(dated._digest({key: val for key, val in item.items() if key != "variables"}) == dated._digest(window_metadata),
-                           "Si statistics independent window metadata")
-            dated._require(set(item) == {"expected_window_slots", "observed_slot_count", "sample_count", "coverage_status", "sample_dates",
-                "excluded_dates", "missing_observed_history_slots", "slot_start_date", "slot_end_date", "variables"}
-                and item["excluded_dates"] == expected_excluded and item["missing_observed_history_slots"] == max(0, window-len(selected))
-                and item["slot_start_date"] == selected[0] and item["slot_end_date"] == selected[-1], "Si statistics exact excluded slot inventory")
-            dated._require(item["sample_dates"] == days and item["sample_count"] == len(days)
-                and item["expected_window_slots"] == window and item["observed_slot_count"] == len(selected)
-                and item["coverage_status"] == ("COMPLETE" if len(days) == window else "PARTIAL"), "Si statistics exact subset coverage")
-            dated._require(set(item["variables"]) == set(STAT_FIELDS), "Si statistics variable coverage")
-            for key in STAT_FIELDS:
-                metric = item["variables"][key]
-                dated._require(set(metric) == {"status", "reason", "population_mean", "population_std_ddof_0", "percentile", "zscore", "zscore_reason"}, "Si statistics metric shape")
-                if len(days) < 2:
-                    dated._require(metric["status"] == "UNAVAILABLE" and metric["reason"] == "minimum_two_admitted_observations_required"
-                        and all(metric[k] is None for k in ("population_mean", "population_std_ddof_0", "percentile", "zscore", "zscore_reason")), "Si statistics minimum sample")
-                    continue
-                with localcontext() as ctx:
-                    ctx.prec = 40
-                    values = [decimal_values[day][key] for day in days]
-                    mean = sum(values) / len(values)
-                    variance = sum((v-mean)**2 for v in values) / len(values)
-                    std = variance.sqrt()
-                    dated._require(metric["status"] == "AVAILABLE", "Si statistics metric omitted")
-                    dated._require(metric["reason"] is None, "Si statistics metric reason")
-                    equal(metric["population_mean"], mean); equal(metric["population_std_ddof_0"], std)
-                    equal(metric["percentile"], Decimal(sum(v <= last[key] for v in values))/len(values))
-                    if len(set(values)) == 1:
-                        dated._require(metric["zscore"] is None and metric["zscore_reason"] == "zero_population_variance", "Si statistics constant sample")
-                    else:
-                        dated._require(metric["zscore_reason"] is None, "Si statistics nonconstant zscore reason")
-                        equal(metric["zscore"], (last[key]-mean)/std)
+        core.verify_view(result, slots, source, e["rows"], view_metadata)

@@ -1,0 +1,58 @@
+{
+  "schema_version": "cr_futoi_observed_statistics_admission.v1",
+  "task_id": "cr_futoi_observed_statistics_v1",
+  "instrument_id": "cr_futures_family",
+  "source_id": "moex_algopack_futoi",
+  "scope": "CR_FAMILY_DESCRIPTIVE_OBSERVED_SUBSETS_NOT_STATISTICAL_CONFIDENCE",
+  "policy": "observed_slots_admitted_subset_min2_descriptive.v1",
+  "admission": {
+    "descriptive_statistics_allowed": true,
+    "linked_cr_dated_admission_required": true,
+    "current_requires_existing_current_pair_and_original_proof": true,
+    "maximum_retained_observed_slots": 504,
+    "windows": [
+      252,
+      504
+    ],
+    "lags": [
+      1,
+      5,
+      20
+    ],
+    "maximum_age_seconds": 345600,
+    "minimum_sample_count": 2,
+    "source_selection": "exact_raw_first_invalid_latest_excluded_no_eod_or_older_slot_substitution",
+    "wrapped_read_errors_preserve_transient_classification": true,
+    "legacy_cr_governance_and_aliases_unchanged": true,
+    "session_completion_proven": false,
+    "historical_pit_usable": false,
+    "model_usable": false,
+    "directional_authority": false,
+    "action_authority": false,
+    "standalone_buy_sell_authority": false,
+    "stage5_full_mode_ready": false,
+    "stage5_pointer_promotion_performed": false
+  },
+  "statistical_semantics": {
+    "version": "cr_statistics_consumer_semantics.v1",
+    "sample": "admitted_subset_within_exact_observed_slots_no_older_gap_substitution",
+    "anchor_included_in_sample": true,
+    "percentile_formula": "count(sample_value <= anchor_value) / sample_count",
+    "percentile_ties": "all_sample_values_equal_to_anchor_are_included_in_numerator",
+    "zscore_formula": "(anchor_value - population_mean) / population_std_ddof_0",
+    "standard_deviation_ddof": 0,
+    "minimum_sample_count": 2,
+    "below_minimum_reason": "minimum_two_admitted_observations_required",
+    "zero_variance_zscore": null,
+    "zero_variance_reason": "zero_population_variance"
+  },
+  "units": {
+    "positions_and_open_interest": "contracts",
+    "participant_fields": "side_counts_not_unique_people",
+    "long_short_net_shares": "fraction_of_one_sided_open_interest",
+    "gross_share_of_two_sided_oi": "gross_divided_by_2_times_open_interest",
+    "share_changes": "fraction_difference_not_percentage_points",
+    "percentile": "fraction",
+    "zscore": "dimensionless"
+  }
+}

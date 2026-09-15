@@ -46,6 +46,26 @@ def rehash(value):
     value[stats.STORE_KEY]["evidence_sha256"] = dated._digest(value[stats.STORE_KEY]["evidence"])
 
 
+@pytest.mark.parametrize("count,input_hash,output_hash", [
+    (1, "c914fce154de2e11de9b0779908610a2cc02cfa0800e079caf723a066c2d1113", "d70959a2be6a1bddf7c9f23c916a1c3be89606c379607bfd21bc5e70f8bd64cc"),
+    (30, "7a0f66e481b3688fe8c98e56ad6c5c4c2779ec35247edf9ae2a81ac7f4fb4871", "e99ee76124f9fddac7b0328bbe3b7c899e30105fad1d79ecbab1e0aecdb38015"),
+    (504, "05d80a276c378526a89fdaeeaef885241aaff7fe68b6486bc105a14f59230922", "7f8ffa5835b0ed2a1181da75ec8dff324faf23f9adf3cd036f15aaad5a2101a8")])
+def test_neutral_kernel_preserves_exact_8dce_si_serialization(count, input_hash, output_hash):
+    # Independent baseline recorded on clean merged8dce before kernel extraction.
+    value = snapshot(count)
+    assert dated._digest(value) == input_hash
+    assert dated._digest(stats.describe(value, now=NOW)) == output_hash
+    assert dated._digest(value) == input_hash
+
+
+def test_neutral_kernel_profiles_and_si_public_signatures_stay_fixed():
+    import inspect
+    assert str(inspect.signature(stats.describe)) == "(snapshot, *, now)"
+    assert str(inspect.signature(stats.capture_snapshot)) == "(snapshot, previous, *, now_fn, refresh_started_at)"
+    assert str(inspect.signature(stats.verify_projection)) == "(snapshot, release, *, now)"
+    with pytest.raises(AttributeError): stats.PROFILE.instrument_id = "cr_futures_family"
+
+
 def release(value, now=NOW, comparisons=None):
     result = {"futoi_context": {"futoi_live": {"comparisons": comparisons}, "futoi_live_cr": {"unchanged": True}}}
     stats.attach_consumer(value, result, now=now)
