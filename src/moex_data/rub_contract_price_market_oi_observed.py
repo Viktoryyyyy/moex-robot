@@ -1108,7 +1108,7 @@ def _validate_native_inventory(inventory):
                 _require(payload[name]['columns']==selected[0][1][name]['columns'],'current_cursor_columns_changed')
             _require(type(total) is int and type(size) is int and total>0 and size>0 and cursor=={'INDEX':index*size,'TOTAL':total,'PAGESIZE':size},'current_cursor_progress')
             rows=_table(payload,'securities'); _require(len(rows)==min(size,total-index*size),'current_cursor_page_rows')
-            count+=len(rows); seen.update(r['SECID'] for r in rows)
+            count+=len(rows); seen.update(str(r['SECID']).upper() for r in rows)
         _require(count==total==len(seen),'current_cursor_incomplete')
 
 def _oracle_view(e,day,anchors,dates,*,comparison_refusal=None):

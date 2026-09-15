@@ -1009,3 +1009,26 @@ def test_native_cursor_inventory_preserves_source_column_and_request_progress(de
     if defect is None:m._validate_native_inventory(inventory)
     else:
         with pytest.raises(ValueError,match='current_cursor_'):m._validate_native_inventory(inventory)
+
+
+
+def test_cursor_case_duplicate_cardinality_matches_original_source_merge():
+    import base64
+    from moex_data import synchronized_live_market_oi_context as source
+    payload=json.loads(base64.b64decode(_native_body()['original_forts_http_evidence']['responses'][0]['content_base64']))
+    # Keep all four required contracts and add only a casing alias of an existing one.
+    for name in ('securities','marketdata'):
+        row=list(payload[name]['data'][0]);row[payload[name]['columns'].index('SECID')]='siu6'
+        payload[name]['data'].append(row)
+    inventory=[];aggregate={}
+    for index in range(2):
+        page=deepcopy(payload)
+        for name in ('securities','marketdata'):
+            page[name]['data']=page[name]['data'][index*3:index*3+3]
+            source._merge_iss_block_by_secid(aggregate,page,name)
+        page['securities.cursor']={'columns':['INDEX','TOTAL','PAGESIZE'],'data':[[index*3,5,3]]}
+        inventory.append(({'role':'selected_values','params':{} if index==0 else {'start':3}},page))
+    # The original acquisition rejects this mismatch after its normalized merge.
+    assert source._aggregate_row_count(aggregate,'securities')==4
+    assert sum(len(page['securities']['data']) for _,page in inventory)==5
+    with pytest.raises(ValueError,match='current_cursor_incomplete'):m._validate_native_inventory(inventory)
