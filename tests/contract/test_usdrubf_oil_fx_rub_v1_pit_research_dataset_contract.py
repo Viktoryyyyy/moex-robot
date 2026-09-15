@@ -39,6 +39,7 @@ def test_contract_pins_existing_phase6_and_brent_evidence() -> None:
     assert phase6["frozen_dataset_manifest_sha256"] == (
         "fcbbb5e5ed0549c5c6f397e34f203f01836271f6bf471f90cab5a2fd64ace082"
     )
+    assert "terminal source row" in phase6["source_panel_binding"]
     brent = upstream["brent"]
     assert brent["runtime_must_not_be_repeated"] is True
     assert brent["source_artifact_regeneration_allowed"] is False
@@ -47,6 +48,9 @@ def test_contract_pins_existing_phase6_and_brent_evidence() -> None:
     )
     assert brent["accepted_artifact_sha256"]["phase84a_gate_results"] == (
         "aceaefb4d2e2a236539dd527c98464ddd1ea6bf5f1cdb8121662e1ce087f9c4c"
+    )
+    assert brent["accepted_artifact_sha256"]["phase84a_input_identity"] == (
+        "3fa20b2daf45f196937064b5f1cc6a58b8009e544d6141e32a77d841d68b65ae"
     )
 
 
@@ -64,7 +68,7 @@ def test_contract_keeps_cnyrubf_full_mode_blocked_until_separate_admission() -> 
     assert cny["synthetic_cross_allowed"] is False
 
 
-def test_contract_separates_labels_and_forbids_cross_contract_returns() -> None:
+def test_contract_separates_labels_and_forbids_unbound_terminal_and_cross_contract_returns() -> None:
     contract = _contract()
     pit = contract["point_in_time_policy"]
     labels = contract["label_policy"]
@@ -73,7 +77,10 @@ def test_contract_separates_labels_and_forbids_cross_contract_returns() -> None:
     assert pit["backward_fill_allowed"] is False
     assert pit["interpolation_allowed"] is False
     assert pit["brent_cross_contract_return_allowed"] is False
+    assert pit["terminal_unbound_source_row_as_label_endpoint_allowed"] is False
     assert labels["feature_and_label_artifacts_separate"] is True
     assert "Phase 6 source D1 panel" in labels["price_source"]
     assert labels["labels_forbidden_from_feature_artifact"] is True
     assert labels["forward_return_horizons_sessions"] == [1, 3, 5, 10]
+    assert labels["unbound_terminal_source_close_allowed"] is False
+    assert labels["terminal_endpoint_policy"] == "structural_null"
