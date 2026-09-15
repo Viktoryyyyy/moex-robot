@@ -149,7 +149,16 @@ def _normalized_dates(series: pd.Series, *, label: str) -> pd.Series:
     parsed = pd.to_datetime(series, errors="coerce")
     if parsed.isna().any():
         raise OilFxRubDatasetError(f"{label} contains invalid date")
-    return parsed.dt.strftime("%Y-%m-%d")
+    return parsed.dt.strftime("%Y-%m-%d").astype("string")
+
+
+def _normalized_optional_dates(series: pd.Series, *, label: str) -> pd.Series:
+    missing = series.isna()
+    parsed = pd.to_datetime(series, errors="coerce")
+    invalid = parsed.isna() & ~missing
+    if invalid.any():
+        raise OilFxRubDatasetError(f"{label} contains invalid non-null date")
+    return parsed.dt.strftime("%Y-%m-%d").astype("string")
 
 
 def validate_phase6_source_panel_replay(
@@ -171,20 +180,26 @@ def validate_phase6_source_panel_replay(
         prepared = phase6_builder._prepare_internal_d1_panel(source_panel)
         diagnostic = phase6_builder._add_past_only_diagnostics(prepared)
         replayed = phase6_builder._build_feature_frame(diagnostic)
-    except Exception as exc:  # existing Phase 6 fail-closed semantics remain authoritative
+    except phase6_builder.Phase6DatasetBuilderError as exc:
         raise OilFxRubDatasetError("Phase 6 source panel replay failed") from exc
 
-    if len(replayed) != len(frozen_modeling_dataset) or len(prepared) != len(frozen_modeling_dataset):
+    if len(replayed) != len(frozen_modeling_dataset) or len(prepared) != len(
+        frozen_modeling_dataset
+    ):
         raise OilFxRubDatasetError("Phase 6 source panel row count differs from frozen dataset")
     frozen_dates = _normalized_dates(
-        frozen_modeling_dataset["target_trade_date"], label="frozen Phase 6 target_trade_date"
+        frozen_modeling_dataset["target_trade_date"],
+        label="frozen Phase 6 target_trade_date",
     ).reset_index(drop=True)
     source_dates = _normalized_dates(
-        prepared["trade_date"], label="Phase 6 source panel trade_date"
+        prepared["trade_date"],
+        label="Phase 6 source panel trade_date",
     ).reset_index(drop=True)
     if not frozen_dates.equals(source_dates):
         raise OilFxRubDatasetError("Phase 6 source panel dates differ from frozen dataset")
-    frozen_instruments = frozen_modeling_dataset["target_instrument_id"].astype(str).reset_index(drop=True)
+    frozen_instruments = (
+        frozen_modeling_dataset["target_instrument_id"].astype(str).reset_index(drop=True)
+    )
     source_instruments = prepared["instrument_id"].astype(str).reset_index(drop=True)
     if not frozen_instruments.equals(source_instruments):
         raise OilFxRubDatasetError("Phase 6 source panel instruments differ from frozen dataset")
@@ -193,8 +208,8 @@ def validate_phase6_source_panel_replay(
         expected = frozen_modeling_dataset[column].reset_index(drop=True)
         actual = replayed[column].reset_index(drop=True)
         if column == "prior_trade_date":
-            if not _normalized_dates(expected, label=column).equals(
-                _normalized_dates(actual, label=f"replayed {column}")
+            if not _normalized_optional_dates(expected, label=column).equals(
+                _normalized_optional_dates(actual, label=f"replayed {column}")
             ):
                 raise OilFxRubDatasetError(f"Phase 6 replay mismatch: {column}")
             continue
@@ -206,7 +221,13 @@ def validate_phase6_source_panel_replay(
             continue
         left_num = pd.to_numeric(expected, errors="coerce").to_numpy(float)
         right_num = pd.to_numeric(actual, errors="coerce").to_numpy(float)
-        if not np.allclose(left_num, right_num, rtol=1e-12, atol=1e-12, equal_nan=True):
+        if not np.allclose(
+            left_num,
+            right_num,
+            rtol=1e-12,
+            atol=1e-12,
+            equal_nan=True,
+        ):
             raise OilFxRubDatasetError(f"Phase 6 replay mismatch: {column}")
 
 
@@ -217,7 +238,10 @@ def _finite_or_null(frame: pd.DataFrame, columns: list[str]) -> bool:
     numeric = raw.apply(pd.to_numeric, errors="coerce")
     values = numeric.to_numpy(dtype=float)
     invalid_coercion = np.isnan(values) & ~raw.isna().to_numpy()
-    return bool(not invalid_coercion.any() and (np.isfinite(values) | np.isnan(values)).all())
+    return bool(
+        not invalid_coercion.any()
+        and (np.isfinite(values) | np.isnan(values)).all()
+    )
 
 
 def build_research_dataset(
@@ -266,8 +290,12 @@ def build_research_dataset(
     identity_ok = bool(
         len(features) == EXPECTED_IDENTITY_COUNT
         and len(labels) == EXPECTED_IDENTITY_COUNT
-        and features.loc[:, IDENTITY_COLUMNS].equals(identities.loc[:, IDENTITY_COLUMNS])
-        and labels.loc[:, IDENTITY_COLUMNS].equals(identities.loc[:, IDENTITY_COLUMNS])
+        and features.loc[:, IDENTITY_COLUMNS].equals(
+            identities.loc[:, IDENTITY_COLUMNS]
+        )
+        and labels.loc[:, IDENTITY_COLUMNS].equals(
+            identities.loc[:, IDENTITY_COLUMNS]
+        )
     )
     prior = pd.to_datetime(brent_matrix["prior_trade_date"], errors="coerce")
     observed = pd.to_datetime(brent_matrix["brent_trade_date"], errors="coerce")
@@ -305,7 +333,11 @@ def build_research_dataset(
         "G7_numerical": {"passed": numerical_ok},
         "G8_label_separation": {"passed": labels_separate},
     }
-    failed = [key.split("_", 1)[0] for key, value in gates.items() if value["passed"] is not True]
+    failed = [
+        key.split("_", 1)[0]
+        for key, value in gates.items()
+        if value["passed"] is not True
+    ]
     gates["G9_final"] = {
         "passed": not failed,
         "failed_gates": failed,
@@ -363,7 +395,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--phase6-source-panel-path", required=True)
     parser.add_argument("--brent-matrix-path", required=True)
     parser.add_argument("--brent-gate-results-path", required=True)
-    parser.add_argument("--mode", choices=("brent_only", "oil_fx_full"), default="brent_only")
+    parser.add_argument(
+        "--mode",
+        choices=("brent_only", "oil_fx_full"),
+        default="brent_only",
+    )
     parser.add_argument("--cnyrubf-matrix-path")
     parser.add_argument("--cnyrubf-gate-results-path")
     parser.add_argument("--output-dir", required=True)
@@ -387,7 +423,8 @@ def main(argv: list[str] | None = None) -> int:
     contract = _read_json(paths["contract"])
     _validate_contract(contract)
     observed_immutable = {
-        name: _sha256(paths[name]) for name in EXPECTED_IMMUTABLE_SHA256
+        name: _sha256(paths[name])
+        for name in EXPECTED_IMMUTABLE_SHA256
     }
     validate_immutable_hashes(observed_immutable)
 
@@ -395,7 +432,10 @@ def main(argv: list[str] | None = None) -> int:
     phase6_source_panel = pd.read_parquet(paths["phase6_source_panel"])
     brent_matrix = pd.read_parquet(paths["brent_pit_acceptance_matrix"])
     brent_gates = _read_json(paths["phase84a_gate_results"])
-    validate_phase6_source_panel_replay(frozen_modeling_dataset, phase6_source_panel)
+    validate_phase6_source_panel_replay(
+        frozen_modeling_dataset,
+        phase6_source_panel,
+    )
 
     features, labels, gates = build_research_dataset(
         contract=contract,
