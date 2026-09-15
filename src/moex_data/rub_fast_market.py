@@ -42,14 +42,19 @@ def refresh(root, *, loader=None, clock=lambda: datetime.now(timezone.utc)):
     folder.mkdir(parents=True, exist_ok=True)
     with base._single_refresh_lock(folder):
         previous = None
+        previous_completed = None
         prior_path = folder / "current.json"
         if prior_path.is_file() and not prior_path.is_symlink() and prior_path.stat().st_size <= MAX_BYTES:
             try:
                 prior = json.loads(prior_path.read_text(encoding='utf-8'))
                 previous = prior.get('accepted_dated_market') if isinstance(prior, dict) else None
-            except (OSError, ValueError):
+                if isinstance(prior,dict) and prior.get('schema_version')==SCHEMA:
+                    previous_completed=_time(prior['completed_at'])
+            except (OSError, ValueError,TypeError,KeyError):
                 pass
         started = _time(clock())
+        if previous_completed is not None and started<previous_completed:
+            raise ValueError('fast_capture_clock_reversed_before_previous_completion')
         dated_evidence = {}
         try:
             market = fetch_live_snapshot(dated_evidence_sink=dated_evidence) if loader is None else loader()
@@ -72,6 +77,32 @@ def refresh(root, *, loader=None, clock=lambda: datetime.now(timezone.utc)):
         value['accepted_dated_market'] = capture(previous, components=witness['components'], now=completed, kind='market')
         from moex_data.rub_dated_market_source import capture as capture_source
         value['accepted_dated_market'] = capture_source(value['accepted_dated_market'], dated_evidence, now=completed)
+        from moex_data import rub_contract_price_market_oi_observed as paired
+        if isinstance(market,dict):
+            value[paired.CURRENT_KEY]=paired.capture_current(market,started=started,completed=completed,
+                now_fn=clock if market.get('original_forts_http_evidence') is not None else None)
+            value['completed_at']=value[paired.CURRENT_KEY]['capture']['captured_at_utc']
+            market.pop('original_forts_http_evidence',None)
+            value['market_sha256']=_digest(market)
+        def fits(candidate):
+            return len(json.dumps(candidate,sort_keys=True,ensure_ascii=False,allow_nan=False,
+                                  separators=(',',':')).encode('utf-8'))+1<=MAX_BYTES
+        if not fits(value):
+            # Optional paired proof must not evict independently admitted facts.
+            value.pop(paired.CURRENT_KEY,None)
+            value['optional_current_proof_error']='FastMarketByteLimit'
+        if not fits(value):
+            value.update(status='FAILED',error_class='FastMarketByteLimit',
+                         market=None,market_sha256=_digest(None))
+        if not fits(value):
+            # Re-admit only the previous independent witnesses at this read clock;
+            # capture with no new components preserves their original timestamps.
+            value['accepted_dated_market']=capture(previous,components={},
+                now=_time(value['completed_at']),kind='market')
+        if not fits(value):
+            value['accepted_dated_market']=None
+        if not fits(value):
+            raise ValueError('FastMarketByteLimit')
         base._atomic_write(folder / "current.json", value)
         return value
 
@@ -88,6 +119,8 @@ def apply(snapshot, *, root, now):
     now = _time(now)
     completed = None
     dated = None
+    paired_current = None
+    optional_current_proof_error = None
     try:
         if marker.is_symlink() or not marker.is_file():
             raise ValueError("invalid enabled marker")
@@ -99,6 +132,8 @@ def apply(snapshot, *, root, now):
         value = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(value, dict) and value.get('schema_version') == SCHEMA:
             dated = value.get('accepted_dated_market')
+            if value.get('optional_current_proof_error')=='FastMarketByteLimit':
+                optional_current_proof_error='FastMarketByteLimit'
         if not isinstance(value, dict) or value.get("schema_version") != SCHEMA or value.get("status") != "COLLECTED":
             raise ValueError("fast market collection unavailable")
         started, completed = _time(value["started_at"]), _time(value["completed_at"])
@@ -122,6 +157,8 @@ def apply(snapshot, *, root, now):
         if not isinstance(market.get("quality"), dict) or not isinstance(market.get("synchronization"), dict):
             raise ValueError("missing market quality")
         error = None
+        from moex_data.rub_contract_price_market_oi_observed import CURRENT_KEY
+        paired_current=value.get(CURRENT_KEY)
     except (ValueError, TypeError, KeyError, OverflowError, OSError) as exc:
         market = {"status": "UNAVAILABLE", "quality": {}, "synchronization": {},
                   "error_class": type(exc).__name__, "error": str(exc)}
@@ -131,14 +168,22 @@ def apply(snapshot, *, root, now):
     live.attach_live_basis_carry_context(result, market, attempted_at_utc=attempted)
     result["fast_market_read"] = dict(schema_version=SCHEMA, read_at=now.isoformat(),
         completed_at=completed.isoformat() if completed else None,
-        error=error, network_fetch_performed=False)
+        error=error, network_fetch_performed=False,
+        optional_current_proof_error=optional_current_proof_error)
     result['accepted_dated_market'] = deepcopy(dated)
+    from moex_data.rub_contract_price_market_oi_observed import CURRENT_KEY
+    result[CURRENT_KEY]=deepcopy(paired_current)
     return result
 
 
 def collection_summary(value):
     """Bounded CLI diagnostics; raw dated evidence stays only in canonical state."""
-    result = {key: item for key, item in value.items() if key not in ('market', 'accepted_dated_market')}
+    from moex_data.rub_contract_price_market_oi_observed import CURRENT_KEY
+    result = {key: item for key, item in value.items() if key not in ('market', 'accepted_dated_market',CURRENT_KEY)}
+    paired=value.get(CURRENT_KEY) or {}
+    current=paired.get('capture') or {}
+    result['contract_price_market_oi_current']={'status':'AVAILABLE' if current.get('facts') else 'UNAVAILABLE',
+        'original_buffer_count':len(current.get('original_byte_buffers',{}))}
     store = value.get('accepted_dated_market') or {}
     result['accepted_dated_market'] = {'frame_count': len(store.get('frames', {})),
         'selected_observation_ids': sorted(store.get('selections', {})),

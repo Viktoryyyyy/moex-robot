@@ -167,3 +167,71 @@ def test_symlink_cache_is_rejected(tmp_path):
     path.rename(other)
     path.symlink_to(other)
     assert read(tmp_path)["authority"]["live_market_oi_factual_authority"] is False
+
+
+def test_optional_proof_overflow_preserves_legacy_market_and_dated_across_failed_refresh(tmp_path,monkeypatch):
+    from moex_data import rub_contract_price_market_oi_observed as paired, rub_dated_context as dated
+    initial=publish(tmp_path);accepted=deepcopy(initial['accepted_dated_market'])
+    assert accepted['selections']
+    def oversized(body,*,started,completed,**kwargs):
+        return {'capture':{'captured_at_utc':completed.isoformat()},'padding':'x'*fast.MAX_BYTES}
+    monkeypatch.setattr(paired,'capture_current',oversized)
+    value=fast.refresh(tmp_path,loader=market,clock=lambda:NOW+timedelta(seconds=1))
+    assert value['status']=='COLLECTED' and value['error_class'] is None
+    assert value['market_sha256']==fast._digest(value['market'])
+    assert value['accepted_dated_market']['frames']==accepted['frames']
+    assert value['accepted_dated_market']['selections']==accepted['selections']
+    assert value['optional_current_proof_error']=='FastMarketByteLimit' and paired.CURRENT_KEY not in value
+    slow=snapshot();slow[paired.CURRENT_KEY]={'old_slow_proof':True}
+    result=fast.apply(slow,root=tmp_path,now=NOW+timedelta(seconds=1))
+    assert result[paired.CURRENT_KEY] is None
+    assert result['fast_market_read']['optional_current_proof_error']=='FastMarketByteLimit'
+    assert dated.describe(result,now=NOW+timedelta(seconds=1))['observations']
+    def failed():raise OSError('ordinary refresh unavailable')
+    final=fast.refresh(tmp_path,loader=failed,clock=lambda:NOW+timedelta(seconds=2))
+    assert final['accepted_dated_market']['frames']==accepted['frames']
+    assert final['accepted_dated_market']['selections']==accepted['selections']
+    assert (fast.state_path(tmp_path)/'current.json').stat().st_size<=fast.MAX_BYTES
+
+
+@pytest.mark.parametrize('dated_overflow',[False,True])
+def test_core_state_overflow_retains_bounded_previous_dated_without_reacceptance(tmp_path,monkeypatch,dated_overflow):
+    from moex_data import rub_dated_market_source as source
+    initial=publish(tmp_path);accepted=deepcopy(initial['accepted_dated_market'])
+    if dated_overflow:
+        original=source.capture
+        def oversized(*args,**kwargs):
+            value=original(*args,**kwargs);value['oversized_diagnostic']='\u044f'*fast.MAX_BYTES
+            return value
+        monkeypatch.setattr(source,'capture',oversized)
+    body=market();body['oversized_field']='\u044f'*fast.MAX_BYTES
+    value=fast.refresh(tmp_path,loader=lambda:body,clock=lambda:NOW+timedelta(seconds=1))
+    assert value['status']=='FAILED' and value['error_class']=='FastMarketByteLimit'
+    assert value['market'] is None and value['market_sha256']==fast._digest(None)
+    assert value['accepted_dated_market']['frames']==accepted['frames']
+    assert value['accepted_dated_market']['selections']==accepted['selections']
+    assert (fast.state_path(tmp_path)/'current.json').stat().st_size<=fast.MAX_BYTES
+
+
+def test_oversized_dated_fallback_never_resurrects_expired_previous_authority(tmp_path,monkeypatch):
+    from moex_data import rub_dated_market_source as source, rub_dated_context as dated
+    publish(tmp_path)
+    monkeypatch.setattr(source,'capture',lambda *a,**kw:{'oversized':'\u044f'*fast.MAX_BYTES})
+    later=NOW+timedelta(hours=97)
+    def unavailable():raise OSError('source unavailable')
+    value=fast.refresh(tmp_path,loader=unavailable,clock=lambda:later)
+    assert value['status']=='FAILED' and value['market'] is None
+    assert not dated.describe({'accepted_dated_market':value['accepted_dated_market']},now=later)['observations']
+    assert (fast.state_path(tmp_path)/'current.json').stat().st_size<=fast.MAX_BYTES
+
+
+def test_even_oversized_independent_dated_carrier_yields_bounded_refusal(tmp_path,monkeypatch):
+    from moex_data import rub_dated_context as dated, rub_dated_market_source as source
+    monkeypatch.setattr(dated,'capture',lambda *a,**kw:{'oversized':'\u044f'*fast.MAX_BYTES})
+    monkeypatch.setattr(source,'capture',lambda value,*a,**kw:value)
+    def unavailable():raise OSError('source unavailable')
+    value=fast.refresh(tmp_path,loader=unavailable,clock=lambda:NOW)
+    assert value['status']=='FAILED' and value['error_class']=='FastMarketByteLimit'
+    assert value['accepted_dated_market'] is None and value['market'] is None
+    assert value['market_sha256']==fast._digest(None)
+    assert (fast.state_path(tmp_path)/'current.json').stat().st_size<=fast.MAX_BYTES

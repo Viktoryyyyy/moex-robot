@@ -273,3 +273,17 @@ def test_independent_oracle_detects_shared_descriptor_fault(archive, monkeypatch
     built = release.build(source, now=NOW, code_revision='a'*40)
     with pytest.raises(AssertionError, match='contract independent source-to-output completeness'):
         projection_completeness(source, built, now=NOW)
+
+
+def test_shared_resolver_returns_all_specs_and_preserves_parent_rejection(archive):
+    from moex_data import rub_accepted_stage3_resolver as resolver
+    root,pilot,parent=archive
+    marker=stage3.acceptance_evidence_path(RUN)
+    resolved=resolver.resolve(root,marker,now=NOW,earliest=NOW.date()-timedelta(days=45))
+    assert len(resolved['specs'])==10
+    assert sum(spec.dataset_id=='futures_open_interest_raw_5m' for spec in resolved['specs'])==4
+    assert len(context.collect(root,now=NOW)['rows'])==4
+    value=json.loads(parent.read_text());value['current_pointer_rollback_status']='rolled_back';_write_json(parent,value)
+    with pytest.raises(ValueError,match='parent_failed_rolled_back'):
+        resolver.resolve(root,marker,now=NOW,earliest=NOW.date()-timedelta(days=45))
+    assert context.collect(root,now=NOW)['rows']==[]

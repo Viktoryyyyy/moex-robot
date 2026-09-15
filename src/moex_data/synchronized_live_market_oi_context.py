@@ -738,6 +738,11 @@ def _validated_response_url(requested_url: str, response_url: str) -> str:
     return response_url
 
 
+class _HTTPPayload(dict):
+    """Parsed values with out-of-band original received bytes for factual proof."""
+    original_responses = ()
+
+
 def _fetch_json(
     *,
     url: str,
@@ -768,6 +773,18 @@ def _fetch_json(
     if not isinstance(payload, dict):
         raise SynchronizedLiveMarketOIError("MOEX API response root must be an object")
     received_at = _aware_utc(now_fn(), "now_fn")
+    content = getattr(response, "content", None)
+    if isinstance(content, bytes) and len(content) <= 8_000_000:
+        import base64
+        from hashlib import sha256
+        import json
+        if json.loads(content) != payload:
+            raise SynchronizedLiveMarketOIError("original HTTP bytes disagree with parsed payload")
+        payload = _HTTPPayload(payload)
+        payload.original_responses = ({"content_base64": base64.b64encode(content).decode("ascii"),
+            "sha256": sha256(content).hexdigest(), "source_url": response_url,
+            "params": dict(params), "received_at_utc": _iso(received_at), "http_status": status_code,
+            "role": "selected_values"},)
     return payload, response_url, received_at
 
 
@@ -879,7 +896,8 @@ def _fetch_forts_all_pages(
     http_get: HTTPGet,
     now_fn: NowFn,
 ) -> tuple[dict[str, object], str, datetime]:
-    aggregate: dict[str, object] = {}
+    aggregate: dict[str, object] = _HTTPPayload()
+    originals = []
     marketdata_receipts: dict[str, str] = {}
     page_params = dict(params)
     page_params.pop("start", None)
@@ -903,6 +921,7 @@ def _fetch_forts_all_pages(
             now_fn=now_fn,
         )
         index, total, page_size = _forts_cursor(page)
+        originals.extend(getattr(page, "original_responses", ()))
         if index != expected_start:
             raise SynchronizedLiveMarketOIError(
                 f"RFUD pagination cursor mismatch: expected INDEX={expected_start}, got {index}"
@@ -949,6 +968,7 @@ def _fetch_forts_all_pages(
                 "data": [[index, total, page_size]],
             }
             aggregate[FORTS_ROW_RECEIPTS_KEY] = dict(marketdata_receipts)
+            aggregate.original_responses = tuple(originals)
             if received_at is None:
                 raise SynchronizedLiveMarketOIError("RFUD pagination completion timestamp is missing")
             return aggregate, source_url, received_at

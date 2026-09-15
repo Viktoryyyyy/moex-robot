@@ -207,6 +207,9 @@ def _fetch_forts_verified(
         )
 
     first[core.FORTS_ROW_RECEIPTS_KEY] = _receipt_map(first, first_received)
+    if isinstance(first, core._HTTPPayload):
+        first.original_responses = (*first.original_responses,
+            *({**item, "role": "completeness_probe"} for item in getattr(probe, "original_responses", ())))
     return first, source_url, probe_received, {
         "mode": COMPLETENESS_MODE,
         "cursor_present": False,
@@ -243,7 +246,7 @@ def fetch_live_snapshot(
         "marketdata.columns": ",".join(core.CETS_MARKETDATA_COLUMNS + core.OBSERVATION_MARKETDATA_COLUMNS),
     }
 
-    request_started = core._aware_utc(now_fn(), 'dated_request_start') if dated_evidence_sink is not None else None
+    request_started = core._aware_utc(now_fn(), 'dated_request_start')
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="moex-live-snapshot") as executor:
         forts_future = executor.submit(
             _fetch_forts_verified,
@@ -294,6 +297,12 @@ def fetch_live_snapshot(
     provenance["forts"]["completeness"] = completeness
     provenance["forts"]["contract_metadata_source_id"] = CONTRACT_METADATA_SOURCE_ID
     provenance["forts"]["contract_metadata_reused_from_live_response"] = True
+    original_responses = getattr(forts_payload, "original_responses", ())
+    if original_responses:
+        snapshot["original_forts_http_evidence"] = {
+            "request_started_lower_bound_utc": core._iso(request_started),
+            "request_clock_semantics": "batch_start_before_each_retained_request",
+            "responses": list(original_responses)}
     return snapshot
 
 
