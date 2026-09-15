@@ -184,6 +184,8 @@ def projection_completeness(snapshot, value, *, now):
     verify_si_statistics(snapshot, value, now=now)
     from moex_data.rub_cr_futoi_dated_context import verify_projection as verify_cr_dated
     verify_cr_dated(snapshot, value, now=now)
+    from moex_data.rub_cr_futoi_observed_statistics import verify_projection as verify_cr_statistics
+    verify_cr_statistics(snapshot, value, now=now)
     from math import isfinite
     view = apply_read_freshness(snapshot, now=now)
     components = view.get('components', {})
