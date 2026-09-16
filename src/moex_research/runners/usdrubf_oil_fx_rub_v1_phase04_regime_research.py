@@ -34,7 +34,7 @@ HORIZONS: Final[tuple[int, ...]] = (1, 3, 5, 10, 20)
 CONFIRMATION_HORIZONS: Final[tuple[int, ...]] = (5, 10, 20)
 BOOTSTRAP_SAMPLES: Final[int] = 1000
 BOOTSTRAP_SEED: Final[int] = 20260916
-BOOTSTRAP_BLOCK_LENGTH: Final[int] = 5
+BOOTSTRAP_BLOCK_LENGTH: Final[int] = 20
 MIN_REGIME_OBSERVATIONS: Final[int] = 15
 ROBUST_MIN_OBSERVATIONS: Final[int] = 20
 
@@ -322,145 +322,248 @@ def _circular_block_indices(n: int, rng: np.random.Generator) -> np.ndarray:
     return np.concatenate([(start + offsets) % n for start in starts])[:n]
 
 
-def _mean_ci(values: np.ndarray, seed: int) -> tuple[float, float]:
-    values = values[np.isfinite(values)]
-    if len(values) < MIN_REGIME_OBSERVATIONS:
-        return float("nan"), float("nan")
+def _bootstrap_regime_ci(
+    observations: pd.DataFrame,
+    *,
+    regime: str,
+    label: str,
+    seed: int,
+) -> tuple[float, float, float, float]:
+    raw = pd.to_numeric(observations[label], errors="coerce").to_numpy(float)
+    valid_mask = np.isfinite(raw)
+    work = observations.loc[valid_mask, ["regime", label]].reset_index(drop=True)
+    original_regime_count = int(work["regime"].eq(regime).sum())
+    if original_regime_count < MIN_REGIME_OBSERVATIONS:
+        return (float("nan"),) * 4
+
     rng = np.random.default_rng(seed)
-    draws = np.empty(BOOTSTRAP_SAMPLES, dtype=float)
-    for i in range(BOOTSTRAP_SAMPLES):
-        idx = _circular_block_indices(len(values), rng)
-        draws[i] = np.mean(values[idx])
-    lo, hi = np.quantile(draws, [0.025, 0.975])
-    return float(lo), float(hi)
+    regime_means: list[float] = []
+    differences: list[float] = []
+    for _ in range(BOOTSTRAP_SAMPLES):
+        idx = _circular_block_indices(len(work), rng)
+        sample = work.iloc[idx]
+        all_values = pd.to_numeric(sample[label], errors="coerce").to_numpy(float)
+        regime_values = pd.to_numeric(
+            sample.loc[sample["regime"].eq(regime), label], errors="coerce"
+        ).to_numpy(float)
+        regime_values = regime_values[np.isfinite(regime_values)]
+        if len(regime_values) == 0:
+            continue
+        regime_mean = float(np.mean(regime_values))
+        regime_means.append(regime_mean)
+        differences.append(regime_mean - float(np.mean(all_values)))
+
+    minimum_draws = max(100, BOOTSTRAP_SAMPLES // 2)
+    if len(regime_means) < minimum_draws:
+        return (float("nan"),) * 4
+    mean_low, mean_high = np.quantile(np.asarray(regime_means), [0.025, 0.975])
+    diff_low, diff_high = np.quantile(np.asarray(differences), [0.025, 0.975])
+    return float(mean_low), float(mean_high), float(diff_low), float(diff_high)
 
 
-def _difference_ci(regime_values: np.ndarray, all_values: np.ndarray, seed: int) -> tuple[float, float]:
-    regime_values = regime_values[np.isfinite(regime_values)]
-    all_values = all_values[np.isfinite(all_values)]
-    if len(regime_values) < MIN_REGIME_OBSERVATIONS or len(all_values) < MIN_REGIME_OBSERVATIONS:
-        return float("nan"), float("nan")
-    rng = np.random.default_rng(seed)
-    draws = np.empty(BOOTSTRAP_SAMPLES, dtype=float)
-    for i in range(BOOTSTRAP_SAMPLES):
-        r = regime_values[_circular_block_indices(len(regime_values), rng)]
-        a = all_values[_circular_block_indices(len(all_values), rng)]
-        draws[i] = np.mean(r) - np.mean(a)
-    lo, hi = np.quantile(draws, [0.025, 0.975])
-    return float(lo), float(hi)
+def _with_fixed_calendar_segments(observations: pd.DataFrame) -> pd.DataFrame:
+    work = observations.copy()
+    dates = pd.to_datetime(work["target_trade_date"], errors="coerce")
+    if dates.isna().any() or not dates.is_monotonic_increasing:
+        raise Phase04RegimeError("target_trade_date must be valid/increasing for stability")
+    start = dates.iloc[0]
+    end = dates.iloc[-1]
+    if end <= start:
+        raise Phase04RegimeError("research calendar span must be positive")
+    span = end - start
+    cut1 = start + span / 3
+    cut2 = start + span * 2 / 3
+    segment = np.where(
+        dates <= cut1,
+        "early",
+        np.where(dates <= cut2, "middle", "late"),
+    )
+    work["_calendar_segment"] = segment
+    return work
 
 
-def _segment_stats(values: np.ndarray) -> tuple[list[int], list[float], list[float]]:
-    idx_groups = np.array_split(np.arange(len(values)), 3)
-    counts: list[int] = []
-    means: list[float] = []
-    hits: list[float] = []
-    for idx in idx_groups:
-        segment = values[idx]
-        segment = segment[np.isfinite(segment)]
-        counts.append(len(segment))
-        means.append(float(np.mean(segment)) if len(segment) else float("nan"))
-        hits.append(float(np.mean(segment < 0.0)) if len(segment) else float("nan"))
-    return counts, means, hits
+def _calendar_segment_statistics(
+    work: pd.DataFrame,
+    *,
+    regime: str,
+    label: str,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    negative_mean_count = 0
+    negative_diff_count = 0
+    for segment in ("early", "middle", "late"):
+        segment_frame = work.loc[work["_calendar_segment"].eq(segment)]
+        all_values = pd.to_numeric(segment_frame[label], errors="coerce").to_numpy(float)
+        all_values = all_values[np.isfinite(all_values)]
+        regime_values = pd.to_numeric(
+            segment_frame.loc[segment_frame["regime"].eq(regime), label],
+            errors="coerce",
+        ).to_numpy(float)
+        regime_values = regime_values[np.isfinite(regime_values)]
+        count = len(regime_values)
+        mean = float(np.mean(regime_values)) if count else float("nan")
+        hit = float(np.mean(regime_values < 0.0)) if count else float("nan")
+        unconditional = float(np.mean(all_values)) if len(all_values) else float("nan")
+        difference = (
+            mean - unconditional
+            if np.isfinite(mean) and np.isfinite(unconditional)
+            else float("nan")
+        )
+        if np.isfinite(mean) and mean < 0.0:
+            negative_mean_count += 1
+        if np.isfinite(difference) and difference < 0.0:
+            negative_diff_count += 1
+        result[f"{segment}_count"] = count
+        result[f"{segment}_mean"] = mean
+        result[f"{segment}_short_hit_rate"] = hit
+        result[f"{segment}_unconditional_mean"] = unconditional
+        result[f"{segment}_mean_minus_unconditional"] = difference
+    result["negative_mean_segment_count"] = negative_mean_count
+    result["negative_difference_segment_count"] = negative_diff_count
+    return result
 
 
 def analyze_regimes(observations: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    work = _with_fixed_calendar_segments(observations)
     metrics: list[dict[str, Any]] = []
     stability: list[dict[str, Any]] = []
     seed_counter = 0
 
     for horizon in HORIZONS:
         label = f"fwd_usdrubf_close_return_{horizon}session"
-        all_values = pd.to_numeric(observations[label], errors="coerce").to_numpy(float)
+        all_values = pd.to_numeric(work[label], errors="coerce").to_numpy(float)
         all_values = all_values[np.isfinite(all_values)]
         unconditional_mean = float(np.mean(all_values))
 
         for regime in REGIME_ORDER[:-1]:
-            subset = observations.loc[observations["regime"].eq(regime), ["target_trade_date", label]].copy()
-            values = pd.to_numeric(subset[label], errors="coerce").to_numpy(float)
+            values = pd.to_numeric(
+                work.loc[work["regime"].eq(regime), label],
+                errors="coerce",
+            ).to_numpy(float)
             values = values[np.isfinite(values)]
             n = len(values)
             mean = float(np.mean(values)) if n else float("nan")
             median = float(np.median(values)) if n else float("nan")
             short_hit = float(np.mean(values < 0.0)) if n else float("nan")
-            mean_lo, mean_hi = _mean_ci(values, BOOTSTRAP_SEED + seed_counter)
             diff = mean - unconditional_mean if np.isfinite(mean) else float("nan")
-            diff_lo, diff_hi = _difference_ci(values, all_values, BOOTSTRAP_SEED + 1000 + seed_counter)
+            mean_lo, mean_hi, diff_lo, diff_hi = _bootstrap_regime_ci(
+                work,
+                regime=regime,
+                label=label,
+                seed=BOOTSTRAP_SEED + seed_counter,
+            )
             seed_counter += 1
 
-            counts, means, hits = _segment_stats(values)
-            same_negative = sum(np.isfinite(v) and v < 0.0 for v in means)
+            segment_stats = _calendar_segment_statistics(
+                work, regime=regime, label=label
+            )
+            negative_mean_segments = int(segment_stats["negative_mean_segment_count"])
+            negative_diff_segments = int(
+                segment_stats["negative_difference_segment_count"]
+            )
+
             if (
                 regime == "high_high"
                 and n >= ROBUST_MIN_OBSERVATIONS
-                and np.isfinite(mean_hi) and mean_hi < 0.0
-                and np.isfinite(diff_hi) and diff_hi < 0.0
+                and np.isfinite(mean_hi)
+                and mean_hi < 0.0
                 and short_hit >= 0.60
-                and same_negative == 3
+                and negative_mean_segments == 3
             ):
-                evidence = "robust"
+                h5_evidence = "robust"
+            elif (
+                regime == "high_high"
+                and n >= MIN_REGIME_OBSERVATIONS
+                and mean < 0.0
+                and short_hit > 0.55
+                and negative_mean_segments >= 2
+            ):
+                h5_evidence = "suggestive"
+            else:
+                h5_evidence = "not_supported"
+
+            if (
+                regime == "high_high"
+                and n >= ROBUST_MIN_OBSERVATIONS
+                and mean < 0.0
+                and np.isfinite(diff_hi)
+                and diff_hi < 0.0
+                and negative_diff_segments == 3
+            ):
+                h6_evidence = "robust"
             elif (
                 regime == "high_high"
                 and n >= MIN_REGIME_OBSERVATIONS
                 and mean < 0.0
                 and diff < 0.0
-                and short_hit > 0.55
-                and same_negative >= 2
+                and negative_diff_segments >= 2
             ):
-                evidence = "suggestive"
+                h6_evidence = "suggestive"
             else:
-                evidence = "not_supported"
+                h6_evidence = "not_supported"
 
-            metrics.append({
-                "regime": regime,
-                "horizon_sessions": horizon,
-                "valid_count": n,
-                "mean_forward_return": mean,
-                "median_forward_return": median,
-                "short_hit_rate": short_hit,
-                "mean_ci95_low": mean_lo,
-                "mean_ci95_high": mean_hi,
-                "unconditional_mean_return": unconditional_mean,
-                "mean_minus_unconditional": diff,
-                "difference_ci95_low": diff_lo,
-                "difference_ci95_high": diff_hi,
-                "evidence_status": evidence,
-            })
-            stability.append({
-                "regime": regime,
-                "horizon_sessions": horizon,
-                "early_count": counts[0],
-                "middle_count": counts[1],
-                "late_count": counts[2],
-                "early_mean": means[0],
-                "middle_mean": means[1],
-                "late_mean": means[2],
-                "early_short_hit_rate": hits[0],
-                "middle_short_hit_rate": hits[1],
-                "late_short_hit_rate": hits[2],
-                "negative_mean_segment_count": same_negative,
-            })
+            metrics.append(
+                {
+                    "regime": regime,
+                    "horizon_sessions": horizon,
+                    "valid_count": n,
+                    "mean_forward_return": mean,
+                    "median_forward_return": median,
+                    "short_hit_rate": short_hit,
+                    "mean_ci95_low": mean_lo,
+                    "mean_ci95_high": mean_hi,
+                    "unconditional_mean_return": unconditional_mean,
+                    "mean_minus_unconditional": diff,
+                    "difference_ci95_low": diff_lo,
+                    "difference_ci95_high": diff_hi,
+                    "h5_evidence_status": h5_evidence,
+                    "h6_evidence_status": h6_evidence,
+                }
+            )
+            stability.append(
+                {
+                    "regime": regime,
+                    "horizon_sessions": horizon,
+                    **segment_stats,
+                }
+            )
 
     metrics_df = pd.DataFrame(metrics)
     stability_df = pd.DataFrame(stability)
 
-    hh = metrics_df.loc[metrics_df["regime"].eq("high_high")].set_index("horizon_sessions")
+    hh = metrics_df.loc[metrics_df["regime"].eq("high_high")].set_index(
+        "horizon_sessions"
+    )
     confirming = hh.loc[list(CONFIRMATION_HORIZONS)]
-    robust_count = int(confirming["evidence_status"].eq("robust").sum())
-    supported_count = int(confirming["evidence_status"].isin(["robust", "suggestive"]).sum())
-    negative_count = int(confirming["mean_forward_return"].lt(0.0).sum())
-    diff_negative_count = int(confirming["mean_minus_unconditional"].lt(0.0).sum())
 
-    if robust_count >= 2:
+    h5_robust_count = int(confirming["h5_evidence_status"].eq("robust").sum())
+    h5_supported_count = int(
+        confirming["h5_evidence_status"].isin(["robust", "suggestive"]).sum()
+    )
+    h5_negative_count = int(confirming["mean_forward_return"].lt(0.0).sum())
+    if h5_robust_count >= 2:
         h5_status = "supported_robust"
-    elif supported_count >= 2 and negative_count == len(CONFIRMATION_HORIZONS):
+    elif (
+        h5_supported_count >= 2
+        and h5_negative_count == len(CONFIRMATION_HORIZONS)
+    ):
         h5_status = "supported_suggestive"
     else:
         h5_status = "not_supported_in_phase04"
 
-    if robust_count >= 2:
+    h6_robust_count = int(confirming["h6_evidence_status"].eq("robust").sum())
+    h6_supported_count = int(
+        confirming["h6_evidence_status"].isin(["robust", "suggestive"]).sum()
+    )
+    h6_diff_negative_count = int(
+        confirming["mean_minus_unconditional"].lt(0.0).sum()
+    )
+    if h6_robust_count >= 2:
         h6_status = "supported_robust"
-    elif supported_count >= 2 and diff_negative_count == len(CONFIRMATION_HORIZONS):
+    elif (
+        h6_supported_count >= 2
+        and h6_diff_negative_count == len(CONFIRMATION_HORIZONS)
+    ):
         h6_status = "supported_suggestive"
     else:
         h6_status = "not_supported_in_phase04"
@@ -477,22 +580,33 @@ def analyze_regimes(observations: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
             "low_threshold": LOW_THRESHOLD,
             "primary_regime": "high_high",
             "primary_direction": "negative USDRUBF forward return",
+            "temporal_stability_partition": "fixed chronological thirds of full research period",
+            "bootstrap": {
+                "method": "date_aligned_circular_block",
+                "samples": BOOTSTRAP_SAMPLES,
+                "block_length_sessions": BOOTSTRAP_BLOCK_LENGTH,
+                "seed": BOOTSTRAP_SEED,
+            },
         },
         "H5_divergence_catch_up": {
             "status": h5_status,
             "confirmation_horizons_sessions": list(CONFIRMATION_HORIZONS),
-            "robust_confirmation_count": robust_count,
-            "supported_confirmation_count": supported_count,
-            "negative_mean_confirmation_count": negative_count,
+            "robust_confirmation_count": h5_robust_count,
+            "supported_confirmation_count": h5_supported_count,
+            "negative_mean_confirmation_count": h5_negative_count,
             "details": [
                 {
                     "horizon_sessions": int(h),
                     "valid_count": int(hh.loc[h, "valid_count"]),
-                    "mean_forward_return": float(hh.loc[h, "mean_forward_return"]),
+                    "mean_forward_return": float(
+                        hh.loc[h, "mean_forward_return"]
+                    ),
                     "short_hit_rate": float(hh.loc[h, "short_hit_rate"]),
                     "mean_ci95_low": float(hh.loc[h, "mean_ci95_low"]),
                     "mean_ci95_high": float(hh.loc[h, "mean_ci95_high"]),
-                    "evidence_status": str(hh.loc[h, "evidence_status"]),
+                    "evidence_status": str(
+                        hh.loc[h, "h5_evidence_status"]
+                    ),
                 }
                 for h in HORIZONS
             ],
@@ -500,20 +614,32 @@ def analyze_regimes(observations: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
         "H6_regime_dependency": {
             "status": h6_status,
             "confirmation_horizons_sessions": list(CONFIRMATION_HORIZONS),
-            "negative_vs_unconditional_confirmation_count": diff_negative_count,
+            "robust_confirmation_count": h6_robust_count,
+            "supported_confirmation_count": h6_supported_count,
+            "negative_vs_unconditional_confirmation_count": h6_diff_negative_count,
             "details": [
                 {
                     "horizon_sessions": int(h),
-                    "mean_minus_unconditional": float(hh.loc[h, "mean_minus_unconditional"]),
-                    "difference_ci95_low": float(hh.loc[h, "difference_ci95_low"]),
-                    "difference_ci95_high": float(hh.loc[h, "difference_ci95_high"]),
+                    "mean_minus_unconditional": float(
+                        hh.loc[h, "mean_minus_unconditional"]
+                    ),
+                    "difference_ci95_low": float(
+                        hh.loc[h, "difference_ci95_low"]
+                    ),
+                    "difference_ci95_high": float(
+                        hh.loc[h, "difference_ci95_high"]
+                    ),
+                    "evidence_status": str(
+                        hh.loc[h, "h6_evidence_status"]
+                    ),
                 }
                 for h in HORIZONS
             ],
         },
         "interpretation_boundary": (
-            "This phase tests fixed, past-only level regimes. It does not establish causality, "
-            "a tradable threshold, a position size, or a production signal."
+            "This phase tests fixed, past-only level regimes. It does not "
+            "establish causality, a tradable threshold, a position size, "
+            "or a production signal."
         ),
         "model_fit_performed": False,
         "trading_rule_design_performed": False,
