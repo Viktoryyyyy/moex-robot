@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any, Final, Mapping
@@ -24,6 +25,7 @@ CONTRACT_ID: Final[str] = "usdrubf_oil_fx_rub_v1_phase04_regime_research"
 CONTRACT_VERSION: Final[str] = "1.0"
 EXPECTED_IDENTITY_COUNT: Final[int] = 472
 EXPECTED_INSTRUMENT: Final[str] = "forts.usdrubf"
+
 WINDOW: Final[int] = 126
 MIN_HISTORY: Final[int] = 63
 HIGH_THRESHOLD: Final[float] = 0.75
@@ -32,8 +34,10 @@ HORIZONS: Final[tuple[int, ...]] = (1, 3, 5, 10, 20)
 CONFIRMATION_HORIZONS: Final[tuple[int, ...]] = (5, 10, 20)
 BOOTSTRAP_SAMPLES: Final[int] = 1000
 BOOTSTRAP_SEED: Final[int] = 20260916
+BOOTSTRAP_BLOCK_LENGTH: Final[int] = 5
 MIN_REGIME_OBSERVATIONS: Final[int] = 15
 ROBUST_MIN_OBSERVATIONS: Final[int] = 20
+
 EXPECTED_SHA256: Final[dict[str, str]] = {
     "phase6_modeling_dataset": "fdd626f9e0522c6bbb653f9e17fbbbeef7ded77f57ff187b35246a2458d55d00",
     "phase6_dataset_manifest": "fcbbb5e5ed0549c5c6f397e34f203f01836271f6bf471f90cab5a2fd64ace082",
@@ -41,6 +45,7 @@ EXPECTED_SHA256: Final[dict[str, str]] = {
     "phase84a_gate_results": "aceaefb4d2e2a236539dd527c98464ddd1ea6bf5f1cdb8121662e1ce087f9c4c",
     "phase84a_input_identity": "3fa20b2daf45f196937064b5f1cc6a58b8009e544d6141e32a77d841d68b65ae",
 }
+
 DECLARED_OUTPUTS: Final[tuple[str, ...]] = (
     "input_identity_verification.json",
     "regime_observations.parquet",
@@ -50,6 +55,7 @@ DECLARED_OUTPUTS: Final[tuple[str, ...]] = (
     "research_manifest.json",
     "gate_results.json",
 )
+
 REGIME_ORDER: Final[tuple[str, ...]] = (
     "high_high",
     "high_low",
@@ -58,6 +64,7 @@ REGIME_ORDER: Final[tuple[str, ...]] = (
     "neutral",
     "warmup",
 )
+
 _ALIAS_PATTERN = re.compile(r"(^|[/\\._-])(latest|current|autodetect)($|[/\\._-])", re.I)
 _SHA40_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 _GLOB_CHARS = frozenset("*?[]")
@@ -118,6 +125,7 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
     for key, value in expected.items():
         if identity.get(key) != value:
             raise Phase04RegimeError(f"contract identity mismatch: {key}")
+
     scope = contract.get("scope")
     if not isinstance(scope, Mapping):
         raise Phase04RegimeError("scope is required")
@@ -127,6 +135,7 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
         raise Phase04RegimeError("Oil_RUB product must remain forbidden")
     if scope.get("target_day_data_allowed") is not False:
         raise Phase04RegimeError("target-day data must remain forbidden")
+
     methodology = contract.get("methodology")
     expected_method = {
         "rolling_window_sessions": WINDOW,
@@ -136,6 +145,7 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
         "forward_return_horizons_sessions": list(HORIZONS),
         "bootstrap_samples": BOOTSTRAP_SAMPLES,
         "bootstrap_seed": BOOTSTRAP_SEED,
+        "bootstrap_block_length_sessions": BOOTSTRAP_BLOCK_LENGTH,
         "minimum_regime_observations": MIN_REGIME_OBSERVATIONS,
         "robust_minimum_observations": ROBUST_MIN_OBSERVATIONS,
         "no_threshold_optimization": True,
@@ -146,8 +156,10 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
     for key, value in expected_method.items():
         if methodology.get(key) != value:
             raise Phase04RegimeError(f"methodology mismatch: {key}")
+
     if contract.get("runtime_artifacts") != list(DECLARED_OUTPUTS):
         raise Phase04RegimeError("runtime artifact inventory mismatch")
+
     authority = contract.get("authority_boundary")
     if not isinstance(authority, Mapping) or any(value is not False for value in authority.values()):
         raise Phase04RegimeError("authority boundary was widened")
@@ -155,7 +167,10 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
 
 def _validate_immutable_hashes(paths: Mapping[str, Path]) -> dict[str, str]:
     observed = {name: _sha256(path) for name, path in paths.items()}
-    failed = [name for name, expected in EXPECTED_SHA256.items() if observed.get(name) != expected]
+    failed = [
+        name for name, expected in EXPECTED_SHA256.items()
+        if observed.get(name) != expected
+    ]
     if failed:
         raise Phase04RegimeError("immutable input hash mismatch: " + ", ".join(sorted(failed)))
     return observed
@@ -232,6 +247,7 @@ def _prepare_observations(
     }
     if not required_brent.issubset(brent_matrix.columns):
         raise Phase04RegimeError("Brent PIT matrix schema mismatch")
+
     brent = brent_matrix.copy()
     for column in ("target_trade_date", "prior_trade_date", "brent_trade_date"):
         brent[column] = _normalize_dates(brent[column], f"Brent {column}")
@@ -246,7 +262,9 @@ def _prepare_observations(
         raise Phase04RegimeError("Brent prior_trade_date mismatch")
     if not brent["brent_trade_date"].equals(brent["prior_trade_date"]):
         raise Phase04RegimeError("Brent close must be prior_trade_date close")
+
     phase02b.validate_phase6_source_panel_replay(modeling_dataset, source_panel)
+
     panel = phase6_builder._prepare_internal_d1_panel(source_panel)
     panel_dates = _normalize_dates(panel["trade_date"], "Phase6 source trade_date")
     panel_instruments = panel["instrument_id"].astype(str)
@@ -256,24 +274,30 @@ def _prepare_observations(
     if not np.isfinite(closes).all() or np.any(closes <= 0):
         raise Phase04RegimeError("Phase6 source close must be finite positive")
     date_to_index = {str(value): idx for idx, value in enumerate(panel_dates)}
+
     brent_close = pd.to_numeric(brent["brent_close"], errors="coerce").to_numpy(float)
     if not np.isfinite(brent_close).all() or np.any(brent_close <= 0):
         raise Phase04RegimeError("Brent close must be finite positive")
+
     usd_prior_close = np.full(EXPECTED_IDENTITY_COUNT, np.nan, dtype=float)
     for idx, prior_date in enumerate(identities["prior_trade_date"].astype(str)):
         panel_idx = date_to_index.get(prior_date)
         if panel_idx is None:
             raise Phase04RegimeError(f"Phase6 source missing prior_trade_date {prior_date}")
         usd_prior_close[idx] = closes[panel_idx]
+
     oil_pct = _rolling_percentile(brent_close)
     usd_pct = _rolling_percentile(usd_prior_close)
+    regimes = [_classify_regime(a, b) for a, b in zip(oil_pct, usd_pct)]
+
     result = identities.loc[:, ["target_trade_date", "target_instrument_id", "prior_trade_date"]].copy()
     result["brent_contract_code"] = brent["brent_contract_code"].astype(str).to_numpy()
     result["brent_prior_close"] = brent_close
     result["usdrubf_prior_close"] = usd_prior_close
     result["brent_percentile_126"] = oil_pct
     result["usdrubf_percentile_126"] = usd_pct
-    result["regime"] = [_classify_regime(a, b) for a, b in zip(oil_pct, usd_pct)]
+    result["regime"] = regimes
+
     terminal_index = len(panel) - 1
     for horizon in HORIZONS:
         values = np.full(EXPECTED_IDENTITY_COUNT, np.nan, dtype=float)
@@ -289,6 +313,15 @@ def _prepare_observations(
     return result
 
 
+def _circular_block_indices(n: int, rng: np.random.Generator) -> np.ndarray:
+    if n <= 0:
+        return np.empty(0, dtype=int)
+    block_count = int(math.ceil(n / BOOTSTRAP_BLOCK_LENGTH))
+    starts = rng.integers(0, n, size=block_count)
+    offsets = np.arange(BOOTSTRAP_BLOCK_LENGTH)
+    return np.concatenate([(start + offsets) % n for start in starts])[:n]
+
+
 def _mean_ci(values: np.ndarray, seed: int) -> tuple[float, float]:
     values = values[np.isfinite(values)]
     if len(values) < MIN_REGIME_OBSERVATIONS:
@@ -296,7 +329,8 @@ def _mean_ci(values: np.ndarray, seed: int) -> tuple[float, float]:
     rng = np.random.default_rng(seed)
     draws = np.empty(BOOTSTRAP_SAMPLES, dtype=float)
     for i in range(BOOTSTRAP_SAMPLES):
-        draws[i] = np.mean(values[rng.integers(0, len(values), size=len(values))])
+        idx = _circular_block_indices(len(values), rng)
+        draws[i] = np.mean(values[idx])
     lo, hi = np.quantile(draws, [0.025, 0.975])
     return float(lo), float(hi)
 
@@ -309,19 +343,19 @@ def _difference_ci(regime_values: np.ndarray, all_values: np.ndarray, seed: int)
     rng = np.random.default_rng(seed)
     draws = np.empty(BOOTSTRAP_SAMPLES, dtype=float)
     for i in range(BOOTSTRAP_SAMPLES):
-        r = regime_values[rng.integers(0, len(regime_values), size=len(regime_values))]
-        a = all_values[rng.integers(0, len(all_values), size=len(all_values))]
+        r = regime_values[_circular_block_indices(len(regime_values), rng)]
+        a = all_values[_circular_block_indices(len(all_values), rng)]
         draws[i] = np.mean(r) - np.mean(a)
     lo, hi = np.quantile(draws, [0.025, 0.975])
     return float(lo), float(hi)
 
 
 def _segment_stats(values: np.ndarray) -> tuple[list[int], list[float], list[float]]:
-    groups = np.array_split(np.arange(len(values)), 3)
+    idx_groups = np.array_split(np.arange(len(values)), 3)
     counts: list[int] = []
     means: list[float] = []
     hits: list[float] = []
-    for idx in groups:
+    for idx in idx_groups:
         segment = values[idx]
         segment = segment[np.isfinite(segment)]
         counts.append(len(segment))
@@ -334,11 +368,13 @@ def analyze_regimes(observations: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
     metrics: list[dict[str, Any]] = []
     stability: list[dict[str, Any]] = []
     seed_counter = 0
+
     for horizon in HORIZONS:
         label = f"fwd_usdrubf_close_return_{horizon}session"
         all_values = pd.to_numeric(observations[label], errors="coerce").to_numpy(float)
         all_values = all_values[np.isfinite(all_values)]
         unconditional_mean = float(np.mean(all_values))
+
         for regime in REGIME_ORDER[:-1]:
             subset = observations.loc[observations["regime"].eq(regime), ["target_trade_date", label]].copy()
             values = pd.to_numeric(subset[label], errors="coerce").to_numpy(float)
@@ -351,6 +387,7 @@ def analyze_regimes(observations: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
             diff = mean - unconditional_mean if np.isfinite(mean) else float("nan")
             diff_lo, diff_hi = _difference_ci(values, all_values, BOOTSTRAP_SEED + 1000 + seed_counter)
             seed_counter += 1
+
             counts, means, hits = _segment_stats(values)
             same_negative = sum(np.isfinite(v) and v < 0.0 for v in means)
             if (
@@ -373,6 +410,7 @@ def analyze_regimes(observations: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
                 evidence = "suggestive"
             else:
                 evidence = "not_supported"
+
             metrics.append({
                 "regime": regime,
                 "horizon_sessions": horizon,
@@ -402,26 +440,31 @@ def analyze_regimes(observations: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
                 "late_short_hit_rate": hits[2],
                 "negative_mean_segment_count": same_negative,
             })
+
     metrics_df = pd.DataFrame(metrics)
     stability_df = pd.DataFrame(stability)
+
     hh = metrics_df.loc[metrics_df["regime"].eq("high_high")].set_index("horizon_sessions")
     confirming = hh.loc[list(CONFIRMATION_HORIZONS)]
     robust_count = int(confirming["evidence_status"].eq("robust").sum())
     supported_count = int(confirming["evidence_status"].isin(["robust", "suggestive"]).sum())
     negative_count = int(confirming["mean_forward_return"].lt(0.0).sum())
     diff_negative_count = int(confirming["mean_minus_unconditional"].lt(0.0).sum())
+
     if robust_count >= 2:
         h5_status = "supported_robust"
     elif supported_count >= 2 and negative_count == len(CONFIRMATION_HORIZONS):
         h5_status = "supported_suggestive"
     else:
         h5_status = "not_supported_in_phase04"
+
     if robust_count >= 2:
         h6_status = "supported_robust"
     elif supported_count >= 2 and diff_negative_count == len(CONFIRMATION_HORIZONS):
         h6_status = "supported_suggestive"
     else:
         h6_status = "not_supported_in_phase04"
+
     summary = {
         "project": PROJECT,
         "task_id": TASK_ID,
@@ -514,6 +557,7 @@ def main(argv: list[str] | None = None) -> int:
         raise Phase04RegimeError("--run-id must be explicit and immutable")
     if not _SHA40_PATTERN.fullmatch(git_sha):
         raise Phase04RegimeError("--git-commit-sha must be exactly 40 lowercase hex characters")
+
     contract = _read_json(contract_path)
     _validate_contract(contract)
     immutable_paths = {
@@ -524,6 +568,7 @@ def main(argv: list[str] | None = None) -> int:
         "phase84a_input_identity": brent_identity_path,
     }
     observed_hashes = _validate_immutable_hashes(immutable_paths)
+
     modeling = pd.read_parquet(phase6_modeling)
     source_panel = pd.read_parquet(phase6_source)
     brent_matrix = pd.read_parquet(brent_matrix_path)
@@ -532,8 +577,10 @@ def main(argv: list[str] | None = None) -> int:
     _validate_brent_evidence(brent_gates)
     if not brent_identity:
         raise Phase04RegimeError("Brent input identity evidence must be non-empty")
+
     observations = _prepare_observations(modeling, source_panel, brent_matrix)
     metrics, stability, summary = analyze_regimes(observations)
+
     gates = {
         "G1_phase6_lineage": {"passed": True},
         "G2_brent_admission": {"passed": True, "status": "moex_brent_source_candidate_for_phase8_5"},
@@ -556,6 +603,7 @@ def main(argv: list[str] | None = None) -> int:
         "failed_gates": failed,
         "status": "oil_fx_rub_phase04_regime_research_complete" if not failed else "blocked",
     }
+
     manifest = {
         "project": PROJECT,
         "task_id": TASK_ID,
@@ -581,14 +629,23 @@ def main(argv: list[str] | None = None) -> int:
         "phase6_lineage_replayed": True,
         "brent_immutable_artifacts_verified": True,
     }
+
     output_dir.mkdir(parents=True, exist_ok=False)
     observations.to_parquet(output_dir / "regime_observations.parquet", index=False)
     metrics.to_csv(output_dir / "regime_metrics.csv", index=False)
     stability.to_csv(output_dir / "regime_temporal_stability.csv", index=False)
-    (output_dir / "input_identity_verification.json").write_text(json.dumps(identity_verification, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    (output_dir / "hypothesis_summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    (output_dir / "research_manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    (output_dir / "gate_results.json").write_text(json.dumps(gates, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (output_dir / "input_identity_verification.json").write_text(
+        json.dumps(identity_verification, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    (output_dir / "hypothesis_summary.json").write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    (output_dir / "research_manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    (output_dir / "gate_results.json").write_text(
+        json.dumps(gates, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     if tuple(sorted(path.name for path in output_dir.iterdir())) != tuple(sorted(DECLARED_OUTPUTS)):
         raise Phase04RegimeError("output artifact inventory mismatch")
     return 0
