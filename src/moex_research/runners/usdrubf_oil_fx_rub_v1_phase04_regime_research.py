@@ -216,6 +216,18 @@ def _normalize_dates(series: pd.Series, label: str) -> pd.Series:
     return parsed.dt.strftime("%Y-%m-%d").astype("string")
 
 
+def _identity_values_equal(observed: pd.DataFrame, expected: pd.DataFrame) -> bool:
+    columns = ["target_trade_date", "target_instrument_id"]
+    if len(observed) != len(expected):
+        return False
+    left = observed.loc[:, columns].copy().reset_index(drop=True)
+    right = expected.loc[:, columns].copy().reset_index(drop=True)
+    for column in columns:
+        left[column] = left[column].astype("string")
+        right[column] = right[column].astype("string")
+    return left.equals(right)
+
+
 def _rolling_percentile(
     values: np.ndarray,
     window: int = WINDOW,
@@ -278,10 +290,9 @@ def _prepare_observations(
     brent["target_instrument_id"] = brent["target_instrument_id"].astype(str)
     if len(brent) != EXPECTED_IDENTITY_COUNT:
         raise Phase04RegimeError("Brent identity count mismatch")
-    if not brent.loc[:, ["target_trade_date", "target_instrument_id"]].reset_index(drop=True).equals(
-        identities.loc[:, ["target_trade_date", "target_instrument_id"]]
-        .astype(str)
-        .reset_index(drop=True)
+    if not _identity_values_equal(
+        brent.loc[:, ["target_trade_date", "target_instrument_id"]],
+        identities.loc[:, ["target_trade_date", "target_instrument_id"]],
     ):
         raise Phase04RegimeError("Brent identity/order mismatch")
     if not brent["prior_trade_date"].equals(identities["prior_trade_date"].astype("string")):
