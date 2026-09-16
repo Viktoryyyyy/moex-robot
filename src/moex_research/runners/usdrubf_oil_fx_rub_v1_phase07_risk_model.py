@@ -19,6 +19,7 @@ TASK_ID: Final[str] = "STRAT_OIL_FX_RUB_V1_07_RISK_MODEL"
 CONTRACT_ID: Final[str] = "usdrubf_oil_fx_rub_v1_phase07_risk_model"
 CONTRACT_VERSION: Final[str] = "1.0"
 EXPECTED_INSTRUMENT: Final[str] = "forts.usdrubf"
+EXPECTED_SOURCE_PANEL_SHA256: Final[str] = "bbe976cf55a610256afad6abfeef4e33a0f416fa878a7d80ea893e79caaac2f1"
 HORIZONS: Final[tuple[int, ...]] = (5, 10, 20)
 STOP_GRID: Final[tuple[float, ...]] = (0.01, 0.02, 0.03, 0.04, 0.05)
 RISK_BUDGET_GRID: Final[tuple[float, ...]] = (0.0025, 0.005, 0.01)
@@ -106,6 +107,8 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
     for contract_key, upstream_key in hash_key_map.items():
         if inputs.get(contract_key) != phase04.EXPECTED_SHA256[upstream_key]:
             raise Phase07RiskModelError(f"immutable hash metadata mismatch: {contract_key}")
+    if inputs.get("phase6_source_panel_sha256") != EXPECTED_SOURCE_PANEL_SHA256:
+        raise Phase07RiskModelError("immutable hash metadata mismatch: phase6_source_panel_sha256")
     if inputs.get("recompute_from_pinned_upstreams") is not True:
         raise Phase07RiskModelError("recompute_from_pinned_upstreams must be true")
     if inputs.get("phase06_runtime_artifact_required") is not False:
@@ -164,6 +167,7 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
         "no_post_hoc_grid_expansion",
         "sample_limited_status_required",
         "phase06_baseline_schedule_must_reproduce",
+        "source_panel_raw_sha256_must_match",
     ):
         if method.get(key) is not True:
             raise Phase07RiskModelError(f"methodology guard missing: {key}")
@@ -408,11 +412,13 @@ def _summary(excursions: pd.DataFrame, stop_metrics: pd.DataFrame, sizing: pd.Da
         "stop_grid_pct": list(STOP_GRID),
         "risk_budget_pct_nav": list(RISK_BUDGET_GRID),
         "round_trip_cost_bps": ROUND_TRIP_COST_BPS,
+        "source_panel_sha256": EXPECTED_SOURCE_PANEL_SHA256,
         "excursion_diagnostics": by_horizon,
         "stop_metric_variant_count": int(len(stop_metrics)),
         "sizing_variant_count": int(len(sizing)),
         "gap_budget_breach_variant_count": int(sizing["gap_risk_budget_breached_in_sample"].sum()),
         "sample_limitation": "Three independent entries only; risk metrics and stop/sizing sensitivities are descriptive and do not establish robustness.",
+        "execution_limitation": "Daily OHLC can model open gaps and stop threshold crossings but not intraday stop slippage beyond the observed session open.",
         "parameter_optimization_performed": False,
         "best_stop_selection_performed": False,
         "statistical_inference_performed": False,
@@ -481,6 +487,11 @@ def main(argv: list[str] | None = None) -> int:
         "phase84a_input_identity": brent_identity_path,
     }
     observed_hashes = phase04._validate_immutable_hashes(immutable_paths)
+    source_panel_sha256 = phase04._sha256(phase6_source_path)
+    if source_panel_sha256 != EXPECTED_SOURCE_PANEL_SHA256:
+        raise Phase07RiskModelError("Phase6 source panel SHA256 mismatch")
+    observed_hashes = dict(observed_hashes)
+    observed_hashes["phase6_source_panel"] = source_panel_sha256
 
     modeling = pd.read_parquet(phase6_modeling_path)
     source_panel = pd.read_parquet(phase6_source_path)
@@ -516,6 +527,8 @@ def main(argv: list[str] | None = None) -> int:
             "passed": True,
             "all_consumed_ohlc_rows_nonterminal": True,
             "phase6_source_panel_replayed": True,
+            "phase6_source_panel_sha256_verified": True,
+            "phase6_source_panel_sha256": source_panel_sha256,
         },
         "G4_excursion_math": {
             "passed": len(excursions) == EXPECTED_TRADES * len(HORIZONS),
@@ -579,6 +592,8 @@ def main(argv: list[str] | None = None) -> int:
         "phase06_frozen_schedule_reproduced": True,
         "independent_trade_count": EXPECTED_TRADES,
         "phase6_lineage_replayed": True,
+        "phase6_source_panel_sha256_verified": True,
+        "phase6_source_panel_sha256": source_panel_sha256,
         "brent_immutable_artifacts_verified": True,
     }
 
