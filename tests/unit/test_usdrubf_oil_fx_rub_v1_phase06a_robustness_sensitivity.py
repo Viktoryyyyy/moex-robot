@@ -35,41 +35,61 @@ def _observations(panel: pd.DataFrame, count: int = 70) -> pd.DataFrame:
     )
 
 
-def test_execution_eligibility_respects_configured_cooldown() -> None:
+def test_execution_eligibility_respects_required_separation() -> None:
     assert phase06a._execution_eligibility([10, 24, 25, 40], 15) == [True, False, True, True]
     assert phase06a._execution_eligibility([10, 30, 31, 52], 21) == [True, False, True, True]
 
 
-def test_config_candidates_exclude_terminal_entry_ohlc() -> None:
+def test_effective_separation_prevents_horizon_overlap() -> None:
+    assert phase06a._effective_separation(15, 5) == 15
+    assert phase06a._effective_separation(15, 30) == 31
+    assert phase06a._effective_separation(21, 20) == 21
+    assert phase06a._effective_separation(30, 30) == 31
+
+
+def test_config_pool_excludes_terminal_entry_ohlc() -> None:
     panel = _panel(80)
     observations = _observations(panel, 79)
-    candidates, raw_count, unbound_count = phase06a._build_config_candidates(
+    pool, raw_count, unbound_count = phase06a._build_config_pool(
         observations,
         panel,
         window=63,
         threshold=0.70,
-        cooldown=15,
     )
     assert raw_count > 0
     assert unbound_count in (0, 1)
-    if not candidates.empty:
-        assert (candidates["entry_source_session_index"].astype(int) < len(panel) - 1).all()
+    if not pool.empty:
+        assert (pool["entry_source_session_index"].astype(int) < len(panel) - 1).all()
+
+
+def test_horizon_specific_eligibility_prevents_overlapping_30d_positions() -> None:
+    panel = _panel(80)
+    pool = pd.DataFrame(
+        {
+            "target_trade_date": [panel.loc[10, "trade_date"], panel.loc[30, "trade_date"], panel.loc[41, "trade_date"]],
+            "prior_trade_date": [panel.loc[9, "trade_date"], panel.loc[29, "trade_date"], panel.loc[40, "trade_date"]],
+            "entry_source_session_index": [10, 30, 41],
+            "brent_percentile": [0.9, 0.9, 0.9],
+            "usdrubf_percentile": [0.9, 0.9, 0.9],
+        }
+    )
+    eligible = phase06a._eligible_for_horizon(pool, panel, cooldown=15, horizon=30)
+    assert eligible["entry_source_session_index"].astype(int).tolist() == [10, 41]
 
 
 def test_trade_rows_apply_short_return_and_cost_once() -> None:
     panel = _panel(80)
-    candidate = pd.DataFrame(
+    pool = pd.DataFrame(
         {
             "target_trade_date": [panel.loc[10, "trade_date"]],
             "prior_trade_date": [panel.loc[9, "trade_date"]],
             "entry_source_session_index": [10],
             "brent_percentile": [0.90],
             "usdrubf_percentile": [0.90],
-            "execution_eligible": [True],
         }
     )
     rows = phase06a._trade_rows_for_config(
-        candidate,
+        pool,
         panel,
         window=126,
         threshold=0.75,
@@ -96,7 +116,8 @@ def test_aggregate_summary_does_not_select_winner() -> None:
                 "rolling_window_sessions": 126,
                 "minimum_history_sessions": 63,
                 "high_threshold": 0.75,
-                "cooldown_source_sessions": 21,
+                "configured_cooldown_source_sessions": 21,
+                "effective_entry_separation_source_sessions": max(21, horizon + 1),
                 "horizon_sessions": horizon,
                 "round_trip_cost_bps": 20,
                 "raw_signal_count": 3,
