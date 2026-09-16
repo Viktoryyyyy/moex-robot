@@ -53,6 +53,7 @@
     "primary_direction": "negative USDRUBF forward return (short USD / long RUB)",
     "bootstrap_samples": 1000,
     "bootstrap_seed": 20260916,
+    "bootstrap_block_length_sessions": 5,
     "minimum_regime_observations": 15,
     "robust_minimum_observations": 20,
     "no_threshold_optimization": true,
