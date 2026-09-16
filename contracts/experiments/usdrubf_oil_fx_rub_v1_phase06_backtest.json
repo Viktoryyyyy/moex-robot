@@ -1,0 +1,136 @@
+{
+  "contract_identity": {
+    "contract_id": "usdrubf_oil_fx_rub_v1_phase06_backtest",
+    "contract_version": "1.0",
+    "project": "MOEX_Bot",
+    "task_id": "STRAT_OIL_FX_RUB_V1_06_BACKTEST",
+    "status": "repository_implementation_only"
+  },
+  "purpose": {
+    "objective": "Evaluate the frozen Phase 05 high-Brent/high-USDRUBF short-USDRUBF candidate schedule using deterministic open-to-close execution and predeclared round-trip cost stress.",
+    "performance_evaluation_allowed": true,
+    "model_fit_allowed": false,
+    "parameter_optimization_allowed": false,
+    "horizon_ranking_allowed": false,
+    "position_sizing_allowed": false,
+    "strategy_promotion_allowed": false,
+    "trading_allowed": false
+  },
+  "inputs": {
+    "phase6_modeling_dataset_sha256": "fdd626f9e0522c6bbb653f9e17fbbbeef7ded77f57ff187b35246a2458d55d00",
+    "phase6_dataset_manifest_sha256": "fcbbb5e5ed0549c5c6f397e34f203f01836271f6bf471f90cab5a2fd64ace082",
+    "brent_pit_acceptance_matrix_sha256": "78b60c9542fc08667267849b9ce03fdf161d2dc971fe99e1ab9d6a8d56266c43",
+    "phase84a_gate_results_sha256": "aceaefb4d2e2a236539dd527c98464ddd1ea6bf5f1cdb8121662e1ce087f9c4c",
+    "phase84a_input_identity_sha256": "3fa20b2daf45f196937064b5f1cc6a58b8009e544d6141e32a77d841d68b65ae",
+    "phase6_source_panel": "explicit path required; semantic replay must reproduce frozen Phase6 dataset and every consumed entry/exit OHLC row must be non-terminal",
+    "phase05_logic_source": "repository implementation usdrubf_oil_fx_rub_v1_phase05_signal_design",
+    "phase05_runtime_artifact_required": false,
+    "phase05_schedule_binding": "recompute deterministically from repository Phase05 logic and pinned upstream inputs, then require exact equality to the frozen schedule below"
+  },
+  "frozen_phase05_schedule": [
+    {
+      "target_trade_date": "2025-01-13",
+      "prior_trade_date": "2025-01-10",
+      "exit_5session_trade_date": "2025-01-20",
+      "exit_10session_trade_date": "2025-01-27",
+      "exit_20session_trade_date": "2025-02-10"
+    },
+    {
+      "target_trade_date": "2025-09-29",
+      "prior_trade_date": "2025-09-26",
+      "exit_5session_trade_date": "2025-10-06",
+      "exit_10session_trade_date": "2025-10-13",
+      "exit_20session_trade_date": "2025-10-27"
+    },
+    {
+      "target_trade_date": "2026-03-17",
+      "prior_trade_date": "2026-03-16",
+      "exit_5session_trade_date": "2026-03-24",
+      "exit_10session_trade_date": "2026-03-31",
+      "exit_20session_trade_date": "2026-04-14"
+    }
+  ],
+  "backtest_definition": {
+    "direction": "short_usdrubf_long_rub",
+    "entry_execution": "target_trade_date open",
+    "entry_price_field": "open",
+    "fixed_exit_horizons_sessions": [5, 10, 20],
+    "exit_execution": "close",
+    "exit_price_field": "close",
+    "gross_short_return_formula": "(entry_open - exit_close) / entry_open",
+    "round_trip_cost_bps_sensitivity": [0, 5, 10, 20],
+    "cost_return_formula": "round_trip_cost_bps / 10000",
+    "net_short_return_formula": "gross_short_return - cost_return",
+    "trade_overlap_allowed": false,
+    "pyramiding_allowed": false,
+    "stop_loss_allowed_in_phase06": false,
+    "position_sizing_allowed_in_phase06": false,
+    "cost_grid_interpretation": "total round-trip cost stress including fees/slippage allowance; not a claim of exact realized cost"
+  },
+  "metrics_definition": {
+    "grouping": "horizon_sessions x round_trip_cost_bps",
+    "metrics": [
+      "trade_count",
+      "mean_gross_return",
+      "mean_net_return",
+      "median_net_return",
+      "hit_rate_net_positive",
+      "compounded_net_return",
+      "worst_trade_net_return",
+      "trade_sequence_max_drawdown"
+    ],
+    "compounded_net_return_formula": "product(1 + net_short_return) - 1 in chronological entry order",
+    "max_drawdown_formula": "max(1 - equity / running_peak) on chronological compounded trade equity including initial equity 1.0",
+    "horizon_ranking_allowed": false,
+    "best_variant_selection_allowed": false
+  },
+  "sample_policy": {
+    "frozen_independent_trade_count": 3,
+    "statistical_inference_allowed": false,
+    "robustness_claim_allowed": false,
+    "interpretation": "descriptive/sample-limited only because the frozen Phase05 schedule contains three independent entries"
+  },
+  "runtime_artifacts": [
+    "input_identity_verification.json",
+    "trade_results.csv",
+    "backtest_metrics.csv",
+    "backtest_summary.json",
+    "research_manifest.json",
+    "gate_results.json"
+  ],
+  "gates": {
+    "G1_lineage": "exact pinned Phase6 and Brent hashes plus Phase6 source-panel semantic replay PASS",
+    "G2_frozen_signal_schedule": "recomputed Phase05 eligible schedule exactly equals the three frozen entries and all +5/+10/+20 exit dates",
+    "G3_price_binding": "every consumed entry open and exit close is from a non-terminal source-panel row bound by Phase6 semantic replay",
+    "G4_execution_semantics": "short USDRUBF; target open entry and fixed future close exits only",
+    "G5_return_math": "gross short return uses the frozen formula with finite positive prices",
+    "G6_cost_math": "only 0/5/10/20 bps total round-trip stress is applied once per trade",
+    "G7_metrics": "declared descriptive metrics only; no horizon ranking, best-variant selection, parameter optimization or statistical inference",
+    "G8_research_only": "no sizing, model fit, strategy promotion, broker/trading actions, upstream mutation or network",
+    "G9_final": "complete only when G1-G8 PASS"
+  },
+  "approved_file_scope": {
+    "create_only": [
+      "contracts/experiments/usdrubf_oil_fx_rub_v1_phase06_backtest.json",
+      "src/moex_research/runners/usdrubf_oil_fx_rub_v1_phase06_backtest.py",
+      "tests/unit/test_usdrubf_oil_fx_rub_v1_phase06_backtest.py",
+      "tests/contract/test_usdrubf_oil_fx_rub_v1_phase06_backtest_contract.py"
+    ],
+    "existing_files_to_modify": [],
+    "scope_widening_allowed": false
+  },
+  "authority_boundary": {
+    "direct_main_write_allowed": false,
+    "merge_allowed": false,
+    "server_apply_allowed": false,
+    "network_access_allowed": false,
+    "upstream_artifact_mutation_allowed": false,
+    "model_fit_allowed": false,
+    "parameter_optimization_allowed": false,
+    "horizon_ranking_allowed": false,
+    "position_sizing_allowed": false,
+    "strategy_promotion_allowed": false,
+    "broker_action_allowed": false,
+    "trading_allowed": false
+  }
+}
