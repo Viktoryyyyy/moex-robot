@@ -20,7 +20,6 @@ def _synthetic_observations() -> pd.DataFrame:
             "usdrubf_percentile_126": [0.82, 0.95, 0.88],
             "regime": ["high_high", "high_high", "high_high"],
             "entry_source_session_index": [5, 9, 30],
-            "entry_open": [100.0, 101.0, 99.0],
         }
     )
 
@@ -57,8 +56,21 @@ def test_candidates_are_schedule_only_and_deoverlapped() -> None:
     lowered = [column.lower() for column in candidates.columns]
     assert not any("return" in column for column in lowered)
     assert not any("pnl" in column for column in lowered)
+    assert not any("entry_open" in column for column in lowered)
+    assert not any("entry_price" in column for column in lowered)
     assert not any("exit_price" in column for column in lowered)
     assert not any("exit_close" in column for column in lowered)
+
+
+def test_candidates_are_invariant_to_target_open_values() -> None:
+    panel_a = _synthetic_panel()
+    panel_b = panel_a.copy()
+    panel_b["open"] = [10_000.0 + index for index in range(len(panel_b))]
+
+    first = phase05._build_signal_candidates(_synthetic_observations(), panel_a)
+    second = phase05._build_signal_candidates(_synthetic_observations(), panel_b)
+
+    pd.testing.assert_frame_equal(first, second)
 
 
 def test_fixed_exit_schedule_uses_panel_session_indices_only() -> None:
@@ -85,6 +97,7 @@ def test_summary_does_not_evaluate_performance() -> None:
     assert summary["status"] == "signal_design_ready_for_phase06"
     assert summary["raw_high_high_observation_count"] == 3
     assert summary["execution_eligible_entry_count"] == 2
+    assert summary["entry_price_value_published"] is False
     assert summary["future_exit_prices_used"] is False
     assert summary["future_returns_used"] is False
     assert summary["pnl_computed"] is False
