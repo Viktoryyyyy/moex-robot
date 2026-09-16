@@ -1,0 +1,136 @@
+{
+  "contract_identity": {
+    "contract_id": "usdrubf_oil_fx_rub_v1_phase03_lead_lag_research",
+    "contract_version": "1.0",
+    "project": "MOEX_Bot",
+    "task_id": "STRAT_OIL_FX_RUB_V1_03_LEAD_LAG_RESEARCH",
+    "phase": "03_LEAD_LAG_RESEARCH",
+    "execution_mode": "browser_controlled_github_route",
+    "status": "repository_implementation_and_authorized_server_research_runtime"
+  },
+  "approved_branch": "research/oil-fx-rub/v1-phase03-lead-lag",
+  "purpose": {
+    "objective": "Test whether PIT-safe Brent information has reproducible lead-lag association with subsequent USDRUBF close returns before any regime segmentation or trading-rule design.",
+    "hypotheses": ["H1_oil_impulse", "H2_oil_lag"]
+  },
+  "scope": {
+    "brent_only": true,
+    "cnyrubf_allowed": false,
+    "oil_fx_full_allowed": false,
+    "model_fit_allowed": false,
+    "hyperparameter_search_allowed": false,
+    "threshold_optimization_allowed": false,
+    "trading_rule_design_allowed": false,
+    "position_sizing_allowed": false,
+    "strategy_promotion_allowed": false,
+    "broker_action_allowed": false,
+    "trading_allowed": false
+  },
+  "upstream_dataset": {
+    "contract": "contracts/experiments/usdrubf_oil_fx_rub_v1_pit_research_dataset.json",
+    "task_id": "STRAT_OIL_FX_RUB_V1_02B_RESEARCH_DATASET",
+    "required_mode": "brent_only",
+    "required_identity_count": 472,
+    "required_final_gate": "G9_final",
+    "required_status": "oil_fx_rub_brent_only_research_dataset_ready",
+    "feature_and_label_identity_join": "exact target_trade_date + target_instrument_id",
+    "runtime_inputs_must_be_same_materialization_directory": true,
+    "runtime_input_sha256_must_be_recorded": true,
+    "upstream_artifact_mutation_allowed": false
+  },
+  "research_features": {
+    "all": [
+      "ext_brent_intraday_return",
+      "ext_brent_range_pct",
+      "ext_brent_close_location",
+      "ext_log1p_brent_volume",
+      "ext_brent_same_contract_close_return_1session",
+      "ext_brent_same_contract_close_return_3session",
+      "ext_brent_same_contract_close_return_5session"
+    ],
+    "primary_impulse_features": [
+      "ext_brent_intraday_return",
+      "ext_brent_same_contract_close_return_1session",
+      "ext_brent_same_contract_close_return_3session",
+      "ext_brent_same_contract_close_return_5session"
+    ],
+    "context_diagnostics_only": [
+      "ext_brent_range_pct",
+      "ext_brent_close_location",
+      "ext_log1p_brent_volume"
+    ]
+  },
+  "forward_labels": [
+    "fwd_usdrubf_close_return_1session",
+    "fwd_usdrubf_close_return_3session",
+    "fwd_usdrubf_close_return_5session",
+    "fwd_usdrubf_close_return_10session"
+  ],
+  "methodology": {
+    "pair_count": 28,
+    "primary_pair_count": 16,
+    "metrics": ["pearson", "spearman"],
+    "quantile_effect": "mean forward return in highest feature quintile minus lowest feature quintile",
+    "temporal_stability": "chronological early/middle/late thirds on each pair's valid rows",
+    "bootstrap": "circular moving-block bootstrap on each pair's valid chronological rows",
+    "bootstrap_samples": 1000,
+    "bootstrap_block_length_sessions": 5,
+    "bootstrap_seed": 20260916,
+    "confidence_interval": 0.95,
+    "robust_pair_rule": "Spearman block-bootstrap CI excludes zero AND quintile-spread block-bootstrap CI excludes zero AND signs are coherent AND all 3 chronological thirds have the overall Spearman sign",
+    "suggestive_pair_rule": "at least one of the two block-bootstrap CIs excludes zero AND signs are coherent AND at least 2 of 3 chronological thirds have the overall Spearman sign",
+    "h1_rule": "robust if any primary impulse pair is robust; suggestive if none robust and at least one primary pair suggestive; otherwise not supported",
+    "h2_min_abs_spearman_improvement": 0.03,
+    "h2_rule": "for each primary impulse feature compare +1 session absolute Spearman with the strongest +3/+5/+10 session pair; delayed strengthening requires later-minus-1session absolute Spearman >= 0.03 and the later pair robust/suggestive",
+    "multiple_testing_boundary": "exploratory descriptive research; pair evidence is not a causal claim or trading significance test"
+  },
+  "runtime_artifacts": [
+    "input_identity_verification.json",
+    "lead_lag_pairwise_metrics.csv",
+    "lead_lag_quantile_effects.csv",
+    "lead_lag_temporal_stability.csv",
+    "hypothesis_summary.json",
+    "research_manifest.json",
+    "gate_results.json"
+  ],
+  "gates": {
+    "G1_upstream_readiness": "accepted Phase 02B brent_only dataset G9 PASS",
+    "G2_identity_and_schema": "exact 472 aligned identities, exact seven feature and four label columns, exact 28 pairs",
+    "G3_pair_coverage": "every pair has at least 300 finite observations after structural nulls",
+    "G4_descriptive_metrics": "all required pairwise, quantile and temporal metrics finite",
+    "G5_block_bootstrap_uncertainty": "exact deterministic 1000-sample circular block-bootstrap protocol",
+    "G6_quantile_effects": "exact 28 pair rows with top-minus-bottom quintile effect",
+    "G7_temporal_stability": "exact 28 pair rows and at least 90 observations in each chronological third",
+    "G8_scope_and_leakage": "no network, source mutation, model fit, threshold optimization, trading-rule design, broker or trading action",
+    "G9_final": "G1-G8 all pass"
+  },
+  "interpretation_boundary": {
+    "causal_claim_allowed": false,
+    "tradable_threshold_claim_allowed": false,
+    "production_signal_claim_allowed": false,
+    "phase04_regime_research_required_before_signal_design": true
+  },
+  "approved_file_scope": {
+    "create_only": [
+      "contracts/experiments/usdrubf_oil_fx_rub_v1_phase03_lead_lag_research.json",
+      "src/moex_research/runners/usdrubf_oil_fx_rub_v1_phase03_lead_lag.py",
+      "tests/unit/test_usdrubf_oil_fx_rub_v1_phase03_lead_lag.py",
+      "tests/contract/test_usdrubf_oil_fx_rub_v1_phase03_lead_lag_contract.py"
+    ],
+    "existing_files_to_modify": [],
+    "exact_file_count": 4,
+    "scope_widening_allowed": false
+  },
+  "authority_boundary": {
+    "direct_main_write_allowed": false,
+    "merge_mode": "manual",
+    "server_runtime_allowed_after_merge_with_owner_approval": true,
+    "runtime_scope": "one brent_only Phase 03 research materialization from the accepted Phase 02B dataset",
+    "real_external_data_acquisition_allowed": false,
+    "upstream_artifact_mutation_allowed": false,
+    "model_fit_allowed": false,
+    "strategy_promotion_allowed": false,
+    "broker_action_allowed": false,
+    "trading_allowed": false
+  }
+}
