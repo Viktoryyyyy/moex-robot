@@ -287,7 +287,7 @@ def _build_signal_candidates(
         }
         for horizon in EXIT_HORIZONS:
             endpoint = entry_idx + horizon
-            available = endpoint < terminal_index
+            available = endpoint <= terminal_index
             item[f"exit_{horizon}session_available"] = bool(available)
             item[f"exit_{horizon}session_trade_date"] = (
                 panel_dates[endpoint] if available else None
