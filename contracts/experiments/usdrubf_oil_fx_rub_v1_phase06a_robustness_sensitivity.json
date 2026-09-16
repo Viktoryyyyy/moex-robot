@@ -63,6 +63,8 @@
     "cost_return_formula": "round_trip_cost_bps / 10000",
     "net_short_return_formula": "gross_short_return - cost_return",
     "cooldown_applied_in_source_panel_sessions": true,
+    "effective_entry_separation_formula": "max(configured_cooldown, horizon_sessions + 1)",
+    "horizon_specific_no_overlap_enforced": true,
     "pyramiding_allowed": false,
     "terminal_source_ohlc_allowed": false,
     "baseline_must_reproduce_phase06_schedule": true,
