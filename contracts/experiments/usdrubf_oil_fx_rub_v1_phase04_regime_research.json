@@ -1,0 +1,108 @@
+{
+  "contract_identity": {
+    "contract_id": "usdrubf_oil_fx_rub_v1_phase04_regime_research",
+    "contract_version": "1.0",
+    "project": "MOEX_Bot",
+    "task_id": "STRAT_OIL_FX_RUB_V1_04_REGIME_RESEARCH",
+    "status": "repository_implementation_only"
+  },
+  "purpose": {
+    "objective": "Test H5 divergence/catch-up and H6 regime dependency, centered on whether high Brent and high USDRUBF levels precede USDRUBF declines.",
+    "exploratory_not_causal": true,
+    "model_fit_allowed": false,
+    "trading_rule_design_allowed": false,
+    "strategy_promotion_allowed": false,
+    "trading_allowed": false
+  },
+  "scope": {
+    "brent_only": true,
+    "cnyrubf_allowed": false,
+    "oil_rub_product_allowed": false,
+    "target_day_data_allowed": false
+  },
+  "inputs": {
+    "phase6_modeling_dataset_sha256": "fdd626f9e0522c6bbb653f9e17fbbbeef7ded77f57ff187b35246a2458d55d00",
+    "phase6_dataset_manifest_sha256": "fcbbb5e5ed0549c5c6f397e34f203f01836271f6bf471f90cab5a2fd64ace082",
+    "brent_pit_acceptance_matrix_sha256": "78b60c9542fc08667267849b9ce03fdf161d2dc971fe99e1ab9d6a8d56266c43",
+    "phase84a_gate_results_sha256": "aceaefb4d2e2a236539dd527c98464ddd1ea6bf5f1cdb8121662e1ce087f9c4c",
+    "phase84a_input_identity_sha256": "3fa20b2daf45f196937064b5f1cc6a58b8009e544d6141e32a77d841d68b65ae",
+    "phase6_source_panel": "explicit path required and semantic replay must reproduce frozen Phase6 dataset"
+  },
+  "methodology": {
+    "level_observation_time": "prior_trade_date close only",
+    "rolling_window_sessions": 126,
+    "minimum_history_sessions": 63,
+    "percentile_includes_current_prior_close": true,
+    "high_threshold": 0.75,
+    "low_threshold": 0.25,
+    "regimes": [
+      "high_high",
+      "high_low",
+      "low_high",
+      "low_low",
+      "neutral"
+    ],
+    "forward_return_horizons_sessions": [
+      1,
+      3,
+      5,
+      10,
+      20
+    ],
+    "primary_h5_regime": "high_high",
+    "primary_direction": "negative USDRUBF forward return (short USD / long RUB)",
+    "bootstrap_samples": 1000,
+    "bootstrap_seed": 20260916,
+    "minimum_regime_observations": 15,
+    "robust_minimum_observations": 20,
+    "no_threshold_optimization": true,
+    "no_horizon_optimization": true
+  },
+  "interpretation": {
+    "H5": "High Brent + high USDRUBF is treated as a divergence/catch-up hypothesis; evidence requires repeated negative forward USDRUBF returns, not merely one best horizon.",
+    "H6": "Regime dependency requires high-high returns to be more negative than unconditional returns and stable through time.",
+    "multiple_horizon_rule": "overall H5/H6 status uses pre-declared 5/10/20 session confirmation counts; strongest horizon is descriptive only"
+  },
+  "runtime_artifacts": [
+    "input_identity_verification.json",
+    "regime_observations.parquet",
+    "regime_metrics.csv",
+    "regime_temporal_stability.csv",
+    "hypothesis_summary.json",
+    "research_manifest.json",
+    "gate_results.json"
+  ],
+  "gates": {
+    "G1_phase6_lineage": "frozen Phase6 hashes and source-panel semantic replay PASS",
+    "G2_brent_admission": "exact accepted Phase8.4A hashes and G1-G9 PASS",
+    "G3_pit_levels": "Brent and USDRUBF levels are prior_trade_date closes only",
+    "G4_percentile_pit": "rolling percentiles use current/prior observations only, never future observations",
+    "G5_regime_fixed": "126/63 window, 0.75/0.25 thresholds and regime definitions are fixed",
+    "G6_labels": "1/3/5/10/20-session labels are separate future outcomes; terminal unbound endpoint is structural null",
+    "G7_no_oil_rub_leakage": "Brent*USDRUBF product is never constructed or used",
+    "G8_research_only": "no model fit, optimization, trading rules, sizing, broker or trading actions",
+    "G9_final": "complete only when G1-G8 PASS"
+  },
+  "approved_file_scope": {
+    "create_only": [
+      "contracts/experiments/usdrubf_oil_fx_rub_v1_phase04_regime_research.json",
+      "src/moex_research/runners/usdrubf_oil_fx_rub_v1_phase04_regime_research.py",
+      "tests/unit/test_usdrubf_oil_fx_rub_v1_phase04_regime_research.py",
+      "tests/contract/test_usdrubf_oil_fx_rub_v1_phase04_regime_research_contract.py"
+    ],
+    "existing_files_to_modify": [],
+    "scope_widening_allowed": false
+  },
+  "authority_boundary": {
+    "direct_main_write_allowed": false,
+    "merge_allowed": false,
+    "server_apply_allowed": false,
+    "network_access_allowed": false,
+    "upstream_artifact_mutation_allowed": false,
+    "model_fit_allowed": false,
+    "trading_rule_design_allowed": false,
+    "strategy_promotion_allowed": false,
+    "broker_action_allowed": false,
+    "trading_allowed": false
+  }
+}
