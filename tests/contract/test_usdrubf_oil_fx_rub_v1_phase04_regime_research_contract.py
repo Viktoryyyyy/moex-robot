@@ -32,7 +32,7 @@ def test_phase04_methodology_is_frozen_ex_ante() -> None:
     assert method["forward_return_horizons_sessions"] == [1, 3, 5, 10, 20]
     assert method["bootstrap_samples"] == 1000
     assert method["bootstrap_seed"] == 20260916
-    assert method["bootstrap_block_length_sessions"] == 5
+    assert method["bootstrap_block_length_sessions"] == 20
     assert method["no_threshold_optimization"] is True
     assert method["no_horizon_optimization"] is True
 
