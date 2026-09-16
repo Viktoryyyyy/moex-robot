@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
 
@@ -98,6 +100,51 @@ def test_joint_bootstrap_preserves_zero_difference_when_every_row_is_regime() ->
     )
     assert abs(diff_low) < 1e-15
     assert abs(diff_high) < 1e-15
+
+
+def test_h6_can_be_supported_when_high_high_return_is_positive_but_below_unconditional() -> None:
+    n = 300
+    dates = pd.date_range("2025-01-01", periods=n, freq="D")
+    regimes = np.full(n, "neutral", dtype=object)
+    regimes[10:30] = "high_high"
+    regimes[110:130] = "high_high"
+    regimes[210:230] = "high_high"
+    frame = pd.DataFrame({
+        "target_trade_date": dates.strftime("%Y-%m-%d"),
+        "regime": regimes,
+    })
+    high_high = frame["regime"].eq("high_high").to_numpy()
+    for horizon in phase04.HORIZONS:
+        values = np.full(n, 0.05, dtype=float)
+        values[high_high] = 0.01
+        frame[f"fwd_usdrubf_close_return_{horizon}session"] = values
+
+    metrics, _, summary = phase04.analyze_regimes(frame)
+    hh = metrics.loc[metrics["regime"].eq("high_high")]
+
+    assert set(hh["h5_evidence_status"]) == {"not_supported"}
+    assert set(hh["h6_evidence_status"]) == {"robust"}
+    assert summary["H5_divergence_catch_up"]["status"] == "not_supported_in_phase04"
+    assert summary["H6_regime_dependency"]["status"] == "supported_robust"
+
+
+def test_json_safe_converts_non_finite_values_to_null() -> None:
+    payload = {
+        "nan": float("nan"),
+        "pos_inf": float("inf"),
+        "neg_inf": float("-inf"),
+        "finite": 1.25,
+        "nested": [np.float64(np.nan)],
+    }
+    safe = phase04._json_safe(payload)
+    encoded = json.dumps(safe, allow_nan=False)
+    decoded = json.loads(encoded)
+
+    assert decoded["nan"] is None
+    assert decoded["pos_inf"] is None
+    assert decoded["neg_inf"] is None
+    assert decoded["nested"] == [None]
+    assert decoded["finite"] == 1.25
 
 
 def test_confirmation_horizons_are_predeclared_not_optimized() -> None:
