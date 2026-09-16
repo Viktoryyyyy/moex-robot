@@ -1,0 +1,88 @@
+{
+  "contract_identity": {
+    "contract_id": "usdrubf_oil_fx_rub_v1_phase07_risk_model",
+    "contract_version": "1.0",
+    "project": "MOEX_Bot",
+    "task_id": "STRAT_OIL_FX_RUB_V1_07_RISK_MODEL"
+  },
+  "purpose": {
+    "risk_research_allowed": true,
+    "mae_mfe_analysis_allowed": true,
+    "stop_sensitivity_allowed": true,
+    "normalized_position_sizing_allowed": true,
+    "parameter_optimization_allowed": false,
+    "best_stop_selection_allowed": false,
+    "statistical_inference_allowed": false,
+    "strategy_promotion_allowed": false,
+    "broker_action_allowed": false,
+    "trading_allowed": false
+  },
+  "inputs": {
+    "phase6_modeling_dataset_sha256": "fdd626f9e0522c6bbb653f9e17fbbbeef7ded77f57ff187b35246a2458d55d00",
+    "phase6_dataset_manifest_sha256": "fcbbb5e5ed0549c5c6f397e34f203f01836271f6bf471f90cab5a2fd64ace082",
+    "phase6_source_panel_sha256": "bbe976cf55a610256afad6abfeef4e33a0f416fa878a7d80ea893e79caaac2f1",
+    "brent_pit_acceptance_matrix_sha256": "78b60c9542fc08667267849b9ce03fdf161d2dc971fe99e1ab9d6a8d56266c43",
+    "phase84a_gate_results_sha256": "aceaefb4d2e2a236539dd527c98464ddd1ea6bf5f1cdb8121662e1ce087f9c4c",
+    "phase84a_input_identity_sha256": "3fa20b2daf45f196937064b5f1cc6a58b8009e544d6141e32a77d841d68b65ae",
+    "recompute_from_pinned_upstreams": true,
+    "phase06_runtime_artifact_required": false,
+    "phase06a_runtime_artifact_required": false
+  },
+  "baseline_reference": {
+    "rolling_window_sessions": 126,
+    "high_threshold": 0.75,
+    "cooldown_source_sessions": 21,
+    "entry_execution": "target_trade_date open",
+    "exit_horizons_sessions": [5, 10, 20],
+    "round_trip_cost_bps": 20,
+    "expected_independent_entry_dates": ["2025-01-13", "2025-09-29", "2026-03-17"]
+  },
+  "risk_definition": {
+    "direction": "short_usdrubf_long_rub",
+    "mae_formula": "max(max_session_high / entry_open - 1, 0)",
+    "mfe_formula": "max(1 - min_session_low / entry_open, 0)",
+    "mark_to_market_path": "entry_open to each session close",
+    "intratrade_max_drawdown_formula": "max((running_peak_mark_equity - mark_equity) / running_peak_mark_equity)",
+    "stop_grid_pct": [0.01, 0.02, 0.03, 0.04, 0.05],
+    "stop_price_formula": "entry_open * (1 + stop_pct)",
+    "stop_trigger": "session_high >= stop_price",
+    "gap_aware_stop_fill": "max(stop_price, session_open)",
+    "stop_checked_from_entry_session": true,
+    "fixed_exit_if_not_stopped": "horizon_session_close",
+    "round_trip_cost_bps": 20,
+    "risk_budget_pct_nav": [0.0025, 0.005, 0.01],
+    "normalized_exposure_multiple_formula": "risk_budget_pct_nav / (stop_pct + round_trip_cost_bps / 10000)",
+    "gap_risk_budget_breach_reported": true,
+    "contract_count_sizing_allowed": false
+  },
+  "methodology": {
+    "full_stop_grid_must_be_reported": true,
+    "full_horizon_grid_must_be_reported": true,
+    "best_stop_must_not_be_selected": true,
+    "no_post_hoc_grid_expansion": true,
+    "terminal_source_ohlc_allowed": false,
+    "overlapping_positions_allowed": false,
+    "sample_limited_status_required": true,
+    "phase06_baseline_schedule_must_reproduce": true,
+    "source_panel_raw_sha256_must_match": true
+  },
+  "runtime_artifacts": [
+    "input_identity_verification.json",
+    "risk_excursions.csv",
+    "stop_sensitivity.csv",
+    "sizing_sensitivity.csv",
+    "risk_summary.json",
+    "research_manifest.json",
+    "gate_results.json"
+  ],
+  "authority_boundary": {
+    "network_access_allowed": false,
+    "source_mutation_allowed": false,
+    "model_fit_allowed": false,
+    "parameter_optimization_allowed": false,
+    "best_stop_selection_allowed": false,
+    "strategy_promotion_allowed": false,
+    "broker_action_allowed": false,
+    "trading_action_allowed": false
+  }
+}
