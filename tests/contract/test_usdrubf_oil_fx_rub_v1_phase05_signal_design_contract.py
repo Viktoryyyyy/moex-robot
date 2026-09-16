@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from moex_research.runners import (
+    usdrubf_oil_fx_rub_v1_phase04_regime_research as phase04,
+)
 from moex_research.runners import usdrubf_oil_fx_rub_v1_phase05_signal_design as phase05
 
 
@@ -24,6 +27,13 @@ def test_phase05_contract_is_frozen_and_research_only() -> None:
     assert payload["purpose"]["performance_evaluation_allowed"] is False
     assert payload["purpose"]["parameter_optimization_allowed"] is False
     assert payload["purpose"]["trading_allowed"] is False
+
+
+def test_phase05_contract_hashes_match_frozen_phase04_inputs() -> None:
+    payload = json.loads(CONTRACT.read_text(encoding="utf-8"))
+    inputs = payload["inputs"]
+    for key, expected_hash in phase04.EXPECTED_SHA256.items():
+        assert inputs[f"{key}_sha256"] == expected_hash
 
 
 def test_phase05_runtime_artifacts_exact() -> None:
