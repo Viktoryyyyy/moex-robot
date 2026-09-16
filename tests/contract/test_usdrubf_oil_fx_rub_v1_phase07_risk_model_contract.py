@@ -14,6 +14,7 @@ def test_phase07_contract_is_frozen_and_research_only() -> None:
     phase07._validate_contract(payload)
 
     assert payload["contract_identity"]["task_id"] == "STRAT_OIL_FX_RUB_V1_07_RISK_MODEL"
+    assert payload["inputs"]["phase6_source_panel_sha256"] == phase07.EXPECTED_SOURCE_PANEL_SHA256
     assert payload["baseline_reference"]["exit_horizons_sessions"] == [5, 10, 20]
     assert payload["risk_definition"]["stop_grid_pct"] == [0.01, 0.02, 0.03, 0.04, 0.05]
     assert payload["risk_definition"]["risk_budget_pct_nav"] == [0.0025, 0.005, 0.01]
@@ -27,4 +28,5 @@ def test_phase07_contract_is_frozen_and_research_only() -> None:
     assert payload["purpose"]["trading_allowed"] is False
     assert payload["methodology"]["terminal_source_ohlc_allowed"] is False
     assert payload["methodology"]["overlapping_positions_allowed"] is False
+    assert payload["methodology"]["source_panel_raw_sha256_must_match"] is True
     assert payload["runtime_artifacts"] == list(phase07.DECLARED_OUTPUTS)
