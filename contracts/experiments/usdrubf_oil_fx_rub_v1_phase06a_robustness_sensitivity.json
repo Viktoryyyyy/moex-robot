@@ -1,0 +1,112 @@
+{
+  "contract_identity": {
+    "contract_id": "usdrubf_oil_fx_rub_v1_phase06a_robustness_sensitivity",
+    "contract_version": "1.0",
+    "project": "MOEX_Bot",
+    "task_id": "STRAT_OIL_FX_RUB_V1_06A_ROBUSTNESS_SENSITIVITY"
+  },
+  "purpose": {
+    "robustness_sensitivity_allowed": true,
+    "parameter_optimization_allowed": false,
+    "winner_selection_allowed": false,
+    "parameter_ranking_allowed": false,
+    "statistical_inference_allowed": false,
+    "model_fit_allowed": false,
+    "position_sizing_allowed": false,
+    "strategy_promotion_allowed": false,
+    "trading_allowed": false
+  },
+  "inputs": {
+    "phase6_modeling_dataset_sha256": "fdd626f9e0522c6bbb653f9e17fbbbeef7ded77f57ff187b35246a2458d55d00",
+    "phase6_dataset_manifest_sha256": "fcbbb5e5ed0549c5c6f397e34f203f01836271f6bf471f90cab5a2fd64ace082",
+    "brent_pit_acceptance_matrix_sha256": "78b60c9542fc08667267849b9ce03fdf161d2dc971fe99e1ab9d6a8d56266c43",
+    "phase84a_gate_results_sha256": "aceaefb4d2e2a236539dd527c98464ddd1ea6bf5f1cdb8121662e1ce087f9c4c",
+    "phase84a_input_identity_sha256": "3fa20b2daf45f196937064b5f1cc6a58b8009e544d6141e32a77d841d68b65ae",
+    "phase06_runtime_artifact_required": false,
+    "recompute_from_pinned_upstreams": true
+  },
+  "baseline_reference": {
+    "rolling_window_sessions": 126,
+    "minimum_history_sessions": 63,
+    "high_threshold": 0.75,
+    "cooldown_source_sessions": 21,
+    "exit_horizons_sessions": [5, 10, 20],
+    "round_trip_cost_bps": 20,
+    "expected_independent_entry_dates": [
+      "2025-01-13",
+      "2025-09-29",
+      "2026-03-17"
+    ]
+  },
+  "sensitivity_grid": {
+    "rolling_window_sessions": [63, 126, 252],
+    "minimum_history_by_window": {
+      "63": 32,
+      "126": 63,
+      "252": 126
+    },
+    "high_threshold": [0.70, 0.75, 0.80],
+    "cooldown_source_sessions": [15, 21, 30],
+    "exit_horizons_sessions": [5, 10, 15, 20, 30],
+    "round_trip_cost_bps": 20,
+    "configuration_count": 27,
+    "metric_cell_count": 135,
+    "entry_execution": "target_trade_date open",
+    "exit_execution": "fixed future source-session close"
+  },
+  "methodology": {
+    "signal_definition": "brent_trailing_percentile >= threshold AND usdrubf_trailing_percentile >= threshold",
+    "signal_observation_time": "prior_trade_date close",
+    "entry_execution": "target_trade_date open",
+    "direction": "short_usdrubf_long_rub",
+    "gross_short_return_formula": "(entry_open - exit_close) / entry_open",
+    "cost_return_formula": "round_trip_cost_bps / 10000",
+    "net_short_return_formula": "gross_short_return - cost_return",
+    "cooldown_applied_in_source_panel_sessions": true,
+    "effective_entry_separation_formula": "max(configured_cooldown, horizon_sessions + 1)",
+    "horizon_specific_no_overlap_enforced": true,
+    "pyramiding_allowed": false,
+    "terminal_source_ohlc_allowed": false,
+    "baseline_must_reproduce_phase06_schedule": true,
+    "full_grid_must_be_reported": true,
+    "best_parameter_combination_must_not_be_selected": true,
+    "no_post_hoc_grid_expansion": true
+  },
+  "descriptive_metrics": [
+    "raw_signal_count",
+    "independent_trade_count",
+    "mean_net_return",
+    "median_net_return",
+    "hit_rate_net_positive",
+    "compounded_net_return",
+    "worst_trade_net_return",
+    "trade_sequence_max_drawdown"
+  ],
+  "aggregate_diagnostics": {
+    "positive_mean_cell_share": true,
+    "positive_median_cell_share": true,
+    "positive_hit_rate_majority_cell_share": true,
+    "cells_with_at_least_3_trades": true,
+    "baseline_reference_reported_separately": true,
+    "robustness_claim_allowed": false
+  },
+  "runtime_artifacts": [
+    "input_identity_verification.json",
+    "sensitivity_trade_results.csv",
+    "sensitivity_metrics.csv",
+    "sensitivity_summary.json",
+    "research_manifest.json",
+    "gate_results.json"
+  ],
+  "authority_boundary": {
+    "network_access_allowed": false,
+    "source_mutation_allowed": false,
+    "model_fit_allowed": false,
+    "parameter_optimization_allowed": false,
+    "winner_selection_allowed": false,
+    "position_sizing_allowed": false,
+    "strategy_promotion_allowed": false,
+    "broker_action_allowed": false,
+    "trading_action_allowed": false
+  }
+}
