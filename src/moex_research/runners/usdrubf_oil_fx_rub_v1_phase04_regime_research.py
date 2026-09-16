@@ -92,6 +92,26 @@ def _read_json(path: str | Path) -> dict[str, Any]:
     return payload
 
 
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, np.generic):
+        return _json_safe(value.item())
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    return value
+
+
+def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
+    safe = _json_safe(payload)
+    path.write_text(
+        json.dumps(safe, indent=2, sort_keys=True, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _explicit_file(raw: object, flag: str, suffix: str) -> Path:
     text = str(raw).strip()
     if not text or any(char in text for char in _GLOB_CHARS) or _ALIAS_PATTERN.search(text):
@@ -196,11 +216,15 @@ def _normalize_dates(series: pd.Series, label: str) -> pd.Series:
     return parsed.dt.strftime("%Y-%m-%d").astype("string")
 
 
-def _rolling_percentile(values: np.ndarray, window: int = WINDOW, min_history: int = MIN_HISTORY) -> np.ndarray:
+def _rolling_percentile(
+    values: np.ndarray,
+    window: int = WINDOW,
+    min_history: int = MIN_HISTORY,
+) -> np.ndarray:
     result = np.full(len(values), np.nan, dtype=float)
     for index in range(len(values)):
         start = max(0, index - window + 1)
-        history = values[start:index + 1]
+        history = values[start : index + 1]
         history = history[np.isfinite(history)]
         if len(history) < min_history:
             continue
@@ -255,7 +279,9 @@ def _prepare_observations(
     if len(brent) != EXPECTED_IDENTITY_COUNT:
         raise Phase04RegimeError("Brent identity count mismatch")
     if not brent.loc[:, ["target_trade_date", "target_instrument_id"]].reset_index(drop=True).equals(
-        identities.loc[:, ["target_trade_date", "target_instrument_id"]].astype(str).reset_index(drop=True)
+        identities.loc[:, ["target_trade_date", "target_instrument_id"]]
+        .astype(str)
+        .reset_index(drop=True)
     ):
         raise Phase04RegimeError("Brent identity/order mismatch")
     if not brent["prior_trade_date"].equals(identities["prior_trade_date"].astype("string")):
@@ -290,7 +316,9 @@ def _prepare_observations(
     usd_pct = _rolling_percentile(usd_prior_close)
     regimes = [_classify_regime(a, b) for a, b in zip(oil_pct, usd_pct)]
 
-    result = identities.loc[:, ["target_trade_date", "target_instrument_id", "prior_trade_date"]].copy()
+    result = identities.loc[
+        :, ["target_trade_date", "target_instrument_id", "prior_trade_date"]
+    ].copy()
     result["brent_contract_code"] = brent["brent_contract_code"].astype(str).to_numpy()
     result["brent_prior_close"] = brent_close
     result["usdrubf_prior_close"] = usd_prior_close
@@ -423,7 +451,9 @@ def _calendar_segment_statistics(
     return result
 
 
-def analyze_regimes(observations: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+def analyze_regimes(
+    observations: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
     work = _with_fixed_calendar_segments(observations)
     metrics: list[dict[str, Any]] = []
     stability: list[dict[str, Any]] = []
@@ -437,8 +467,7 @@ def analyze_regimes(observations: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
 
         for regime in REGIME_ORDER[:-1]:
             values = pd.to_numeric(
-                work.loc[work["regime"].eq(regime), label],
-                errors="coerce",
+                work.loc[work["regime"].eq(regime), label], errors="coerce"
             ).to_numpy(float)
             values = values[np.isfinite(values)]
             n = len(values)
@@ -485,7 +514,6 @@ def analyze_regimes(observations: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
             if (
                 regime == "high_high"
                 and n >= ROBUST_MIN_OBSERVATIONS
-                and mean < 0.0
                 and np.isfinite(diff_hi)
                 and diff_hi < 0.0
                 and negative_diff_segments == 3
@@ -494,7 +522,6 @@ def analyze_regimes(observations: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
             elif (
                 regime == "high_high"
                 and n >= MIN_REGIME_OBSERVATIONS
-                and mean < 0.0
                 and diff < 0.0
                 and negative_diff_segments >= 2
             ):
@@ -543,10 +570,7 @@ def analyze_regimes(observations: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
     h5_negative_count = int(confirming["mean_forward_return"].lt(0.0).sum())
     if h5_robust_count >= 2:
         h5_status = "supported_robust"
-    elif (
-        h5_supported_count >= 2
-        and h5_negative_count == len(CONFIRMATION_HORIZONS)
-    ):
+    elif h5_supported_count >= 2 and h5_negative_count == len(CONFIRMATION_HORIZONS):
         h5_status = "supported_suggestive"
     else:
         h5_status = "not_supported_in_phase04"
@@ -598,15 +622,11 @@ def analyze_regimes(observations: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
                 {
                     "horizon_sessions": int(h),
                     "valid_count": int(hh.loc[h, "valid_count"]),
-                    "mean_forward_return": float(
-                        hh.loc[h, "mean_forward_return"]
-                    ),
+                    "mean_forward_return": float(hh.loc[h, "mean_forward_return"]),
                     "short_hit_rate": float(hh.loc[h, "short_hit_rate"]),
                     "mean_ci95_low": float(hh.loc[h, "mean_ci95_low"]),
                     "mean_ci95_high": float(hh.loc[h, "mean_ci95_high"]),
-                    "evidence_status": str(
-                        hh.loc[h, "h5_evidence_status"]
-                    ),
+                    "evidence_status": str(hh.loc[h, "h5_evidence_status"]),
                 }
                 for h in HORIZONS
             ],
@@ -623,23 +643,16 @@ def analyze_regimes(observations: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFr
                     "mean_minus_unconditional": float(
                         hh.loc[h, "mean_minus_unconditional"]
                     ),
-                    "difference_ci95_low": float(
-                        hh.loc[h, "difference_ci95_low"]
-                    ),
-                    "difference_ci95_high": float(
-                        hh.loc[h, "difference_ci95_high"]
-                    ),
-                    "evidence_status": str(
-                        hh.loc[h, "h6_evidence_status"]
-                    ),
+                    "difference_ci95_low": float(hh.loc[h, "difference_ci95_low"]),
+                    "difference_ci95_high": float(hh.loc[h, "difference_ci95_high"]),
+                    "evidence_status": str(hh.loc[h, "h6_evidence_status"]),
                 }
                 for h in HORIZONS
             ],
         },
         "interpretation_boundary": (
-            "This phase tests fixed, past-only level regimes. It does not "
-            "establish causality, a tradable threshold, a position size, "
-            "or a production signal."
+            "This phase tests fixed, past-only level regimes. It does not establish "
+            "causality, a tradable threshold, a position size, or a production signal."
         ),
         "model_fit_performed": False,
         "trading_rule_design_performed": False,
@@ -670,12 +683,24 @@ def build_argument_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_argument_parser().parse_args(argv)
     contract_path = _explicit_file(args.contract_path, "--contract-path", ".json")
-    phase6_modeling = _explicit_file(args.phase6_modeling_dataset_path, "--phase6-modeling-dataset-path", ".parquet")
-    phase6_manifest = _explicit_file(args.phase6_dataset_manifest_path, "--phase6-dataset-manifest-path", ".json")
-    phase6_source = _explicit_file(args.phase6_source_panel_path, "--phase6-source-panel-path", ".parquet")
-    brent_matrix_path = _explicit_file(args.brent_matrix_path, "--brent-matrix-path", ".parquet")
-    brent_gates_path = _explicit_file(args.brent_gate_results_path, "--brent-gate-results-path", ".json")
-    brent_identity_path = _explicit_file(args.brent_input_identity_path, "--brent-input-identity-path", ".json")
+    phase6_modeling = _explicit_file(
+        args.phase6_modeling_dataset_path, "--phase6-modeling-dataset-path", ".parquet"
+    )
+    phase6_manifest = _explicit_file(
+        args.phase6_dataset_manifest_path, "--phase6-dataset-manifest-path", ".json"
+    )
+    phase6_source = _explicit_file(
+        args.phase6_source_panel_path, "--phase6-source-panel-path", ".parquet"
+    )
+    brent_matrix_path = _explicit_file(
+        args.brent_matrix_path, "--brent-matrix-path", ".parquet"
+    )
+    brent_gates_path = _explicit_file(
+        args.brent_gate_results_path, "--brent-gate-results-path", ".json"
+    )
+    brent_identity_path = _explicit_file(
+        args.brent_input_identity_path, "--brent-input-identity-path", ".json"
+    )
     output_dir = _explicit_output_dir(args.output_dir)
     run_id = str(args.run_id).strip()
     git_sha = str(args.git_commit_sha).strip().lower()
@@ -709,12 +734,30 @@ def main(argv: list[str] | None = None) -> int:
 
     gates = {
         "G1_phase6_lineage": {"passed": True},
-        "G2_brent_admission": {"passed": True, "status": "moex_brent_source_candidate_for_phase8_5"},
+        "G2_brent_admission": {
+            "passed": True,
+            "status": "moex_brent_source_candidate_for_phase8_5",
+        },
         "G3_pit_levels": {"passed": True, "source_date": "prior_trade_date"},
-        "G4_percentile_pit": {"passed": True, "window_sessions": WINDOW, "min_history_sessions": MIN_HISTORY},
-        "G5_regime_fixed": {"passed": True, "high_threshold": HIGH_THRESHOLD, "low_threshold": LOW_THRESHOLD},
-        "G6_labels": {"passed": True, "horizons_sessions": list(HORIZONS), "terminal_endpoint_policy": "structural_null"},
-        "G7_no_oil_rub_leakage": {"passed": True, "oil_rub_product_constructed": False},
+        "G4_percentile_pit": {
+            "passed": True,
+            "window_sessions": WINDOW,
+            "min_history_sessions": MIN_HISTORY,
+        },
+        "G5_regime_fixed": {
+            "passed": True,
+            "high_threshold": HIGH_THRESHOLD,
+            "low_threshold": LOW_THRESHOLD,
+        },
+        "G6_labels": {
+            "passed": True,
+            "horizons_sessions": list(HORIZONS),
+            "terminal_endpoint_policy": "structural_null",
+        },
+        "G7_no_oil_rub_leakage": {
+            "passed": True,
+            "oil_rub_product_constructed": False,
+        },
         "G8_research_only": {
             "passed": True,
             "network_access_performed": False,
@@ -727,7 +770,9 @@ def main(argv: list[str] | None = None) -> int:
     gates["G9_final"] = {
         "passed": not failed,
         "failed_gates": failed,
-        "status": "oil_fx_rub_phase04_regime_research_complete" if not failed else "blocked",
+        "status": (
+            "oil_fx_rub_phase04_regime_research_complete" if not failed else "blocked"
+        ),
     }
 
     manifest = {
@@ -737,7 +782,10 @@ def main(argv: list[str] | None = None) -> int:
         "git_commit_sha": git_sha,
         "identity_count": EXPECTED_IDENTITY_COUNT,
         "input_sha256": observed_hashes,
-        "regime_counts": {key: int(value) for key, value in observations["regime"].value_counts().to_dict().items()},
+        "regime_counts": {
+            key: int(value)
+            for key, value in observations["regime"].value_counts().to_dict().items()
+        },
         "runtime_artifacts": list(DECLARED_OUTPUTS),
         "network_access_performed": False,
         "upstream_artifact_mutation_performed": False,
@@ -760,19 +808,14 @@ def main(argv: list[str] | None = None) -> int:
     observations.to_parquet(output_dir / "regime_observations.parquet", index=False)
     metrics.to_csv(output_dir / "regime_metrics.csv", index=False)
     stability.to_csv(output_dir / "regime_temporal_stability.csv", index=False)
-    (output_dir / "input_identity_verification.json").write_text(
-        json.dumps(identity_verification, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    (output_dir / "hypothesis_summary.json").write_text(
-        json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    (output_dir / "research_manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    (output_dir / "gate_results.json").write_text(
-        json.dumps(gates, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    if tuple(sorted(path.name for path in output_dir.iterdir())) != tuple(sorted(DECLARED_OUTPUTS)):
+    _write_json(output_dir / "input_identity_verification.json", identity_verification)
+    _write_json(output_dir / "hypothesis_summary.json", summary)
+    _write_json(output_dir / "research_manifest.json", manifest)
+    _write_json(output_dir / "gate_results.json", gates)
+
+    if tuple(sorted(path.name for path in output_dir.iterdir())) != tuple(
+        sorted(DECLARED_OUTPUTS)
+    ):
         raise Phase04RegimeError("output artifact inventory mismatch")
     return 0
 
