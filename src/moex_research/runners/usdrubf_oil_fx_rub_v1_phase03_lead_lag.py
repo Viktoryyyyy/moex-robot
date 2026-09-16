@@ -124,6 +124,22 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
         raise Phase03LeadLagError("runtime artifact inventory mismatch")
 
 
+def _validate_input_bundle_paths(
+    features_path: Path,
+    labels_path: Path,
+    manifest_path: Path,
+    gates_path: Path,
+) -> None:
+    parents = {
+        path.resolve().parent
+        for path in (features_path, labels_path, manifest_path, gates_path)
+    }
+    if len(parents) != 1:
+        raise Phase03LeadLagError(
+            "Phase 02B runtime inputs must come from one materialization directory"
+        )
+
+
 def _validate_inputs(
     features: pd.DataFrame,
     labels: pd.DataFrame,
@@ -546,6 +562,9 @@ def main(argv: list[str] | None = None) -> int:
     gates_path = Path(args.dataset_gates_path)
     contract = _read_json(contract_path)
     _validate_contract(contract)
+    _validate_input_bundle_paths(
+        features_path, labels_path, manifest_path, gates_path
+    )
     features = pd.read_parquet(features_path)
     labels = pd.read_parquet(labels_path)
     upstream_manifest = _read_json(manifest_path)
