@@ -50,7 +50,8 @@
     "fixed_exit_if_not_stopped": "horizon_session_close",
     "round_trip_cost_bps": 20,
     "risk_budget_pct_nav": [0.0025, 0.005, 0.01],
-    "normalized_exposure_multiple_formula": "risk_budget_pct_nav / stop_pct",
+    "normalized_exposure_multiple_formula": "risk_budget_pct_nav / (stop_pct + round_trip_cost_bps / 10000)",
+    "gap_risk_budget_breach_reported": true,
     "contract_count_sizing_allowed": false
   },
   "methodology": {
