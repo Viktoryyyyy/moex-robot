@@ -24,6 +24,17 @@ def test_regime_classification_is_fixed() -> None:
     assert phase04._classify_regime(float("nan"), 0.90) == "warmup"
 
 
+def test_block_bootstrap_indices_are_deterministic_and_complete() -> None:
+    rng1 = np.random.default_rng(123)
+    rng2 = np.random.default_rng(123)
+    first = phase04._circular_block_indices(23, rng1)
+    second = phase04._circular_block_indices(23, rng2)
+    np.testing.assert_array_equal(first, second)
+    assert len(first) == 23
+    assert first.min() >= 0
+    assert first.max() < 23
+
+
 def test_high_high_negative_catchup_can_be_detected_without_model_fit() -> None:
     n = 300
     frame = pd.DataFrame({
@@ -54,3 +65,4 @@ def test_confirmation_horizons_are_predeclared_not_optimized() -> None:
     assert phase04.MIN_HISTORY == 63
     assert phase04.HIGH_THRESHOLD == 0.75
     assert phase04.LOW_THRESHOLD == 0.25
+    assert phase04.BOOTSTRAP_BLOCK_LENGTH == 5
