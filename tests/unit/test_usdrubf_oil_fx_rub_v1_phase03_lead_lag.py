@@ -7,7 +7,9 @@ from moex_research.runners.usdrubf_oil_fx_rub_v1_phase03_lead_lag import (
     FEATURE_COLUMNS,
     IDENTITY_COLUMNS,
     LABEL_COLUMNS,
+    Phase03LeadLagError,
     _build_gates,
+    _validate_input_bundle_paths,
     analyze_lead_lag,
 )
 
@@ -65,3 +67,27 @@ def test_gates_pass_for_well_formed_analysis() -> None:
 def test_schema_constants_do_not_mix_labels_into_features() -> None:
     assert not (set(FEATURE_COLUMNS) & set(LABEL_COLUMNS))
     assert IDENTITY_COLUMNS == ("target_trade_date", "target_instrument_id")
+
+
+def test_runtime_inputs_must_share_one_materialization_directory(tmp_path) -> None:
+    bundle = tmp_path / "bundle"
+    other = tmp_path / "other"
+    bundle.mkdir()
+    other.mkdir()
+    _validate_input_bundle_paths(
+        bundle / "features.parquet",
+        bundle / "labels.parquet",
+        bundle / "manifest.json",
+        bundle / "gate_results.json",
+    )
+    try:
+        _validate_input_bundle_paths(
+            bundle / "features.parquet",
+            bundle / "labels.parquet",
+            bundle / "manifest.json",
+            other / "gate_results.json",
+        )
+    except Phase03LeadLagError:
+        pass
+    else:
+        raise AssertionError("mixed materialization directories must fail closed")
