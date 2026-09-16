@@ -88,6 +88,30 @@ def test_fixed_exit_schedule_uses_panel_session_indices_only() -> None:
     assert first["exit_20session_execution"] == "close"
 
 
+def test_fixed_exit_schedule_can_emit_terminal_date_without_price() -> None:
+    panel = _synthetic_panel()
+    terminal_index = len(panel) - 1
+    observations = pd.DataFrame(
+        {
+            "target_trade_date": [panel.iloc[terminal_index - 20]["trade_date"]],
+            "target_instrument_id": ["forts.usdrubf"],
+            "prior_trade_date": [panel.iloc[terminal_index - 21]["trade_date"]],
+            "brent_percentile_126": [0.90],
+            "usdrubf_percentile_126": [0.90],
+            "regime": ["high_high"],
+            "entry_source_session_index": [terminal_index - 20],
+        }
+    )
+
+    candidates = phase05._build_signal_candidates(observations, panel)
+    row = candidates.iloc[0]
+
+    assert row["exit_20session_available"]
+    assert row["exit_20session_trade_date"] == panel.iloc[terminal_index]["trade_date"]
+    assert "exit_price" not in " ".join(candidates.columns).lower()
+    assert "exit_close" not in " ".join(candidates.columns).lower()
+
+
 def test_summary_does_not_evaluate_performance() -> None:
     candidates = phase05._build_signal_candidates(
         _synthetic_observations(), _synthetic_panel()
