@@ -1,0 +1,94 @@
+{
+  "contract_identity": {
+    "contract_id": "usdrubf_oil_fx_rub_v1_phase05_signal_design",
+    "contract_version": "1.0",
+    "project": "MOEX_Bot",
+    "task_id": "STRAT_OIL_FX_RUB_V1_05_SIGNAL_DESIGN",
+    "status": "repository_implementation_only"
+  },
+  "purpose": {
+    "objective": "Convert the Phase 04 high-Brent/high-USDRUBF research regime into a deterministic PIT-safe short-USDRUBF candidate signal schedule for Phase 06 backtesting.",
+    "signal_design_allowed": true,
+    "performance_evaluation_allowed": false,
+    "model_fit_allowed": false,
+    "parameter_optimization_allowed": false,
+    "strategy_promotion_allowed": false,
+    "trading_allowed": false
+  },
+  "inputs": {
+    "phase6_modeling_dataset_sha256": "fdd626f9e0522c6bbb653f9e17fbbbeef7ded77f57ff187b35246a2458d55d00",
+    "phase6_dataset_manifest_sha256": "fcbbb5e5ed0549c5c6f397e34f203f01836271f6bf471f90cab5a2fd64ace082",
+    "brent_pit_acceptance_matrix_sha256": "78b60c9542fc08667267849b9ce03fdf161d2dc971fe99e1ab9d6a8d56266c43",
+    "phase84a_gate_results_sha256": "aceaefb4d2e2a236539dd527c98464ddd1ea6bf5f1cdb8121662e1ce087f9c4c",
+    "phase84a_input_identity_sha256": "3fa20b2daf45f196937064b5f1cc6a58b8009e544d6141e32a77d841d68b65ae",
+    "phase6_source_panel": "explicit path required and semantic replay must reproduce frozen Phase6 dataset",
+    "phase04_logic_source": "repository main implementation usdrubf_oil_fx_rub_v1_phase04_regime_research"
+  },
+  "signal_definition": {
+    "regime_sampling_basis": "Phase 04 eligible identity sequence; not a continuous daily Brent regime path",
+    "signal_observation_time": "prior_trade_date close",
+    "raw_signal_condition": "brent_percentile_126 >= 0.75 AND usdrubf_percentile_126 >= 0.75",
+    "direction": "short_usdrubf_long_rub",
+    "execution_time": "target_trade_date open",
+    "entry_price_field": "open",
+    "minimum_entry_separation_source_sessions": 21,
+    "overlap_policy": "accept earliest raw signal, then suppress raw signals until at least 21 source-panel session indices after the accepted entry",
+    "pyramiding_allowed": false,
+    "fixed_exit_horizons_sessions": [5, 10, 20],
+    "fixed_exit_execution": "close of entry source-panel index plus horizon sessions",
+    "regime_exit_allowed": false,
+    "regime_exit_reason": "Phase 04 regime is sampled only on eligible research identities, so continuous daily regime-exit timing is not observable",
+    "stop_loss_allowed_in_phase05": false,
+    "stop_loss_reason": "risk overlay belongs to Phase 07",
+    "phase06_round_trip_cost_bps_sensitivity": [0, 5, 10, 20],
+    "cost_grid_interpretation": "predeclared stress grid only; not an assertion of exact realized brokerage/exchange/slippage cost"
+  },
+  "phase05_output_policy": {
+    "future_exit_prices_allowed": false,
+    "future_returns_allowed": false,
+    "pnl_allowed": false,
+    "performance_ranking_allowed": false,
+    "candidate_schedule_only": true
+  },
+  "runtime_artifacts": [
+    "input_identity_verification.json",
+    "signal_candidates.parquet",
+    "signal_design_summary.json",
+    "research_manifest.json",
+    "gate_results.json"
+  ],
+  "gates": {
+    "G1_lineage": "exact pinned Phase6 and Brent artifact hashes plus Phase6 semantic replay PASS",
+    "G2_phase04_semantics": "126/63 percentile and 0.75 high thresholds exactly match Phase 04 repository implementation",
+    "G3_pit_signal": "raw signal uses prior_trade_date closes only and target session open is the earliest execution price",
+    "G4_signal_direction": "only high_high short-USDRUBF candidates are emitted",
+    "G5_overlap": "accepted entries are separated by at least 21 source-panel session indices; no pyramiding",
+    "G6_exit_schedule": "only fixed 5/10/20 session close schedules are emitted; no regime-exit inference",
+    "G7_no_outcome_use": "no future exit prices, forward returns, PnL, performance ranking, model fit or threshold/horizon optimization",
+    "G8_research_only": "no broker/trading actions, no sizing, no strategy promotion, no upstream mutation, no network",
+    "G9_final": "complete only when G1-G8 PASS"
+  },
+  "approved_file_scope": {
+    "create_only": [
+      "contracts/experiments/usdrubf_oil_fx_rub_v1_phase05_signal_design.json",
+      "src/moex_research/runners/usdrubf_oil_fx_rub_v1_phase05_signal_design.py",
+      "tests/unit/test_usdrubf_oil_fx_rub_v1_phase05_signal_design.py",
+      "tests/contract/test_usdrubf_oil_fx_rub_v1_phase05_signal_design_contract.py"
+    ],
+    "existing_files_to_modify": [],
+    "scope_widening_allowed": false
+  },
+  "authority_boundary": {
+    "direct_main_write_allowed": false,
+    "merge_allowed": false,
+    "server_apply_allowed": false,
+    "network_access_allowed": false,
+    "upstream_artifact_mutation_allowed": false,
+    "model_fit_allowed": false,
+    "parameter_optimization_allowed": false,
+    "performance_evaluation_allowed": false,
+    "strategy_promotion_allowed": false,
+    "broker_action_allowed": false,
+    "trading_allowed": false
+  }
+}
