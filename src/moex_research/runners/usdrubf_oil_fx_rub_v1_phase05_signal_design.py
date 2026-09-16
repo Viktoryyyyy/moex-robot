@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import re
 from pathlib import Path
 from typing import Any, Final, Mapping
@@ -85,6 +84,14 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
     for key, value in expected_identity.items():
         if identity.get(key) != value:
             raise Phase05SignalDesignError(f"contract identity mismatch: {key}")
+
+    inputs = contract.get("inputs")
+    if not isinstance(inputs, Mapping):
+        raise Phase05SignalDesignError("inputs are required")
+    for key, expected_hash in phase04.EXPECTED_SHA256.items():
+        field = f"{key}_sha256"
+        if inputs.get(field) != expected_hash:
+            raise Phase05SignalDesignError(f"immutable input hash contract mismatch: {field}")
 
     purpose = contract.get("purpose")
     if not isinstance(purpose, Mapping):
@@ -195,10 +202,7 @@ def _prepare_signal_observations(
     panel_dates = phase04._normalize_dates(panel["trade_date"], "Phase6 source trade_date")
     if set(panel["instrument_id"].astype(str)) != {EXPECTED_INSTRUMENT}:
         raise Phase05SignalDesignError("Phase6 source instrument mismatch")
-    panel_open = pd.to_numeric(panel["open"], errors="coerce").to_numpy(float)
     panel_close = pd.to_numeric(panel["close"], errors="coerce").to_numpy(float)
-    if not np.isfinite(panel_open).all() or np.any(panel_open <= 0):
-        raise Phase05SignalDesignError("Phase6 source open must be finite positive")
     if not np.isfinite(panel_close).all() or np.any(panel_close <= 0):
         raise Phase05SignalDesignError("Phase6 source close must be finite positive")
     date_to_index = {str(value): idx for idx, value in enumerate(panel_dates)}
@@ -209,7 +213,6 @@ def _prepare_signal_observations(
 
     usd_prior_close = np.full(EXPECTED_IDENTITY_COUNT, np.nan, dtype=float)
     entry_index = np.full(EXPECTED_IDENTITY_COUNT, -1, dtype=int)
-    entry_open = np.full(EXPECTED_IDENTITY_COUNT, np.nan, dtype=float)
     for idx, (target_date, prior_date) in enumerate(
         zip(
             identities["target_trade_date"].astype(str),
@@ -222,7 +225,6 @@ def _prepare_signal_observations(
             raise Phase05SignalDesignError("Phase6 source missing target/prior identity date")
         usd_prior_close[idx] = panel_close[prior_idx]
         entry_index[idx] = target_idx
-        entry_open[idx] = panel_open[target_idx]
 
     oil_pct = phase04._rolling_percentile(brent_close)
     usd_pct = phase04._rolling_percentile(usd_prior_close)
@@ -238,7 +240,6 @@ def _prepare_signal_observations(
     observations["usdrubf_percentile_126"] = usd_pct
     observations["regime"] = regimes
     observations["entry_source_session_index"] = entry_index
-    observations["entry_open"] = entry_open
     return observations, panel
 
 
@@ -281,7 +282,6 @@ def _build_signal_candidates(
             "usdrubf_percentile_126": float(row["usdrubf_percentile_126"]),
             "entry_execution": "target_trade_date_open",
             "entry_source_session_index": entry_idx,
-            "entry_open": float(row["entry_open"]),
             "execution_eligible": bool(eligible[ordinal - 1]),
             "suppression_reason": "" if eligible[ordinal - 1] else "overlap_cooldown_21_sessions",
         }
@@ -305,7 +305,15 @@ def _build_signal_candidates(
     ):
         raise Phase05SignalDesignError("overlap guard failed")
 
-    forbidden_tokens = ("return", "pnl", "profit", "exit_price", "exit_close")
+    forbidden_tokens = (
+        "return",
+        "pnl",
+        "profit",
+        "entry_price",
+        "entry_open",
+        "exit_price",
+        "exit_close",
+    )
     forbidden_columns = [
         column
         for column in candidates.columns
@@ -333,6 +341,7 @@ def _build_summary(candidates: pd.DataFrame) -> dict[str, Any]:
         "direction": "short_usdrubf_long_rub",
         "signal_observation_time": "prior_trade_date close",
         "entry_execution": "target_trade_date open",
+        "entry_price_value_published": False,
         "fixed_exit_horizons_sessions": list(EXIT_HORIZONS),
         "phase06_round_trip_cost_bps_sensitivity": list(COST_GRID_BPS),
         "regime_exit_not_designed": True,
@@ -442,10 +451,14 @@ def main(argv: list[str] | None = None) -> int:
         "G3_pit_signal": {
             "passed": True,
             "signal_source_time": "prior_trade_date_close",
+            "execution_price_value_read": False,
             "earliest_execution": "target_trade_date_open",
         },
         "G4_signal_direction": {
-            "passed": bool((candidates["signal_regime"] == "high_high").all()),
+            "passed": bool(
+                (candidates["signal_regime"] == "high_high").all()
+                and (candidates["direction"] == "short_usdrubf_long_rub").all()
+            ),
             "direction": "short_usdrubf_long_rub",
         },
         "G5_overlap": {
@@ -460,6 +473,7 @@ def main(argv: list[str] | None = None) -> int:
         },
         "G7_no_outcome_use": {
             "passed": True,
+            "entry_price_value_published": False,
             "future_exit_prices_used": False,
             "future_returns_used": False,
             "pnl_computed": False,
@@ -499,6 +513,7 @@ def main(argv: list[str] | None = None) -> int:
         "model_fit_performed": False,
         "parameter_optimization_performed": False,
         "performance_evaluation_performed": False,
+        "entry_price_value_published": False,
         "trading_action_performed": False,
     }
     identity_verification = {
