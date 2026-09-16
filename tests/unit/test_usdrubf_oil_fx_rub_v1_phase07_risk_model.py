@@ -83,22 +83,28 @@ def test_stop_without_trigger_uses_fixed_horizon_close() -> None:
 
 
 def test_cost_aware_sizing_and_gap_breach() -> None:
-    metrics = pd.DataFrame(
-        [
-            {
-                "horizon_sessions": 20,
-                "stop_pct": 0.02,
-                "worst_trade_net_return": -0.032,
-            }
-        ]
-    )
-    sizing = phase07._sizing_sensitivity(metrics)
-    row = sizing.loc[np.isclose(sizing["risk_budget_pct_nav"], 0.005)].iloc[0]
+    rows = []
+    for horizon in phase07.HORIZONS:
+        for stop_pct in phase07.STOP_GRID:
+            rows.append(
+                {
+                    "horizon_sessions": horizon,
+                    "stop_pct": stop_pct,
+                    "worst_trade_net_return": -0.032 if (horizon == 20 and np.isclose(stop_pct, 0.02)) else -float(stop_pct + phase07.COST_RETURN),
+                }
+            )
+    sizing = phase07._sizing_sensitivity(pd.DataFrame(rows))
+    row = sizing.loc[
+        (sizing["horizon_sessions"] == 20)
+        & np.isclose(sizing["stop_pct"], 0.02)
+        & np.isclose(sizing["risk_budget_pct_nav"], 0.005)
+    ].iloc[0]
     expected_exposure = 0.005 / 0.022
     assert np.isclose(row["normalized_exposure_multiple"], expected_exposure)
     assert np.isclose(row["nominal_exact_stop_loss_pct_nav"], 0.005)
     assert row["observed_worst_trade_loss_pct_nav"] > 0.005
     assert bool(row["gap_risk_budget_breached_in_sample"]) is True
+    assert len(sizing) == 45
 
 
 def test_grids_are_fixed_ex_ante() -> None:
