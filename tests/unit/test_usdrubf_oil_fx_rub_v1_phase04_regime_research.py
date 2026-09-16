@@ -26,6 +26,21 @@ def test_regime_classification_is_fixed() -> None:
     assert phase04._classify_regime(float("nan"), 0.90) == "warmup"
 
 
+def test_identity_alignment_is_dtype_insensitive_but_value_strict() -> None:
+    observed = pd.DataFrame({
+        "target_trade_date": pd.Series(["2025-01-01", "2025-01-02"], dtype="string"),
+        "target_instrument_id": ["forts.usdrubf", "forts.usdrubf"],
+    })
+    expected = pd.DataFrame({
+        "target_trade_date": ["2025-01-01", "2025-01-02"],
+        "target_instrument_id": pd.Series(["forts.usdrubf", "forts.usdrubf"], dtype="string"),
+    })
+
+    assert phase04._identity_values_equal(observed, expected)
+    expected.loc[1, "target_trade_date"] = "2025-01-03"
+    assert not phase04._identity_values_equal(observed, expected)
+
+
 def test_block_bootstrap_indices_are_deterministic_and_complete() -> None:
     rng1 = np.random.default_rng(123)
     rng2 = np.random.default_rng(123)
