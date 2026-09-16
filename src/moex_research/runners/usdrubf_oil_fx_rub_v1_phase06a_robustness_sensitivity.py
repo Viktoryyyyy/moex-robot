@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import math
 import re
 from itertools import product
 from pathlib import Path
@@ -20,7 +19,6 @@ TASK_ID: Final[str] = "STRAT_OIL_FX_RUB_V1_06A_ROBUSTNESS_SENSITIVITY"
 CONTRACT_ID: Final[str] = "usdrubf_oil_fx_rub_v1_phase06a_robustness_sensitivity"
 CONTRACT_VERSION: Final[str] = "1.0"
 EXPECTED_INSTRUMENT: Final[str] = "forts.usdrubf"
-
 WINDOW_GRID: Final[tuple[int, ...]] = (63, 126, 252)
 MIN_HISTORY_BY_WINDOW: Final[dict[int, int]] = {63: 32, 126: 63, 252: 126}
 THRESHOLD_GRID: Final[tuple[float, ...]] = (0.70, 0.75, 0.80)
@@ -45,7 +43,6 @@ DECLARED_OUTPUTS: Final[tuple[str, ...]] = (
 
 _ALIAS_PATTERN = re.compile(r"(^|[/\\._-])(latest|current|autodetect)($|[/\\._-])", re.I)
 _SHA40_PATTERN = re.compile(r"^[0-9a-f]{40}$")
-_GLOB_CHARS = frozenset("*?[]")
 
 
 class Phase06ARobustnessError(ValueError):
@@ -97,14 +94,13 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
     inputs = contract.get("inputs")
     if not isinstance(inputs, Mapping):
         raise Phase06ARobustnessError("inputs are required")
-    hash_key_map = {
+    for contract_key, upstream_key in {
         "phase6_modeling_dataset_sha256": "phase6_modeling_dataset",
         "phase6_dataset_manifest_sha256": "phase6_dataset_manifest",
         "brent_pit_acceptance_matrix_sha256": "brent_pit_acceptance_matrix",
         "phase84a_gate_results_sha256": "phase84a_gate_results",
         "phase84a_input_identity_sha256": "phase84a_input_identity",
-    }
-    for contract_key, upstream_key in hash_key_map.items():
+    }.items():
         if inputs.get(contract_key) != phase04.EXPECTED_SHA256[upstream_key]:
             raise Phase06ARobustnessError(f"immutable hash metadata mismatch: {contract_key}")
     if inputs.get("phase06_runtime_artifact_required") is not False:
@@ -129,8 +125,6 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
             raise Phase06ARobustnessError(f"baseline mismatch: {key}")
 
     grid = contract.get("sensitivity_grid")
-    if not isinstance(grid, Mapping):
-        raise Phase06ARobustnessError("sensitivity_grid is required")
     expected_grid = {
         "rolling_window_sessions": list(WINDOW_GRID),
         "minimum_history_by_window": {str(k): v for k, v in MIN_HISTORY_BY_WINDOW.items()},
@@ -143,6 +137,8 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
         "entry_execution": "target_trade_date open",
         "exit_execution": "fixed future source-session close",
     }
+    if not isinstance(grid, Mapping):
+        raise Phase06ARobustnessError("sensitivity_grid is required")
     for key, value in expected_grid.items():
         if grid.get(key) != value:
             raise Phase06ARobustnessError(f"sensitivity grid mismatch: {key}")
@@ -150,15 +146,18 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
     methodology = contract.get("methodology")
     if not isinstance(methodology, Mapping):
         raise Phase06ARobustnessError("methodology is required")
-    required_true = (
+    for key in (
         "cooldown_applied_in_source_panel_sessions",
+        "horizon_specific_no_overlap_enforced",
         "baseline_must_reproduce_phase06_schedule",
         "full_grid_must_be_reported",
         "best_parameter_combination_must_not_be_selected",
         "no_post_hoc_grid_expansion",
-    )
-    if any(methodology.get(key) is not True for key in required_true):
-        raise Phase06ARobustnessError("methodology guard missing")
+    ):
+        if methodology.get(key) is not True:
+            raise Phase06ARobustnessError(f"methodology guard missing: {key}")
+    if methodology.get("effective_entry_separation_formula") != "max(configured_cooldown, horizon_sessions + 1)":
+        raise Phase06ARobustnessError("effective separation formula mismatch")
     if methodology.get("pyramiding_allowed") is not False:
         raise Phase06ARobustnessError("pyramiding must remain disabled")
     if methodology.get("terminal_source_ohlc_allowed") is not False:
@@ -171,10 +170,8 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
     aggregate = contract.get("aggregate_diagnostics")
     if not isinstance(aggregate, Mapping) or aggregate.get("robustness_claim_allowed") is not False:
         raise Phase06ARobustnessError("robustness claim must remain forbidden")
-
     if contract.get("runtime_artifacts") != list(DECLARED_OUTPUTS):
         raise Phase06ARobustnessError("runtime artifact inventory mismatch")
-
     authority = contract.get("authority_boundary")
     if not isinstance(authority, Mapping) or any(value is not False for value in authority.values()):
         raise Phase06ARobustnessError("authority boundary was widened")
@@ -192,13 +189,19 @@ def _validate_upstream_contracts(
     )
 
 
-def _execution_eligibility(indices: list[int], cooldown: int) -> list[bool]:
-    if cooldown not in COOLDOWN_GRID:
-        raise Phase06ARobustnessError("unsupported cooldown")
+def _effective_separation(cooldown: int, horizon: int) -> int:
+    if cooldown not in COOLDOWN_GRID or horizon not in HORIZON_GRID:
+        raise Phase06ARobustnessError("unsupported cooldown/horizon")
+    return max(cooldown, horizon + 1)
+
+
+def _execution_eligibility(indices: list[int], separation: int) -> list[bool]:
+    if separation < 1:
+        raise Phase06ARobustnessError("entry separation must be positive")
     accepted: list[bool] = []
     last_accepted: int | None = None
     for index in indices:
-        eligible = last_accepted is None or index - last_accepted >= cooldown
+        eligible = last_accepted is None or index - last_accepted >= separation
         accepted.append(eligible)
         if eligible:
             last_accepted = index
@@ -209,13 +212,12 @@ def _config_id(window: int, threshold: float, cooldown: int) -> str:
     return f"w{window}_t{int(round(threshold * 100)):02d}_c{cooldown}"
 
 
-def _build_config_candidates(
+def _build_config_pool(
     observations: pd.DataFrame,
     panel: pd.DataFrame,
     *,
     window: int,
     threshold: float,
-    cooldown: int,
 ) -> tuple[pd.DataFrame, int, int]:
     min_history = MIN_HISTORY_BY_WINDOW[window]
     oil_pct = phase04._rolling_percentile(
@@ -233,23 +235,27 @@ def _build_config_candidates(
     raw["brent_percentile"] = oil_pct[mask]
     raw["usdrubf_percentile"] = usd_pct[mask]
     raw = raw.sort_values("entry_source_session_index", kind="mergesort").reset_index(drop=True)
-    raw_signal_count = int(len(raw))
-
+    raw_count = int(len(raw))
     terminal_index = len(panel) - 1
-    executable = raw.loc[raw["entry_source_session_index"].astype(int) < terminal_index].copy()
-    unbound_entry_excluded_count = raw_signal_count - int(len(executable))
-    if executable.empty:
-        executable["execution_eligible"] = pd.Series(dtype=bool)
-        return executable, raw_signal_count, unbound_entry_excluded_count
-
-    indices = executable["entry_source_session_index"].astype(int).tolist()
-    executable["execution_eligible"] = _execution_eligibility(indices, cooldown)
-    return executable, raw_signal_count, unbound_entry_excluded_count
+    pool = raw.loc[raw["entry_source_session_index"].astype(int) < terminal_index].copy()
+    return pool, raw_count, raw_count - int(len(pool))
 
 
-def _baseline_schedule(candidates: pd.DataFrame, panel: pd.DataFrame) -> tuple[tuple[str, str, str, str, str], ...]:
-    eligible = candidates.loc[candidates["execution_eligible"]].copy()
-    eligible = eligible.sort_values("entry_source_session_index", kind="mergesort")
+def _eligible_for_horizon(pool: pd.DataFrame, panel: pd.DataFrame, *, cooldown: int, horizon: int) -> pd.DataFrame:
+    terminal_index = len(panel) - 1
+    available = pool.loc[
+        pool["entry_source_session_index"].astype(int) + horizon < terminal_index
+    ].copy()
+    available = available.sort_values("entry_source_session_index", kind="mergesort").reset_index(drop=True)
+    if available.empty:
+        return available
+    separation = _effective_separation(cooldown, horizon)
+    eligibility = _execution_eligibility(available["entry_source_session_index"].astype(int).tolist(), separation)
+    return available.loc[np.asarray(eligibility, dtype=bool)].reset_index(drop=True)
+
+
+def _baseline_schedule(pool: pd.DataFrame, panel: pd.DataFrame) -> tuple[tuple[str, str, str, str, str], ...]:
+    eligible = _eligible_for_horizon(pool, panel, cooldown=BASELINE_COOLDOWN, horizon=20)
     panel_dates = panel["trade_date"].astype(str).tolist()
     rows: list[tuple[str, str, str, str, str]] = []
     for _, row in eligible.iterrows():
@@ -270,30 +276,28 @@ def _baseline_schedule(candidates: pd.DataFrame, panel: pd.DataFrame) -> tuple[t
 
 
 def _trade_rows_for_config(
-    candidates: pd.DataFrame,
+    pool: pd.DataFrame,
     panel: pd.DataFrame,
     *,
     window: int,
     threshold: float,
     cooldown: int,
 ) -> list[dict[str, Any]]:
-    eligible = candidates.loc[candidates["execution_eligible"]].copy()
-    eligible = eligible.sort_values("entry_source_session_index", kind="mergesort")
     panel_dates = panel["trade_date"].astype(str).tolist()
     panel_open = pd.to_numeric(panel["open"], errors="coerce").to_numpy(float)
     panel_close = pd.to_numeric(panel["close"], errors="coerce").to_numpy(float)
     terminal_index = len(panel) - 1
     config_id = _config_id(window, threshold, cooldown)
     rows: list[dict[str, Any]] = []
-    for trade_ordinal, (_, candidate) in enumerate(eligible.iterrows(), start=1):
-        entry_idx = int(candidate["entry_source_session_index"])
-        if entry_idx >= terminal_index:
-            raise Phase06ARobustnessError("terminal entry OHLC consumption blocked")
-        entry_open = phase06._safe_positive_price(panel_open[entry_idx], "entry_open")
-        for horizon in HORIZON_GRID:
+    for horizon in HORIZON_GRID:
+        eligible = _eligible_for_horizon(pool, panel, cooldown=cooldown, horizon=horizon)
+        separation = _effective_separation(cooldown, horizon)
+        for ordinal, (_, candidate) in enumerate(eligible.iterrows(), start=1):
+            entry_idx = int(candidate["entry_source_session_index"])
             exit_idx = entry_idx + horizon
-            if exit_idx >= terminal_index:
-                continue
+            if entry_idx >= terminal_index or exit_idx >= terminal_index:
+                raise Phase06ARobustnessError("terminal OHLC consumption blocked")
+            entry_open = phase06._safe_positive_price(panel_open[entry_idx], "entry_open")
             exit_close = phase06._safe_positive_price(panel_close[exit_idx], "exit_close")
             gross = phase06._gross_short_return(entry_open, exit_close)
             net = phase06._net_short_return(gross, PRIMARY_COST_BPS)
@@ -303,8 +307,9 @@ def _trade_rows_for_config(
                     "rolling_window_sessions": window,
                     "minimum_history_sessions": MIN_HISTORY_BY_WINDOW[window],
                     "high_threshold": threshold,
-                    "cooldown_source_sessions": cooldown,
-                    "trade_ordinal": trade_ordinal,
+                    "configured_cooldown_source_sessions": cooldown,
+                    "effective_entry_separation_source_sessions": separation,
+                    "trade_ordinal": ordinal,
                     "entry_trade_date": str(candidate["target_trade_date"]),
                     "prior_trade_date": str(candidate["prior_trade_date"]),
                     "entry_source_session_index": entry_idx,
@@ -331,24 +336,27 @@ def _metric_row(
     cooldown: int,
     horizon: int,
     raw_signal_count: int,
-    independent_trade_count: int,
     unbound_entry_excluded_count: int,
 ) -> dict[str, Any]:
-    subset = trade_frame.loc[
-        (trade_frame["config_id"] == _config_id(window, threshold, cooldown))
-        & (trade_frame["horizon_sessions"] == horizon)
-    ].sort_values("entry_trade_date", kind="mergesort") if not trade_frame.empty else pd.DataFrame()
+    if trade_frame.empty:
+        subset = pd.DataFrame()
+    else:
+        subset = trade_frame.loc[
+            (trade_frame["config_id"] == _config_id(window, threshold, cooldown))
+            & (trade_frame["horizon_sessions"] == horizon)
+        ].sort_values("entry_trade_date", kind="mergesort")
     trade_count = int(len(subset))
     row: dict[str, Any] = {
         "config_id": _config_id(window, threshold, cooldown),
         "rolling_window_sessions": window,
         "minimum_history_sessions": MIN_HISTORY_BY_WINDOW[window],
         "high_threshold": threshold,
-        "cooldown_source_sessions": cooldown,
+        "configured_cooldown_source_sessions": cooldown,
+        "effective_entry_separation_source_sessions": _effective_separation(cooldown, horizon),
         "horizon_sessions": horizon,
         "round_trip_cost_bps": PRIMARY_COST_BPS,
         "raw_signal_count": raw_signal_count,
-        "independent_trade_count": independent_trade_count,
+        "independent_trade_count": trade_count,
         "unbound_entry_excluded_count": unbound_entry_excluded_count,
         "trade_count": trade_count,
         "mean_net_return": np.nan,
@@ -406,7 +414,7 @@ def _build_aggregate_summary(metrics: pd.DataFrame) -> dict[str, Any]:
     baseline = metrics.loc[
         (metrics["rolling_window_sessions"] == BASELINE_WINDOW)
         & np.isclose(metrics["high_threshold"], BASELINE_THRESHOLD)
-        & (metrics["cooldown_source_sessions"] == BASELINE_COOLDOWN)
+        & (metrics["configured_cooldown_source_sessions"] == BASELINE_COOLDOWN)
         & metrics["horizon_sessions"].isin(phase06.EXIT_HORIZONS)
     ].sort_values("horizon_sessions")
 
@@ -508,31 +516,28 @@ def main(argv: list[str] | None = None) -> int:
     if len(observations) != phase04.EXPECTED_IDENTITY_COUNT:
         raise Phase06ARobustnessError("identity count mismatch")
 
-    baseline_candidates, _, _ = _build_config_candidates(
+    baseline_pool, _, _ = _build_config_pool(
         observations,
         panel,
         window=BASELINE_WINDOW,
         threshold=BASELINE_THRESHOLD,
-        cooldown=BASELINE_COOLDOWN,
     )
-    if _baseline_schedule(baseline_candidates, panel) != phase06.FROZEN_SCHEDULE:
+    if _baseline_schedule(baseline_pool, panel) != phase06.FROZEN_SCHEDULE:
         raise Phase06ARobustnessError("baseline sensitivity configuration does not reproduce Phase06 schedule")
 
     trade_rows: list[dict[str, Any]] = []
-    config_stats: dict[tuple[int, float, int], tuple[int, int, int]] = {}
+    config_stats: dict[tuple[int, float, int], tuple[int, int]] = {}
     for window, threshold, cooldown in product(WINDOW_GRID, THRESHOLD_GRID, COOLDOWN_GRID):
-        candidates, raw_count, unbound_count = _build_config_candidates(
+        pool, raw_count, unbound_count = _build_config_pool(
             observations,
             panel,
             window=window,
             threshold=threshold,
-            cooldown=cooldown,
         )
-        independent_count = int(candidates["execution_eligible"].sum()) if "execution_eligible" in candidates else 0
-        config_stats[(window, threshold, cooldown)] = (raw_count, independent_count, unbound_count)
+        config_stats[(window, threshold, cooldown)] = (raw_count, unbound_count)
         trade_rows.extend(
             _trade_rows_for_config(
-                candidates,
+                pool,
                 panel,
                 window=window,
                 threshold=threshold,
@@ -542,16 +547,17 @@ def main(argv: list[str] | None = None) -> int:
 
     trade_columns = [
         "config_id", "rolling_window_sessions", "minimum_history_sessions", "high_threshold",
-        "cooldown_source_sessions", "trade_ordinal", "entry_trade_date", "prior_trade_date",
-        "entry_source_session_index", "brent_percentile", "usdrubf_percentile", "horizon_sessions",
-        "exit_trade_date", "entry_price", "exit_price", "round_trip_cost_bps",
-        "gross_short_return", "net_short_return", "net_profitable",
+        "configured_cooldown_source_sessions", "effective_entry_separation_source_sessions",
+        "trade_ordinal", "entry_trade_date", "prior_trade_date", "entry_source_session_index",
+        "brent_percentile", "usdrubf_percentile", "horizon_sessions", "exit_trade_date",
+        "entry_price", "exit_price", "round_trip_cost_bps", "gross_short_return",
+        "net_short_return", "net_profitable",
     ]
     trades = pd.DataFrame(trade_rows, columns=trade_columns)
 
     metric_rows: list[dict[str, Any]] = []
     for window, threshold, cooldown in product(WINDOW_GRID, THRESHOLD_GRID, COOLDOWN_GRID):
-        raw_count, independent_count, unbound_count = config_stats[(window, threshold, cooldown)]
+        raw_count, unbound_count = config_stats[(window, threshold, cooldown)]
         for horizon in HORIZON_GRID:
             metric_rows.append(
                 _metric_row(
@@ -561,7 +567,6 @@ def main(argv: list[str] | None = None) -> int:
                     cooldown=cooldown,
                     horizon=horizon,
                     raw_signal_count=raw_count,
-                    independent_trade_count=independent_count,
                     unbound_entry_excluded_count=unbound_count,
                 )
             )
@@ -602,6 +607,8 @@ def main(argv: list[str] | None = None) -> int:
             "exit_execution": "future_source_session_close",
             "terminal_source_ohlc_consumed": False,
             "round_trip_cost_bps": PRIMARY_COST_BPS,
+            "horizon_specific_no_overlap_enforced": True,
+            "effective_entry_separation_formula": "max(configured_cooldown, horizon_sessions + 1)",
         },
         "G7_no_selection_or_inference": {
             "passed": True,
