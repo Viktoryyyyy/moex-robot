@@ -75,7 +75,7 @@ output_artifacts:
 validation_rules:
 - schema_version must equal futures_registry_refresh_manifest.v1.
 - snapshot_date must be the same snapshot_date used by downstream raw_5m_loader.py and futoi_raw_loader.py.
-- component_execution_order must equal registry_evidence_artifacts_producer, liquidity_history_metrics_probe_apim_calendar.
+- component_execution_order for new executions must equal registry_evidence_artifacts_producer, liquidity_history_metrics_probe.
 - total_duration_sec must be present and non-negative.
 - every child_component_status row must include duration_sec.
 - child_duration_summary must contain each executed registry child component.
@@ -94,7 +94,7 @@ validation_rules:
 blocking_conditions:
 - any required registry, availability, liquidity, or history-depth contract is missing from repo.
 - registry_evidence_artifacts_producer.py exits non-zero.
-- liquidity_history_metrics_probe_apim_calendar.py exits non-zero.
+- moex_data.futures.liquidity_history_metrics_probe exits non-zero.
 - any required output artifact is missing or stale relative to the child process execution.
 - any accepted whitelist instrument is absent from liquidity_screen or history_depth_screen.
 - any accepted whitelist instrument other than SiU7 fails history_depth_status.
@@ -107,3 +107,10 @@ operational_notes:
 - The scheduler must call daily_refresh_runner.py only; it must not call registry_refresh_runner.py directly.
 - registry_refresh_runner.py is a thin data-acquisition wrapper around existing registry/availability and liquidity/history producers.
 - No continuous series, all-futures expansion, strategy, research, or runtime trading behavior is introduced by this contract.
+
+entrypoint_and_historical_compatibility:
+- The screen child is launched as python -m moex_data.futures.liquidity_history_metrics_probe, using the runner's interpreter and repository working directory.
+- The runner prepends its absolute src directory to the child PYTHONPATH, preserves other inherited environment values, and does not modify the parent environment.
+- The existing producer uses observed AlgoPack TradeStats dates. This repair does not restore the removed Calendar API wrapper or change date-source, selection, numerical, history-completeness, or quality policies.
+- Historical manifests may contain the legacy component ID liquidity_history_metrics_probe_apim_calendar and its original command. Preserve those records, statuses, timestamps, and evidence without rewriting or reclassifying them; the legacy ID is not a current executable alias.
+- The manifest schema and output paths are unchanged. A historical failed run does not become successful when a later run uses the corrected entrypoint.
