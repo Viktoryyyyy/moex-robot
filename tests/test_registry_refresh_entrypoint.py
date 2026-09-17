@@ -1,5 +1,6 @@
 """Regression coverage for the registry child removed by calendar migration."""
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -200,13 +201,16 @@ def test_child_source_path_and_environment_are_explicit(monkeypatch, tmp_path, i
 
 
 @pytest.mark.parametrize("invalid_option", [False, True])
-def test_actual_selected_producer_cli_without_network(monkeypatch, tmp_path, invalid_option):
+@pytest.mark.parametrize("bounds", [(), ("--from", "2026-09-01", "--till", "2026-09-16")])
+def test_actual_selected_producer_cli_without_network(monkeypatch, tmp_path, invalid_option, bounds):
     # Capture the command actually selected by main, then execute it for real.
-    _, _, calls, _ = _simulate_refresh(monkeypatch, tmp_path)
+    _, _, calls, _ = _simulate_refresh(monkeypatch, tmp_path, bounds=bounds)
     command = list(calls[1])
     data_root = tmp_path / "real_cli_no_outputs"
     command[command.index("--data-root") + 1] = str(data_root)
-    command += ["--invalid-registry-test-option"] if invalid_option else ["--help"]
+    if invalid_option:
+        command.append("--invalid-registry-test-option")
+    assert "--help" not in command
     guard_root = tmp_path / "network_guard"
     guard_root.mkdir()
     marker = tmp_path / "network_guard_loaded"
@@ -234,14 +238,28 @@ def test_actual_selected_producer_cli_without_network(monkeypatch, tmp_path, inv
     assert not data_root.exists()
     if invalid_option:
         assert result["returncode"] == 2, result
-        assert "unrecognized arguments" in result["stderr_tail"]
+        unknown = [
+            line.split("error: unrecognized arguments:", 1)[1].strip()
+            for line in result["stderr_tail"].splitlines()
+            if "error: unrecognized arguments:" in line
+        ]
+        assert unknown == ["--invalid-registry-test-option"], result["stderr_tail"]
+        assert "Missing normalized registry artifact" not in result["stderr_tail"]
         assert result["status"] == "fail"
         assert result["failure_reason"] == "component_returncode_nonzero"
     else:
-        assert result["returncode"] == 0, result["stderr_tail"]
-        assert result["status"] == "pass"
-        assert "--snapshot-date" in result["stdout_tail"]
-        assert "--full-history-proven" in result["stdout_tail"]
+        # Reaching this exact missing-input error proves all forwarded options parsed.
+        expected_missing = runner.contract_path(
+            ROOT, data_root, runner.CONTRACTS["normalized_registry"], SNAPSHOT_DATE,
+        )
+        assert result["returncode"] == 1, result
+        assert result["stderr_tail"].strip() == (
+            "ERROR: FileNotFoundError: Missing normalized registry artifact: " + str(expected_missing)
+        )
+        assert result["status"] == "fail"
+        assert result["failure_reason"] == "component_returncode_nonzero"
+        assert not result["stdout_tail"]
+        assert "unrecognized arguments" not in result["stderr_tail"]
         origin = runner.run_child(ROOT, "module_origin", [
             sys.executable, "-c",
             "import json; from moex_data.futures import liquidity_history_metrics_probe as m; "
@@ -260,3 +278,236 @@ def test_manifest_contract_tracks_current_and_historical_component_ids():
     assert "Historical manifests may contain the legacy component ID liquidity_history_metrics_probe_apim_calendar" in text
     assert "without rewriting or reclassifying them" in text
     assert not (ROOT / "src/moex_data/futures/liquidity_history_metrics_probe_apim_calendar.py").exists()
+    assert "manifest_history/{sha256}.json" in text
+    assert "exact original bytes" in text
+    assert "without replacing the daily manifest" in text
+    assert "nonblocking POSIX flock" in text
+
+
+def _manifest_path(tmp_path):
+    directory = tmp_path / ("run_date=" + RUN_DATE)
+    directory.mkdir()
+    return directory / "manifest.json"
+
+
+def _archive_path(path, payload):
+    return path.parent / "manifest_history" / (hashlib.sha256(payload).hexdigest() + ".json")
+
+
+@pytest.mark.parametrize("previous", [
+    b'{ "run_id":"legacy", "registry_refresh_result_verdict":"fail", '
+    b'"component_execution_order":["liquidity_history_metrics_probe_apim_calendar"] }\r\n',
+    b'{"damaged": ',
+    b"",
+    '{"original_note":"Сбой источника"}\r\n'.encode("utf-8"),
+])
+def test_manifest_preserves_original_bytes_and_identical_retry(tmp_path, previous):
+    path = _manifest_path(tmp_path)
+    path.write_bytes(previous)
+    path.chmod(0o640)
+    value = {"run_id": "retry", "registry_refresh_result_verdict": "pass"}
+    runner.write_manifest(path, value)
+    published = path.read_bytes()
+    archive = _archive_path(path, previous)
+    assert archive.read_bytes() == previous
+    assert _archive_path(path, published).read_bytes() == published
+    assert json.loads(published) == value
+    assert path.stat().st_mode & 0o777 == 0o640
+    initial = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in archive.parent.glob("*.json")}
+    runner.write_manifest(path, value)
+    assert path.read_bytes() == published
+    assert {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in archive.parent.glob("*.json")} == initial
+    assert not [p for p in path.parent.rglob(".manifest.*") if p.name != ".manifest.lock"]
+
+
+def test_same_day_main_retry_retains_legacy_failure_and_each_new_result(monkeypatch, tmp_path):
+    outputs = runner.output_paths(ROOT, tmp_path / "fixture_data", SNAPSHOT_DATE, RUN_DATE)
+    path = Path(outputs["manifest"])
+    path.parent.mkdir(parents=True)
+    legacy = b'{"run_id":"old", "registry_refresh_result_verdict":"fail", "stderr_tail":"missing calendar wrapper"}\n'
+    path.write_bytes(legacy)
+    failed, _, _, _ = _simulate_refresh(monkeypatch, tmp_path, fault="screen_exit")
+    failed_bytes = path.read_bytes()
+    succeeded, current, _, _ = _simulate_refresh(monkeypatch, tmp_path)
+    assert failed == 1 and succeeded == 0
+    assert current["registry_refresh_result_verdict"] == "pass"
+    for payload in (legacy, failed_bytes, path.read_bytes()):
+        assert _archive_path(path, payload).read_bytes() == payload
+    assert json.loads(_archive_path(path, failed_bytes).read_bytes())["registry_refresh_result_verdict"] == "fail"
+
+
+@pytest.mark.parametrize("which", ["previous", "new"])
+def test_manifest_archive_failure_keeps_previous_daily_bytes(monkeypatch, tmp_path, which):
+    path = _manifest_path(tmp_path)
+    previous = b'{"run_id":"legacy", "status":"fail"}\n'
+    path.write_bytes(previous)
+    real_archive = runner._archive_manifest_bytes
+
+    def fail_selected(directory, payload):
+        if (payload == previous) == (which == "previous"):
+            raise OSError("injected preservation failure")
+        return real_archive(directory, payload)
+
+    monkeypatch.setattr(runner, "_archive_manifest_bytes", fail_selected)
+    with pytest.raises(OSError, match="injected preservation failure"):
+        runner.write_manifest(path, {"run_id": "new", "status": "pass"})
+    assert path.read_bytes() == previous
+
+
+@pytest.mark.parametrize("stage", [
+    "archive_temp", "archive_link", "archive_sync", "parent_sync", "current_temp", "replace",
+])
+def test_manifest_io_failure_before_replacement_is_fail_closed(monkeypatch, tmp_path, stage):
+    path = _manifest_path(tmp_path)
+    previous = b'{"run_id":"old", "status":"fail"}\n'
+    path.write_bytes(previous)
+    history = path.parent / "manifest_history"
+    real_temp = runner._manifest_temp
+    real_sync = runner._sync_manifest_directory
+
+    def fail(*args, **kwargs):
+        raise OSError("injected " + stage)
+
+    def temporary(directory, payload, mode=None):
+        if (stage == "archive_temp" and directory == history) or (stage == "current_temp" and directory == path.parent):
+            fail()
+        return real_temp(directory, payload, mode)
+
+    def sync(directory):
+        if (stage == "archive_sync" and directory == history) or (stage == "parent_sync" and directory == path.parent):
+            fail()
+        return real_sync(directory)
+
+    monkeypatch.setattr(runner, "_manifest_temp", temporary)
+    monkeypatch.setattr(runner, "_sync_manifest_directory", sync)
+    if stage == "archive_link":
+        monkeypatch.setattr(runner.os, "link", fail)
+    if stage == "replace":
+        monkeypatch.setattr(runner.os, "replace", fail)
+    with pytest.raises(OSError, match="injected " + stage):
+        runner.write_manifest(path, {"run_id": "new"})
+    assert path.read_bytes() == previous
+    assert not list(history.glob(".manifest.*"))
+    assert not [p for p in path.parent.glob(".manifest.*") if p.name != ".manifest.lock"]
+
+
+def test_manifest_partial_archive_write_never_poisoned_or_published(monkeypatch, tmp_path):
+    path = _manifest_path(tmp_path)
+    previous = b'{"status":"fail"}\n'
+    path.write_bytes(previous)
+
+    def fail_fsync(fd):
+        raise OSError("injected flush failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(runner.os, "fsync", fail_fsync)
+        with pytest.raises(OSError, match="injected flush failure"):
+            runner.write_manifest(path, {"status": "pass"})
+    assert path.read_bytes() == previous
+    assert not list((path.parent / "manifest_history").iterdir())
+    # Retry after an interrupted/failed temporary write does not hit a poisoned archive.
+    runner.write_manifest(path, {"status": "pass"})
+    assert _archive_path(path, previous).read_bytes() == previous
+
+
+def test_manifest_existing_archive_conflict_is_not_overwritten(monkeypatch, tmp_path):
+    path = _manifest_path(tmp_path)
+    previous = b'{"status":"fail"}\n'
+    path.write_bytes(previous)
+    archive = _archive_path(path, previous)
+    archive.parent.mkdir()
+    archive.write_bytes(b"conflicting evidence")
+    with pytest.raises(RuntimeError, match="manifest_archive_conflict"):
+        runner.write_manifest(path, {"status": "pass"})
+    assert path.read_bytes() == previous
+    assert archive.read_bytes() == b"conflicting evidence"
+
+
+def test_manifest_read_failure_is_not_treated_as_absence(monkeypatch, tmp_path):
+    path = _manifest_path(tmp_path)
+    previous = b'{"status":"fail"}'
+    path.write_bytes(previous)
+    real_read = runner._read_manifest_bytes
+
+    def denied(candidate):
+        if candidate == path:
+            raise PermissionError("injected prior read failure")
+        return real_read(candidate)
+
+    monkeypatch.setattr(runner, "_read_manifest_bytes", denied)
+    with pytest.raises(PermissionError, match="injected prior read failure"):
+        runner.write_manifest(path, {"status": "pass"})
+    assert path.read_bytes() == previous
+    assert not (path.parent / "manifest_history").exists()
+
+
+@pytest.mark.parametrize("target", ["current", "archive", "history", "lock"])
+def test_manifest_rejects_symlink_targets_without_changing_evidence(tmp_path, target):
+    path = _manifest_path(tmp_path)
+    previous = b'{"status":"fail"}\n'
+    path.write_bytes(previous)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    source = outside / "prior.json"
+    source.write_bytes(previous)
+    if target == "current":
+        path.unlink()
+        path.symlink_to(source)
+    elif target == "archive":
+        archive = _archive_path(path, previous)
+        archive.parent.mkdir()
+        archive.symlink_to(source)
+    elif target == "history":
+        (path.parent / "manifest_history").symlink_to(outside, target_is_directory=True)
+    else:
+        (path.parent / ".manifest.lock").symlink_to(source)
+    with pytest.raises((OSError, RuntimeError)):
+        runner.write_manifest(path, {"status": "pass"})
+    assert path.read_bytes() == previous
+    assert source.read_bytes() == previous
+    assert list(outside.iterdir()) == [source]
+
+
+def test_manifest_publication_lock_refuses_overlapping_writer(tmp_path):
+    import fcntl
+
+    path = _manifest_path(tmp_path)
+    previous = b'{"status":"fail"}'
+    path.write_bytes(previous)
+    with (path.parent / ".manifest.lock").open("wb") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(BlockingIOError):
+            runner.write_manifest(path, {"status": "pass"})
+    assert path.read_bytes() == previous
+    assert not (path.parent / "manifest_history").exists()
+    runner.write_manifest(path, {"status": "pass"})
+    assert _archive_path(path, previous).read_bytes() == previous
+
+
+def test_manifest_serialization_failure_keeps_previous_bytes(tmp_path):
+    path = _manifest_path(tmp_path)
+    previous = b'{"status":"fail"}'
+    path.write_bytes(previous)
+    circular = {}
+    circular["self"] = circular
+    with pytest.raises(ValueError, match="Circular reference"):
+        runner.write_manifest(path, circular)
+    assert path.read_bytes() == previous
+    assert not (path.parent / "manifest_history").exists()
+
+
+def test_main_does_not_report_success_when_manifest_preservation_fails(monkeypatch, tmp_path, capsys):
+    outputs = runner.output_paths(ROOT, tmp_path / "fixture_data", SNAPSHOT_DATE, RUN_DATE)
+    path = Path(outputs["manifest"])
+    path.parent.mkdir(parents=True)
+    previous = b'{"status":"fail"}'
+    path.write_bytes(previous)
+
+    def fail_archive(directory, payload):
+        raise OSError("injected preservation failure")
+
+    monkeypatch.setattr(runner, "_archive_manifest_bytes", fail_archive)
+    with pytest.raises(OSError, match="injected preservation failure"):
+        _simulate_refresh(monkeypatch, tmp_path)
+    assert path.read_bytes() == previous
+    assert "registry_refresh_result_verdict:" not in capsys.readouterr().out
