@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import json
 import os
+import stat
 import subprocess
+import tempfile
 import sys
 import time
 from pathlib import Path
@@ -82,9 +85,104 @@ def output_paths(root, data_root, snapshot_date, run_date):
     return out
 
 
+
+def _read_manifest_bytes(path):
+    """Read original bytes without following a file symlink or opening a FIFO."""
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            raise RuntimeError("manifest_not_regular_file: " + str(path))
+        return source.read()
+
+
+def _sync_manifest_directory(path):
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _manifest_temp(directory, payload, mode=None):
+    """A partial write is never published as an archive or daily manifest."""
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="wb", dir=directory, prefix=".manifest.", delete=False) as output:
+            temporary = Path(output.name)
+            output.write(payload)
+            output.flush()
+            if mode is not None:
+                os.fchmod(output.fileno(), mode)
+            os.fsync(output.fileno())
+        return temporary
+    except BaseException:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        raise
+
+
+def _archive_manifest_bytes(directory, payload):
+    """Publish a byte-addressed archive with no overwrite, including on retry."""
+    archive = directory / (hashlib.sha256(payload).hexdigest() + ".json")
+    try:
+        existing = _read_manifest_bytes(archive)
+    except FileNotFoundError:
+        temporary = _manifest_temp(directory, payload)
+        try:
+            try:
+                os.link(temporary, archive)
+            except FileExistsError:
+                pass
+            existing = _read_manifest_bytes(archive)
+        finally:
+            temporary.unlink(missing_ok=True)
+    if existing != payload:
+        raise RuntimeError("manifest_archive_conflict: " + str(archive))
+    _sync_manifest_directory(directory)
+
+
+def write_manifest(path, manifest):
+    """Retain every distinct manifest before atomic daily publication (POSIX)."""
+    import fcntl
+
+    payload = (json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n").encode("utf-8")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Keep the lock inode: unlinking it would let later writers bypass a holder.
+    fd = os.open(path.parent / ".manifest.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    with os.fdopen(fd, "rb") as lock:
+        if not stat.S_ISREG(os.fstat(lock.fileno()).st_mode):
+            raise RuntimeError("manifest_lock_not_regular_file")
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            previous = _read_manifest_bytes(path)
+        except FileNotFoundError:
+            previous = None
+        mode = stat.S_IMODE(path.stat(follow_symlinks=False).st_mode) if previous is not None else None
+        history = path.parent / "manifest_history"
+        history.mkdir(exist_ok=True)
+        if history.is_symlink() or not history.is_dir():
+            raise RuntimeError("manifest_history_not_directory: " + str(history))
+        if previous is not None:
+            _archive_manifest_bytes(history, previous)
+        _archive_manifest_bytes(history, payload)
+        # Persist the history directory's entry before replacing the daily file.
+        _sync_manifest_directory(path.parent)
+        temporary = _manifest_temp(path.parent, payload, mode)
+        try:
+            os.replace(temporary, path)
+            _sync_manifest_directory(path.parent)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
 def run_child(root, component_id, command, expected):
     started_at = time.time()
-    proc = subprocess.run(command, cwd=str(root), text=True, capture_output=True)
+    # A child interpreter does not inherit this process's sys.path.
+    child_env = os.environ.copy()
+    source_root = str((root / "src").resolve())
+    inherited_pythonpath = child_env.get("PYTHONPATH", "")
+    child_env["PYTHONPATH"] = source_root + (os.pathsep + inherited_pythonpath if inherited_pythonpath else "")
+    proc = subprocess.run(command, cwd=str(root), text=True, capture_output=True, env=child_env)
     completed_at = time.time()
     item = {"component_id": component_id, "command": command, "returncode": int(proc.returncode), "stdout_tail": proc.stdout[-4000:], "stderr_tail": proc.stderr[-4000:], "duration_sec": round(completed_at - started_at, 3), "json_line_outputs": parse_json_line_output(proc.stdout), "status": "fail", "validation_status": "not_validated"}
     if proc.returncode != 0:
@@ -262,8 +360,8 @@ def main():
     evidence_cmd = [sys.executable, str(root / "src/moex_data/futures/registry_evidence_artifacts_producer.py")] + common + ["--availability-max-workers", str(args.availability_max_workers)]
     child_items.append(run_child(root, "registry_evidence_artifacts_producer", evidence_cmd, {k: outputs[k] for k in ["registry_snapshot", "normalized_registry", "family_mapping", "algopack_fo_tradestats", "moex_futoi", "algopack_fo_obstats", "algopack_fo_hi2"]}))
     if child_items[-1].get("status") == "pass":
-        screen_cmd = [sys.executable, str(root / "src/moex_data/futures/liquidity_history_metrics_probe_apim_calendar.py")] + common + ["--full-history-proven"]
-        child_items.append(run_child(root, "liquidity_history_metrics_probe_apim_calendar", screen_cmd, {"liquidity_screen": outputs["liquidity_screen"], "history_depth_screen": outputs["history_depth_screen"]}))
+        screen_cmd = [sys.executable, "-m", "moex_data.futures.liquidity_history_metrics_probe"] + common + ["--full-history-proven"]
+        child_items.append(run_child(root, "liquidity_history_metrics_probe", screen_cmd, {"liquidity_screen": outputs["liquidity_screen"], "history_depth_screen": outputs["history_depth_screen"]}))
     final_status = "pass" if len(child_items) == 2 and all(x.get("status") == "pass" for x in child_items) else "fail"
     blockers = [str(x.get("component_id")) + ":" + str(x.get("failure_reason")) for x in child_items if x.get("status") != "pass"]
     child_duration_summary = {str(x.get("component_id")): x.get("duration_sec") for x in child_items if x.get("component_id")}
@@ -277,10 +375,9 @@ def main():
         blockers += validation_blockers
         if validation_blockers:
             final_status = "fail"
-    manifest = {"schema_version": SCHEMA_MANIFEST, "run_id": run_id, "run_date": args.run_date, "snapshot_date": args.snapshot_date, "refresh_from": args.from_date or None, "refresh_till": args.till or None, "started_ts": started_ts, "completed_ts": utc_now_iso(), "total_duration_sec": round(time.time() - run_started_epoch, 3), "runner_whitelist_applied": whitelist, "excluded_instruments_confirmed": excluded, "availability_max_workers": int(args.availability_max_workers), "component_execution_order": ["registry_evidence_artifacts_producer", "liquidity_history_metrics_probe_apim_calendar"], "child_component_status": child_items, "child_duration_summary": child_duration_summary, "availability_probe_timing_summary": availability_probe_timing_summary, "child_output_references": {x["component_id"]: {"status": x.get("status"), "validation_status": x.get("validation_status"), "expected_outputs": x.get("expected_outputs")} for x in child_items}, "output_artifacts": outputs, "output_summaries": output_summaries, "artifact_validation_status": "pass" if final_status == "pass" else "fail", "registry_refresh_result_verdict": final_status, "blockers": blockers}
+    manifest = {"schema_version": SCHEMA_MANIFEST, "run_id": run_id, "run_date": args.run_date, "snapshot_date": args.snapshot_date, "refresh_from": args.from_date or None, "refresh_till": args.till or None, "started_ts": started_ts, "completed_ts": utc_now_iso(), "total_duration_sec": round(time.time() - run_started_epoch, 3), "runner_whitelist_applied": whitelist, "excluded_instruments_confirmed": excluded, "availability_max_workers": int(args.availability_max_workers), "component_execution_order": ["registry_evidence_artifacts_producer", "liquidity_history_metrics_probe"], "child_component_status": child_items, "child_duration_summary": child_duration_summary, "availability_probe_timing_summary": availability_probe_timing_summary, "child_output_references": {x["component_id"]: {"status": x.get("status"), "validation_status": x.get("validation_status"), "expected_outputs": x.get("expected_outputs")} for x in child_items}, "output_artifacts": outputs, "output_summaries": output_summaries, "artifact_validation_status": "pass" if final_status == "pass" else "fail", "registry_refresh_result_verdict": final_status, "blockers": blockers}
     path = Path(outputs["manifest"])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+    write_manifest(path, manifest)
     print_json_line("registry_refresh_manifest_path", str(path))
     print_json_line("child_component_status", manifest["child_output_references"])
     print_json_line("child_duration_summary", child_duration_summary)

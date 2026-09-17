@@ -75,7 +75,7 @@ output_artifacts:
 validation_rules:
 - schema_version must equal futures_registry_refresh_manifest.v1.
 - snapshot_date must be the same snapshot_date used by downstream raw_5m_loader.py and futoi_raw_loader.py.
-- component_execution_order must equal registry_evidence_artifacts_producer, liquidity_history_metrics_probe_apim_calendar.
+- component_execution_order for new executions must equal registry_evidence_artifacts_producer, liquidity_history_metrics_probe.
 - total_duration_sec must be present and non-negative.
 - every child_component_status row must include duration_sec.
 - child_duration_summary must contain each executed registry child component.
@@ -94,7 +94,7 @@ validation_rules:
 blocking_conditions:
 - any required registry, availability, liquidity, or history-depth contract is missing from repo.
 - registry_evidence_artifacts_producer.py exits non-zero.
-- liquidity_history_metrics_probe_apim_calendar.py exits non-zero.
+- moex_data.futures.liquidity_history_metrics_probe exits non-zero.
 - any required output artifact is missing or stale relative to the child process execution.
 - any accepted whitelist instrument is absent from liquidity_screen or history_depth_screen.
 - any accepted whitelist instrument other than SiU7 fails history_depth_status.
@@ -107,3 +107,20 @@ operational_notes:
 - The scheduler must call daily_refresh_runner.py only; it must not call registry_refresh_runner.py directly.
 - registry_refresh_runner.py is a thin data-acquisition wrapper around existing registry/availability and liquidity/history producers.
 - No continuous series, all-futures expansion, strategy, research, or runtime trading behavior is introduced by this contract.
+
+entrypoint_and_historical_compatibility:
+- The screen child is launched as python -m moex_data.futures.liquidity_history_metrics_probe, using the runner's interpreter and repository working directory.
+- The runner prepends its absolute src directory to the child PYTHONPATH, preserves other inherited environment values, and does not modify the parent environment.
+- The existing producer uses observed AlgoPack TradeStats dates. This repair does not restore the removed Calendar API wrapper or change date-source, selection, numerical, history-completeness, or quality policies.
+- Historical manifests may contain the legacy component ID liquidity_history_metrics_probe_apim_calendar and its original command. Preserve those records, statuses, timestamps, and evidence without rewriting or reclassifying them; the legacy ID is not a current executable alias.
+- The daily manifest schema and existing output paths are unchanged. A historical failed run does not become successful when a later run uses the corrected entrypoint.
+
+manifest_attempt_retention:
+- history_path_pattern: ${MOEX_DATA_ROOT}/futures/runs/registry_refresh/run_date={run_date}/manifest_history/{sha256}.json
+- Before replacing the daily manifest, retain its exact original bytes, including malformed or empty legacy evidence, and the exact newly serialized manifest bytes. SHA256 is computed over bytes, not run_id or parsed/reformatted JSON; identical bytes reuse the same verified archive.
+- Archives are published from flushed and fsynced temporary files by create-only hard link. An existing archive must be a regular file containing identical bytes; mismatch, unreadable evidence or an archive failure stops publication without replacing the daily manifest.
+- The daily manifest remains a complete manifest at its existing path, not a new pointer schema. It is atomically replaced only after archive files and their directories have been synced. Existing daily file permissions are preserved; new files start private to their writer.
+- Manifest publication uses a nonblocking POSIX flock on the persistent sibling .manifest.lock inode. A competing publication fails explicitly; kernel release on process exit permits later retries. Do not unlink the lock file. This is not a replacement for the scheduler's existing whole-refresh serialization.
+- This publication procedure targets the existing Linux runtime and requires regular files, hard-link support and directory fsync. File symlinks and a symlinked history directory are refused. No guarantee is made against a non-cooperating process modifying the storage.
+- Temporary-file failures cannot publish a partial named archive. Archive/write/replace errors propagate as execution failure, never a success report. A directory-fsync failure after replacement can leave the new daily file visible, but both versions have already been archived; do not infer success from visibility alone.
+- Retention covers manifest bytes only, not copies of every referenced child artifact, and does not recover attempts overwritten before this repair. No archive cleanup, history backfill or source refresh policy is introduced.
