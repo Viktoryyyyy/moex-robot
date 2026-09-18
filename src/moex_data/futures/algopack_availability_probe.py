@@ -489,6 +489,9 @@ def _tradestats_column(columns: Iterable[str], candidates: Iterable[str]) -> str
     found = [name for name in columns if name.lower() in wanted]
     if len(found) != 1:
         raise TradeStatsSourceError("missing or ambiguous TradeStats field: " + "/".join(sorted(wanted)))
+    # SECID is mandatory; TICKER remains a candidate only to reject ambiguous schemas.
+    if "secid" in wanted and found[0].lower() != "secid":
+        raise TradeStatsSourceError("missing required TradeStats field: SECID")
     return found[0]
 
 

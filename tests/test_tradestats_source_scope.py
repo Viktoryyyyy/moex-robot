@@ -608,3 +608,78 @@ def test_compatibility_contract_resolves_history_without_promoting_legacy_author
     assert "date_source_endpoint: " + ENDPOINT + "/{SECID}.json" in text
     assert "use_for_new_data_loading: false" in text
     assert "use_for_new_instrument_onboarding: false" in text
+
+
+def identity_payload(values, field, block="tradestats"):
+    answer = payload(values, block)
+    answer[block]["columns"][COLUMNS.index("secid")] = field
+    return answer
+
+
+@pytest.mark.parametrize("block", ["tradestats", "data"])
+@pytest.mark.parametrize("field", ["ticker", "TICKER", "TiCkEr"])
+@pytest.mark.parametrize("row_count", [0, 2])
+def test_ticker_only_schema_fails_in_all_historical_consumers(monkeypatch, block, field, row_count):
+    answer = identity_payload(rows(row_count), field, block)
+    result, calls = probe(monkeypatch, answer)
+    assert result["availability_status"] == "error" and result["observed_rows"] == 0
+    assert result["error_code"] == "TradeStatsSourceError"
+    assert "SECID" in result["error_message"] and len(calls) == 1
+    assert_consumers_reject(
+        monkeypatch,
+        lambda offset: answer if offset == 0 else identity_payload([], field, block),
+        "SECID",
+    )
+
+
+@pytest.mark.parametrize("block", ["tradestats", "data"])
+@pytest.mark.parametrize("field", ["secid", "SECID", "SeCiD"])
+def test_contracted_secid_spelling_passes_all_historical_consumers(monkeypatch, block, field):
+    values = rows(2)
+    answer = identity_payload(values, field, block)
+    result, _ = probe(monkeypatch, answer)
+    assert result["availability_status"] == "available" and result["observed_rows"] == 2
+    pages = {0: answer, 2: identity_payload([], field, block)}
+    (frame, _, status, error), calls = history(monkeypatch, pages.__getitem__)
+    assert status == "completed" and not error and len(frame) == 2
+    assert set(frame[field]) == {"USDRUBF"}
+    assert [call[1]["start"] for call in calls] == [0, 2]
+    observed_dates, calls = dates(monkeypatch, pages.__getitem__)
+    assert observed_dates == sorted({row[0] for row in values})
+    assert [call[1]["start"] for call in calls] == [0, 2]
+
+
+@pytest.mark.parametrize("block", ["tradestats", "data"])
+@pytest.mark.parametrize("extra_field", ["TICKER", "SECID"])
+@pytest.mark.parametrize("row_count", [0, 2])
+def test_ambiguous_identity_remains_rejected_by_all_consumers(monkeypatch, block, extra_field, row_count):
+    answer = payload(rows(row_count), block)
+    answer[block]["columns"].append(extra_field)
+    for row in answer[block]["data"]:
+        row.append("USDRUBF")
+    result, _ = probe(monkeypatch, answer)
+    assert result["availability_status"] == "error" and result["observed_rows"] == 0
+    assert result["error_code"] == "TradeStatsSourceError"
+    assert_consumers_reject(monkeypatch, lambda offset: answer, "TradeStats")
+
+
+@pytest.mark.parametrize("field", ["ticker", "TICKER", "TiCkEr"])
+@pytest.mark.parametrize("row_count", [0, 2])
+def test_row_keys_require_secid_without_ticker_substitution(field, row_count):
+    import pandas as pd
+
+    answer = identity_payload(rows(row_count), field)["tradestats"]
+    frame = pd.DataFrame(answer["data"], columns=answer["columns"])
+    with pytest.raises(availability.TradeStatsSourceError, match="SECID"):
+        availability._tradestats_row_keys(frame)
+
+
+@pytest.mark.parametrize("block", ["tradestats", "data"])
+@pytest.mark.parametrize("later_row_count", [0, 2])
+def test_later_ticker_only_schema_discards_valid_earlier_history(monkeypatch, block, later_row_count):
+    first = payload(rows(2), block)
+    later = identity_payload(
+        rows(later_row_count, start="2025-09-19T10:00:00"), "TICKER", block,
+    )
+    pages = {0: first, 2: later}
+    assert_consumers_reject(monkeypatch, pages.__getitem__, "SECID")
