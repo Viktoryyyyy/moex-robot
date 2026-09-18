@@ -2,7 +2,7 @@
 
 status: implemented_contract
 project: MOEX Bot
-scope: Slice 1.1 registry refresh automation
+scope: current-registry evidence validation with separate Slice 1 compatibility
 artifact_class: external_pattern
 format: json
 schema_version: futures_registry_refresh_manifest.v1
@@ -10,6 +10,7 @@ schema_version: futures_registry_refresh_manifest.v1
 purpose: Manifest for the canonical registry refresh child stage used by unattended futures daily refresh. This stage refreshes the current ISS futures registry snapshot, normalized registry, ALGOPACK/FUTOI/OBStats/HI2 availability reports, and liquidity/history screens for the same snapshot_date before raw 5m, FUTOI raw, and derived D1 components run.
 producer: src/moex_data/futures/registry_refresh_runner.py
 consumer:
+- src/moex_data/futures/universal_daily_refresh_runner.py
 - src/moex_data/futures/daily_refresh_runner.py
 - futures_data_lake_pm_review
 - futures_daily_refresh_quality_consumer
@@ -20,6 +21,7 @@ primary_key:
 
 required_fields:
 - schema_version
+- validation_mode
 - run_id
 - run_date
 - snapshot_date
@@ -85,26 +87,26 @@ validation_rules:
 - registry_refresh_result_verdict must be pass only when both child components exit zero and all required output artifacts exist and validate.
 - artifact_validation_status must be pass only when output_summaries.*.validation_status are pass.
 - registry_snapshot and normalized_registry must have more than zero rows.
-- algopack_fo_tradestats, moex_futoi, algopack_fo_obstats, and algopack_fo_hi2 availability reports must have availability_status=available for every selected Slice 1 universe row.
-- liquidity_screen must contain every accepted Slice 1 whitelist instrument with liquidity_status=pass.
-- history_depth_screen must contain every accepted Slice 1 whitelist instrument with history_depth_status=pass, except SiU7 may be pass or review_required because SiU7 is explicitly short-history allowed.
-- runner_whitelist_applied must equal SiM6, SiU6, SiU7, SiZ6, USDRUBF for accepted Slice 1 closeout.
-- excluded_instruments_confirmed must include SiH7 and SiM7.
+- In slice1_compat only, algopack_fo_tradestats, moex_futoi, algopack_fo_obstats, and algopack_fo_hi2 availability reports must have availability_status=available for every selected Slice 1 universe row.
+- In slice1_compat only, liquidity_screen must contain every accepted Slice 1 whitelist instrument with liquidity_status=pass.
+- In slice1_compat only, history_depth_screen must contain every accepted Slice 1 whitelist instrument with history_depth_status=pass, except SiU7 may be pass or review_required because SiU7 is explicitly short-history allowed.
+- In slice1_compat only, runner_whitelist_applied must equal SiM6, SiU6, SiU7, SiZ6, USDRUBF for accepted Slice 1 closeout.
+- In slice1_compat only, excluded_instruments_confirmed must include SiH7 and SiM7.
 
 blocking_conditions:
 - any required registry, availability, liquidity, or history-depth contract is missing from repo.
 - registry_evidence_artifacts_producer.py exits non-zero.
 - moex_data.futures.liquidity_history_metrics_probe exits non-zero.
 - any required output artifact is missing or stale relative to the child process execution.
-- any accepted whitelist instrument is absent from liquidity_screen or history_depth_screen.
-- any accepted whitelist instrument other than SiU7 fails history_depth_status.
-- SiU7 has history_depth_status other than pass or review_required.
+- In slice1_compat only, any accepted whitelist instrument is absent from liquidity_screen or history_depth_screen.
+- In slice1_compat only, any accepted whitelist instrument other than SiU7 fails history_depth_status.
+- In slice1_compat only, SiU7 has history_depth_status other than pass or review_required.
 - artifact_validation_status is not pass.
 - concurrency changes output row count, selected instrument count, endpoint candidates, status distribution, or fail-closed behavior.
 
 operational_notes:
 - This contract removes the prior unattended-refresh dependency on fixed --snapshot-date 2026-04-29.
-- The scheduler must call daily_refresh_runner.py only; it must not call registry_refresh_runner.py directly.
+- The canonical scheduler calls universal_daily_refresh_runner.py, which explicitly selects current_registry for the registry child. daily_refresh_runner.py remains a Slice 1 compatibility caller.
 - registry_refresh_runner.py is a thin data-acquisition wrapper around existing registry/availability and liquidity/history producers.
 - No continuous series, all-futures expansion, strategy, research, or runtime trading behavior is introduced by this contract.
 
@@ -124,3 +126,24 @@ manifest_attempt_retention:
 - This publication procedure targets the existing Linux runtime and requires regular files, hard-link support and directory fsync. File symlinks and a symlinked history directory are refused. No guarantee is made against a non-cooperating process modifying the storage.
 - Temporary-file failures cannot publish a partial named archive. Archive/write/replace errors propagate as execution failure, never a success report. A directory-fsync failure after replacement can leave the new daily file visible, but both versions have already been archived; do not infer success from visibility alone.
 - Retention covers manifest bytes only, not copies of every referenced child artifact, and does not recover attempts overwritten before this repair. No archive cleanup, history backfill or source refresh policy is introduced.
+
+validation_modes:
+- New manifests require validation_mode=current_registry or slice1_compat. Historical manifests without this field retain their original legacy interpretation; never relabel or rewrite them as canonical acceptance.
+- registry_refresh_runner.py defaults to slice1_compat for existing callers. The universal runner must pass --validation-mode current_registry, including --stage/--stop-after paths. Debug --family/--secid filters must not narrow registry evidence validation.
+- current_registry rejects explicit --whitelist or --excluded arguments, including empty values, before child execution. Canonical manifests record runner_whitelist_applied=[] and excluded_instruments_confirmed=[]; these empty compatibility fields do not make new exclusion/admission decisions.
+- slice1_compat retains existing whitelist, exclusion, availability and screen-validation functions, defaults and review-ready handling. No replacement fixed contract list is introduced.
+
+current_registry_evidence_validation:
+- This mode validates candidate evidence only. A pass means complete, coherent outputs from both current producers; it does not mean every instrument is eligible, every source is available, every screen passed, or full historical/PIT coverage is proven.
+- Snapshot and normalized registry must be nonempty, have unique case-insensitive board/SECID identities, and exactly matching identity sets for the requested snapshot_date. Required identity/provenance fields must be nonempty text; normalized snapshot_id/source_snapshot_id, engine and market must agree with the raw registry.
+- Reuse registry_evidence_artifacts_producer.select_all_rfud_instruments for expected candidate scope. Do not use Slice 1 constants, count-only comparison, fabricated expired-contract rows or a new universe selector.
+- Family mapping and each of the four availability reports must cover exactly that candidate set, with no missing/extra/duplicate identity. Same-snapshot IDs, family identity where resolved, endpoint IDs and schema versions must agree with their producers.
+- Family mapping retains the current producer's derived_rule/pass and unresolved/failed outcomes. A resolved family must agree with normalized registry; unresolved evidence does not become an accepted mapping.
+- Availability rows require probe_status=completed and the contracted availability_status vocabulary. available, unavailable, partial, error and not_checked are retained in status_counts without relabeling; availability is not required for all candidates. Incomplete probes and unknown statuses fail artifact validation.
+- Probe and screen windows must match the existing producer defaults or explicit registry-runner bounds. This validation does not change the 14-day availability or 365-day screen defaults, the universal runner's existing bound forwarding, or the acquisition requests.
+- Reuse liquidity_history_metrics_probe.selected_instruments_from_artifacts for screen coverage: exactly the TradeStats-available current candidates, not all registry rows and not a Slice 1 list. No available TradeStats instruments remains an explicit blocking condition because the existing producer cannot produce an accepted empty screen.
+- Both screen artifacts must have the expected schema, identity, window and explicit pass/fail/review_required outcome. pass/review_required requires completed fetch, metrics_computed and ready_for_pm_review. fail requires failed validation and blocked review; it is retained as a negative outcome, not relabeled as success. Unknown or incoherent states fail structural validation.
+- output_summaries.*.validation_scope=current_registry_evidence_only distinguishes artifact validation from the unchanged row quality outcomes. Preserve status_counts and expected/candidate counts. Do not set included/deferred/excluded or loadability flags here; existing downstream eligibility remains authoritative.
+- Validate the seven evidence artifacts before starting the expensive metrics child. If evidence is invalid or screen selection cannot resolve, write a failed manifest with the specific validation blocker and do not launch that child. After both children finish, revalidate all nine artifacts.
+- Existing child nonzero-return, missing/stale-output, manifest archival and atomic publication failures remain blocking. A structurally valid report cannot cancel a child failure.
+- No eligibility code/configuration, numerical threshold, formula, source loader, source-scope repair, current universe, historical artifact, service, timer, concurrency or timeout policy is changed by this mode separation.
