@@ -53,3 +53,11 @@ validation_rules:
 blocking_conditions:
 - duplicate primary key.
 - selected instrument has fail or not_checked liquidity_status without explicit review.
+
+historical_tradestats_input:
+- Read /iss/datashop/algopack/fo/tradestats/{SECID}.json through authenticated APIM with explicit screen_from/screen_till. No general-market or unauthenticated ISS fallback supplies historical metrics.
+- Validate a named tradestats or data block, unambiguous SECID/date columns, and every row's requested instrument and date bounds before aggregation. Malformed/error/mixed/foreign data are rejected, not filtered into apparent success.
+- Exhaust pagination before returning fetch_status=completed. With a cursor, INDEX, TOTAL, PAGESIZE and row counts must agree; without one, continue by returned row count until a valid empty page. A short page alone is not EOF.
+- Repeated/overlapping row identities, non-advancing or malformed cursors, schema/cursor-total changes, an exhausted page guard and later-page failure discard the partial result. No partial volume/value/trade sums are admitted.
+- source_endpoint_url is the actual route; trade_stats_rows, daily_rows and first/last_available_date describe only accepted observations. An exhausted request is not proof of every trading session or PIT history.
+- Sparse legitimate observations retain existing numerical/threshold rules. This change does not fabricate dates, change formulas/universe/storage, or rewrite earlier reports.

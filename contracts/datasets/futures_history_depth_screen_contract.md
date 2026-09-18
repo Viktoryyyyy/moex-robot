@@ -52,3 +52,11 @@ validation_rules:
 blocking_conditions:
 - duplicate primary key.
 - selected instrument has fail or not_checked history_depth_status without explicit review.
+
+historical_source_and_coverage:
+- Instrument metrics and the reference instrument's observed-date request use /iss/datashop/algopack/fo/tradestats/{SECID}.json with explicit date bounds, not a general current-market snapshot.
+- Before accepting dates, validate named data blocks, requested SECID and source trade dates. Foreign/mixed/missing identity, invalid/out-of-range dates and malformed responses fail explicitly.
+- Complete cursor or cursorless traversal is required. Missing cursor metadata does not mean one-page history; repeated/overlapping pages, malformed/non-advancing cursors, page-guard exhaustion and later-page failures cannot produce accepted partial dates or metrics.
+- history_window_checked.date_source_endpoint resolves the actual reference SECID route; each screen row retains its actual source_endpoint_url and observed first/last dates. The reference selection rule is unchanged.
+- Source exhaustion establishes only retrieval of returned observations within the requested range, not complete sessions, pre-listing history, PIT eligibility or historical publication availability. Sparse observations do not justify invented dates.
+- Existing full_history_proven/history_proof_scope, thresholds, coverage calculations and review gates retain their existing meaning; this repair does not grant new historical authority or modify past evidence.

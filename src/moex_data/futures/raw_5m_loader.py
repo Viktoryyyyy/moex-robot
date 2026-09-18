@@ -475,7 +475,7 @@ def main():
         },
         "duplicate_summary": duplicate_summary,
         "duplicate_diagnostics": duplicate_diagnostics,
-        "calendar_validation_summary": {"calendar_denominator_status": calendar_status, "calendar_from": calendar_from, "calendar_till": calendar_till, "expected_trading_days": len(expected_calendar), "date_source_reference_secid": reference_secid, "date_source_id": base.observed_date_source.OBSERVED_DATE_SOURCE_ID, "date_source_endpoint": base.observed_date_source.OBSERVED_DATE_SOURCE_ENDPOINT},
+        "calendar_validation_summary": {"calendar_denominator_status": calendar_status, "calendar_from": calendar_from, "calendar_till": calendar_till, "expected_trading_days": len(expected_calendar), "date_source_reference_secid": reference_secid, "date_source_id": base.observed_date_source.OBSERVED_DATE_SOURCE_ID, "date_source_endpoint": base.observed_date_source.observed_date_source_endpoint(reference_secid)},
         "short_history_handling": {"SiU7": summaries.get("SiU7")},
         "loader_result_verdict": "pass" if quality_status_counts.get("fail", 0) == 0 else "fail",
     }

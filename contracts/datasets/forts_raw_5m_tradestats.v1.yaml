@@ -10,7 +10,8 @@ legacy_incremental_date_selection:
   consumer_ref: src/moex_data/futures/refresh_forts_raw_5m_incremental_pointer.py
   date_source_artifact_id: external.apim.fo.tradestats.v1
   date_source_id: moex_algopack_fo_tradestats_5m
-  date_source_endpoint: /iss/datashop/algopack/fo/tradestats.json
+  # Resolve the explicit SECID before recording this endpoint in a manifest or pointer.
+  date_source_endpoint: /iss/datashop/algopack/fo/tradestats/{SECID}.json
   date_selection_rule: observed_trade_dates_only
   request_bounds_required:
     - from

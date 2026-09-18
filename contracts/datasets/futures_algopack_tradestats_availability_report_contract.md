@@ -58,3 +58,11 @@ validation_rules:
 blocking_conditions:
 - duplicate primary key.
 - selected Slice 1 instrument lacks completed availability status.
+
+historical_source_admission:
+- TradeStats probes use the authenticated instrument-specific path /iss/datashop/algopack/fo/tradestats/{SECID}.json with explicit probe_from/probe_till. The general market endpoint is not a historical fallback.
+- available requires a valid named tradestats or data block and at least one row. Every returned row must have the requested SECID and a valid source trade date inside the requested bounds; mixed, foreign, missing-identity, malformed, error or out-of-range responses are error, not available.
+- Empty data with a valid identity/date schema is unavailable, distinct from an invalid response. Present cursor metadata must be well formed and consistent with the returned first page.
+- source_endpoint_url identifies the actual instrument route. observed_rows and observed_min_ts/observed_max_ts describe the validated first page and source trade dates only, not the full historical extent.
+- review_notes marks instrument_specific_first_page_only; full_history_not_proven. A completed presence probe does not establish complete history, session coverage or PIT admission.
+- This correction does not alter report identity/storage, universe rules, FUTOI/OBStats/HI2 behavior, or rewrite previously stored evidence.
