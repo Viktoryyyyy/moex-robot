@@ -326,6 +326,176 @@ def validate_outputs(outputs, whitelist):
     return summaries, blockers
 
 
+# The current mode validates candidate evidence, never admission to a dataset.
+SLICE1_COMPAT = "slice1_compat"
+CURRENT_REGISTRY = "current_registry"
+AVAILABILITY_ENDPOINTS = (
+    "algopack_fo_tradestats", "moex_futoi", "algopack_fo_obstats", "algopack_fo_hi2",
+)
+
+
+def _require_current(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def _current_text(frame, columns):
+    missing = [name for name in columns if name not in frame.columns]
+    _require_current(not missing, "missing_fields:" + ",".join(missing))
+    for name in columns:
+        valid = frame[name].map(lambda value: isinstance(value, str) and bool(value.strip()) and value == value.strip())
+        _require_current(bool(valid.all()), "invalid_text_field:" + name)
+
+
+def _current_keys(frame):
+    _current_text(frame, ("board", "secid"))
+    keys = list(zip(frame["board"].str.upper(), frame["secid"].str.upper()))
+    _require_current(len(set(keys)) == len(keys), "duplicate_instrument_identity")
+    return set(keys)
+
+
+def _current_frame(path, snapshot_date, required, schema=None):
+    frame = pd.read_parquet(path)
+    _require_current(frame.columns.is_unique, "duplicate_columns")
+    _current_text(frame, ("snapshot_date", "board", "secid", *required))
+    _require_current(bool(frame["snapshot_date"].eq(snapshot_date).all()), "snapshot_date_mismatch")
+    _current_keys(frame)
+    if schema is not None:
+        _current_text(frame, ("schema_version",))
+        _require_current(bool(frame["schema_version"].eq(schema).all()), "schema_version_mismatch")
+    return frame
+
+
+def _current_coverage(frame, expected):
+    actual, wanted = _current_keys(frame), _current_keys(expected)
+    missing, extra = sorted(wanted - actual), sorted(actual - wanted)
+    _require_current(not missing and not extra, "coverage_mismatch:missing=" + str(missing[:10]) + ";extra=" + str(extra[:10]))
+
+
+def _current_agreement(frame, expected, field, expected_field=None):
+    _current_text(frame, (field,))
+    expected_field = expected_field or field
+    _current_text(expected, (expected_field,))
+    wanted = {(row.board.upper(), row.secid.upper()): getattr(row, expected_field)
+              for row in expected.itertuples(index=False)}
+    for row in frame.itertuples(index=False):
+        _require_current(getattr(row, field) == wanted.get((row.board.upper(), row.secid.upper())),
+                         "inconsistent_registry_field:" + field)
+
+
+def _current_window(frame, prefix, bounds):
+    first, last = prefix + "_from", prefix + "_till"
+    _current_text(frame, (first, last))
+    _require_current(bool(frame[first].eq(bounds[0]).all()) and bool(frame[last].eq(bounds[1]).all()),
+                     "request_window_mismatch:" + prefix)
+
+
+def validate_current_outputs(outputs, snapshot_date, *, from_date="", till="", evidence_only=False):
+    """Validate exact producer scopes; retain negative outcomes for eligibility."""
+    from moex_data.futures import registry_evidence_artifacts_producer as evidence
+
+    summaries = {}
+    key = "registry_snapshot"
+    try:
+        source = evidence.availability
+        probe_bounds = source.date_range_defaults(
+            snapshot_date, argparse.Namespace(from_date=from_date, till=till, lookback_days=14))
+        screen_bounds = base.date_range_defaults(
+            snapshot_date, argparse.Namespace(from_date=from_date, till=till, history_lookback_days=365))
+
+        def record(name, frame, field=None):
+            item = {"rows": int(len(frame)), "validation_status": "pass",
+                    "validation_scope": "current_registry_evidence_only"}
+            if field is not None:
+                item["status_counts"] = {str(k): int(v) for k, v in frame[field].value_counts().items()}
+            summaries[name] = item
+
+        registry = _current_frame(outputs[key], snapshot_date, ("snapshot_id", "engine", "market"))
+        _require_current(not registry.empty, "empty_registry")
+        _require_current(registry["snapshot_id"].nunique() == 1, "ambiguous_snapshot_id")
+        record(key, registry)
+
+        key = "normalized_registry"
+        normalized = _current_frame(outputs[key], snapshot_date,
+                                    ("snapshot_id", "source_snapshot_id", "engine", "market", "family_code"),
+                                    source.SCHEMA_NORMALIZED_REGISTRY)
+        _current_coverage(normalized, registry)
+        for field in ("snapshot_id", "engine", "market"):
+            _current_agreement(normalized, registry, field)
+        _current_agreement(normalized, registry, "source_snapshot_id", "snapshot_id")
+        # Reuse the acquisition producer's RFUD candidate scope, not a new whitelist.
+        candidates = evidence.select_all_rfud_instruments(normalized)
+        record(key, normalized)
+        summaries[key]["candidate_count"] = int(len(candidates))
+
+        key = "family_mapping"
+        mapping = _current_frame(outputs[key], snapshot_date,
+                                 ("mapping_id", "snapshot_id", "mapping_status", "mapping_source", "validation_status"),
+                                 evidence.SCHEMA_FAMILY_MAPPING)
+        _require_current("family_code" in mapping.columns, "missing_fields:family_code")
+        _current_coverage(mapping, candidates)
+        _current_agreement(mapping, candidates, "snapshot_id")
+        _require_current(bool(mapping["mapping_status"].isin(("pass", "unresolved")).all()), "invalid_mapping_status")
+        mapped = mapping["mapping_status"].eq("pass")
+        _current_agreement(mapping.loc[mapped], candidates, "family_code")
+        _require_current(bool(mapping.loc[mapped, "mapping_source"].eq("derived_rule").all())
+                         and bool(mapping.loc[mapped, "validation_status"].eq("pass").all()),
+                         "incoherent_mapping_status")
+        _require_current(bool(mapping.loc[~mapped, "mapping_source"].eq("unresolved").all())
+                         and bool(mapping.loc[~mapped, "validation_status"].eq("failed").all()),
+                         "incoherent_unresolved_mapping")
+        record(key, mapping, "mapping_status")
+
+        reports = {}
+        for key in AVAILABILITY_ENDPOINTS:
+            frame = _current_frame(outputs[key], snapshot_date,
+                                   ("availability_report_id", "family_code", "endpoint_id", "source_endpoint_url",
+                                    "availability_status", "probe_status"),
+                                   source.REPORT_SCHEMA_BY_ENDPOINT[key])
+            _current_coverage(frame, candidates)
+            _current_agreement(frame, candidates, "family_code")
+            _require_current(bool(frame["endpoint_id"].eq(key).all()), "endpoint_id_mismatch")
+            _current_window(frame, "probe", probe_bounds)
+            _require_current(bool(frame["probe_status"].eq("completed").all()), "probe_not_completed")
+            _require_current(bool(frame["availability_status"].isin(
+                ("available", "unavailable", "partial", "error", "not_checked")).all()), "invalid_availability_status")
+            record(key, frame, "availability_status")
+            reports[key] = frame
+
+        # Use the existing metrics producer's selection; never require all candidates available.
+        key = "liquidity_screen"
+        selected = base.selected_instruments_from_artifacts(normalized, reports["algopack_fo_tradestats"])
+        if evidence_only:
+            return summaries, []
+        for key, field, schema in (
+            ("liquidity_screen", "liquidity_status", base.SCHEMA_LIQUIDITY_SCREEN),
+            ("history_depth_screen", "history_depth_status", base.SCHEMA_HISTORY_DEPTH_SCREEN),
+        ):
+            frame = _current_frame(outputs[key], snapshot_date,
+                                   ("family_code", key + "_id", field, "validation_status", "review_status", "fetch_status", "review_notes"),
+                                   schema)
+            _current_coverage(frame, selected)
+            _current_agreement(frame, selected, "family_code")
+            _current_window(frame, "screen", screen_bounds)
+            _require_current(bool(frame[field].isin(("pass", "fail", "review_required")).all()), "invalid_screen_status")
+            _require_current(bool(frame["fetch_status"].isin(("completed", "failed")).all()), "invalid_fetch_status")
+            computed = frame[field].ne("fail")
+            _require_current(bool(frame.loc[computed, "validation_status"].eq("metrics_computed").all())
+                             and bool(frame.loc[computed, "review_status"].eq("ready_for_pm_review").all())
+                             and bool(frame.loc[computed, "fetch_status"].eq("completed").all()),
+                             "incoherent_computed_screen")
+            _require_current(bool(frame.loc[~computed, "validation_status"].eq("failed").all())
+                             and bool(frame.loc[~computed, "review_status"].eq("blocked").all()),
+                             "incoherent_failed_screen")
+            record(key, frame, field)
+            summaries[key]["expected_instrument_count"] = int(len(selected))
+        return summaries, []
+    except Exception as exc:
+        summaries[key] = {"validation_status": "fail", "validation_scope": "current_registry_evidence_only",
+                          "failure_reason": type(exc).__name__ + ":" + str(exc)[:600]}
+        return summaries, [key + "_validation_failed"]
+
+
 def main():
     if load_dotenv is not None:
         load_dotenv()
@@ -339,17 +509,24 @@ def main():
     parser.add_argument("--apim-base-url", default=os.getenv("MOEX_API_URL", base.DEFAULT_APIM_BASE_URL))
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--availability-max-workers", type=int, default=int(os.getenv("MOEX_AVAILABILITY_MAX_WORKERS", "4")))
-    parser.add_argument("--whitelist", default=",".join(DEFAULT_WHITELIST))
-    parser.add_argument("--excluded", default=",".join(DEFAULT_EXCLUDED))
+    parser.add_argument("--validation-mode", choices=[SLICE1_COMPAT, CURRENT_REGISTRY], default=SLICE1_COMPAT)
+    parser.add_argument("--whitelist", default=None)
+    parser.add_argument("--excluded", default=None)
     args = parser.parse_args()
+    current_mode = args.validation_mode == CURRENT_REGISTRY
+    if current_mode and (args.whitelist is not None or args.excluded is not None):
+        parser.error("current_registry forbids --whitelist and --excluded; use eligibility downstream")
     root = Path.cwd().resolve()
     data_root = base.resolve_data_root(args)
-    whitelist = parse_list(args.whitelist, DEFAULT_WHITELIST)
-    excluded = parse_list(args.excluded, DEFAULT_EXCLUDED)
+    whitelist = [] if current_mode else parse_list(args.whitelist, DEFAULT_WHITELIST)
+    excluded = [] if current_mode else parse_list(args.excluded, DEFAULT_EXCLUDED)
     base.assert_files_exist(root, REQUIRED_CONTRACTS + REQUIRED_CONFIGS)
     outputs = output_paths(root, data_root, args.snapshot_date, args.run_date)
     started_ts = utc_now_iso()
-    run_id = "futures_registry_refresh_" + args.run_date + "_" + stable_id([args.snapshot_date, started_ts, ",".join(whitelist)])
+    identity = [args.snapshot_date, started_ts, ",".join(whitelist)]
+    if current_mode:
+        identity.append(CURRENT_REGISTRY)
+    run_id = "futures_registry_refresh_" + args.run_date + "_" + stable_id(identity)
     common = ["--snapshot-date", args.snapshot_date, "--data-root", str(data_root), "--timeout", str(args.timeout), "--iss-base-url", args.iss_base_url, "--apim-base-url", args.apim_base_url]
     if args.from_date:
         common += ["--from", args.from_date]
@@ -359,23 +536,31 @@ def main():
     child_items = []
     evidence_cmd = [sys.executable, str(root / "src/moex_data/futures/registry_evidence_artifacts_producer.py")] + common + ["--availability-max-workers", str(args.availability_max_workers)]
     child_items.append(run_child(root, "registry_evidence_artifacts_producer", evidence_cmd, {k: outputs[k] for k in ["registry_snapshot", "normalized_registry", "family_mapping", "algopack_fo_tradestats", "moex_futoi", "algopack_fo_obstats", "algopack_fo_hi2"]}))
-    if child_items[-1].get("status") == "pass":
+    output_summaries, validation_blockers = {}, []
+    if current_mode and child_items[-1].get("status") == "pass":
+        output_summaries, validation_blockers = validate_current_outputs(
+            outputs, args.snapshot_date, from_date=args.from_date, till=args.till, evidence_only=True)
+    if child_items[-1].get("status") == "pass" and not validation_blockers:
         screen_cmd = [sys.executable, "-m", "moex_data.futures.liquidity_history_metrics_probe"] + common + ["--full-history-proven"]
         child_items.append(run_child(root, "liquidity_history_metrics_probe", screen_cmd, {"liquidity_screen": outputs["liquidity_screen"], "history_depth_screen": outputs["history_depth_screen"]}))
     final_status = "pass" if len(child_items) == 2 and all(x.get("status") == "pass" for x in child_items) else "fail"
-    blockers = [str(x.get("component_id")) + ":" + str(x.get("failure_reason")) for x in child_items if x.get("status") != "pass"]
+    blockers = [str(x.get("component_id")) + ":" + str(x.get("failure_reason")) for x in child_items if x.get("status") != "pass"] + validation_blockers
     child_duration_summary = {str(x.get("component_id")): x.get("duration_sec") for x in child_items if x.get("component_id")}
     availability_probe_timing_summary = {}
     if child_items:
         parsed_child_stdout = child_items[0].get("json_line_outputs") or parse_json_line_output(child_items[0].get("stdout_tail", ""))
         availability_probe_timing_summary = parsed_child_stdout.get("availability_probe_timing_summary") or {}
-    output_summaries = {}
     if final_status == "pass":
-        output_summaries, validation_blockers = validate_outputs(outputs, whitelist)
+        if current_mode:
+            output_summaries, validation_blockers = validate_current_outputs(
+                outputs, args.snapshot_date, from_date=args.from_date, till=args.till)
+        else:
+            output_summaries, validation_blockers = validate_outputs(outputs, whitelist)
         blockers += validation_blockers
         if validation_blockers:
             final_status = "fail"
     manifest = {"schema_version": SCHEMA_MANIFEST, "run_id": run_id, "run_date": args.run_date, "snapshot_date": args.snapshot_date, "refresh_from": args.from_date or None, "refresh_till": args.till or None, "started_ts": started_ts, "completed_ts": utc_now_iso(), "total_duration_sec": round(time.time() - run_started_epoch, 3), "runner_whitelist_applied": whitelist, "excluded_instruments_confirmed": excluded, "availability_max_workers": int(args.availability_max_workers), "component_execution_order": ["registry_evidence_artifacts_producer", "liquidity_history_metrics_probe"], "child_component_status": child_items, "child_duration_summary": child_duration_summary, "availability_probe_timing_summary": availability_probe_timing_summary, "child_output_references": {x["component_id"]: {"status": x.get("status"), "validation_status": x.get("validation_status"), "expected_outputs": x.get("expected_outputs")} for x in child_items}, "output_artifacts": outputs, "output_summaries": output_summaries, "artifact_validation_status": "pass" if final_status == "pass" else "fail", "registry_refresh_result_verdict": final_status, "blockers": blockers}
+    manifest["validation_mode"] = args.validation_mode
     path = Path(outputs["manifest"])
     write_manifest(path, manifest)
     print_json_line("registry_refresh_manifest_path", str(path))
