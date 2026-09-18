@@ -13,6 +13,7 @@ import pandas as pd
 import requests
 
 from moex_data.futures import refresh_forts_raw_5m_incremental as observed_date_source
+from moex_data.futures import algopack_availability_probe as tradestats_source
 
 TZ_MSK = ZoneInfo("Europe/Moscow")
 DEFAULT_ISS_BASE_URL = "https://iss.moex.com"
@@ -158,6 +159,15 @@ def block_to_frame(data: Dict[str, Any], preferred_blocks: Iterable[str]) -> pd.
 
 
 def fetch_paged_frame(base_url: str, path: str, params: Dict[str, Any], block: str, timeout: float, use_apim: bool) -> pd.DataFrame:
+    if path.startswith("/iss/datashop/algopack/fo/tradestats"):
+        secid = tradestats_source._tradestats_path_secid(path)
+        if params.get("secid", secid) != secid:
+            raise tradestats_source.TradeStatsSourceError("TradeStats path and requested SECID disagree")
+        def read_page(start):
+            return request_json(base_url, path, dict(params, start=start), timeout, use_apim)
+        pages = list(tradestats_source.iter_tradestats_history(
+            read_page, secid, params.get("from"), params.get("till")))
+        return pd.concat(pages, ignore_index=True) if pages else pd.DataFrame()
     frames = []
     start = 0
     while True:
@@ -296,25 +306,17 @@ def fetch_observed_trading_dates(
 
 
 def fetch_tradestats(secid: str, screen_from: str, screen_till: str, timeout: float, apim_base_url: str, iss_base_url: str) -> Tuple[pd.DataFrame, str, str, str]:
-    candidates = [
-        (apim_base_url, "/iss/datashop/algopack/fo/tradestats/" + secid + ".json", {}, True),
-        (iss_base_url, "/iss/datashop/algopack/fo/tradestats/" + secid + ".json", {}, False),
-        (apim_base_url, "/iss/datashop/algopack/fo/tradestats.json", {"secid": secid}, True),
-        (iss_base_url, "/iss/datashop/algopack/fo/tradestats.json", {"secid": secid}, False),
-    ]
-    last_error = ""
-    last_url = ""
-    for base_url, path, extra, use_apim in candidates:
-        params = {"from": screen_from, "till": screen_till}
-        params.update(extra)
-        last_url = url_join(base_url, path)
-        try:
-            frame = fetch_paged_frame(base_url, path, params, "data", timeout, use_apim)
-            if not frame.empty:
-                return frame, last_url, "completed", ""
-        except Exception as exc:
-            last_error = exc.__class__.__name__ + ": " + str(exc)[:500]
-    return pd.DataFrame(), last_url, "failed", last_error or "empty_response"
+    # The general market snapshot is not a historical fallback. Keep the public signature.
+    source_url = ""
+    try:
+        path = tradestats_source.tradestats_instrument_path(secid)
+        source_url = url_join(apim_base_url, path)
+        frame = fetch_paged_frame(apim_base_url, path, {"from": screen_from, "till": screen_till}, "tradestats", timeout, True)
+        if frame.empty:
+            return frame, source_url, "failed", "empty_response"
+        return frame, source_url, "completed", ""
+    except Exception as exc:
+        return pd.DataFrame(), source_url, "failed", exc.__class__.__name__ + ": " + str(exc)[:500]
 
 
 def duplicate_intraday_rows(frame: pd.DataFrame) -> int:
@@ -707,7 +709,7 @@ def main() -> int:
         "date_source_note": calendar_note or None,
         "date_source_reference_secid": reference_secid,
         "date_source_id": observed_date_source.OBSERVED_DATE_SOURCE_ID,
-        "date_source_endpoint": observed_date_source.OBSERVED_DATE_SOURCE_ENDPOINT,
+        "date_source_endpoint": observed_date_source.observed_date_source_endpoint(reference_secid),
     }
 
     print_json_line("output_artifacts_created", output_paths)

@@ -129,7 +129,8 @@ def test_incremental_refresh_source_loader_never_requests_calendar_endpoint(monk
     forbidden = "/iss/" + "calendars"
     assert dates == ["2026-06-12", "2026-06-15", "2026-06-17"]
     assert calls
-    assert all(url.endswith(refresh.OBSERVED_DATE_SOURCE_ENDPOINT) for url in calls)
+    # The historical loader now resolves an instrument path; exact-date Stage10 stays separate.
+    assert all(url.endswith(refresh.observed_date_source_endpoint("USDRUBF")) for url in calls)
     assert all(forbidden not in url for url in calls)
 
 
@@ -153,7 +154,7 @@ def test_observed_source_absence_is_contextual_and_fail_closed(monkeypatch: pyte
     message = str(error.value)
     assert "fetch_observed_tradestats_dates" in message
     assert refresh.SOURCE_ARTIFACT_ID in message
-    assert refresh.OBSERVED_DATE_SOURCE_ENDPOINT in message
+    assert refresh.observed_date_source_endpoint("USDRUBF") in message
     assert "secid=USDRUBF" in message
     assert "authoritative AlgoPack TradeStats source returned no observed trade dates" in message
 

@@ -9,7 +9,7 @@ import sys
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -441,6 +441,183 @@ def rows_stats(frame: pd.DataFrame) -> Dict[str, Any]:
     return {"rows": int(len(frame)), "min_ts": values.min(), "max_ts": values.max()}
 
 
+# Shared only by historical TradeStats consumers; other source parsers stay unchanged.
+TRADESTATS_HISTORY_ENDPOINT = "/iss/datashop/algopack/fo/tradestats/{SECID}.json"
+TRADESTATS_MAX_PAGES = 500
+
+
+class TradeStatsSourceError(ValueError):
+    """An invalid source response must never be admitted as partial history."""
+
+
+def tradestats_instrument_path(secid: str) -> str:
+    from urllib.parse import quote
+
+    if not isinstance(secid, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", secid.strip()):
+        raise TradeStatsSourceError("TradeStats requires an explicit safe SECID")
+    return TRADESTATS_HISTORY_ENDPOINT.replace("{SECID}", quote(secid.strip(), safe=""))
+
+
+def _tradestats_path_secid(path: str) -> str:
+    from urllib.parse import unquote
+
+    prefix = "/iss/datashop/algopack/fo/tradestats/"
+    if not path.startswith(prefix) or not path.endswith(".json"):
+        raise TradeStatsSourceError("general TradeStats endpoint is not instrument history")
+    secid = unquote(path[len(prefix):-5])
+    if tradestats_instrument_path(secid) != path:
+        raise TradeStatsSourceError("noncanonical TradeStats instrument path")
+    return secid
+
+
+def _tradestats_date(value: Any) -> str:
+    from datetime import date
+
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+        raise TradeStatsSourceError("invalid TradeStats date; expected YYYY-MM-DD")
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError as exc:
+        raise TradeStatsSourceError("invalid TradeStats date") from exc
+
+
+def _tradestats_column(columns: Iterable[str], candidates: Iterable[str]) -> str:
+    wanted = set(candidates)
+    found = [name for name in columns if name.lower() in wanted]
+    if len(found) != 1:
+        raise TradeStatsSourceError("missing or ambiguous TradeStats field: " + "/".join(sorted(wanted)))
+    return found[0]
+
+
+def tradestats_page(payload: Any, secid: str, date_start: str, date_end: str) -> Tuple[pd.DataFrame, str]:
+    """Parse only named data blocks and validate every row, including empty schemas."""
+    tradestats_instrument_path(secid)
+    first, last = _tradestats_date(date_start), _tradestats_date(date_end)
+    if first > last:
+        raise TradeStatsSourceError("TradeStats from date is after till date")
+    if not isinstance(payload, dict):
+        raise TradeStatsSourceError("TradeStats response JSON root is not an object")
+    if any(str(key).lower() in ("error", "errors", "error_message") and value is not None
+           for key, value in payload.items()):
+        raise TradeStatsSourceError("TradeStats error payload")
+    names = [name for name in ("tradestats", "data") if name in payload]
+    if len(names) != 1:
+        raise TradeStatsSourceError("missing or ambiguous TradeStats data block")
+    block = names[0]
+    raw = payload[block]
+    if not isinstance(raw, dict):
+        raise TradeStatsSourceError("malformed TradeStats data block")
+    columns, rows = raw.get("columns"), raw.get("data")
+    if (not isinstance(columns, list) or not columns
+            or any(not isinstance(c, str) or not c or c != c.strip() for c in columns)
+            or len({c.lower() for c in columns}) != len(columns)
+            or not isinstance(rows, list)
+            or any(not isinstance(row, list) or len(row) != len(columns) for row in rows)):
+        raise TradeStatsSourceError("malformed TradeStats columns or rows")
+    if any(c.lower() in ("error", "errors", "error_message") for c in columns):
+        raise TradeStatsSourceError("TradeStats error columns")
+    symbol = _tradestats_column(columns, ("secid", "ticker"))
+    source_date = _tradestats_column(columns, ("tradedate", "date"))
+    si, di = columns.index(symbol), columns.index(source_date)
+    for row in rows:
+        if not isinstance(row[si], str) or row[si].strip().upper() != secid.strip().upper():
+            raise TradeStatsSourceError("TradeStats response contains foreign or missing SECID")
+        if not first <= _tradestats_date(row[di]) <= last:
+            raise TradeStatsSourceError("TradeStats date escaped requested source range")
+    return pd.DataFrame(rows, columns=columns), block
+
+
+def _tradestats_cursor(payload: Dict[str, Any], start: int, count: int) -> Optional[Tuple[int, int, int]]:
+    names = [name for name in ("tradestats.cursor", "data.cursor") if name in payload]
+    if not names:
+        return None
+    if len(names) != 1:
+        raise TradeStatsSourceError("ambiguous TradeStats cursor")
+    raw = payload[names[0]]
+    if not isinstance(raw, dict):
+        raise TradeStatsSourceError("malformed TradeStats cursor")
+    columns, rows = raw.get("columns"), raw.get("data")
+    if (not isinstance(columns, list) or not columns
+            or any(not isinstance(c, str) or not c or c != c.strip() for c in columns)
+            or len({c.upper() for c in columns}) != len(columns)
+            or not isinstance(rows, list) or len(rows) != 1
+            or not isinstance(rows[0], list) or len(rows[0]) != len(columns)):
+        raise TradeStatsSourceError("malformed TradeStats cursor schema")
+    values = dict(zip((c.upper() for c in columns), rows[0]))
+    if any(type(values.get(key)) is not int for key in ("INDEX", "TOTAL", "PAGESIZE")):
+        raise TradeStatsSourceError("TradeStats cursor fields must be integers")
+    index, total, size = (values[key] for key in ("INDEX", "TOTAL", "PAGESIZE"))
+    if index != start or total < 0 or size <= 0 or index > total:
+        raise TradeStatsSourceError("non-advancing or invalid TradeStats cursor")
+    if count != min(size, total - index):
+        raise TradeStatsSourceError("TradeStats cursor row count mismatch")
+    return index, total, size
+
+
+def _tradestats_row_keys(frame: pd.DataFrame) -> List[Tuple[Any, ...]]:
+    symbol = _tradestats_column(frame.columns, ("secid", "ticker"))
+    source_date = _tradestats_column(frame.columns, ("tradedate", "date"))
+    times = [c for c in frame.columns if c.lower() in ("tradetime", "time")]
+    if len(times) > 1:
+        raise TradeStatsSourceError("ambiguous TradeStats time field")
+    keys = []
+    for row in frame.to_dict("records"):
+        identity = (row[symbol].strip().upper(), row[source_date])
+        if times:
+            moment = row[times[0]]
+            if not isinstance(moment, str) or not re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\.[0-9]{1,6})?", moment):
+                raise TradeStatsSourceError("invalid TradeStats time")
+            # Normalize fractional seconds so textual variants cannot hide overlaps.
+            clock = datetime.strptime(moment, "%H:%M:%S.%f" if "." in moment else "%H:%M:%S").time()
+            keys.append(identity + (clock.isoformat(timespec="microseconds"),))
+        else:
+            # Date-only callers retain support; use all fields rather than invent intraday identity.
+            keys.append(identity + (json.dumps(row, sort_keys=True, allow_nan=False),))
+    return keys
+
+
+def iter_tradestats_history(read_page: Callable[[int], Any], secid: str, date_start: str, date_end: str, *, max_pages: int = TRADESTATS_MAX_PAGES) -> Iterator[pd.DataFrame]:
+    """Exhaust the source before a caller returns success; never treat a short page as EOF."""
+    tradestats_instrument_path(secid)
+    if _tradestats_date(date_start) > _tradestats_date(date_end):
+        raise TradeStatsSourceError("TradeStats from date is after till date")
+    if type(max_pages) is not int or max_pages < 1:
+        raise TradeStatsSourceError("invalid TradeStats max_pages guard")
+    start, expected_total = 0, None
+    cursor_mode = None
+    expected_columns = None
+    seen = set()
+    for _ in range(max_pages):
+        payload = read_page(start)
+        frame, block = tradestats_page(payload, secid, date_start, date_end)
+        columns = (block, tuple(frame.columns))
+        if expected_columns is not None and columns != expected_columns:
+            raise TradeStatsSourceError("TradeStats page schema changed")
+        expected_columns = columns
+        cursor = _tradestats_cursor(payload, start, len(frame))
+        if cursor_mode is not None and (cursor is not None) != cursor_mode:
+            raise TradeStatsSourceError("TradeStats cursor presence changed")
+        cursor_mode = cursor is not None
+        if cursor is not None:
+            _, total, size = cursor
+            if expected_total is not None and total != expected_total:
+                raise TradeStatsSourceError("TradeStats cursor total changed during retrieval")
+            expected_total = total
+        if frame.empty:
+            return
+        keys = _tradestats_row_keys(frame)
+        current = set(keys)
+        if len(current) != len(keys) or seen.intersection(current):
+            raise TradeStatsSourceError("TradeStats pagination did not advance: duplicate or overlapping rows")
+        seen.update(current)
+        yield frame
+        start += len(frame)
+        if cursor is not None and start == total:
+            return
+    raise TradeStatsSourceError("TradeStats pagination exceeded max_pages guard")
+
+
+
 def _futoi_schema_error(frame: pd.DataFrame) -> str:
     if frame.empty:
         return "empty_response"
@@ -460,8 +637,16 @@ def probe_one_path(base_url: str, path: str, params: Dict[str, Any], timeout: fl
     try:
         data = request_json(base_url, path, params, timeout, use_apim)
         is_futoi = "/analyticalproducts/futoi/" in path
-        preferred = ["futoi"] if is_futoi else ["data", "securities", "tradestats", "obstats", "hi2"]
-        frame = block_to_frame(data, preferred)
+        is_tradestats = path.startswith("/iss/datashop/algopack/fo/tradestats")
+        if is_tradestats:
+            requested = _tradestats_path_secid(path)
+            if params.get("secid", requested) != requested:
+                raise TradeStatsSourceError("TradeStats path and requested SECID disagree")
+            frame, _ = tradestats_page(data, requested, params.get("from"), params.get("till"))
+            _tradestats_cursor(data, int(params.get("start", 0)), len(frame))
+        else:
+            preferred = ["futoi"] if is_futoi else ["data", "securities", "tradestats", "obstats", "hi2"]
+            frame = block_to_frame(data, preferred)
         if is_futoi:
             error = _futoi_schema_error(frame)
             if error:
@@ -475,8 +660,7 @@ def probe_one_path(base_url: str, path: str, params: Dict[str, Any], timeout: fl
 def endpoint_probe_candidates(endpoint_id: str, secid: str, family: str, config_path: str) -> List[Tuple[str, Dict[str, Any], bool]]:
     if endpoint_id == "algopack_fo_tradestats":
         return [
-            ("/iss/datashop/algopack/fo/tradestats/" + secid + ".json", {}, True),
-            (config_path, {"secid": secid}, True),
+            (tradestats_instrument_path(secid), {}, True),
         ]
     if endpoint_id == "algopack_fo_obstats":
         return [
@@ -539,6 +723,9 @@ def probe_endpoint_for_instrument(
             error_code = code
             error_message = msg
     stats = rows_stats(best_frame)
+    if endpoint_id == "algopack_fo_tradestats" and not best_frame.empty:
+        source_date = _tradestats_column(best_frame.columns, ("tradedate", "date"))
+        stats = {"rows": len(best_frame), "min_ts": best_frame[source_date].min(), "max_ts": best_frame[source_date].max()}
     availability_status = best_status
     if best_status == "available" and stats["rows"] == 0:
         availability_status = "unavailable"
@@ -589,7 +776,7 @@ def availability_record_from_probe(
             "observed_max_ts": result["observed_max_ts"],
             "error_code": result["error_code"],
             "error_message": result["error_message"],
-            "review_notes": None,
+            "review_notes": "instrument_specific_first_page_only; full_history_not_proven" if endpoint_id == "algopack_fo_tradestats" else None,
             "probe_status": "completed",
             "validation_status": "not_validated",
         },

@@ -103,3 +103,35 @@ evidence:
     - CRU6
   historical_research_source_id_noncanonical:
     CNYRUBF: moex_algopack_cnyrubf_fo_tradestats_5m
+
+historical_tradestats_consumers:
+  scope:
+    - moex_data.futures.algopack_availability_probe
+    - moex_data.futures.liquidity_history_metrics_probe
+    - moex_data.futures.refresh_forts_raw_5m_incremental.fetch_observed_tradestats_dates
+  endpoint_pattern: /iss/datashop/algopack/fo/tradestats/{SECID}.json
+  general_market_history_fallback: forbidden
+  authenticated_apim_only: true
+  explicit_bounds: [from, till]
+  instrument_identity: safe_path_secid_checked_against_every_returned_row
+  accepted_blocks: [tradestats, data]
+  ambiguous_blocks_or_fields: fail_closed
+  invalid_or_out_of_range_source_dates: fail_closed
+  mixed_or_missing_secid: fail_closed
+  availability_probe_scope: validated_first_page_presence_only
+  historical_pagination:
+    cursor: validate_index_total_page_size_and_exact_returned_count
+    no_cursor: advance_by_returned_rows_until_valid_empty_page
+    short_page_is_end: false
+    repeated_or_overlapping_rows: fail_closed
+    changed_schema_or_cursor_total: fail_closed
+    malformed_or_nonadvancing_cursor: fail_closed
+    page_guard_exhausted: fail_closed
+    later_page_failure: discard_partial_result
+  provenance: actual_instrument_endpoint_and_observed_date_extent
+  retrieval_exhaustion_is_full_session_or_pit_proof: false
+  compatibility_boundary:
+    - Existing shared raw-materializer endpoint_path and exact-date scanner behavior are not changed by this historical-consumer repair.
+    - The shared OBSERVED_DATE_SOURCE_ENDPOINT alias is retained for those callers; the historical helper resolves observed_date_source_endpoint(secid).
+    - Source IDs, schemas, storage, numerical/threshold/universe policies and previous evidence are unchanged.
+    - Recorded prior coverage evidence is not revalidated or rewritten by this change; no historical admission is granted to new outputs before runtime acceptance.

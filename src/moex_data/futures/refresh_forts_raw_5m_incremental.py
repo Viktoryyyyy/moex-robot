@@ -13,6 +13,7 @@ from typing import Final
 import requests
 
 from . import materialize_forts_raw_5m_instrument as materializer
+from . import algopack_availability_probe as tradestats_source
 
 ARTIFACT_ID: Final[str] = "dataset.forts.raw_5m.tradestats.v1"
 SOURCE_ARTIFACT_ID: Final[str] = "external.apim.fo.tradestats.v1"
@@ -186,12 +187,16 @@ def _require_base_manifest(base_manifest: Mapping[str, object], instrument_id: s
     return _require_date(str(last_valid or ""), "base_manifest.last_valid_trade_date")
 
 
+def observed_date_source_endpoint(secid: str) -> str:
+    return tradestats_source.tradestats_instrument_path(secid)
+
+
 def _source_error(*, secid: str, date_start: str, date_end: str, detail: str) -> ValueError:
     return ValueError(
         "fetch_observed_tradestats_dates source="
         + SOURCE_ARTIFACT_ID
         + " endpoint="
-        + OBSERVED_DATE_SOURCE_ENDPOINT
+        + observed_date_source_endpoint(secid)
         + " secid="
         + secid
         + " range="
@@ -224,63 +229,32 @@ def fetch_observed_tradestats_dates(
     checked_secid = _require_token(secid, "secid")
     if start_date > end_date:
         raise ValueError("date_start must be <= date_end")
+    path = observed_date_source_endpoint(checked_secid)
     base_url = materializer.core._apim_base_url(apim_base_url, None)
-    endpoint = materializer.core._source_url(base_url, OBSERVED_DATE_SOURCE_ENDPOINT)
+    endpoint = materializer.core._source_url(base_url, path)
     headers = materializer._auth_headers_with_bearer(None)
     observed: set[str] = set()
-    seen_signatures: set[tuple[object, ...]] = set()
-    start = 0
+
+    def read_page(start):
+        params = {"from": start_date.isoformat(), "till": end_date.isoformat(),
+                  "secid": checked_secid, "start": start, "iss.meta": "off",
+                  "iss.only": "tradestats,tradestats.cursor"}
+        response = requests.get(endpoint, params=params, headers=headers, timeout=timeout)
+        response.raise_for_status()
+        return response.json()
+
     try:
-        for _ in range(MAX_APIM_PAGES):
-            params = {
-                "from": start_date.isoformat(),
-                "till": end_date.isoformat(),
-                "secid": checked_secid,
-                "start": start,
-                "iss.meta": "off",
-                "iss.only": "tradestats",
-            }
-            response = requests.get(endpoint, params=params, headers=headers, timeout=timeout)
-            response.raise_for_status()
-            payload = response.json()
-            if not isinstance(payload, Mapping):
-                raise ValueError("response JSON root is not an object")
-            frame = materializer.core._block_to_frame(payload)
-            if frame.empty:
-                break
-            signature = _page_signature(frame)
-            if signature in seen_signatures:
-                raise ValueError("pagination did not advance")
-            seen_signatures.add(signature)
-            secid_col = materializer.core._canonical_column(frame, ("secid",))
-            date_col = materializer.core._canonical_column(frame, ("tradedate", "date"))
-            if secid_col is None or date_col is None:
-                raise ValueError("tradestats response missing secid/tradedate columns")
-            scoped = frame.loc[frame[secid_col].astype(str).str.strip().str.upper() == checked_secid.upper()]
-            for raw_value in scoped[date_col].tolist():
-                parsed = materializer.core._parse_trade_date(raw_value)
-                if parsed is None:
-                    raise ValueError("tradestats response contains invalid trade date")
-                parsed_date = date.fromisoformat(parsed)
-                if start_date <= parsed_date <= end_date:
-                    observed.add(parsed)
-            start += int(len(frame.index))
-        else:
-            raise ValueError("pagination exceeded max_pages guard")
+        for frame in tradestats_source.iter_tradestats_history(
+                read_page, checked_secid, start_date.isoformat(), end_date.isoformat(),
+                max_pages=MAX_APIM_PAGES):
+            date_col = tradestats_source._tradestats_column(frame.columns, ("tradedate", "date"))
+            observed.update(frame[date_col].tolist())
     except Exception as exc:
-        if isinstance(exc, ValueError) and str(exc).startswith("fetch_observed_tradestats_dates source="):
-            raise
-        raise _source_error(
-            secid=checked_secid,
-            date_start=start_date.isoformat(),
-            date_end=end_date.isoformat(),
-            detail=str(exc),
-        ) from exc
+        raise _source_error(secid=checked_secid, date_start=start_date.isoformat(),
+                            date_end=end_date.isoformat(), detail=str(exc)) from exc
     if not observed:
         raise _source_error(
-            secid=checked_secid,
-            date_start=start_date.isoformat(),
-            date_end=end_date.isoformat(),
+            secid=checked_secid, date_start=start_date.isoformat(), date_end=end_date.isoformat(),
             detail="authoritative AlgoPack TradeStats source returned no observed trade dates",
         )
     return sorted(observed)
@@ -376,7 +350,7 @@ def _build_manifest(
         "added_partition_count": len(successes),
         "date_source_artifact_id": SOURCE_ARTIFACT_ID,
         "date_source_id": OBSERVED_DATE_SOURCE_ID,
-        "date_source_endpoint": OBSERVED_DATE_SOURCE_ENDPOINT,
+        "date_source_endpoint": observed_date_source_endpoint(secid),
         "date_selection_rule": "observed_trade_dates_only",
         "session_binding": "explicit_trade_date_session",
         "storage_pattern": materializer.STORAGE_PATTERN,

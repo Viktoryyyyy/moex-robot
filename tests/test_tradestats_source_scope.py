@@ -247,3 +247,178 @@ def test_observed_dates_later_page_failure_cannot_admit_earlier_dates(monkeypatc
         return payload(rows(1000))
     with pytest.raises(ValueError):
         dates(monkeypatch, answer)
+
+
+def cursor_page(values, index, total, size, block="tradestats"):
+    value = payload(values, block)
+    value[block + ".cursor"] = {
+        "columns": ["INDEX", "TOTAL", "PAGESIZE"], "data": [[index, total, size]],
+    }
+    return value
+
+
+@pytest.mark.parametrize("consumer", ["history", "dates"])
+def test_all_consumers_traverse_valid_cursor_history(monkeypatch, consumer):
+    values = rows(1002)
+    pages = {0: cursor_page(values[:1000], 0, 1002, 1000),
+             1000: cursor_page(values[1000:], 1000, 1002, 1000)}
+    if consumer == "dates":
+        result, calls = dates(monkeypatch, pages.__getitem__)
+        assert result == sorted({row[0] for row in values})
+    else:
+        (frame, _, status, error), calls = history(monkeypatch, pages.__getitem__)
+        assert status == "completed" and not error and len(frame) == 1002
+    assert [call[1]["start"] for call in calls] == [0, 1000]
+
+
+def assert_consumers_reject(monkeypatch, answer, message):
+    (frame, _, status, error), calls = history(monkeypatch, answer)
+    assert status == "failed" and frame.empty and message in error
+    assert calls and all(call[0].endswith("/USDRUBF.json") for call in calls)
+    with pytest.raises(ValueError, match=message):
+        dates(monkeypatch, answer)
+
+
+@pytest.mark.parametrize("cursor", [
+    None, {}, {"columns": ["INDEX"], "data": [[0]]},
+    {"columns": ["INDEX", "TOTAL", "PAGESIZE"], "data": []},
+    {"columns": ["INDEX", "TOTAL", "PAGESIZE"], "data": [[1, 2, 2]]},
+    {"columns": ["INDEX", "TOTAL", "PAGESIZE"], "data": [[0, -1, 2]]},
+    {"columns": ["INDEX", "TOTAL", "PAGESIZE"], "data": [[0, 2, 0]]},
+    {"columns": ["INDEX", "TOTAL", "PAGESIZE"], "data": [[False, 2, 2]]},
+    {"columns": ["INDEX", "TOTAL", "PAGESIZE"], "data": [[0, 2.5, 2]]},
+    {"columns": ["INDEX", "TOTAL", "PAGESIZE"], "data": [[0, 4, 3]]},
+])
+def test_malformed_cursor_is_not_an_empty_or_completed_history(monkeypatch, cursor):
+    answer = payload(rows(2))
+    answer["tradestats.cursor"] = cursor
+    assert_consumers_reject(monkeypatch, lambda _: answer, "cursor")
+    result, _ = probe(monkeypatch, answer)
+    assert result["availability_status"] == "error" and result["error_message"]
+
+
+@pytest.mark.parametrize("fault", ["changed_total", "missing_cursor", "empty_before_total"])
+def test_later_cursor_fault_discards_previous_pages(monkeypatch, fault):
+    first = cursor_page(rows(2), 0, 4, 2)
+    second = cursor_page(rows(2, start="2025-09-19T10:00:00"), 2, 4, 2)
+    if fault == "changed_total":
+        second["tradestats.cursor"]["data"][0][1] = 5
+    elif fault == "missing_cursor":
+        second.pop("tradestats.cursor")
+    else:
+        second["tradestats"]["data"] = []
+    assert_consumers_reject(monkeypatch, lambda offset: first if offset == 0 else second, "cursor")
+
+
+def test_duplicate_identity_rejected_even_when_metrics_were_revised(monkeypatch):
+    values = rows(2)
+    overlap = deepcopy(values[-1:]) + rows(1, start="2025-09-20T10:00:00")
+    overlap[0][3] = 999
+    assert_consumers_reject(monkeypatch, lambda offset: payload(values if offset == 0 else overlap), "overlapping")
+
+
+def test_later_foreign_identity_cannot_produce_partial_success(monkeypatch):
+    pages = {0: payload(rows(2)), 2: payload(rows(1, secid="FOREIGN"))}
+    assert_consumers_reject(monkeypatch, pages.__getitem__, "SECID")
+
+
+def test_later_malformed_block_cannot_produce_partial_success(monkeypatch):
+    assert_consumers_reject(monkeypatch, lambda offset: payload(rows(2)) if offset == 0 else {}, "block")
+
+
+@pytest.mark.parametrize("bad", [
+    {"tradestats": None},
+    {"tradestats": {"columns": ["secid", "tradedate"], "data": None}},
+    {"tradestats": {"columns": ["secid", "tradedate"], "data": [["USDRUBF"]]}},
+    {"tradestats": {"columns": ["secid", "SECID", "tradedate"], "data": []}},
+    {"tradestats": {"columns": ["secid", "ticker", "tradedate"], "data": []}},
+    {"tradestats": {"columns": ["secid", "tradedate", "ERROR_MESSAGE"],
+                    "data": [["USDRUBF", FROM, "denied"]]}},
+    {"error": "denied", **payload(rows(1))},
+    {**payload(rows(1)), **payload(rows(1), "data")},
+])
+def test_schema_and_error_payloads_cannot_be_presence_evidence(monkeypatch, bad):
+    result, calls = probe(monkeypatch, bad)
+    assert result["availability_status"] == "error" and result["observed_rows"] == 0
+    assert result["error_code"] == "TradeStatsSourceError" and len(calls) == 1
+    (frame, _, status, error), _ = history(monkeypatch, lambda offset: bad)
+    assert status == "failed" and frame.empty and "TradeStatsSourceError" in error
+    with pytest.raises(ValueError, match="TradeStats"):
+        dates(monkeypatch, lambda offset: bad)
+
+
+@pytest.mark.parametrize("bad_date", [None, 20250918, "2026-02-29", "2025-09-18suffix", "20250918", "2026-09-19"])
+def test_invalid_dates_fail_explicitly_in_all_consumers(monkeypatch, bad_date):
+    answer = payload(rows(1))
+    answer["tradestats"]["data"][0][0] = bad_date
+    assert_consumers_reject(monkeypatch, lambda offset: answer, "date")
+    result, _ = probe(monkeypatch, answer)
+    assert result["availability_status"] == "error" and result["observed_rows"] == 0
+
+
+@pytest.mark.parametrize("secid", [None, "", ".", "..", "../USDRUBF", "A/B", "A\\B", "A?date=x", "A#x", "A%2FB"])
+def test_unsafe_path_identity_is_rejected_before_history_network(monkeypatch, secid):
+    def network(*args, **kwargs):
+        raise AssertionError("unsafe SECID must not reach network")
+    monkeypatch.setattr(liquidity, "request_json", network)
+    frame, url, status, error = liquidity.fetch_tradestats(secid, FROM, TILL, 1, "https://apim.invalid", "https://iss.invalid")
+    assert frame.empty and status == "failed" and error and not url
+    with pytest.raises(ValueError):
+        availability.tradestats_instrument_path(secid)
+
+
+def test_page_guard_exhaustion_is_not_partial_success(monkeypatch):
+    real_iterator = availability.iter_tradestats_history
+    def bounded(*args, **kwargs):
+        return real_iterator(*args, **dict(kwargs, max_pages=2))
+    monkeypatch.setattr(availability, "iter_tradestats_history", bounded)
+    def answer(offset):
+        return payload(rows(1, start="2025-09-" + str(18 + offset) + "T10:00:00"))
+    assert_consumers_reject(monkeypatch, answer, "max_pages")
+
+
+def test_date_only_synthetic_payload_remains_supported(monkeypatch):
+    def answer(offset):
+        return {"tradestats": {"columns": ["SECID", "TRADEDATE"],
+                               "data": [["USDRUBF", FROM], ["USDRUBF", TILL]] if offset == 0 else []}}
+    result, calls = dates(monkeypatch, answer)
+    assert result == [FROM, TILL]
+    assert [call[1]["start"] for call in calls] == [0, 2]
+
+
+def test_history_uses_no_generic_or_unauthenticated_fallback(monkeypatch):
+    calls = []
+    def network(base_url, path, params, timeout, use_apim):
+        calls.append((base_url, path, use_apim))
+        raise requests.ReadTimeout("synthetic")
+    monkeypatch.setattr(liquidity, "request_json", network)
+    frame, url, status, error = liquidity.fetch_tradestats("USDRUBF", FROM, TILL, 1, "https://apim.invalid", "https://iss.invalid")
+    assert status == "failed" and frame.empty and "ReadTimeout" in error
+    assert calls == [("https://apim.invalid", ENDPOINT + "/USDRUBF.json", True)]
+    assert url == "https://apim.invalid" + ENDPOINT + "/USDRUBF.json"
+
+
+def test_presence_statistics_use_trade_date_not_unrelated_ts(monkeypatch):
+    value = payload(rows(1))
+    value["tradestats"]["columns"].append("ts")
+    value["tradestats"]["data"][0].append("2099-01-01")
+    result, _ = probe(monkeypatch, value)
+    assert result["availability_status"] == "available"
+    assert result["observed_min_ts"] == result["observed_max_ts"] == FROM
+
+
+def test_actual_historical_endpoint_is_recorded_without_redefining_shared_endpoint(tmp_path):
+    path = ENDPOINT + "/USDRUBF.json"
+    assert observed.observed_date_source_endpoint("USDRUBF") == path
+    error = observed._source_error(secid="USDRUBF", date_start=FROM, date_end=TILL, detail="synthetic")
+    assert "endpoint=" + path in str(error)
+    result = observed._build_manifest(
+        artifact_version="synthetic", base_manifest={"last_valid_trade_date": FROM},
+        base_manifest_path=tmp_path / "base.json", instrument_id="forts.usdrubf", secid="USDRUBF",
+        last_completed_valid_trading_day=datetime.fromisoformat(TILL).date(), incremental_start=None,
+        requested_dates=[], successes=[], failures=[], build_started_at="synthetic", build_finished_at="synthetic",
+        quality_report_path=tmp_path / "quality.json",
+    )
+    assert result["date_source_endpoint"] == path
+    assert observed.OBSERVED_DATE_SOURCE_ENDPOINT == ENDPOINT + ".json"
+    assert observed.materializer.core.SOURCE_ENDPOINT_APIM_FO_TRADESTATS == ENDPOINT + ".json"
