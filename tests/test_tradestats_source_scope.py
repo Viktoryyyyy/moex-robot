@@ -422,3 +422,189 @@ def test_actual_historical_endpoint_is_recorded_without_redefining_shared_endpoi
     assert result["date_source_endpoint"] == path
     assert observed.OBSERVED_DATE_SOURCE_ENDPOINT == ENDPOINT + ".json"
     assert observed.materializer.core.SOURCE_ENDPOINT_APIM_FO_TRADESTATS == ENDPOINT + ".json"
+
+
+@pytest.mark.parametrize("module", [availability, liquidity], ids=["availability", "liquidity"])
+@pytest.mark.parametrize("token", [None, "", " \t\n "], ids=["missing", "empty", "blank"])
+def test_real_history_transport_rejects_missing_key_before_get(monkeypatch, module, token):
+    if token is None:
+        monkeypatch.delenv("MOEX_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("MOEX_API_KEY", token)
+    calls = []
+    def get(*args, **kwargs):
+        calls.append((args, kwargs))
+        return Response(payload(rows(1)))
+    monkeypatch.setattr(requests, "get", get)
+    with pytest.raises(availability.TradeStatsSourceError, match="MOEX_API_KEY"):
+        module.request_json("https://apim.invalid", ENDPOINT + "/USDRUBF.json",
+                            {"from": FROM, "till": TILL}, 1.0, True)
+    assert calls == []
+
+
+@pytest.mark.parametrize("module", [availability, liquidity], ids=["availability", "liquidity"])
+@pytest.mark.parametrize("token", ["synthetic-token", "  synthetic-token  "])
+def test_real_history_transport_sends_bearer_header(monkeypatch, module, token):
+    monkeypatch.setenv("MOEX_API_KEY", token)
+    calls = []
+    answer = payload(rows(1))
+    def get(url, *, params, headers, timeout):
+        calls.append((url, dict(params), dict(headers), timeout))
+        return Response(answer)
+    monkeypatch.setattr(requests, "get", get)
+    query = {"from": FROM, "till": TILL, "start": 0}
+    assert module.request_json("https://apim.invalid", ENDPOINT + "/USDRUBF.json",
+                               query, 1.0, True) == answer
+    assert len(calls) == 1
+    url, params, headers, timeout = calls[0]
+    assert url == "https://apim.invalid" + ENDPOINT + "/USDRUBF.json"
+    assert params == query and timeout == 1.0
+    assert headers["Authorization"] == "Bearer synthetic-token"
+
+
+@pytest.mark.parametrize("module", [availability, liquidity], ids=["availability", "liquidity"])
+def test_real_history_transport_cannot_disable_apim_auth(monkeypatch, module):
+    monkeypatch.setenv("MOEX_API_KEY", "synthetic-token")
+    calls = []
+    def get(*args, **kwargs):
+        calls.append((args, kwargs))
+        return Response(payload(rows(1)))
+    monkeypatch.setattr(requests, "get", get)
+    with pytest.raises(availability.TradeStatsSourceError, match="MOEX_API_KEY"):
+        module.request_json("https://iss.invalid", ENDPOINT + "/USDRUBF.json",
+                            {"from": FROM, "till": TILL}, 1.0, False)
+    assert calls == []
+
+
+@pytest.mark.parametrize("module", [availability, liquidity], ids=["availability", "liquidity"])
+@pytest.mark.parametrize("path,use_apim", [
+    ("/iss/datashop/algopack/fo/obstats/USDRUBF.json", True),
+    ("/iss/datashop/algopack/fo/hi2/USDRUBF.json", True),
+    ("/iss/analyticalproducts/futoi/securities/si.json", True),
+    ("/iss/engines/futures/markets/forts/boards/rfud/securities.json", False),
+])
+def test_real_transport_preserves_other_source_header_policy(monkeypatch, module, path, use_apim):
+    monkeypatch.delenv("MOEX_API_KEY", raising=False)
+    calls = []
+    def get(url, *, params, headers, timeout):
+        calls.append((url, headers))
+        return Response({"synthetic": True})
+    monkeypatch.setattr(requests, "get", get)
+    assert module.request_json("https://source.invalid", path, {}, 1.0, use_apim) == {"synthetic": True}
+    assert len(calls) == 1 and "Authorization" not in calls[0][1]
+
+
+@pytest.mark.parametrize("consumer", ["availability", "liquidity"])
+@pytest.mark.parametrize("token", [None, "", " \t "])
+def test_missing_key_is_reported_by_consumer_without_http(monkeypatch, consumer, token):
+    if token is None:
+        monkeypatch.delenv("MOEX_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("MOEX_API_KEY", token)
+    calls = []
+    def get(*args, **kwargs):
+        calls.append((args, kwargs))
+        return Response(payload(rows(1)))
+    monkeypatch.setattr(requests, "get", get)
+    if consumer == "availability":
+        result = availability.probe_endpoint_for_instrument(
+            "algopack_fo_tradestats", ENDPOINT + ".json", "USDRUBF", "USDRUBF",
+            FROM, TILL, 1.0, "https://apim.invalid", "https://iss.invalid")
+        assert result["availability_status"] == "error" and result["observed_rows"] == 0
+        assert result["error_code"] == "TradeStatsSourceError"
+        assert "MOEX_API_KEY" in result["error_message"]
+    else:
+        frame, _, status, error = liquidity.fetch_tradestats(
+            "USDRUBF", FROM, TILL, 1.0, "https://apim.invalid", "https://iss.invalid")
+        assert frame.empty and status == "failed"
+        assert "TradeStatsSourceError" in error and "MOEX_API_KEY" in error
+    assert calls == []
+
+
+@pytest.mark.parametrize("reference", ["USDRUBF", "92U6"])
+def test_raw_loader_manifest_records_actual_reference_route(tmp_path, monkeypatch, reference):
+    import json
+    import pandas as pd
+    from moex_data.futures import raw_5m_loader as loader
+
+    instruments = pd.DataFrame([{
+        "secid": reference, "family_code": "synthetic", "board": "RFUD",
+        "short_history_flag": False, "history_depth_status": "pass",
+    }])
+    source_frame = pd.DataFrame([{
+        "secid": reference, "tradedate": FROM, "tradetime": "10:00:00",
+        "pr_open": 1, "pr_high": 1, "pr_low": 1, "pr_close": 1, "vol": 1,
+    }])
+    monkeypatch.setattr(sys, "argv", [
+        "raw_5m_loader", "--data-root", str(tmp_path), "--snapshot-date", TILL,
+        "--run-date", TILL, "--whitelist", reference,
+    ])
+    monkeypatch.setattr(loader.base, "assert_files_exist", lambda *_args: None)
+    monkeypatch.setattr(loader.base, "load_contract_values", lambda *_args: {})
+    monkeypatch.setattr(loader, "load_inputs", lambda *_args: ({}, instruments, pd.DataFrame(), pd.DataFrame()))
+    monkeypatch.setattr(loader, "select_instruments", lambda *_args: instruments.copy())
+    monkeypatch.setattr(loader, "date_bounds", lambda *_args: (FROM, TILL))
+    references = []
+    def observed_dates(start, end, secid, *_args):
+        references.append(secid)
+        return {FROM}, loader.base.OBSERVED_DATE_STATUS
+    monkeypatch.setattr(loader.base, "fetch_observed_trading_dates", observed_dates)
+    monkeypatch.setattr(loader.base, "fetch_tradestats", lambda *_args: (
+        source_frame.copy(), "https://apim.invalid" + ENDPOINT + "/" + reference + ".json", "completed", ""))
+    monkeypatch.setattr(loader, "write_partitions", lambda *_args: [])
+    monkeypatch.setattr(pd.DataFrame, "to_parquet", lambda *_args, **_kwargs: None)
+    assert loader.main() == 0
+    manifest_path = Path(loader.output_paths(tmp_path, TILL)["manifest"])
+    summary = json.loads(manifest_path.read_text())["calendar_validation_summary"]
+    assert references == [reference]
+    assert summary["date_source_reference_secid"] == reference
+    assert summary["date_source_endpoint"] == ENDPOINT + "/" + reference + ".json"
+
+
+@pytest.mark.parametrize("reference", ["USDRUBF", "92U6"])
+def test_batch_reports_record_actual_reference_route(tmp_path, monkeypatch, capsys, reference):
+    import json
+    import pandas as pd
+    from moex_data.futures import all_universe_raw_5m_backfill_slice as batch
+
+    normalized = pd.DataFrame([{"secid": reference, "family_code": "synthetic", "board": "RFUD"}])
+    config = {
+        "continuous_build_enabled": False, "w1_build_enabled": False,
+        "active_raw_5m_selection_mode": batch.MODE_L3_3,
+        "supported_boards": ["RFUD"], "first_executable_slice": {"excluded_secids": []},
+        "l3_3_raw_5m_included_universe": {"recent_trading_dates": 1},
+    }
+    monkeypatch.setattr(sys, "argv", [
+        "batch", "--data-root", str(tmp_path), "--snapshot-date", TILL, "--run-date", TILL,
+    ])
+    monkeypatch.setattr(batch, "load_dotenv", None)
+    monkeypatch.setattr(batch.base, "assert_files_exist", lambda *_args: None)
+    monkeypatch.setattr(batch, "load_json", lambda *_args: config)
+    monkeypatch.setattr(batch, "load_registry", lambda *_args: ("synthetic_registry", normalized))
+    references = []
+    def recent_dates(snapshot, count, timeout, base_url, secid):
+        references.append(secid)
+        return [FROM]
+    monkeypatch.setattr(batch, "recent_dates", recent_dates)
+    monkeypatch.setattr(batch, "run_chunk", lambda *_args: (
+        {"status": "succeeded", "failed_secid": []}, pd.DataFrame([{"quality_status": "pass"}])))
+    monkeypatch.setattr(batch, "write_parquet", lambda *_args: None)
+    saved = []
+    monkeypatch.setattr(batch, "dump_json", lambda path, value: saved.append(deepcopy(value)))
+    assert batch.main() == 0
+    output = json.loads(capsys.readouterr().out)
+    date_sources = [value["date_source"] for value in saved if "date_source" in value]
+    date_sources.append(output["aggregate_report"]["date_source"])
+    assert references == [reference] and len(date_sources) == 2
+    for value in date_sources:
+        assert value["reference_secid"] == reference
+        assert value["endpoint"] == ENDPOINT + "/" + reference + ".json"
+
+
+def test_compatibility_contract_resolves_history_without_promoting_legacy_authority():
+    text = (ROOT / "contracts/datasets/forts_raw_5m_tradestats.v1.yaml").read_text()
+    assert "status: deprecated_runtime_compatibility_only" in text
+    assert "ingestion_source_of_truth: false" in text
+    assert "date_source_endpoint: " + ENDPOINT + "/{SECID}.json" in text
+    assert "use_for_new_data_loading: false" in text
+    assert "use_for_new_instrument_onboarding: false" in text

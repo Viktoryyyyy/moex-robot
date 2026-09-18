@@ -132,6 +132,9 @@ def url_join(base_url: str, path: str) -> str:
 
 
 def request_json(base_url: str, path: str, params: Dict[str, Any], timeout: float, use_apim: bool) -> Dict[str, Any]:
+    if path.startswith("/iss/datashop/algopack/fo/tradestats/"):
+        if not use_apim or not os.getenv("MOEX_API_KEY", "").strip():
+            raise tradestats_source.TradeStatsSourceError("MOEX_API_KEY is required for historical TradeStats APIM requests")
     url = url_join(base_url, path)
     response = requests.get(url, params=params, headers=auth_headers(use_apim), timeout=timeout)
     response.raise_for_status()

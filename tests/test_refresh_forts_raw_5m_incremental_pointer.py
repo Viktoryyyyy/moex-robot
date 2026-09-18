@@ -249,7 +249,8 @@ def test_passed_quality_atomically_advances_pointer_with_observed_date_metadata(
     assert pointer_payload["previous_accepted_manifest_reference"] == accepted_base.as_posix()
     assert pointer_payload["date_source_artifact_id"] == refresh.SOURCE_ARTIFACT_ID
     assert pointer_payload["date_source_id"] == refresh.base_refresh.OBSERVED_DATE_SOURCE_ID
-    assert pointer_payload["date_source_endpoint"] == refresh.base_refresh.OBSERVED_DATE_SOURCE_ENDPOINT
+    # Historical provenance is the requested instrument route, not the exact-date scanner alias.
+    assert pointer_payload["date_source_endpoint"] == "/iss/datashop/algopack/fo/tradestats/USDRUBF.json"
     assert pointer_payload["date_selection_rule"] == "observed_trade_dates_only"
     assert pointer_payload["session_binding"] == "explicit_trade_date_session"
     assert pointer_payload["atomic_update_rule"] == "write_temp_file_in_pointer_directory_then_replace"

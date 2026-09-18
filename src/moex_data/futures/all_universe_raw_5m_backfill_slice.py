@@ -518,13 +518,13 @@ def main():
         write_parquet(chunk_out["quality_report"], quality)
         dump_json(chunk_out["chunk_manifest"], manifest)
         report = aggregate(registry, eligibility, [manifest])
-        report["date_source"] = {"status": OBSERVED_DATE_STATUS, "reference_secid": reference_secid, "source_id": observed_date_source.OBSERVED_DATE_SOURCE_ID, "endpoint": observed_date_source.OBSERVED_DATE_SOURCE_ENDPOINT}
+        report["date_source"] = {"status": OBSERVED_DATE_STATUS, "reference_secid": reference_secid, "source_id": observed_date_source.OBSERVED_DATE_SOURCE_ID, "endpoint": observed_date_source.observed_date_source_endpoint(reference_secid)}
         dump_json(chunk_out["aggregate_report"], report)
         manifests.append(manifest)
         quality_frames.append(quality)
         chunk_outputs.append(chunk_out)
     aggregate_report = aggregate(registry, eligibility, manifests)
-    aggregate_report["date_source"] = {"status": OBSERVED_DATE_STATUS, "reference_secid": reference_secid, "source_id": observed_date_source.OBSERVED_DATE_SOURCE_ID, "endpoint": observed_date_source.OBSERVED_DATE_SOURCE_ENDPOINT}
+    aggregate_report["date_source"] = {"status": OBSERVED_DATE_STATUS, "reference_secid": reference_secid, "source_id": observed_date_source.OBSERVED_DATE_SOURCE_ID, "endpoint": observed_date_source.observed_date_source_endpoint(reference_secid)}
     print(json.dumps({
         "outputs": {"registry_snapshot": out["registry_snapshot"], "eligibility_snapshot": out["eligibility_snapshot"], "chunks": chunk_outputs},
         "selection_mode": mode,
