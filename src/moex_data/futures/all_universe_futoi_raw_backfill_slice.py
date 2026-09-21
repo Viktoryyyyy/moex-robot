@@ -16,7 +16,6 @@ import pandas as pd
 
 from moex_data.futures import futoi_raw_loader as futoi
 from moex_data.futures import liquidity_history_metrics_probe as base
-from moex_data.futures import liquidity_history_metrics_probe_apim_calendar as apim_calendar
 
 SCHEMA_MANIFEST = "futures_all_universe_futoi_raw_chunk_manifest.v1"
 SCHEMA_QUALITY = "futures_all_universe_futoi_raw_quality_report.v1"
@@ -283,9 +282,13 @@ def run_chunk(args, root, selected, run_id, chunk_id):
         ends.append(end)
     calendar_from = min(starts)
     calendar_till = max(ends)
-    expected_calendar, calendar_status = apim_calendar.fetch_futures_calendar(calendar_from, calendar_till, float(args.timeout), "")
-    if expected_calendar is None or calendar_status != "canonical_apim_futures_xml":
-        raise RuntimeError("APIM futures calendar validation failed: " + str(calendar_status))
+    reference_secid = base._reference_secid(selected)
+    expected_calendar, calendar_status = base.fetch_observed_trading_dates(
+        calendar_from, calendar_till, reference_secid,
+        float(args.timeout), str(args.apim_base_url),
+    )
+    if not expected_calendar or calendar_status != base.OBSERVED_DATE_STATUS:
+        raise RuntimeError("authoritative observed TradeStats date validation failed: " + str(calendar_status))
     quality_rows = []
     partitions = []
     failed = []

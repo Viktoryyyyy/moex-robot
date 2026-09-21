@@ -30,6 +30,7 @@ def main():
     parser.add_argument("--data-root", default="")
     parser.add_argument("--selection-mode", choices=[au.MODE_L3_2, au.MODE_L3_3], default=au.MODE_L3_3)
     parser.add_argument("--iss-base-url", default=os.getenv("MOEX_ISS_BASE_URL", base.DEFAULT_ISS_BASE_URL))
+    parser.add_argument("--apim-base-url", default=os.getenv("MOEX_API_URL", base.DEFAULT_APIM_BASE_URL))
     parser.add_argument("--timeout", type=float, default=60.0)
     args = parser.parse_args()
 
@@ -53,7 +54,8 @@ def main():
         selected_ids = []
         recent_count = int((config.get("l3_3_raw_5m_included_universe") or {}).get("recent_trading_dates", 3))
 
-    dates = au.recent_dates(args.snapshot_date, recent_count, float(args.timeout), str(args.iss_base_url))
+    reference_secid = au.observed_reference_secid(registry, selected_ids, config, mode)
+    dates = au.recent_dates(args.snapshot_date, recent_count, float(args.timeout), str(args.apim_base_url), reference_secid)
     eligibility = au.build_eligibility(registry, selected_ids, dates, config, registry_snapshot_id, mode)
     selected = au.selected_universe(eligibility)
     chunk_id = "eligibility_snapshot_" + base.stable_id([registry_snapshot_id, mode, args.snapshot_date])
