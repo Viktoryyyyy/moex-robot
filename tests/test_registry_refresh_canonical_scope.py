@@ -1048,3 +1048,109 @@ def test_new_invariants_block_runner_manifest(monkeypatch, tmp_path, fault):
     assert manifest["artifact_validation_status"] == manifest["registry_refresh_result_verdict"] == "fail"
     assert manifest["blockers"] == [
         ("algopack_fo_tradestats" if fault == "observations" else "liquidity_screen") + "_validation_failed"]
+
+
+# Preserve source spelling across every coverage boundary (review 4062127820).
+CASE_IDENTITY_CHANGES = (
+    ("board", "rfud"), ("board", "RfUd"), ("secid", "SIZ6"), ("secid", "siz6"),
+)
+
+
+@pytest.mark.parametrize("key", ALL_KEYS)
+@pytest.mark.parametrize("field,value", CASE_IDENTITY_CHANGES)
+def test_each_artifact_preserves_exact_producer_identity(tmp_path, key, field, value):
+    frames = fixture_frames()
+    mask = frames[key].secid == "SiZ6"
+    assert mask.sum() == 1
+    frames[key].loc[mask, field] = value
+    summaries, blockers = validate(tmp_path, frames)
+    assert blockers == [key + "_validation_failed"]
+    assert "inconsistent_registry_field:" + field in summaries[key]["failure_reason"]
+
+
+def case_identity_frames(field, value, *, from_payload=False):
+    frames = fixture_frames()
+    raw = frames["registry_snapshot"].copy(deep=True)
+    if from_payload:
+        payloads = [json.loads(text) for text in raw.raw_payload_json]
+        for payload in payloads:
+            if payload["SECID"] == "SiZ6":
+                payload["BOARDID" if field == "board" else "SECID"] = value
+        raw = evidence.availability.build_registry_snapshot(pd.DataFrame(payloads), DAY)
+    else:
+        raw.loc[raw.secid == "SiZ6", field] = value
+    frames["registry_snapshot"] = raw
+    normalized = evidence.availability.build_normalized_registry(raw)
+    frames["normalized_registry"] = normalized
+    frames["family_mapping"] = evidence.build_family_mapping(normalized, DAY)
+    target_secid = value if field == "secid" else "SiZ6"
+    target = normalized.loc[normalized.secid == target_secid].iloc[0]
+    for endpoint in registry.AVAILABILITY_ENDPOINTS:
+        mask = frames[endpoint].secid == "SiZ6"
+        frames[endpoint].loc[mask, ["board", "secid", "family_code"]] = [
+            target.board, target.secid, target.family_code]
+        frames[endpoint].loc[mask, "source_endpoint_url"] = source_url(
+            endpoint, target.secid, target.family_code)
+    for key, row in zip(("liquidity_screen", "history_depth_screen"), produced_screen_pair(target)):
+        frames[key] = pd.concat(
+            [frames[key].loc[frames[key].secid != "SiZ6"], pd.DataFrame([row])], ignore_index=True)
+    return frames
+
+
+@pytest.mark.parametrize("field,value", CASE_IDENTITY_CHANGES)
+@pytest.mark.parametrize("evidence_only", [True, False])
+def test_coherent_case_changes_cannot_override_captured_payload(tmp_path, field, value, evidence_only):
+    frames = case_identity_frames(field, value)
+    before = {key: frame.copy(deep=True) for key, frame in frames.items()}
+    summaries, blockers = validate(tmp_path, frames, evidence_only=evidence_only)
+    assert blockers == ["registry_snapshot_validation_failed"]
+    assert "inconsistent_registry_field:" + field in summaries["registry_snapshot"]["failure_reason"]
+    assert "normalized_registry" not in summaries
+    for key in frames:
+        pd.testing.assert_frame_equal(frames[key], before[key])
+
+
+@pytest.mark.parametrize("field,value", CASE_IDENTITY_CHANGES)
+def test_case_only_raw_corruption_stops_before_metrics(monkeypatch, tmp_path, field, value):
+    frames = case_identity_frames(field, value)
+    monkeypatch.setitem(globals(), "fixture_frames", lambda: frames)
+    code, manifest, calls, outputs = simulate_main(monkeypatch, tmp_path)
+    assert code == 1 and len(calls) == 1
+    assert manifest["blockers"] == ["registry_snapshot_validation_failed"]
+    assert "inconsistent_registry_field:" + field in manifest["output_summaries"]["registry_snapshot"]["failure_reason"]
+    assert not Path(outputs["liquidity_screen"]).exists()
+    assert not Path(outputs["history_depth_screen"]).exists()
+
+
+@pytest.mark.parametrize("field,value", CASE_IDENTITY_CHANGES)
+@pytest.mark.parametrize("reverse", [False, True])
+def test_actual_payload_case_is_preserved_without_rewriting(tmp_path, field, value, reverse):
+    frames = case_identity_frames(field, value, from_payload=True)
+    if reverse:
+        for key in frames:
+            frames[key] = frames[key].iloc[::-1].reset_index(drop=True)
+    before = {key: frame.copy(deep=True) for key, frame in frames.items()}
+    assert validate(tmp_path, frames)[1] == []
+    for key in frames:
+        pd.testing.assert_frame_equal(frames[key], before[key])
+
+
+@pytest.mark.parametrize("field", ["board", "secid"])
+def test_exact_coverage_still_rejects_case_insensitive_collisions(field):
+    expected = pd.DataFrame({"board": ["RFUD"], "secid": ["SiZ6"]})
+    alias = expected.copy()
+    alias[field] = alias[field].str.swapcase()
+    with pytest.raises(ValueError, match="duplicate_instrument_identity"):
+        registry._current_coverage(pd.concat([expected, alias], ignore_index=True), expected)
+
+
+def test_exact_coverage_preserves_empty_helper_scope():
+    empty = pd.DataFrame(columns=["board", "secid"])
+    registry._current_coverage(empty, empty.copy())
+
+
+def test_legacy_availability_keeps_case_insensitive_matching(tmp_path):
+    outputs = write_frames(tmp_path, fixture_frames())
+    result = registry.availability_summary(outputs["algopack_fo_tradestats"], ["SIZ6", "usdrubf"])
+    assert result["validation_status"] == "pass"
+    assert result["whitelist_status"] == {"SIZ6": "available", "usdrubf": "available"}

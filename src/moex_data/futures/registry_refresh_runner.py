@@ -504,6 +504,9 @@ def _current_coverage(frame, expected):
     actual, wanted = _current_keys(frame), _current_keys(expected)
     missing, extra = sorted(wanted - actual), sorted(actual - wanted)
     _require_current(not missing and not extra, "coverage_mismatch:missing=" + str(missing[:10]) + ";extra=" + str(extra[:10]))
+    # Fold case only to detect collisions; evidence must retain producer identity.
+    for field in ("board", "secid"):
+        _current_agreement(frame, expected, field)
 
 
 def _current_agreement(frame, expected, field, expected_field=None):
