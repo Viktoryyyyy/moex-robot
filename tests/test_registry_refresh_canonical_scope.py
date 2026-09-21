@@ -158,6 +158,7 @@ def test_explicit_negative_availability_is_preserved_not_global_failure(tmp_path
 @pytest.mark.parametrize("outcome", ["fail", "review_required"])
 def test_negative_or_review_screen_outcome_is_evidence_not_admission(tmp_path, key, field, outcome):
     frames = fixture_frames()
+    frame = frames[key]
     frame.loc[0, field] = outcome
     if outcome == "fail":
         frame.loc[0, ["validation_status", "review_status", "fetch_status"]] = ["failed", "blocked", "completed"]
