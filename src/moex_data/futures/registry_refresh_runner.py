@@ -326,6 +326,399 @@ def validate_outputs(outputs, whitelist):
     return summaries, blockers
 
 
+# The current mode validates candidate evidence, never admission to a dataset.
+SLICE1_COMPAT = "slice1_compat"
+CURRENT_REGISTRY = "current_registry"
+AVAILABILITY_ENDPOINTS = (
+    "algopack_fo_tradestats", "moex_futoi", "algopack_fo_obstats", "algopack_fo_hi2",
+)
+
+
+def _require_current(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def _current_text(frame, columns):
+    missing = [name for name in columns if name not in frame.columns]
+    _require_current(not missing, "missing_fields:" + ",".join(missing))
+    for name in columns:
+        valid = frame[name].map(lambda value: isinstance(value, str) and bool(value.strip()) and value == value.strip())
+        _require_current(bool(valid.all()), "invalid_text_field:" + name)
+
+
+def _current_keys(frame):
+    _current_text(frame, ("board", "secid"))
+    keys = list(zip(frame["board"].str.upper(), frame["secid"].str.upper()))
+    _require_current(len(set(keys)) == len(keys), "duplicate_instrument_identity")
+    return set(keys)
+
+
+
+# Required column presence is independent of value nullability (for example,
+# liquidity asset_class may be unknown and a perpetual contract_code is empty).
+def _current_required_fields(artifact):
+    import re
+
+    root = Path(__file__).resolve().parents[3]
+    lines = (root / CONTRACTS[artifact]).read_text(encoding="utf-8").splitlines()
+    headers = [i for i, line in enumerate(lines) if line.strip() == "required_fields:"]
+    _require_current(len(headers) == 1, "invalid_required_fields_contract:" + artifact)
+    fields = []
+    for raw in lines[headers[0] + 1:]:
+        line = raw.strip()
+        if not line:
+            continue
+        if not line.startswith("- "):
+            break
+        field = line[2:].strip()
+        _require_current(re.fullmatch(r"[a-z][a-z0-9_]*", field) is not None,
+                         "invalid_required_field_name:" + artifact)
+        fields.append(field)
+    _require_current(bool(fields) and len(set(fields)) == len(fields),
+                     "invalid_required_fields_contract:" + artifact)
+    return tuple(fields)
+
+
+def _current_schema_values(frame, artifact):
+    import numpy as np
+
+    if artifact in ("registry_snapshot", "normalized_registry"):
+        for field in ("shortname", "secname"):
+            _require_current(bool(frame[field].map(lambda v: isinstance(v, str)).all()),
+                             "invalid_text_field:" + field)
+    if artifact == "registry_snapshot":
+        _current_text(frame, ("source_system", "source_endpoint_id"))
+        for field, expected in (
+            ("source_system", "MOEX_ISS"),
+            ("source_endpoint_id", "iss_futures_forts_rfud_securities"),
+        ):
+            _require_current(bool(frame[field].eq(expected).all()), "invalid_registry_source:" + field)
+        _current_text(frame, ("raw_payload_json",))
+        for row in frame.itertuples(index=False):
+            payload = json.loads(row.raw_payload_json)
+            _require_current(isinstance(payload, dict) and bool(payload), "invalid_registry_payload")
+            symbols = [v for k, v in payload.items() if k.upper() == "SECID"]
+            _require_current(len(symbols) == 1 and isinstance(symbols[0], str)
+                             and symbols[0].strip().upper() == row.secid.upper(),
+                             "registry_payload_secid_mismatch")
+    elif artifact == "normalized_registry":
+        _require_current(bool(frame["contract_code"].map(lambda v: isinstance(v, str)).all()),
+                         "invalid_contract_code")
+        _require_current(bool(frame["instrument_kind"].isin(
+            ("expiring_future", "perpetual_future_candidate", "technical", "unknown")).all()),
+                         "invalid_instrument_kind")
+        _require_current(bool(frame["is_perpetual_candidate"].map(
+            lambda v: isinstance(v, (bool, np.bool_))).all()), "invalid_perpetual_flag")
+        _require_current(bool(frame["is_perpetual_candidate"].eq(
+            frame["instrument_kind"].eq("perpetual_future_candidate")).all()),
+                         "inconsistent_perpetual_classification")
+
+
+def _current_source_config():
+    root = Path(__file__).resolve().parents[3]
+    config = json.loads((root / REQUIRED_CONFIGS[0]).read_text(encoding="utf-8"))
+    items = config.get("sources")
+    _require_current(isinstance(items, list), "invalid_source_config")
+    result = {}
+    for endpoint in AVAILABILITY_ENDPOINTS:
+        matches = [item for item in items if isinstance(item, dict) and item.get("endpoint_id") == endpoint]
+        _require_current(len(matches) == 1, "ambiguous_source_config:" + endpoint)
+        item = matches[0]
+        _require_current(item.get("dataset_contract") == CONTRACTS[endpoint]
+                         and isinstance(item.get("endpoint_path"), str) and item["endpoint_path"].startswith("/iss/"),
+                         "invalid_source_config:" + endpoint)
+        result[endpoint] = item
+    return result
+
+
+def _current_source_routes(frame, endpoint, source, config, apim_base_url, iss_base_url):
+    from urllib.parse import urlsplit
+
+    _current_text(frame, ("source_endpoint_url",))
+    for row in frame.itertuples(index=False):
+        candidates = source.endpoint_probe_candidates(
+            endpoint, row.secid, row.family_code, config[endpoint]["endpoint_path"])
+        expected = set()
+        for path, _params, use_apim in candidates:
+            origin = apim_base_url if use_apim else iss_base_url
+            parsed = urlsplit(origin)
+            _require_current(parsed.scheme == "https" and bool(parsed.hostname)
+                             and parsed.username is None and parsed.password is None
+                             and not parsed.query and not parsed.fragment,
+                             "invalid_configured_source_origin")
+            _require_current(not use_apim or parsed.hostname.lower().rstrip(".") != "iss.moex.com",
+                             "public_iss_forbidden_for_apim")
+            expected.add(source.url_join(origin, path))
+        _require_current(row.source_endpoint_url in expected,
+                         "source_endpoint_url_mismatch:" + endpoint + ":" + row.secid)
+
+
+# These fields are emitted once in compute_one_metrics.common and copied to
+# both screens. Outcomes, review notes and threshold profiles may differ.
+SCREEN_PROVENANCE_FIELDS = (
+    "source_endpoint_url", "trade_stats_rows", "daily_rows", "duplicate_intraday_rows",
+    "first_available_date", "last_available_date", "available_trading_days",
+    "expected_trading_days", "coverage_ratio", "recent_gap_count",
+    "missing_day_diagnostics", "calendar_status", "calendar_note",
+    "full_history_proven", "history_proof_scope", "metric_columns_json",
+    "fetch_status", "fetch_error",
+)
+
+
+def _current_screen_provenance(liquidity, history):
+    for frame in (liquidity, history):
+        missing = [field for field in SCREEN_PROVENANCE_FIELDS if field not in frame.columns]
+        _require_current(not missing, "missing_screen_provenance:" + ",".join(missing))
+    expected = {(row.board.upper(), row.secid.upper()): row
+                for row in liquidity.itertuples(index=False)}
+    for row in history.itertuples(index=False):
+        other = expected[(row.board.upper(), row.secid.upper())]
+        for field in SCREEN_PROVENANCE_FIELDS:
+            left, right = getattr(other, field), getattr(row, field)
+            _require_current(pd.api.types.is_scalar(left) and pd.api.types.is_scalar(right),
+                             "invalid_screen_provenance:" + field)
+            left_missing, right_missing = bool(pd.isna(left)), bool(pd.isna(right))
+            equal = left_missing and right_missing
+            if not left_missing and not right_missing:
+                equal = bool(left == right)
+            _require_current(equal, "screen_provenance_mismatch:" + field + ":" + row.secid)
+
+
+def _current_frame(path, snapshot_date, required, schema=None, *, artifact):
+    frame = pd.read_parquet(path)
+    _require_current(frame.columns.is_unique, "duplicate_columns")
+    missing = [field for field in _current_required_fields(artifact) if field not in frame.columns]
+    _require_current(not missing, "missing_fields:" + ",".join(missing))
+    _current_schema_values(frame, artifact)
+    _current_text(frame, ("snapshot_date", "board", "secid", *required))
+    _require_current(bool(frame["snapshot_date"].eq(snapshot_date).all()), "snapshot_date_mismatch")
+    _current_keys(frame)
+    if schema is not None:
+        _current_text(frame, ("schema_version",))
+        _require_current(bool(frame["schema_version"].eq(schema).all()), "schema_version_mismatch")
+    return frame
+
+
+def _current_coverage(frame, expected):
+    actual, wanted = _current_keys(frame), _current_keys(expected)
+    missing, extra = sorted(wanted - actual), sorted(actual - wanted)
+    _require_current(not missing and not extra, "coverage_mismatch:missing=" + str(missing[:10]) + ";extra=" + str(extra[:10]))
+    # Fold case only to detect collisions; evidence must retain producer identity.
+    for field in ("board", "secid"):
+        _current_agreement(frame, expected, field)
+
+
+def _current_agreement(frame, expected, field, expected_field=None):
+    _current_text(frame, (field,))
+    expected_field = expected_field or field
+    _current_text(expected, (expected_field,))
+    wanted = {(row.board.upper(), row.secid.upper()): getattr(row, expected_field)
+              for row in expected.itertuples(index=False)}
+    for row in frame.itertuples(index=False):
+        _require_current(getattr(row, field) == wanted.get((row.board.upper(), row.secid.upper())),
+                         "inconsistent_registry_field:" + field)
+
+
+def _current_normalized_lineage(frame, raw, source):
+    """Compare producer-derived identity with the same captured raw snapshot."""
+    expected = source.build_normalized_registry(raw)
+    _current_coverage(frame, expected)
+    by_key = {(row.board.upper(), row.secid.upper()): row
+              for row in expected.itertuples(index=False)}
+    # Required fields were checked by _current_frame. Nullable metadata stays
+    # optional, but a supplied value must agree with the unchanged producer.
+    fields = [field for field in (
+        "shortname", "secname", "family_code", "contract_code",
+        "instrument_kind", "is_perpetual_candidate", "expiration_date",
+        "last_trade_date", "asset_code", "asset_class", "underlying",
+        "lot_size", "price_step", "price_step_value", "currency",
+    ) if field in frame.columns]
+    for row in frame.itertuples(index=False):
+        original = by_key[(row.board.upper(), row.secid.upper())]
+        for field in fields:
+            left, right = getattr(row, field), getattr(original, field)
+            _require_current(pd.api.types.is_scalar(left) and pd.api.types.is_scalar(right),
+                             "invalid_normalized_lineage:" + field)
+            left_missing, right_missing = bool(pd.isna(left)), bool(pd.isna(right))
+            equal = left_missing and right_missing
+            if not left_missing and not right_missing:
+                equal = bool(left == right)
+            _require_current(equal, "normalized_source_lineage_mismatch:" + field + ":" + row.secid)
+
+
+
+def _current_raw_identity(frame, snapshot_date, source):
+    """Reconcile captured payload identity before selecting any RFUD candidate."""
+    payloads = [json.loads(value) for value in frame["raw_payload_json"]]
+    expected = source.build_registry_snapshot(pd.DataFrame(payloads), snapshot_date)
+    _current_coverage(frame, expected)
+    for field in ("engine", "market"):
+        _current_agreement(frame, expected, field)
+    _require_current(bool(frame["board"].str.lower().eq("rfud").all()),
+                     "registry_endpoint_scope_mismatch")
+
+
+def _current_count(value):
+    """Accept finite whole counts, not booleans or numeric strings."""
+    import math
+    import numbers
+
+    return (isinstance(value, numbers.Real) and not isinstance(value, bool)
+            and math.isfinite(value) and value >= 0 and value == int(value))
+
+
+def _current_available_observations(frame):
+    available = frame.loc[frame["availability_status"].eq("available")]
+    if available.empty:
+        return
+    _require_current("observed_rows" in frame.columns, "missing_fields:observed_rows")
+    _require_current(bool(available["observed_rows"].map(
+        lambda value: _current_count(value) and value > 0).all()),
+                     "available_without_observations")
+
+
+def _current_screen_duplicates(frame, field):
+    counts = frame["duplicate_intraday_rows"]
+    _require_current(bool(counts.map(_current_count).all()),
+                     "invalid_duplicate_intraday_rows")
+    _require_current(bool(counts.loc[frame[field].ne("fail")].eq(0).all()),
+                     "computed_screen_with_duplicate_rows")
+
+
+def _current_window(frame, prefix, bounds):
+    first, last = prefix + "_from", prefix + "_till"
+    _current_text(frame, (first, last))
+    _require_current(bool(frame[first].eq(bounds[0]).all()) and bool(frame[last].eq(bounds[1]).all()),
+                     "request_window_mismatch:" + prefix)
+
+
+def validate_current_outputs(outputs, snapshot_date, *, from_date="", till="", evidence_only=False,
+                             apim_base_url=base.DEFAULT_APIM_BASE_URL, iss_base_url=base.DEFAULT_ISS_BASE_URL):
+    """Validate exact producer scopes; retain negative outcomes for eligibility."""
+    from moex_data.futures import registry_evidence_artifacts_producer as evidence
+
+    summaries = {}
+    key = "registry_snapshot"
+    try:
+        source = evidence.availability
+        source_config = _current_source_config()
+        probe_bounds = source.date_range_defaults(
+            snapshot_date, argparse.Namespace(from_date=from_date, till=till, lookback_days=14))
+        screen_bounds = base.date_range_defaults(
+            snapshot_date, argparse.Namespace(from_date=from_date, till=till, history_lookback_days=365))
+
+        def record(name, frame, field=None):
+            item = {"rows": int(len(frame)), "validation_status": "pass",
+                    "validation_scope": "current_registry_evidence_only"}
+            if field is not None:
+                item["status_counts"] = {str(k): int(v) for k, v in frame[field].value_counts().items()}
+            summaries[name] = item
+
+        registry = _current_frame(outputs[key], snapshot_date, ("snapshot_id", "engine", "market"), artifact=key)
+        _require_current(not registry.empty, "empty_registry")
+        _require_current(registry["snapshot_id"].nunique() == 1, "ambiguous_snapshot_id")
+        _current_raw_identity(registry, snapshot_date, source)
+        record(key, registry)
+
+        key = "normalized_registry"
+        normalized = _current_frame(outputs[key], snapshot_date,
+                                    ("snapshot_id", "source_snapshot_id", "engine", "market", "family_code"),
+                                    source.SCHEMA_NORMALIZED_REGISTRY, artifact=key)
+        _current_coverage(normalized, registry)
+        for field in ("snapshot_id", "engine", "market"):
+            _current_agreement(normalized, registry, field)
+        _current_agreement(normalized, registry, "source_snapshot_id", "snapshot_id")
+        _current_normalized_lineage(normalized, registry, source)
+        # Reuse the acquisition producer's RFUD candidate scope, not a new whitelist.
+        candidates = evidence.select_all_rfud_instruments(normalized)
+        record(key, normalized)
+        summaries[key]["candidate_count"] = int(len(candidates))
+
+        key = "family_mapping"
+        mapping = _current_frame(outputs[key], snapshot_date,
+                                 ("mapping_id", "snapshot_id", "mapping_status", "mapping_source", "validation_status"),
+                                 evidence.SCHEMA_FAMILY_MAPPING, artifact=key)
+        _require_current("family_code" in mapping.columns, "missing_fields:family_code")
+        _current_coverage(mapping, candidates)
+        _current_agreement(mapping, candidates, "snapshot_id")
+        _require_current(bool(mapping["mapping_status"].isin(("pass", "unresolved")).all()), "invalid_mapping_status")
+        mapped = mapping["mapping_status"].eq("pass")
+        _current_agreement(mapping.loc[mapped], candidates, "family_code")
+        _require_current(bool(mapping.loc[mapped, "mapping_source"].eq("derived_rule").all())
+                         and bool(mapping.loc[mapped, "validation_status"].eq("pass").all()),
+                         "incoherent_mapping_status")
+        _require_current(bool(mapping.loc[~mapped, "mapping_source"].eq("unresolved").all())
+                         and bool(mapping.loc[~mapped, "validation_status"].eq("failed").all()),
+                         "incoherent_unresolved_mapping")
+        expected_mapping = evidence.build_family_mapping(candidates, snapshot_date)
+        _current_agreement(mapping, expected_mapping, "mapping_status")
+        _require_current(bool(mapping.loc[~mapped, "family_code"].isna().all()),
+                         "incoherent_unresolved_family")
+        record(key, mapping, "mapping_status")
+
+        reports = {}
+        for key in AVAILABILITY_ENDPOINTS:
+            frame = _current_frame(outputs[key], snapshot_date,
+                                   ("availability_report_id", "family_code", "endpoint_id", "source_endpoint_url",
+                                    "availability_status", "probe_status"),
+                                   source.REPORT_SCHEMA_BY_ENDPOINT[key], artifact=key)
+            _current_coverage(frame, candidates)
+            _current_agreement(frame, candidates, "family_code")
+            _require_current(bool(frame["endpoint_id"].eq(key).all()), "endpoint_id_mismatch")
+            _current_window(frame, "probe", probe_bounds)
+            _require_current(bool(frame["probe_status"].eq("completed").all()), "probe_not_completed")
+            _require_current(bool(frame["availability_status"].isin(
+                ("available", "unavailable", "partial", "error", "not_checked")).all()), "invalid_availability_status")
+            _current_source_routes(frame, key, source, source_config, apim_base_url, iss_base_url)
+            _current_available_observations(frame)
+            record(key, frame, "availability_status")
+            reports[key] = frame
+
+        # Use the existing metrics producer's selection; never require all candidates available.
+        key = "liquidity_screen"
+        selected = base.selected_instruments_from_artifacts(normalized, reports["algopack_fo_tradestats"])
+        if evidence_only:
+            return summaries, []
+        screens = {}
+        for key, field, schema in (
+            ("liquidity_screen", "liquidity_status", base.SCHEMA_LIQUIDITY_SCREEN),
+            ("history_depth_screen", "history_depth_status", base.SCHEMA_HISTORY_DEPTH_SCREEN),
+        ):
+            frame = _current_frame(outputs[key], snapshot_date,
+                                   ("family_code", key + "_id", field, "validation_status", "review_status", "fetch_status", "review_notes"),
+                                   schema, artifact=key)
+            _current_coverage(frame, selected)
+            _current_agreement(frame, selected, "family_code")
+            _current_window(frame, "screen", screen_bounds)
+            missing = [name for name in SCREEN_PROVENANCE_FIELDS if name not in frame.columns]
+            _require_current(not missing, "missing_screen_provenance:" + ",".join(missing))
+            _current_source_routes(frame, "algopack_fo_tradestats", source, source_config,
+                                   apim_base_url, iss_base_url)
+            _require_current(bool(frame[field].isin(("pass", "fail", "review_required")).all()), "invalid_screen_status")
+            _require_current(bool(frame["fetch_status"].isin(("completed", "failed")).all()), "invalid_fetch_status")
+            computed = frame[field].ne("fail")
+            _require_current(bool(frame.loc[computed, "validation_status"].eq("metrics_computed").all())
+                             and bool(frame.loc[computed, "review_status"].eq("ready_for_pm_review").all())
+                             and bool(frame.loc[computed, "fetch_status"].eq("completed").all()),
+                             "incoherent_computed_screen")
+            _require_current(bool(frame.loc[~computed, "validation_status"].eq("failed").all())
+                             and bool(frame.loc[~computed, "review_status"].eq("blocked").all()),
+                             "incoherent_failed_screen")
+            record(key, frame, field)
+            summaries[key]["expected_instrument_count"] = int(len(selected))
+            screens[key] = frame
+        _current_screen_provenance(screens["liquidity_screen"], screens["history_depth_screen"])
+        for key, field in (("liquidity_screen", "liquidity_status"),
+                           ("history_depth_screen", "history_depth_status")):
+            _current_screen_duplicates(screens[key], field)
+        return summaries, []
+    except Exception as exc:
+        summaries[key] = {"validation_status": "fail", "validation_scope": "current_registry_evidence_only",
+                          "failure_reason": type(exc).__name__ + ":" + str(exc)[:600]}
+        return summaries, [key + "_validation_failed"]
+
+
 def main():
     if load_dotenv is not None:
         load_dotenv()
@@ -339,17 +732,24 @@ def main():
     parser.add_argument("--apim-base-url", default=os.getenv("MOEX_API_URL", base.DEFAULT_APIM_BASE_URL))
     parser.add_argument("--timeout", type=float, default=60.0)
     parser.add_argument("--availability-max-workers", type=int, default=int(os.getenv("MOEX_AVAILABILITY_MAX_WORKERS", "4")))
-    parser.add_argument("--whitelist", default=",".join(DEFAULT_WHITELIST))
-    parser.add_argument("--excluded", default=",".join(DEFAULT_EXCLUDED))
+    parser.add_argument("--validation-mode", choices=[SLICE1_COMPAT, CURRENT_REGISTRY], default=SLICE1_COMPAT)
+    parser.add_argument("--whitelist", default=None)
+    parser.add_argument("--excluded", default=None)
     args = parser.parse_args()
+    current_mode = args.validation_mode == CURRENT_REGISTRY
+    if current_mode and (args.whitelist is not None or args.excluded is not None):
+        parser.error("current_registry forbids --whitelist and --excluded; use eligibility downstream")
     root = Path.cwd().resolve()
     data_root = base.resolve_data_root(args)
-    whitelist = parse_list(args.whitelist, DEFAULT_WHITELIST)
-    excluded = parse_list(args.excluded, DEFAULT_EXCLUDED)
+    whitelist = [] if current_mode else parse_list(args.whitelist, DEFAULT_WHITELIST)
+    excluded = [] if current_mode else parse_list(args.excluded, DEFAULT_EXCLUDED)
     base.assert_files_exist(root, REQUIRED_CONTRACTS + REQUIRED_CONFIGS)
     outputs = output_paths(root, data_root, args.snapshot_date, args.run_date)
     started_ts = utc_now_iso()
-    run_id = "futures_registry_refresh_" + args.run_date + "_" + stable_id([args.snapshot_date, started_ts, ",".join(whitelist)])
+    identity = [args.snapshot_date, started_ts, ",".join(whitelist)]
+    if current_mode:
+        identity.append(CURRENT_REGISTRY)
+    run_id = "futures_registry_refresh_" + args.run_date + "_" + stable_id(identity)
     common = ["--snapshot-date", args.snapshot_date, "--data-root", str(data_root), "--timeout", str(args.timeout), "--iss-base-url", args.iss_base_url, "--apim-base-url", args.apim_base_url]
     if args.from_date:
         common += ["--from", args.from_date]
@@ -359,23 +759,33 @@ def main():
     child_items = []
     evidence_cmd = [sys.executable, str(root / "src/moex_data/futures/registry_evidence_artifacts_producer.py")] + common + ["--availability-max-workers", str(args.availability_max_workers)]
     child_items.append(run_child(root, "registry_evidence_artifacts_producer", evidence_cmd, {k: outputs[k] for k in ["registry_snapshot", "normalized_registry", "family_mapping", "algopack_fo_tradestats", "moex_futoi", "algopack_fo_obstats", "algopack_fo_hi2"]}))
-    if child_items[-1].get("status") == "pass":
+    output_summaries, validation_blockers = {}, []
+    if current_mode and child_items[-1].get("status") == "pass":
+        output_summaries, validation_blockers = validate_current_outputs(
+            outputs, args.snapshot_date, from_date=args.from_date, till=args.till, evidence_only=True,
+            apim_base_url=args.apim_base_url, iss_base_url=args.iss_base_url)
+    if child_items[-1].get("status") == "pass" and not validation_blockers:
         screen_cmd = [sys.executable, "-m", "moex_data.futures.liquidity_history_metrics_probe"] + common + ["--full-history-proven"]
         child_items.append(run_child(root, "liquidity_history_metrics_probe", screen_cmd, {"liquidity_screen": outputs["liquidity_screen"], "history_depth_screen": outputs["history_depth_screen"]}))
     final_status = "pass" if len(child_items) == 2 and all(x.get("status") == "pass" for x in child_items) else "fail"
-    blockers = [str(x.get("component_id")) + ":" + str(x.get("failure_reason")) for x in child_items if x.get("status") != "pass"]
+    blockers = [str(x.get("component_id")) + ":" + str(x.get("failure_reason")) for x in child_items if x.get("status") != "pass"] + validation_blockers
     child_duration_summary = {str(x.get("component_id")): x.get("duration_sec") for x in child_items if x.get("component_id")}
     availability_probe_timing_summary = {}
     if child_items:
         parsed_child_stdout = child_items[0].get("json_line_outputs") or parse_json_line_output(child_items[0].get("stdout_tail", ""))
         availability_probe_timing_summary = parsed_child_stdout.get("availability_probe_timing_summary") or {}
-    output_summaries = {}
     if final_status == "pass":
-        output_summaries, validation_blockers = validate_outputs(outputs, whitelist)
+        if current_mode:
+            output_summaries, validation_blockers = validate_current_outputs(
+                outputs, args.snapshot_date, from_date=args.from_date, till=args.till,
+                apim_base_url=args.apim_base_url, iss_base_url=args.iss_base_url)
+        else:
+            output_summaries, validation_blockers = validate_outputs(outputs, whitelist)
         blockers += validation_blockers
         if validation_blockers:
             final_status = "fail"
     manifest = {"schema_version": SCHEMA_MANIFEST, "run_id": run_id, "run_date": args.run_date, "snapshot_date": args.snapshot_date, "refresh_from": args.from_date or None, "refresh_till": args.till or None, "started_ts": started_ts, "completed_ts": utc_now_iso(), "total_duration_sec": round(time.time() - run_started_epoch, 3), "runner_whitelist_applied": whitelist, "excluded_instruments_confirmed": excluded, "availability_max_workers": int(args.availability_max_workers), "component_execution_order": ["registry_evidence_artifacts_producer", "liquidity_history_metrics_probe"], "child_component_status": child_items, "child_duration_summary": child_duration_summary, "availability_probe_timing_summary": availability_probe_timing_summary, "child_output_references": {x["component_id"]: {"status": x.get("status"), "validation_status": x.get("validation_status"), "expected_outputs": x.get("expected_outputs")} for x in child_items}, "output_artifacts": outputs, "output_summaries": output_summaries, "artifact_validation_status": "pass" if final_status == "pass" else "fail", "registry_refresh_result_verdict": final_status, "blockers": blockers}
+    manifest["validation_mode"] = args.validation_mode
     path = Path(outputs["manifest"])
     write_manifest(path, manifest)
     print_json_line("registry_refresh_manifest_path", str(path))

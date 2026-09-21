@@ -190,6 +190,7 @@ def command_for_stage(root, stage_id, args):
     if stage_id in {"registry_refresh", "all_universe_eligibility_snapshot", "raw_5m_refresh", "futoi_raw_refresh", "roll_map"}:
         cmd.extend(["--iss-base-url", args.iss_base_url])
     if stage_id == "registry_refresh":
+        cmd.extend(["--validation-mode", "current_registry"])
         cmd.extend(["--availability-max-workers", str(args.availability_max_workers)])
     if stage_id in {"raw_5m_refresh", "futoi_raw_refresh"}:
         cmd.extend(["--apim-base-url", args.apim_base_url])
