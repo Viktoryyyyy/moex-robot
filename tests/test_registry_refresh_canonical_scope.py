@@ -252,16 +252,7 @@ def test_explicit_bounds_follow_producer_defaults_and_overrides(tmp_path):
 
 
 def test_unresolved_family_is_retained_without_inventing_mapping(tmp_path):
-    frames = fixture_frames()
-    frames["normalized_registry"].loc[2, "family_code"] = "UNKNOWN"
-    mapping = frames["family_mapping"]
-    index = mapping.index[mapping.secid == "NODATAF"][0]
-    mapping.loc[index, ["family_code", "mapping_status", "mapping_source", "validation_status"]] = [
-        None, "unresolved", "unresolved", "failed"]
-    for key in registry.AVAILABILITY_ENDPOINTS:
-        mask = frames[key].secid == "NODATAF"
-        frames[key].loc[mask, "family_code"] = "UNKNOWN"
-        frames[key].loc[mask, "source_endpoint_url"] = source_url(key, "NODATAF", "UNKNOWN")
+    frames = mapping_fixture_with_unknown()
     summaries, blockers = validate(tmp_path, frames)
     assert blockers == [] and summaries["family_mapping"]["status_counts"]["unresolved"] == 1
 
@@ -713,13 +704,17 @@ def test_mixed_invalid_perpetual_flag_is_rejected_in_memory(value, row_index):
 
 def mapping_fixture_with_unknown(family="UNKNOWN"):
     frames = fixture_frames()
-    normalized = frames["normalized_registry"]
-    normalized.loc[normalized.secid == "NODATAF", "family_code"] = family
+    raw = pd.DataFrame({"SECID": ["USDRUBF", "SiZ6", family], "BOARDID": ["RFUD"] * 3})
+    snapshot = evidence.availability.build_registry_snapshot(raw, DAY)
+    normalized = evidence.availability.build_normalized_registry(snapshot)
+    frames["registry_snapshot"] = snapshot
+    frames["normalized_registry"] = normalized
     frames["family_mapping"] = evidence.build_family_mapping(normalized, DAY)
     for key in registry.AVAILABILITY_ENDPOINTS:
         mask = frames[key].secid == "NODATAF"
+        frames[key].loc[mask, "secid"] = family
         frames[key].loc[mask, "family_code"] = family
-        frames[key].loc[mask, "source_endpoint_url"] = source_url(key, "NODATAF", family)
+        frames[key].loc[mask, "source_endpoint_url"] = source_url(key, family, family)
     return frames
 
 
@@ -742,7 +737,7 @@ def test_resolved_registry_family_cannot_be_relabelled_unresolved(tmp_path, seci
 def test_unresolved_mapping_cannot_retain_a_family_value(tmp_path, family, evidence_only):
     frames = mapping_fixture_with_unknown()
     mapping = frames["family_mapping"]
-    mapping.loc[mapping.secid == "NODATAF", "family_code"] = family
+    mapping.loc[mapping.secid == "UNKNOWN", "family_code"] = family
     summaries, blockers = validate(tmp_path, frames, evidence_only=evidence_only)
     assert blockers == ["family_mapping_validation_failed"]
     assert "incoherent_unresolved_family" in summaries["family_mapping"]["failure_reason"]
@@ -752,7 +747,7 @@ def test_unresolved_mapping_cannot_retain_a_family_value(tmp_path, family, evide
 def test_unknown_registry_family_cannot_be_relabelled_pass(tmp_path, evidence_only):
     frames = mapping_fixture_with_unknown()
     mapping = frames["family_mapping"]
-    mapping.loc[mapping.secid == "NODATAF", ["family_code", "mapping_status", "mapping_source", "validation_status"]] = [
+    mapping.loc[mapping.secid == "UNKNOWN", ["family_code", "mapping_status", "mapping_source", "validation_status"]] = [
         "UNKNOWN", "pass", "derived_rule", "pass"]
     summaries, blockers = validate(tmp_path, frames, evidence_only=evidence_only)
     assert blockers == ["family_mapping_validation_failed"]
@@ -768,7 +763,7 @@ def test_actual_mapping_producer_unknowns_pass_by_identity_without_rewriting(tmp
     summaries, blockers = validate(tmp_path, frames, evidence_only=evidence_only)
     assert blockers == []
     assert summaries["family_mapping"]["status_counts"] == {"pass": 2, "unresolved": 1}
-    assert pd.isna(frames["family_mapping"].loc[frames["family_mapping"].secid == "NODATAF", "family_code"]).all()
+    assert pd.isna(frames["family_mapping"].loc[frames["family_mapping"].secid == family, "family_code"]).all()
     pd.testing.assert_frame_equal(frames["family_mapping"], before)
 
 
@@ -786,3 +781,90 @@ def test_main_blocks_false_unresolved_mapping_before_metrics_child(monkeypatch, 
     assert "inconsistent_registry_field:mapping_status" in manifest["output_summaries"]["family_mapping"]["failure_reason"]
     assert not Path(outputs["liquidity_screen"]).exists()
     assert not Path(outputs["history_depth_screen"]).exists()
+
+
+def coherently_corrupted_family(secid, family):
+    frames = fixture_frames()
+    normalized = frames["normalized_registry"]
+    normalized.loc[normalized.secid == secid, "family_code"] = family
+    frames["family_mapping"] = evidence.build_family_mapping(normalized, DAY)
+    for key in (*registry.AVAILABILITY_ENDPOINTS, "liquidity_screen", "history_depth_screen"):
+        mask = frames[key].secid == secid
+        frames[key].loc[mask, "family_code"] = family
+        endpoint = key if key in registry.AVAILABILITY_ENDPOINTS else "algopack_fo_tradestats"
+        frames[key].loc[mask, "source_endpoint_url"] = source_url(endpoint, secid, family)
+    return frames
+
+
+@pytest.mark.parametrize("secid", ["USDRUBF", "SiZ6"])
+@pytest.mark.parametrize("family", ["WRONG", "UNKNOWN"])
+@pytest.mark.parametrize("evidence_only", [True, False])
+def test_consistent_downstream_wrong_family_cannot_override_raw(tmp_path, secid, family, evidence_only):
+    frames = coherently_corrupted_family(secid, family)
+    raw_before = frames["registry_snapshot"].copy(deep=True)
+    normalized_before = frames["normalized_registry"].copy(deep=True)
+    summaries, blockers = validate(tmp_path, frames, evidence_only=evidence_only)
+    assert blockers == ["normalized_registry_validation_failed"]
+    assert "normalized_source_lineage_mismatch:family_code:" + secid in summaries["normalized_registry"]["failure_reason"]
+    assert "family_mapping" not in summaries
+    pd.testing.assert_frame_equal(frames["registry_snapshot"], raw_before)
+    pd.testing.assert_frame_equal(frames["normalized_registry"], normalized_before)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("contract_code", "Q9"), ("shortname", "different"), ("secname", "different"),
+    ("instrument_kind", "perpetual_future_candidate"),
+    ("expiration_date", "2030-01-01"), ("last_trade_date", "2030-01-01"),
+    ("asset_code", "WRONG"), ("asset_class", "WRONG"), ("underlying", "WRONG"),
+    ("lot_size", 5), ("price_step", 5), ("price_step_value", 5), ("currency", "WRONG"),
+])
+@pytest.mark.parametrize("evidence_only", [True, False])
+def test_normalized_identity_and_supplied_metadata_must_match_raw(tmp_path, field, value, evidence_only):
+    frames = fixture_frames()
+    normalized = frames["normalized_registry"]
+    normalized[field] = normalized[field].astype(object)
+    normalized.loc[normalized.secid == "SiZ6", field] = value
+    if field == "instrument_kind":
+        normalized.loc[normalized.secid == "SiZ6", "is_perpetual_candidate"] = True
+    frames["family_mapping"] = evidence.build_family_mapping(normalized, DAY)
+    summaries, blockers = validate(tmp_path, frames, evidence_only=evidence_only)
+    assert blockers == ["normalized_registry_validation_failed"]
+    assert "normalized_source_lineage_mismatch:" + field in summaries["normalized_registry"]["failure_reason"]
+
+
+@pytest.mark.parametrize("field", ["family_code", "contract_code", "instrument_kind"])
+def test_main_blocks_normalized_source_mismatch_before_metrics(monkeypatch, tmp_path, field):
+    frames = coherently_corrupted_family("SiZ6", "WRONG") if field == "family_code" else fixture_frames()
+    normalized = frames["normalized_registry"]
+    if field == "contract_code":
+        normalized.loc[normalized.secid == "SiZ6", field] = "Q9"
+    elif field == "instrument_kind":
+        normalized.loc[normalized.secid == "SiZ6", [field, "is_perpetual_candidate"]] = ["perpetual_future_candidate", True]
+    frames["family_mapping"] = evidence.build_family_mapping(normalized, DAY)
+    monkeypatch.setitem(globals(), "fixture_frames", lambda: frames)
+    code, manifest, calls, outputs = simulate_main(monkeypatch, tmp_path)
+    assert code == 1 and len(calls) == 1
+    assert manifest["blockers"] == ["normalized_registry_validation_failed"]
+    assert "normalized_source_lineage_mismatch:" + field in manifest["output_summaries"]["normalized_registry"]["failure_reason"]
+    assert not Path(outputs["liquidity_screen"]).exists()
+    assert not Path(outputs["history_depth_screen"]).exists()
+
+
+@pytest.mark.parametrize("null", [None, float("nan"), pd.NA])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_normalized_lineage_accepts_equivalent_nulls_and_order(tmp_path, null, reverse):
+    frames = fixture_frames()
+    normalized = frames["normalized_registry"]
+    for field in ("expiration_date", "last_trade_date", "underlying", "lot_size", "price_step", "price_step_value"):
+        normalized[field] = pd.Series([null] * len(normalized), index=normalized.index, dtype=object)
+    if reverse:
+        frames["normalized_registry"] = normalized.iloc[::-1].reset_index(drop=True)
+    before = frames["normalized_registry"].copy(deep=True)
+    assert validate(tmp_path, frames)[1] == []
+    pd.testing.assert_frame_equal(frames["normalized_registry"], before)
+
+
+def test_normalized_optional_metadata_may_be_absent(tmp_path):
+    frames = fixture_frames()
+    frames["normalized_registry"] = frames["normalized_registry"].drop(columns=["expiration_date", "lot_size"])
+    assert validate(tmp_path, frames)[1] == []

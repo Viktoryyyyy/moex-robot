@@ -517,6 +517,33 @@ def _current_agreement(frame, expected, field, expected_field=None):
                          "inconsistent_registry_field:" + field)
 
 
+def _current_normalized_lineage(frame, raw, source):
+    """Compare producer-derived identity with the same captured raw snapshot."""
+    expected = source.build_normalized_registry(raw)
+    _current_coverage(frame, expected)
+    by_key = {(row.board.upper(), row.secid.upper()): row
+              for row in expected.itertuples(index=False)}
+    # Required fields were checked by _current_frame. Nullable metadata stays
+    # optional, but a supplied value must agree with the unchanged producer.
+    fields = [field for field in (
+        "shortname", "secname", "family_code", "contract_code",
+        "instrument_kind", "is_perpetual_candidate", "expiration_date",
+        "last_trade_date", "asset_code", "asset_class", "underlying",
+        "lot_size", "price_step", "price_step_value", "currency",
+    ) if field in frame.columns]
+    for row in frame.itertuples(index=False):
+        original = by_key[(row.board.upper(), row.secid.upper())]
+        for field in fields:
+            left, right = getattr(row, field), getattr(original, field)
+            _require_current(pd.api.types.is_scalar(left) and pd.api.types.is_scalar(right),
+                             "invalid_normalized_lineage:" + field)
+            left_missing, right_missing = bool(pd.isna(left)), bool(pd.isna(right))
+            equal = left_missing and right_missing
+            if not left_missing and not right_missing:
+                equal = bool(left == right)
+            _require_current(equal, "normalized_source_lineage_mismatch:" + field + ":" + row.secid)
+
+
 def _current_window(frame, prefix, bounds):
     first, last = prefix + "_from", prefix + "_till"
     _current_text(frame, (first, last))
@@ -559,6 +586,7 @@ def validate_current_outputs(outputs, snapshot_date, *, from_date="", till="", e
         for field in ("snapshot_id", "engine", "market"):
             _current_agreement(normalized, registry, field)
         _current_agreement(normalized, registry, "source_snapshot_id", "snapshot_id")
+        _current_normalized_lineage(normalized, registry, source)
         # Reuse the acquisition producer's RFUD candidate scope, not a new whitelist.
         candidates = evidence.select_all_rfud_instruments(normalized)
         record(key, normalized)
