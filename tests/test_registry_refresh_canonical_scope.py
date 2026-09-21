@@ -613,3 +613,75 @@ def test_main_validates_the_same_origin_it_passes_to_children(monkeypatch, tmp_p
     monkeypatch.setattr(registry, "validate_current_outputs", validate_at_origin)
     code, _, _, _ = simulate_main(monkeypatch, tmp_path)
     assert code == 0 and calls == [(APIM, ISS), (APIM, ISS)]
+
+
+@pytest.mark.parametrize("kind", ["expiring_future", "perpetual_future_candidate", "technical", "unknown"])
+@pytest.mark.parametrize("flag", [False, True])
+@pytest.mark.parametrize("dtype", ["bool", "boolean", "object"])
+def test_perpetual_classification_requires_a_coherent_typed_pair(kind, flag, dtype):
+    frame = fixture_frames()["normalized_registry"].iloc[:1].copy()
+    frame["instrument_kind"] = kind
+    frame["is_perpetual_candidate"] = pd.Series([flag], index=frame.index, dtype=dtype)
+    before = frame.copy(deep=True)
+    if flag == (kind == "perpetual_future_candidate"):
+        registry._current_schema_values(frame, "normalized_registry")
+    else:
+        with pytest.raises(ValueError, match="inconsistent_perpetual_classification"):
+            registry._current_schema_values(frame, "normalized_registry")
+    pd.testing.assert_frame_equal(frame, before)
+
+
+@pytest.mark.parametrize("kind", ["expiring_future", "perpetual_future_candidate", "technical", "unknown"])
+@pytest.mark.parametrize("evidence_only", [True, False])
+def test_inconsistent_perpetual_pair_blocks_preflight_and_final_validation(tmp_path, kind, evidence_only):
+    frames = fixture_frames()
+    normalized = frames["normalized_registry"]
+    index = normalized.index[normalized.secid == "SiZ6"][0]
+    normalized.loc[index, "instrument_kind"] = kind
+    normalized.loc[index, "is_perpetual_candidate"] = kind != "perpetual_future_candidate"
+    summaries, blockers = validate(tmp_path, frames, evidence_only=evidence_only)
+    assert blockers == ["normalized_registry_validation_failed"]
+    assert "inconsistent_perpetual_classification" in summaries["normalized_registry"]["failure_reason"]
+    assert "liquidity_screen" not in summaries
+    assert "history_depth_screen" not in summaries
+
+
+@pytest.mark.parametrize("evidence_only", [True, False])
+def test_real_normalizer_classifications_pass_without_relabeling(tmp_path, evidence_only):
+    frames = fixture_frames()
+    raw = pd.DataFrame({
+        "SECID": ["USDRUBF", "SiZ6", "NODATAF"], "BOARDID": ["RFUD"] * 3,
+        "LASTTRADEDATE": ["", "2026-12-17", ""],
+    })
+    snapshot = evidence.availability.build_registry_snapshot(raw, DAY)
+    normalized = evidence.availability.build_normalized_registry(snapshot)
+    pairs = {row.secid: (row.instrument_kind, bool(row.is_perpetual_candidate))
+             for row in normalized.itertuples(index=False)}
+    assert pairs == {
+        "USDRUBF": ("perpetual_future_candidate", True),
+        "SiZ6": ("expiring_future", False),
+        "NODATAF": ("unknown", False),
+    }
+    frames["registry_snapshot"] = snapshot
+    frames["normalized_registry"] = normalized
+    frames["family_mapping"] = evidence.build_family_mapping(normalized, DAY)
+    before = normalized.copy(deep=True)
+    summaries, blockers = validate(tmp_path, frames, evidence_only=evidence_only)
+    assert blockers == [] and summaries["normalized_registry"]["validation_status"] == "pass"
+    pd.testing.assert_frame_equal(normalized, before)
+
+
+@pytest.mark.parametrize("secid", ["USDRUBF", "SiZ6"])
+def test_main_blocks_inconsistent_perpetual_flag_before_metrics_child(monkeypatch, tmp_path, secid):
+    frames = fixture_frames()
+    normalized = frames["normalized_registry"]
+    index = normalized.index[normalized.secid == secid][0]
+    normalized.loc[index, "is_perpetual_candidate"] = not bool(normalized.loc[index, "is_perpetual_candidate"])
+    monkeypatch.setitem(globals(), "fixture_frames", lambda: frames)
+    code, manifest, calls, outputs = simulate_main(monkeypatch, tmp_path)
+    assert code == 1 and len(calls) == 1
+    assert manifest["blockers"] == ["normalized_registry_validation_failed"]
+    assert manifest["artifact_validation_status"] == manifest["registry_refresh_result_verdict"] == "fail"
+    assert "inconsistent_perpetual_classification" in manifest["output_summaries"]["normalized_registry"]["failure_reason"]
+    assert not Path(outputs["liquidity_screen"]).exists()
+    assert not Path(outputs["history_depth_screen"]).exists()

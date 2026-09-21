@@ -410,6 +410,9 @@ def _current_schema_values(frame, artifact):
                          "invalid_instrument_kind")
         _require_current(bool(frame["is_perpetual_candidate"].map(
             lambda v: isinstance(v, (bool, np.bool_))).all()), "invalid_perpetual_flag")
+        _require_current(bool(frame["is_perpetual_candidate"].eq(
+            frame["instrument_kind"].eq("perpetual_future_candidate")).all()),
+                         "inconsistent_perpetual_classification")
 
 
 def _current_source_config():
