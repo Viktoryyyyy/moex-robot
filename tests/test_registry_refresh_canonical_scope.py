@@ -158,7 +158,6 @@ def test_explicit_negative_availability_is_preserved_not_global_failure(tmp_path
 @pytest.mark.parametrize("outcome", ["fail", "review_required"])
 def test_negative_or_review_screen_outcome_is_evidence_not_admission(tmp_path, key, field, outcome):
     frames = fixture_frames()
-    frame = frames[key]
     frame.loc[0, field] = outcome
     if outcome == "fail":
         frame.loc[0, ["validation_status", "review_status", "fetch_status"]] = ["failed", "blocked", "completed"]
@@ -462,9 +461,21 @@ def test_nullable_values_empty_contract_code_and_boolean_flags_are_preserved(tmp
 ])
 def test_required_field_values_use_contract_semantics(tmp_path, key, field, value):
     frames = fixture_frames()
-    frames[key][field] = frames[key][field].astype(object)
-    frames[key].loc[0, field] = value
-    assert validate(tmp_path, frames)[1] == [key + "_validation_failed"]
+    if field == "is_perpetual_candidate":
+        # Mixed bool/string or bool/int object columns cannot be written by Arrow.
+        # Persist a homogeneous wrong type so the validator, not the writer, rejects it.
+        frames[key][field] = pd.Series(value, index=frames[key].index, dtype=object)
+    else:
+        frames[key][field] = frames[key][field].astype(object)
+        frames[key].loc[0, field] = value
+    outputs = write_frames(tmp_path, frames)
+    if field == "is_perpetual_candidate":
+        restored = pd.read_parquet(outputs[key])
+        assert restored[field].tolist() == [value] * len(frames[key])
+    summaries, blockers = registry.validate_current_outputs(outputs, DAY)
+    assert blockers == [key + "_validation_failed"]
+    if field == "is_perpetual_candidate":
+        assert "invalid_perpetual_flag" in summaries[key]["failure_reason"]
 
 
 @pytest.mark.parametrize("endpoint", registry.AVAILABILITY_ENDPOINTS)
@@ -685,3 +696,15 @@ def test_main_blocks_inconsistent_perpetual_flag_before_metrics_child(monkeypatc
     assert "inconsistent_perpetual_classification" in manifest["output_summaries"]["normalized_registry"]["failure_reason"]
     assert not Path(outputs["liquidity_screen"]).exists()
     assert not Path(outputs["history_depth_screen"]).exists()
+
+
+@pytest.mark.parametrize("value", ["false", 1])
+@pytest.mark.parametrize("row_index", [0, 1, 2])
+def test_mixed_invalid_perpetual_flag_is_rejected_in_memory(value, row_index):
+    frame = fixture_frames()["normalized_registry"]
+    frame["is_perpetual_candidate"] = frame["is_perpetual_candidate"].astype(object)
+    frame.loc[row_index, "is_perpetual_candidate"] = value
+    before = frame.copy(deep=True)
+    with pytest.raises(ValueError, match="invalid_perpetual_flag"):
+        registry._current_schema_values(frame, "normalized_registry")
+    pd.testing.assert_frame_equal(frame, before)
