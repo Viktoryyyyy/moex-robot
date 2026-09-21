@@ -580,6 +580,10 @@ def validate_current_outputs(outputs, snapshot_date, *, from_date="", till="", e
         _require_current(bool(mapping.loc[~mapped, "mapping_source"].eq("unresolved").all())
                          and bool(mapping.loc[~mapped, "validation_status"].eq("failed").all()),
                          "incoherent_unresolved_mapping")
+        expected_mapping = evidence.build_family_mapping(candidates, snapshot_date)
+        _current_agreement(mapping, expected_mapping, "mapping_status")
+        _require_current(bool(mapping.loc[~mapped, "family_code"].isna().all()),
+                         "incoherent_unresolved_family")
         record(key, mapping, "mapping_status")
 
         reports = {}

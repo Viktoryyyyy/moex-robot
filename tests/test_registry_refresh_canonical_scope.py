@@ -709,3 +709,80 @@ def test_mixed_invalid_perpetual_flag_is_rejected_in_memory(value, row_index):
     with pytest.raises(ValueError, match="invalid_perpetual_flag"):
         registry._current_schema_values(frame, "normalized_registry")
     pd.testing.assert_frame_equal(frame, before)
+
+
+def mapping_fixture_with_unknown(family="UNKNOWN"):
+    frames = fixture_frames()
+    normalized = frames["normalized_registry"]
+    normalized.loc[normalized.secid == "NODATAF", "family_code"] = family
+    frames["family_mapping"] = evidence.build_family_mapping(normalized, DAY)
+    for key in registry.AVAILABILITY_ENDPOINTS:
+        mask = frames[key].secid == "NODATAF"
+        frames[key].loc[mask, "family_code"] = family
+        frames[key].loc[mask, "source_endpoint_url"] = source_url(key, "NODATAF", family)
+    return frames
+
+
+@pytest.mark.parametrize("secid", ["USDRUBF", "SiZ6"])
+@pytest.mark.parametrize("family", [None, "FOREIGN", "UNKNOWN"])
+@pytest.mark.parametrize("evidence_only", [True, False])
+def test_resolved_registry_family_cannot_be_relabelled_unresolved(tmp_path, secid, family, evidence_only):
+    frames = fixture_frames()
+    mapping = frames["family_mapping"]
+    mask = mapping.secid == secid
+    mapping.loc[mask, ["family_code", "mapping_status", "mapping_source", "validation_status"]] = [
+        family, "unresolved", "unresolved", "failed"]
+    summaries, blockers = validate(tmp_path, frames, evidence_only=evidence_only)
+    assert blockers == ["family_mapping_validation_failed"]
+    assert "inconsistent_registry_field:mapping_status" in summaries["family_mapping"]["failure_reason"]
+
+
+@pytest.mark.parametrize("family", ["UNKNOWN", "FOREIGN", ""])
+@pytest.mark.parametrize("evidence_only", [True, False])
+def test_unresolved_mapping_cannot_retain_a_family_value(tmp_path, family, evidence_only):
+    frames = mapping_fixture_with_unknown()
+    mapping = frames["family_mapping"]
+    mapping.loc[mapping.secid == "NODATAF", "family_code"] = family
+    summaries, blockers = validate(tmp_path, frames, evidence_only=evidence_only)
+    assert blockers == ["family_mapping_validation_failed"]
+    assert "incoherent_unresolved_family" in summaries["family_mapping"]["failure_reason"]
+
+
+@pytest.mark.parametrize("evidence_only", [True, False])
+def test_unknown_registry_family_cannot_be_relabelled_pass(tmp_path, evidence_only):
+    frames = mapping_fixture_with_unknown()
+    mapping = frames["family_mapping"]
+    mapping.loc[mapping.secid == "NODATAF", ["family_code", "mapping_status", "mapping_source", "validation_status"]] = [
+        "UNKNOWN", "pass", "derived_rule", "pass"]
+    summaries, blockers = validate(tmp_path, frames, evidence_only=evidence_only)
+    assert blockers == ["family_mapping_validation_failed"]
+    assert "inconsistent_registry_field:mapping_status" in summaries["family_mapping"]["failure_reason"]
+
+
+@pytest.mark.parametrize("family", ["UNKNOWN", "unknown", "UnKnOwN"])
+@pytest.mark.parametrize("evidence_only", [True, False])
+def test_actual_mapping_producer_unknowns_pass_by_identity_without_rewriting(tmp_path, family, evidence_only):
+    frames = mapping_fixture_with_unknown(family)
+    frames["family_mapping"] = frames["family_mapping"].iloc[::-1].reset_index(drop=True)
+    before = frames["family_mapping"].copy(deep=True)
+    summaries, blockers = validate(tmp_path, frames, evidence_only=evidence_only)
+    assert blockers == []
+    assert summaries["family_mapping"]["status_counts"] == {"pass": 2, "unresolved": 1}
+    assert pd.isna(frames["family_mapping"].loc[frames["family_mapping"].secid == "NODATAF", "family_code"]).all()
+    pd.testing.assert_frame_equal(frames["family_mapping"], before)
+
+
+@pytest.mark.parametrize("secid", ["USDRUBF", "SiZ6"])
+def test_main_blocks_false_unresolved_mapping_before_metrics_child(monkeypatch, tmp_path, secid):
+    frames = fixture_frames()
+    mapping = frames["family_mapping"]
+    mapping.loc[mapping.secid == secid, ["family_code", "mapping_status", "mapping_source", "validation_status"]] = [
+        None, "unresolved", "unresolved", "failed"]
+    monkeypatch.setitem(globals(), "fixture_frames", lambda: frames)
+    code, manifest, calls, outputs = simulate_main(monkeypatch, tmp_path)
+    assert code == 1 and len(calls) == 1
+    assert manifest["blockers"] == ["family_mapping_validation_failed"]
+    assert manifest["artifact_validation_status"] == manifest["registry_refresh_result_verdict"] == "fail"
+    assert "inconsistent_registry_field:mapping_status" in manifest["output_summaries"]["family_mapping"]["failure_reason"]
+    assert not Path(outputs["liquidity_screen"]).exists()
+    assert not Path(outputs["history_depth_screen"]).exists()
