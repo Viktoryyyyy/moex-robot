@@ -35,8 +35,45 @@ def no_network(monkeypatch):
     def denied(*args, **kwargs):
         raise AssertionError("live network forbidden")
     monkeypatch.setattr(requests.sessions.Session, "request", denied)
+    monkeypatch.setenv("MOEX_API_URL", APIM)
+    monkeypatch.setenv("MOEX_ISS_BASE_URL", ISS)
     monkeypatch.setattr(registry, "load_dotenv", None)
     monkeypatch.setattr(universal, "load_dotenv", None)
+
+
+
+APIM = "https://apim.moex.com"
+ISS = "https://iss.moex.com"
+SOURCE_PATHS = {
+    "algopack_fo_tradestats": "/iss/datashop/algopack/fo/tradestats/{secid}.json",
+    "moex_futoi": "/iss/analyticalproducts/futoi/securities/{family}.json",
+    "algopack_fo_obstats": "/iss/datashop/algopack/fo/obstats/{secid}.json",
+    "algopack_fo_hi2": "/iss/datashop/algopack/fo/hi2/{secid}.json",
+}
+
+
+def source_url(endpoint, secid, family):
+    return APIM + SOURCE_PATHS[endpoint].format(secid=secid, family=family.lower())
+
+
+def produced_screen_pair(instrument, failed=False):
+    """Use the real metrics producer; replace only its external history fetch."""
+    from unittest.mock import patch
+
+    secid = str(instrument["secid"])
+    url = source_url("algopack_fo_tradestats", secid, str(instrument["family_code"]))
+    history = pd.DataFrame([
+        {"secid": secid, "tradedate": "2026-09-17", "tradetime": "10:00:00", "vol": 10, "val": 100, "trades": 2},
+        {"secid": secid, "tradedate": "2026-09-17", "tradetime": "10:05:00", "vol": 20, "val": 200, "trades": 3},
+    ])
+    result = (pd.DataFrame(), url, "failed", "synthetic source failure") if failed else (history, url, "completed", "")
+    with patch.object(registry.base, "fetch_tradestats", return_value=result):
+        pair = registry.base.compute_one_metrics(
+            instrument, SCREEN_FROM, DAY, {"2026-09-17"}, "synthetic date evidence",
+            {}, {}, 10, True, False, 1.0, APIM, ISS)
+    for row in pair:
+        row["snapshot_date"] = DAY
+    return pair
 
 
 def fixture_frames():
@@ -58,27 +95,19 @@ def fixture_frames():
                 "availability_report_id": endpoint + "_" + row.secid,
                 "snapshot_date": DAY, "board": row.board, "secid": row.secid,
                 "family_code": row.family_code, "endpoint_id": endpoint,
-                "source_endpoint_url": "https://source.invalid/" + row.secid,
+                "source_endpoint_url": source_url(endpoint, row.secid, row.family_code),
                 "availability_status": status, "probe_status": "completed",
                 "validation_status": "not_validated", "probe_from": PROBE_FROM, "probe_till": DAY,
                 "schema_version": evidence.availability.REPORT_SCHEMA_BY_ENDPOINT[endpoint],
             })
         frames[endpoint] = pd.DataFrame(rows)
-    for key, field, schema in (
-        ("liquidity_screen", "liquidity_status", registry.base.SCHEMA_LIQUIDITY_SCREEN),
-        ("history_depth_screen", "history_depth_status", registry.base.SCHEMA_HISTORY_DEPTH_SCREEN),
-    ):
-        rows = []
-        for row in normalized.loc[normalized.secid != "NODATAF"].itertuples(index=False):
-            rows.append({
-                key + "_id": key + "_" + row.secid,
-                "snapshot_date": DAY, "board": row.board, "secid": row.secid, "family_code": row.family_code,
-                "screen_from": SCREEN_FROM, "screen_till": DAY, field: "pass",
-                "validation_status": "metrics_computed", "review_status": "ready_for_pm_review",
-                "fetch_status": "completed", "review_notes": "synthetic computed outcome",
-                "schema_version": schema,
-            })
-        frames[key] = pd.DataFrame(rows)
+    liquidity, history = [], []
+    for _, instrument in normalized.loc[normalized.secid != "NODATAF"].iterrows():
+        liq, hist = produced_screen_pair(instrument)
+        liquidity.append(liq)
+        history.append(hist)
+    frames["liquidity_screen"] = pd.DataFrame(liquidity)
+    frames["history_depth_screen"] = pd.DataFrame(history)
     return frames
 
 
@@ -132,7 +161,7 @@ def test_negative_or_review_screen_outcome_is_evidence_not_admission(tmp_path, k
     frame = frames[key]
     frame.loc[0, field] = outcome
     if outcome == "fail":
-        frame.loc[0, ["validation_status", "review_status", "fetch_status"]] = ["failed", "blocked", "failed"]
+        frame.loc[0, ["validation_status", "review_status", "fetch_status"]] = ["failed", "blocked", "completed"]
     summaries, blockers = validate(tmp_path, frames)
     assert blockers == [] and summaries[key]["status_counts"][outcome] == 1
     assert frame.loc[0, field] == outcome
@@ -230,7 +259,9 @@ def test_unresolved_family_is_retained_without_inventing_mapping(tmp_path):
     mapping.loc[index, ["family_code", "mapping_status", "mapping_source", "validation_status"]] = [
         None, "unresolved", "unresolved", "failed"]
     for key in registry.AVAILABILITY_ENDPOINTS:
-        frames[key].loc[frames[key].secid == "NODATAF", "family_code"] = "UNKNOWN"
+        mask = frames[key].secid == "NODATAF"
+        frames[key].loc[mask, "family_code"] = "UNKNOWN"
+        frames[key].loc[mask, "source_endpoint_url"] = source_url(key, "NODATAF", "UNKNOWN")
     summaries, blockers = validate(tmp_path, frames)
     assert blockers == [] and summaries["family_mapping"]["status_counts"]["unresolved"] == 1
 
@@ -377,3 +408,208 @@ def test_contract_documents_mode_boundary_without_rewriting_legacy_history():
     assert "current_registry" in text and "slice1_compat" in text and "validation_mode" in text
     assert "candidate evidence only" in text
     assert "manifest_attempt_retention:" in text
+
+
+
+def required_field_cases():
+    """Read the contract independently of the production field parser."""
+    cases = []
+    for key, rel in registry.CONTRACTS.items():
+        section = (ROOT / rel).read_text().split("\nrequired_fields:\n", 1)[1]
+        for line in section.splitlines():
+            if not line.strip():
+                continue
+            if not line.startswith("- "):
+                break
+            cases.append((key, line[2:].strip()))
+    return cases
+
+
+@pytest.mark.parametrize("key,field", required_field_cases())
+def test_every_contracted_field_is_required(tmp_path, key, field):
+    frames = fixture_frames()
+    assert field in frames[key].columns, "positive fixture must satisfy the real contract"
+    frames[key] = frames[key].drop(columns=field)
+    summaries, blockers = validate(tmp_path, frames)
+    assert blockers == [key + "_validation_failed"]
+    assert "missing_fields:" in summaries[key]["failure_reason"]
+    assert field in summaries[key]["failure_reason"]
+
+
+def test_nullable_values_empty_contract_code_and_boolean_flags_are_preserved(tmp_path):
+    frames = fixture_frames()
+    frames["liquidity_screen"]["asset_class"] = None
+    normalized = frames["normalized_registry"]
+    assert normalized.loc[normalized.secid == "USDRUBF", "contract_code"].iloc[0] == ""
+    assert set(normalized["is_perpetual_candidate"].tolist()) == {True, False}
+    assert validate(tmp_path, frames)[1] == []
+
+
+@pytest.mark.parametrize("key,field,value", [
+    ("registry_snapshot", "source_system", "UNTRUSTED"),
+    ("registry_snapshot", "source_system", None),
+    ("registry_snapshot", "source_endpoint_id", None),
+    ("registry_snapshot", "source_endpoint_id", "different_source"),
+    ("registry_snapshot", "raw_payload_json", ""),
+    ("registry_snapshot", "raw_payload_json", "{}"),
+    ("registry_snapshot", "raw_payload_json", "[]"),
+    ("registry_snapshot", "raw_payload_json", "not json"),
+    ("registry_snapshot", "raw_payload_json", '{"SECID":"FOREIGN"}'),
+    ("normalized_registry", "instrument_kind", "not_a_future_kind"),
+    ("normalized_registry", "is_perpetual_candidate", "false"),
+    ("normalized_registry", "is_perpetual_candidate", 1),
+    ("normalized_registry", "contract_code", None),
+])
+def test_required_field_values_use_contract_semantics(tmp_path, key, field, value):
+    frames = fixture_frames()
+    frames[key][field] = frames[key][field].astype(object)
+    frames[key].loc[0, field] = value
+    assert validate(tmp_path, frames)[1] == [key + "_validation_failed"]
+
+
+@pytest.mark.parametrize("endpoint", registry.AVAILABILITY_ENDPOINTS)
+@pytest.mark.parametrize("fault", ["foreign_host", "public_iss", "http", "foreign_instrument",
+                                    "wrong_route", "query", "fragment", "userinfo"])
+def test_availability_rejects_wrong_source_routes(tmp_path, endpoint, fault):
+    frames = fixture_frames()
+    row = frames[endpoint].iloc[0]
+    url = source_url(endpoint, row.secid, row.family_code)
+    if fault == "foreign_host":
+        url = url.replace("apim.moex.com", "other.invalid")
+    elif fault == "public_iss":
+        url = url.replace("apim.moex.com", "iss.moex.com")
+    elif fault == "http":
+        url = url.replace("https:", "http:")
+    elif fault == "foreign_instrument":
+        url = url.rsplit("/", 1)[0] + "/FOREIGN.json"
+    elif fault == "wrong_route":
+        url = APIM + "/iss/unrelated.json"
+    elif fault == "query":
+        url += "?secid=FOREIGN"
+    elif fault == "fragment":
+        url += "#different-source"
+    else:
+        url = url.replace("https://", "https://user@")
+    frames[endpoint].loc[0, "source_endpoint_url"] = url
+    summaries, blockers = validate(tmp_path, frames)
+    assert blockers == [endpoint + "_validation_failed"]
+    assert "source_endpoint_url_mismatch" in summaries[endpoint]["failure_reason"]
+
+
+def test_futoi_uses_family_not_contract_identity(tmp_path):
+    frames = fixture_frames()
+    mask = frames["moex_futoi"].secid == "SiZ6"
+    assert frames["moex_futoi"].loc[mask, "source_endpoint_url"].iloc[0].endswith("/si.json")
+    assert validate(tmp_path, frames)[1] == []
+    frames["moex_futoi"].loc[mask, "source_endpoint_url"] = APIM + "/iss/analyticalproducts/futoi/securities/siz6.json"
+    assert validate(tmp_path, frames)[1] == ["moex_futoi_validation_failed"]
+
+
+@pytest.mark.parametrize("endpoint,suffix", [
+    ("algopack_fo_obstats", "obstats"), ("algopack_fo_hi2", "hi2"),
+])
+def test_other_sources_keep_existing_general_candidate(tmp_path, endpoint, suffix):
+    frames = fixture_frames()
+    frames[endpoint]["source_endpoint_url"] = APIM + "/iss/datashop/algopack/fo/" + suffix + ".json"
+    assert validate(tmp_path, frames)[1] == []
+
+
+def test_general_tradestats_route_is_never_historical_provenance(tmp_path):
+    frames = fixture_frames()
+    frames["algopack_fo_tradestats"]["source_endpoint_url"] = APIM + "/iss/datashop/algopack/fo/tradestats.json"
+    assert validate(tmp_path, frames)[1] == ["algopack_fo_tradestats_validation_failed"]
+
+
+@pytest.mark.parametrize("key", ["liquidity_screen", "history_depth_screen"])
+@pytest.mark.parametrize("fault", ["missing", "foreign_instrument", "public_iss", "general_route"])
+def test_each_screen_requires_instrument_specific_source(tmp_path, key, fault):
+    frames = fixture_frames()
+    if fault == "missing":
+        frames[key] = frames[key].drop(columns="source_endpoint_url")
+    else:
+        url = source_url("algopack_fo_tradestats", "FOREIGN", "")
+        if fault == "public_iss":
+            url = source_url("algopack_fo_tradestats", "USDRUBF", "").replace("apim.moex.com", "iss.moex.com")
+        if fault == "general_route":
+            url = APIM + "/iss/datashop/algopack/fo/tradestats.json"
+        frames[key].loc[0, "source_endpoint_url"] = url
+    assert validate(tmp_path, frames)[1] == [key + "_validation_failed"]
+
+
+@pytest.mark.parametrize("key", ["liquidity_screen", "history_depth_screen"])
+@pytest.mark.parametrize("field", registry.SCREEN_PROVENANCE_FIELDS)
+def test_screen_shared_provenance_cannot_be_missing(tmp_path, key, field):
+    frames = fixture_frames()
+    frames[key] = frames[key].drop(columns=field)
+    assert validate(tmp_path, frames)[1] == [key + "_validation_failed"]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("trade_stats_rows", 999), ("daily_rows", 99), ("duplicate_intraday_rows", 1),
+    ("first_available_date", "2026-09-16"), ("last_available_date", "2026-09-16"),
+    ("available_trading_days", 99), ("expected_trading_days", 99), ("coverage_ratio", 0.2),
+    ("recent_gap_count", 1), ("missing_day_diagnostics", "{}"),
+    ("calendar_status", "unavailable"), ("calendar_note", "different denominator"),
+    ("full_history_proven", False), ("history_proof_scope", "bounded_probe"),
+    ("metric_columns_json", "{}"), ("fetch_error", "not the same fetch"),
+])
+def test_screen_shared_fetch_disagreement_is_rejected(tmp_path, field, value):
+    frames = fixture_frames()
+    frames["history_depth_screen"][field] = frames["history_depth_screen"][field].astype(object)
+    frames["history_depth_screen"].loc[0, field] = value
+    summaries, blockers = validate(tmp_path, frames)
+    assert blockers == ["history_depth_screen_validation_failed"]
+    assert "screen_provenance_mismatch:" + field in summaries["history_depth_screen"]["failure_reason"]
+
+
+def test_consistent_failed_fetch_is_retained_as_two_negative_outcomes(tmp_path):
+    frames = fixture_frames()
+    instrument = frames["normalized_registry"].iloc[0]
+    pair = produced_screen_pair(instrument, failed=True)
+    for key, row in zip(("liquidity_screen", "history_depth_screen"), pair):
+        frames[key] = pd.concat([pd.DataFrame([row]), frames[key].iloc[1:]], ignore_index=True)
+    summaries, blockers = validate(tmp_path, frames)
+    assert blockers == []
+    assert summaries["liquidity_screen"]["status_counts"]["fail"] == 1
+    assert summaries["history_depth_screen"]["status_counts"]["fail"] == 1
+
+
+def test_failed_fetch_in_only_one_screen_is_not_coherent(tmp_path):
+    frames = fixture_frames()
+    _, failed_history = produced_screen_pair(frames["normalized_registry"].iloc[0], failed=True)
+    frames["history_depth_screen"] = pd.concat(
+        [pd.DataFrame([failed_history]), frames["history_depth_screen"].iloc[1:]], ignore_index=True)
+    summaries, blockers = validate(tmp_path, frames)
+    assert blockers == ["history_depth_screen_validation_failed"]
+    assert "screen_provenance_mismatch" in summaries["history_depth_screen"]["failure_reason"]
+
+
+def test_provenance_pairing_uses_identity_not_row_position(tmp_path):
+    frames = fixture_frames()
+    frames["history_depth_screen"] = frames["history_depth_screen"].iloc[::-1].reset_index(drop=True)
+    assert validate(tmp_path, frames)[1] == []
+
+
+def test_explicit_source_origin_is_checked_and_public_iss_cannot_be_apim(tmp_path):
+    frames = fixture_frames()
+    for key in (*registry.AVAILABILITY_ENDPOINTS, "liquidity_screen", "history_depth_screen"):
+        frames[key]["source_endpoint_url"] = frames[key]["source_endpoint_url"].str.replace(
+            APIM, "https://configured-apim.invalid", regex=False)
+    assert validate(tmp_path, frames, apim_base_url="https://configured-apim.invalid")[1] == []
+    assert validate(tmp_path, frames)[1]
+    for key in (*registry.AVAILABILITY_ENDPOINTS, "liquidity_screen", "history_depth_screen"):
+        frames[key]["source_endpoint_url"] = frames[key]["source_endpoint_url"].str.replace(
+            "https://configured-apim.invalid", ISS, regex=False)
+    summaries, blockers = validate(tmp_path, frames, apim_base_url=ISS)
+    assert blockers and "public_iss_forbidden" in summaries["algopack_fo_tradestats"]["failure_reason"]
+
+
+def test_main_validates_the_same_origin_it_passes_to_children(monkeypatch, tmp_path):
+    calls = []
+    actual = registry.validate_current_outputs
+    def validate_at_origin(*args, **kwargs):
+        calls.append((kwargs["apim_base_url"], kwargs["iss_base_url"]))
+        return actual(*args, **kwargs)
+    monkeypatch.setattr(registry, "validate_current_outputs", validate_at_origin)
+    code, _, _, _ = simulate_main(monkeypatch, tmp_path)
+    assert code == 0 and calls == [(APIM, ISS), (APIM, ISS)]
