@@ -97,6 +97,7 @@ def fixture_frames():
                 "family_code": row.family_code, "endpoint_id": endpoint,
                 "source_endpoint_url": source_url(endpoint, row.secid, row.family_code),
                 "availability_status": status, "probe_status": "completed",
+                "observed_rows": 1 if status == "available" else 0,
                 "validation_status": "not_validated", "probe_from": PROBE_FROM, "probe_till": DAY,
                 "schema_version": evidence.availability.REPORT_SCHEMA_BY_ENDPOINT[endpoint],
             })
@@ -868,3 +869,182 @@ def test_normalized_optional_metadata_may_be_absent(tmp_path):
     frames = fixture_frames()
     frames["normalized_registry"] = frames["normalized_registry"].drop(columns=["expiration_date", "lot_size"])
     assert validate(tmp_path, frames)[1] == []
+
+
+# Producer invariants from review 4061758276, 4061758280 and 4061758285.
+def coherent_raw_identity_change(field, value):
+    frames = fixture_frames()
+    raw = frames["registry_snapshot"]
+    raw.loc[raw.secid == "SiZ6", field] = value
+    normalized = evidence.availability.build_normalized_registry(raw)
+    frames["normalized_registry"] = normalized
+    candidates = evidence.select_all_rfud_instruments(normalized)
+    frames["family_mapping"] = evidence.build_family_mapping(candidates, DAY)
+    for key in (*registry.AVAILABILITY_ENDPOINTS, "liquidity_screen", "history_depth_screen"):
+        frames[key] = frames[key].loc[frames[key].secid.isin(candidates.secid)].copy()
+    return frames
+
+
+@pytest.mark.parametrize("field,value", [("board", "CETS"), ("engine", "stock"), ("market", "shares")])
+@pytest.mark.parametrize("evidence_only", [True, False])
+def test_captured_raw_identity_cannot_be_overridden_or_pruned(tmp_path, field, value, evidence_only):
+    frames = coherent_raw_identity_change(field, value)
+    before = {key: frame.copy(deep=True) for key, frame in frames.items()}
+    summaries, blockers = validate(tmp_path, frames, evidence_only=evidence_only)
+    assert blockers == ["registry_snapshot_validation_failed"]
+    assert "normalized_registry" not in summaries
+    for key in frames:
+        pd.testing.assert_frame_equal(frames[key], before[key])
+
+
+@pytest.mark.parametrize("field,value", [("board", "CETS"), ("engine", "stock"), ("market", "shares")])
+def test_raw_identity_failure_stops_before_screen_child(monkeypatch, tmp_path, field, value):
+    frames = coherent_raw_identity_change(field, value)
+    monkeypatch.setitem(globals(), "fixture_frames", lambda: frames)
+    code, manifest, calls, outputs = simulate_main(monkeypatch, tmp_path)
+    assert code == 1 and len(calls) == 1
+    assert manifest["blockers"] == ["registry_snapshot_validation_failed"]
+    assert not Path(outputs["liquidity_screen"]).exists()
+
+
+@pytest.mark.parametrize("column", ["BOARDID", "BOARD", "board", None])
+@pytest.mark.parametrize("value", ["RFUD", "rfud", "", None])
+def test_raw_identity_keeps_actual_producer_aliases_and_fallback(column, value):
+    payload = {"SECID": ["USDRUBF", "SiZ6"]}
+    if column is not None:
+        payload[column] = [value, value]
+    frame = evidence.availability.build_registry_snapshot(pd.DataFrame(payload), DAY)
+    before = frame.copy(deep=True)
+    registry._current_raw_identity(frame.iloc[::-1], DAY, evidence.availability)
+    pd.testing.assert_frame_equal(frame, before)
+
+
+def test_matching_non_rfud_payload_is_not_the_rfud_endpoint_scope():
+    frame = evidence.availability.build_registry_snapshot(
+        pd.DataFrame({"SECID": ["SiZ6"], "BOARDID": ["CETS"]}), DAY)
+    with pytest.raises(ValueError, match="registry_endpoint_scope_mismatch"):
+        registry._current_raw_identity(frame, DAY, evidence.availability)
+
+
+@pytest.mark.parametrize("endpoint", registry.AVAILABILITY_ENDPOINTS)
+@pytest.mark.parametrize("value", ["missing", None, 0, -1, 0.5, "1", True, float("inf")])
+def test_available_requires_positive_supported_observation_count(tmp_path, endpoint, value):
+    frames = fixture_frames()
+    frames[endpoint]["availability_status"] = "available"
+    # Uniform types allow the negative evidence to reach the validator via Parquet.
+    if value == "missing":
+        frames[endpoint] = frames[endpoint].drop(columns="observed_rows")
+    else:
+        frames[endpoint]["observed_rows"] = pd.Series(value, index=frames[endpoint].index, dtype=object)
+    summaries, blockers = validate(tmp_path, frames, evidence_only=True)
+    assert blockers == [endpoint + "_validation_failed"]
+    expected = "missing_fields:observed_rows" if value == "missing" else "available_without_observations"
+    assert expected in summaries[endpoint]["failure_reason"]
+
+
+@pytest.mark.parametrize("status", ["unavailable", "partial", "error", "not_checked"])
+def test_negative_availability_does_not_require_positive_observations(tmp_path, status):
+    frames = fixture_frames()
+    frames["moex_futoi"]["availability_status"] = status
+    frames["moex_futoi"] = frames["moex_futoi"].drop(columns="observed_rows")
+    summaries, blockers = validate(tmp_path, frames)
+    assert blockers == []
+    assert summaries["moex_futoi"]["status_counts"] == {status: 3}
+
+
+@pytest.mark.parametrize("endpoint", registry.AVAILABILITY_ENDPOINTS)
+@pytest.mark.parametrize("empty", [False, True])
+def test_actual_probe_report_observations_reach_validator(monkeypatch, tmp_path, endpoint, empty):
+    frames = fixture_frames()
+    instruments = frames["normalized_registry"].loc[frames["normalized_registry"].secid == "USDRUBF"]
+    columns = ["secid", "tradedate", "tradetime", "clgroup", "pos", "pos_long",
+               "pos_short", "pos_long_num", "pos_short_num"]
+    rows = [] if empty else [["USDRUBF", "2026-09-17", "10:00:00", "FIZ", 1, 2, 1, 2, 1]]
+    block = "futoi" if endpoint == "moex_futoi" else "data"
+    def response(*args, **kwargs):
+        return {block: {"columns": columns, "data": rows}}
+    monkeypatch.setattr(evidence.availability, "request_json", response)
+    report = evidence.availability.build_availability_report(
+        endpoint, SOURCE_PATHS[endpoint].format(secid="USDRUBF", family="usdrubf"),
+        instruments, DAY, PROBE_FROM, DAY, 1.0, APIM, ISS, 1)
+    assert report.observed_rows.tolist() == [0 if empty else 1]
+    assert report.availability_status.tolist() == ["unavailable" if empty else "available"]
+    frames[endpoint] = pd.concat(
+        [report, frames[endpoint].loc[frames[endpoint].secid != "USDRUBF"]], ignore_index=True)
+    if empty and endpoint == "algopack_fo_tradestats":
+        for key in ("liquidity_screen", "history_depth_screen"):
+            frames[key] = frames[key].loc[frames[key].secid != "USDRUBF"].copy()
+    assert validate(tmp_path, frames)[1] == []
+
+
+def duplicate_producer_frames():
+    from unittest.mock import patch
+
+    frames = fixture_frames()
+    instrument = frames["normalized_registry"].iloc[0]
+    secid = str(instrument.secid)
+    row = {"secid": secid, "tradedate": "2026-09-17", "tradetime": "10:00:00",
+           "vol": 10, "val": 100, "trades": 2}
+    url = source_url("algopack_fo_tradestats", secid, str(instrument.family_code))
+    with patch.object(registry.base, "fetch_tradestats",
+                      return_value=(pd.DataFrame([row, row]), url, "completed", "")):
+        pair = registry.base.compute_one_metrics(
+            instrument, SCREEN_FROM, DAY, {"2026-09-17"}, "synthetic date evidence",
+            {}, {}, 10, True, False, 1.0, APIM, ISS)
+    for key, result in zip(("liquidity_screen", "history_depth_screen"), pair):
+        result["snapshot_date"] = DAY
+        assert result["duplicate_intraday_rows"] > 0
+        frames[key] = pd.concat([pd.DataFrame([result]), frames[key].iloc[1:]], ignore_index=True)
+    return frames
+
+
+def test_real_duplicate_source_outcomes_are_retained_as_negative_evidence(tmp_path):
+    frames = duplicate_producer_frames()
+    summaries, blockers = validate(tmp_path, frames)
+    assert blockers == []
+    for key in ("liquidity_screen", "history_depth_screen"):
+        assert summaries[key]["status_counts"]["fail"] == 1
+
+
+@pytest.mark.parametrize("key", ["liquidity_screen", "history_depth_screen", "both"])
+@pytest.mark.parametrize("outcome", ["pass", "review_required"])
+def test_duplicate_source_cannot_be_promoted_to_computed_outcome(tmp_path, key, outcome):
+    frames = duplicate_producer_frames()
+    for name, field in (("liquidity_screen", "liquidity_status"),
+                        ("history_depth_screen", "history_depth_status")):
+        if key in (name, "both"):
+            frames[name].loc[0, [field, "validation_status", "review_status"]] = [
+                outcome, "metrics_computed", "ready_for_pm_review"]
+    summaries, blockers = validate(tmp_path, frames)
+    failed = "liquidity_screen" if key == "both" else key
+    assert blockers == [failed + "_validation_failed"]
+    assert "computed_screen_with_duplicate_rows" in summaries[failed]["failure_reason"]
+
+
+@pytest.mark.parametrize("value", [None, "0", False, -1, 0.5, float("nan"), float("inf")])
+def test_duplicate_counts_must_be_known_nonnegative_whole_numbers(tmp_path, value):
+    frames = fixture_frames()
+    for key in ("liquidity_screen", "history_depth_screen"):
+        frames[key]["duplicate_intraday_rows"] = pd.Series(value, index=frames[key].index, dtype=object)
+    summaries, blockers = validate(tmp_path, frames)
+    assert blockers == ["liquidity_screen_validation_failed"]
+    assert "invalid_duplicate_intraday_rows" in summaries["liquidity_screen"]["failure_reason"]
+
+
+@pytest.mark.parametrize("fault", ["observations", "duplicates"])
+def test_new_invariants_block_runner_manifest(monkeypatch, tmp_path, fault):
+    frames = duplicate_producer_frames() if fault == "duplicates" else fixture_frames()
+    if fault == "observations":
+        frames["algopack_fo_tradestats"]["observed_rows"] = 0
+    else:
+        for key, field in (("liquidity_screen", "liquidity_status"),
+                           ("history_depth_screen", "history_depth_status")):
+            frames[key].loc[0, [field, "validation_status", "review_status"]] = [
+                "pass", "metrics_computed", "ready_for_pm_review"]
+    monkeypatch.setitem(globals(), "fixture_frames", lambda: frames)
+    code, manifest, calls, _ = simulate_main(monkeypatch, tmp_path)
+    assert code == 1
+    assert len(calls) == (1 if fault == "observations" else 2)
+    assert manifest["artifact_validation_status"] == manifest["registry_refresh_result_verdict"] == "fail"
+    assert manifest["blockers"] == [
+        ("algopack_fo_tradestats" if fault == "observations" else "liquidity_screen") + "_validation_failed"]

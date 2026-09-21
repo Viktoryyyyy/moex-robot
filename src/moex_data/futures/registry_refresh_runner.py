@@ -544,6 +544,45 @@ def _current_normalized_lineage(frame, raw, source):
             _require_current(equal, "normalized_source_lineage_mismatch:" + field + ":" + row.secid)
 
 
+
+def _current_raw_identity(frame, snapshot_date, source):
+    """Reconcile captured payload identity before selecting any RFUD candidate."""
+    payloads = [json.loads(value) for value in frame["raw_payload_json"]]
+    expected = source.build_registry_snapshot(pd.DataFrame(payloads), snapshot_date)
+    _current_coverage(frame, expected)
+    for field in ("engine", "market"):
+        _current_agreement(frame, expected, field)
+    _require_current(bool(frame["board"].str.lower().eq("rfud").all()),
+                     "registry_endpoint_scope_mismatch")
+
+
+def _current_count(value):
+    """Accept finite whole counts, not booleans or numeric strings."""
+    import math
+    import numbers
+
+    return (isinstance(value, numbers.Real) and not isinstance(value, bool)
+            and math.isfinite(value) and value >= 0 and value == int(value))
+
+
+def _current_available_observations(frame):
+    available = frame.loc[frame["availability_status"].eq("available")]
+    if available.empty:
+        return
+    _require_current("observed_rows" in frame.columns, "missing_fields:observed_rows")
+    _require_current(bool(available["observed_rows"].map(
+        lambda value: _current_count(value) and value > 0).all()),
+                     "available_without_observations")
+
+
+def _current_screen_duplicates(frame, field):
+    counts = frame["duplicate_intraday_rows"]
+    _require_current(bool(counts.map(_current_count).all()),
+                     "invalid_duplicate_intraday_rows")
+    _require_current(bool(counts.loc[frame[field].ne("fail")].eq(0).all()),
+                     "computed_screen_with_duplicate_rows")
+
+
 def _current_window(frame, prefix, bounds):
     first, last = prefix + "_from", prefix + "_till"
     _current_text(frame, (first, last))
@@ -576,6 +615,7 @@ def validate_current_outputs(outputs, snapshot_date, *, from_date="", till="", e
         registry = _current_frame(outputs[key], snapshot_date, ("snapshot_id", "engine", "market"), artifact=key)
         _require_current(not registry.empty, "empty_registry")
         _require_current(registry["snapshot_id"].nunique() == 1, "ambiguous_snapshot_id")
+        _current_raw_identity(registry, snapshot_date, source)
         record(key, registry)
 
         key = "normalized_registry"
@@ -628,6 +668,7 @@ def validate_current_outputs(outputs, snapshot_date, *, from_date="", till="", e
             _require_current(bool(frame["availability_status"].isin(
                 ("available", "unavailable", "partial", "error", "not_checked")).all()), "invalid_availability_status")
             _current_source_routes(frame, key, source, source_config, apim_base_url, iss_base_url)
+            _current_available_observations(frame)
             record(key, frame, "availability_status")
             reports[key] = frame
 
@@ -665,6 +706,9 @@ def validate_current_outputs(outputs, snapshot_date, *, from_date="", till="", e
             summaries[key]["expected_instrument_count"] = int(len(selected))
             screens[key] = frame
         _current_screen_provenance(screens["liquidity_screen"], screens["history_depth_screen"])
+        for key, field in (("liquidity_screen", "liquidity_status"),
+                           ("history_depth_screen", "history_depth_status")):
+            _current_screen_duplicates(screens[key], field)
         return summaries, []
     except Exception as exc:
         summaries[key] = {"validation_status": "fail", "validation_scope": "current_registry_evidence_only",
