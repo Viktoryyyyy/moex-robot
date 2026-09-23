@@ -5,7 +5,7 @@ import pytest
 from moex_data import step10_rub_refresh_scheduler as step10
 
 
-def test_stage10_observed_dates_use_registry_bound_si_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stage10_observed_dates_use_registry_bound_usdrubf_reference(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
 
     def fake_observed_dates(date_start: str, date_end: str, **kwargs):
@@ -25,7 +25,7 @@ def test_stage10_observed_dates_use_registry_bound_si_reference(monkeypatch: pyt
         {
             "date_start": "2026-08-16",
             "date_end": "2026-08-30",
-            "instrument_id": "si_futures_family",
+            "instrument_id": "usdrubf_futures_family",
             "timeout": 60.0,
         }
     ]
