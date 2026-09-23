@@ -3,6 +3,8 @@ import argparse
 import json
 import os
 import sys
+from datetime import date
+from numbers import Real
 from pathlib import Path
 
 sys.path.insert(0, str(Path.cwd() / "src"))
@@ -103,15 +105,80 @@ def load_availability(repo_root, root, snapshot_date):
 
 
 def latest_by_secid(frame):
-    work = frame.copy()
-    work["_secid_upper"] = work["secid"].astype(str).str.upper()
-    return {str(row.get("_secid_upper")): row for _, row in work.drop_duplicates("_secid_upper", keep="last").iterrows()}
+    # Ambiguous evidence must not be resolved by row order or case folding.
+    secids = frame["secid"]
+    if (secids.isna().any()
+            or not secids.map(lambda value: isinstance(value, str) and bool(value) and value == value.strip()).all()
+            or secids.str.upper().duplicated().any()):
+        raise RuntimeError("Canonical FUTOI availability validation failed: ambiguous_secid")
+    return {row["secid"]: row for _, row in frame.iterrows()}
 
 
-def derive_futoi_eligibility(eligibility, availability):
+def validate_admission_inputs(eligibility, availability, snapshot_date=None):
+    required = {
+        "eligibility": ["secid", "board", "family_code", "registry_snapshot_date",
+                        "eligibility_snapshot_date", "registry_snapshot_id", "classification_status"],
+        "availability": ["secid", "board", "family_code", "snapshot_date",
+                         "availability_status", "probe_status", "observed_rows"],
+    }
+    for name, frame in (("eligibility", eligibility), ("availability", availability)):
+        if (not frame.columns.is_unique
+                or any(column not in frame.columns for column in required[name])):
+            raise RuntimeError("Canonical FUTOI availability validation failed: invalid_" + name + "_columns")
+        latest_by_secid(frame)
+    if eligibility.empty:
+        raise RuntimeError("Canonical FUTOI availability validation failed: empty_eligibility")
+    dates = eligibility["registry_snapshot_date"].tolist()
+    expected = snapshot_date if snapshot_date is not None else dates[0]
+    try:
+        valid_date = isinstance(expected, str) and date.fromisoformat(expected).isoformat() == expected
+    except ValueError:
+        valid_date = False
+    same_date = lambda value: isinstance(value, str) and value == expected
+    if (not valid_date
+            or not eligibility["registry_snapshot_date"].map(same_date).all()
+            or not eligibility["eligibility_snapshot_date"].map(same_date).all()
+            or not availability["snapshot_date"].map(same_date).all()):
+        raise RuntimeError("Canonical FUTOI availability validation failed: snapshot_date_mismatch")
+    if not eligibility["classification_status"].isin(["included", "deferred", "excluded"]).all():
+        raise RuntimeError("Canonical FUTOI availability validation failed: invalid_classification")
+    candidates = eligibility.loc[eligibility["classification_status"] == "included"]
+    for field in ("board", "family_code", "registry_snapshot_id"):
+        if not candidates[field].map(lambda value: isinstance(value, str) and bool(value.strip())).all():
+            raise RuntimeError("Canonical FUTOI availability validation failed: invalid_" + field)
     by_secid = latest_by_secid(availability)
+    folded = {key.upper(): key for key in by_secid}
+    for _, row in candidates.iterrows():
+        evidence = by_secid.get(row["secid"])
+        if evidence is None:
+            if row["secid"].upper() in folded:
+                raise RuntimeError("Canonical FUTOI availability validation failed: secid_case_mismatch")
+            continue
+        # The generic registry builder intentionally uppercases board identifiers.
+        if (str(evidence["board"]).upper() != row["board"].upper()
+                or evidence["family_code"] != row["family_code"]):
+            raise RuntimeError("Canonical FUTOI availability validation failed: identity_mismatch")
+    return by_secid
+
+
+def observed_row_count(value):
+    if isinstance(value, bool) or not isinstance(value, Real):
+        return None
+    try:
+        count = int(value)
+    except (ValueError, OverflowError):
+        return None
+    return count if count >= 0 and count == value else None
+
+
+def has_source_error(row):
+    return any(pd.notna(row.get(key)) and bool(str(row.get(key)).strip())
+               for key in ("error_code", "error_message"))
+
+
+def derive_futoi_eligibility(eligibility, availability, snapshot_date=None):
+    by_secid = validate_admission_inputs(eligibility, availability, snapshot_date)
     work = eligibility.copy()
-    failures = []
     futoi_status = []
     futoi_flags = []
     availability_statuses = []
@@ -131,9 +198,8 @@ def derive_futoi_eligibility(eligibility, availability):
             last_dates.append(None)
             source_urls.append(None)
             continue
-        arow = by_secid.get(secid.upper())
+        arow = by_secid.get(secid)
         if arow is None:
-            failures.append(secid + ":missing_futoi_availability_row")
             futoi_status.append("fail_missing_futoi_availability_row")
             futoi_flags.append(False)
             availability_statuses.append("")
@@ -149,9 +215,18 @@ def derive_futoi_eligibility(eligibility, availability):
         first_dates.append(arow.get("first_available_date"))
         last_dates.append(arow.get("last_available_date"))
         source_urls.append(arow.get("source_endpoint_url"))
+        count = observed_row_count(arow.get("observed_rows"))
+        if (availability_status == "unavailable" and probe_status == "completed"
+                and count == 0 and not has_source_error(arow)):
+            futoi_status.append("deferred_futoi_unavailable")
+            futoi_flags.append(False)
+            continue
         if availability_status != "available" or probe_status != "completed":
-            failures.append(secid + ":futoi_availability_not_available_completed")
             futoi_status.append("fail_futoi_availability_not_available_completed")
+            futoi_flags.append(False)
+            continue
+        if count is None or count <= 0 or has_source_error(arow):
+            futoi_status.append("fail_futoi_observed_rows_unproven")
             futoi_flags.append(False)
             continue
         futoi_status.append("pass")
@@ -164,14 +239,20 @@ def derive_futoi_eligibility(eligibility, availability):
     work["futoi_last_available_date"] = last_dates
     work["futoi_source_endpoint_url_probe"] = source_urls
     work["futoi_eligibility_schema_version"] = SCHEMA_FUTOI_ELIGIBILITY
-    if failures:
-        raise RuntimeError("Canonical FUTOI availability validation failed: " + ";".join(failures))
+    work["futoi_deferral_reason"] = [
+        "futoi_unavailable" if value == "deferred_futoi_unavailable"
+        else value.removeprefix("fail_") if value.startswith("fail_") else ""
+        for value in futoi_status
+    ]
+    work["futoi_retry_required"] = [value.startswith("fail_") for value in futoi_status]
     return work
 
 
-def selected_universe(futoi_eligibility):
+def selected_universe(futoi_eligibility, *, allow_empty=False):
     selected = futoi_eligibility.loc[(futoi_eligibility["classification_status"].astype(str) == "included") & (futoi_eligibility["futoi_eligible"] == True)].copy()
     if selected.empty:
+        if allow_empty:
+            return selected.reset_index(drop=True)
         raise RuntimeError("No eligibility_snapshot rows with classification_status=included and futoi_eligible=true")
     if "registry_snapshot_id" not in selected.columns or selected["registry_snapshot_id"].isna().all():
         raise RuntimeError("Selected FUTOI universe lacks registry_snapshot_id")
@@ -274,6 +355,17 @@ def run_instrument(args, root, row, run_id, chunk_id, expected_calendar, calenda
 
 
 def run_chunk(args, root, selected, run_id, chunk_id):
+    if selected.empty:
+        return {
+            "schema_version": SCHEMA_MANIFEST, "chunk_id": chunk_id,
+            "dataset_stage": DATASET_STAGE,
+            "selection_model": "eligibility_snapshot_driven_futoi_eligible_true",
+            "secid_list": [], "family_count": 0, "date_from": None, "date_till": None,
+            "status": "deferred", "started_at": run_id, "finished_at": now_utc(),
+            "failed_secid": [], "output_partitions": [], "quality_summary": {},
+            "calendar_validation_summary": {"calendar_denominator_status": "not_requested_no_eligible_instruments"},
+            "no_futoi_prejoin_into_ohlcv": True, "exact_contract_only": bool(args.exact_contract_only),
+        }, pd.DataFrame(columns=["secid", "family_code", "quality_status"])
     starts = []
     ends = []
     for _, row in selected.iterrows():
@@ -304,8 +396,49 @@ def run_chunk(args, root, selected, run_id, chunk_id):
     return manifest, quality
 
 
+def record_availability_outcomes(manifest, quality, scoped, run_id, chunk_id):
+    deferred = scoped.loc[~scoped["futoi_eligible"]].copy()
+    retry = deferred.loc[deferred["futoi_retry_required"], "secid"].tolist()
+    instrument_failures = list(manifest.get("failed_secid") or [])
+    manifest["candidate_secid_list"] = scoped["secid"].tolist()
+    manifest["deferred_secid"] = deferred["secid"].tolist()
+    manifest["deferral_reasons"] = dict(zip(deferred["secid"], deferred["futoi_deferral_reason"]))
+    manifest["availability_retry_secid"] = retry
+    manifest["failed_secid"] = list(dict.fromkeys(instrument_failures + retry))
+    manifest["futoi_coverage_complete"] = not manifest["deferred_secid"] and not manifest["failed_secid"]
+    if retry:
+        successful = len(manifest["secid_list"]) - len(instrument_failures)
+        manifest["status"] = "partial_failed" if successful > 0 else "failed"
+    rows = []
+    for _, row in deferred.iterrows():
+        reason = str(row["futoi_deferral_reason"])
+        rows.append({
+            "run_id": run_id, "chunk_id": chunk_id, "dataset_stage": DATASET_STAGE,
+            "eligibility_snapshot_id": row.get("eligibility_snapshot_id"),
+            "registry_snapshot_id": row.get("registry_snapshot_id"),
+            "family_code": row["family_code"], "secid": row["secid"],
+            "rows_written": 0, "date_from": None, "date_till": None,
+            "quality_status": "fail" if row["futoi_retry_required"] else "deferred",
+            "source_payload_status": row["futoi_probe_status"],
+            "partition_status": "not_written", "calendar_status": "not_requested",
+            "failure_reason": reason if row["futoi_retry_required"] else "",
+            "deferred_reason": reason,
+            "futoi_availability_status": row["futoi_availability_status"],
+            "futoi_probe_status": row["futoi_probe_status"],
+            "output_partitions_json": "[]", "schema_version": SCHEMA_QUALITY,
+            "selection_model": "eligibility_snapshot_driven_futoi_eligible_true",
+        })
+    if rows:
+        extra = pd.DataFrame(rows)
+        quality = pd.concat([quality, extra], ignore_index=True) if not quality.empty else extra
+    manifest["quality_summary"] = {
+        str(key): int(value) for key, value in quality["quality_status"].value_counts().items()
+    }
+    return manifest, quality
+
+
 def aggregate(eligibility, futoi_eligibility, selected, manifest):
-    return {"candidate_universe_count": int(len(eligibility)), "included_count": int((eligibility["classification_status"].astype(str) == "included").sum()), "deferred_count": int((eligibility["classification_status"].astype(str) == "deferred").sum()), "excluded_count": int((eligibility["classification_status"].astype(str) == "excluded").sum()), "futoi_eligible_count": int((futoi_eligibility["futoi_eligible"] == True).sum()), "selected_futoi_secid_count": int(len(selected)), "failed_secid_count": int(len(manifest.get("failed_secid") or [])), "chunk_status": manifest.get("status"), "classification_visibility_preserved": True}
+    return {"candidate_universe_count": int(len(eligibility)), "included_count": int((eligibility["classification_status"].astype(str) == "included").sum()), "deferred_count": int((eligibility["classification_status"].astype(str) == "deferred").sum()), "excluded_count": int((eligibility["classification_status"].astype(str) == "excluded").sum()), "futoi_eligible_count": int((futoi_eligibility["futoi_eligible"] == True).sum()), "selected_futoi_secid_count": int(len(selected)), "failed_secid_count": int(len(manifest.get("failed_secid") or [])), "chunk_status": manifest.get("status"), "classification_visibility_preserved": True, "futoi_deferred_count": int(futoi_eligibility["futoi_deferral_reason"].ne("").sum()), "scope_deferred_secid_count": len(manifest.get("deferred_secid") or []), "availability_retry_secid_count": len(manifest.get("availability_retry_secid") or []), "futoi_coverage_complete": manifest.get("futoi_coverage_complete", False)}
 
 
 def main():
@@ -331,14 +464,17 @@ def main():
     family_filter = parse_csv(args.family)
     eligibility_path, eligibility = load_eligibility(root, args.snapshot_date)
     availability_path, availability = load_availability(repo_root, root, args.snapshot_date)
-    futoi_eligibility = derive_futoi_eligibility(eligibility, availability)
-    selected = selected_universe(futoi_eligibility)
+    futoi_eligibility = derive_futoi_eligibility(eligibility, availability, args.snapshot_date)
+    selected = futoi_eligibility.loc[futoi_eligibility["classification_status"] == "included"].copy()
     selected = apply_scope_filters(selected, secid_filter, family_filter)
+    scoped = selected.copy()
+    selected = selected_universe(scoped, allow_empty=True)
     run_id = "all_universe_futoi_raw_" + args.run_date + "_" + base.stable_id([args.snapshot_date, eligibility_path, availability_path, now_utc(), ",".join(secid_filter), ",".join(family_filter), bool(args.exact_contract_only)])
-    chunk_id = "futoi_raw_" + base.stable_id([args.snapshot_date, ",".join(selected["secid"].astype(str).tolist()), args.from_date, args.till, bool(args.exact_contract_only)])
+    chunk_id = "futoi_raw_" + base.stable_id([args.snapshot_date, ",".join(scoped["secid"].astype(str).tolist()), args.from_date, args.till, bool(args.exact_contract_only)])
     out = paths(root, args.snapshot_date, chunk_id)
     write_parquet(out["futoi_eligibility_snapshot"], futoi_eligibility)
     manifest, quality = run_chunk(args, root, selected, run_id, chunk_id)
+    manifest, quality = record_availability_outcomes(manifest, quality, scoped, run_id, chunk_id)
     manifest["input_artifacts"] = {"eligibility_snapshot": eligibility_path, "futoi_availability_report": availability_path}
     manifest["output_artifacts"] = out
     manifest["scope_filters"] = {"secid": secid_filter, "family": family_filter}
@@ -347,7 +483,7 @@ def main():
     aggregate_report = aggregate(eligibility, futoi_eligibility, selected, manifest)
     dump_json(out["aggregate_report"], aggregate_report)
     print(json.dumps({"outputs": out, "selection_mode": args.selection_mode, "scope_filters": {"secid": secid_filter, "family": family_filter}, "exact_contract_only": bool(args.exact_contract_only), "selected_universe": {"secid_count": int(len(selected)), "secids": selected["secid"].astype(str).tolist(), "dataset_stage": DATASET_STAGE}, "chunk_status": aggregate_report.get("chunk_status"), "aggregate_report": aggregate_report}, ensure_ascii=False, sort_keys=True, default=str))
-    return 0 if aggregate_report.get("chunk_status") in ["succeeded", "partial_failed"] else 1
+    return 0 if aggregate_report.get("chunk_status") == "succeeded" else 1
 
 
 if __name__ == "__main__":
