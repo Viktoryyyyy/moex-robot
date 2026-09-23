@@ -190,7 +190,6 @@ def real_chain(monkeypatch, tmp_path, capsys):
         monkeypatch.setattr(module, "load_dotenv", None)
     monkeypatch.setenv("MOEX_API_KEY", "synthetic-test-token")
     monkeypatch.setenv("MOEX_API_URL", helper.APIM)
-    monkeypatch.setenv("MOEX_ISS_BASE_URL", helper.ISS)
     args, esummary, _, manifest, dates, calls, inputs = helper.connected_run(
         monkeypatch, tmp_path, capsys)
     # Preserve raw bytes for the instrument which is about to become deferred.
@@ -203,6 +202,12 @@ def real_chain(monkeypatch, tmp_path, capsys):
     dates.clear()
     calls.clear()
     availability_path = helper.futoi.resolve_availability_path(ROOT, tmp_path, DAY)
+    # Explicit clean diagnostics for subsequent synthetic unavailability scenarios.
+    evidence = pd.read_parquet(availability_path)
+    for column in ("error_code", "error_message"):
+        if column not in evidence.columns:
+            evidence[column] = None
+    evidence.to_parquet(availability_path, index=False)
     return helper, args, esummary, availability_path, dates, calls, preserved, inputs
 
 
@@ -416,3 +421,82 @@ def test_real_quality_parquet_schema_and_dataset_scan_are_stable(
         assert combined["rows_written"].to_pylist() == (
             pd.concat([pd.read_parquet(path)["rows_written"] for path in paths]).tolist()
         )
+
+
+@pytest.mark.parametrize("missing_columns", [
+    ("error_code",), ("error_message",), ("error_code", "error_message"),
+])
+@pytest.mark.parametrize("all_unavailable", [False, True])
+def test_missing_error_diagnostics_cannot_authorize_clean_deferral(
+    missing_columns, all_unavailable,
+):
+    e, a = frames()
+    mask = a.secid.notna() if all_unavailable else a.secid.eq("USDRUBF")
+    expected = a.loc[mask, "secid"].tolist()
+    a.loc[mask, ["availability_status", "observed_rows"]] = ["unavailable", 0]
+    a = a.drop(columns=list(missing_columns))
+    before_e, before_a = e.copy(deep=True), a.copy(deep=True)
+    derived = runner.derive_futoi_eligibility(e, a, DAY)
+    affected = derived.loc[derived.secid.isin(expected)]
+    assert not affected.futoi_eligible.any()
+    assert affected.futoi_retry_required.all()
+    assert affected.futoi_deferral_reason.eq("futoi_error_diagnostics_missing").all()
+    assert runner.selected_universe(derived, allow_empty=True).secid.tolist() == (
+        [] if all_unavailable else ["SiZ6"]
+    )
+    pd.testing.assert_frame_equal(e, before_e)
+    pd.testing.assert_frame_equal(a, before_a)
+
+
+def test_sparse_available_evidence_keeps_existing_fetch_admission():
+    # The accepted integration fixture predates nullable diagnostic columns.
+    e, a = frames()
+    a = a.drop(columns=["error_code", "error_message"])
+    derived = runner.derive_futoi_eligibility(e, a, DAY)
+    assert derived.futoi_eligible.all()
+    assert not derived.futoi_retry_required.any()
+    assert derived.futoi_deferral_reason.eq("").all()
+
+
+@pytest.mark.parametrize("missing_columns", [
+    ("error_code",), ("error_message",), ("error_code", "error_message"),
+])
+@pytest.mark.parametrize("all_unavailable", [False, True])
+def test_real_missing_diagnostics_never_exit_success_or_overwrite_deferred_raw(
+    monkeypatch, tmp_path, capsys, real_chain, missing_columns, all_unavailable,
+):
+    import json
+
+    helper, args, _, availability_path, dates, calls, preserved, inputs = real_chain
+    evidence = pd.read_parquet(availability_path)
+    mask = evidence.secid.notna() if all_unavailable else evidence.secid.eq("USDRUBF")
+    expected = sorted(evidence.loc[mask, "secid"].tolist())
+    evidence.loc[mask, ["availability_status", "observed_rows"]] = ["unavailable", 0]
+    evidence.drop(columns=list(missing_columns)).to_parquet(availability_path, index=False)
+    before = {path: path.read_bytes() for path in inputs}
+
+    code = helper.invoke(monkeypatch, runner, "futoi_raw_refresh", args)
+    summary = json.loads(capsys.readouterr().out)
+    manifest = json.loads(Path(summary["outputs"]["chunk_manifest"]).read_text())
+    report = pd.read_parquet(summary["outputs"]["quality_report"])
+    assert code == 1
+    assert manifest["status"] == ("failed" if all_unavailable else "partial_failed")
+    assert manifest["deferred_secid"] == manifest["availability_retry_secid"] == expected
+    assert manifest["failed_secid"] == expected
+    assert manifest["futoi_coverage_complete"] is False
+    assert manifest["deferral_reasons"] == dict.fromkeys(expected, "futoi_error_diagnostics_missing")
+    assert len(dates) == len(calls) == (0 if all_unavailable else 1)
+    if all_unavailable:
+        assert manifest["secid_list"] == manifest["output_partitions"] == []
+    else:
+        assert manifest["secid_list"] == ["SiZ6"]
+        assert calls[0][1].endswith("/si.json")
+        assert report.loc[report.secid.eq("SiZ6"), "quality_status"].item() == "pass"
+    affected = report.loc[report.secid.isin(expected)]
+    assert len(affected) == len(expected)
+    assert affected.quality_status.eq("fail").all()
+    assert affected.rows_written.eq(0).all()
+    assert affected.calendar_status.eq("not_requested").all()
+    assert affected.failure_reason.eq("futoi_error_diagnostics_missing").all()
+    assert all(path.read_bytes() == content for path, content in before.items())
+    assert all(path.read_bytes() == content for path, content in preserved.items())

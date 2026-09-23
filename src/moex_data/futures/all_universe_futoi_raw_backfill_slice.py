@@ -216,6 +216,12 @@ def derive_futoi_eligibility(eligibility, availability, snapshot_date=None):
         last_dates.append(arow.get("last_available_date"))
         source_urls.append(arow.get("source_endpoint_url"))
         count = observed_row_count(arow.get("observed_rows"))
+        # Skipping a source as cleanly unavailable requires both diagnostic fields.
+        if (availability_status == "unavailable"
+                and not {"error_code", "error_message"}.issubset(arow.index)):
+            futoi_status.append("fail_futoi_error_diagnostics_missing")
+            futoi_flags.append(False)
+            continue
         if (availability_status == "unavailable" and probe_status == "completed"
                 and count == 0 and not has_source_error(arow)):
             futoi_status.append("deferred_futoi_unavailable")
