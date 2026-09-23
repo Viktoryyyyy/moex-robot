@@ -289,3 +289,130 @@ def test_real_fetch_failure_does_not_exit_zero_or_overwrite_failed_raw(
     assert manifest["deferred_secid"] == []
     assert manifest["output_partitions"]
     assert all(path.read_bytes() == content for path, content in preserved.items())
+
+
+@pytest.mark.parametrize("outcome,deferred_count", [
+    ("available", 0), ("unavailable", 1), ("unavailable", 2),
+    ("error", 1), ("error", 2), ("missing", 2),
+])
+def test_quality_schema_and_existing_metrics_survive_deferrals(
+    monkeypatch, tmp_path, outcome, deferred_count,
+):
+    def denied(*args, **kwargs):
+        raise AssertionError("no source request during report construction")
+    monkeypatch.setattr(runner.base, "fetch_observed_trading_dates", denied)
+    e, a = frames()
+    if outcome == "missing":
+        a = a.iloc[:0].copy()
+    elif deferred_count:
+        indices = a.index[-deferred_count:]
+        a.loc[indices, ["availability_status", "observed_rows"]] = [outcome, 0]
+        if outcome == "error":
+            a.loc[indices, "error_code"] = "timeout"
+    derived = runner.derive_futoi_eligibility(e, a, DAY)
+    selected = runner.selected_universe(derived, allow_empty=True)
+    original_rows = []
+    for _, row in selected.iterrows():
+        raw = pd.DataFrame([
+            dict(trade_date=DAY, ts=pd.Timestamp(DAY + "T10:00:00"),
+                 secid=row.secid, clgroup=group, pos=net,
+                 pos_long=100, pos_short=net - 100, pos_long_num=2, pos_short_num=2)
+            for group, net in (("FIZ", 10), ("YUR", -10))
+        ])
+        original_rows.append(runner.quality_row(
+            "run", "chunk", row, DAY, DAY, raw, "completed", "", [],
+            "observed_trade_dates",
+        ))
+    if selected.empty:
+        manifest, quality = runner.run_chunk(
+            SimpleNamespace(exact_contract_only=False), tmp_path, selected, "run", "chunk")
+    else:
+        manifest = dict(status="succeeded", secid_list=selected.secid.tolist(),
+                        failed_secid=[], output_partitions=[])
+        quality = pd.DataFrame(original_rows)
+    before = quality.copy(deep=True)
+    manifest, report = runner.record_availability_outcomes(
+        manifest, quality, derived, "run", "chunk")
+    standard = runner.quality_row(
+        "run", "chunk", derived.iloc[0], None, None, pd.DataFrame(), "", "", [], "")
+    assert report.columns.tolist() == [*standard, "deferred_reason"]
+    integer_columns = {
+        "rows_written", "trade_dates", "duplicate_key_count",
+        "null_required_count", "invalid_position_count",
+    }
+    for column in report:
+        assert str(report[column].dtype) == ("Int64" if column in integer_columns else "string")
+    pd.testing.assert_frame_equal(quality, before)
+    for original in original_rows:
+        actual = report.loc[report.secid == original["secid"]].iloc[0]
+        for key, value in original.items():
+            assert pd.isna(actual[key]) if value is None else actual[key] == value
+        assert actual.deferred_reason == ""
+    deferred = report.loc[report.secid.isin(derived.loc[~derived.futoi_eligible, "secid"])]
+    assert len(deferred) == deferred_count
+    assert deferred[list(integer_columns)].eq(0).all().all()
+    assert deferred[["date_from", "date_till", "min_ts", "max_ts"]].isna().all().all()
+    assert deferred.calendar_status.eq("not_requested").all()
+    assert deferred.partition_status.eq("not_written").all()
+    assert deferred.output_partitions_json.eq("[]").all()
+    assert report.schema_version.eq(runner.SCHEMA_QUALITY).all()
+    if deferred_count:
+        assert deferred.quality_status.eq("deferred" if outcome == "unavailable" else "fail").all()
+        assert manifest["futoi_coverage_complete"] is False
+
+
+@pytest.mark.parametrize("outcome,all_deferred", [
+    ("unavailable", False), ("unavailable", True),
+    ("error", False), ("error", True),
+])
+def test_real_quality_parquet_schema_and_dataset_scan_are_stable(
+    monkeypatch, tmp_path, capsys, real_chain, outcome, all_deferred,
+):
+    import json
+    import pyarrow.dataset as ds
+    import pyarrow.parquet as pq
+
+    helper, args, _, availability_path, dates, calls, _, _ = real_chain
+    assert helper.invoke(monkeypatch, runner, "futoi_raw_refresh", args) == 0
+    baseline_summary = json.loads(capsys.readouterr().out)
+    baseline_path = tmp_path / "quality_before_deferral.parquet"
+    baseline_path.write_bytes(Path(baseline_summary["outputs"]["quality_report"]).read_bytes())
+    baseline_schema = pq.read_schema(baseline_path)
+    baseline_report = pd.read_parquet(baseline_path)
+
+    evidence = pd.read_parquet(availability_path)
+    mask = evidence.secid.notna() if all_deferred else evidence.secid.eq("USDRUBF")
+    evidence.loc[mask, ["availability_status", "observed_rows"]] = [outcome, 0]
+    if outcome == "error":
+        evidence.loc[mask, "error_code"] = "timeout"
+    evidence.to_parquet(availability_path, index=False)
+    dates.clear()
+    calls.clear()
+
+    code = helper.invoke(monkeypatch, runner, "futoi_raw_refresh", args)
+    summary = json.loads(capsys.readouterr().out)
+    report_path = Path(summary["outputs"]["quality_report"])
+    report = pd.read_parquet(report_path)
+    schema = pq.read_schema(report_path)
+    assert schema.equals(baseline_schema, check_metadata=False)
+    assert code == (1 if all_deferred or outcome == "error" else 0)
+    assert len(dates) == (0 if all_deferred else 1)
+    assert len(calls) == (0 if all_deferred else 1)
+    assert len(report) == len(baseline_report) == 2
+    if not all_deferred:
+        pd.testing.assert_frame_equal(
+            report.loc[report.secid.eq("SiZ6")].drop(columns=["run_id"]).reset_index(drop=True),
+            baseline_report.loc[baseline_report.secid.eq("SiZ6")].drop(columns=["run_id"]).reset_index(drop=True),
+        )
+    deferred = report if all_deferred else report.loc[report.secid.eq("USDRUBF")]
+    assert deferred.quality_status.eq("deferred" if outcome == "unavailable" else "fail").all()
+    assert deferred.rows_written.eq(0).all()
+    assert deferred[["date_from", "date_till", "min_ts", "max_ts"]].isna().all().all()
+    # Scan both file orders: schema inference must not depend on the first chunk.
+    for paths in ([baseline_path, report_path], [report_path, baseline_path]):
+        combined = ds.dataset([str(path) for path in paths], format="parquet").to_table()
+        assert combined.schema.equals(baseline_schema, check_metadata=False)
+        assert combined.num_rows == 4
+        assert combined["rows_written"].to_pylist() == (
+            pd.concat([pd.read_parquet(path)["rows_written"] for path in paths]).tolist()
+        )

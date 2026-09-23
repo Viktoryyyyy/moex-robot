@@ -354,6 +354,21 @@ def run_instrument(args, root, row, run_id, chunk_id, expected_calendar, calenda
     return quality_row(run_id, chunk_id, row, date_from, date_till, raw, fetch_status, failure, partitions, calendar_status), partitions, failure
 
 
+def quality_report_frame(rows):
+    """Keep v1 report columns and Parquet types stable, including empty chunks."""
+    template = quality_row("", "", {}, None, None, pd.DataFrame(), "", "", [], "")
+    template["deferred_reason"] = ""
+    counts = {
+        "rows_written", "trade_dates", "duplicate_key_count",
+        "null_required_count", "invalid_position_count",
+    }
+    frame = pd.DataFrame(rows, columns=list(template))
+    for column in frame.columns:
+        dtype = "Int64" if column in counts else pd.StringDtype(storage="python")
+        frame[column] = frame[column].astype(dtype)
+    return frame
+
+
 def run_chunk(args, root, selected, run_id, chunk_id):
     if selected.empty:
         return {
@@ -365,7 +380,7 @@ def run_chunk(args, root, selected, run_id, chunk_id):
             "failed_secid": [], "output_partitions": [], "quality_summary": {},
             "calendar_validation_summary": {"calendar_denominator_status": "not_requested_no_eligible_instruments"},
             "no_futoi_prejoin_into_ohlcv": True, "exact_contract_only": bool(args.exact_contract_only),
-        }, pd.DataFrame(columns=["secid", "family_code", "quality_status"])
+        }, quality_report_frame([])
     starts = []
     ends = []
     for _, row in selected.iterrows():
@@ -409,28 +424,18 @@ def record_availability_outcomes(manifest, quality, scoped, run_id, chunk_id):
     if retry:
         successful = len(manifest["secid_list"]) - len(instrument_failures)
         manifest["status"] = "partial_failed" if successful > 0 else "failed"
-    rows = []
+    rows = quality.assign(deferred_reason="").to_dict("records")
     for _, row in deferred.iterrows():
         reason = str(row["futoi_deferral_reason"])
-        rows.append({
-            "run_id": run_id, "chunk_id": chunk_id, "dataset_stage": DATASET_STAGE,
-            "eligibility_snapshot_id": row.get("eligibility_snapshot_id"),
-            "registry_snapshot_id": row.get("registry_snapshot_id"),
-            "family_code": row["family_code"], "secid": row["secid"],
-            "rows_written": 0, "date_from": None, "date_till": None,
-            "quality_status": "fail" if row["futoi_retry_required"] else "deferred",
-            "source_payload_status": row["futoi_probe_status"],
-            "partition_status": "not_written", "calendar_status": "not_requested",
-            "failure_reason": reason if row["futoi_retry_required"] else "",
-            "deferred_reason": reason,
-            "futoi_availability_status": row["futoi_availability_status"],
-            "futoi_probe_status": row["futoi_probe_status"],
-            "output_partitions_json": "[]", "schema_version": SCHEMA_QUALITY,
-            "selection_model": "eligibility_snapshot_driven_futoi_eligible_true",
-        })
-    if rows:
-        extra = pd.DataFrame(rows)
-        quality = pd.concat([quality, extra], ignore_index=True) if not quality.empty else extra
+        deferred_row = quality_row(
+            run_id, chunk_id, row, None, None, pd.DataFrame(),
+            row["futoi_probe_status"],
+            reason if row["futoi_retry_required"] else "", [], "not_requested",
+        )
+        deferred_row["quality_status"] = "fail" if row["futoi_retry_required"] else "deferred"
+        deferred_row["deferred_reason"] = reason
+        rows.append(deferred_row)
+    quality = quality_report_frame(rows)
     manifest["quality_summary"] = {
         str(key): int(value) for key, value in quality["quality_status"].value_counts().items()
     }
