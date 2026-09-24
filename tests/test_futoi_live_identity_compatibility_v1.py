@@ -14,6 +14,10 @@ from moex_data.futures import materialize_futoi_instrument as materializer
 # was introduced. A match outside this set is a review requirement, not a
 # reason to silently broaden v2 admission or to alter historical evidence.
 REVIEWED_IDENTITY_CONSUMERS = frozenset({
+    # The accepted-pointer legacy implementation defines its own helper.
+    "src/moex_data/futures/futoi_live_factual_refresh.py",
+    # This caller reads historical v1 partitions; its default API stays v1.
+    "src/moex_data/rub_cr_futoi_observed_statistics.py",
     "src/moex_data/futures/materialize_futoi_instrument.py",
     "src/moex_data/futures/futoi_live_factual_refresh_source_native.py",
     "src/moex_data/futures/futoi_intraday_previous_session_context.py",
@@ -25,7 +29,7 @@ REVIEWED_IDENTITY_CONSUMERS = frozenset({
     "src/moex_research/runners/usdrubf_s7_3_chat_analysis_snapshot_current_context.py",
     "src/moex_research/runners/usdrubf_s7_3_chat_analysis_snapshot_futoi.py",
 })
-IDENTITY_SYMBOL = re.compile(r"\b(?:source_identity|latest_aligned_factual|_materialize_target)\b")
+IDENTITY_SYMBOL = re.compile(r"\b(?:source_identity|latest_aligned_factual|_materialize_target)\s*\(")
 
 
 def test_futoi_identity_consumer_inventory_is_explicit():
@@ -68,3 +72,45 @@ def test_historical_raw_default_key_and_paths_remain_v1(monkeypatch, tmp_path):
     assert materializer._manifest_path("2026-09-17", "legacy") == (
         tmp_path / "state" / "refresh" / "dataset_id=futures_futoi_raw"
         / "run_date=2026-09-17" / "run_id=legacy" / "manifest.json")
+
+
+# The runtime call graph must also be explicit: source identity alone does not
+# discover a caller which selects a refresh implementation by importing it.
+REVIEWED_REFRESH_IMPORTERS = REVIEWED_IDENTITY_CONSUMERS | {
+    "src/moex_data/step10_rub_refresh_entrypoint.py",
+}
+
+
+def test_futoi_refresh_importer_inventory_is_explicit():
+    import ast
+
+    root = Path(__file__).resolve().parents[1]
+    tracked = {
+        "futoi_live_factual_refresh_source_native",
+        "futoi_intraday_previous_session_context",
+        "futoi_intraday_previous_session_context_fast",
+    }
+    unreviewed = {}
+    for path in sorted((root / "src").rglob("*.py")):
+        relative = path.relative_to(root).as_posix()
+        if relative in REVIEWED_REFRESH_IMPORTERS:
+            continue
+        text = path.read_text(encoding="utf-8")
+        if not any(name in text for name in tracked):
+            continue
+        references = []
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node, ast.ImportFrom):
+                names = [node.module or ""] + [item.name for item in node.names]
+            elif isinstance(node, ast.Import):
+                names = [item.name for item in node.names]
+            else:
+                continue
+            if any(name.rsplit(".", 1)[-1] in tracked for name in names):
+                references.append(f"{node.lineno}: {ast.get_source_segment(text, node)}")
+        if references:
+            unreviewed[relative] = references
+    assert not unreviewed, (
+        "Unreviewed FUTOI refresh importers; reconcile runtime version selection:\n"
+        + "\n".join(path + "\n  " + "\n  ".join(lines) for path, lines in unreviewed.items())
+    )
