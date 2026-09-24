@@ -38,7 +38,7 @@ CANONICAL_ENV_PATH: Final[str] = "/home/trader/moex_bot/.env"
 MARKET_TZ: Final[str] = "Europe/Moscow"
 REGISTRY_PATH: Final[str] = "configs/instruments/forts_instrument_registry.v1.yaml"
 ROOT_REF_PREFIX: Final[str] = "${MOEX_DATA_ROOT}/"
-OBSERVED_DATE_REFERENCE_INSTRUMENT_ID: Final[str] = "si_futures_family"
+OBSERVED_DATE_REFERENCE_INSTRUMENT_ID: Final[str] = "usdrubf_futures_family"
 STAGE5_INSTRUMENTS: Final[tuple[str, ...]] = ("si_futures_family", "cr_futures_family")
 STAGE7_INSTRUMENTS: Final[dict[str, str]] = {
     "usdrubf_futures_family": "USDRUBF",

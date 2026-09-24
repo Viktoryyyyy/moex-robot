@@ -73,7 +73,7 @@ def test_stage10_date_source_requests_only_algopack_tradestats(monkeypatch: pyte
         if int(params["start"]) > 0:
             return FakeResponse(_tradestats_payload([]), str(url))
         if request_date in data_dates:
-            return FakeResponse(_tradestats_payload([["SiU6", request_date]]), str(url))
+            return FakeResponse(_tradestats_payload([["USDRUBF", request_date]]), str(url))
         return FakeResponse(_tradestats_payload([]), str(url))
 
     monkeypatch.setattr(refresh.requests, "get", fake_get)
@@ -94,7 +94,7 @@ def test_stage10_date_source_requests_only_algopack_tradestats(monkeypatch: pyte
         "2026-06-15",
     ]
     assert all(params["date"] == params["from"] == params["till"] for params in first_requests)
-    assert all(params["secid"] == "SiU6" for params in first_requests)
+    assert all(params["secid"] == "USDRUBF" for params in first_requests)
 
 
 def test_incremental_refresh_source_loader_never_requests_calendar_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,7 +165,7 @@ def test_weekends_and_gaps_are_not_fabricated_by_stage10_date_source(monkeypatch
     def source_loader(date_start, date_end, *, instrument_id, registry_path=None, timeout, apim_base_url=None):
         assert date_start == "2026-06-12"
         assert date_end == "2026-06-17"
-        assert instrument_id == "si_futures_family"
+        assert instrument_id == "usdrubf_futures_family"
         assert registry_path is None
         assert timeout == 1.0
         assert apim_base_url is None
