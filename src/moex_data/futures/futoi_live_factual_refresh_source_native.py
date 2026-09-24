@@ -7,6 +7,8 @@ import os
 import tempfile
 from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
+from numbers import Integral, Real
 from pathlib import Path
 from typing import Final
 
@@ -167,14 +169,18 @@ def _atomic_json(path: Path, payload: Mapping[str, object]) -> None:
 
 
 def _as_int(value: object, field: str) -> int:
-    if value is None or isinstance(value, bool) or pd.isna(value):
+    if value is None or isinstance(value, bool) or value.__class__.__name__ == "bool_" or pd.isna(value):
         _fail(field + " must be a finite integer")
     try:
-        number = float(value)
-    except (TypeError, ValueError) as exc:
+        number = Decimal(str(value).strip())
+    except (InvalidOperation, TypeError, ValueError) as exc:
         raise FutoiSourceNativeRefreshError(field + " must be numeric") from exc
-    if not pd.notna(number) or not float(number).is_integer():
+    if not number.is_finite() or number != number.to_integral_value():
         _fail(field + " must be a finite integer")
+    # A float at this boundary may already have rounded a distinct source ID.
+    # Exact integer, string and Decimal inputs do not pass through binary float.
+    if isinstance(value, Real) and not isinstance(value, Integral) and abs(number) >= 2**53:
+        _fail(field + " has unsafe floating-point integer precision")
     return int(number)
 
 
