@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Final
@@ -12,6 +13,7 @@ from . import futoi_live_factual_refresh_source_native as source
 
 PROJECT: Final[str] = source.PROJECT
 SCHEMA_VERSION: Final[str] = "futoi_intraday_previous_session_context.v1"
+SCHEMA_VERSION_V2: Final[str] = "futoi_intraday_previous_session_context.v2"
 ARTIFACT_FILENAME: Final[str] = "intraday_previous_session_context.json"
 SOURCE_LOOKBACK_DAYS: Final[int] = source.SOURCE_LOOKBACK_DAYS
 CURRENT_ROLE: Final[str] = "current_intraday"
@@ -26,11 +28,16 @@ def _fail(message: str) -> None:
     raise FutoiIntradayContextError(message)
 
 
-def _artifact_path(root: Path, instrument_id: str) -> Path:
+def _artifact_path(root: Path, instrument_id: str, *, raw_schema_version: str = "v1") -> Path:
+    if source._raw_version(raw_schema_version) == "v2":
+        path = source._current_path(root, instrument_id, raw_schema_version="v2").parent / ARTIFACT_FILENAME
+        return source._checked_root_path(root, path.relative_to(root))
     return source._current_path(root, instrument_id).parent / ARTIFACT_FILENAME
 
 
-def _load_previous(root: Path, instrument_id: str) -> dict[str, object] | None:
+def _load_previous(root: Path, instrument_id: str, *, raw_schema_version: str = "v1") -> dict[str, object] | None:
+    if source._raw_version(raw_schema_version) == "v2":
+        return _load_root_context(root, instrument_id)
     path = _artifact_path(root, instrument_id)
     if not path.exists():
         return None
@@ -335,7 +342,14 @@ def run_refresh(
     run_id: str,
     timeout: float = 60.0,
     now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    raw_schema_version: str = "v1",
 ) -> dict[str, object]:
+    if source._raw_version(raw_schema_version) == "v2":
+        return _run_root_context(
+            through_date=through_date, run_id=run_id, timeout=timeout, now_fn=now_fn,
+            instrument_id=instrument_id,
+            parallel=False,
+        )
     checked_through = source._iso_date(through_date, "through_date")
     checked_instrument = source._instrument_id(instrument_id)
     checked_run = source._safe_token(run_id, "run_id")
@@ -494,7 +508,13 @@ def run_refresh_all(
     run_id: str,
     timeout: float = 60.0,
     now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    raw_schema_version: str = "v1",
 ) -> dict[str, object]:
+    if source._raw_version(raw_schema_version) == "v2":
+        return _run_root_context_all(
+            through_date=through_date, run_id=run_id, timeout=timeout, now_fn=now_fn,
+            parallel=False,
+        )
     checked_through = source._iso_date(through_date, "through_date")
     checked_run = source._safe_token(run_id, "run_id")
     root = source._data_root()
@@ -547,3 +567,301 @@ def run_refresh_all(
         "stage5_full_mode_ready": False,
         "stage5_pointer_promotion_performed": False,
     }
+
+
+class NoObservedCurrentTradeDate(FutoiIntradayContextError):
+    pass
+
+
+class NoObservedPreviousTradeDate(FutoiIntradayContextError):
+    pass
+
+
+def _root_role_witness(
+    through_date: str, role: str, *, timeout: float, observations: list[dict[str, object]],
+) -> str:
+    """Resolve one role only; a failed witness never changes another role."""
+    end = date.fromisoformat(source._iso_date(through_date, "through_date"))
+    if role not in (CURRENT_ROLE, PREVIOUS_ROLE):
+        _fail("unknown FUTOI context role")
+    secid = source.observed_dates.reference_secid(source.DATE_WITNESS_INSTRUMENT_ID)
+    if secid != source.DATE_WITNESS_SECID:
+        _fail("v2 USDRUBF date-witness registry binding mismatch")
+    lower = end if role == CURRENT_ROLE else end - timedelta(days=SOURCE_LOOKBACK_DAYS - 1)
+    candidate = end if role == CURRENT_ROLE else end - timedelta(days=1)
+    while candidate >= lower:
+        observation = {
+            "trade_date": candidate.isoformat(),
+            "witness_instrument_id": source.DATE_WITNESS_INSTRUMENT_ID,
+            "witness_secid": secid, "date_authority_source_id": source.observed_dates.SOURCE_ID,
+            "futoi_availability_proven": False,
+        }
+        observations.append(observation)
+        try:
+            found = source.observed_dates._exact_date_has_secid(
+                candidate, secid=secid, timeout=timeout, apim_base_url=None,
+            )
+            if type(found) is not bool:
+                _fail("observed TradeStats witness must return a boolean")
+        except Exception as exc:
+            observation.update(status="WITNESS_ERROR", error_class=type(exc).__name__, error=str(exc))
+            raise  # Never skip an uncertain date to find an older convenient date.
+        observation["status"] = "OBSERVED_TRADESTATS_DATE" if found else "NO_OBSERVED_TRADESTATS_DATE"
+        if found:
+            return candidate.isoformat()
+        candidate -= timedelta(days=1)
+    error_type = NoObservedCurrentTradeDate if role == CURRENT_ROLE else NoObservedPreviousTradeDate
+    raise error_type("no observed USDRUBF date witness for " + role + " through " + through_date)
+
+
+def _root_role_record(
+    *, root: Path, instrument_id: str, through_date: str, role: str, run_id: str,
+    timeout: float, attempted_at: str, now_fn: Callable[[], datetime],
+) -> dict[str, object]:
+    observations: list[dict[str, object]] = []
+    target = None
+    provenance = None
+    record = {
+        "role": role, "instrument_id": instrument_id, "source_id": source.SOURCE_ID,
+        "source_ticker": source.ROOT_TICKERS[instrument_id],
+        "raw_schema_version": "v2", "source_identity_scope": source.ROOT_IDENTITY_SCOPE,
+        "status": "ERROR", "availability_state": "ERROR", "expected_trade_date": None,
+        "trade_date": None, "refresh_attempted_at": attempted_at, "last_success_at": None,
+        "failed_attempt_at": None, "refresh_error_class": None, "refresh_error": None,
+        "factual": None, "provenance": None, "date_witness_observations": observations,
+        "consumer_factual_use_allowed": False,
+    }
+    try:
+        target = _root_role_witness(through_date, role, timeout=timeout, observations=observations)
+        record["expected_trade_date"] = target
+        # The existing materializer performs the own-ticker exact-date request.
+        # Do not run the legacy SECID-bound probe or select a second response.
+        _, provenance = source._materialize_target(
+            root, target, run_id + "_" + role, instrument_id=instrument_id,
+            timeout=timeout, raw_schema_version="v2",
+        )
+        factual = source.replay_root_factual(
+            root, provenance, instrument_id=instrument_id, trade_date=target,
+        )
+        completed = source._aware_utc(now_fn(), role + ".last_success_at")
+        started = source._aware_utc(attempted_at, role + ".refresh_attempted_at")
+        receipt = source._aware_utc(factual["availability_ts_utc"], role + ".receipt")
+        ingest = source._aware_utc(factual["ingest_ts_utc"], role + ".ingest")
+        if not started <= receipt <= ingest <= completed:
+            _fail("v2 role refresh/receipt/ingest/validation clocks are inconsistent")
+        record.update(status="FRESH", availability_state="AVAILABLE", trade_date=target,
+                      last_success_at=completed.isoformat(), factual=factual, provenance=provenance)
+    except Exception as exc:
+        missing = isinstance(exc, (NoObservedCurrentTradeDate, NoObservedPreviousTradeDate))
+        empty = source._is_explicit_empty_source(exc)
+        status = "UNAVAILABLE" if missing else ("PENDING" if empty else "ERROR")
+        record.update(
+            status=status, availability_state=status,
+            refresh_error_class=type(exc).__name__, refresh_error=str(exc),
+            failed_attempt_evidence=getattr(exc, "attempt_provenance", provenance),
+            failure_stage="date_witness" if target is None else "futoi_materialization_or_admission",
+        )
+        try:
+            failed_at = source._aware_utc(now_fn(), role + ".failed_attempt_at")
+            if failed_at < source._aware_utc(attempted_at, "refresh_attempted_at"):
+                _fail("v2 role failure clock precedes refresh start")
+            record["failed_attempt_at"] = failed_at.isoformat()
+        except Exception as clock_error:
+            record["failure_clock_error"] = type(clock_error).__name__ + ": " + str(clock_error)
+    record["freshness"] = {
+        **_freshness(state=str(record["status"]), expected_trade_date=target,
+                     factual=record["factual"]),
+        "policy": "independent_usdrubf_role_witness_then_own_exact_futoi_v2",
+        "witness_instrument_id": source.DATE_WITNESS_INSTRUMENT_ID,
+        "witness_secid": source.DATE_WITNESS_SECID,
+        "scope": "observed_date_match_not_consumer_ttl_or_session_completeness",
+    }
+    return record
+
+
+def _root_context_payload(
+    *, instrument_id: str, through_date: str, run_id: str, attempted_at: str,
+    records: Mapping[str, Mapping[str, object]],
+) -> dict[str, object]:
+    fresh = [role for role, record in records.items() if record.get("status") == "FRESH"]
+    status = "PASS" if len(fresh) == 2 else ("PARTIAL" if fresh else "FAILED")
+    dates = sorted({
+        str(record["expected_trade_date"]) for record in records.values()
+        if record.get("expected_trade_date") is not None
+    })
+    return {
+        "project": PROJECT, "schema_version": SCHEMA_VERSION_V2,
+        "raw_schema_version": "v2", "source_identity_scope": source.ROOT_IDENTITY_SCOPE,
+        "source_id": source.SOURCE_ID, "instrument_id": instrument_id,
+        "source_ticker": source.ROOT_TICKERS[instrument_id], "run_id": run_id,
+        "status": status, "through_date": through_date, "refresh_attempted_at": attempted_at,
+        "observed_trade_dates": dates, "observed_trade_dates_scope": "independent_role_witness_set",
+        "observed_current_trade_date": records[CURRENT_ROLE].get("expected_trade_date"),
+        "previous_observed_trade_date": records[PREVIOUS_ROLE].get("expected_trade_date"),
+        **records, "quality_status": status, "acceptance_status": status,
+        "retention_policy": "prior_frozen_evidence_only_no_factual_fallback",
+        "factual_authority": False, "directional_authority": False, "action_authority": False,
+        "standalone_buy_sell_authority": False, "stage5_full_mode_required": False,
+        "stage5_full_mode_ready": False, "stage5_pointer_promotion_performed": False,
+        "session_completion_proven": False, "historical_pit_research_ready_claimed": False,
+        "model_usable": False, "calendar_dependency": False, "weekday_weekend_inference": False,
+    }
+
+
+def _run_root_context(
+    *, through_date: str, instrument_id: str, run_id: str, timeout: float,
+    now_fn: Callable[[], datetime], parallel: bool,
+) -> dict[str, object]:
+    checked = source._instrument_id(instrument_id)
+    through = source._iso_date(through_date, "through_date")
+    run_id = source._safe_token(run_id, "run_id")
+    root = source._data_root()
+    path = _artifact_path(root, checked, raw_schema_version="v2")
+    started = source._aware_utc(now_fn(), "refresh_attempted_at")
+    if through != started.tz_convert(source.MARKET_TZ).date().isoformat():
+        _fail("v2 intraday through_date must equal the refresh-start Europe/Moscow date")
+    attempted_at = started.isoformat()
+
+    def refresh_role(role: str) -> dict[str, object]:
+        return _root_role_record(
+            root=root, instrument_id=checked, through_date=through, role=role,
+            run_id=run_id, timeout=timeout, attempted_at=attempted_at, now_fn=now_fn,
+        )
+
+    roles = (CURRENT_ROLE, PREVIOUS_ROLE)
+    if parallel:
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="futoi-session-v2") as executor:
+            futures = {role: executor.submit(refresh_role, role) for role in roles}
+            records = {role: futures[role].result() for role in roles}
+    else:
+        records = {role: refresh_role(role) for role in roles}
+    payload = _root_context_payload(
+        instrument_id=checked, through_date=through, run_id=run_id,
+        attempted_at=attempted_at, records=records,
+    )
+    # Retain immutable prior evidence, not an old fact labelled as a new role.
+    source._archive_root_context(root, path, payload)
+    return payload
+
+
+def _run_root_context_all(
+    *, through_date: str, run_id: str, timeout: float,
+    now_fn: Callable[[], datetime], parallel: bool,
+) -> dict[str, object]:
+    through = source._iso_date(through_date, "through_date")
+    checked_run = source._safe_token(run_id, "run_id")
+    root = source._data_root()
+    attempted_at = source._aware_utc(now_fn(), "refresh_attempted_at").isoformat()
+
+    def refresh_one(instrument_id: str) -> dict[str, object]:
+        instrument_run = checked_run + "_" + instrument_id
+        try:
+            return _run_root_context(
+                through_date=through, instrument_id=instrument_id, run_id=instrument_run,
+                timeout=timeout, now_fn=now_fn, parallel=parallel,
+            )
+        except Exception as exc:
+            records = {}
+            failed_at = None
+            failure_clock_error = None
+            try:
+                stamp = source._aware_utc(now_fn(), "failed_attempt_at")
+                if stamp < source._aware_utc(attempted_at, "refresh_attempted_at"):
+                    _fail("v2 failure clock precedes refresh start")
+                failed_at = stamp.isoformat()
+            except Exception as clock_error:
+                failure_clock_error = type(clock_error).__name__ + ": " + str(clock_error)
+            for role in (CURRENT_ROLE, PREVIOUS_ROLE):
+                record = _empty_record(role=role, expected_trade_date=None, attempted_at=attempted_at,
+                                       status="ERROR", error_class=type(exc).__name__, error=str(exc))
+                record.update(raw_schema_version="v2", source_identity_scope=source.ROOT_IDENTITY_SCOPE,
+                              instrument_id=instrument_id, source_id=source.SOURCE_ID,
+                              source_ticker=source.ROOT_TICKERS[instrument_id],
+                              date_witness_observations=[], consumer_factual_use_allowed=False,
+                              failed_attempt_at=failed_at)
+                if failure_clock_error:
+                    record["failure_clock_error"] = failure_clock_error
+                record["freshness"].update(
+                    policy="independent_usdrubf_role_witness_then_own_exact_futoi_v2",
+                    witness_instrument_id=source.DATE_WITNESS_INSTRUMENT_ID,
+                    witness_secid=source.DATE_WITNESS_SECID,
+                    scope="observed_date_match_not_consumer_ttl_or_session_completeness",
+                )
+                records[role] = record
+            payload = _root_context_payload(instrument_id=instrument_id, through_date=through,
+                                            run_id=instrument_run, attempted_at=attempted_at, records=records)
+            payload.update(error_class=type(exc).__name__, error=str(exc))
+            try:
+                source._archive_root_context(
+                    root, _artifact_path(root, instrument_id, raw_schema_version="v2"), payload,
+                )
+            except Exception as persistence_error:
+                payload["failure_persistence_error"] = type(persistence_error).__name__ + ": " + str(persistence_error)
+            return payload
+
+    instruments = source.LIVE_INSTRUMENT_IDS
+    if parallel:
+        with ThreadPoolExecutor(max_workers=len(instruments), thread_name_prefix="futoi-context-v2") as executor:
+            futures = {instrument: executor.submit(refresh_one, instrument) for instrument in instruments}
+            results = {instrument: futures[instrument].result() for instrument in instruments}
+    else:
+        results = {instrument: refresh_one(instrument) for instrument in instruments}
+    failed = [instrument for instrument, result in results.items() if result["status"] != "PASS"]
+    fresh_any = any(result["status"] in ("PASS", "PARTIAL") for result in results.values())
+    return {
+        "project": PROJECT, "schema_version": SCHEMA_VERSION_V2, "raw_schema_version": "v2",
+        "source_identity_scope": source.ROOT_IDENTITY_SCOPE,
+        "status": "PASS" if not failed else ("PARTIAL" if fresh_any else "FAILED"),
+        "run_id": checked_run, "through_date": through,
+        "instrument_ids": list(instruments), "instrument_results": results, "failed_instrument_ids": failed,
+        "factual_authority": False, "directional_authority": False, "action_authority": False,
+        "standalone_buy_sell_authority": False, "stage5_full_mode_ready": False,
+        "stage5_pointer_promotion_performed": False,
+    }
+
+
+def _load_root_context(root: Path, instrument_id: str) -> dict[str, object] | None:
+    """Read a version-bound run envelope; consumer admission is a separate check."""
+    path = _artifact_path(root, instrument_id, raw_schema_version="v2")
+    if not path.exists():
+        return None
+    value = source._load_json(path, "v2 FUTOI intraday context")
+    expected = {
+        "project": PROJECT, "schema_version": SCHEMA_VERSION_V2, "raw_schema_version": "v2",
+        "source_identity_scope": source.ROOT_IDENTITY_SCOPE, "instrument_id": instrument_id,
+        "source_id": source.SOURCE_ID, "source_ticker": source.ROOT_TICKERS[instrument_id],
+    }
+    if "secid" in value or any(value.get(k) != v for k, v in expected.items()):
+        _fail("v2 FUTOI role envelope version/identity mismatch")
+    archived = json.loads(source._root_proof_bytes(
+        root, value.get("run_evidence_ref"), value.get("run_evidence_sha256"), ".json",
+    ))
+    if archived != {k: v for k, v in value.items() if k not in ("run_evidence_ref", "run_evidence_sha256")}:
+        _fail("v2 FUTOI role envelope differs from frozen evidence")
+    for flag in ("factual_authority", "directional_authority", "action_authority",
+                 "standalone_buy_sell_authority", "stage5_full_mode_ready",
+                 "stage5_pointer_promotion_performed", "session_completion_proven",
+                 "historical_pit_research_ready_claimed", "model_usable"):
+        if value.get(flag) is not False:
+            _fail("v2 FUTOI role envelope must not grant " + flag)
+    for role in (CURRENT_ROLE, PREVIOUS_ROLE):
+        record = value.get(role)
+        if (not isinstance(record, Mapping) or record.get("role") != role or "secid" in record
+                or record.get("raw_schema_version") != "v2"
+                or record.get("source_identity_scope") != source.ROOT_IDENTITY_SCOPE
+                or record.get("instrument_id") != instrument_id
+                or record.get("source_id") != source.SOURCE_ID
+                or record.get("source_ticker") != source.ROOT_TICKERS[instrument_id]
+                or record.get("consumer_factual_use_allowed") is not False):
+            _fail("v2 FUTOI role record version/identity mismatch")
+        if record.get("status") == "FRESH":
+            factual = record.get("factual")
+            if (not isinstance(factual, Mapping) or "secid" in factual
+                    or factual.get("raw_schema_version") != "v2"
+                    or factual.get("source_identity_scope") != source.ROOT_IDENTITY_SCOPE
+                    or factual.get("trade_date") != record.get("expected_trade_date")
+                    or factual.get("trade_date") != record.get("trade_date")):
+                _fail("v2 FUTOI fresh role factual version/date mismatch")
+        elif record.get("factual") is not None:
+            _fail("v2 FUTOI failed role must not carry an older factual fallback")
+    return value

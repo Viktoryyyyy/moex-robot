@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import math
+from copy import deepcopy
+from hashlib import sha256
+from io import BytesIO
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -168,23 +171,41 @@ def _observed_witness(
     }
 
 
-def _normalized_factual(value: Mapping[str, object], *, field: str) -> dict[str, object]:
+def _normalized_factual(
+    value: Mapping[str, object], *, field: str, raw_schema_version: str = "v1",
+) -> dict[str, object]:
+    version = source._raw_version(raw_schema_version)
+    integer = source._as_int if version == "v2" else _integer
+    if version == "v1" and (
+        value.get("raw_schema_version", "v1") != "v1"
+        or value.get("source_identity_scope") == source.ROOT_IDENTITY_SCOPE
+    ):
+        _fail("v1 normalizer cannot admit another raw version or root scope")
+    if version == "v2" and (
+        value.get("raw_schema_version") != "v2"
+        or value.get("source_identity_scope") != source.ROOT_IDENTITY_SCOPE
+        or value.get("source_ticker") not in source.ROOT_TICKERS.values()
+        or "secid" in value
+        or not isinstance(value.get("selected_source_records"), Mapping)
+        or set(value["selected_source_records"]) != {"FIZ", "YUR"}
+    ):
+        _fail("v2 normalized factual requires explicit root identity and selected records")
     fiz_raw = value.get("fiz")
     yur_raw = value.get("yur")
     if not isinstance(fiz_raw, Mapping) or not isinstance(yur_raw, Mapping):
         _fail(field + " FIZ/YUR payload is missing")
-    oi = _integer(value.get("total_open_interest"), field + ".total_open_interest")
+    oi = integer(value.get("total_open_interest"), field + ".total_open_interest")
     if oi <= 0:
         _fail(field + ".total_open_interest must be positive")
 
     def side(raw: Mapping[str, object], label: str) -> dict[str, object]:
-        long_value = _integer(raw.get("long"), field + "." + label + ".long")
-        short_value = _integer(raw.get("short"), field + "." + label + ".short")
-        net_value = _integer(raw.get("net"), field + "." + label + ".net")
-        long_participants = _integer(
+        long_value = integer(raw.get("long"), field + "." + label + ".long")
+        short_value = integer(raw.get("short"), field + "." + label + ".short")
+        net_value = integer(raw.get("net"), field + "." + label + ".net")
+        long_participants = integer(
             raw.get("long_participants"), field + "." + label + ".long_participants"
         )
-        short_participants = _integer(
+        short_participants = integer(
             raw.get("short_participants"), field + "." + label + ".short_participants"
         )
         if min(long_value, short_value, long_participants, short_participants) < 0:
@@ -209,7 +230,7 @@ def _normalized_factual(value: Mapping[str, object], *, field: str) -> dict[str,
     if int(fiz["short"]) + int(yur["short"]) != oi:
         _fail(field + " total short OI identity failed")
 
-    return {
+    result = {
         "trade_date": str(value.get("trade_date") or ""),
         "snapshot_ts": value.get("snapshot_ts"),
         "source_publication_time": value.get("source_publication_time"),
@@ -226,6 +247,27 @@ def _normalized_factual(value: Mapping[str, object], *, field: str) -> dict[str,
             "long_plus_short_must_not_be_interpreted_as_unique_participants": True,
         },
     }
+
+    if version == "v2":
+        session = source._as_int(value.get("sess_id"), field + ".sess_id")
+        records = deepcopy(value["selected_source_records"])
+        for group, record in records.items():
+            if not isinstance(record, Mapping) or any(record.get(k) != v for k, v in {
+                "trade_date": value.get("trade_date"), "source_ticker": value["source_ticker"],
+                "clgroup": group, "snapshot_ts": value.get("snapshot_ts"),
+            }.items()):
+                _fail("v2 normalized selected-record identity mismatch")
+            record_session = source._as_int(record.get("sess_id"), field + "." + group + ".sess_id")
+            revision = source._as_int(record.get("seqnum"), field + "." + group + ".seqnum")
+            if record_session != session or not all(-(2**63) <= n < 2**63 for n in (session, revision)):
+                _fail("v2 normalized selected-record session/range mismatch")
+            record["sess_id"], record["seqnum"] = record_session, revision
+        result.update(
+            raw_schema_version="v2", source_identity_scope=source.ROOT_IDENTITY_SCOPE,
+            source_ticker=value["source_ticker"], sess_id=session,
+            selected_source_records=records,
+        )
+    return result
 
 
 def _context_record(
@@ -419,7 +461,10 @@ def _raw_factual(
     *,
     instrument_id: str,
     trade_date: str,
+    raw_schema_version: str = "v1",
 ) -> dict[str, object]:
+    if source._raw_version(raw_schema_version) == "v2":
+        return _raw_root_factual(root, instrument_id=instrument_id, trade_date=trade_date)
     path = raw_materializer._partition_path(trade_date, instrument_id, source.SOURCE_ID)
     if path.is_symlink() or not path.is_file():
         return {
@@ -476,7 +521,18 @@ def _factual_for_date(
     previous: Mapping[str, object],
     eod: pd.DataFrame,
     eod_provenance: Mapping[str, object],
+    raw_schema_version: str = "v1",
 ) -> dict[str, object]:
+    if source._raw_version(raw_schema_version) == "v2":
+        return _root_factual_for_date(
+            root, instrument_id=instrument_id, trade_date=trade_date, previous=previous,
+        )
+    for value in (previous, previous.get("factual"), previous.get("provenance")):
+        if isinstance(value, Mapping) and (
+            value.get("raw_schema_version", "v1") != "v1"
+            or value.get("source_identity_scope") == source.ROOT_IDENTITY_SCOPE
+        ):
+            _fail("v1 date reader cannot admit another raw version or root scope")
     previous_factual = previous.get("factual")
     if (
         previous.get("status") == "AVAILABLE"
@@ -811,3 +867,158 @@ def build_all(
         "stage5_full_mode_ready": False,
         "stage5_pointer_promotion_performed": False,
     }
+
+
+def _root_raw_relative(instrument_id: str, trade_date: str) -> Path:
+    checked = source._instrument_id(instrument_id)
+    day = source._iso_date(trade_date, "trade_date")
+    return (Path("market") / "supplementary" / "dataset_id=futures_futoi_raw"
+            / "schema_version=v2" / ("instrument_id=" + checked)
+            / ("trade_date=" + day) / ("source=" + source.SOURCE_ID) / "part.parquet")
+
+
+def _root_raw_identity(instrument_id: str) -> dict[str, object]:
+    checked = source._instrument_id(instrument_id)
+    return {
+        "instrument_id": checked, "source_id": source.SOURCE_ID,
+        "source_ticker": source.ROOT_TICKERS[checked], "raw_schema_version": "v2",
+        "source_identity_scope": source.ROOT_IDENTITY_SCOPE,
+        "source_record_key_fields": list(source.ROOT_KEY_FIELDS),
+        "source_contract_ref": source.ROOT_CONTRACT_REFS["source_contract_ref"],
+        "raw_contract_ref": source.ROOT_CONTRACT_REFS["raw_contract_ref"],
+    }
+
+
+def _decode_root_raw(content: bytes, *, instrument_id: str, trade_date: str) -> dict[str, object]:
+    # The exact buffer that was hashed is decoded, never a second pathname read.
+    frame = pd.read_parquet(BytesIO(content))
+    return source.latest_aligned_factual(
+        frame, expected_trade_date=trade_date, expected_instrument_id=instrument_id,
+        expected_source_ticker=source.ROOT_TICKERS[instrument_id], raw_schema_version="v2",
+    )
+
+
+def _raw_root_factual(root: Path, *, instrument_id: str, trade_date: str) -> dict[str, object]:
+    identity = _root_raw_identity(instrument_id)
+    relative = _root_raw_relative(instrument_id, trade_date)
+    ref = source.ROOT_REF_PREFIX + relative.as_posix()
+    proof = None
+    try:
+        path = source._checked_root_path(root, relative)
+        if not path.exists():
+            return {
+                "status": "UNAVAILABLE", "trade_date": trade_date, "factual": None,
+                "provenance": None, "reason": "selected_v2_raw_partition_missing",
+                "raw_schema_version": "v2", "source_identity_scope": source.ROOT_IDENTITY_SCOPE,
+            }
+        if not path.is_file():
+            _fail("selected v2 raw partition is not a regular file")
+        content = path.read_bytes()
+        proof = {
+            **identity, "source_state_kind": "validated_existing_canonical_raw_partition",
+            "original_raw_partition_ref": ref, "raw_partition_ref": ref,
+            "raw_partition_sha256": sha256(content).hexdigest(),
+            "factual_validation": "NOT_VALIDATED",
+        }
+        factual = _decode_root_raw(content, instrument_id=instrument_id, trade_date=trade_date)
+        normalized = _normalized_factual(factual, field="raw_v2." + trade_date, raw_schema_version="v2")
+        proof["factual_validation"] = "PASS"
+    except Exception as exc:
+        return {
+            "status": "UNAVAILABLE", "trade_date": trade_date, "factual": None,
+            "provenance": proof, "reason": "selected_v2_raw_partition_failed_validation",
+            "error_class": type(exc).__name__, "error": str(exc),
+            "raw_schema_version": "v2", "source_identity_scope": source.ROOT_IDENTITY_SCOPE,
+        }
+    return {
+        "status": "AVAILABLE", "trade_date": trade_date, "factual": normalized,
+        "provenance": proof, "raw_schema_version": "v2",
+        "source_identity_scope": source.ROOT_IDENTITY_SCOPE,
+    }
+
+
+def _replay_root_raw_factual(
+    root: Path, provenance: Mapping[str, object], *, instrument_id: str, trade_date: str,
+) -> dict[str, object]:
+    """Distinguish full native publication evidence from raw-only validation."""
+    identity = _root_raw_identity(instrument_id)
+    relative = _root_raw_relative(instrument_id, trade_date)
+    if not isinstance(provenance, Mapping) or any(provenance.get(k) != v for k, v in identity.items()):
+        _fail("v2 raw replay identity/version/contract mismatch")
+    if "secid" in provenance:
+        _fail("v2 raw replay must not contain contract secid")
+    if "accepted_state_kind" in provenance:
+        if (provenance.get("accepted_state_kind") != "source_native_exact_date_raw_quality_pass"
+                or "source_state_kind" in provenance):
+            _fail("v2 native publication evidence cannot be relabelled raw-only")
+        # All quality/manifest/run bindings are mandatory; any failure propagates.
+        return source.replay_root_factual(
+            root, provenance, instrument_id=instrument_id, trade_date=trade_date,
+        )
+    required = {
+        **identity, "source_state_kind": "validated_existing_canonical_raw_partition",
+        "original_raw_partition_ref": source.ROOT_REF_PREFIX + relative.as_posix(),
+        "factual_validation": "PASS",
+    }
+    if (set(provenance) != set(required) | {"raw_partition_ref", "raw_partition_sha256"}
+            or any(provenance.get(k) != v for k, v in required.items())):
+        _fail("v2 raw-only evidence shape/state/path mismatch")
+    digest = provenance["raw_partition_sha256"]
+    if (not isinstance(digest, str) or len(digest) != 64
+            or any(c not in "0123456789abcdef" for c in digest)):
+        _fail("v2 raw replay digest is invalid")
+    ref = provenance["raw_partition_ref"]
+    if ref == required["original_raw_partition_ref"]:
+        path = source._checked_root_path(root, relative)
+        if not path.is_file():
+            _fail("v2 raw replay source file is missing")
+        content = path.read_bytes()
+        if sha256(content).hexdigest() != digest:
+            _fail("v2 raw replay SHA mismatch")
+    else:
+        # Only this exact content-addressed object is allowed. The old canonical
+        # partition may have been replaced or removed; it is not read in replay.
+        content = source._root_proof_bytes(root, ref, digest, ".parquet")
+    return _decode_root_raw(content, instrument_id=instrument_id, trade_date=trade_date)
+
+
+def _root_factual_for_date(
+    root: Path, *, instrument_id: str, trade_date: str, previous: Mapping[str, object],
+) -> dict[str, object]:
+    source._instrument_id(instrument_id)
+    source._iso_date(trade_date, "trade_date")
+    if not isinstance(previous, Mapping):
+        _fail("v2 previous context must be an explicit mapping")
+    factual = previous.get("factual")
+    owns_date = previous.get("expected_trade_date") == trade_date or (
+        isinstance(factual, Mapping) and factual.get("trade_date") == trade_date
+    )
+    if not owns_date:
+        return _raw_factual(root, instrument_id=instrument_id, trade_date=trade_date, raw_schema_version="v2")
+    try:
+        if (previous.get("status") != "AVAILABLE" or not isinstance(factual, Mapping)
+                or factual.get("trade_date") != trade_date
+                or previous.get("expected_trade_date") != trade_date
+                or previous.get("raw_schema_version", "v2") != "v2"):
+            _fail("selected v2 previous context is not exact and fresh")
+        proof = previous.get("provenance")
+        if not isinstance(proof, Mapping) or proof.get("accepted_state_kind") != "source_native_exact_date_raw_quality_pass":
+            _fail("selected v2 previous context requires native publication evidence")
+        replayed = _replay_root_raw_factual(root, proof, instrument_id=instrument_id, trade_date=trade_date)
+        normalized = _normalized_factual(replayed, field="previous_v2." + trade_date, raw_schema_version="v2")
+        if factual != normalized:
+            _fail("selected v2 previous factual differs from frozen raw")
+        return {
+            "status": "AVAILABLE", "trade_date": trade_date, "factual": normalized,
+            "provenance": deepcopy(proof), "source_kind": "previous_session_context",
+            "raw_schema_version": "v2", "source_identity_scope": source.ROOT_IDENTITY_SCOPE,
+        }
+    except Exception as exc:
+        # Do not hide an explicit failed attempt with an older canonical file.
+        return {
+            "status": "UNAVAILABLE", "trade_date": trade_date, "factual": None,
+            "provenance": previous.get("provenance"),
+            "reason": "selected_v2_previous_failed_revalidation",
+            "error_class": type(exc).__name__, "error": str(exc),
+            "raw_schema_version": "v2", "source_identity_scope": source.ROOT_IDENTITY_SCOPE,
+        }

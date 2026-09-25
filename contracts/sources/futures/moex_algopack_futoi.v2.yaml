@@ -1,0 +1,75 @@
+contract_id: moex_algopack_futoi.v2
+schema_version: source_contract.v2
+status: opt_in_raw_producer_only
+source_id: moex_algopack_futoi
+source_system: moex_algopack
+source_kind: supplementary_futoi
+endpoint_pattern: /iss/analyticalproducts/futoi/securities/{TICKER}.json
+base_url_env: MOEX_API_URL
+default_base_url: https://apim.moex.com
+auth:
+  type: bearer
+  token_env: MOEX_API_KEY
+  token_required_for_apim: true
+producer: moex_data.futures.materialize_futoi_instrument
+api_opt_in:
+  argument: raw_schema_version
+  value: v2
+  default: v1
+request_contract:
+  explicit_fields:
+    from: "{YYYY-MM-DD}"
+    till: "{YYYY-MM-DD}"
+    latest: "0"
+  response_block: futoi
+  transport: authenticated_apim
+  latest_autodetect_allowed: false
+  fallback_endpoint_allowed: false
+  public_iss_transport_allowed: false
+  retry_policy:
+    max_attempts: 3
+    retry_http_status: [401, 429, 500, 502, 503, 504]
+identity_policy:
+  canonical_identity_field: instrument_id
+  source_identity_scope: source_ticker_root
+  source_identity_fields: [source_id, source_ticker]
+  instrument_tickers:
+    si_futures_family: si
+    cr_futures_family: cr
+  exact_registry_ticker_binding_required: true
+  individual_contract_secid_in_response_required: false
+  registry_secid_as_source_identity_allowed: false
+response_contract:
+  canonical_dataset_ref: contracts/datasets/futures_futoi_raw.v2.yaml
+  required_columns: [sess_id, seqnum, tradedate, tradetime, ticker, clgroup, pos, pos_long, pos_short, pos_long_num, pos_short_num, systime]
+  optional_preserved_columns: [trade_session_date]
+  normalization: source_record_projection_not_complete_http_byte_capture
+  duplicate_case_normalized_columns_forbidden: true
+  exact_requested_trade_date_required: true
+  exact_source_ticker_required: true
+  supported_clgroups: [FIZ, YUR]
+  integer_semantics: finite_integral_non_boolean_exact_signed_int64
+  large_float_at_or_above_2_pow_53: reject
+  same_source_key_conflict: fail_closed
+  distinct_source_revisions: preserve_all
+timestamp_semantics:
+  event: tradedate_plus_tradetime
+  source_publication: systime
+  source_timezone: Europe/Moscow
+  receipt: clock_after_complete_source_response
+  ingest: clock_after_receipt_before_normalization
+  ordering: event_lte_publication_lte_receipt_lte_ingest
+failure_semantics:
+  exact_empty: fail_with_original_empty_reason
+  transport_or_authorization_error: fail_with_original_error_class
+  malformed_or_error_message_response: fail_closed
+  unknown_version: fail_before_source_request
+  earlier_date_or_pair_substitution: forbidden
+authority:
+  raw_structure_pass_is_pair_admission: false
+  latest_pair_audit_required_separately: true
+  accepted_pointer_promotion: false
+  stage5_or_model_or_trade_authority: false
+compatibility:
+  historical_v1_defaults_and_artifacts: unchanged
+  replaces_v1: false

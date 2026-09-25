@@ -9,6 +9,7 @@ from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 from hashlib import sha256
 from io import BytesIO
+from pathlib import Path
 import json
 from math import isfinite
 import re
@@ -390,9 +391,21 @@ def _verified_frame(root, provenance, prefix):
     return engine.pd.read_parquet(BytesIO(content))
 
 
-def _freeze_raw_fact(root, provenance, expected, *, normalized, instrument_id=INSTRUMENT):
+def _freeze_raw_fact(
+    root, provenance, expected, *, normalized, instrument_id=INSTRUMENT,
+    raw_schema_version="v1",
+):
     from moex_data.futures import futoi_delta_statistics_context as engine
     from moex_data.futures import futoi_live_factual_refresh_source_native as source
+    if source._raw_version(raw_schema_version) == "v2":
+        return _freeze_root_raw_fact(
+            root, provenance, expected, normalized=normalized, instrument_id=instrument_id,
+        )
+    if isinstance(provenance, dict) and (
+        provenance.get("raw_schema_version", "v1") != "v1"
+        or provenance.get("source_identity_scope") == source.ROOT_IDENTITY_SCOPE
+    ):
+        raise ValueError("v1 frozen replay cannot admit another raw version or root scope")
     proof = deepcopy(provenance)
     _check_source_refs(root, proof, ("raw_partition",))
     path = root / proof["raw_partition_ref"][len("${MOEX_DATA_ROOT}/"):]
@@ -626,3 +639,28 @@ def verify_projection(snapshot, release, *, now):
                      last_capture_error=capture_error,
                      latest_baseline_diagnostics=_latest_diagnostics(stored, evidence, _stamp(now)))
     _require(output == canonical and _digest(output) == _digest(canonical), "Si dated canonical projection changed")
+
+
+def _freeze_root_raw_fact(root, provenance, expected, *, normalized, instrument_id):
+    """Freeze/replay explicit raw v2 without changing any dated admission."""
+    from moex_data.futures import futoi_delta_statistics_context as engine
+    from moex_data.futures import futoi_live_factual_refresh_source_native as source
+
+    proof = deepcopy(provenance)
+    # Validate both representation and exact bytes before publishing an archive.
+    # Full native evidence is checked as full evidence; it cannot fall back to
+    # the weaker raw-only representation on a missing quality/manifest file.
+    factual = engine._replay_root_raw_factual(
+        root, proof, instrument_id=instrument_id, trade_date=expected,
+    )
+    source._checked_root_path(
+        root, Path("state") / "datasets" / ("dataset_id=" + source.DATASET_ID) / "evidence",
+    )
+    path = root / proof["raw_partition_ref"][len(source.ROOT_REF_PREFIX):]
+    frozen = source._freeze_artifact(root, path, proof["raw_partition_sha256"])
+    proof["raw_partition_ref"] = source._rooted_ref(root, frozen)
+    if normalized:
+        factual = engine._normalized_factual(
+            factual, field="frozen_raw_v2." + expected, raw_schema_version="v2",
+        )
+    return factual, proof

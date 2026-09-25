@@ -1,0 +1,102 @@
+contract_id: futoi_intraday_previous_session_context.v2
+dataset_id: futoi_live_factual_context
+artifact_class: external_pattern
+format: json
+schema_version: futoi_intraday_previous_session_context.v2
+raw_schema_version: v2
+status: opt_in_role_refresh_only_runtime_wiring_not_enabled
+producers:
+  - moex_data.futures.futoi_intraday_previous_session_context
+  - moex_data.futures.futoi_intraday_previous_session_context_fast
+storage_root_ref: MOEX_DATA_ROOT
+artifact_path_pattern: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/schema_version=v2/instrument_id={INSTRUMENT_ID}/intraday_previous_session_context.json"
+evidence_path_pattern: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/{SHA256}.{SUFFIX}"
+identity:
+  source_id: moex_algopack_futoi
+  source_identity_scope: source_ticker_root
+  instrument_tickers:
+    si_futures_family: si
+    cr_futures_family: cr
+  contract_secid_allowed: false
+version_selection:
+  argument: raw_schema_version
+  default: v1
+  opt_in: v2
+  unknown_version: fail_before_io
+  missing_or_corrupt_v2_fallback_to_v1_or_eod: forbidden
+  legacy_defaults_and_paths: unchanged
+roles:
+  current_intraday:
+    candidate_date: explicit_through_date
+    through_date: equal_refresh_start_Europe_Moscow_date
+    witness_query: exact_through_date
+  previous_completed_session:
+    candidate_date: newest_observed_date_strictly_before_through_date
+    witness_query: descending_exact_dates_within_same_14_calendar_day_window
+  failure_coupling: forbidden
+  instrument_failure_coupling: forbidden
+date_witness:
+  instrument_id: usdrubf_futures_family
+  secid: USDRUBF
+  registry_binding_reverified: true
+  resolver: moex_data.futures.observed_tradestats_dates._exact_date_has_secid
+  weekday_weekend_or_CETS_inference: forbidden
+  source_error_means_nontrading_day: false
+  uncertain_previous_date_skip: forbidden
+  own_futoi_availability_implied: false
+source_request:
+  producer: moex_data.futures.materialize_futoi_instrument
+  raw_schema_version: v2
+  own_ticker_exact_selected_date: required
+  legacy_secid_bound_preprobe: forbidden
+  failed_exact_date_selects_older_date: false
+factual:
+  validator: moex_data.futures.futoi_live_factual_refresh_source_native
+  replay: same_SHA_verified_frozen_raw_quality_manifest
+  publication_audit: existing_engine_for_both_roots
+  actual_latest_source_pair_selected_before_validation: true
+  exact_balance_required: true
+  earlier_balanced_pair_substitution: forbidden
+  selected_source_identifiers_preserve_exact_integer_precision: true
+  receipt_ingest_validation_microseconds_preserved: true
+  refresh_start_lte_receipt_lte_ingest_lte_validation: required
+  original_source_event_and_publication_clock_order: required
+  freshness_scope: observed_date_match_not_consumer_ttl_or_session_completeness
+failure:
+  no_witness: UNAVAILABLE
+  exact_source_empty: PENDING
+  transport_auth_schema_or_pair_rejection: ERROR
+  original_error_class_and_reason: preserved
+  available_failed_attempt_provenance: retained
+  failure_clock_error: explicit
+  failed_role_factual: null
+  other_role_result: preserved_independently
+retention_policy: prior_frozen_evidence_only_no_factual_fallback
+persistence:
+  complete_role_envelope: content_addressed_then_atomic_publish
+  old_frozen_run_envelopes: retained
+  persisted_v1_envelope_overwrite: forbidden
+  native_completed_date_current_file_overwrite: forbidden
+  reader_checks: explicit_version_identity_and_frozen_run_equality
+  reader_self_grants_consumer_admission: false
+execution:
+  regular: sequential_roles_and_instruments
+  fast: at_most_two_roles_per_instrument_and_two_instruments_in_parallel
+  legacy_v1_implementation: unchanged_except_explicit_version_dispatch
+  new_producer_scheduler_or_refresh_command: false
+authority:
+  factual_authority: false
+  consumer_factual_use_allowed: false
+  directional_authority: false
+  action_authority: false
+  standalone_buy_sell_authority: false
+  stage5_full_mode_ready: false
+  stage5_pointer_promotion_performed: false
+  session_completion_proven: false
+  historical_pit_research_ready_claimed: false
+  model_usable: false
+  cr_current_pair_scope_ttl_governance_and_audit_checks: unchanged
+deployment:
+  live_runtime_enabled: false
+  downstream_dated_statistics_and_snapshot_wiring_complete: false
+  server_apply_requires_separate_authority: true
