@@ -1,0 +1,54 @@
+contract_id: futures_futoi_quality_report.v2
+dataset_id: futures_futoi_quality_report
+artifact_class: external_pattern
+producer: moex_data.futures.materialize_futoi_instrument
+format: json
+schema_version: futures_futoi_quality_report.v2
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/state/quality/dataset_id=futures_futoi_raw/schema_version=v2/run_date={YYYY-MM-DD}/run_id={RUN_ID}/quality_report.json"
+grain: one_explicit_instrument_date_run
+required_fields:
+  - schema_version
+  - run_id
+  - dataset_id
+  - instrument_id
+  - source_id
+  - source_ticker
+  - futoi_ticker
+  - raw_schema_version
+  - source_identity_scope
+  - source_record_key_fields
+  - trade_date
+  - quality_status
+  - quality_scope
+  - row_count
+  - failure_reasons
+  - quality_contract_ref
+field_values:
+  dataset_id: futures_futoi_raw
+  raw_schema_version: v2
+  source_identity_scope: source_ticker_root
+  quality_scope: raw_structure_only_not_latest_pair_admission
+allowed_quality_status: [pass, fail]
+pass_requires:
+  row_count: positive
+  duplicate_key_count: zero
+  null_required_count: zero
+  invalid_position_count: zero
+  failure_reasons: empty
+  exact_duplicate_rows_dropped: nonnegative
+  date_ticker_and_integer_identity: validated
+  publication_receipt_ingest_order: validated
+failure_requires:
+  error_class: original_exception_class
+  failure_reasons: original_exception_message
+  transport_failure_not_empty: true
+  unchanged_original_exception_raised: true
+not_proven_by_pass:
+  - latest_pair_balance_or_admission
+  - session_or_history_completeness
+  - historical_pit
+  - stage5_readiness
+  - model_or_trade_authority
+run_id_cross_instrument_reuse: forbidden
+accepted_pointer_promotion: false

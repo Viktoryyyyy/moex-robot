@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from numbers import Integral, Real
 from typing import Final
 
 import pandas as pd
@@ -42,6 +43,15 @@ POSITION_FIELDS: Final[tuple[str, ...]] = (
 RETRYABLE_HTTP_STATUS: Final[frozenset[int]] = frozenset({401, 429, 500, 502, 503, 504})
 MAX_FETCH_ATTEMPTS: Final[int] = 3
 
+
+RAW_SCHEMA_V2: Final[str] = "v2"
+ROOT_IDENTITY_SCOPE: Final[str] = "source_ticker_root"
+ROOT_SOURCE_RECORD_KEY_FIELDS: Final[tuple[str, ...]] = (
+    "trade_date", "sess_id", "seqnum", "source_ticker", "clgroup",
+)
+ROOT_INSTRUMENT_TICKERS: Final[dict[str, str]] = {
+    "si_futures_family": "si", "cr_futures_family": "cr",
+}
 
 class FutoiMaterializationError(ValueError):
     pass
@@ -159,7 +169,14 @@ def _registry_binding(registry_path: str | Path, instrument_id: str) -> dict[str
     _fail("instrument_id not found in FORTS registry")
 
 
-def _partition_path(trade_date: str, instrument_id: str, source_id: str) -> Path:
+def _partition_path(trade_date: str, instrument_id: str, source_id: str, *, raw_schema_version: str = "v1") -> Path:
+    if _raw_schema_version(raw_schema_version) == RAW_SCHEMA_V2:
+        return _root_path(
+            "market", "supplementary", "dataset_id=" + DATASET_ID, "schema_version=v2",
+            "instrument_id=" + _require_token(instrument_id, "instrument_id"),
+            "trade_date=" + _require_date(trade_date, "trade_date"),
+            "source=" + _require_token(source_id, "source_id"), "part.parquet",
+        )
     return (
         _data_root()
         / "market"
@@ -172,11 +189,23 @@ def _partition_path(trade_date: str, instrument_id: str, source_id: str) -> Path
     )
 
 
-def _quality_path(trade_date: str, run_id: str) -> Path:
+def _quality_path(trade_date: str, run_id: str, *, raw_schema_version: str = "v1") -> Path:
+    if _raw_schema_version(raw_schema_version) == RAW_SCHEMA_V2:
+        return _root_path(
+            "state", "quality", "dataset_id=" + DATASET_ID, "schema_version=v2",
+            "run_date=" + _require_date(trade_date, "trade_date"),
+            "run_id=" + _require_token(run_id, "run_id"), "quality_report.json",
+        )
     return _data_root() / "state" / "quality" / ("dataset_id=" + DATASET_ID) / ("run_date=" + trade_date) / ("run_id=" + run_id) / "quality_report.json"
 
 
-def _manifest_path(trade_date: str, run_id: str) -> Path:
+def _manifest_path(trade_date: str, run_id: str, *, raw_schema_version: str = "v1") -> Path:
+    if _raw_schema_version(raw_schema_version) == RAW_SCHEMA_V2:
+        return _root_path(
+            "state", "refresh", "dataset_id=" + DATASET_ID, "schema_version=v2",
+            "run_date=" + _require_date(trade_date, "trade_date"),
+            "run_id=" + _require_token(run_id, "run_id"), "manifest.json",
+        )
     return _data_root() / "state" / "refresh" / ("dataset_id=" + DATASET_ID) / ("run_date=" + trade_date) / ("run_id=" + run_id) / "manifest.json"
 
 
@@ -460,6 +489,212 @@ def _quality(frame: pd.DataFrame, binding: Mapping[str, object], trade_date: str
     }
 
 
+
+def _raw_schema_version(value: object) -> str:
+    if not isinstance(value, str) or value not in ("v1", RAW_SCHEMA_V2):
+        _fail("unsupported FUTOI raw_schema_version")
+    return value
+
+
+def _root_path(*parts: str) -> Path:
+    """Do not let a symlink redirect a v2 write into v1 or outside the lake."""
+    root = _data_root()
+    if not root.is_absolute() or root.is_symlink() or not root.is_dir():
+        _fail("v2 MOEX_DATA_ROOT must be an existing absolute non-symlink directory")
+    path = root
+    for part in parts:
+        path = path / part
+        if path.is_symlink():
+            _fail("v2 artifact path contains a symlink")
+    if not path.resolve().is_relative_to(root.resolve()):
+        _fail("v2 artifact path escaped MOEX_DATA_ROOT")
+    return path
+
+
+def _root_integer(value: object, field: str) -> int:
+    # Validate before pandas can coerce mixed integer/float values again.
+    if isinstance(value, Real) and not isinstance(value, Integral):
+        if not pd.isna(value) and abs(value) >= 2**53:
+            _fail("v2 " + field + " has unsafe floating-point integer precision")
+    number = _coerce_source_identifier(value, field)
+    if not -(2**63) <= number < 2**63:
+        _fail("v2 " + field + " is outside exact signed-int64 storage range")
+    return number
+
+
+def _normalize_root_source(
+    frame: pd.DataFrame, *, trade_date: str, instrument_id: str,
+    ticker: str, received_at: str, ingest_at: str,
+) -> tuple[pd.DataFrame, int]:
+    """Preserve source records, including unbalanced pairs, for later admission."""
+    if frame.empty:
+        _fail("FUTOI APIM exact source returned no rows")
+    names = [str(column).strip().lower() for column in frame.columns]
+    if len(names) != len(set(names)):
+        _fail("FUTOI APIM schema contains duplicate columns after case normalization")
+    source = frame.copy()
+    source.columns = names
+    if "error_message" in names:
+        _fail("FUTOI APIM returned ERROR_MESSAGE instead of data")
+    required = {"sess_id", "seqnum", "tradedate", "tradetime", "ticker",
+                "clgroup", "systime", *POSITION_FIELDS}
+    if not required.issubset(names):
+        _fail("FUTOI APIM schema mismatch")
+    source = _validate_raw_source_rows(source, trade_date, ticker)
+    result = source[["tradedate", "tradetime", "ticker", "clgroup", "systime"]].copy()
+    for field in ("sess_id", "seqnum", *POSITION_FIELDS):
+        result[field] = pd.Series(
+            [_root_integer(value, field) for value in source[field].tolist()],
+            dtype="int64",
+        )
+    if "trade_session_date" in source:
+        result["trade_session_date"] = source["trade_session_date"].astype("string")
+    result["trade_date"] = trade_date
+    result["instrument_id"] = instrument_id
+    result["source_id"] = SOURCE_ID
+    result["source_ticker"] = result["ticker"].astype("string").str.strip().str.lower()
+    result["clgroup"] = result["clgroup"].astype("string").str.strip().str.upper()
+    result["moment"] = pd.to_datetime(
+        result["tradedate"].astype(str) + " " + result["tradetime"].astype(str),
+        errors="raise",
+    )
+    result = _enforce_publication_timestamp(result)
+    result["raw_schema_version"] = RAW_SCHEMA_V2
+    result["source_identity_scope"] = ROOT_IDENTITY_SCOPE
+
+    receipt = pd.Timestamp(received_at)
+    ingest = pd.Timestamp(ingest_at)
+    if receipt.tzinfo is None or ingest.tzinfo is None or pd.isna(receipt) or pd.isna(ingest):
+        _fail("v2 receipt and ingest clocks must be timezone-aware")
+    publications = pd.to_datetime(result["systime"], errors="raise")
+    if publications.dt.tz is None:
+        publications = publications.dt.tz_localize("Europe/Moscow")
+    if bool((publications.dt.tz_convert("UTC") > receipt).any()) or ingest < receipt:
+        _fail("v2 source publication, receipt and ingest clocks are inconsistent")
+    result["availability_ts_utc"] = receipt.tz_convert("UTC").isoformat()
+    result["ingest_ts"] = ingest.tz_convert("UTC").isoformat()
+
+    invalid = ((result["pos_long"] < 0) | (result["pos_short"] > 0)
+               | (result["pos_long_num"] < 0) | (result["pos_short_num"] < 0))
+    if bool(invalid.any()):
+        _fail("v2 FUTOI contains invalid position signs/counts")
+    # Integer arithmetic remains exact (including before Parquet serialization).
+    for net, long_value, short_value in zip(
+        result["pos"].tolist(), result["pos_long"].tolist(), result["pos_short"].tolist()
+    ):
+        if net != long_value + short_value:
+            _fail("v2 FUTOI per-row net position identity failed")
+
+    keys = list(ROOT_SOURCE_RECORD_KEY_FIELDS)
+    duplicates = result[result.duplicated(keys, keep=False)]
+    for _, group in duplicates.groupby(keys, dropna=False, sort=False):
+        for field in result.columns:
+            first = group[field].iloc[0]
+            equal = group[field].isna() if pd.isna(first) else group[field].eq(first)
+            if not bool(equal.fillna(False).all()):
+                _fail("conflicting duplicate FUTOI source record")
+    count = len(result)
+    result = result.drop_duplicates(keys, keep="last")
+    dropped = count - len(result)
+    return result.sort_values(["ts", "sess_id", "seqnum", "clgroup"]).reset_index(drop=True), dropped
+
+
+def _utc_now_root() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _materialize_root_partition(
+    binding: Mapping[str, object], trade_date: str, run_id: str, *,
+    timeout: float, apim_base_url: str | None,
+) -> dict[str, object]:
+    instrument_id = str(binding["instrument_id"])
+    ticker = str(binding["futoi.ticker"]).strip().lower()
+    if ROOT_INSTRUMENT_TICKERS.get(instrument_id) != ticker:
+        _fail("v2 FUTOI instrument/ticker binding is not an approved Si/CR root")
+    partition = _partition_path(trade_date, instrument_id, SOURCE_ID, raw_schema_version=RAW_SCHEMA_V2)
+    quality_path = _quality_path(trade_date, run_id, raw_schema_version=RAW_SCHEMA_V2)
+    manifest_path = _manifest_path(trade_date, run_id, raw_schema_version=RAW_SCHEMA_V2)
+    for existing in (quality_path, manifest_path):
+        if existing.exists():
+            try:
+                prior = json.loads(existing.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise FutoiMaterializationError("existing v2 run metadata is unreadable") from exc
+            if (not isinstance(prior, Mapping)
+                    or prior.get("instrument_id") != instrument_id
+                    or prior.get("raw_schema_version") != RAW_SCHEMA_V2
+                    or prior.get("source_identity_scope") != ROOT_IDENTITY_SCOPE):
+                _fail("v2 run_id is already bound to incompatible source identity")
+    identity = {
+        "dataset_id": DATASET_ID, "instrument_id": instrument_id,
+        "source_id": SOURCE_ID, "source_ticker": ticker, "futoi_ticker": ticker,
+        "raw_schema_version": RAW_SCHEMA_V2, "source_identity_scope": ROOT_IDENTITY_SCOPE,
+        "source_record_key_fields": list(ROOT_SOURCE_RECORD_KEY_FIELDS),
+    }
+    refs = {
+        "source_contract_ref": "contracts/sources/futures/moex_algopack_futoi.v2.yaml",
+        "raw_contract_ref": "contracts/datasets/futures_futoi_raw.v2.yaml",
+        "quality_contract_ref": "contracts/datasets/futures_futoi_quality_report.v2.yaml",
+        "manifest_contract_ref": "contracts/datasets/futures_futoi_refresh_manifest.v2.yaml",
+    }
+    quality = {
+        **identity, "schema_version": "futures_futoi_quality_report.v2",
+        "run_id": run_id, "trade_date": trade_date,
+        "quality_status": "fail", "row_count": 0,
+        "quality_scope": "raw_structure_only_not_latest_pair_admission",
+        "failure_reasons": [], "quality_contract_ref": refs["quality_contract_ref"],
+    }
+    manifest = {
+        **identity, "schema_version": "futures_futoi_refresh_manifest.v2",
+        "run_id": run_id, "run_date": trade_date,
+        "instrument_scope": [instrument_id], "source_scope": [SOURCE_ID],
+        "requested_from": trade_date, "requested_till": trade_date,
+        "partitions_written": [], "partitions_skipped": [],
+        "quality_report_ref": quality_path.as_posix(), "refresh_status": "failed",
+        "producer": "moex_data.futures.materialize_futoi_instrument.v2",
+        "source_contract": {**identity, **refs, "transport": "authenticated_apim"},
+        "accepted_manifest_ref": None, "accepted_manifest_pointer_reference": None,
+        "latest_autodetect_used": False, "hardcoded_server_path_used": False,
+        "factual_authority": False, "stage5_pointer_promotion_performed": False,
+    }
+    try:
+        source, url = _fetch_exact(ticker, trade_date, timeout, apim_base_url)
+        # Receipt is captured AFTER the complete HTTP response, never before it.
+        received_at = _utc_now_root()
+        normalized, dropped = _normalize_root_source(
+            source, trade_date=trade_date, instrument_id=instrument_id, ticker=ticker,
+            received_at=received_at, ingest_at=_utc_now_root(),
+        )
+        digest = _write_parquet_atomic(partition, normalized, run_id)
+        quality.update(quality_status="pass", row_count=len(normalized),
+                       duplicate_key_count=0, null_required_count=0, invalid_position_count=0,
+                       exact_duplicate_rows_dropped=dropped)
+        manifest["source_contract"]["source_endpoint_url"] = url
+        manifest.update(refresh_status="succeeded", partitions_written=[partition.as_posix()],
+                        publication_run_id=run_id, published_partition_sha256=digest,
+                        exact_duplicate_rows_dropped=dropped)
+    except Exception as exc:
+        # Do not classify timeout/auth/schema errors as EMPTY or substitute a date.
+        quality.update(error_class=type(exc).__name__, failure_reasons=[str(exc)])
+        _write_json_atomic(quality_path, quality)
+        _write_json_atomic(manifest_path, manifest)
+        raise
+    _write_json_atomic(quality_path, quality)
+    _write_json_atomic(manifest_path, manifest)
+    return {
+        **identity, **refs, "status": "succeeded", "trade_date": trade_date,
+        "row_count": len(normalized), "quality_status": "pass",
+        "quality_scope": quality["quality_scope"], "storage_partition_path": partition.as_posix(),
+        "publication_run_id": run_id, "published_partition_sha256": digest,
+        "quality_report_reference": quality_path.as_posix(),
+        "manifest_reference": manifest_path.as_posix(),
+        "accepted_manifest_pointer_reference": None, "factual_authority": False,
+        "latest_autodetect_used": False, "hardcoded_server_path_used": False,
+        "timestamp_semantics": "source_reference_moment",
+        "exact_duplicate_rows_dropped": dropped,
+    }
+
+
 def materialize_futoi_partition(
     *,
     trade_date: str,
@@ -469,7 +704,9 @@ def materialize_futoi_partition(
     timeout: float = 60.0,
     apim_base_url: str | None = None,
     require_enabled: bool = False,
+    raw_schema_version: str = "v1",
 ) -> dict[str, object]:
+    _raw_schema_version(raw_schema_version)
     checked_date = _require_date(trade_date, "trade_date")
     checked_instrument = _require_token(instrument_id, "instrument_id")
     checked_run_id = _require_token(run_id, "run_id")
@@ -482,6 +719,11 @@ def materialize_futoi_partition(
         _fail("registry FUTOI materialization is not enabled")
     if str(binding["futoi.availability_status"]) != "available" or str(binding["futoi.probe_status"]) != "completed":
         _fail("registry FUTOI APIM availability evidence is not completed/available")
+
+    if raw_schema_version == RAW_SCHEMA_V2:
+        return _materialize_root_partition(
+            binding, checked_date, checked_run_id, timeout=timeout, apim_base_url=apim_base_url,
+        )
 
     ingest_ts = _utc_now()
     source_frame, source_url = _fetch_exact(ticker, checked_date, timeout, apim_base_url)

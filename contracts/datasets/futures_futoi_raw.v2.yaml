@@ -1,0 +1,73 @@
+contract_id: futures_futoi_raw.v2
+dataset_id: futures_futoi_raw
+artifact_class: external_pattern
+producer: moex_data.futures.materialize_futoi_instrument
+format: parquet
+schema_version: futures_futoi_raw.v2
+raw_schema_version: v2
+status: opt_in_raw_producer_only
+storage_root_ref: MOEX_DATA_ROOT
+path_pattern: "${MOEX_DATA_ROOT}/market/supplementary/dataset_id=futures_futoi_raw/schema_version=v2/instrument_id={INSTRUMENT_ID}/trade_date={YYYY-MM-DD}/source={SOURCE_ID}/part.parquet"
+partitioning: [dataset_id, schema_version, instrument_id, trade_date, source_id]
+grain: futoi_source_record_by_clgroup
+identity_model:
+  canonical_identity_field: instrument_id
+  source_identity_fields: [source_id, source_ticker]
+  source_identity_scope: source_ticker_root
+  permitted_instruments: [si_futures_family, cr_futures_family]
+  contract_secid_assignment_allowed: false
+required_columns:
+  - instrument_id
+  - source_id
+  - raw_schema_version
+  - source_identity_scope
+  - source_ticker
+  - ticker
+  - trade_date
+  - tradedate
+  - tradetime
+  - ts
+  - moment
+  - systime
+  - sess_id
+  - seqnum
+  - clgroup
+  - pos
+  - pos_long
+  - pos_short
+  - pos_long_num
+  - pos_short_num
+  - availability_ts_utc
+  - ingest_ts
+optional_preserved_columns: [trade_session_date]
+source_record_key_fields: [trade_date, sess_id, seqnum, source_ticker, clgroup]
+integer_storage:
+  fields: [sess_id, seqnum, pos, pos_long, pos_short, pos_long_num, pos_short_num]
+  dtype: int64
+  overflow_policy: reject_without_rounding
+  unsafe_large_float_policy: reject
+timestamp_semantics:
+  ts_and_moment: source_tradedate_plus_tradetime
+  systime: source_publication_not_event_identity
+  source_timezone: Europe/Moscow
+  availability_ts_utc: full_response_receipt_utc
+  ingest_ts: ingestion_start_after_receipt_utc
+quality:
+  exact_date_and_ticker: required
+  signs_and_per_row_net_identity: required
+  exact_duplicate_source_record: keep_one
+  conflicting_source_record_key: reject
+  distinct_revisions: preserve_all
+  unbalanced_fiz_yur_pair: preserve_for_separate_latest_pair_rejection
+  raw_quality_grants_factual_authority: false
+source_contract_ref: contracts/sources/futures/moex_algopack_futoi.v2.yaml
+quality_contract_ref: contracts/datasets/futures_futoi_quality_report.v2.yaml
+refresh_manifest_contract_ref: contracts/datasets/futures_futoi_refresh_manifest.v2.yaml
+path_rules:
+  explicit_version_required: true
+  unknown_version_or_corrupt_v2_fallback_to_v1_or_eod: forbidden
+  v1_overwrite_or_migration: forbidden
+  dynamic_scan: forbidden
+  symlink_redirection: forbidden
+  hardcoded_server_path_allowed: false
+accepted_pointer_promotion: false
