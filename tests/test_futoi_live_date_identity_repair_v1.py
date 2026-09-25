@@ -591,18 +591,29 @@ def test_parquet_snapshot_root_failure_cannot_retain_old_pass_as_fresh(monkeypat
 def test_native_root_context_contract_and_config_declare_isolated_opt_in_path(tmp_path):
     from pathlib import Path
     import inspect
-    import yaml
+    import json
+    from moex_data.futures.contract_io import load_simple_yaml_mapping
 
     root = Path(__file__).resolve().parents[1]
-    contract = yaml.safe_load((root / "contracts/datasets/futoi_live_factual_context.v2.yaml").read_text())
-    config = yaml.safe_load((root / "configs/datasets/futures_data_lake.v1.yaml").read_text())
+    # Exercise the production config reader, not an undeclared YAML dependency.
+    config = load_simple_yaml_mapping(root, "configs/datasets/futures_data_lake.v1.yaml")
     declared = config["futoi_source_native_context_v2"]
-    assert contract["schema_version"] == source.SCHEMA_VERSION_V2
-    assert declared["current_path_pattern"] == contract["current_path_pattern"]
-    expected = contract["current_path_pattern"].replace("${MOEX_DATA_ROOT}", str(tmp_path)).replace(
+    assert declared["contract_ref"] == "contracts/datasets/futoi_live_factual_context.v2.yaml"
+    contract_lines = (root / declared["contract_ref"]).read_text(encoding="utf-8").splitlines()
+    # These two contract fields are explicit top-level scalars. Check their exact
+    # declarations, including uniqueness, without introducing another YAML parser.
+    schema_lines = [line for line in contract_lines if line.startswith("schema_version:")]
+    path_lines = [line for line in contract_lines if line.startswith("current_path_pattern:")]
+    assert schema_lines == ["schema_version: " + source.SCHEMA_VERSION_V2]
+    assert len(path_lines) == 1
+    contract_pattern = json.loads(path_lines[0].partition(":")[2].strip())
+    assert isinstance(contract_pattern, str)
+    assert declared["context_artifact_path_pattern"] == contract_pattern
+    expected = contract_pattern.replace("${MOEX_DATA_ROOT}", str(tmp_path)).replace(
         "{INSTRUMENT_ID}", source.SI_INSTRUMENT_ID,
     )
     assert source._current_path(tmp_path, source.SI_INSTRUMENT_ID, raw_schema_version="v2") == Path(expected)
+    assert declared["failed_attempt_publication_policy"] == "replace_old_pass_with_explicit_failure"
     assert declared["live_runtime_enabled"] is False
     for function in (source.run_refresh, source.run_refresh_all, source.source_identity,
                      source.latest_aligned_factual, source._materialize_target, _snapshot_reader().build_snapshot):
@@ -627,3 +638,14 @@ def test_legacy_snapshot_candidate_rejects_v2_tags(monkeypatch, tmp_path, locati
     monkeypatch.setattr(snapshot, "_load_json", lambda *a: value)
     with pytest.raises(snapshot.FutoiSnapshotComponentError, match="another raw version"):
         snapshot._load_candidate(tmp_path, source.SI_INSTRUMENT_ID)
+
+
+@pytest.mark.parametrize("marker", ["current", "latest", "autodetect"])
+def test_native_context_config_keeps_legacy_dynamic_selection_guard(marker):
+    from moex_data.futures.contract_io import FuturesContractIoError, reject_dynamic_markers
+
+    # Describing a separately versioned live artifact does not authorize dynamic
+    # selection through the historical controlled-read interface.
+    for value in (marker + "_path_pattern", "${MOEX_DATA_ROOT}/" + marker + ".json"):
+        with pytest.raises(FuturesContractIoError, match="unsupported dynamic marker"):
+            reject_dynamic_markers(value, "regression")

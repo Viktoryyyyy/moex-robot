@@ -329,13 +329,13 @@ futoi_source_native_context_v2:
     argument: raw_schema_version
     value: v2
     default: v1
-  current_path_pattern: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/schema_version=v2/instrument_id={INSTRUMENT_ID}/current.json"
+  context_artifact_path_pattern: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/schema_version=v2/instrument_id={INSTRUMENT_ID}/current.json"
   evidence_path_pattern: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/{SHA256}.{SUFFIX}"
   source_identity_scope: source_ticker_root
   witness_instrument_id: usdrubf_futures_family
   witness_secid: USDRUBF
   scope: latest_completed_observed_date_not_current_intraday
-  failed_attempt_replaces_current_pass_with_explicit_failure: true
+  failed_attempt_publication_policy: replace_old_pass_with_explicit_failure
   frozen_v1_rewrite_allowed: false
   source_candidate_self_grants_authority: false
   stage5_pointer_promotion: false
