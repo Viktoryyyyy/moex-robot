@@ -649,3 +649,314 @@ def test_native_context_config_keeps_legacy_dynamic_selection_guard(marker):
     for value in (marker + "_path_pattern", "${MOEX_DATA_ROOT}/" + marker + ".json"):
         with pytest.raises(FuturesContractIoError, match="unsupported dynamic marker"):
             reject_dynamic_markers(value, "regression")
+
+
+@pytest.fixture(params=["regular", "fast"])
+def role_v2_module(request):
+    from moex_data.futures import futoi_intraday_previous_session_context as regular
+    from moex_data.futures import futoi_intraday_previous_session_context_fast as fast
+    return regular if request.param == "regular" else fast
+
+
+def _role_v2_setup(monkeypatch, tmp_path):
+    """Synthetic orchestration inputs; materialization/replay are mocked here."""
+    from moex_data.futures import futoi_intraday_previous_session_context as core
+
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    now = pd.Timestamp("2026-09-24T07:36:00.123456Z").to_pydatetime()
+    observed = {"2026-09-24", "2026-09-23"}
+    witness_errors = {}
+    source_errors = {}
+    witness_calls = []
+    source_calls = []
+    monkeypatch.setattr(source.observed_dates, "reference_secid", lambda instrument_id: (
+        "USDRUBF" if instrument_id == "usdrubf_futures_family" else pytest.fail("expired witness used")
+    ))
+    def witness(day, *, secid, timeout, apim_base_url):
+        assert secid == "USDRUBF"
+        witness_calls.append(day.isoformat())
+        if day.isoformat() in witness_errors:
+            raise witness_errors[day.isoformat()]
+        return day.isoformat() in observed
+    monkeypatch.setattr(source.observed_dates, "_exact_date_has_secid", witness)
+    def materialize(root, target, run_id, *, instrument_id, timeout, raw_schema_version):
+        assert raw_schema_version == "v2"
+        source_calls.append((instrument_id, target, run_id))
+        error = source_errors.get((instrument_id, target))
+        if error is not None:
+            raise error
+        return root / "unused_synthetic.parquet", {
+            "synthetic": True, "trade_date": target, "instrument_id": instrument_id,
+            "source_id": source.SOURCE_ID, "source_ticker": source.ROOT_TICKERS[instrument_id],
+            "raw_schema_version": "v2", "source_identity_scope": "source_ticker_root",
+        }
+    monkeypatch.setattr(source, "_materialize_target", materialize)
+    def replay(root, proof, *, instrument_id, trade_date):
+        assert proof["trade_date"] == trade_date
+        return {
+            "trade_date": trade_date, "snapshot_ts": trade_date + "T07:35:00+00:00",
+            "source_publication_time": trade_date + "T07:35:10+00:00",
+            "availability_ts_utc": now.isoformat(), "ingest_ts_utc": now.isoformat(),
+            "raw_schema_version": "v2", "source_identity_scope": "source_ticker_root",
+            "source_ticker": source.ROOT_TICKERS[instrument_id],
+            "fiz": {"net": 100}, "yur": {"net": -100},
+        }
+    monkeypatch.setattr(source, "replay_root_factual", replay)
+    monkeypatch.setattr(source, "_probe_exact_date", lambda *a, **k: pytest.fail("legacy duplicate probe used"))
+    monkeypatch.setattr(core, "_resolve_observed_trade_dates", lambda *a, **k: pytest.fail("coupled v1 resolver used"))
+    return now, observed, witness_errors, source_errors, witness_calls, source_calls
+
+
+@pytest.mark.parametrize("failed_role", ["current_intraday", "previous_completed_session"])
+@pytest.mark.parametrize("failure_kind", ["witness_timeout", "no_witness", "source_timeout", "source_empty"])
+def test_role_v2_independence_in_both_directions(
+    role_v2_module, monkeypatch, tmp_path, failed_role, failure_kind,
+):
+    from moex_data.futures import futoi_intraday_previous_session_context as core
+    from moex_data.futures import materialize_futoi_instrument as materializer
+
+    now, observed, witness_errors, source_errors, witness_calls, source_calls = _role_v2_setup(monkeypatch, tmp_path)
+    failed_date = "2026-09-24" if failed_role == core.CURRENT_ROLE else "2026-09-23"
+    other = core.PREVIOUS_ROLE if failed_role == core.CURRENT_ROLE else core.CURRENT_ROLE
+    if failure_kind == "witness_timeout":
+        witness_errors[failed_date] = TimeoutError("synthetic witness timeout")
+    elif failure_kind == "no_witness":
+        observed.remove(failed_date)
+    elif failure_kind == "source_empty":
+        source_errors[(source.SI_INSTRUMENT_ID, failed_date)] = materializer.FutoiMaterializationError(
+            source.EXPLICIT_EMPTY_ERROR,
+        )
+    else:
+        source_errors[(source.SI_INSTRUMENT_ID, failed_date)] = TimeoutError("synthetic source timeout")
+    result = role_v2_module.run_refresh(
+        through_date="2026-09-24", instrument_id=source.SI_INSTRUMENT_ID,
+        run_id="role_failure", now_fn=lambda: now, raw_schema_version="v2",
+    )
+    expected_status = {"no_witness": "UNAVAILABLE", "source_empty": "PENDING"}.get(failure_kind, "ERROR")
+    assert result["status"] == "PARTIAL"
+    assert result[failed_role]["status"] == expected_status
+    assert result[failed_role]["factual"] is None
+    assert result[other]["status"] == "FRESH"
+    assert result[other]["factual"]["trade_date"] != failed_date
+    assert result[other]["consumer_factual_use_allowed"] is False
+    if failure_kind == "witness_timeout":
+        assert result[failed_role]["refresh_error_class"] == "TimeoutError"
+        assert len(witness_calls) == 2  # Do not skip the uncertain previous date.
+    elif failure_kind == "no_witness" and failed_role == core.PREVIOUS_ROLE:
+        assert len(witness_calls) == core.SOURCE_LOOKBACK_DAYS
+    if failure_kind in ("source_empty", "source_timeout"):
+        assert result[failed_role]["expected_trade_date"] == failed_date
+        assert sorted(call[1] for call in source_calls) == ["2026-09-23", "2026-09-24"]
+    assert result["refresh_attempted_at"] == now.isoformat()
+    assert result["raw_schema_version"] == "v2"
+
+
+def test_role_v2_si_failure_does_not_cancel_cr(role_v2_module, monkeypatch, tmp_path):
+    now, _, _, errors, _, _ = _role_v2_setup(monkeypatch, tmp_path)
+    for day in ("2026-09-23", "2026-09-24"):
+        errors[(source.SI_INSTRUMENT_ID, day)] = TimeoutError("synthetic Si timeout")
+    result = role_v2_module.run_refresh_all(
+        through_date="2026-09-24", run_id="isolated_roots", now_fn=lambda: now, raw_schema_version="v2",
+    )
+    assert result["status"] == "PARTIAL"
+    assert result["instrument_results"][source.SI_INSTRUMENT_ID]["status"] == "FAILED"
+    assert result["instrument_results"][source.CR_INSTRUMENT_ID]["status"] == "PASS"
+    assert result["failed_instrument_ids"] == [source.SI_INSTRUMENT_ID]
+
+
+def test_role_v2_failed_pair_evidence_and_previous_are_preserved(role_v2_module, monkeypatch, tmp_path):
+    from moex_data.futures import futoi_intraday_previous_session_context as core
+    now, _, _, errors, _, calls = _role_v2_setup(monkeypatch, tmp_path)
+    error = source.FutoiSourceNativeRefreshError("FIZ/YUR net positions do not balance to zero")
+    error.attempt_provenance = {"synthetic_reconstructed": True, "imbalance": 6}
+    errors[(source.SI_INSTRUMENT_ID, "2026-09-24")] = error
+    result = role_v2_module.run_refresh(
+        through_date="2026-09-24", instrument_id=source.SI_INSTRUMENT_ID,
+        run_id="latest_plus_six", now_fn=lambda: now, raw_schema_version="v2",
+    )
+    assert result[core.CURRENT_ROLE]["status"] == "ERROR"
+    assert result[core.CURRENT_ROLE]["failed_attempt_evidence"] == error.attempt_provenance
+    assert result[core.PREVIOUS_ROLE]["status"] == "FRESH"
+    assert sorted(call[1] for call in calls) == ["2026-09-23", "2026-09-24"]
+
+
+@pytest.mark.parametrize("day", ["2026-09-19", "2026-09-20"])
+def test_role_v2_witness_keeps_observed_weekends(monkeypatch, day):
+    from moex_data.futures import futoi_intraday_previous_session_context as core
+    from datetime import date, timedelta
+
+    previous = (date.fromisoformat(day) - timedelta(days=1)).isoformat()
+    monkeypatch.setattr(source.observed_dates, "reference_secid", lambda _id: "USDRUBF")
+    monkeypatch.setattr(source.observed_dates, "_exact_date_has_secid",
+                        lambda requested, **kwargs: requested.isoformat() in {day, previous})
+    assert core._root_role_witness(day, core.CURRENT_ROLE, timeout=1, observations=[]) == day
+    assert core._root_role_witness(day, core.PREVIOUS_ROLE, timeout=1, observations=[]) == previous
+
+
+def test_role_v2_persisted_envelope_is_isolated_and_hash_bound(role_v2_module, monkeypatch, tmp_path):
+    from moex_data.futures import futoi_intraday_previous_session_context as core
+    import json
+
+    now, _, _, errors, _, _ = _role_v2_setup(monkeypatch, tmp_path)
+    legacy = core._artifact_path(tmp_path, source.SI_INSTRUMENT_ID)
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text('{"unchanged_legacy_evidence":true}')
+    result = role_v2_module.run_refresh(
+        through_date="2026-09-24", instrument_id=source.SI_INSTRUMENT_ID,
+        run_id="versioned_roles", now_fn=lambda: now, raw_schema_version="v2",
+    )
+    path = core._artifact_path(tmp_path, source.SI_INSTRUMENT_ID, raw_schema_version="v2")
+    assert path != legacy and "schema_version=v2" in path.parts
+    assert core._load_previous(tmp_path, source.SI_INSTRUMENT_ID, raw_schema_version="v2") == result
+    errors[(source.SI_INSTRUMENT_ID, "2026-09-24")] = TimeoutError("synthetic later failure")
+    failed = role_v2_module.run_refresh(
+        through_date="2026-09-24", instrument_id=source.SI_INSTRUMENT_ID,
+        run_id="later_roles", now_fn=lambda: now, raw_schema_version="v2",
+    )
+    assert failed[core.CURRENT_ROLE]["factual"] is None
+    assert failed[core.PREVIOUS_ROLE]["status"] == "FRESH"
+    frozen = json.loads(source._root_proof_bytes(
+        tmp_path, result["run_evidence_ref"], result["run_evidence_sha256"], ".json",
+    ))
+    assert frozen[core.CURRENT_ROLE]["status"] == "FRESH"  # Original evidence, not this attempt.
+    assert legacy.read_text() == '{"unchanged_legacy_evidence":true}'
+    failed[core.CURRENT_ROLE]["status"] = "FRESH"
+    path.write_text(json.dumps(failed))
+    with pytest.raises(core.FutoiIntradayContextError, match="frozen evidence"):
+        core._load_previous(tmp_path, source.SI_INSTRUMENT_ID, raw_schema_version="v2")
+
+
+@pytest.mark.parametrize("version", ["v9", None, True])
+def test_role_v2_unknown_version_fails_before_io(role_v2_module, monkeypatch, version):
+    monkeypatch.setattr(source, "_data_root", lambda: pytest.fail("version must fail before I/O"))
+    with pytest.raises(source.FutoiSourceNativeRefreshError, match="raw_schema_version"):
+        role_v2_module.run_refresh_all(through_date="2026-09-24", run_id="wrong_version", raw_schema_version=version)
+
+
+def test_role_v2_validation_clock_error_keeps_attempt_provenance(role_v2_module, monkeypatch, tmp_path):
+    from moex_data.futures import futoi_intraday_previous_session_context as core
+    now, _, _, _, _, _ = _role_v2_setup(monkeypatch, tmp_path)
+    replay = source.replay_root_factual
+    def bad_clock(root, proof, *, instrument_id, trade_date):
+        value = replay(root, proof, instrument_id=instrument_id, trade_date=trade_date)
+        if trade_date == "2026-09-24":
+            value["ingest_ts_utc"] = (pd.Timestamp(now) + pd.Timedelta(seconds=1)).isoformat()
+        return value
+    monkeypatch.setattr(source, "replay_root_factual", bad_clock)
+    result = role_v2_module.run_refresh(
+        through_date="2026-09-24", instrument_id=source.SI_INSTRUMENT_ID,
+        run_id="clock_roles", now_fn=lambda: now, raw_schema_version="v2",
+    )
+    assert result[core.CURRENT_ROLE]["status"] == "ERROR"
+    assert result[core.CURRENT_ROLE]["failed_attempt_evidence"]["synthetic"] is True
+    assert result[core.PREVIOUS_ROLE]["status"] == "FRESH"
+
+
+@pytest.mark.parametrize("bad_current", [False, True])
+@pytest.mark.parametrize("instrument", source.LIVE_INSTRUMENT_IDS)
+def test_role_v2_parquet_end_to_end_with_expired_registry(
+    role_v2_module, monkeypatch, tmp_path, bad_current, instrument,
+):
+    from moex_data.futures import futoi_intraday_previous_session_context as core
+    from moex_data.futures import materialize_futoi_instrument as materializer
+
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    now = pd.Timestamp("2026-09-24T07:36:00.123456Z").to_pydatetime()
+    monkeypatch.setattr(materializer, "_registry_binding", lambda _path, instrument: _binding_for(instrument))
+    monkeypatch.setattr(materializer, "_utc_now_root", lambda: now.isoformat())
+    monkeypatch.setattr(source.observed_dates, "reference_secid", lambda instrument: (
+        "USDRUBF" if instrument == "usdrubf_futures_family" else pytest.fail("expired witness")
+    ))
+    monkeypatch.setattr(source.observed_dates, "_exact_date_has_secid", lambda day, **kwargs: day.isoformat() in {
+        "2026-09-23", "2026-09-24",
+    })
+    calls = []
+    def fetch(ticker, day, timeout, base):
+        calls.append((ticker, day))
+        raw = _root_frame(day=day, instrument=instrument)
+        if bad_current and day == "2026-09-24":
+            raw.loc[0, ["pos", "pos_long", "pos_short"]] = [726369, 927387, -201018]
+            raw.loc[1, ["pos", "pos_long", "pos_short"]] = [-726363, 4297389, -5023752]
+        return raw, "https://apim.moex.com/iss/analyticalproducts/futoi/securities/" + ticker + ".json"
+    monkeypatch.setattr(materializer, "_fetch_exact", fetch)
+    monkeypatch.setattr(source, "_probe_exact_date", lambda *a, **k: pytest.fail("legacy probe used"))
+    result = role_v2_module.run_refresh(
+        through_date="2026-09-24", instrument_id=instrument,
+        run_id="parquet_roles", raw_schema_version="v2", now_fn=lambda: now,
+    )
+    assert sorted(calls) == [(source.ROOT_TICKERS[instrument], day) for day in ("2026-09-23", "2026-09-24")]
+    assert result["status"] == ("PARTIAL" if bad_current else "PASS")
+    assert result[core.PREVIOUS_ROLE]["status"] == "FRESH"
+    assert "secid" not in result[core.PREVIOUS_ROLE]["factual"]
+    assert result[core.PREVIOUS_ROLE]["factual"] == source.replay_root_factual(
+        tmp_path, result[core.PREVIOUS_ROLE]["provenance"],
+        instrument_id=instrument, trade_date="2026-09-23",
+    )
+    if bad_current:
+        assert result[core.CURRENT_ROLE]["factual"] is None
+        assert "publication_audit" in result[core.CURRENT_ROLE]["failed_attempt_evidence"]
+    else:
+        assert result[core.CURRENT_ROLE]["status"] == "FRESH"
+        assert "publication_audit" in result[core.CURRENT_ROLE]["provenance"]
+
+
+@pytest.mark.parametrize("day", ["2026-09-23", "2026-09-25"])
+def test_role_v2_intraday_date_cannot_be_a_past_or_future_date(role_v2_module, monkeypatch, tmp_path, day):
+    from moex_data.futures import futoi_intraday_previous_session_context as core
+    now, _, _, _, witness_calls, source_calls = _role_v2_setup(monkeypatch, tmp_path)
+    with pytest.raises(core.FutoiIntradayContextError, match="refresh-start"):
+        role_v2_module.run_refresh(
+            through_date=day, instrument_id=source.SI_INSTRUMENT_ID,
+            run_id="wrong_intraday_date", now_fn=lambda: now, raw_schema_version="v2",
+        )
+    assert witness_calls == [] and source_calls == []
+
+
+def test_role_v2_default_api_stays_legacy(role_v2_module, tmp_path):
+    import inspect
+    from moex_data.futures import futoi_intraday_previous_session_context as core
+    for function in (role_v2_module.run_refresh, role_v2_module.run_refresh_all,
+                     core._artifact_path, core._load_previous):
+        assert inspect.signature(function).parameters["raw_schema_version"].default == "v1"
+    assert core._artifact_path(tmp_path, source.SI_INSTRUMENT_ID) == (
+        source._current_path(tmp_path, source.SI_INSTRUMENT_ID).parent / core.ARTIFACT_FILENAME
+    )
+
+
+def test_role_v2_reader_rejects_legacy_envelope_in_versioned_path(tmp_path):
+    from moex_data.futures import futoi_intraday_previous_session_context as core
+    import json
+
+    path = core._artifact_path(tmp_path, source.SI_INSTRUMENT_ID, raw_schema_version="v2")
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({
+        "project": source.PROJECT, "schema_version": core.SCHEMA_VERSION,
+        "instrument_id": source.SI_INSTRUMENT_ID, "raw_schema_version": "v1",
+    }))
+    with pytest.raises(core.FutoiIntradayContextError, match="version/identity"):
+        core._load_previous(tmp_path, source.SI_INSTRUMENT_ID, raw_schema_version="v2")
+
+
+def test_role_v2_contract_config_and_explicit_path_agree(tmp_path):
+    from pathlib import Path
+    import json
+    from moex_data.futures import futoi_intraday_previous_session_context as core
+    from moex_data.futures.contract_io import load_simple_yaml_mapping
+
+    root = Path(__file__).resolve().parents[1]
+    values = load_simple_yaml_mapping(root, "configs/datasets/futures_data_lake.v1.yaml")
+    declared = values["futoi_intraday_context_v2"]
+    assert declared["contract_ref"] == "contracts/datasets/futoi_intraday_previous_session_context.v2.yaml"
+    lines = (root / declared["contract_ref"]).read_text(encoding="utf-8").splitlines()
+    assert [line for line in lines if line.startswith("schema_version:")] == [
+        "schema_version: " + core.SCHEMA_VERSION_V2,
+    ]
+    paths = [line for line in lines if line.startswith("artifact_path_pattern:")]
+    assert len(paths) == 1
+    pattern = json.loads(paths[0].partition(":")[2].strip())
+    assert declared["artifact_path_pattern"] == pattern
+    assert core._artifact_path(tmp_path, source.SI_INSTRUMENT_ID, raw_schema_version="v2") == Path(
+        pattern.replace("${MOEX_DATA_ROOT}", str(tmp_path)).replace("{INSTRUMENT_ID}", source.SI_INSTRUMENT_ID)
+    )
+    assert declared["roles"] == (core.CURRENT_ROLE, core.PREVIOUS_ROLE)
+    assert declared["live_runtime_enabled"] is False
