@@ -125,16 +125,28 @@ def _governance_state(values: Mapping[str, object], instrument_id: str) -> dict[
     }
 
 
-def _candidate_path(root: Path, instrument_id: str) -> Path:
+def _candidate_path(root: Path, instrument_id: str, *, raw_schema_version: str = "v1") -> Path:
+    if futoi_source._raw_version(raw_schema_version) == "v2":
+        return futoi_source._current_path(root, instrument_id, raw_schema_version="v2").relative_to(root)
     if instrument_id not in FUTOI_COMPONENT_BY_INSTRUMENT:
         raise FutoiSnapshotComponentError("unsupported FUTOI candidate instrument_id")
     return FUTOI_CURRENT_BASE_RELATIVE_PATH / ("instrument_id=" + instrument_id) / "current.json"
 
 
-def _load_candidate(root: Path, instrument_id: str) -> dict[str, object]:
+def _load_candidate(
+    root: Path, instrument_id: str, *, raw_schema_version: str = "v1", now: datetime | None = None,
+) -> dict[str, object]:
+    if futoi_source._raw_version(raw_schema_version) == "v2":
+        return _load_root_candidate(root, instrument_id, now=now)
     identity = futoi_source.source_identity(instrument_id)
     path = root / _candidate_path(root, instrument_id)
     value = _load_json(path, "FUTOI factual current artifact")
+    for tagged in (value, value.get("factual"), value.get("provenance")):
+        if isinstance(tagged, Mapping) and (
+            tagged.get("raw_schema_version", "v1") != "v1"
+            or tagged.get("source_identity_scope") == "source_ticker_root"
+        ):
+            raise FutoiSnapshotComponentError("v1 FUTOI candidate cannot admit another raw version or scope")
     if value.get("project") != PROJECT:
         raise FutoiSnapshotComponentError("FUTOI factual artifact project mismatch")
     if value.get("schema_version") != futoi_source.SCHEMA_VERSION:
@@ -211,13 +223,17 @@ def _futoi_component(
     governance_values: Mapping[str, object],
     instrument_id: str,
     component_name: str,
+    raw_schema_version: str = "v1",
 ) -> dict[str, object]:
+    futoi_source._raw_version(raw_schema_version)
     attempted_at = base._iso(now)
     governance = _governance_state(governance_values, instrument_id)
     allowed = governance["factual_use_allowed"] is True
 
     try:
-        candidate = _load_candidate(root, instrument_id)
+        candidate = _load_candidate(root, instrument_id, **(
+            {"raw_schema_version": "v2", "now": now} if raw_schema_version == "v2" else {}
+        ))
     except Exception as exc:
         if allowed:
             prior = _previous_ready_futoi(
@@ -287,6 +303,12 @@ def _futoi_component(
         "stage5_pointer_promotion_performed": False,
         "missing_or_blocked_must_not_be_interpreted_as_neutral": True,
     }
+    if raw_schema_version == "v2":
+        candidate_view.update(
+            raw_schema_version="v2", source_identity_scope=futoi_source.ROOT_IDENTITY_SCOPE,
+            source_context_schema_version=candidate["schema_version"],
+            source_factual_scope="latest_completed_observed_date_not_current_intraday",
+        )
     return {
         "status": "READY" if allowed else "GOVERNED_BLOCKED",
         "refresh_attempted_at": attempted_at,
@@ -331,7 +353,9 @@ def build_snapshot(
     previous: Mapping[str, object] | None = None,
     producers: Mapping[str, base.ComponentProducer] | None = None,
     data_root: Path | None = None,
+    raw_schema_version: str = "v1",
 ) -> dict[str, object]:
+    futoi_source._raw_version(raw_schema_version)
     now_utc = base._aware(now, "now")
     result = base.build_snapshot(now=now_utc, previous=previous, producers=producers)
     root = data_root if data_root is not None else base._data_root()
@@ -344,6 +368,7 @@ def build_snapshot(
             governance_values=governance_values,
             instrument_id=instrument_id,
             component_name=component_name,
+            **({"raw_schema_version": "v2"} if raw_schema_version == "v2" else {}),
         )
 
     # Backward-compatible Si alias remains unchanged; explicit map adds CR without ambiguity.
@@ -447,6 +472,93 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("STATUS=FAILED")
         print(f"ERROR={exc}")
         return 1
+
+
+def _load_root_candidate(root: Path, instrument_id: str, *, now: datetime | None) -> dict[str, object]:
+    """Validate a completed-date v2 candidate; never reinterpret it as an intraday pair."""
+    from moex_data.futures import futoi_publication_audit as audit
+
+    def require(condition: bool, reason: str) -> None:
+        if not condition:
+            raise FutoiSnapshotComponentError("v2 FUTOI " + reason)
+
+    path = root / _candidate_path(root, instrument_id, raw_schema_version="v2")
+    value = _load_json(path, "v2 FUTOI factual current artifact")
+    expected = {
+        "project": PROJECT, "schema_version": futoi_source.SCHEMA_VERSION_V2,
+        "instrument_id": instrument_id, "source_id": futoi_source.SOURCE_ID,
+        "source_ticker": futoi_source.ROOT_TICKERS[instrument_id],
+        "raw_schema_version": "v2", "source_identity_scope": futoi_source.ROOT_IDENTITY_SCOPE,
+        "status": "PASS", "quality_status": "PASS", "acceptance_status": "PASS",
+    }
+    require("secid" not in value and all(value.get(k) == v for k, v in expected.items()),
+            "candidate schema/source/status mismatch")
+    for flag in ("factual_authority", "directional_authority", "action_authority",
+                 "standalone_buy_sell_authority", "stage5_full_mode_required", "stage5_full_mode_ready",
+                 "stage5_pointer_promotion_performed", "historical_pit_research_ready_claimed",
+                 "session_completion_proven", "model_usable"):
+        require(value.get(flag) is False, "candidate must not self-grant " + flag)
+    archived = json.loads(futoi_source._root_proof_bytes(
+        root, value.get("run_evidence_ref"), value.get("run_evidence_sha256"), ".json",
+    ))
+    require(archived == {k: v for k, v in value.items()
+                        if k not in ("run_evidence_ref", "run_evidence_sha256")},
+            "candidate differs from frozen run evidence")
+    factual, provenance, freshness = value.get("factual"), value.get("provenance"), value.get("freshness")
+    require(all(isinstance(v, Mapping) for v in (factual, provenance, freshness)),
+            "factual/provenance/freshness payload missing")
+    target = futoi_source._iso_date(value.get("expected_latest_source_trade_date"), "candidate target date")
+    through = futoi_source._iso_date(value.get("through_date"), "candidate through date")
+    started = futoi_source._aware_utc(value.get("refresh_started_at"), "refresh_started_at")
+    completed = futoi_source._aware_utc(value.get("last_success_at"), "last_success_at")
+    read_at = futoi_source._aware_utc(now if now is not None else datetime.now(timezone.utc), "read_at")
+    require(target <= through < started.tz_convert(futoi_source.MARKET_TZ).date().isoformat(),
+            "candidate is not bound to a completed requested date")
+    require(started <= completed <= read_at, "candidate refresh/validation/read clocks are inconsistent")
+    require(freshness.get("status") == "FRESH"
+            and freshness.get("accepted_trade_date") == target
+            and freshness.get("policy") == "bounded_usdrubf_witness_then_own_exact_date_futoi_v2"
+            and freshness.get("scope") == "latest_completed_observed_date_not_current_intraday"
+            and freshness.get("witness_instrument_id") == futoi_source.DATE_WITNESS_INSTRUMENT_ID
+            and freshness.get("witness_secid") == futoi_source.DATE_WITNESS_SECID
+            and freshness.get("trading_date_authority_source_id") == futoi_source.observed_dates.SOURCE_ID
+            and freshness.get("source_lookback_days") == futoi_source.SOURCE_LOOKBACK_DAYS
+            and freshness.get("weekday_weekend_inference") is False
+            and freshness.get("calendar_dependency") is False, "candidate freshness semantics mismatch")
+    observations = value.get("source_date_observations")
+    require(isinstance(observations, list) and bool(observations), "candidate date witness missing")
+    days = []
+    for observation in observations:
+        require(isinstance(observation, Mapping), "candidate witness row is malformed")
+        day = futoi_source._iso_date(observation.get("trade_date"), "witness date")
+        require(observation.get("status") == "OBSERVED_TRADESTATS_DATE"
+                and observation.get("date_authority_source_id") == futoi_source.observed_dates.SOURCE_ID
+                and observation.get("witness_instrument_id") == futoi_source.DATE_WITNESS_INSTRUMENT_ID
+                and observation.get("witness_secid") == futoi_source.DATE_WITNESS_SECID
+                and observation.get("futoi_availability_proven") is False,
+                "candidate witness identity mismatch")
+        require(0 <= (datetime.fromisoformat(through) - datetime.fromisoformat(day)).days
+                < futoi_source.SOURCE_LOOKBACK_DAYS, "candidate witness date outside bounded interval")
+        days.append(day)
+    require(days == sorted(set(days)) and days[-1] == target, "candidate did not select newest witnessed date")
+    replayed = futoi_source.replay_root_factual(
+        root, provenance, instrument_id=instrument_id, trade_date=target,
+    )
+    require(factual == replayed and value.get("data_as_of") == replayed["snapshot_ts"],
+            "candidate factual differs from exact frozen raw replay")
+    require(started <= futoi_source._aware_utc(replayed["availability_ts_utc"], "receipt")
+            <= futoi_source._aware_utc(replayed["ingest_ts_utc"], "ingest") <= completed,
+            "candidate source/receipt/ingest/validation clocks are inconsistent")
+    receipt = provenance.get("publication_audit")
+    require(isinstance(receipt, Mapping), "publication audit is missing")
+    report = json.loads(futoi_source._root_proof_bytes(root, receipt.get("ref"), receipt.get("sha256"), ".json"))
+    require(isinstance(report, Mapping)
+            and report.get("schema_version") == audit.SCHEMA and report.get("policy") == audit.POLICY
+            and report.get("instrument_id") == instrument_id and report.get("trade_date") == target
+            and report.get("latest_status") == "PASS" and report.get("latest_factual") == replayed
+            and report.get("provenance") == {k: v for k, v in provenance.items() if k != "publication_audit"},
+            "candidate publication audit mismatch")
+    return value
 
 
 if __name__ == "__main__":

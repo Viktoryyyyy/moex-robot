@@ -318,3 +318,25 @@ futoi_live_raw_v2:
   historical_backfill_authorized: false
   live_runtime_enabled: false
   model_or_trade_authority: false
+
+# Native completed-date prerequisite only; fast/regular runtime wiring remains separate.
+futoi_source_native_context_v2:
+  status: opt_in_native_completed_date_and_candidate_reader_only
+  contract_ref: contracts/datasets/futoi_live_factual_context.v2.yaml
+  producer_ref: src/moex_data/futures/futoi_live_factual_refresh_source_native.py
+  candidate_reader_ref: src/moex_research/runners/usdrubf_s7_3_chat_analysis_snapshot_futoi.py
+  api_opt_in:
+    argument: raw_schema_version
+    value: v2
+    default: v1
+  current_path_pattern: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/schema_version=v2/instrument_id={INSTRUMENT_ID}/current.json"
+  evidence_path_pattern: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/{SHA256}.{SUFFIX}"
+  source_identity_scope: source_ticker_root
+  witness_instrument_id: usdrubf_futures_family
+  witness_secid: USDRUBF
+  scope: latest_completed_observed_date_not_current_intraday
+  failed_attempt_replaces_current_pass_with_explicit_failure: true
+  frozen_v1_rewrite_allowed: false
+  source_candidate_self_grants_authority: false
+  stage5_pointer_promotion: false
+  live_runtime_enabled: false

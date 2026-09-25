@@ -1,0 +1,100 @@
+contract_id: futoi_live_factual_context.v2
+dataset_id: futoi_live_factual_context
+artifact_class: external_pattern
+format: json
+schema_version: futoi_live_factual_refresh_source_native.v2
+raw_schema_version: v2
+status: opt_in_native_completed_date_and_candidate_reader_only
+producer: moex_data.futures.futoi_live_factual_refresh_source_native
+consumer: src.moex_research.runners.usdrubf_s7_3_chat_analysis_snapshot_futoi
+storage_root_ref: MOEX_DATA_ROOT
+current_path_pattern: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/schema_version=v2/instrument_id={INSTRUMENT_ID}/current.json"
+evidence_path_pattern: "${MOEX_DATA_ROOT}/state/datasets/dataset_id=futoi_live_factual_context/evidence/{SHA256}.{SUFFIX}"
+identity:
+  source_id: moex_algopack_futoi
+  source_identity_scope: source_ticker_root
+  instrument_tickers:
+    si_futures_family: si
+    cr_futures_family: cr
+  contract_secid_allowed: false
+  raw_key_fields: [trade_date, sess_id, seqnum, source_ticker, clgroup]
+version_selection:
+  argument: raw_schema_version
+  default: v1
+  opt_in: v2
+  existing_cli_option: --raw-schema-version
+  unknown_version_or_path_mismatch: fail_closed
+  missing_or_corrupt_selected_v2_fallback_to_v1_or_eod: forbidden
+  v1_defaults_paths_outputs_and_frozen_evidence: unchanged
+date_selection:
+  scope: latest_completed_observed_date_not_current_intraday
+  witness_instrument_id: usdrubf_futures_family
+  witness_secid: USDRUBF
+  witness_source_id: moex_algopack_fo_tradestats_5m
+  maximum_lookback_calendar_days: 14
+  through_date: explicit_completed_Europe_Moscow_calendar_date
+  candidate: greatest_USDRUBF_observed_date_within_bounded_interval
+  own_futoi_query: exact_candidate_date_and_own_ticker
+  witness_implies_futoi_availability: false
+  source_failure_selects_earlier_date: false
+  weekday_weekend_or_CETS_inference: forbidden
+latest_pair:
+  select_before_validation: true
+  timestamp_selection: true_latest_source_event_timestamp
+  required_groups: [FIZ, YUR]
+  session_ambiguity: reject
+  group_revision_selection: greatest_exact_integer_seqnum
+  cross_group_seqnum_equality_required: false
+  shared_session_required: true
+  per_row_net_identity: exact
+  fiz_yur_net_balance: exact_zero
+  total_long_short_balance: exact
+  incomplete_or_unbalanced_latest_pair_older_fallback: forbidden
+  selected_source_records: preserve_exact_FIZ_YUR_keys_revisions_and_clocks
+  publication_audit_engine: moex_data.futures.futoi_publication_audit
+  audit_both_roots: true
+  rejected_pair_evidence: frozen_raw_and_publication_audit
+clocks:
+  source_event_and_publication_timezone: Europe/Moscow
+  stored_context_timezone: UTC
+  required_order: event_lte_publication_lte_full_response_receipt_lte_ingest_lte_validation
+  receipt_must_not_precede_refresh_start: true
+  candidate_validation_must_not_exceed_read_clock: true
+  date_freshness_does_not_prove_current_intraday_pair: true
+  existing_current_pair_ttl_and_governance: unchanged
+proof:
+  frozen_raw_quality_manifest_and_run_envelope: required
+  exact_raw_canonical_versioned_path_in_manifest: required
+  publication_run_id_binding: required
+  raw_and_metadata_sha256_verification: required
+  parquet_read_from_same_verified_byte_buffer: required
+  candidate_factual_equals_recomputed_raw_factual: required
+  candidate_equals_frozen_run_envelope: required
+  successful_publication_audit_matches_raw_provenance_and_factual: required
+  source_refetch_during_replay: forbidden
+  symlink_redirection: forbidden
+  reused_raw_run_metadata_slot: forbidden
+failure:
+  original_error_class_and_reason: preserved
+  source_date_observations_and_attempt_provenance: preserved_when_available
+  failed_current_attempt: explicit_FAILED_envelope_with_factual_null
+  old_success_relabelled_fresh: forbidden
+  prior_content_addressed_evidence: retained
+  persistence_or_failure_clock_error: explicit_not_success
+  si_cr_failures: independent
+authority:
+  source_candidate_self_grants_factual_authority: false
+  session_completion_proven: false
+  historical_pit_research_ready_claimed: false
+  model_usable: false
+  directional_authority: false
+  action_authority: false
+  standalone_buy_sell_authority: false
+  stage5_full_mode_ready: false
+  stage5_pointer_promotion_performed: false
+  existing_governance_and_cr_current_pair_limits: unchanged
+deployment:
+  fast_and_regular_role_wiring_complete: false
+  dated_and_statistics_reader_migration_complete: false
+  live_runtime_enabled: false
+  server_apply_requires_separate_authority: true
