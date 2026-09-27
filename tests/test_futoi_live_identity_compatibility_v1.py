@@ -384,6 +384,37 @@ def test_v2_run_slot_cannot_be_reused_for_another_instrument(monkeypatch, tmp_pa
     assert json.loads(path.read_text()) == payload
 
 
+@pytest.mark.parametrize("instrument", ["si_futures_family", "cr_futures_family"])
+@pytest.mark.parametrize("first_fails", [False, True])
+@pytest.mark.parametrize("metadata_left", ["both", "quality", "manifest"])
+def test_v2_same_identity_run_slot_never_refetches_or_overwrites(monkeypatch, tmp_path, instrument, first_fails, metadata_left):
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(materializer, "_registry_binding", lambda *args: _root_binding(instrument))
+    monkeypatch.setattr(materializer, "_utc_now_root", lambda: "2026-09-24T07:35:12+00:00")
+    def fetch(ticker, *args):
+        if first_fails:
+            raise TimeoutError("synthetic first-attempt timeout")
+        return _synthetic_root_pair(ticker), "https://synthetic.invalid/exact"
+    monkeypatch.setattr(materializer, "_fetch_exact", fetch)
+    args = dict(trade_date="2026-09-24", instrument_id=instrument, run_id="same_slot", raw_schema_version="v2")
+    if first_fails:
+        with pytest.raises(TimeoutError):
+            materializer.materialize_futoi_partition(**args)
+    else:
+        materializer.materialize_futoi_partition(**args)
+    quality = materializer._quality_path("2026-09-24", "same_slot", raw_schema_version="v2")
+    manifest = materializer._manifest_path("2026-09-24", "same_slot", raw_schema_version="v2")
+    # A partially written metadata pair also reserves the original run identity.
+    if metadata_left == "quality": manifest.unlink()
+    if metadata_left == "manifest": quality.unlink()
+    before = {str(path.relative_to(tmp_path)): path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    monkeypatch.setattr(materializer, "_fetch_exact", lambda *a: pytest.fail("reused run slot reached source"))
+    with pytest.raises(materializer.FutoiMaterializationError, match="run_id metadata slot already exists"):
+        materializer.materialize_futoi_partition(**args)
+    after = {str(path.relative_to(tmp_path)): path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    assert after == before
+
+
 # Reader-only migration fixtures are synthetic/reconstructed, not production replay.
 from moex_data.futures import futoi_delta_statistics_context as reader
 from moex_data.futures import futoi_live_factual_refresh_source_native as native

@@ -616,15 +616,7 @@ def _materialize_root_partition(
     manifest_path = _manifest_path(trade_date, run_id, raw_schema_version=RAW_SCHEMA_V2)
     for existing in (quality_path, manifest_path):
         if existing.exists():
-            try:
-                prior = json.loads(existing.read_text(encoding="utf-8"))
-            except (OSError, ValueError) as exc:
-                raise FutoiMaterializationError("existing v2 run metadata is unreadable") from exc
-            if (not isinstance(prior, Mapping)
-                    or prior.get("instrument_id") != instrument_id
-                    or prior.get("raw_schema_version") != RAW_SCHEMA_V2
-                    or prior.get("source_identity_scope") != ROOT_IDENTITY_SCOPE):
-                _fail("v2 run_id is already bound to incompatible source identity")
+            _fail("v2 run_id metadata slot already exists; use a new run_id")
     identity = {
         "dataset_id": DATASET_ID, "instrument_id": instrument_id,
         "source_id": SOURCE_ID, "source_ticker": ticker, "futoi_ticker": ticker,

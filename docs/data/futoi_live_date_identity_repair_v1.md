@@ -226,8 +226,21 @@ were occupied production ports, not stopped for testing. The existing authorized
 `moex-test-isolated` helper supplies a separate loopback namespace: **308 passed**
 (18.69s) across both main FUTOI test files and both MCP test files, including the six
 new snapshot refusal cases. All **210 tests** in the three final migrated files
-passed (61.50s). The final full **7,422-test** run and GitHub Python 3.11 checks
-are separate merge gates; actual final SHAs/results are recorded in PR #548.
+passed (61.50s). A subsequent full run finished with **7,421 passed, 1 failed,
+37 subtests passed** (920.43s): the remaining policy test correctly rejected
+tracked pytest/bytecode files modified inside the temporary test checkout. The
+final isolated checkout excludes generated caches from its Git baseline; the
+policy check is unchanged. Full-suite and GitHub Python 3.11 checks remain separate
+merge gates; actual final SHAs/results are recorded in PR #548.
+
+Inline review 4116398275 found that direct v2 materialization could reuse the same
+instrument/date/run ID and overwrite its existing attempt metadata. Any existing
+v2 quality or manifest slot now rejects before fetch or writes, even when its
+identity matches. V1 behavior is unchanged. Twelve real-file regressions cover
+Si/CR, successful/failed first attempts, and both/quality-only/manifest-only slots;
+they verify no fetch and byte-for-byte preservation of all retained evidence.
+Both main FUTOI files plus duplicate-retry, block-selection and publication-time
+materializer tests passed: **322 passed** (16.60s).
 
 Historical failed run 36126639359 has a check annotation stating that the hosted
 runner lost communication. Its job logs return BlobNotFound. This establishes the
