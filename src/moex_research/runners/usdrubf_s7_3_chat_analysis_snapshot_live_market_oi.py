@@ -286,11 +286,13 @@ def refresh_snapshot(
             through_date=through_date,
             run_id=run_id,
             now_fn=now_fn,
+            raw_schema_version="v2",
         )
         delta_bundle = current_context.delta_context.build_all(
             root=root,
             refresh_bundle=refresh_bundle,
             as_of=now,
+            raw_schema_version="v2",
         )
         producers = parallel_prefetch.prefetch_producers(
             base.bind_oil_history(calendar_bound_producers, previous),
@@ -301,8 +303,9 @@ def refresh_snapshot(
             previous=previous,
             producers=producers,
             data_root=root,
+            raw_schema_version="v2",
         )
-        current_context._attach_futoi_context(snapshot, refresh_bundle, delta_bundle)
+        current_context._attach_futoi_context(snapshot, refresh_bundle, delta_bundle, now=now_fn(), raw_schema_version="v2")
         live_snapshot = _load_live_or_unavailable(live_loader)
         attempted_at = _iso_now(lambda: now)
         attach_live_market_oi_context(

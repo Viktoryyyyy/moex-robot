@@ -380,7 +380,7 @@ def test_c1_real_capture_completion_bounds_canonical_generation(tmp_path,monkeyp
     monkeypatch.setattr(overlay.current_context.current,'current_producers',lambda:{})
     monkeypatch.setattr(overlay.current_context.context,'run_refresh_all',lambda **kwargs:{})
     monkeypatch.setattr(overlay.current_context.delta_context,'build_all',lambda **kwargs:{})
-    monkeypatch.setattr(overlay.current_context,'_attach_futoi_context',lambda *args:None)
+    monkeypatch.setattr(overlay.current_context,'_attach_futoi_context',lambda *args,**kwargs:None)
     monkeypatch.setattr(overlay.user_position,'attach_user_position_context',lambda *args,**kwargs:None)
     monkeypatch.setattr(overlay.futoi,'build_snapshot',lambda **kwargs:{
         'identity':{'generated_at_utc':NOW.isoformat()},'components':{},'authority':{},'analysis_views':{},'analysis_workflow':{}})
@@ -392,7 +392,8 @@ def test_c1_real_capture_completion_bounds_canonical_generation(tmp_path,monkeyp
     monkeypatch.setattr(m,'_capture',refused_source)
     written=[];monkeypatch.setattr(base,'_atomic_write',lambda path,value:written.append(value))
     final=NOW+timedelta(seconds=1 if reversed_completion else 3)
-    ticks=iter((NOW,NOW+timedelta(seconds=1),NOW+timedelta(seconds=2),final))
+    # FUTOI admission reads once before the historical-basis capture clocks.
+    ticks=iter((NOW,NOW,NOW+timedelta(seconds=1),NOW+timedelta(seconds=2),final))
     if reversed_completion:
         with pytest.raises(base.ChatAnalysisSnapshotError,match='precedes historical basis capture completion'):
             overlay.refresh_snapshot(now_fn=lambda:next(ticks),live_loader=lambda:{'status':'UNAVAILABLE'})

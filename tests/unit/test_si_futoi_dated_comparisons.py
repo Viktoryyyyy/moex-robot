@@ -698,7 +698,7 @@ def test_runner_refuses_generation_before_completed_si_attempt(tmp_path, monkeyp
     monkeypatch.setattr(live.current_context.context, "run_refresh_all", lambda **k: {})
     monkeypatch.setattr(live.current_context.delta_context, "build_all", lambda **k: {})
     monkeypatch.setattr(live.parallel_prefetch, "prefetch_producers", lambda *a, **k: {})
-    monkeypatch.setattr(live.current_context, "_attach_futoi_context", lambda *a: None)
+    monkeypatch.setattr(live.current_context, "_attach_futoi_context", lambda *a, **k: None)
     monkeypatch.setattr(live, "attach_live_market_oi_context", lambda *a, **k: None)
     monkeypatch.setattr(live, "attach_live_basis_carry_context", lambda *a, **k: None)
     monkeypatch.setattr(live.user_position, "attach_user_position_context", lambda *a, **k: None)
@@ -713,7 +713,8 @@ def test_runner_refuses_generation_before_completed_si_attempt(tmp_path, monkeyp
         return candidate()
     monkeypatch.setattr(integrated, "_capture_candidate", collect)
     monkeypatch.setattr(base, "_atomic_write", lambda *a: pytest.fail("regressed generation must not publish"))
-    ticks = iter(NOW + timedelta(seconds=n) for n in (0, 1, 3, 2))
+    # Preserve the reversed final clock, with one preceding admission read.
+    ticks = iter(NOW + timedelta(seconds=n) for n in (0, 0, 1, 3, 2))
     with pytest.raises(base.ChatAnalysisSnapshotError, match="precedes Si capture completion"):
         live.refresh_snapshot(now_fn=lambda: next(ticks), live_loader=lambda: {})
     assert snapshot[dated.STORE_KEY]["last_capture_attempt_at_utc"] == (NOW+timedelta(seconds=3)).isoformat()

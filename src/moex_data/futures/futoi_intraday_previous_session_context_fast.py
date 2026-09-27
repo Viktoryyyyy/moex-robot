@@ -12,6 +12,7 @@ from . import futoi_live_factual_refresh_source_native as source
 
 PROJECT = core.PROJECT
 SCHEMA_VERSION = core.SCHEMA_VERSION
+SCHEMA_VERSION_V2 = core.SCHEMA_VERSION_V2
 ARTIFACT_FILENAME = core.ARTIFACT_FILENAME
 SOURCE_LOOKBACK_DAYS = core.SOURCE_LOOKBACK_DAYS
 CURRENT_ROLE = core.CURRENT_ROLE
@@ -209,7 +210,14 @@ def run_refresh(
     run_id: str,
     timeout: float = 60.0,
     now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    raw_schema_version: str = "v1",
 ) -> dict[str, object]:
+    if source._raw_version(raw_schema_version) == "v2":
+        return core._run_root_context(
+            through_date=through_date, run_id=run_id, timeout=timeout, now_fn=now_fn,
+            instrument_id=instrument_id,
+            parallel=True,
+        )
     checked_through = source._iso_date(through_date, "through_date")
     checked_instrument = source._instrument_id(instrument_id)
     checked_run = source._safe_token(run_id, "run_id")
@@ -299,7 +307,13 @@ def run_refresh_all(
     run_id: str,
     timeout: float = 60.0,
     now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    raw_schema_version: str = "v1",
 ) -> dict[str, object]:
+    if source._raw_version(raw_schema_version) == "v2":
+        return core._run_root_context_all(
+            through_date=through_date, run_id=run_id, timeout=timeout, now_fn=now_fn,
+            parallel=True,
+        )
     checked_through = source._iso_date(through_date, "through_date")
     checked_run = source._safe_token(run_id, "run_id")
     root = source._data_root()
