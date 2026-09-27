@@ -134,7 +134,7 @@ def test_canonical_live_refresh_builds_and_attaches_real_delta_bundle() -> None:
     body = inspect.getsource(live_runner.refresh_snapshot)
     refresh_call = "current_context.context.run_refresh_all"
     delta_call = "current_context.delta_context.build_all"
-    attach_call = "current_context._attach_futoi_context(snapshot, refresh_bundle, delta_bundle)"
+    attach_call = 'current_context._attach_futoi_context(snapshot, refresh_bundle, delta_bundle, now=now_fn(), raw_schema_version="v2")'
     assert refresh_call in body
     assert delta_call in body
     assert attach_call in body

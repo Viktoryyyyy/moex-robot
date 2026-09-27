@@ -155,7 +155,7 @@ def test_slow_canonical_capture_finishes_after_hour_network_receipt(monkeypatch,
     monkeypatch.setattr(overlay.current_context.current, 'current_producers', lambda: {})
     monkeypatch.setattr(overlay.current_context.context, 'run_refresh_all', lambda **kwargs: {})
     monkeypatch.setattr(overlay.current_context.delta_context, 'build_all', lambda **kwargs: {})
-    monkeypatch.setattr(overlay.current_context, '_attach_futoi_context', lambda *args: None)
+    monkeypatch.setattr(overlay.current_context, '_attach_futoi_context', lambda *args, **kwargs: None)
     monkeypatch.setattr(overlay.user_position, 'attach_user_position_context', lambda *args, **kwargs: None)
     monkeypatch.setattr(overlay.futoi, 'build_snapshot', lambda **kwargs: {
         'identity': {'generated_at_utc': NOW.isoformat()}, 'components': {}, 'authority': {}, 'analysis_views': {}, 'analysis_workflow': {}})
@@ -163,7 +163,8 @@ def test_slow_canonical_capture_finishes_after_hour_network_receipt(monkeypatch,
     monkeypatch.setattr(base, '_atomic_write', lambda path, value: written.update(snapshot=value))
     # This fixture owns the hour network and acceptance clocks; C1 is tested separately.
     monkeypatch.setattr('moex_data.rub_historical_basis_carry_context.capture_snapshot', lambda *args, **kwargs: None)
-    ticks = iter(NOW + timedelta(seconds=n) for n in range(6))
+    # FUTOI admission now reads the clock once before the hour acquisitions.
+    ticks = iter(NOW + timedelta(seconds=n) for n in range(7))
     def acquire(**kwargs):
         requested = kwargs['now_fn'](); received = kwargs['now_fn']()
         value = acquisition(now=received)
@@ -174,10 +175,10 @@ def test_slow_canonical_capture_finishes_after_hour_network_receipt(monkeypatch,
     monkeypatch.setattr(source, 'acquire', acquire)
     value, _ = overlay.refresh_snapshot(now_fn=lambda: next(ticks), live_loader=lambda: {'status': 'UNAVAILABLE'})
     frame = value['accepted_dated_slow']['frames'][value['accepted_dated_slow']['selections'][source.PURPOSE]]
-    assert frame['received_at_utc'] == (NOW + timedelta(seconds=2)).isoformat()
-    assert frame['accepted_at_utc'] == value['identity']['generated_at_utc'] == (NOW + timedelta(seconds=5)).isoformat()
+    assert frame['received_at_utc'] == (NOW + timedelta(seconds=3)).isoformat()
+    assert frame['accepted_at_utc'] == value['identity']['generated_at_utc'] == (NOW + timedelta(seconds=6)).isoformat()
     cny = value['accepted_dated_slow']['frames'][value['accepted_dated_slow']['selections']['timeframe:observed_1H.CNYRUBF']]
-    assert cny['received_at_utc'] == (NOW + timedelta(seconds=4)).isoformat()
+    assert cny['received_at_utc'] == (NOW + timedelta(seconds=5)).isoformat()
     assert cny['accepted_at_utc'] == frame['accepted_at_utc']
     assert written['snapshot'] is value
 

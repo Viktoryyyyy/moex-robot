@@ -705,6 +705,8 @@ def test_reader_parquet_native_proof_and_normalized_previous_replay(monkeypatch,
     assert kept == proof
     previous = {
         "status": "AVAILABLE", "expected_trade_date": "2026-09-24",
+        "raw_schema_version": "v2", "source_identity_scope": native.ROOT_IDENTITY_SCOPE,
+        "instrument_id": instrument, "source_id": native.SOURCE_ID, "source_ticker": ticker,
         "factual": reader._normalized_factual(full, field="previous", raw_schema_version="v2"),
         "provenance": proof,
     }
@@ -756,3 +758,61 @@ def test_reader_normalizer_refuses_invalid_selected_record_identity(field, value
     fact["selected_source_records"]["FIZ"][field] = value
     with pytest.raises((reader.FutoiDeltaStatisticsError, native.FutoiSourceNativeRefreshError)):
         reader._normalized_factual(fact, field="records", raw_schema_version="v2")
+
+
+@pytest.mark.parametrize("field,value", [
+    ("raw_schema_version", None), ("raw_schema_version", "v1"),
+    ("source_identity_scope", None), ("source_identity_scope", "contract"),
+    ("instrument_id", "cr_futures_family"), ("instrument_id", None),
+    ("source_id", "wrong"), ("source_id", None),
+    ("source_ticker", "cr"), ("source_ticker", None), ("secid", "SiU6"),
+])
+def test_previous_external_identity_cannot_be_repaired_by_copied_inner_proof(monkeypatch, tmp_path, field, value):
+    previous = {"status": "AVAILABLE", "expected_trade_date": "2026-09-24",
+        "instrument_id": "si_futures_family", "source_id": native.SOURCE_ID,
+        "source_ticker": "si", "raw_schema_version": "v2", "source_identity_scope": native.ROOT_IDENTITY_SCOPE,
+        "factual": reader._normalized_factual(_reader_fact(), field="test", raw_schema_version="v2"),
+        "provenance": {"accepted_state_kind": "source_native_exact_date_raw_quality_pass"}}
+    if value is None:
+        previous.pop(field)
+    else:
+        previous[field] = value
+    monkeypatch.setattr(reader, "_replay_root_raw_factual", lambda *a, **k: pytest.fail("bad envelope reached replay"))
+    monkeypatch.setattr(reader, "_raw_factual", lambda *a, **k: pytest.fail("bad envelope fell back"))
+    result = reader._factual_for_date(tmp_path, instrument_id="si_futures_family", trade_date="2026-09-24",
+        previous=previous, eod=object(), eod_provenance={}, raw_schema_version="v2")
+    assert result["status"] == "UNAVAILABLE"
+    assert result["reason"] == "selected_v2_previous_failed_revalidation"
+
+
+@pytest.mark.parametrize("instrument", native.LIVE_INSTRUMENT_IDS)
+def test_statistics_roundtrip_keeps_exact_root_and_revision_identity(tmp_path, instrument):
+    from moex_data import rub_futoi_observed_statistics_core as core
+    _reader_parquet(tmp_path, instrument)
+    loaded = reader._raw_factual(tmp_path, instrument_id=instrument, trade_date="2026-09-24", raw_schema_version="v2")
+    fact, provenance = dated._freeze_raw_fact(tmp_path, loaded["provenance"], "2026-09-24",
+        normalized=True, instrument_id=instrument, raw_schema_version="v2")
+    proof = {"source_kind": "canonical_raw", "provenance": provenance,
+             **dated._statistics_root_identity(fact, provenance)}
+    row = core._encode_row(fact, dated._digest(proof))
+    restored = dated._restore_statistics_identity(core._decode_row(row), proof, instrument_id=instrument)
+    for key in ("raw_schema_version", "source_identity_scope", "source_ticker", "sess_id", "selected_source_records"):
+        assert restored[key] == fact[key]
+    assert restored["selected_source_records"]["YUR"]["seqnum"] == 2**53 + 1
+    identity = proof["factual_identity"]
+    initial = dated._economic_identity(identity)
+    identity["selected_source_records"]["YUR"]["availability_ts_utc"] = "2026-09-24T10:00:00Z"
+    identity["selected_source_records"]["YUR"]["ingest_ts_utc"] = "2026-09-24T10:00:01Z"
+    assert dated._economic_identity(identity) == initial
+    identity["selected_source_records"]["YUR"]["seqnum"] += 1
+    assert dated._economic_identity(identity) != initial
+    proof["factual_identity"]["source_ticker"] = "wrong"
+    with pytest.raises(ValueError, match="identity_mismatch"):
+        dated._restore_statistics_identity(core._decode_row(row), proof, instrument_id=instrument)
+
+
+def test_cr_statistics_selected_v2_missing_does_not_fallback_to_eod(tmp_path):
+    from moex_data import rub_cr_futoi_observed_statistics as statistics
+    row, proof = statistics._source_row(tmp_path, "2026-09-24", object(), {}, None,
+        pd.Timestamp("2026-09-25T08:00:00Z").to_pydatetime(), raw_schema_version="v2")
+    assert row["status"] == "UNAVAILABLE" and row["values"] is None and proof is None

@@ -291,7 +291,7 @@ path_rules:
 
 # Additive opt-in contract. Existing v1 declarations and acceptance are unchanged.
 futoi_live_raw_v2:
-  status: producer_only_runtime_wiring_not_enabled
+  status: explicit_v2_live_callers_enabled
   producer_ref: src/moex_data/futures/materialize_futoi_instrument.py
   api_opt_in:
     argument: raw_schema_version
@@ -316,12 +316,12 @@ futoi_live_raw_v2:
   raw_quality_implies_pair_admission: false
   accepted_pointer_promotion: false
   historical_backfill_authorized: false
-  live_runtime_enabled: false
+  live_runtime_enabled: true
   model_or_trade_authority: false
 
-# Native completed-date prerequisite only; fast/regular runtime wiring remains separate.
+# Explicit completed-date refresh; current/previous roles retain separate admission.
 futoi_source_native_context_v2:
-  status: opt_in_native_completed_date_and_candidate_reader_only
+  status: explicit_v2_completed_date_refresh_and_snapshot
   contract_ref: contracts/datasets/futoi_live_factual_context.v2.yaml
   producer_ref: src/moex_data/futures/futoi_live_factual_refresh_source_native.py
   candidate_reader_ref: src/moex_research/runners/usdrubf_s7_3_chat_analysis_snapshot_futoi.py
@@ -339,11 +339,11 @@ futoi_source_native_context_v2:
   frozen_v1_rewrite_allowed: false
   source_candidate_self_grants_authority: false
   stage5_pointer_promotion: false
-  live_runtime_enabled: false
+  live_runtime_enabled: true
 
-# Additive role-envelope declaration; consumers and service callers still use v1.
+# Explicit live role envelopes; historical default APIs remain v1.
 futoi_intraday_context_v2:
-  status: opt_in_role_refresh_only_runtime_wiring_not_enabled
+  status: explicit_v2_fast_regular_snapshot_and_admitted_readers
   contract_ref: contracts/datasets/futoi_intraday_previous_session_context.v2.yaml
   producer_ref: src/moex_data/futures/futoi_intraday_previous_session_context.py
   fast_producer_ref: src/moex_data/futures/futoi_intraday_previous_session_context_fast.py
@@ -362,6 +362,6 @@ futoi_intraday_context_v2:
   role_failure_isolation: true
   instrument_failure_isolation: true
   retention_policy: prior_frozen_evidence_only_no_factual_fallback
-  live_runtime_enabled: false
+  live_runtime_enabled: true
   stage5_pointer_promotion: false
   model_or_trade_authority: false

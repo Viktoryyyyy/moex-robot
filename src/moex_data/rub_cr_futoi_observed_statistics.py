@@ -46,11 +46,13 @@ def _grant(value):
 
 
 def _proof(value):
-    if not isinstance(value, dict) or set(value) != {"source_kind", "provenance"}:
+    if not isinstance(value, dict) or set(value) not in ({"source_kind", "provenance"}, {"source_kind", "provenance", "factual_identity"}):
         raise ValueError("cr_statistics_proof_shape")
     if value["source_kind"] == "excluded_raw":
         p = value["provenance"]
-        if set(p) != {"raw_partition_ref", "raw_partition_sha256"}: raise ValueError("cr_statistics_excluded_proof_shape")
+        if p.get("raw_schema_version") == "v2":
+            common._check_root_evidence_identity(p, instrument_id=PROFILE.instrument_id)
+        if p.get("raw_schema_version") != "v2" and set(p) != {"raw_partition_ref", "raw_partition_sha256"}: raise ValueError("cr_statistics_excluded_proof_shape")
         common._ref(p["raw_partition_ref"]); common._hash(p["raw_partition_sha256"])
     elif value["source_kind"] in ("canonical_raw", "accepted_eod"):
         common._proof(value)
@@ -81,6 +83,7 @@ def _validate_rows(e, cutoff):
             raise ValueError("cr_statistics_exact_integer_columns")
         if not isinstance(row["clocks"], dict) or set(row["clocks"]) != set(core.CLOCKS): raise ValueError("cr_statistics_clock_inventory")
         fact = core._decode_row(row)
+        fact = common._restore_statistics_identity(fact, p, instrument_id=PROFILE.instrument_id)
         dated._valid_record(dated._record(fact, p["source_kind"], p["provenance"], day), day, cutoff)
         facts[day] = fact
     if used != set(proofs): raise ValueError("cr_statistics_unused_proof")
@@ -217,14 +220,18 @@ def attach_consumer(snapshot, consumers, *, now):
     consumers["futoi_context"]["futoi_live_cr"]["observed_statistics"] = describe(snapshot, now=now)
 
 
-def _source_row(root, day, eod, eod_proof, eod_error, cutoff):
+def _source_row(root, day, eod, eod_proof, eod_error, cutoff, *, raw_schema_version="v1", previous=None):
     from moex_data.futures import futoi_delta_statistics_context as engine
     from moex_data.futures import futoi_live_factual_refresh_source_native as source
     row = {"trade_date": day, "status": "UNAVAILABLE", "values": None, "clocks": None, "proof_id": None, "reason": None}
     proof = None; source_rejection = None
     try:
-        loaded = engine._raw_factual(root, instrument_id=PROFILE.instrument_id, trade_date=day)
-        if loaded.get("reason") == "canonical_raw_partition_missing":
+        version_args = {"raw_schema_version": raw_schema_version} if raw_schema_version != "v1" else {}
+        loaded = (engine._factual_for_date(root, instrument_id=PROFILE.instrument_id, trade_date=day,
+                    previous=previous, eod=None, eod_provenance=None, raw_schema_version="v2")
+                  if raw_schema_version == "v2" and previous is not None else
+                  engine._raw_factual(root, instrument_id=PROFILE.instrument_id, trade_date=day, **version_args))
+        if raw_schema_version == "v1" and loaded.get("reason") == "canonical_raw_partition_missing":
             if eod_error is not None: raise eod_error
             selected = eod.loc[eod["trade_date"].astype(str).eq(day)] if eod is not None else []
             if len(selected) != 1: raise ValueError("exact_cr_raw_and_eod_date_missing_or_duplicate")
@@ -238,6 +245,11 @@ def _source_row(root, day, eod, eod_proof, eod_error, cutoff):
                 if not p: raise ValueError("cr_statistics_raw_rejection_proof_missing")
                 common._check_source_refs(root, p, ("raw_partition",))
                 frozen = source._freeze_artifact(root, root/p["raw_partition_ref"][len("${MOEX_DATA_ROOT}/"):], p["raw_partition_sha256"])
+                if raw_schema_version == "v2":
+                    p = deepcopy(p)
+                    p["raw_partition_ref"] = source._rooted_ref(root, frozen)
+                    proof = {"source_kind": "excluded_raw", "provenance": p}
+                    raise ValueError(source_rejection)
                 p = {"raw_partition_ref": source._rooted_ref(root, frozen), "raw_partition_sha256": p["raw_partition_sha256"]}
                 frame = common._verified_frame(root, p, "raw_partition")
                 identity = source.source_identity(PROFILE.instrument_id)
@@ -254,9 +266,9 @@ def _source_row(root, day, eod, eod_proof, eod_error, cutoff):
                 source_rejection = None
                 proof = {"source_kind": "canonical_raw", "provenance": p}
             else:
-                fact, p = common._freeze_raw_fact(root, loaded["provenance"], day, normalized=True, instrument_id=PROFILE.instrument_id)
+                fact, p = common._freeze_raw_fact(root, loaded["provenance"], day, normalized=True, instrument_id=PROFILE.instrument_id, **version_args)
                 if fact != loaded["factual"]: raise ValueError("cr_statistics_frozen_raw_fact_mismatch")
-                proof = {"source_kind": "canonical_raw", "provenance": p}
+                proof = {"source_kind": "canonical_raw", "provenance": p, **common._statistics_root_identity(fact, p)}
         dated._valid_record(dated._record(fact, proof["source_kind"], proof["provenance"], day), day, cutoff)
         _proof(proof); row = core._encode_row(fact, common._digest(proof))
     except Exception as exc:
@@ -273,8 +285,14 @@ def _capture(snapshot, cutoff):
     if linked["status"] != "AVAILABLE": raise ValueError("cr_statistics_linked_dated_unavailable: "+linked["reason"])
     body = snapshot["components"]["futoi_live_cr"]["data"]
     if body.get("instrument_id") != PROFILE.instrument_id or body.get("source_id") != dated.SOURCE: raise ValueError("cr_statistics_source_identity")
+    version = common._selected_raw_version(body, instrument_id=PROFILE.instrument_id)
+    version_args = {"raw_schema_version": version} if version == "v2" else {}
     context = {**body["context_refresh"], engine.session_context.PREVIOUS_ROLE: body.get("previous_completed_session"), engine.session_context.CURRENT_ROLE: body.get("current_intraday")}
     root = source._data_root(); witness = engine._observed_witness(root, as_of=cutoff, raw_context=context)
+    if version == "v2":
+        version_args["previous"] = engine._context_record(body.get("previous_completed_session"),
+            expected_trade_date=body["context_refresh"].get("previous_observed_trade_date"),
+            role=engine.session_context.PREVIOUS_ROLE, raw_schema_version="v2", instrument_id=PROFILE.instrument_id, root=root)
     common._check_source_refs(root, witness["provenance"], ("partition", "manifest", "quality_report"))
     frame = common._verified_frame(root, witness["provenance"], "partition")
     anchor = linked["dated"]["anchor"]["trade_date"]
@@ -287,7 +305,7 @@ def _capture(snapshot, cutoff):
     except Exception as exc: eod_error = exc
     rows, proofs = [], {}
     for day in slots:
-        row, proof = _source_row(root, day, eod, eod_proof, eod_error, cutoff); rows.append(row)
+        row, proof = _source_row(root, day, eod, eod_proof, eod_error, cutoff, **version_args); rows.append(row)
         if proof is not None: proofs[row["proof_id"]] = proof
     return {"schema_version": SCHEMA, "instrument_id": PROFILE.instrument_id, "source_id": dated.SOURCE, "policy": POLICY,
         "admission_at_acceptance": deepcopy(snapshot[GRANT_KEY]), "linked_dated_evidence_sha256": linked["evidence_sha256"],
@@ -300,6 +318,7 @@ def _semantic(e):
     return {"linked": e["linked_dated_evidence_sha256"], "slots": e["slots"], "grant": e["admission_at_acceptance"]["artifact_sha256"],
         "current_date": e["observed_date_witness"]["current_observed_trade_date"],
         "rows": [{"trade_date": r["trade_date"], "status": r["status"], "values": r["values"],
+            **common._statistics_semantic_identity(e, r),
             "excluded_source_sha256": e["proofs"][r["proof_id"]]["provenance"].get("raw_partition_sha256") if r["status"] == "UNAVAILABLE" and r["proof_id"] is not None else None,
             "source_clocks": {key: r["clocks"][key] for key in ("snapshot_ts", "source_publication_time")} if r["clocks"] else None} for r in e["rows"]]}
 

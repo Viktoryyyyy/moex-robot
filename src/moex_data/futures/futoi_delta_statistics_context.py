@@ -275,7 +275,11 @@ def _context_record(
     *,
     expected_trade_date: str | None,
     role: str,
+    raw_schema_version: str = "v1",
+    instrument_id: str | None = None,
+    root: Path | None = None,
 ) -> dict[str, object]:
+    version = source._raw_version(raw_schema_version)
     if not isinstance(record, Mapping):
         return {
             "status": "UNAVAILABLE",
@@ -286,11 +290,30 @@ def _context_record(
             "reason": "context_record_missing",
         }
     factual = record.get("factual")
+    replay_error = None
     exact_fresh = (
         record.get("status") == "FRESH"
         and isinstance(factual, Mapping)
         and factual.get("trade_date") == expected_trade_date
     )
+    if version == "v2":
+        identity = _root_raw_identity(instrument_id)
+        exact_fresh = exact_fresh and "secid" not in record and all(
+            record.get(key) == identity[key]
+            for key in ("instrument_id", "source_id", "source_ticker", "raw_schema_version", "source_identity_scope")
+        )
+        if exact_fresh:
+            try:
+                if root is None:
+                    _fail("v2 context replay requires a data root")
+                replayed = source.replay_root_factual(root, record.get("provenance"),
+                    instrument_id=instrument_id, trade_date=expected_trade_date)
+                if factual != replayed:
+                    _fail("v2 context fact differs from frozen publication evidence")
+                _normalized_factual(factual, field=role, raw_schema_version=version)
+            except Exception as exc:
+                replay_error = exc
+                exact_fresh = False
     if not exact_fresh:
         retained_trade_date = (
             str(factual.get("trade_date"))
@@ -307,14 +330,18 @@ def _context_record(
             "refresh_error": record.get("refresh_error"),
             "factual": None,
             "retained_provenance": record.get("provenance"),
+            **({"failed_attempt_evidence": record.get("failed_attempt_evidence") or record.get("provenance"),
+                "revalidation_error_class": type(replay_error).__name__ if replay_error else None,
+                "revalidation_error": str(replay_error) if replay_error else None} if version == "v2" else {}),
             "missing_or_stale_must_not_be_interpreted_as_zero_or_neutral": True,
         }
     return {
         "status": "AVAILABLE",
         "role": role,
         "expected_trade_date": expected_trade_date,
-        "factual": _normalized_factual(factual, field=role),
+        "factual": _normalized_factual(factual, field=role, raw_schema_version=version),
         "provenance": record.get("provenance"),
+        **({key: identity[key] for key in ("instrument_id", "source_id", "source_ticker", "raw_schema_version", "source_identity_scope")} if version == "v2" else {}),
     }
 
 
@@ -712,8 +739,15 @@ def build_instrument_context(
     instrument_id: str,
     raw_context: Mapping[str, object],
     as_of: datetime,
+    raw_schema_version: str = "v1",
 ) -> dict[str, object]:
+    version = source._raw_version(raw_schema_version)
     checked_instrument = source._instrument_id(instrument_id)
+    if version == "v2":
+        expected_identity = {key: _root_raw_identity(checked_instrument)[key] for key in (
+            "instrument_id", "source_id", "source_ticker", "raw_schema_version", "source_identity_scope")}
+        if "secid" in raw_context or any(raw_context.get(k) != v for k, v in expected_identity.items()):
+            _fail("v2 delta context envelope identity mismatch")
     witness = _observed_witness(root, as_of=as_of, raw_context=raw_context)
     raw_dates = witness["observed_trade_dates"]
     if isinstance(raw_dates, (str, bytes)) or not isinstance(raw_dates, Sequence):
@@ -726,13 +760,19 @@ def build_instrument_context(
         raw_context.get(session_context.CURRENT_ROLE),
         expected_trade_date=current_date,
         role=session_context.CURRENT_ROLE,
+        raw_schema_version=version, instrument_id=checked_instrument, root=root,
     )
     previous = _context_record(
         raw_context.get(session_context.PREVIOUS_ROLE),
         expected_trade_date=previous_date,
         role=session_context.PREVIOUS_ROLE,
+        raw_schema_version=version, instrument_id=checked_instrument, root=root,
     )
-    eod, eod_provenance = _accepted_eod(root, instrument_id=checked_instrument, as_of=as_of)
+    if version == "v2":
+        # Selected root history must not borrow legacy EOD or depend on its presence.
+        eod, eod_provenance = pd.DataFrame(columns=["trade_date"]), None
+    else:
+        eod, eod_provenance = _accepted_eod(root, instrument_id=checked_instrument, as_of=as_of)
     current_index = observed_dates.index(current_date) if current_date is not None else -1
     lag_targets: dict[int, str | None] = {}
     baselines: dict[int, dict[str, object]] = {}
@@ -757,13 +797,17 @@ def build_instrument_context(
                 previous=previous,
                 eod=eod,
                 eod_provenance=eod_provenance,
+                raw_schema_version=version,
             )
     deltas = {
         "delta_1d": _delta(current, baselines[1], lag=1, target_trade_date=lag_targets[1]),
         "delta_5d": _delta(current, baselines[5], lag=5, target_trade_date=lag_targets[5]),
         "delta_20d": _delta(current, baselines[20], lag=20, target_trade_date=lag_targets[20]),
     }
-    statistics = _statistics(current=current, eod=eod, witness_dates=observed_dates)
+    statistics = (_statistics(current=current, eod=eod, witness_dates=observed_dates) if version == "v1" else {
+        "status": "UNAVAILABLE", "reason": "selected_v2_uses_separately_admitted_observed_statistics",
+        "raw_schema_version": "v2", "factual_authority": False,
+    })
     statuses = [
         str(current.get("status")),
         str(previous.get("status")),
@@ -776,6 +820,7 @@ def build_instrument_context(
         "project": PROJECT,
         "status": overall,
         "instrument_id": checked_instrument,
+        **({key: _root_raw_identity(checked_instrument)[key] for key in ("source_id", "source_ticker", "raw_schema_version", "source_identity_scope")} if version == "v2" else {}),
         "contract_ref": CONTRACT_REF,
         "current": current,
         "previous_observed_session": previous,
@@ -791,8 +836,8 @@ def build_instrument_context(
             "dataset_id": EOD_DATASET_ID,
             "provenance": eod_provenance,
             "row_count": int(len(eod.index)),
-            "min_trade_date": str(eod["trade_date"].min()),
-            "max_trade_date": str(eod["trade_date"].max()),
+            "min_trade_date": str(eod["trade_date"].min()) if len(eod.index) else None,
+            "max_trade_date": str(eod["trade_date"].max()) if len(eod.index) else None,
             "historical_stage5_outputs_supply_live_factual_authority": False,
         },
         "factual_authority": False,
@@ -812,7 +857,9 @@ def build_all(
     root: Path,
     refresh_bundle: Mapping[str, object],
     as_of: datetime,
+    raw_schema_version: str = "v1",
 ) -> dict[str, object]:
+    version = source._raw_version(raw_schema_version)
     raw_results = refresh_bundle.get("instrument_results")
     if not isinstance(raw_results, Mapping):
         _fail("FUTOI refresh bundle instrument_results is missing")
@@ -828,6 +875,7 @@ def build_all(
                 instrument_id=instrument_id,
                 raw_context=raw_context,
                 as_of=as_of,
+                **({"raw_schema_version": version} if version == "v2" else {}),
             )
         except Exception as exc:
             result = {
@@ -999,7 +1047,12 @@ def _root_factual_for_date(
         if (previous.get("status") != "AVAILABLE" or not isinstance(factual, Mapping)
                 or factual.get("trade_date") != trade_date
                 or previous.get("expected_trade_date") != trade_date
-                or previous.get("raw_schema_version", "v2") != "v2"):
+                or previous.get("raw_schema_version") != "v2"
+                or previous.get("source_identity_scope") != source.ROOT_IDENTITY_SCOPE
+                or previous.get("instrument_id") != instrument_id
+                or previous.get("source_id") != source.SOURCE_ID
+                or previous.get("source_ticker") != source.ROOT_TICKERS[instrument_id]
+                or "secid" in previous):
             _fail("selected v2 previous context is not exact and fresh")
         proof = previous.get("provenance")
         if not isinstance(proof, Mapping) or proof.get("accepted_state_kind") != "source_native_exact_date_raw_quality_pass":
@@ -1017,8 +1070,9 @@ def _root_factual_for_date(
         # Do not hide an explicit failed attempt with an older canonical file.
         return {
             "status": "UNAVAILABLE", "trade_date": trade_date, "factual": None,
-            "provenance": previous.get("provenance"),
+            "provenance": previous.get("provenance") or previous.get("failed_attempt_evidence") or previous.get("retained_provenance"),
             "reason": "selected_v2_previous_failed_revalidation",
             "error_class": type(exc).__name__, "error": str(exc),
+            "source_refusal": {key: previous.get(key) for key in ("refresh_error_class", "refresh_error", "revalidation_error_class", "revalidation_error")},
             "raw_schema_version": "v2", "source_identity_scope": source.ROOT_IDENTITY_SCOPE,
         }

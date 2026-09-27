@@ -4,7 +4,7 @@ artifact_class: external_pattern
 format: json
 schema_version: futoi_live_factual_refresh_source_native.v2
 raw_schema_version: v2
-status: opt_in_native_completed_date_and_candidate_reader_only
+status: explicit_v2_completed_date_refresh_and_snapshot
 producer: moex_data.futures.futoi_live_factual_refresh_source_native
 consumer: src.moex_research.runners.usdrubf_s7_3_chat_analysis_snapshot_futoi
 storage_root_ref: MOEX_DATA_ROOT
@@ -96,5 +96,5 @@ authority:
 deployment:
   fast_and_regular_role_wiring_complete: false
   dated_and_statistics_reader_migration_complete: false
-  live_runtime_enabled: false
+  live_runtime_enabled: true
   server_apply_requires_separate_authority: true

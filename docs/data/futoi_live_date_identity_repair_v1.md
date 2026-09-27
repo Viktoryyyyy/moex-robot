@@ -139,3 +139,81 @@ The Si +6 newest pair must fail with no tolerance, rounding, older balanced pair
 Instrument registry/automatic roll, generic observed-date resolver changes, old v1 source/raw contracts, registry-stack cleanup, Stage3/4/5/7/10 orchestration, governance grants, accepted pointers, historical backfill/migration, Brent/oil, trading/model permission, server commands/apply, production API probes and refresh runs.
 
 Keep issue #547 open until its required code and separately authorized operational acceptance are established. Do not claim that merge alone changes server state.
+
+## Owner-authorized continuation, 2026-09-27
+
+The owner separately authorized finishing this PR, independent final-head review,
+successful final-head CI, guarded merge of PR #548 and exact merged-SHA server apply
+with minimal native FUTOI/snapshot refresh. These operational stages supersede the
+original change-only operational exclusion above; unrelated service/data policy stays
+out of scope. No second implementation task was dispatched. The prior automated
+execution reported DONE/NOT_PUBLISHED in issuecomment-5857941646; its local commit
+was not imported. Work resumed from published head
+`33dc068a0f1394b5867f0a83bb7096bcab8b48cf`, base
+`748462b282441b362e43bed1c07b565b97f681ac`.
+
+Scope amendments recorded by the owner:
+
+- `src/moex_research/runners/usdrubf_s7_3_chat_analysis_snapshot_live_market_oi.py`:
+  explicit v2 FUTOI calls only (issuecomment-5819295974).
+- `src/moex_data/step10_rub_refresh_entrypoint.py`: explicit v2 native refresh and
+  matching failure schema only, preserving nonblocking Stage7 behavior.
+- `src/moex_data/rub_si_futoi_observed_statistics.py` and
+  `src/moex_data/rub_cr_futoi_observed_statistics.py`: version/identity propagation,
+  frozen replay and refusal evidence, no selected-v2 fallback or governance expansion
+  (owner's explicit approval in the current execution; issuecomment-5858024651).
+- `tests/test_rub_dated_hour_source.py` and
+  `tests/test_usdrubf_s7_3_chat_analysis_snapshot_current_context_delta.py`: owner
+  approved minimal migration of the old FUTOI mock/call expectation to explicit
+  version and admission clock arguments; retain clock-causality and call-order checks.
+
+The complete-checkout caller/serializer preflight found the regular snapshot runner,
+fast live-market runner and independent Step10 FUTOI call. Their root-v2 selection is
+now explicit through producer, native snapshot reader, delta builder and attachment.
+Si/CR dated and statistics captures receive the selected version and preserve exact
+root/session/revision identity through retained and compact-row serialization.
+Default v1 APIs and their historical bytes, pointers, keys and hashes stay unchanged.
+The isolated v2 declarations now truthfully mark explicit live callers enabled.
+
+Review 5316858234 / inline 4103857780 is addressed by requiring the complete explicit
+outer previous identity before replay. Copied factual/provenance cannot repair a
+missing version, wrong instrument/source/ticker/scope or contract SECID. Native replay
+requires the complete hashed publication audit as well as raw/quality/manifest bytes.
+Replay errors and selected-role failed-attempt evidence remain diagnosable; an
+explicit selected failure cannot fall back to an earlier canonical partition/EOD.
+Current and previous admission are independently attached per instrument. CR keeps
+its existing current-pair-only audit/TTL authority and separate dated/statistics grants.
+
+Independent preliminary review additionally found nested receipt/ingest clocks in
+economic identity comparisons. Retention now ignores receipt-only changes at both
+levels while preserving source event/publication/session/revision changes. Statistics
+proofs carry the revision identity that the compact numeric row format cannot encode.
+No publication-audit engine, current-pair authority engine or grant was changed.
+
+Validation uses normal imports and real PyArrow Parquet in an isolated Linux checkout
+with a separate temporary data root and cleaned environment. The two allowed test
+files cover source-native plus regular/fast real refresh to saved snapshot/consumer,
+both role-failure directions, Si/CR isolation, strict reconstructed +6 with an older
+balanced pair present, full audit corruption, explicit outer identity, large IDs,
+v1 compatibility, dated/statistics capture and repeated-observation first acceptance.
+Fixtures are synthetic/reconstructed, not production replay. Full compileall/pytest,
+independent exact published-head review, exact-head CI and operational results must
+be recorded with actual SHAs in PR #548; this document does not certify pending gates.
+
+Confirmed prepublication validation: **305 passed** (17.93s, Python 3.12,
+PyArrow 24.0.0) using `PYTHONPATH=.:src pytest -q` with
+`tests/test_futoi_live_date_identity_repair_v1.py`,
+`tests/test_futoi_live_identity_compatibility_v1.py`,
+`tests/test_rub_dated_hour_source.py`, and
+`tests/test_usdrubf_s7_3_chat_analysis_snapshot_current_context_delta.py`.
+`python -m compileall -q src tests` and `git diff --check` passed. The full
+7,416-test run and fresh GitHub Python 3.11 checks are separate gates. Initial full
+run found four test failures corrected in the 305-test run: two new consumer
+attachment assertions and the two owner-approved legacy fixture migrations.
+
+Historical failed run 36126639359 has a check annotation stating that the hosted
+runner lost communication. Its job logs return BlobNotFound. This establishes the
+reported termination condition, not its underlying cause and not a code-test pass.
+Fresh final-head checks remain required. Overlapping PRs #369/#371 and their held
+shared-file lanes were inspected and left unchanged. No AGENTS.md or the two exact
+named v2 operating/parallel-lane documents were present in the complete checkout.

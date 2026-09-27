@@ -1,6 +1,6 @@
 contract_id: moex_algopack_futoi.v2
 schema_version: source_contract.v2
-status: opt_in_raw_producer_only
+status: explicit_v2_live_callers_with_v1_api_default
 source_id: moex_algopack_futoi
 source_system: moex_algopack
 source_kind: supplementary_futoi

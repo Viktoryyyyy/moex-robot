@@ -199,7 +199,11 @@ def _public_record(record):
     for side in ("fiz", "yur"):
         result["factual"][side] = {field: fact[side][field] for field in common.SIDE_FIELDS}
     proof = record["provenance"]
-    if record["source_kind"] == "accepted_eod":
+    if proof.get("raw_schema_version") == "v2":
+        result["factual"].update({key: deepcopy(fact[key]) for key in (
+            "raw_schema_version", "source_identity_scope", "source_ticker", "sess_id", "selected_source_records")})
+        result["provenance"] = deepcopy(proof)
+    elif record["source_kind"] == "accepted_eod":
         p = proof["accepted_pointer"]
         result["provenance"] = {"source_kind": proof["source_kind"], "accepted_pointer": {
             key: p[key] for key in ("acceptance_contract_id", *(prefix+suffix for prefix in ("partition", "manifest", "quality_report") for suffix in ("_ref", "_sha256")))}}
@@ -378,11 +382,15 @@ def _transient_read_failure(error):
     return False
 
 
-def _load_record(root, day, eod, eod_proof, cutoff, *, eod_error=None):
+def _load_record(root, day, eod, eod_proof, cutoff, *, eod_error=None, raw_schema_version="v1", previous=None):
     from moex_data.futures import futoi_delta_statistics_context as engine
     try:
-        loaded = engine._raw_factual(root, instrument_id=INSTRUMENT, trade_date=day)
-        if loaded.get("reason") == "canonical_raw_partition_missing":
+        version_args = {"raw_schema_version": raw_schema_version} if raw_schema_version != "v1" else {}
+        loaded = (engine._factual_for_date(root, instrument_id=INSTRUMENT, trade_date=day,
+                    previous=previous, eod=None, eod_provenance=None, raw_schema_version="v2")
+                  if raw_schema_version == "v2" and previous is not None else
+                  engine._raw_factual(root, instrument_id=INSTRUMENT, trade_date=day, **version_args))
+        if raw_schema_version == "v1" and loaded.get("reason") == "canonical_raw_partition_missing":
             if eod_error is not None:
                 raise eod_error
             rows = eod.loc[eod["trade_date"].astype(str).eq(day)] if eod is not None else []
@@ -394,7 +402,7 @@ def _load_record(root, day, eod, eod_proof, cutoff, *, eod_error=None):
                 if loaded.get("error_class") in ("OSError", "IOError", "PermissionError", "FileNotFoundError"):
                     raise OSError(loaded.get("error") or "raw_source_read_failed")
                 raise ValueError(loaded.get("reason") or "cr_latest_raw_pair_invalid_no_fallback")
-            fact, proof = common._freeze_raw_fact(root, loaded["provenance"], day, normalized=True, instrument_id=INSTRUMENT)
+            fact, proof = common._freeze_raw_fact(root, loaded["provenance"], day, normalized=True, instrument_id=INSTRUMENT, **version_args)
             if fact != loaded["factual"]: raise ValueError("cr_frozen_raw_fact_mismatch")
             result = _record(fact, "canonical_raw", proof, day)
         _valid_record(result, day, cutoff)
@@ -412,11 +420,17 @@ def _capture(snapshot, cutoff):
     _admission(artifact)
     body = snapshot["components"]["futoi_live_cr"]["data"]
     if body.get("instrument_id") != INSTRUMENT or body.get("source_id") != SOURCE: raise ValueError("cr_capture_source_identity")
+    version = common._selected_raw_version(body, instrument_id=INSTRUMENT)
+    version_args = {"raw_schema_version": version} if version == "v2" else {}
     expected = temporal._previous_witness(body["context_refresh"], cutoff)
     if expected is None: raise ValueError("cr_independent_previous_date_witness_unavailable")
     context = {**body["context_refresh"], engine.session_context.PREVIOUS_ROLE: body.get("previous_completed_session"),
                engine.session_context.CURRENT_ROLE: body.get("current_intraday")}
     root = source._data_root()
+    if version == "v2":
+        version_args["previous"] = engine._context_record(body.get("previous_completed_session"),
+            expected_trade_date=expected, role=engine.session_context.PREVIOUS_ROLE,
+            raw_schema_version="v2", instrument_id=INSTRUMENT, root=root)
     witness = engine._observed_witness(root, as_of=cutoff, raw_context=context)
     common._check_source_refs(root, witness["provenance"], ("partition", "manifest", "quality_report"))
     frame = common._verified_frame(root, witness["provenance"], "partition")
@@ -433,7 +447,7 @@ def _capture(snapshot, cutoff):
     return {"schema_version": SCHEMA, "instrument_id": INSTRUMENT, "source_id": SOURCE, "admission": artifact,
         "accepted_at_utc": cutoff.isoformat(), "causal_cutoff_at_utc": cutoff.isoformat(),
         "witness": {"dates": dates, "previous_observed_trade_date": expected, "current_observed_trade_date": witness.get("current_observed_trade_date"), "provenance": deepcopy(witness["provenance"])},
-        "records": [_load_record(root, day, eod, eod_proof, cutoff, eod_error=eod_error) for day in dates]}
+        "records": [_load_record(root, day, eod, eod_proof, cutoff, eod_error=eod_error, **version_args) for day in dates]}
 
 
 def _capture_current(snapshot, cutoff):
@@ -442,6 +456,7 @@ def _capture_current(snapshot, cutoff):
     root = source._data_root(); repo = Path(__file__).resolve().parents[2]
     body = snapshot["components"]["futoi_live_cr"]["data"]
     record = body["current_intraday"]
+    version = common._selected_raw_version(body, instrument_id=INSTRUMENT, role="current_intraday")
     governance_ref = "contracts/intelligence/usdrubf_futoi_live_acceptance_governance_v1.json"
     governance_bytes = (repo / governance_ref).read_bytes()
     governance = json.loads(governance_bytes)
@@ -457,9 +472,11 @@ def _capture_current(snapshot, cutoff):
         "evidence_ref": evidence_ref, "evidence_text": evidence_bytes.decode(), "evidence_sha256": sha256(evidence_bytes).hexdigest()}
     _validated_original_admission(original_admission)
     original = record["provenance"]
-    fact, proof = common._freeze_raw_fact(root, original, record["factual"]["trade_date"], normalized=False, instrument_id=INSTRUMENT)
+    fact, proof = common._freeze_raw_fact(root, original, record["factual"]["trade_date"], normalized=False, instrument_id=INSTRUMENT,
+                                        **({"raw_schema_version": version} if version == "v2" else {}))
     if fact != record["factual"]: raise ValueError("cr_current_frozen_byte_fact_mismatch")
-    proof.update(source_id=SOURCE, factual_validation="PASS")
+    if version == "v1":
+        proof.update(source_id=SOURCE, factual_validation="PASS")
     ref = original["publication_audit"]
     common._ref(ref["ref"]); common._hash(ref["sha256"])
     raw = (root / ref["ref"][len("${MOEX_DATA_ROOT}/"):]).read_bytes()
@@ -478,7 +495,7 @@ def _semantic(e):
     for record in records:
         record.pop("reason"); record.pop("provenance")
         if record["factual"]:
-            record["factual"].pop("availability_ts_utc", None); record["factual"].pop("ingest_ts_utc", None)
+            record["factual"] = common._economic_identity(record["factual"])
     return {"dates": e["witness"]["dates"], "current_date": e["witness"]["current_observed_trade_date"], "records": records,
             "admission_sha256": e["admission"]["artifact_sha256"]}
 
@@ -576,7 +593,11 @@ def verify_projection(snapshot, release, *, now):
         for side in ("fiz", "yur"):
             result["factual"][side] = {key: fact[side][key] for key in ("long", "short", "net", "long_participants", "short_participants")}
         proof = record["provenance"]
-        if record["source_kind"] == "accepted_eod":
+        if proof.get("raw_schema_version") == "v2":
+            result["factual"].update({key: deepcopy(fact[key]) for key in (
+                "raw_schema_version", "source_identity_scope", "source_ticker", "sess_id", "selected_source_records")})
+            result["provenance"] = deepcopy(proof)
+        elif record["source_kind"] == "accepted_eod":
             result["provenance"] = {"source_kind": "accepted_stage5_eod_historical_context_only", "accepted_pointer": {
                 key: proof["accepted_pointer"][key] for key in ("acceptance_contract_id", "partition_ref", "partition_sha256", "manifest_ref", "manifest_sha256", "quality_report_ref", "quality_report_sha256")}}
         else:

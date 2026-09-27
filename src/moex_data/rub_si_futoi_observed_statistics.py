@@ -72,11 +72,13 @@ def _decode_row(row):
 
 
 def _proof(value):
-    if not isinstance(value, dict) or set(value) != {"source_kind", "provenance"}:
+    if not isinstance(value, dict) or set(value) not in ({"source_kind", "provenance"}, {"source_kind", "provenance", "factual_identity"}):
         raise ValueError("statistics_proof_shape")
     if value["source_kind"] == "excluded_raw":
         p = value["provenance"]
-        if set(p) != {"raw_partition_ref", "raw_partition_sha256"}:
+        if p.get("raw_schema_version") == "v2":
+            dated._check_root_evidence_identity(p, instrument_id=dated.INSTRUMENT)
+        if p.get("raw_schema_version") != "v2" and set(p) != {"raw_partition_ref", "raw_partition_sha256"}:
             raise ValueError("excluded_source_proof_shape")
         dated._ref(p["raw_partition_ref"])
         dated._hash(p["raw_partition_sha256"])
@@ -164,6 +166,7 @@ def _admit(snapshot, now):
         elif any(row["clocks"][field] is not None for field in ("source_publication_time", "ingest_ts_utc")):
             raise ValueError("accepted_eod_original_clock_semantics")
         fact = _decode_row(row)
+        fact = dated._restore_statistics_identity(fact, proof, instrument_id=dated.INSTRUMENT)
         dated._fact(_record(fact, proof["source_kind"], proof["provenance"]), day, cutoff)
         facts[day] = fact
     if used != set(e["proofs"]): raise ValueError("statistics_unused_proof")
@@ -236,12 +239,18 @@ def _capture(snapshot, *, cutoff):
     from moex_data.futures import futoi_delta_statistics_context as engine
     from moex_data.futures import futoi_live_factual_refresh_source_native as source
     data = snapshot["components"]["futoi_live"]["data"]
+    version = dated._selected_raw_version(data, instrument_id=dated.INSTRUMENT)
+    version_args = {"raw_schema_version": version} if version == "v2" else {}
     if data.get("instrument_id") != dated.INSTRUMENT or data.get("source_id") != dated.SOURCE:
         raise ValueError("statistics_source_identity_mismatch")
     linked = dated.describe(snapshot.get(dated.STORE_KEY), now=cutoff, governance=data.get("governance"))
     if linked["status"] not in ("AVAILABLE", "PARTIAL"):
         raise ValueError("statistics_linked_anchor_not_available")
     root = source._data_root()
+    selected_previous = (engine._context_record(data.get("previous_completed_session"),
+        expected_trade_date=data["context_refresh"].get("previous_observed_trade_date"),
+        role=engine.session_context.PREVIOUS_ROLE, raw_schema_version="v2", instrument_id=dated.INSTRUMENT, root=root)
+        if version == "v2" else None)
     context = {**data["context_refresh"], engine.session_context.PREVIOUS_ROLE: data["previous_completed_session"],
                engine.session_context.CURRENT_ROLE: data.get("current_intraday")}
     witness = engine._observed_witness(root, as_of=cutoff, raw_context=context)
@@ -262,8 +271,10 @@ def _capture(snapshot, *, cutoff):
     for day in slots:
         row = {"trade_date": day, "status": "UNAVAILABLE", "values": None, "clocks": None, "proof_id": None, "reason": None}
         try:
-            loaded = engine._raw_factual(root, instrument_id=dated.INSTRUMENT, trade_date=day)
-            if loaded.get("reason") == "canonical_raw_partition_missing":
+            loaded = (engine._factual_for_date(root, instrument_id=dated.INSTRUMENT, trade_date=day,
+                previous=selected_previous, eod=None, eod_provenance=None, raw_schema_version="v2")
+                if version == "v2" else engine._raw_factual(root, instrument_id=dated.INSTRUMENT, trade_date=day))
+            if version == "v1" and loaded.get("reason") == "canonical_raw_partition_missing":
                 matches = eod.loc[eod["trade_date"].astype(str).eq(day)] if eod is not None else []
                 if len(matches) != 1:
                     raise ValueError("exact_raw_and_accepted_eod_date_missing_or_duplicate")
@@ -274,16 +285,16 @@ def _capture(snapshot, *, cutoff):
                 if loaded.get("status") != "AVAILABLE":
                     raw_proof = loaded.get("provenance")
                     if raw_proof:
-                        proof = {"source_kind": "excluded_raw", "provenance": {key: raw_proof[key] for key in ("raw_partition_ref", "raw_partition_sha256")}}
+                        proof = {"source_kind": "excluded_raw", "provenance": (deepcopy(raw_proof) if version == "v2" else {key: raw_proof[key] for key in ("raw_partition_ref", "raw_partition_sha256")})}
                         dated._check_source_refs(root, proof["provenance"], ("raw_partition",))
                         raw_path = root / raw_proof["raw_partition_ref"][len("${MOEX_DATA_ROOT}/"):]
                         frozen = source._freeze_artifact(root, raw_path, raw_proof["raw_partition_sha256"])
                         proof["provenance"]["raw_partition_ref"] = source._rooted_ref(root, frozen)
                         key = dated._digest(proof); proofs[key] = proof; row["proof_id"] = key
                     raise ValueError(loaded.get("reason") or "latest_raw_not_admitted_no_revision_fallback")
-                fact, raw_proof = dated._freeze_raw_fact(root, loaded["provenance"], day, normalized=True)
+                fact, raw_proof = dated._freeze_raw_fact(root, loaded["provenance"], day, normalized=True, **version_args)
                 if fact != loaded["factual"]: raise ValueError("statistics_frozen_raw_fact_mismatch")
-                proof = {"source_kind": "canonical_raw", "provenance": raw_proof}
+                proof = {"source_kind": "canonical_raw", "provenance": raw_proof, **dated._statistics_root_identity(fact, raw_proof)}
             dated._fact(_record(fact, proof["source_kind"], proof["provenance"]), day, cutoff)
             if proof["source_kind"] == "canonical_raw":
                 for field in CLOCKS: dated._stamp(fact.get(field))
@@ -303,7 +314,8 @@ def _capture(snapshot, *, cutoff):
 
 def _semantic(e):
     return {"linked": e["linked_dated_evidence_sha256"], "slots": e["slots"],
-        "rows": [{key: row[key] for key in ("trade_date", "status", "values")} for row in e["rows"]],
+        "rows": [{**{key: row[key] for key in ("trade_date", "status", "values")},
+                  **dated._statistics_semantic_identity(e, row)} for row in e["rows"]],
         "current_date": e["observed_date_witness"]["current_observed_trade_date"],
         "previous_date": e["observed_date_witness"]["previous_observed_trade_date"]}
 

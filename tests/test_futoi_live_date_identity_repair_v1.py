@@ -614,10 +614,163 @@ def test_native_root_context_contract_and_config_declare_isolated_opt_in_path(tm
     )
     assert source._current_path(tmp_path, source.SI_INSTRUMENT_ID, raw_schema_version="v2") == Path(expected)
     assert declared["failed_attempt_publication_policy"] == "replace_old_pass_with_explicit_failure"
-    assert declared["live_runtime_enabled"] is False
+    assert declared["live_runtime_enabled"] is True
     for function in (source.run_refresh, source.run_refresh_all, source.source_identity,
                      source.latest_aligned_factual, source._materialize_target, _snapshot_reader().build_snapshot):
         assert inspect.signature(function).parameters["raw_schema_version"].default == "v1"
+
+
+@pytest.mark.parametrize("fast", [False, True])
+@pytest.mark.parametrize("failed", [None, ("si", "2026-09-24"), ("si", "2026-09-23"),
+                                      ("cr", "2026-09-24"), ("cr", "2026-09-23")])
+def test_real_refresh_to_saved_snapshot_and_consumer_preserves_independent_roles(monkeypatch, tmp_path, fast, failed):
+    """Synthetic external HTTP/clock inputs; real FUTOI version flow and admission."""
+    import json
+    from contextlib import nullcontext
+    from moex_data.futures import futoi_intraday_previous_session_context as regular
+    from moex_data.futures import futoi_intraday_previous_session_context_fast as quick
+    from moex_data.futures import materialize_futoi_instrument as materializer
+    from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_current_context as runner
+    from moex_data import rub_temporal_applicability as temporal
+    from moex_data import rub_factual_projection as projection
+    now = pd.Timestamp("2026-09-24T07:36:00Z").to_pydatetime()
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(runner, "context", quick if fast else regular)
+    monkeypatch.setattr(materializer, "_registry_binding", lambda _path, instrument: _binding_for(instrument))
+    monkeypatch.setattr(materializer, "_utc_now_root", lambda: now.isoformat())
+    monkeypatch.setattr(source.observed_dates, "reference_secid", lambda inst: "USDRUBF")
+    monkeypatch.setattr(source.observed_dates, "_exact_date_has_secid", lambda day, **kw: day.isoformat() in {"2026-09-23", "2026-09-24"})
+    def fetch(ticker, day, timeout, base):
+        instrument = "si_futures_family" if ticker == "si" else "cr_futures_family"
+        raw = _root_frame(day=day, instrument=instrument)
+        if (ticker, day) == failed:
+            latest = raw.copy()
+            latest["seqnum"] = 44
+            latest.loc[0, ["pos", "pos_long", "pos_short"]] = [726369, 927387, -201018]
+            latest.loc[1, ["pos", "pos_long", "pos_short"]] = [-726363, 4297389, -5023752]
+            raw = pd.concat([raw, latest], ignore_index=True)
+        return raw, "https://apim.moex.com/iss/analyticalproducts/futoi/securities/" + ticker + ".json"
+    monkeypatch.setattr(materializer, "_fetch_exact", fetch)
+    # Replace unrelated market/macro acquisition; the FUTOI builder is real.
+    monkeypatch.setattr(runner.base, "build_snapshot", lambda **kw: {
+        "schema_version": runner.base.SCHEMA_VERSION,
+        "identity": {"project": runner.base.PROJECT, "generated_at_utc": now.isoformat()}, "components": {},
+        "authority": {}, "analysis_views": {}, "analysis_workflow": {}})
+    monkeypatch.setattr(runner.current, "current_producers", lambda: {})
+    monkeypatch.setattr(runner.base, "load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(runner.base, "install_timestamp_policy", lambda: None)
+    monkeypatch.setattr(runner.base, "_single_refresh_lock", lambda path: nullcontext())
+    snapshot, path = runner.refresh_snapshot(now_fn=lambda: now)
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved == snapshot
+    temporal.apply(saved, now=now)
+    consumer = projection.consumer_context(saved)["futoi_context"]
+    for ticker, component in (("si", "futoi_live"), ("cr", "futoi_live_cr")):
+        data = saved["components"][component]["data"]
+        assert data["raw_schema_version"] == "v2" and data["source_ticker"] == ticker
+        assert data["source_identity_scope"] == source.ROOT_IDENTITY_SCOPE and "secid" not in data
+        for day, role in (("2026-09-24", "current_intraday"), ("2026-09-23", "previous_completed_session")):
+            record = data[role]
+            assert record["expected_trade_date"] == day
+            assert record["raw_schema_version"] == "v2"
+            assert record["status"] == ("ERROR" if (ticker, day) == failed else "FRESH")
+            if (ticker, day) == failed:
+                assert record["factual"] is None
+                assert "publication_audit" in record["failed_attempt_evidence"]
+                from moex_data.futures import futoi_delta_statistics_context as engine
+                refused = engine._context_record(record, expected_trade_date=day, role=role,
+                    raw_schema_version="v2", instrument_id=data["instrument_id"], root=tmp_path)
+                loaded = engine._factual_for_date(tmp_path, instrument_id=data["instrument_id"], trade_date=day,
+                    previous=refused, eod=None, eod_provenance=None, raw_schema_version="v2")
+                assert loaded["status"] == "UNAVAILABLE"
+                assert loaded["provenance"] == record["failed_attempt_evidence"]
+        assert consumer[component]["current_usable"] is ((ticker, "2026-09-24") != failed)
+    assert (consumer["futoi_live"]["previous_observation"] is not None) is (failed != ("si", "2026-09-23"))
+    assert consumer["futoi_live_cr"]["previous_observation"] is None
+    if failed is None:
+        from copy import deepcopy
+        bundle = {"instrument_results": {}}
+        for instrument, component in ((source.SI_INSTRUMENT_ID, "futoi_live"), (source.CR_INSTRUMENT_ID, "futoi_live_cr")):
+            data = snapshot["components"][component]["data"]
+            bundle["instrument_results"][instrument] = {**data["context_refresh"],
+                "current_intraday": data["current_intraday"], "previous_completed_session": data["previous_completed_session"]}
+        for wrong_version in (None, "v9"):
+            changed = deepcopy(bundle)
+            if wrong_version is None:
+                changed["instrument_results"][source.SI_INSTRUMENT_ID].pop("raw_schema_version")
+            else:
+                changed["instrument_results"][source.SI_INSTRUMENT_ID]["raw_schema_version"] = wrong_version
+            view = deepcopy(snapshot)
+            runner._attach_futoi_context(view, changed, now=now, raw_schema_version="v2")
+            assert view["components"]["futoi_live"]["status"] == "UNAVAILABLE"
+            assert view["components"]["futoi_live_cr"]["status"] == "READY"
+
+        # Synthetic accepted TradeStats storage I/O; actual dated/statistics
+        # capture, byte verification, admission, serialization and read remain real.
+        from hashlib import sha256
+        from datetime import timedelta
+        from moex_data import rub_si_futoi_dated_context as si_dated
+        from moex_data import rub_cr_futoi_dated_context as cr_dated
+        from moex_data import rub_si_futoi_observed_statistics as si_stats
+        from moex_data import rub_cr_futoi_observed_statistics as cr_stats
+        from moex_data.futures import futoi_delta_statistics_context as engine
+        witness_frame = pd.DataFrame({"trade_date": ["2026-09-23", "2026-09-24"]})
+        witness_proof = {"acceptance_contract_id": "step7_rub_native_d1_w1_technical_acceptance.v1"}
+        for field in ("partition", "manifest", "quality_report"):
+            artifact = tmp_path / ("synthetic_witness_" + field)
+            if field == "partition": witness_frame.to_parquet(artifact, index=False)
+            else: artifact.write_text("{}", encoding="utf-8")
+            witness_proof[field + "_ref"] = source._rooted_ref(tmp_path, artifact)
+            witness_proof[field + "_sha256"] = sha256(artifact.read_bytes()).hexdigest()
+        def accepted_frame(root, *, spec, as_of):
+            if spec.dataset_id != engine.OBSERVED_DATE_WITNESS_DATASET_ID:
+                raise FileNotFoundError("synthetic fixture has no accepted EOD")
+            return witness_frame.copy(), deepcopy(witness_proof)
+        monkeypatch.setattr(engine, "_accepted_frame", accepted_frame)
+        def capture_all(value, previous):
+            for module in (si_dated, cr_dated, si_stats, cr_stats):
+                module.capture_snapshot(value, previous, now_fn=lambda: now, refresh_started_at=now)
+                assert module.STORE_KEY in value, value.get(cr_dated.DIAGNOSTICS_KEY)
+            assert si_dated.describe(value[si_dated.STORE_KEY], now=now,
+                governance=value["components"]["futoi_live"]["data"]["governance"])["status"] == "PARTIAL"
+            assert cr_dated.describe(value, now=now)["status"] == "AVAILABLE"
+            assert si_stats.describe(value, now=now)["status"] == "AVAILABLE"
+            assert cr_stats.describe(value, now=now)["status"] == "AVAILABLE"
+        capture_all(snapshot, None)
+        first = deepcopy(snapshot)
+        first_received = first["components"]["futoi_live"]["data"]["previous_completed_session"]["factual"]["availability_ts_utc"]
+        now += timedelta(seconds=30)
+        repeated, path = runner.refresh_snapshot(now_fn=lambda: now)
+        assert repeated["components"]["futoi_live"]["data"]["previous_completed_session"]["factual"]["availability_ts_utc"] != first_received
+        capture_all(repeated, first)
+        for module in (si_dated, cr_dated, si_stats, cr_stats):
+            assert repeated[module.STORE_KEY]["evidence"]["accepted_at_utc"] == first[module.STORE_KEY]["evidence"]["accepted_at_utc"]
+            assert repeated[module.STORE_KEY]["evidence_sha256"] == first[module.STORE_KEY]["evidence_sha256"]
+        runner.base._atomic_write(path, repeated)
+        reread = json.loads(path.read_text(encoding="utf-8"))
+        temporal.apply(reread, now=now)
+        output = projection.consumer_context(reread)
+        for module in (si_dated, si_stats, cr_dated, cr_stats):
+            module.attach_consumer(reread, output, now=now)
+        for module in (si_dated, cr_dated, si_stats, cr_stats):
+            module.verify_projection(reread, output, now=now)
+
+
+@pytest.mark.parametrize("damage", ["missing", "bytes"])
+def test_native_replay_requires_complete_publication_audit(monkeypatch, tmp_path, damage):
+    from moex_data.futures import materialize_futoi_instrument as materializer
+    monkeypatch.setenv("MOEX_DATA_ROOT", str(tmp_path))
+    monkeypatch.setattr(materializer, "_registry_binding", lambda path, instrument: _binding_for(instrument))
+    monkeypatch.setattr(materializer, "_utc_now_root", lambda: "2026-09-24T07:36:00+00:00")
+    monkeypatch.setattr(materializer, "_fetch_exact", lambda *args: (_root_frame(), "https://apim.moex.com/iss/analyticalproducts/futoi/securities/si.json"))
+    _, proof = source._materialize_target(tmp_path, "2026-09-24", "audit_regression",
+        instrument_id="si_futures_family", timeout=1, raw_schema_version="v2")
+    if damage == "missing":
+        proof.pop("publication_audit")
+    else:
+        (tmp_path / proof["publication_audit"]["ref"].removeprefix(source.ROOT_REF_PREFIX)).write_bytes(b"corrupt")
+    with pytest.raises(source.FutoiSourceNativeRefreshError):
+        source.replay_root_factual(tmp_path, proof, instrument_id="si_futures_family", trade_date="2026-09-24")
 
 
 def test_native_root_witness_secid_is_verified_before_query(monkeypatch):
@@ -959,4 +1112,4 @@ def test_role_v2_contract_config_and_explicit_path_agree(tmp_path):
         pattern.replace("${MOEX_DATA_ROOT}", str(tmp_path)).replace("{INSTRUMENT_ID}", source.SI_INSTRUMENT_ID)
     )
     assert declared["roles"] == (core.CURRENT_ROLE, core.PREVIOUS_ROLE)
-    assert declared["live_runtime_enabled"] is False
+    assert declared["live_runtime_enabled"] is True

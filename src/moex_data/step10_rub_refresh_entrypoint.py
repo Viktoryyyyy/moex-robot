@@ -27,10 +27,13 @@ def _run_futoi_factual_non_blocking(*, through_date: str, run_id: str, timeout: 
             through_date=through_date,
             run_id=run_id + "_futoi_factual",
             timeout=timeout,
+            raw_schema_version="v2",
         )
     except Exception as exc:
         return {
-            "schema_version": futoi_factual.SCHEMA_VERSION,
+            "schema_version": futoi_factual.SCHEMA_VERSION_V2,
+            "raw_schema_version": "v2",
+            "source_identity_scope": futoi_factual.ROOT_IDENTITY_SCOPE,
             "project": PROJECT,
             "status": "FAILED_NON_BLOCKING",
             "error_class": exc.__class__.__name__,

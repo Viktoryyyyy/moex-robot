@@ -51,7 +51,10 @@ def _attach_futoi_context(
     snapshot: dict[str, object],
     refresh_bundle: Mapping[str, object],
     delta_bundle: Mapping[str, object] | None = None,
+    *, now: datetime | None = None, raw_schema_version: str = "v1",
 ) -> None:
+    now = now if now is not None else datetime.now(timezone.utc)
+    selected_version = futoi_source._raw_version(raw_schema_version)
     instrument_results = refresh_bundle.get("instrument_results")
     if not isinstance(instrument_results, Mapping):
         raise CurrentContextSnapshotError("FUTOI context refresh bundle has no instrument_results")
@@ -70,7 +73,7 @@ def _attach_futoi_context(
     for instrument_id, component_name in futoi.FUTOI_COMPONENT_BY_INSTRUMENT.items():
         raw_context = instrument_results.get(instrument_id)
         if not isinstance(raw_context, Mapping):
-            raise CurrentContextSnapshotError("FUTOI context result is missing for " + instrument_id)
+            raw_context = {}
         raw_delta_view = delta_results.get(instrument_id)
         delta_view = (
             dict(raw_delta_view)
@@ -79,10 +82,36 @@ def _attach_futoi_context(
         )
         current_view = raw_context.get(context.CURRENT_ROLE)
         previous_view = raw_context.get(context.PREVIOUS_ROLE)
-        if not isinstance(current_view, Mapping) or not isinstance(previous_view, Mapping):
-            raise CurrentContextSnapshotError(
-                "FUTOI current/previous context is missing for " + instrument_id
-            )
+        current_view = current_view if isinstance(current_view, Mapping) else {"status": "ERROR", "factual": None}
+        previous_view = previous_view if isinstance(previous_view, Mapping) else {"status": "ERROR", "factual": None}
+        version = selected_version
+        if version == "v1" and any(value.get("raw_schema_version", "v1") != "v1"
+                or value.get("source_identity_scope") == futoi_source.ROOT_IDENTITY_SCOPE
+                for value in (raw_context, current_view, previous_view)):
+            current_view = previous_view = {"status": "ERROR", "factual": None,
+                "refresh_error": "explicit v1 attachment refuses versioned root envelope"}
+        if version == "v2":
+            expected = {"raw_schema_version": "v2", "source_identity_scope": futoi_source.ROOT_IDENTITY_SCOPE,
+                        "instrument_id": instrument_id, "source_id": futoi_source.SOURCE_ID,
+                        "source_ticker": futoi_source.ROOT_TICKERS[instrument_id]}
+            def checked_role(value):
+                result = dict(value)
+                try:
+                    for envelope in (raw_context, value):
+                        if "secid" in envelope or any(envelope.get(k) != v for k, v in expected.items()):
+                            raise ValueError("v2 snapshot envelope identity mismatch")
+                    if result.get("status") == "FRESH":
+                        day = result.get("expected_trade_date")
+                        replayed = futoi_source.replay_root_factual(futoi_source._data_root(), result.get("provenance"),
+                            instrument_id=instrument_id, trade_date=day)
+                        if result.get("factual") != replayed:
+                            raise ValueError("v2 snapshot fact differs from frozen publication evidence")
+                    result["consumer_factual_use_allowed"] = False
+                except Exception as exc:
+                    result.update(status="ERROR", factual=None, consumer_factual_use_allowed=False,
+                                  refresh_error_class=type(exc).__name__, refresh_error=str(exc))
+                return result
+            current_view, previous_view = checked_role(current_view), checked_role(previous_view)
         governance = futoi._governance_state(governance_values, instrument_id)
         allowed = governance.get("factual_use_allowed") is True
         current_factual = current_view.get("factual")
@@ -96,6 +125,11 @@ def _attach_futoi_context(
             and current_has_factual
             and previous_has_factual
         )
+        if version == "v2":
+            # Consumer governance remains the grant; producer flags grant nothing.
+            current_view["consumer_factual_use_allowed"] = bool(allowed and current_view.get("status") == "FRESH" and current_has_factual)
+            previous_view["consumer_factual_use_allowed"] = bool(allowed and previous_view.get("status") == "FRESH" and previous_has_factual)
+            fully_ready = current_view["consumer_factual_use_allowed"]
         retained = current_view.get("status") in {
             "RETAINED_STALE",
             "UNAVAILABLE_RETAINED_STALE",
@@ -148,6 +182,10 @@ def _attach_futoi_context(
                 "missing_or_blocked_must_not_be_interpreted_as_neutral": True,
             }
         )
+        if version == "v2":
+            existing_data.pop("secid", None)
+            existing_data.update(expected)
+            existing_data["context_refresh"].update(expected)
         if fully_ready:
             status = "READY"
         elif retained and allowed:
@@ -183,7 +221,7 @@ def _attach_futoi_context(
             if entry.get("current_pair_acceptance", {}).get("accepted") is True:
                 admission = pair_authority.admit(governance_values, current_view,
                     root=None, repo_root=futoi.REPO_ROOT,
-                    now=datetime.now(timezone.utc))
+                    now=now)
             factual_authority = admission["allowed"] is True
             existing_data.update(factual_authority=factual_authority,
                 consumer_factual_use_allowed=factual_authority,
@@ -239,19 +277,22 @@ def refresh_snapshot(
             through_date=through_date,
             run_id=run_id,
             now_fn=now_fn,
+            raw_schema_version="v2",
         )
         delta_bundle = delta_context.build_all(
             root=root,
             refresh_bundle=refresh_bundle,
             as_of=now,
+            raw_schema_version="v2",
         )
         snapshot = futoi.build_snapshot(
             now=now,
             previous=previous,
             producers=producers,
             data_root=root,
+            raw_schema_version="v2",
         )
-        _attach_futoi_context(snapshot, refresh_bundle, delta_bundle)
+        _attach_futoi_context(snapshot, refresh_bundle, delta_bundle, now=now_fn(), raw_schema_version="v2")
         base.finalize_snapshot_timing(snapshot, started=now, completed=now_fn())
         base._atomic_write(path, snapshot)
     return snapshot, path

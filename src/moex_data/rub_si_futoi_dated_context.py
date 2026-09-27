@@ -104,6 +104,13 @@ def _fact(record, expected, at, *, instrument_id=INSTRUMENT):
     fact = record["factual"]
     if not isinstance(fact, dict) or _day(fact.get("trade_date")) != expected:
         raise ValueError("exact_target_date_mismatch")
+    provenance = record.get("provenance") or {}
+    if fact.get("raw_schema_version") == "v2" or provenance.get("raw_schema_version") == "v2":
+        from moex_data.futures import futoi_delta_statistics_context as engine
+        _check_root_evidence_identity(provenance, instrument_id=instrument_id)
+        if any(fact.get(key) != provenance.get(key) for key in ("raw_schema_version", "source_identity_scope", "source_ticker")):
+            raise ValueError("retained_root_fact_identity_mismatch")
+        engine._normalized_factual(fact, field="retained_root_fact", raw_schema_version="v2")
     event = _stamp(fact["snapshot_ts"])
     if event.astimezone(ZoneInfo("Europe/Moscow")).date().isoformat() != expected:
         raise ValueError("source_event_date_mismatch")
@@ -170,7 +177,7 @@ def _proof(record):
     elif record["source_kind"] in ("previous_observed", "canonical_raw"):
         _ref(proof["raw_partition_ref"])
         _hash(proof["raw_partition_sha256"])
-        if record["source_kind"] == "previous_observed":
+        if record["source_kind"] == "previous_observed" or (proof.get("raw_schema_version") == "v2" and "accepted_state_kind" in proof):
             if proof.get("accepted_state_kind") != "source_native_exact_date_raw_quality_pass":
                 raise ValueError("previous_source_acceptance_required")
             for prefix in ("raw_quality_report", "raw_refresh_manifest"):
@@ -313,13 +320,28 @@ def describe(store, *, now, governance):
                 "reason": str(exc), **FLAGS}
 
 
+def _economic_identity(factual):
+    fact = deepcopy(factual)
+    if isinstance(fact, dict):
+        fact.pop("availability_ts_utc", None)
+        fact.pop("ingest_ts_utc", None)
+        if fact.get("raw_schema_version") == "v2":
+            for record in fact.get("selected_source_records", {}).values():
+                record.pop("availability_ts_utc", None)
+                record.pop("ingest_ts_utc", None)
+    return fact
+
+
+def _statistics_semantic_identity(evidence, row):
+    proof = evidence["proofs"].get(row.get("proof_id"), {})
+    identity = proof.get("factual_identity")
+    return {"factual_identity": _economic_identity(identity)} if identity is not None else {}
+
+
 def _semantic(evidence):
     """New receipts alone are not a new economic observation or first acceptance."""
     def observation(record):
-        fact = deepcopy(record.get("factual"))
-        if isinstance(fact, dict):
-            fact.pop("availability_ts_utc", None)
-            fact.pop("ingest_ts_utc", None)
+        fact = _economic_identity(record.get("factual"))
         return {"status": record.get("status"), "target_trade_date": record.get("target_trade_date"),
                 "factual": fact}
     return {"anchor": observation(evidence["anchor"]),
@@ -420,12 +442,75 @@ def _freeze_raw_fact(
     return fact, proof
 
 
+def _selected_raw_version(data, *, instrument_id, role=None):
+    """Explicit live envelope selection; legacy untagged envelopes stay v1."""
+    from moex_data.futures import futoi_live_factual_refresh_source_native as source
+    version = source._raw_version(data.get("raw_schema_version", "v1"))
+    if version == "v2":
+        expected = {"instrument_id": instrument_id, "source_id": source.SOURCE_ID,
+                    "source_ticker": source.ROOT_TICKERS[instrument_id],
+                    "raw_schema_version": "v2", "source_identity_scope": source.ROOT_IDENTITY_SCOPE}
+        for envelope in ((data, data.get(role)) if role else (data,)):
+            if not isinstance(envelope, dict) or "secid" in envelope or any(envelope.get(k) != v for k, v in expected.items()):
+                raise ValueError("v2_capture_envelope_identity_mismatch")
+    elif any(isinstance(value, dict) and (value.get("raw_schema_version", "v1") != "v1"
+             or value.get("source_identity_scope") == source.ROOT_IDENTITY_SCOPE)
+             for value in (data, data.get("context_refresh"), data.get("current_intraday"), data.get("previous_completed_session"))):
+        raise ValueError("v1_capture_contains_v2_envelope")
+    return version
+
+
+def _statistics_root_identity(factual, provenance):
+    if provenance.get("raw_schema_version", "v1") == "v1":
+        return {}
+    keys = ("raw_schema_version", "source_identity_scope", "source_ticker", "sess_id", "selected_source_records")
+    return {"factual_identity": {key: deepcopy(factual[key]) for key in keys}}
+
+
+def _check_root_evidence_identity(provenance, *, instrument_id):
+    from moex_data.futures import futoi_live_factual_refresh_source_native as source
+    expected = {"instrument_id": instrument_id, "source_id": SOURCE,
+        "raw_schema_version": "v2", "source_identity_scope": source.ROOT_IDENTITY_SCOPE,
+        "source_ticker": source.ROOT_TICKERS[instrument_id]}
+    if "secid" in provenance or any(provenance.get(k) != v for k, v in expected.items()):
+        raise ValueError("root_evidence_identity_mismatch")
+    for prefix in ("raw_partition", "raw_quality_report", "raw_refresh_manifest"):
+        if prefix == "raw_partition" or prefix + "_ref" in provenance or prefix + "_sha256" in provenance:
+            _ref(provenance[prefix + "_ref"]); _hash(provenance[prefix + "_sha256"])
+    if "publication_audit" in provenance:
+        receipt = provenance["publication_audit"]
+        _ref(receipt["ref"]); _hash(receipt["sha256"])
+
+
+def _restore_statistics_identity(factual, proof, *, instrument_id):
+    from moex_data.futures import futoi_delta_statistics_context as engine
+    from moex_data.futures import futoi_live_factual_refresh_source_native as source
+    provenance = proof["provenance"]
+    version = source._raw_version(provenance.get("raw_schema_version", "v1"))
+    if version == "v1":
+        if "factual_identity" in proof:
+            raise ValueError("legacy_statistics_contains_root_identity")
+        return factual
+    metadata = proof.get("factual_identity")
+    expected = {"raw_schema_version": "v2", "source_identity_scope": source.ROOT_IDENTITY_SCOPE,
+                "source_ticker": source.ROOT_TICKERS[instrument_id]}
+    if (not isinstance(metadata, dict) or set(metadata) != set(expected) | {"sess_id", "selected_source_records"}
+            or provenance.get("instrument_id") != instrument_id or provenance.get("source_id") != SOURCE
+            or any(metadata.get(k) != v or provenance.get(k) != v for k, v in expected.items())):
+        raise ValueError("statistics_root_identity_mismatch")
+    restored = {**factual, **deepcopy(metadata)}
+    engine._normalized_factual(restored, field="statistics_restored", raw_schema_version="v2")
+    return restored
+
+
 def _capture_candidate(component, *, now):
     """Reuse the canonical source/observed-date/accepted-EOD loaders; no network."""
     from moex_data import rub_temporal_applicability as temporal
     from moex_data.futures import futoi_delta_statistics_context as engine
     from moex_data.futures import futoi_live_factual_refresh_source_native as source
     data = component["data"]
+    version = _selected_raw_version(data, instrument_id=INSTRUMENT, role="previous_completed_session")
+    version_args = {"raw_schema_version": version} if version == "v2" else {}
     _governance(data["governance"])
     if data.get("instrument_id") != INSTRUMENT or data.get("source_id") != SOURCE:
         raise ValueError("si_component_identity_mismatch")
@@ -440,7 +525,7 @@ def _capture_candidate(component, *, now):
     root = source._data_root()
     proof = deepcopy(previous["provenance"])
     _check_source_refs(root, proof, ("raw_partition", "raw_quality_report", "raw_refresh_manifest"))
-    factual, proof = _freeze_raw_fact(root, proof, expected, normalized=False)
+    factual, proof = _freeze_raw_fact(root, proof, expected, normalized=False, **version_args)
     if factual != previous["factual"]:
         raise ValueError("previous_fact_differs_from_frozen_raw")
     anchor = {"instrument_id": INSTRUMENT, "source_id": SOURCE,
@@ -477,8 +562,8 @@ def _capture_candidate(component, *, now):
             try:
                 loaded = (engine._factual_for_date(
                     root, instrument_id=INSTRUMENT, trade_date=target, previous={},
-                    eod=eod, eod_provenance=eod_proof)
-                    if eod is not None else engine._raw_factual(root, instrument_id=INSTRUMENT, trade_date=target))
+                    eod=eod, eod_provenance=eod_proof, **version_args)
+                    if eod is not None else engine._raw_factual(root, instrument_id=INSTRUMENT, trade_date=target, **version_args))
                 if loaded.get("status") != "AVAILABLE":
                     raise ValueError(loaded.get("reason") or "exact_target_not_admitted")
                 fact, provenance = deepcopy(loaded["factual"]), deepcopy(loaded["provenance"])
@@ -491,7 +576,7 @@ def _capture_candidate(component, *, now):
                         raise ValueError("accepted_eod_fact_differs_from_verified_partition_bytes")
                 else:
                     kind = "canonical_raw"
-                    verified_fact, provenance = _freeze_raw_fact(root, provenance, target, normalized=True)
+                    verified_fact, provenance = _freeze_raw_fact(root, provenance, target, normalized=True, **version_args)
                     if fact != verified_fact:
                         raise ValueError("baseline_fact_differs_from_frozen_raw")
                 record = {"instrument_id": INSTRUMENT, "source_id": SOURCE,

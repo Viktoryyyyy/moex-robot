@@ -1127,10 +1127,22 @@ def replay_root_factual(
     root: Path, provenance: Mapping[str, object], *, instrument_id: str, trade_date: str,
 ) -> dict[str, object]:
     frame = _verified_root_frame(root, provenance, instrument_id=instrument_id, trade_date=trade_date)
-    return latest_aligned_factual(
+    factual = latest_aligned_factual(
         frame, expected_trade_date=trade_date, expected_instrument_id=instrument_id,
         expected_source_ticker=ROOT_TICKERS[instrument_id], raw_schema_version=RAW_SCHEMA_V2,
     )
+    from . import futoi_publication_audit as audit
+    receipt = provenance.get("publication_audit")
+    if not isinstance(receipt, Mapping):
+        _fail("v2 publication audit is missing")
+    report = json.loads(_root_proof_bytes(root, receipt.get("ref"), receipt.get("sha256"), ".json"))
+    if (not isinstance(report, Mapping) or report.get("schema_version") != audit.SCHEMA
+            or report.get("policy") != audit.POLICY or report.get("instrument_id") != instrument_id
+            or report.get("trade_date") != trade_date or report.get("latest_status") != "PASS"
+            or report.get("latest_factual") != factual
+            or report.get("provenance") != {k: v for k, v in provenance.items() if k != "publication_audit"}):
+        _fail("v2 publication audit mismatch")
+    return factual
 
 
 def _materialize_root_target(
