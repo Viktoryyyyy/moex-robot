@@ -166,6 +166,11 @@ Scope amendments recorded by the owner:
   `tests/test_usdrubf_s7_3_chat_analysis_snapshot_current_context_delta.py`: owner
   approved minimal migration of the old FUTOI mock/call expectation to explicit
   version and admission clock arguments; retain clock-causality and call-order checks.
+- `tests/unit/test_futures_calendar_clock_context.py`,
+  `tests/unit/test_historical_basis_carry_context.py`, and
+  `tests/unit/test_si_futoi_dated_comparisons.py`: owner explicitly approved the
+  same bounded mock/clock migration (issuecomment-5858572880). All original causal
+  ordering, completion timestamps and refusal-to-publish assertions remain enforced.
 
 The complete-checkout caller/serializer preflight found the regular snapshot runner,
 fast live-market runner and independent Step10 FUTOI call. Their root-v2 selection is
@@ -190,6 +195,13 @@ levels while preserving source event/publication/session/revision changes. Stati
 proofs carry the revision identity that the compact numeric row format cannot encode.
 No publication-audit engine, current-pair authority engine or grant was changed.
 
+Independent complete-diff review also found that the native snapshot component
+could retain a prior v1 component after selected-v2 candidate failure. Retention is
+now limited to explicitly/default selected v1. Six actual-reader regressions cover
+missing/corrupt/rejected v2 with ready prior v1/v2 components. Review of published
+`32c0f57b2015ea8f2d100e287e761f13f9f167f6` passed; subsequent test-only changes
+require fresh exact-head review and checks before merge.
+
 Validation uses normal imports and real PyArrow Parquet in an isolated Linux checkout
 with a separate temporary data root and cleaned environment. The two allowed test
 files cover source-native plus regular/fast real refresh to saved snapshot/consumer,
@@ -207,9 +219,15 @@ PyArrow 24.0.0) using `PYTHONPATH=.:src pytest -q` with
 `tests/test_rub_dated_hour_source.py`, and
 `tests/test_usdrubf_s7_3_chat_analysis_snapshot_current_context_delta.py`.
 `python -m compileall -q src tests` and `git diff --check` passed. The full
-7,416-test run and fresh GitHub Python 3.11 checks are separate gates. Initial full
-run found four test failures corrected in the 305-test run: two new consumer
-attachment assertions and the two owner-approved legacy fixture migrations.
+initial full run finished with **7404 passed, 12 failed, 37 subtests passed**
+(1000.59s). Four failures were corrected in the 305-test run. Six were old attachment
+mocks in the three subsequently approved test files. Both remaining MCP failures
+were occupied production ports, not stopped for testing. The existing authorized
+`moex-test-isolated` helper supplies a separate loopback namespace: **308 passed**
+(18.69s) across both main FUTOI test files and both MCP test files, including the six
+new snapshot refusal cases. All **210 tests** in the three final migrated files
+passed (61.50s). The final full **7,422-test** run and GitHub Python 3.11 checks
+are separate merge gates; actual final SHAs/results are recorded in PR #548.
 
 Historical failed run 36126639359 has a check annotation stating that the hosted
 runner lost communication. Its job logs return BlobNotFound. This establishes the

@@ -153,7 +153,8 @@ def test_overlay_binds_clock_before_slow_prework_and_real_prefetch(tmp_path, mon
     monkeypatch.setattr(futoi, '_load_governance', lambda: {})
     monkeypatch.setattr(futoi, '_futoi_component', lambda **kwargs: {'status': 'UNAVAILABLE', 'data': {}})
     selected = producers(); selected['futures_calendar'] = base._futures_calendar_component
-    clock = Clock([0, 8, 9, 17, 18])
+    # Current/live overlays also read the FUTOI admission clock before completion.
+    clock = Clock([0, 8, 9, 17, 18] + ([18] if route != 'futoi' else []))
     monkeypatch.setattr(base, '_live_now', lambda: clock.readings[-1])
     requests = []
     def fetch(url, *, env):
@@ -172,7 +173,7 @@ def test_overlay_binds_clock_before_slow_prework_and_real_prefetch(tmp_path, mon
         monkeypatch.setattr(current_context.current, 'current_producers', lambda: selected)
         monkeypatch.setattr(current_context.context, 'run_refresh_all', prework)
         monkeypatch.setattr(current_context.delta_context, 'build_all', lambda **kwargs: {})
-        monkeypatch.setattr(current_context, '_attach_futoi_context', lambda *args: None)
+        monkeypatch.setattr(current_context, '_attach_futoi_context', lambda *args, **kwargs: None)
         if route == 'current_context':
             value, _ = current_context.refresh_snapshot(now_fn=clock)
         else:
@@ -190,7 +191,7 @@ def test_overlay_binds_clock_before_slow_prework_and_real_prefetch(tmp_path, mon
     assert data['received_at'] == (NOW+timedelta(seconds=17)).isoformat()
     assert datetime.fromisoformat(value['identity']['refresh_started_at_utc']) == NOW
     assert datetime.fromisoformat(value['identity']['generated_at_utc']) == NOW+timedelta(seconds=18)
-    assert len(clock.readings) == 5
+    assert len(clock.readings) == (5 if route == 'futoi' else 6)
 
 
 @pytest.mark.parametrize('route', ['futoi', 'current_context', 'live_market'])
