@@ -240,7 +240,7 @@ def _futoi_component(
                 previous,
                 component_name=component_name,
                 instrument_id=instrument_id,
-            )
+            ) if raw_schema_version == "v1" else None
             if prior is not None:
                 return {
                     "status": "RETAINED_PREVIOUS",

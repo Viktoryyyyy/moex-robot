@@ -513,6 +513,30 @@ def test_snapshot_selected_v2_does_not_read_present_v1_candidate(monkeypatch, tm
     assert old.read_text() == '{"legacy":true}'
 
 
+@pytest.mark.parametrize("failure", ["missing", "corrupt", "rejected"])
+@pytest.mark.parametrize("prior_version", ["v1", "v2"])
+def test_selected_v2_snapshot_failure_cannot_retain_prior_authority(monkeypatch, tmp_path, failure, prior_version):
+    snapshot = _snapshot_reader()
+    monkeypatch.setattr(snapshot, "_governance_state", lambda *a: {"factual_use_allowed": True})
+    path = source._current_path(tmp_path, source.SI_INSTRUMENT_ID, raw_schema_version="v2")
+    if failure != "missing":
+        path.parent.mkdir(parents=True)
+        path.write_text("not json" if failure == "corrupt" else '{"status":"FAILED"}', encoding="utf-8")
+    prior = {"components": {"futoi_live": {"status": "READY", "data": {
+        "instrument_id": source.SI_INSTRUMENT_ID, "raw_schema_version": prior_version,
+        "factual_authority": True, "consumer_factual_use_allowed": True,
+        "factual": {"old_value_must_not_be_retained": 123}}}}}
+    args = dict(root=tmp_path, now=pd.Timestamp("2026-09-24T08:00:00Z").to_pydatetime(),
+        previous=prior, governance_values={}, instrument_id=source.SI_INSTRUMENT_ID, component_name="futoi_live")
+    result = snapshot._futoi_component(**args, raw_schema_version="v2")
+    assert result["status"] == "UNAVAILABLE" and result["data"] is None
+    assert result["refresh_error"] and result["refresh_error_class"]
+    if prior_version == "v1":
+        legacy = snapshot._futoi_component(**args)
+        assert legacy["status"] == "RETAINED_PREVIOUS"
+        assert legacy["data"] == prior["components"]["futoi_live"]["data"]
+
+
 def _parquet_root_payload(monkeypatch, tmp_path, instrument):
     _parquet_setup(monkeypatch, tmp_path, instrument)
     clock = iter([pd.Timestamp("2026-09-24T07:00:00Z").to_pydatetime(),
