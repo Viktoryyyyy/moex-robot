@@ -76,6 +76,61 @@ def component(data=None):
     return {"status": "READY", "data_as_of": data["received_at"], "data": data}
 
 
+def currency_unit_fact():
+    """Synthetic source fixture reconstructed from the observed ISS UNIT format."""
+    docs = documents(secid="BRX6", expiry="2026-11-02")
+    set_description(docs[1], "UNIT", "USD")
+    return collect(docs)
+
+
+def test_currency_unit_preserves_source_text_and_proves_per_barrel_basis():
+    data, calls, raw = currency_unit_fact()
+    assert len(calls) == 3 and data["secid"] == "BRX6"
+    assert data["source_unit_text"] == data["identity_evidence"]["unit"] == "USD"
+    assert data["price_unit"] == "USD/barrel" and data["quote_currency"] == "USD"
+    assert data["contract_size_barrels"] == 10 and data["price"] == 95.88
+    proof = data["quote_unit_evidence"]
+    assert proof["schema_version"] == "moex_brent_quote_unit.v1"
+    assert proof["asset_code"] == "BR" and proof["native_unit"] == "USD"
+    assert proof["parameter_source_url"] == "https://www.moex.com/ru/derivatives/commodity/oil/"
+    assert proof["price_unit"] == "USD/barrel" and proof["contract_size_barrels"] == 10
+    assert data["provenance"][1]["raw_payload_sha256"] == hashlib.sha256(raw[1]).hexdigest()
+    assert brent.factual_usable(component(data))
+    assert brent.factual_usable(brent.reconcile_component(component(data), now=NOW))
+    assert not brent.factual_usable(brent.reconcile_component(component(data), now=NOW+timedelta(seconds=1201)))
+    assert "quote_unit_evidence" not in collect()[0], "legacy native-unit records remain unchanged"
+
+
+@pytest.mark.parametrize("defect", ["missing", "version", "source", "asset", "unit", "price_unit", "lot", "native_mismatch"])
+def test_currency_unit_persisted_proof_is_required_and_bound(defect):
+    data = currency_unit_fact()[0]
+    if defect == "missing":
+        data.pop("quote_unit_evidence")
+    elif defect == "native_mismatch":
+        data["identity_evidence"]["unit"] = brent.UNIT_TEXT
+    else:
+        field, value = {
+            "version": ("schema_version", "unknown"),
+            "source": ("parameter_source_url", "https://example.invalid/"),
+            "asset": ("asset_code", "BRM"), "unit": ("native_unit", "RUB"),
+            "price_unit": ("price_unit", "USD/contract"), "lot": ("contract_size_barrels", 1),
+        }[defect]
+        data["quote_unit_evidence"][field] = value
+    view = brent.reconcile_component(component(data), now=NOW)
+    assert view["status"] == "UNAVAILABLE" and not brent.factual_usable(view)
+    assert all(view["data"][key] is False for key in brent.FACTUAL_FLAGS)
+
+
+@pytest.mark.parametrize("lot", [1, 100])
+def test_currency_unit_refuses_other_contract_sizes_even_when_native_fields_agree(lot):
+    docs = documents()
+    set_description(docs[1], "UNIT", "USD")
+    set_description(docs[1], "LOTSIZE", str(lot))
+    set_value(docs[0], "securities", "LOTVOLUME", lot)
+    with pytest.raises(brent.BrentFactualError, match="quote unit"):
+        collect(docs)
+
+
 def use_default_producers(monkeypatch, data=None):
     data = collect()[0] if data is None else deepcopy(data)
     monkeypatch.setattr(brent, "load_factual_brent", lambda: deepcopy(data))

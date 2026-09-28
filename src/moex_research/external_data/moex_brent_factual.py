@@ -24,6 +24,7 @@ from .moex_brent_history import SOURCE_ID, select_nearest_contract
 POLICY_ID = "oil_brent_factual_acceptance_v1"
 PRICE_SEMANTICS = "latest_published_official_trading_results_close"
 UNIT_TEXT = "в долларах США за 1 баррель"
+BR_PARAMETER_SOURCE = "https://www.moex.com/ru/derivatives/commodity/oil/"
 MOSCOW = ZoneInfo("Europe/Moscow")
 BASE = "https://iss.moex.com/iss"
 MARKET = "/engines/futures/markets/forts"
@@ -48,6 +49,29 @@ class BrentFactualError(ValueError):
 def _require(condition: bool, message: str) -> None:
     if not condition:
         raise BrentFactualError(message)
+
+
+def _quote_unit_evidence(native_unit: object, contract_size: object) -> dict | None:
+    """Bind currency-only metadata to the explicit BR ten-barrel specification."""
+    if native_unit == UNIT_TEXT:
+        return None  # Preserve the legacy explicit-unit record and evidence bytes.
+    _require(native_unit == "USD" and type(contract_size) is int and contract_size == 10,
+             "unproven Brent quote unit")
+    return {"schema_version": "moex_brent_quote_unit.v1", "asset_code": "BR",
+            "native_unit": "USD", "quote_currency": "USD", "price_unit": "USD/barrel",
+            "contract_size_barrels": 10, "parameter_source_url": BR_PARAMETER_SOURCE}
+
+
+def quote_unit_metadata(data: Mapping) -> dict:
+    """Validate persisted normalization and export its original source unit."""
+    expected = _quote_unit_evidence(data.get("source_unit_text"), data.get("contract_size_barrels"))
+    _require(data.get("quote_unit_evidence") == expected, "Brent quote unit evidence mismatch")
+    if expected is None:
+        return {}
+    _require(data.get("price_unit") == "USD/barrel", "Brent quote unit normalization mismatch")
+    return {"source_unit_text": data["source_unit_text"], "quote_currency": "USD",
+            "contract_size_barrels": data["contract_size_barrels"],
+            "quote_unit_evidence": deepcopy(expected)}
 
 
 def _utc(value: object) -> datetime:
@@ -198,7 +222,6 @@ def load_factual_brent(
              and description.get("TYPE") == "futures"
              and description.get("SHORTNAME") == selected.row.get("SHORTNAME"),
              "contract description identity mismatch")
-    _require(description.get("UNIT") == UNIT_TEXT, "unproven Brent quote unit")
     first_trade = _date(description.get("FRSTTRADE"))
     expiry = _date(description.get("LSTTRADE"))
     delivery = _date(description.get("LSTDELDATE"))
@@ -212,6 +235,7 @@ def load_factual_brent(
     contract_size = int(lot_text)
     _require(_number(selected.row.get("LOTVOLUME"), "LOTVOLUME") == contract_size,
              "contract size metadata mismatch")
+    unit_evidence = _quote_unit_evidence(description.get("UNIT"), contract_size)
     boards = [r for r in _rows(metadata, "boards")
               if r.get("secid") == selected.secid and r.get("boardid") == "RFUD"]
     _require(len(boards) == 1 and boards[0].get("engine") == "futures"
@@ -257,6 +281,7 @@ def load_factual_brent(
         "expiry": expiry.isoformat(), "last_delivery_date": delivery.isoformat(),
         "quote_currency": "USD", "price_unit": "USD/barrel",
         "source_unit_text": description["UNIT"],
+        **({"quote_unit_evidence": unit_evidence} if unit_evidence is not None else {}),
         "contract_size_barrels": contract_size,
         "identity_evidence": {
             "secid": description["SECID"], "board": boards[0]["boardid"],
@@ -304,9 +329,10 @@ def _validate_persisted_identity(data: Mapping) -> None:
     evidence = data.get("identity_evidence")
     _require(isinstance(evidence, Mapping), "persisted native identity evidence missing")
     _require(evidence.get("secid") == secid and evidence.get("board") == "RFUD"
-             and evidence.get("asset_code") == "BR" and evidence.get("unit") == UNIT_TEXT
+             and evidence.get("asset_code") == "BR" and evidence.get("unit") == data.get("source_unit_text")
              and type(evidence.get("lot_size")) is int and evidence["lot_size"] == size,
              "persisted native identity evidence inconsistent")
+    quote_unit_metadata(data)
     evaluated = _date(data.get("selection_evaluated_date_moscow"))
     expiry = _date(data.get("expiry"))
     delivery = _date(data.get("last_delivery_date"))
@@ -382,7 +408,6 @@ def factual_usable(component: object) -> bool:
         and data.get("price_semantics") == PRICE_SEMANTICS
         and data.get("price_unit") == "USD/barrel"
         and data.get("quote_currency") == "USD"
-        and data.get("source_unit_text") == UNIT_TEXT
         and data.get("session_status") == "PUBLISHED_PRIOR_DATE_TRADING_RESULTS"
         and data.get("source_event_time") is None
         and data.get("source_published_at") is None

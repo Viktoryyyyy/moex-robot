@@ -82,7 +82,9 @@ def describe(snapshot):
             scope = 'latest_published_dated_reference'
             if key == 'oil':
                 from moex_research.external_data.brent_daily_context import describe as oil_context
+                from moex_research.external_data.moex_brent_factual import quote_unit_metadata
                 fact.update({name: deepcopy(data.get(name)) for name in ('expiry', 'price_field', 'price_semantics', 'selection_rule', 'selection_evaluated_date_moscow')})
+                fact.update(quote_unit_metadata(data))
                 fact['daily_weekly_context'] = oil_context(data.get('daily_weekly_context'), data, now=target_now)
         facts.append({'factor': key, 'scope': scope, 'snapshot_path': 'components.' + key + '.data', 'values': fact})
     horizons = {}

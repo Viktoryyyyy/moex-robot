@@ -200,6 +200,10 @@ def projection_completeness(snapshot, value, *, now):
     oil_facts = [fact for fact in value['facts'] if fact['factor'] == 'oil']
     _require(len(oil_facts) == int(oil_usable(oil_component)), 'oil fact cardinality must match reconciled admission')
     if oil_facts:
+        unit_fields = ('source_unit_text', 'quote_currency', 'contract_size_barrels', 'quote_unit_evidence')
+        expected_unit = {key: oil[key] for key in unit_fields} if oil.get('source_unit_text') == 'USD' else {}
+        actual_unit = {key: oil_facts[0]['values'][key] for key in unit_fields if key in oil_facts[0]['values']}
+        _require(actual_unit == expected_unit, 'oil quote unit bidirectional projection completeness')
         _require(oil_facts[0]['values'].get('daily_weekly_context') == oil_context(oil.get('daily_weekly_context'), oil, now=now), 'oil history bidirectional projection completeness')
     market = components.get('synchronized_live_market_oi', {}).get('data', {})
     spot = market.get('instruments', {}).get('cnyrub_tom', {})

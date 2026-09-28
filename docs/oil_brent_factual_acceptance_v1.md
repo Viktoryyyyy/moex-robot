@@ -29,7 +29,11 @@ Missing expiry, duplicate identities, a tied nearest expiry, inconsistent metada
 
 ## Price, units and availability
 
-`price` is **CLOSE**, never `LAST`, `PREVPRICE` or `SETTLEPRICE`. OHLC must be positive, finite, numeric and internally consistent. The source's explicit `UNIT` must be `в долларах США за 1 баррель`. Output is `quote_currency=USD`, `price_unit=USD/barrel`; native LOTSIZE must agree with LOTVOLUME and is exposed as `contract_size_barrels`.
+`price` is **CLOSE**, never `LAST`, `PREVPRICE` or `SETTLEPRICE`. OHLC must be positive, finite, numeric and internally consistent. Output is `quote_currency=USD`, `price_unit=USD/barrel`; native LOTSIZE must agree with LOTVOLUME and is exposed as `contract_size_barrels`.
+
+The original explicit `UNIT=в долларах США за 1 баррель` remains accepted with its original record shape. Currency-only `UNIT=USD` requires the already verified BR/RFUD/futures identity and native LOTSIZE=LOTVOLUME=10. The [official MOEX BR contract parameters](https://www.moex.com/ru/derivatives/commodity/oil/) define quotation in USD per barrel and a ten-barrel lot. This specific policy is recorded as `quote_unit_evidence.schema_version=moex_brent_quote_unit.v1`, binding native unit, BR asset, USD currency, USD/barrel price unit, ten-barrel size and that parameter-source URL. The URL identifies the reviewed normalization policy; it is not a fourth runtime request or an archived response claim. Other currency strings, unknown units and different sizes fail closed.
+
+`source_unit_text` and `identity_evidence.unit` always preserve the literal native value, including `USD`. Readers require those fields to agree and require the exact versioned normalization evidence for currency-only metadata. They do not replace `USD` with a fabricated explicit native description. Legacy records, evidence hashes and historical acceptance remain unchanged.
 
 `source_trade_date` and `source_history_till` retain the date of the published result. `source_event_time` and `source_published_at` remain null: the responses do not establish the timestamp of the closing trade or first publication.
 
@@ -84,6 +88,10 @@ Reported source-body SHA-256:
 These are operator-reported source hashes, not a claim that their original raw response bytes were independently replayed here. The two probe durations were 0.954 and 0.771 seconds; these do not measure the new production collector or whole snapshot refresh.
 
 ## Validation and remaining operational gates
+
+Correction task `oil_target_structure_repair_v1` addresses the observed 28 September 2026 currency-only metadata rejection. Its scope is the two Brent source/context modules, `rub_factual_release.py`, `rub_factual_release_acceptance.py`, their two Brent unit-test files and these two Brent policy/context documents. No instrument registry, governance grant, scheduler, historical dataset or trading mode changes. The current-source probe identified BRX6 dynamically; BRX6 is not an implementation constant. Fixtures reconstructed from the native metadata format are synthetic, not production replay.
+
+Regression coverage requires both unit formats through actual parallel refresh, saved JSON, full/compact consumer projection, exact D1/W1 arithmetic, unchanged-history cache reuse and first acceptance. Missing/corrupt unit evidence, mismatched native identity, wrong sizes and omitted consumer metadata must be rejected. Exact-head test, review, merge and apply evidence belongs in the PR and deployment report.
 
 `tests/unit/test_moex_brent_factual.py` contains offline source, selection, failure, clock, metadata, price, canonical snapshot, retained-state, reader and matrix regressions. Existing source selector and unrelated snapshot regressions remain applicable. CI and independent review must be tied to the exact final PR head; results are recorded in the PR, not inferred from this document.
 

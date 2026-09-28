@@ -74,6 +74,33 @@ def test_missing20_does_not_erase5_or1(tmp_path):
     assert result['comparisons']['1obs']['change_abs'] == 1
 
 
+@pytest.mark.parametrize('defect', ['missing_anchor', 'missing_evidence', 'changed_evidence', 'both_wrong'])
+def test_currency_unit_history_proof_survives_frozen_replay_and_refuses_corruption(tmp_path, defect):
+    from test_moex_brent_factual import currency_unit_fact
+    anchor = currency_unit_fact()[0]
+    rows = native_rows('BRX6')
+    anchor.update(source_trade_date=rows[-1]['TRADEDATE'], ohlc=source._ohlc(rows[-1]), price=rows[-1]['CLOSE'])
+    value = context.acquire(anchor, audit_root=tmp_path, clock=lambda: NOW,
+                            transport=fetcher(rows), monotonic=lambda: 0)
+    frozen = json.loads(json.dumps(value))
+    assert context.describe(frozen, anchor, now=NOW)['status'] == 'AVAILABLE'
+    archives = {p: p.read_bytes() for p in tmp_path.rglob('*.json')}
+    if defect == 'missing_anchor':
+        anchor.pop('quote_unit_evidence')
+    elif defect == 'missing_evidence':
+        frozen['evidence']['identity'].pop('quote_unit_evidence')
+    else:
+        frozen['evidence']['identity']['quote_unit_evidence']['asset_code'] = 'BRM'
+        if defect == 'both_wrong':
+            anchor['quote_unit_evidence']['asset_code'] = 'BRM'
+    # Even a newly computed envelope digest cannot admit a false unit policy.
+    evidence = frozen['evidence']
+    evidence['audit_version_ref'] = context.payload_digest({k: v for k, v in evidence.items() if k != 'audit_version_ref'})
+    result = context.describe(frozen, anchor, now=NOW)
+    assert result['status'] == 'UNAVAILABLE' and result['daily'] == result['weekly'] == []
+    assert {p: p.read_bytes() for p in tmp_path.rglob('*.json')} == archives
+
+
 @pytest.mark.parametrize('bad', [None, True, float('nan'), float('inf'), -1, '100'])
 def test_bad_row_keeps_exact_ordinal_and_local_shorter_comparisons(tmp_path,bad):
     rows=native_rows(); rows[9]['CLOSE']=bad
@@ -254,17 +281,22 @@ def test_release_compact_and_reverse_projection_without_network(tmp_path,monkeyp
     assert fact['price']==129 and fact['daily_weekly_context']['status']=='UNAVAILABLE'
 
 
-def test_canonical_parallel_refresh_preserves_history_on_second_run(tmp_path, monkeypatch):
-    from test_moex_brent_factual import documents
+@pytest.mark.parametrize('native_unit,secid,expiry', [
+    (source.UNIT_TEXT, 'BRV6', '2026-10-01'), ('USD', 'BRX6', '2026-11-02')])
+def test_canonical_parallel_refresh_preserves_history_on_second_run(tmp_path, monkeypatch, native_unit, secid, expiry):
+    from test_moex_brent_factual import documents, set_description
     from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_live_market_oi as overlay
     from moex_data import rub_dated_context, rub_dated_hour_source
     base = overlay.base
-    docs = documents(published='2026-09-11'); docs[-1]['history'] = block([native_rows()[-1]])
+    rows = native_rows(secid)
+    docs = documents(secid=secid, expiry=expiry, published='2026-09-11')
+    set_description(docs[1], 'UNIT', native_unit)
+    docs[-1]['history'] = block([rows[-1]])
     calls = []; clock = [NOW]
     def fetch(url):
         calls.append(url)
         if '/history/' in url:
-            return fetcher(native_rows())(url)
+            return fetcher(rows)(url)
         return json.dumps(docs[0] if '/markets/forts/securities.json' in url else docs[1]).encode()
     load_latest = source.load_factual_brent
     acquire_history = context.acquire
@@ -281,7 +313,7 @@ def test_canonical_parallel_refresh_preserves_history_on_second_run(tmp_path, mo
     monkeypatch.setattr(overlay.current_context.delta_context, 'build_all', lambda **kwargs: {})
     monkeypatch.setattr(overlay.current_context, '_attach_futoi_context', lambda *args, **kwargs: None)
     monkeypatch.setattr(overlay.futoi, '_load_governance', lambda: {})
-    monkeypatch.setattr(overlay.futoi, '_futoi_component', lambda **kwargs: {'status':'UNAVAILABLE','data':None})
+    monkeypatch.setattr(overlay.futoi, '_futoi_component', lambda **kwargs: {'status':'UNAVAILABLE','data':{}})
     monkeypatch.setattr(overlay, 'attach_live_market_oi_context', lambda *args, **kwargs: None)
     monkeypatch.setattr(overlay, 'attach_live_basis_carry_context', lambda *args, **kwargs: None)
     monkeypatch.setattr(overlay.user_position, 'attach_user_position_context', lambda *args, **kwargs: None)
@@ -301,4 +333,27 @@ def test_canonical_parallel_refresh_preserves_history_on_second_run(tmp_path, mo
     assert second_history['anchor'] == first_history['anchor']
     assert first == first_input
     assert {p: p.read_bytes() for p in (tmp_path/'audit').rglob('*.json')} == archives
-    assert json.loads(path.read_text())['components']['oil']['data']['daily_weekly_context'] == second_history
+    saved = json.loads(path.read_text())
+    oil = saved['components']['oil']['data']
+    assert oil['daily_weekly_context'] == second_history
+    assert saved['components']['oil']['status'] == 'READY'
+    assert oil['source_unit_text'] == native_unit and oil['secid'] == secid
+    from moex_data import rub_factual_release as release
+    from moex_data.rub_factual_release_acceptance import projection_completeness
+    full = release.build(saved, now=clock[0], code_revision='a'*40)
+    projection_completeness(saved, full, now=clock[0])
+    compact = release.compact(saved, now=clock[0], code_revision='a'*40)
+    fact = next(item['values'] for item in compact['facts'] if item['factor'] == 'oil')
+    history = fact['daily_weekly_context']
+    assert len(history['daily']) == 30 and len(history['weekly']) == 8
+    assert history['comparisons']['20obs']['change_abs'] == 20
+    assert all(entry['secid'] == secid for entry in history['comparisons'].values())
+    if native_unit == 'USD':
+        assert fact['source_unit_text'] == history['source_unit_text'] == 'USD'
+        assert fact['quote_unit_evidence'] == history['quote_unit_evidence'] == oil['quote_unit_evidence']
+        assert second_history['evidence']['identity']['quote_unit_evidence'] == oil['quote_unit_evidence']
+        for field in ('source_unit_text', 'quote_currency', 'contract_size_barrels', 'quote_unit_evidence'):
+            corrupt = deepcopy(full)
+            next(item['values'] for item in corrupt['facts'] if item['factor'] == 'oil').pop(field)
+            with pytest.raises(AssertionError, match='oil quote unit'):
+                projection_completeness(saved, corrupt, now=clock[0])
