@@ -358,11 +358,14 @@ def refresh_snapshot(
         from moex_data.rub_dated_context import capture_slow
         capture_slow(snapshot, previous, now=completed,
                      hour_acquisition=hour_acquisition, cny_hour_acquisition=cny_hour_acquisition)
+        from moex_data.rub_analysis_bundle_v2 import prepare, finish
+        prepared_bundles = prepare(snapshot, now=completed)
         published = base._aware(now_fn(), "publication_checked_at")
         if published < completed:
             raise base.ChatAnalysisSnapshotError("publication check precedes capture completion")
         snapshot = _live_context_at_publication(snapshot, root=root, now=published)
         base.finalize_snapshot_timing(snapshot, started=now, completed=published)
+        finish(snapshot, prepared_bundles, now=published)
         base._atomic_write(path, snapshot)
     return snapshot, path
 

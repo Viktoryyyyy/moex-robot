@@ -193,7 +193,7 @@ def _risk_payload(as_of: str = "2026-08-26T09:00:00Z") -> dict[str, object]:
 
 def test_daily_bundle_uses_exact_twenty_blocks_and_excludes_future_rows(tmp_path, monkeypatch):
     _materialize_scope(tmp_path, monkeypatch, "daily")
-    result = bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+    result = bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of=AS_OF)
     assert result["schema_version"] == "rub_analysis_bundle.v1"
     assert result["identity"] == {"project": "MOEX_Bot", "scope": "daily", "as_of": "2026-08-27T12:00:00+00:00"}
     assert result["server_core"]["status"] == "not_ready_policy_gap"
@@ -215,7 +215,7 @@ def test_daily_bundle_uses_exact_twenty_blocks_and_excludes_future_rows(tmp_path
 
 def test_weekly_bundle_adds_w1_and_preserves_declared_policy_gaps(tmp_path, monkeypatch):
     _materialize_scope(tmp_path, monkeypatch, "weekly")
-    result = bundle.build_analysis_bundle(scope="weekly", as_of=AS_OF)
+    result = bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="weekly", as_of=AS_OF)
     assert result["server_core"]["block_count"] == 24
     assert len(result["server_core"]["blocks"]) == 24
     assert {row["timeframe"] for row in result["server_core"]["blocks"] if row["stage"] == 7} == {"1D", "1W"}
@@ -230,7 +230,7 @@ def test_explicit_stage8_input_is_strictly_validated_and_carried(tmp_path, monke
     _materialize_scope(tmp_path, monkeypatch, "daily")
     risk = tmp_path / "risk.json"
     risk.write_text(json.dumps(_risk_payload()), encoding="utf-8")
-    result = bundle.build_analysis_bundle(scope="daily", as_of=AS_OF, position_risk_input=str(risk))
+    result = bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of=AS_OF, position_risk_input=str(risk))
     assert result["position_risk"]["status"] == "ready"
     assert result["position_risk"]["state"]["schema_version"] == "step8_position_risk_state.v1"
     assert result["position_risk"]["state"]["snapshot_id"] == "risk_snapshot_1"
@@ -242,13 +242,13 @@ def test_stage8_state_later_than_bundle_as_of_fails_closed(tmp_path, monkeypatch
     risk = tmp_path / "risk.json"
     risk.write_text(json.dumps(_risk_payload("2026-08-29T09:00:00Z")), encoding="utf-8")
     with pytest.raises(bundle.Step9AnalysisBundleError, match="later than bundle as_of"):
-        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF, position_risk_input=str(risk))
+        bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of=AS_OF, position_risk_input=str(risk))
 
 
 def test_naive_as_of_fails_closed(tmp_path, monkeypatch):
     _materialize_scope(tmp_path, monkeypatch, "daily")
     with pytest.raises(bundle.Step9AnalysisBundleError, match="timezone-aware"):
-        bundle.build_analysis_bundle(scope="daily", as_of="2026-08-27T12:00:00")
+        bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of="2026-08-27T12:00:00")
 
 
 def test_no_observation_before_as_of_fails_closed(tmp_path, monkeypatch):
@@ -261,7 +261,7 @@ def test_no_observation_before_as_of_fails_closed(tmp_path, monkeypatch):
         values["binding_availability_ts_utc"] = "2019-12-31T00:00:00Z"
         path.write_text(json.dumps(values, sort_keys=True), encoding="utf-8")
     with pytest.raises(bundle.Step9AnalysisBundleError, match="no causal observation"):
-        bundle.build_analysis_bundle(scope="daily", as_of="2020-01-01T00:00:00Z")
+        bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of="2020-01-01T00:00:00Z")
 
 
 def test_stage3_naive_exchange_timestamp_is_localized_to_moscow():
@@ -278,7 +278,7 @@ def test_missing_mandatory_pointer_fails_closed(tmp_path, monkeypatch):
     first = bundle.pointer_specs("daily")[0]
     bundle._pointer_path(root, first).unlink()
     with pytest.raises(bundle.Step9AnalysisBundleError, match="accepted pointer missing"):
-        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+        bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of=AS_OF)
 
 
 def test_pointer_identity_and_quality_fail_closed(tmp_path, monkeypatch):
@@ -289,7 +289,7 @@ def test_pointer_identity_and_quality_fail_closed(tmp_path, monkeypatch):
     values["instrument_id"] = "wrong"
     path.write_text(json.dumps(values), encoding="utf-8")
     with pytest.raises(bundle.Step9AnalysisBundleError, match="instrument_id mismatch"):
-        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+        bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of=AS_OF)
 
 
 def test_missing_trusted_digest_fails_closed(tmp_path, monkeypatch):
@@ -300,7 +300,7 @@ def test_missing_trusted_digest_fails_closed(tmp_path, monkeypatch):
     values.pop("partition_sha256")
     path.write_text(json.dumps(values), encoding="utf-8")
     with pytest.raises(bundle.Step9AnalysisBundleError, match="partition_sha256 is required trusted integrity evidence"):
-        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+        bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of=AS_OF)
 
 
 @pytest.mark.parametrize("field", ["run_id", "acceptance_run_id", "acceptance_contract_id"])
@@ -312,7 +312,7 @@ def test_missing_pointer_provenance_fails_closed(tmp_path, monkeypatch, field):
     values.pop(field)
     path.write_text(json.dumps(values), encoding="utf-8")
     with pytest.raises(bundle.Step9AnalysisBundleError, match=field + " must be non-empty"):
-        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+        bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of=AS_OF)
 
 
 def test_stage_inappropriate_acceptance_contract_fails_closed(tmp_path, monkeypatch):
@@ -323,7 +323,7 @@ def test_stage_inappropriate_acceptance_contract_fails_closed(tmp_path, monkeypa
     values["acceptance_contract_id"] = "step4_rub_basis_carry_acceptance.v1"
     path.write_text(json.dumps(values), encoding="utf-8")
     with pytest.raises(bundle.Step9AnalysisBundleError, match="acceptance_contract_id mismatch"):
-        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+        bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of=AS_OF)
 
 
 def test_mixed_acceptance_runs_within_stage_fail_closed(tmp_path, monkeypatch):
@@ -334,7 +334,7 @@ def test_mixed_acceptance_runs_within_stage_fail_closed(tmp_path, monkeypatch):
     values["acceptance_run_id"] = "different_acceptance_run"
     path.write_text(json.dumps(values, sort_keys=True), encoding="utf-8")
     with pytest.raises(bundle.Step9AnalysisBundleError, match="mixed acceptance_run_id within stage.*3"):
-        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+        bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of=AS_OF)
 
 
 def test_stage3_future_binding_availability_fails_closed(tmp_path, monkeypatch):
@@ -345,7 +345,7 @@ def test_stage3_future_binding_availability_fails_closed(tmp_path, monkeypatch):
     values["binding_availability_ts_utc"] = FUTURE
     path.write_text(json.dumps(values, sort_keys=True), encoding="utf-8")
     with pytest.raises(bundle.Step9AnalysisBundleError, match="binding availability is later than as_of"):
-        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+        bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of=AS_OF)
 
 
 def test_support_documents_must_correlate_to_pointer_producer_run(tmp_path, monkeypatch):
@@ -360,7 +360,7 @@ def test_support_documents_must_correlate_to_pointer_producer_run(tmp_path, monk
     pointer["manifest_sha256"] = _sha(manifest)
     pointer_path.write_text(json.dumps(pointer, sort_keys=True), encoding="utf-8")
     with pytest.raises(bundle.Step9AnalysisBundleError, match="manifest run_id mismatch"):
-        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+        bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of=AS_OF)
 
 
 def test_pointer_sha_mismatch_fails_closed(tmp_path, monkeypatch):
@@ -371,7 +371,7 @@ def test_pointer_sha_mismatch_fails_closed(tmp_path, monkeypatch):
     values["partition_sha256"] = "0" * 64
     path.write_text(json.dumps(values), encoding="utf-8")
     with pytest.raises(bundle.Step9AnalysisBundleError, match="partition_sha256 mismatch"):
-        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+        bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of=AS_OF)
 
 
 def test_traversal_ref_fails_closed(tmp_path, monkeypatch):
@@ -382,7 +382,7 @@ def test_traversal_ref_fails_closed(tmp_path, monkeypatch):
     values["partition_ref"] = "${MOEX_DATA_ROOT}/../foreign.parquet"
     path.write_text(json.dumps(values), encoding="utf-8")
     with pytest.raises(bundle.Step9AnalysisBundleError, match="path traversal"):
-        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+        bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of=AS_OF)
 
 
 def test_symlink_partition_fails_closed(tmp_path, monkeypatch):
@@ -396,7 +396,7 @@ def test_symlink_partition_fails_closed(tmp_path, monkeypatch):
     target.symlink_to(real)
     pointer_path.write_text(json.dumps(values), encoding="utf-8")
     with pytest.raises(bundle.Step9AnalysisBundleError, match="symlink"):
-        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+        bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of=AS_OF)
 
 
 def test_duplicate_pointer_json_member_fails_closed(tmp_path, monkeypatch):
@@ -408,13 +408,13 @@ def test_duplicate_pointer_json_member_fails_closed(tmp_path, monkeypatch):
     payload = payload[:-1] + ',"dataset_id":"duplicate"}'
     path.write_text(payload, encoding="utf-8")
     with pytest.raises(bundle.Step9AnalysisBundleError, match="duplicate JSON object member"):
-        bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+        bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of=AS_OF)
 
 
 def test_output_is_deterministic_for_identical_inputs(tmp_path, monkeypatch):
     _materialize_scope(tmp_path, monkeypatch, "daily")
-    first = bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
-    second = bundle.build_analysis_bundle(scope="daily", as_of=AS_OF)
+    first = bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of=AS_OF)
+    second = bundle.build_analysis_bundle(schema_version="rub_analysis_bundle.v1", scope="daily", as_of=AS_OF)
     assert json.dumps(first, sort_keys=True, separators=(",", ":")) == json.dumps(second, sort_keys=True, separators=(",", ":"))
 
 

@@ -192,6 +192,10 @@ def projection_completeness(snapshot, value, *, now):
     verify_historical_basis(snapshot, value, now=now)
     from math import isfinite
     view = apply_read_freshness(snapshot, now=now)
+    if any((view.get('components', {}).get('stage9_'+scope, {}).get('data') or {}).get('schema_version') == 'rub_analysis_bundle.v2'
+           for scope in ('daily', 'weekly')):
+        from moex_data import rub_analysis_bundle_v2 as bundle
+        bundle.revoke_current(view, bundle._check_current(view, now=now), now=now)
     components = view.get('components', {})
     from moex_research.external_data.brent_daily_context import describe as oil_context
     from moex_research.external_data.moex_brent_factual import factual_usable as oil_usable
@@ -308,6 +312,13 @@ def projection_completeness(snapshot, value, *, now):
     expected_blocks = {}
     from moex_data.rub_contract_observed_context import describe as describe_contract_dates
     contract_evidence = None
+    stage9_periods = None
+    if any((components.get('stage9_'+scope, {}).get('data') or {}).get('schema_version') == 'rub_analysis_bundle.v2'
+           for scope in ('daily', 'weekly')):
+        from moex_data.rub_analysis_bundle_v2 import _periods
+        stage9_periods = _periods(view, now=now)
+        from moex_data.rub_analysis_bundle_v2 import verify_projection
+        verify_projection(view, value, now=now, periods=stage9_periods)
     for name in ('stage9_daily', 'stage9_weekly'):
         component = components.get(name, {})
         core = (component.get('data') or {}).get('server_core', {})
@@ -362,8 +373,13 @@ def projection_completeness(snapshot, value, *, now):
                     'contract sparse weekly arithmetic')
     for name in ('stage9_daily', 'stage9_weekly'):
         component = components.get(name, {})
-        if component.get('status') != 'READY': continue
-        for block in (component.get('data') or {}).get('server_core', {}).get('blocks', []):
+        data = component.get('data') or {}
+        if data.get('schema_version') == 'rub_analysis_bundle.v2':
+            blocks = stage9_periods[name.removeprefix('stage9_')]
+        else:
+            if component.get('status') != 'READY': continue
+            blocks = data.get('server_core', {}).get('blocks', [])
+        for block in blocks:
             try:
                 selected_clock = datetime.fromisoformat(block['selected_causal_ts_utc'])
                 build_clock = datetime.fromisoformat(block['selected_observation']['build_ts_utc'])
@@ -374,6 +390,7 @@ def projection_completeness(snapshot, value, *, now):
                 _fx_arithmetic_completeness(block, now=now)
                 expected_block = deepcopy(block)
                 expected_block.pop('observed_context_evidence', None)
+                expected_block.pop('source_envelope', None)
                 expected_blocks.setdefault((block.get('block_id'), block.get('selected_causal_ts_utc')), expected_block)
     actual_blocks = {(entry['values'].get('block_id'), entry['values'].get('selected_causal_ts_utc')): entry['values'] for entry in value['timeframe_context']}
     # Independent source-hour oracle: do not ask the projection's admission helper.

@@ -77,6 +77,10 @@ def test_historical_raw_default_key_and_paths_remain_v1(monkeypatch, tmp_path):
 # The runtime call graph must also be explicit: source identity alone does not
 # discover a caller which selects a refresh implementation by importing it.
 REVIEWED_REFRESH_IMPORTERS = REVIEWED_IDENTITY_CONSUMERS | {
+    # Stage9 v2 replays full root publication evidence; it never calls a refresh.
+    # Explicit v2 identity, existing governance and independent roots are covered
+    # by test_stage9_analysis_bundle_v2's real refresh -> JSON -> reader/export.
+    "src/moex_data/rub_analysis_bundle_v2.py",
     "src/moex_data/step10_rub_refresh_entrypoint.py",
     # Direct source import: _data_root only. Keep historical loaders at v1
     # until their own caller explicitly selects the new version.

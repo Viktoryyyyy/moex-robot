@@ -1,0 +1,16 @@
+config_id: step9_rub_analysis_bundle.v2
+project: MOEX_Bot
+schema_version: rub_analysis_bundle.v2
+selection_contract_ref: contracts/intelligence/rub_analysis_bundle_selection_v2.json
+dataset_contract_ref: contracts/datasets/rub_analysis_bundle.v2.yaml
+producer: existing_chat_analysis_snapshot_refresh
+reader: moex_data.step9_rub_analysis_bundle
+snapshot_and_cli_schema_version: rub_analysis_bundle.v2
+legacy_python_api_default_schema_version: rub_analysis_bundle.v1
+new_collector: false
+source_fetch_at_read: false
+accepted_pointer_writes: false
+history_backfill: false
+ttl_extension: false
+model_authority: false
+trading_authority: false

@@ -254,11 +254,13 @@ def _single_refresh_lock(state_dir: Path) -> Iterator[None]:
             handle.close()
 
 
-def _stage9_component(scope: str) -> ComponentProducer:
+def _stage9_component(scope: str, shared_seed=None) -> ComponentProducer:
     def produce(now: datetime) -> ProducedComponent:
-        bundle = step9.build_analysis_bundle(scope=scope, as_of=_iso(now))
-        freshness = bundle["server_core"]["freshness_alignment"]
-        newest = freshness.get("newest_selected_causal_ts_utc")
+        from moex_data.rub_analysis_bundle_v2 import seed
+        bundle = shared_seed(scope, now) if shared_seed is not None else seed(scope=scope, now=now)
+        times = [b['selected_causal_ts_utc'] for b in bundle['server_core']['blocks']
+                 if b.get('status') == 'ready']
+        newest = max(times) if times else None
         return ProducedComponent(data=bundle, data_as_of=newest)
 
     return produce
@@ -414,9 +416,11 @@ def _oil_component(now: datetime, previous=None) -> ProducedComponent:
 
 
 def default_producers() -> Mapping[str, ComponentProducer]:
+    from moex_data.rub_analysis_bundle_v2 import shared_seed_provider
+    stage9_seed = shared_seed_provider()
     return {
-        "stage9_daily": _stage9_component("daily"),
-        "stage9_weekly": _stage9_component("weekly"),
+        "stage9_daily": _stage9_component("daily", stage9_seed),
+        "stage9_weekly": _stage9_component("weekly", stage9_seed),
         "live_market_structure": _live_market_component,
         "cbr_macro": _macro_component,
         "official_news": _news_component,
@@ -759,6 +763,15 @@ def finalize_snapshot_timing(snapshot: dict[str, object], *, started: datetime, 
     cbr_liquidity_factual.apply(snapshot, now=completed)
 
 
+def finalize_bundle_publication(snapshot, *, started, now_fn):
+    from moex_data.rub_analysis_bundle_v2 import prepare, finish
+    completed = _aware(now_fn(), 'refresh_completed_at')
+    prepared = prepare(snapshot, now=completed)
+    published = _aware(now_fn(), 'publication_checked_at') if prepared is not None else completed
+    finalize_snapshot_timing(snapshot, started=started, completed=published)
+    finish(snapshot, prepared, now=published)
+
+
 def refresh_snapshot(
     *,
     now_fn: Callable[[], datetime] | None = None,
@@ -784,7 +797,7 @@ def refresh_snapshot(
         now = _aware(clock(), "clock")
         snapshot = build_snapshot(now=now, previous=previous, producers=selected_producers,
                                   calendar_context=calendar_context)
-        finalize_snapshot_timing(snapshot, started=now, completed=clock())
+        finalize_bundle_publication(snapshot, started=now, now_fn=clock)
         _atomic_write(path, snapshot)
     return snapshot, path
 
@@ -812,8 +825,8 @@ def read_current_snapshot(
         "snapshot_age_seconds": age,
         "status": "FRESH" if age <= STALE_AFTER_SECONDS else "STALE",
     }
-    from moex_data.rub_factual_release import describe as describe_release
-    result['factual_release'] = describe_release(result)
+    from moex_data.rub_analysis_bundle_v2 import reconcile
+    result['factual_release'] = reconcile(result, now=now)
     return result, path
 
 
