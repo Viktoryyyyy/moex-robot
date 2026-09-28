@@ -248,3 +248,38 @@ reported termination condition, not its underlying cause and not a code-test pas
 Fresh final-head checks remain required. Overlapping PRs #369/#371 and their held
 shared-file lanes were inspected and left unchanged. No AGENTS.md or the two exact
 named v2 operating/parallel-lane documents were present in the complete checkout.
+
+## Snapshot metadata correction after PR #548
+
+The owner reported a remaining snapshot label/data mismatch after merge
+`a9cc728c672e789d4e32e36f621d021498e91953`. The current/previous attachment replaced
+the native candidate's top-level factual/provenance, but inherited its completed-date
+`source_factual_scope` and native `source_context_schema_version` labels. The v2
+attachment now labels the top-level factual slot as `current_intraday` and records
+the attached context's schema. These labels describe origin, not freshness,
+consumer admission, session completeness or historical authority. A failed current
+still has a null top-level fact and an independently retained previous role.
+
+Only the existing attachment, this document and the existing task regression test
+change. The regression seeds a real successful native candidate for both roots
+before real regular/fast refresh, then checks the saved snapshot and consumer path
+for both role-failure directions. It also checks the native-only completed-date
+labels before attachment. The original regression without a native candidate stays
+covered. Native-only semantics, default v1 behavior, all fact/provenance bytes,
+governance and CR TTL are unchanged. The new regression first reproduced the native
+schema label surviving current attachment on the unmodified merged code.
+
+Targeted Linux validation with real Parquet passed: **306 passed** (27.58s) across
+both task test files, `test_usdrubf_s7_3_chat_analysis_snapshot_current_context_delta.py`
+and `unit/test_usdrubf_s7_3_chat_analysis_snapshot_futoi.py`. No production refresh
+or metadata-file editing is used as a substitute for deploying the reviewed fix.
+
+The full CI test set also passed locally on Linux: **7444 passed, 37 subtests
+passed** (856.25s), plus `compileall src tests`. The first full run had two path-guard
+test failures because the temporary checkout itself was inside Python's temp root.
+An independent read-only review confirmed that setup issue; a separate `TMPDIR`
+restored the tests' intended path boundary. Both affected test files then passed
+(86 tests), followed by the full passing run, without changing or disabling tests.
+
+Validation, exact-head review and publication results for this correction are
+recorded separately; the earlier PR #548 review does not certify a new correction.
