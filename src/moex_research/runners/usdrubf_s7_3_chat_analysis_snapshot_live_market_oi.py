@@ -355,12 +355,48 @@ def refresh_snapshot(
         si_attempt = (snapshot.get(SI_DATED_STORE_KEY) or {}).get("last_capture_attempt_at_utc")
         if si_attempt is not None and completed < base._aware(si_attempt, "si_capture_completed_at"):
             raise base.ChatAnalysisSnapshotError("refresh completion precedes Si capture completion")
-        base.finalize_snapshot_timing(snapshot, started=now, completed=completed)
         from moex_data.rub_dated_context import capture_slow
-        capture_slow(snapshot, previous, now=base._aware(snapshot['identity']['generated_at_utc'], 'completed'),
+        capture_slow(snapshot, previous, now=completed,
                      hour_acquisition=hour_acquisition, cny_hour_acquisition=cny_hour_acquisition)
+        published = base._aware(now_fn(), "publication_checked_at")
+        if published < completed:
+            raise base.ChatAnalysisSnapshotError("publication check precedes capture completion")
+        snapshot = _live_context_at_publication(snapshot, root=root, now=published)
+        base.finalize_snapshot_timing(snapshot, started=now, completed=published)
         base._atomic_write(path, snapshot)
     return snapshot, path
+
+
+def _live_context_at_publication(snapshot: dict[str, object], *, root, now: datetime) -> dict[str, object]:
+    """Use the opted-in persisted fast generation after slow captures, then age it.
+
+    Market and basis must come from one generation. The existing fast reader
+    verifies its envelope and original current proof; an enabled failed/expired
+    cache refuses both components without reviving the heavy collection.
+    """
+    from moex_data.rub_fast_market import apply as apply_fast_market
+    result = apply_fast_market(snapshot, root=root, now=now)
+    names = (COMPONENT, BASIS_CARRY_COMPONENT)
+    flags = ("live_market_oi_factual_authority", "live_basis_carry_factual_authority")
+    # Reuse the consumer's downgrade-only TTL checks on just these components.
+    # Other components and accepted historical evidence retain their own clocks.
+    checked = base.apply_read_freshness({
+        "components": {name: result["components"][name] for name in names},
+        "authority": {flag: result["authority"].get(flag, False) for flag in flags},
+    }, now=now)
+    for name in names:
+        result["components"][name] = checked["components"][name]
+    for flag in flags:
+        result["authority"][flag] = checked["authority"][flag]
+    result["live_publication_freshness"] = {
+        "checked_at_utc": now.isoformat(),
+        "maximum_source_age_seconds": checked["live_read_freshness"]["maximum_source_age_seconds"],
+        "blocked_instruments": checked["live_read_freshness"]["blocked_instruments"],
+        "fast_market_overlay_selected": "fast_market_read" in result,
+        "additional_live_fetch_performed": False,
+    }
+    _recompute_readiness_with_partial(result)
+    return result
 
 
 def load_live_analysis_snapshot(

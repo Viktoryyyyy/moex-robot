@@ -393,7 +393,7 @@ def test_c1_real_capture_completion_bounds_canonical_generation(tmp_path,monkeyp
     written=[];monkeypatch.setattr(base,'_atomic_write',lambda path,value:written.append(value))
     final=NOW+timedelta(seconds=1 if reversed_completion else 3)
     # FUTOI admission reads once before the historical-basis capture clocks.
-    ticks=iter((NOW,NOW,NOW+timedelta(seconds=1),NOW+timedelta(seconds=2),final))
+    ticks=iter((NOW,NOW,NOW+timedelta(seconds=1),NOW+timedelta(seconds=2),final,final))
     if reversed_completion:
         with pytest.raises(base.ChatAnalysisSnapshotError,match='precedes historical basis capture completion'):
             overlay.refresh_snapshot(now_fn=lambda:next(ticks),live_loader=lambda:{'status':'UNAVAILABLE'})

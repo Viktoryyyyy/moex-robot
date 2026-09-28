@@ -27,6 +27,8 @@ def _instrument(
         "age_seconds": 10.0,
         "stale": False,
         "source_id": source_id,
+        "oi": 1000 if logical_id != "cnyrub_tom" else None,
+        "price_oi_same_source_row": logical_id != "cnyrub_tom",
     }
     if expiry is not None:
         item["expiry_date"] = expiry
@@ -34,7 +36,7 @@ def _instrument(
 
 
 def _live_ready() -> dict[str, object]:
-    return {
+    value = {
         "schema_version": overlay.live_market.SCHEMA_VERSION,
         "status": "READY",
         "snapshot_received_at_utc": NOW.isoformat(),
@@ -63,6 +65,7 @@ def _live_ready() -> dict[str, object]:
             ),
         },
     }
+    return overlay.live_market._reclassify(value)
 
 
 def test_refresh_writes_basis_carry_from_single_live_fetch_into_canonical_snapshot(monkeypatch, tmp_path) -> None:
