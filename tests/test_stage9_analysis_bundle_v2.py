@@ -117,6 +117,7 @@ def test_heavy_refresh_saved_json_and_reader_keep_sections_and_independent_roots
             periods = data["sections"]["completed_periods"]
             assert len(periods["items"]) == count
             assert periods["status"] == "AVAILABLE", periods
+            assert data["server_core"]["status"] == data["readiness"]["server_core"] == periods["status"]
             for item in periods["items"].values():
                 assert item["freshness"]["source_end_date"] in ("2026-09-23", "2026-09-20")
                 assert item["freshness"]["session_completion_proven"] is False
@@ -201,6 +202,37 @@ def test_heavy_refresh_saved_json_and_reader_keep_sections_and_independent_roots
     for name in ("si_front", "futoi_live", "futoi_live_cr"):
         assert current(expired)[name]["status"] == "UNAVAILABLE"
     assert expired["components"]["stage9_weekly"]["data"]["sections"]["completed_periods"]["status"] == "AVAILABLE"
+
+
+@pytest.mark.parametrize("refuse_all", [False, True])
+def test_period_core_status_tracks_only_usable_periods_after_saved_evidence_refusal(tmp_path, monkeypatch, refuse_all):
+    from moex_data import rub_factual_release
+    from moex_data.rub_factual_release_acceptance import projection_completeness
+    source_io(tmp_path, monkeypatch)
+    saved, path = live.refresh_snapshot(now_fn=lambda: NOW, live_loader=lambda: shifted_market(NOW))
+    for scope in ("daily", "weekly"):
+        blocks = saved["components"]["stage9_"+scope]["data"]["server_core"]["blocks"]
+        for block in blocks:
+            if refuse_all or (block["timeframe"] == "1D" and block["instrument_id"] == "usdrubf_futures_family"):
+                block["source_envelope"]["buffers_base64"]["partition_ref"] = base64.b64encode(b"corrupt").decode()
+    live.base._atomic_write(path, saved)
+    frozen = path.read_bytes()
+    read, _ = live.base.read_current_snapshot(now_fn=lambda: NOW)
+    assert path.read_bytes() == frozen
+    expected = "UNAVAILABLE" if refuse_all else "PARTIAL"
+    exported = rub_factual_release.build(saved, now=NOW, code_revision="a"*40)
+    for scope in ("daily", "weekly"):
+        for data in (read["components"]["stage9_"+scope]["data"], exported["analysis_bundles"][scope]):
+            assert data["sections"]["current_market"]["items"]["si_front"]["status"] == "AVAILABLE"
+            assert data["server_core"]["status"] == data["readiness"]["server_core"] == expected
+            assert data["sections"]["completed_periods"]["status"] == expected
+            assert data["readiness"]["bundle_status"] == "PARTIAL"
+    for field in ("server_core", "readiness"):
+        damaged = deepcopy(exported)
+        target = damaged["analysis_bundles"]["daily"][field]
+        target["status" if field == "server_core" else "server_core"] = "AVAILABLE"
+        with pytest.raises(AssertionError, match="period core availability"):
+            projection_completeness(saved, damaged, now=NOW)
 
 
 def test_frozen_periods_replay_original_buffers_without_paths_and_refuse_tampering(tmp_path, monkeypatch):

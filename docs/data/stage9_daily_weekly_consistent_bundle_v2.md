@@ -108,6 +108,11 @@ that the new reverse oracle received the original snapshot clock. The corrective
 change passes the reconciled read-time view, including independent current v2
 revocations, and tests frozen acceptance at +1, +61 and +1201 seconds. The
 corrected head requires a new independent review and complete CI checks.
+GitHub review comment `4126903371` found a separate aggregate status mismatch:
+an entirely refused D1/W1 core was still labelled `PARTIAL`. Both core status
+fields now derive exclusively from replayed period availability, independently
+of current-market availability. Real refresh, saved-JSON corruption, canonical
+read and export tests cover partial/all refusals and reject altered status labels.
 
 Server apply is authorized only for the confirmed merged SHA. Runtime acceptance
 must inspect a newly saved snapshot and canonical read, daily/weekly section

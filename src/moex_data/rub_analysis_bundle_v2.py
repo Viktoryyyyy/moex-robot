@@ -462,7 +462,7 @@ def _bundles(snapshot, prepared, *, now):
             "identity": {"project": "MOEX_Bot", "scope": scope, "as_of": now.isoformat(),
                 "source_snapshot_generated_at_utc": snapshot.get("identity", {}).get("generated_at_utc")},
             "sections": sections,
-            "server_core": {"status": "PARTIAL", "blocks": deepcopy(periods), "block_count": len(periods),
+            "server_core": {"status": completed["status"], "blocks": deepcopy(periods), "block_count": len(periods),
                 "scope": "accepted_period_evidence_only_not_current_market",
                 "freshness_alignment": {"status": "POLICY_DEFINED", "policy": POLICY_ID,
                     "oldest_selected_causal_ts_utc": min(source_times) if source_times else None,
@@ -470,7 +470,7 @@ def _bundles(snapshot, prepared, *, now):
                     "cross_section_timestamp_equality_required": False, "exact_trigger_generation_allowed": False}},
             "position_risk": risk, "external_context": external, "missing_sources": unavailable,
             "readiness": {"bundle_status": "PARTIAL", "analysis_bundle_complete": False,
-                "server_core": "PARTIAL" if any(s["status"]!="UNAVAILABLE" for s in sections.values()) else "UNAVAILABLE",
+                "server_core": completed["status"],
                 "section_statuses": {name:s["status"] for name,s in sections.items()},
                 "position_risk": risk.get("status"), "external_context": "PARTIAL",
                 "unavailable_capabilities": limitations, "selection_policy_ready": True},
@@ -569,6 +569,12 @@ def verify_projection(snapshot, release, *, now, periods):
             if block.get("status") == "ready":
                 period_clock(block, now)
         require(output.get("server_core", {}).get("blocks") == expected_periods, "full period values and evidence")
+        usable_periods = sum(block.get("status") == "ready" for block in expected_periods)
+        period_status = ("AVAILABLE" if expected_periods and usable_periods == len(expected_periods)
+                         else "PARTIAL" if usable_periods else "UNAVAILABLE")
+        require(output.get("server_core", {}).get("status") == period_status
+            and output.get("readiness", {}).get("server_core") == period_status
+            and sections["completed_periods"].get("status") == period_status, "period core availability")
         items = sections["completed_periods"]["items"]
         require(set(items) == {b["block_id"] for b in expected_periods}, "period inventory")
         history_sources = {}
