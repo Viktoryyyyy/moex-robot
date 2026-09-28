@@ -12,8 +12,12 @@ It reuses the consumer's 60-second source TTL checks immediately before
 publication, so an old heavy observation cannot keep a usable flag merely
 because collection finished recently. No network request is added on this path.
 
-Only the live snapshot runner, its publication tests and this task document
-change. Historical evidence, FUTOI admissions, source identity, source timestamps,
+Only the live snapshot runner, its publication tests, existing calendar,
+historical-basis, hour and oil refresh fixtures, and this task document change.
+Clock fixtures include the final publication sample and preserve the earlier
+economic acceptance times. Calendar/oil fixtures use real unavailable live
+attachments instead of removing the live components. Historical evidence,
+FUTOI admissions, source identity, source timestamps,
 Stage10, timers, registry, original TTL and trading authority are unchanged.
 An enabled missing, failed, corrupted or expired fast cache refuses live facts
 and dependent basis; it does not fall back to earlier heavy quotes. Opt-out

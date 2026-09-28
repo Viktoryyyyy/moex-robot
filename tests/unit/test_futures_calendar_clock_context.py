@@ -154,7 +154,8 @@ def test_overlay_binds_clock_before_slow_prework_and_real_prefetch(tmp_path, mon
     monkeypatch.setattr(futoi, '_futoi_component', lambda **kwargs: {'status': 'UNAVAILABLE', 'data': {}})
     selected = producers(); selected['futures_calendar'] = base._futures_calendar_component
     # Current/live overlays also read the FUTOI admission clock before completion.
-    clock = Clock([0, 8, 9, 17, 18] + ([18] if route != 'futoi' else []))
+    clock = Clock([0, 8, 9, 17, 18] + ([18] if route != 'futoi' else [])
+                  + ([18] if route == 'live_market' else []))
     monkeypatch.setattr(base, '_live_now', lambda: clock.readings[-1])
     requests = []
     def fetch(url, *, env):
@@ -179,8 +180,6 @@ def test_overlay_binds_clock_before_slow_prework_and_real_prefetch(tmp_path, mon
         else:
             # Keep real prefetch and real futoi/base builders; unrelated attachments
             # are isolated so this regression exercises only calendar clock wiring.
-            monkeypatch.setattr(live_market, 'attach_live_market_oi_context', lambda *args, **kwargs: None)
-            monkeypatch.setattr(live_market, 'attach_live_basis_carry_context', lambda *args, **kwargs: None)
             monkeypatch.setattr(live_market.user_position, 'attach_user_position_context', lambda *args, **kwargs: None)
             monkeypatch.setattr('moex_data.rub_si_futoi_dated_context.capture_snapshot', lambda *args, **kwargs: None)
             monkeypatch.setattr('moex_data.rub_historical_basis_carry_context.capture_snapshot', lambda *args, **kwargs: None)
@@ -191,7 +190,7 @@ def test_overlay_binds_clock_before_slow_prework_and_real_prefetch(tmp_path, mon
     assert data['received_at'] == (NOW+timedelta(seconds=17)).isoformat()
     assert datetime.fromisoformat(value['identity']['refresh_started_at_utc']) == NOW
     assert datetime.fromisoformat(value['identity']['generated_at_utc']) == NOW+timedelta(seconds=18)
-    assert len(clock.readings) == (5 if route == 'futoi' else 6)
+    assert len(clock.readings) == {'futoi': 5, 'current_context': 6, 'live_market': 7}[route]
 
 
 @pytest.mark.parametrize('route', ['futoi', 'current_context', 'live_market'])

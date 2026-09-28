@@ -314,8 +314,6 @@ def test_canonical_parallel_refresh_preserves_history_on_second_run(tmp_path, mo
     monkeypatch.setattr(overlay.current_context, '_attach_futoi_context', lambda *args, **kwargs: None)
     monkeypatch.setattr(overlay.futoi, '_load_governance', lambda: {})
     monkeypatch.setattr(overlay.futoi, '_futoi_component', lambda **kwargs: {'status':'UNAVAILABLE','data':{}})
-    monkeypatch.setattr(overlay, 'attach_live_market_oi_context', lambda *args, **kwargs: None)
-    monkeypatch.setattr(overlay, 'attach_live_basis_carry_context', lambda *args, **kwargs: None)
     monkeypatch.setattr(overlay.user_position, 'attach_user_position_context', lambda *args, **kwargs: None)
     monkeypatch.setattr(rub_dated_hour_source, 'acquire', lambda **kwargs: None)
     monkeypatch.setattr(rub_dated_context, 'capture_slow', lambda *args, **kwargs: None)
