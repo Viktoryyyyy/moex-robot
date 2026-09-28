@@ -1,0 +1,21 @@
+{
+  "project": "MOEX_Bot",
+  "schema_version": "rub_analysis_bundle_selection.v2",
+  "sections": [
+    "current_market",
+    "completed_periods",
+    "historical_comparisons"
+  ],
+  "market_source_ttl_seconds": 60,
+  "futoi_current_ttl_seconds": 1200,
+  "dated_maximum_lifetime_seconds": 345600,
+  "period_policy": "accepted_elapsed_calendar_period_observations_no_session_completion_claim",
+  "period_freshness": "explicit_source_period_age_not_live_freshness",
+  "selection": "existing_admission_then_explicit_role_no_cross_role_fallback",
+  "read": "replay_frozen_pointer_and_original_hash_bound_buffers_recheck_existing_admissions",
+  "partial_is_ready": false,
+  "new_collection": false,
+  "historical_pointer_writes": false,
+  "model_authority": false,
+  "trading_authority": false
+}

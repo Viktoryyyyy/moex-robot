@@ -17,14 +17,15 @@ def _encoded(value):
     return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode()
 
 
-def describe(snapshot):
+def describe(snapshot, *, stage9_periods=None, stage9_current_checks=None, include_analysis_bundles=True):
     from moex_data.rub_production_source_matrix import build as matrix_build
     from moex_data.rub_macro_evidence_inventory import describe as describe_macro, reconcile_components
     snapshot = dict(snapshot)
     if not isinstance(snapshot.get('components'), dict):
         snapshot['components'] = {}
     else:
-        snapshot['components'] = dict(snapshot['components'])
+        snapshot['components'] = {key: {**value, 'data': value.get('data') or {}}
+            if isinstance(value, dict) else value for key, value in snapshot['components'].items()}
     try:
         reference = (snapshot['live_read_freshness']['read_at_utc']
             if 'live_read_freshness' in snapshot else snapshot['identity']['generated_at_utc'])
@@ -45,6 +46,13 @@ def describe(snapshot):
         # use the same receipt/evidence decision for both the matrix and facts.
         snapshot['components']['external_cny'] = reconcile_cny(
             snapshot['components']['external_cny'], now=target_now)
+    if target_now is not None and any(
+            (snapshot['components'].get('stage9_'+scope, {}).get('data') or {}).get('schema_version') == 'rub_analysis_bundle.v2'
+            for scope in ('daily', 'weekly')):
+        from moex_data import rub_analysis_bundle_v2 as bundle
+        if stage9_current_checks is None:
+            stage9_current_checks = bundle._check_current(snapshot, now=target_now)
+        bundle.revoke_current(snapshot, stage9_current_checks, now=target_now)
     matrix = matrix_build(snapshot)
     components = snapshot['components']
     facts = []
@@ -103,7 +111,12 @@ def describe(snapshot):
             'model_probability': None, 'forecast_generated': False}
     freshness = snapshot.get('live_read_freshness')
     from moex_data.rub_dated_context import describe as dated_context
-    consumers = consumer_context(snapshot)
+    if stage9_periods is None and target_now is not None and any(
+            (components.get('stage9_'+scope, {}).get('data') or {}).get('schema_version') == 'rub_analysis_bundle.v2'
+            for scope in ('daily', 'weekly')):
+        from moex_data.rub_analysis_bundle_v2 import _periods
+        stage9_periods = _periods(snapshot, now=target_now)
+    consumers = consumer_context(snapshot, stage9_periods=stage9_periods)
     from moex_data.rub_si_futoi_dated_context import attach_consumer as attach_si_dated
     attach_si_dated(snapshot, consumers, now=target_now)
     from moex_data.rub_si_futoi_observed_statistics import attach_consumer as attach_si_statistics
@@ -135,7 +148,7 @@ def describe(snapshot):
                     **{key: hour_item[key] for key in ('origin', 'accepted_at_utc', 'acceptance_evidence_id', 'revision_id')},
                     'values': {'block_id': identity[0], 'selected_causal_ts_utc': identity[1],
                                'selected_causal_time_semantics': 'observed_hour_end_not_availability', **hour}})
-    return {'schema_version': SCHEMA, 'as_of_utc': freshness.get('read_at_utc') if isinstance(freshness, dict) else None,
+    result = {'schema_version': SCHEMA, 'as_of_utc': freshness.get('read_at_utc') if isinstance(freshness, dict) else None,
         'status': 'INCOMPLETE', 'facts': facts, 'horizons': horizons, **consumers,
         'dated_context': accepted_dated,
         'observed_range_levels': range_levels,
@@ -147,6 +160,16 @@ def describe(snapshot):
         'limitations': ['session_and_target_trading_dates_unproven',
             'news_relevance_corpus_not_accepted', 'macro_providers_incomplete',
             'historical_vintages_and_causal_alignment_not_accepted', 'model_evaluation_paused']}
+    if include_analysis_bundles and target_now is not None and any(
+            (components.get('stage9_'+scope, {}).get('data') or {}).get('schema_version') == 'rub_analysis_bundle.v2'
+            for scope in ('daily', 'weekly')):
+        from moex_data import rub_analysis_bundle_v2 as bundle
+        prepared = {'release': result, 'periods': stage9_periods if stage9_periods is not None else bundle._periods(snapshot, now=target_now),
+            'checked_at_utc': target_now.isoformat(), 'contract': bundle._contract(),
+            'current_checks': stage9_current_checks}
+        bundle.finish(snapshot, prepared, now=target_now)
+        bundle.attach_release(snapshot, result)
+    return result
 
 
 def build(snapshot, *, now, code_revision):
@@ -189,6 +212,10 @@ def compact(snapshot, *, now, code_revision):
     if now.utcoffset() is None: raise ValueError('aware consumption time required')
     now = now.astimezone(timezone.utc)
     view = apply_read_freshness(snapshot, now=now)
+    if any((view.get('components', {}).get('stage9_'+scope, {}).get('data') or {}).get('schema_version') == 'rub_analysis_bundle.v2'
+           for scope in ('daily', 'weekly')):
+        from moex_data import rub_analysis_bundle_v2 as bundle
+        bundle.revoke_current(view, bundle._check_current(view, now=now), now=now)
     value = build(view, now=now, code_revision=code_revision)
     projection_completeness(view, value, now=now)
     return build_package(view, value, now=now)

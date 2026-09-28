@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import math
 import os
 import re
+from io import BytesIO
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -18,6 +20,7 @@ from moex_data import step8_position_risk_state as step8
 
 
 SCHEMA_VERSION = "rub_analysis_bundle.v1"
+CURRENT_SCHEMA_VERSION = "rub_analysis_bundle.v2"
 SUPPORTED_SCOPES = {"daily", "weekly"}
 ROOT_REF_PREFIX = "${MOEX_DATA_ROOT}/"
 _SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -48,13 +51,21 @@ def _load_json(path: Path, field: str, *, decimal_tokens: bool = False) -> Mappi
     if path.is_symlink() or not path.is_file():
         _fail(field + " must be a regular non-symlink file")
     try:
+        raw = path.read_text(encoding="utf-8").encode("utf-8")
+    except Exception as exc:
+        raise Step9AnalysisBundleError(field + " is not valid JSON: " + str(exc)) from exc
+    return _load_json_bytes(raw, field, decimal_tokens=decimal_tokens)
+
+
+def _load_json_bytes(raw: bytes, field: str, *, decimal_tokens: bool = False) -> Mapping[str, Any]:
+    try:
         kwargs: dict[str, Any] = {
             "object_pairs_hook": _reject_duplicate_json_members,
             "parse_constant": _reject_json_constant,
         }
         if decimal_tokens:
             kwargs["parse_float"] = Decimal
-        value = json.loads(path.read_text(encoding="utf-8"), **kwargs)
+        value = json.loads(raw.decode("utf-8"), **kwargs)
     except Step9AnalysisBundleError:
         raise
     except Exception as exc:
@@ -106,7 +117,7 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _resolve_root_ref(value: object, field: str, root: Path) -> Path:
+def _resolve_root_ref(value: object, field: str, root: Path, *, frozen: bool = False) -> Path:
     if not isinstance(value, str) or not value.startswith(ROOT_REF_PREFIX):
         _fail(field + " must be an explicit ${MOEX_DATA_ROOT}/ reference")
     relative_text = value[len(ROOT_REF_PREFIX):]
@@ -116,6 +127,8 @@ def _resolve_root_ref(value: object, field: str, root: Path) -> Path:
     if relative.is_absolute() or any(part in ("", ".", "..") for part in relative.parts):
         _fail(field + " contains invalid path traversal")
     candidate = root.joinpath(relative)
+    if frozen:
+        return candidate
     if candidate.is_symlink():
         _fail(field + " must not reference a symlink")
     try:
@@ -422,16 +435,26 @@ def _json_value(value: Any, field: str) -> Any:
     return str(value)
 
 
-def _read_pointer_block(root: Path, spec: PointerSpec, as_of: datetime) -> dict[str, Any]:
+def _read_pointer_block(root: Path, spec: PointerSpec, as_of: datetime, *,
+                        pointer_bytes: bytes | None = None,
+                        evidence_buffers: Mapping[str, bytes] | None = None,
+                        freeze_pointer: bool = False) -> dict[str, Any]:
     pointer_path = _pointer_path(root, spec)
-    try:
-        resolved_pointer = pointer_path.resolve(strict=True)
-        resolved_pointer.relative_to(root)
-    except (OSError, ValueError) as exc:
-        raise Step9AnalysisBundleError(spec.block_id + " accepted pointer missing or escaped data root") from exc
-    if pointer_path.is_symlink() or not resolved_pointer.is_file():
-        _fail(spec.block_id + " accepted pointer must be regular non-symlink file")
-    pointer = _load_json(resolved_pointer, spec.block_id + ".pointer")
+    pointer = None
+    if pointer_bytes is None:
+        try:
+            resolved_pointer = pointer_path.resolve(strict=True)
+            resolved_pointer.relative_to(root)
+        except (OSError, ValueError) as exc:
+            raise Step9AnalysisBundleError(spec.block_id + " accepted pointer missing or escaped data root") from exc
+        if pointer_path.is_symlink() or not resolved_pointer.is_file():
+            _fail(spec.block_id + " accepted pointer must be regular non-symlink file")
+        if freeze_pointer:
+            pointer_bytes = resolved_pointer.read_bytes()
+        else:
+            pointer = _load_json(resolved_pointer, spec.block_id + ".pointer")
+    if pointer is None:
+        pointer = _load_json_bytes(pointer_bytes, spec.block_id + ".pointer")
     if pointer.get("dataset_id") != spec.dataset_id:
         _fail(spec.block_id + " pointer dataset_id mismatch")
     if pointer.get("instrument_id") != spec.instrument_id:
@@ -453,20 +476,30 @@ def _read_pointer_block(root: Path, spec: PointerSpec, as_of: datetime) -> dict[
 
     resolved: dict[str, Path] = {}
     observed_hashes: dict[str, str] = {}
+    buffers: dict[str, bytes] = {}
     for field in ("manifest_ref", "quality_report_ref", "partition_ref"):
         if field not in pointer:
             _fail(spec.block_id + " pointer missing " + field)
-        path = _resolve_root_ref(pointer[field], spec.block_id + "." + field, root)
+        path = _resolve_root_ref(pointer[field], spec.block_id + "." + field, root,
+                                 frozen=evidence_buffers is not None)
         resolved[field] = path
         base = {
             "manifest_ref": "manifest",
             "quality_report_ref": "quality_report",
             "partition_ref": "partition",
         }[field]
-        observed_hashes[base + "_sha256"] = _verify_required_sha(pointer, base, path)
+        expected = pointer.get(base + "_sha256")
+        if not isinstance(expected, str) or _SHA256_RE.fullmatch(expected) is None:
+            _fail(base + "_sha256 is required trusted integrity evidence")
+        raw = path.read_bytes() if evidence_buffers is None else evidence_buffers[field]
+        observed = hashlib.sha256(raw).hexdigest()
+        if observed != expected:
+            _fail(base + "_sha256 mismatch")
+        buffers[field] = raw
+        observed_hashes[base + "_sha256"] = observed
 
-    manifest = _load_json(resolved["manifest_ref"], spec.block_id + ".manifest")
-    quality = _load_json(resolved["quality_report_ref"], spec.block_id + ".quality_report")
+    manifest = _load_json_bytes(buffers["manifest_ref"], spec.block_id + ".manifest")
+    quality = _load_json_bytes(buffers["quality_report_ref"], spec.block_id + ".quality_report")
     _validate_support_identity(
         manifest, spec, spec.block_id + ".manifest",
         support_kind="manifest", producer_run_id=run_id, quality_required=True,
@@ -477,7 +510,7 @@ def _read_pointer_block(root: Path, spec: PointerSpec, as_of: datetime) -> dict[
     )
 
     try:
-        frame = pd.read_parquet(resolved["partition_ref"])
+        frame = pd.read_parquet(BytesIO(buffers["partition_ref"]))
     except Exception as exc:
         raise Step9AnalysisBundleError(spec.block_id + " partition read failed: " + str(exc)) from exc
     if not isinstance(frame, pd.DataFrame):
@@ -516,6 +549,14 @@ def _read_pointer_block(root: Path, spec: PointerSpec, as_of: datetime) -> dict[
         from moex_data.rub_fx_observed_context import capture, apply
         block['observed_context_evidence'] = capture(frame, spec, block['provenance'], now=as_of)
         apply(block, as_of)
+    if freeze_pointer:
+        block['source_envelope'] = {
+            'schema_version': 'stage9_accepted_pointer_evidence.v1',
+            'selection_as_of_utc': as_of.isoformat(),
+            'pointer_bytes_base64': base64.b64encode(pointer_bytes).decode('ascii'),
+            'pointer_sha256': hashlib.sha256(pointer_bytes).hexdigest(),
+            'buffers_base64': {key: base64.b64encode(raw).decode('ascii') for key, raw in buffers.items()},
+        }
     return block
 
 
@@ -573,7 +614,7 @@ def _policy_gaps(scope: str) -> list[dict[str, str]]:
     ]
 
 
-def build_analysis_bundle(
+def _build_legacy_analysis_bundle(
     *,
     scope: str,
     as_of: str,
@@ -656,11 +697,24 @@ def build_analysis_bundle(
     }
 
 
+def build_analysis_bundle(*, scope: str, as_of: str,
+                          position_risk_input: str | None = None,
+                          schema_version: str = SCHEMA_VERSION) -> dict[str, Any]:
+    if schema_version == SCHEMA_VERSION:
+        return _build_legacy_analysis_bundle(scope=scope, as_of=as_of,
+                                            position_risk_input=position_risk_input)
+    if schema_version != CURRENT_SCHEMA_VERSION:
+        _fail('unsupported Stage9 schema version')
+    from moex_data.rub_analysis_bundle_v2 import build
+    return build(scope=scope, as_of=_parse_as_of(as_of), position_risk_input=position_risk_input)
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build deterministic Stage 9 RUB daily/weekly analysis bundle.")
     parser.add_argument("--scope", required=True, choices=sorted(SUPPORTED_SCOPES))
     parser.add_argument("--as-of", required=True)
     parser.add_argument("--position-risk-input")
+    parser.add_argument("--schema-version", choices=(SCHEMA_VERSION, CURRENT_SCHEMA_VERSION), default=CURRENT_SCHEMA_VERSION)
     parser.add_argument("--output-json")
     return parser.parse_args(argv)
 
@@ -681,6 +735,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             scope=args.scope,
             as_of=args.as_of,
             position_risk_input=args.position_risk_input,
+            schema_version=args.schema_version,
         )
         payload = json.dumps(bundle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         if args.output_json:

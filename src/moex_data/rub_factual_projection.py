@@ -140,7 +140,7 @@ def _same_pair(pair, current):
     return True
 
 
-def consumer_context(snapshot):
+def consumer_context(snapshot, *, stage9_periods=None):
     """Compact, explicitly scoped dated context; does not grant model authority."""
     components = _dict(snapshot.get('components')); now = reference(snapshot)
     market = market_data(snapshot); instruments = _dict(market.get('instruments'))
@@ -204,12 +204,19 @@ def consumer_context(snapshot):
     contract_source_selected = False
     for name in ('stage9_daily', 'stage9_weekly'):
         component = _dict(components.get(name)); data = _dict(component.get('data'))
-        if component.get('status') != 'READY': continue
         core = _dict(data.get('server_core'))
+        if data.get('schema_version') == 'rub_analysis_bundle.v2' and now is not None:
+            from moex_data.rub_analysis_bundle_v2 import period_blocks
+            scope = name.removeprefix('stage9_')
+            blocks = (stage9_periods[scope] if stage9_periods is not None
+                      else period_blocks(data, now=now))
+        else:
+            if component.get('status') != 'READY': continue
+            blocks = core.get('blocks', [])
         if not contract_source_selected and 'contract_price_evidence' in core and now is not None:
             contract_context = describe_contract_dates(core['contract_price_evidence'], now=now)
             contract_source_selected = True
-        for block in _dict(data.get('server_core')).get('blocks', []):
+        for block in blocks:
             if not isinstance(block, dict): continue
             if (block.get('status') != 'ready' or block.get('stage') != 7
                     or block.get('timeframe') not in ('1H', '1D', '1W')
@@ -223,6 +230,7 @@ def consumer_context(snapshot):
             from moex_data.rub_fx_observed_context import apply as apply_fx_context
             apply_fx_context(projected_block, now)
             projected_block.pop('observed_context_evidence', None)
+            projected_block.pop('source_envelope', None)
             timeframes.append({'snapshot_path': f'components.{name}.data.server_core.blocks',
                 'scope': 'accepted_dated_observation_not_session_completion', 'values': projected_block})
 

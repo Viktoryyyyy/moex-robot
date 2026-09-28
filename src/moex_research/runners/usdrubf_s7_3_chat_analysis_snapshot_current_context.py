@@ -297,7 +297,7 @@ def refresh_snapshot(
             raw_schema_version="v2",
         )
         _attach_futoi_context(snapshot, refresh_bundle, delta_bundle, now=now_fn(), raw_schema_version="v2")
-        base.finalize_snapshot_timing(snapshot, started=now, completed=now_fn())
+        base.finalize_bundle_publication(snapshot, started=now, now_fn=now_fn)
         base._atomic_write(path, snapshot)
     return snapshot, path
 

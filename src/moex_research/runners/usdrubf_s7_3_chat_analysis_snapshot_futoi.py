@@ -427,7 +427,7 @@ def refresh_snapshot(
             producers=selected_producers,
             data_root=root,
         )
-        base.finalize_snapshot_timing(snapshot, started=now, completed=now_fn())
+        base.finalize_bundle_publication(snapshot, started=now, now_fn=now_fn)
         base._atomic_write(path, snapshot)
     return snapshot, path
 

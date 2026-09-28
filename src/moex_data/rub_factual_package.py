@@ -29,6 +29,23 @@ def _dict(value):
     return value if isinstance(value, dict) else {}
 
 
+def compact_analysis_bundle(value, *, scope):
+    """Keep selection identity/digests; raw replay bytes live in the input snapshot."""
+    def project(item):
+        if isinstance(item, list):
+            return [project(child) for child in item]
+        if not isinstance(item, dict):
+            return deepcopy(item)
+        result = {key: project(child) for key, child in item.items()
+                  if key not in ('pointer_bytes_base64', 'buffers_base64', 'observed_context_evidence')}
+        if 'source_envelope' in item and item.get('block_id'):
+            result['frozen_evidence_ref'] = {'snapshot_component': 'stage9_'+scope,
+                'block_id': item['block_id'], 'field': 'data.server_core.blocks[].source_envelope',
+                'carrier': 'original_input_snapshot', 'bytes_in_compact_package': False}
+        return result
+    return project(value)
+
+
 def compact_news_context(news):
     """Keep content-addressed news references without exposing audit locations."""
     def reference(value):
@@ -223,6 +240,9 @@ def build_package(snapshot, release, *, now):
     macro = release['macro_evidence_inventory']
     chosen['macro_context'] = {key: macro[key] for key in ('facts', 'scheduled_events', 'calendar_coverage')}
     chosen = compact_values(chosen)
+    if 'analysis_bundles' in release:
+        chosen['analysis_bundles'] = {scope: compact_analysis_bundle(data, scope=scope)
+            for scope, data in release['analysis_bundles'].items()}
     # B's existing content address makes its retained original-byte audit locatable.
     paired=release.get('contract_price_market_oi_context') or {}
     if paired.get('status')=='AVAILABLE':

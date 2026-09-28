@@ -1,0 +1,54 @@
+contract_id: rub_analysis_bundle.v2
+project: MOEX_Bot
+dataset_id: rub_analysis_bundle
+schema_version: rub_analysis_bundle.v2
+artifact_class: read_only_existing_admitted_evidence_selection
+format: json
+selection_policy_ref: contracts/intelligence/rub_analysis_bundle_selection_v2.json
+storage:
+  carrier: existing_chat_analysis_snapshot_current_json
+  scopes:
+    daily: components.stage9_daily.data
+    weekly: components.stage9_weekly.data
+  independent_current_pointer: false
+  writes_historical_accepted_pointers: false
+sections:
+  current_market:
+    sources: [synchronized_live_market_oi, live_basis_carry, futoi_live, futoi_live_cr]
+    requires_existing_admission: true
+    market_maximum_source_age_seconds: 60
+    futoi_maximum_source_and_receipt_age_seconds: 1200
+    old_stage5_eod_fallback: false
+    source_observation_proves_session_completion: false
+  completed_periods:
+    scope: accepted_elapsed_calendar_period_observations
+    daily: [USDRUBF_1D, CNYRUBF_1D]
+    weekly: [USDRUBF_1D, CNYRUBF_1D, USDRUBF_1W, CNYRUBF_1W]
+    technical_features_require_exact_ohlcv_generation: true
+    freshness: original_period_dates_and_explicit_age_not_current_freshness
+    proven_session_completion: false
+    frozen_carrier: stage9_accepted_pointer_evidence.v1
+    frozen_bytes: [pointer, manifest, quality_report, partition]
+    hash_and_recompute_same_bytes: true
+  historical_comparisons:
+    selection: existing_independently_admitted_dated_projections
+    maximum_existing_dated_lifetime_seconds: 345600
+    actual_sample_counts_and_exact_lag_refusals_required: true
+    latest_source_rejection_never_searches_earlier_valid_date: true
+    first_economic_acceptance_preserved: true
+external_context:
+  separate_from_server_core: true
+  existing_facts_only: true
+  final_publication_and_read_admission_required: true
+position_risk:
+  explicit_stage8_input_only: true
+  manual_position_is_full_risk_state: false
+readiness:
+  partial_is_ready: false
+  selection_policy_ready_is_full_bundle_ready: false
+  missing_sources_are_neutral: false
+authority:
+  grants_new_source_admission: false
+  grants_stage5_authority: false
+  grants_model_authority: false
+  grants_trading_authority: false
