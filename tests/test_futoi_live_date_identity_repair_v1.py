@@ -645,9 +645,10 @@ def test_native_root_context_contract_and_config_declare_isolated_opt_in_path(tm
 
 
 @pytest.mark.parametrize("fast", [False, True])
+@pytest.mark.parametrize("native_candidate", [False, True], ids=["no_native", "native_seeded"])
 @pytest.mark.parametrize("failed", [None, ("si", "2026-09-24"), ("si", "2026-09-23"),
                                       ("cr", "2026-09-24"), ("cr", "2026-09-23")])
-def test_real_refresh_to_saved_snapshot_and_consumer_preserves_independent_roles(monkeypatch, tmp_path, fast, failed):
+def test_real_refresh_to_saved_snapshot_and_consumer_preserves_independent_roles(monkeypatch, tmp_path, fast, native_candidate, failed):
     """Synthetic external HTTP/clock inputs; real FUTOI version flow and admission."""
     import json
     from contextlib import nullcontext
@@ -684,6 +685,23 @@ def test_real_refresh_to_saved_snapshot_and_consumer_preserves_independent_roles
     monkeypatch.setattr(runner.base, "load_dotenv", lambda *a, **k: None)
     monkeypatch.setattr(runner.base, "install_timestamp_policy", lambda: None)
     monkeypatch.setattr(runner.base, "_single_refresh_lock", lambda path: nullcontext())
+    if native_candidate:
+        # A valid completed-date candidate seeds the labels which the later
+        # current/previous attachment must replace, including on current failure.
+        with monkeypatch.context() as native_io:
+            native_io.setattr(source.observed_dates, "observed_dates", lambda *a, **k: ["2026-09-23"])
+            native_io.setattr(materializer, "_fetch_exact", lambda ticker, day, *a: (
+                _root_frame(day=day, instrument=source.SI_INSTRUMENT_ID if ticker == "si" else source.CR_INSTRUMENT_ID),
+                "https://apim.moex.com/iss/analyticalproducts/futoi/securities/" + ticker + ".json"))
+            native = source.run_refresh_all(through_date="2026-09-23", run_id="label_native_seed",
+                raw_schema_version="v2", now_fn=lambda: now)
+        assert native["status"] == "PASS"
+        completed_snapshot = runner.futoi.build_snapshot(now=now, raw_schema_version="v2")
+        for component in ("futoi_live", "futoi_live_cr"):
+            completed = completed_snapshot["components"][component]["data"]
+            assert completed["factual"]["trade_date"] == "2026-09-23"
+            assert completed["source_context_schema_version"] == source.SCHEMA_VERSION_V2
+            assert completed["source_factual_scope"] == "latest_completed_observed_date_not_current_intraday"
     snapshot, path = runner.refresh_snapshot(now_fn=lambda: now)
     saved = json.loads(path.read_text(encoding="utf-8"))
     assert saved == snapshot
@@ -693,6 +711,10 @@ def test_real_refresh_to_saved_snapshot_and_consumer_preserves_independent_roles
         data = saved["components"][component]["data"]
         assert data["raw_schema_version"] == "v2" and data["source_ticker"] == ticker
         assert data["source_identity_scope"] == source.ROOT_IDENTITY_SCOPE and "secid" not in data
+        assert data["source_context_schema_version"] == regular.SCHEMA_VERSION_V2
+        assert data["source_context_schema_version"] == data["context_refresh"]["schema_version"]
+        assert data["source_factual_scope"] == "current_intraday"
+        assert data["factual"] == data["current_intraday"]["factual"]
         for day, role in (("2026-09-24", "current_intraday"), ("2026-09-23", "previous_completed_session")):
             record = data[role]
             assert record["expected_trade_date"] == day

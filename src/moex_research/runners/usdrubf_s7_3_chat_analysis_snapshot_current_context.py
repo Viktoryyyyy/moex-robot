@@ -185,6 +185,10 @@ def _attach_futoi_context(
         if version == "v2":
             existing_data.pop("secid", None)
             existing_data.update(expected)
+            # The top-level fact now comes from the current role, replacing the
+            # native completed-date candidate and its descriptive metadata.
+            existing_data.update(source_context_schema_version=raw_context.get("schema_version"),
+                                 source_factual_scope=context.CURRENT_ROLE)
             existing_data["context_refresh"].update(expected)
         if fully_ready:
             status = "READY"
