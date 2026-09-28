@@ -192,6 +192,10 @@ def projection_completeness(snapshot, value, *, now):
     verify_historical_basis(snapshot, value, now=now)
     from math import isfinite
     view = apply_read_freshness(snapshot, now=now)
+    if any((view.get('components', {}).get('stage9_'+scope, {}).get('data') or {}).get('schema_version') == 'rub_analysis_bundle.v2'
+           for scope in ('daily', 'weekly')):
+        from moex_data import rub_analysis_bundle_v2 as bundle
+        bundle.revoke_current(view, bundle._check_current(view, now=now), now=now)
     components = view.get('components', {})
     from moex_research.external_data.brent_daily_context import describe as oil_context
     from moex_research.external_data.moex_brent_factual import factual_usable as oil_usable
@@ -312,9 +316,9 @@ def projection_completeness(snapshot, value, *, now):
     if any((components.get('stage9_'+scope, {}).get('data') or {}).get('schema_version') == 'rub_analysis_bundle.v2'
            for scope in ('daily', 'weekly')):
         from moex_data.rub_analysis_bundle_v2 import _periods
-        stage9_periods = _periods(snapshot, now=now)
+        stage9_periods = _periods(view, now=now)
         from moex_data.rub_analysis_bundle_v2 import verify_projection
-        verify_projection(snapshot, value, now=now, periods=stage9_periods)
+        verify_projection(view, value, now=now, periods=stage9_periods)
     for name in ('stage9_daily', 'stage9_weekly'):
         component = components.get(name, {})
         core = (component.get('data') or {}).get('server_core', {})

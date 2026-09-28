@@ -161,6 +161,15 @@ def test_heavy_refresh_saved_json_and_reader_keep_sections_and_independent_roots
             reader=live.base.read_current_snapshot, code_revision="a"*40)
         assert json.loads(exported_path.read_bytes())["analysis_bundles"] == package["analysis_bundles"]
         from moex_data.rub_factual_release_acceptance import projection_completeness
+        for seconds in (1, 61, 1201):
+            later = NOW+timedelta(seconds=seconds)
+            later_release = rub_factual_release.build(saved, now=later, code_revision="a"*40)
+            projection_completeness(saved, later_release, now=later)
+            later_items = later_release["analysis_bundles"]["daily"]["sections"]["current_market"]["items"]
+            if seconds >= 61:
+                assert later_items["si_front"]["status"] == "UNAVAILABLE"
+            if seconds >= 1201:
+                assert later_items["futoi_live"]["status"] == "UNAVAILABLE"
         for mutation in ("missing_bundle", "missing_section", "changed_value", "changed_identity", "extra_item", "changed_evidence"):
             damaged = deepcopy(exported)
             daily = damaged["analysis_bundles"]["daily"]

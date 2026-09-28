@@ -103,6 +103,11 @@ The reverse completeness gate now validates Stage9 scope/section inventories,
 source values, identity, full evidence and refusals. A final **98 passed** focused
 run covers factual release/package and new Stage9 tests, including omitted,
 altered and extra projection elements and direct frozen compact refusal.
+Exact-head review of `7bb7e39de0f49bf43604d550e720909e6aa2d517` additionally found
+that the new reverse oracle received the original snapshot clock. The corrective
+change passes the reconciled read-time view, including independent current v2
+revocations, and tests frozen acceptance at +1, +61 and +1201 seconds. The
+corrected head requires a new independent review and complete CI checks.
 
 Server apply is authorized only for the confirmed merged SHA. Runtime acceptance
 must inspect a newly saved snapshot and canonical read, daily/weekly section
