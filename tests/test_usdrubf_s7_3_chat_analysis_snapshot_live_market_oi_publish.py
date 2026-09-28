@@ -4,24 +4,16 @@ from contextlib import nullcontext
 from datetime import datetime, timezone
 
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_live_market_oi as overlay
+from test_rub_fast_market import NOW, market
 
 
 def _live_ready() -> dict[str, object]:
-    return {
-        "schema_version": "synchronized_live_market_oi_context.v1",
-        "status": "READY",
-        "quality": {"status": "PASS", "analysis_usable": True},
-        "synchronization": {
-            "status": "PASS",
-            "synchronized": True,
-            "as_of_utc": "2026-09-02T15:49:09+00:00",
-        },
-    }
+    return market()
 
 
 def test_refresh_snapshot_publishes_live_market_oi_inside_canonical_write(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr('moex_data.rub_dated_hour_source.acquire', lambda **kwargs: {'latest_attempts': {}})
-    now = datetime(2026, 9, 2, 15, 49, 10, tzinfo=timezone.utc)
+    now = NOW
     state_dir = tmp_path / "state"
     output_path = state_dir / overlay.base.CURRENT_FILENAME
     written: dict[str, object] = {}
