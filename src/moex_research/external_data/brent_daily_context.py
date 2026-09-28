@@ -99,11 +99,19 @@ def _page_rows(batch, latest, accepted):
     return sorted(result, key=lambda row: row['TRADEDATE'])
 
 
+def _identity(latest):
+    identity = {k: latest[k] for k in ('secid', 'expiry', 'board', 'price_unit', 'source_unit_text')}
+    source._require(identity['price_unit'] == 'USD/barrel', 'history identity/unit mismatch')
+    unit = source.quote_unit_metadata(latest)
+    if unit:
+        identity.update({k: unit[k] for k in ('contract_size_barrels', 'quote_unit_evidence')})
+    return identity
+
+
 def replay(evidence, latest, now):
     source._require(isinstance(evidence, dict) and evidence.get('schema_version') == SCHEMA, 'history evidence missing')
-    identity = {k: latest[k] for k in ('secid', 'expiry', 'board', 'price_unit', 'source_unit_text')}
-    source._require(evidence['identity'] == identity and identity['price_unit'] == 'USD/barrel'
-        and identity['source_unit_text'] == source.UNIT_TEXT, 'history identity/unit mismatch')
+    identity = _identity(latest)
+    source._require(evidence['identity'] == identity, 'history identity/unit mismatch')
     accepted = source._utc(evidence['accepted_at'])
     source._require(source._utc(evidence['first_accepted_at']) <= accepted <= now, 'history acceptance chronology invalid')
     source._require(evidence['audit_version_ref'] == payload_digest({k: v for k, v in evidence.items() if k != 'audit_version_ref'}), 'history version digest mismatch')
@@ -148,7 +156,7 @@ def acquire(latest, *, previous=None, audit_root, clock=lambda: datetime.now(tim
         try:
             prior_latest = prior['anchor']
             replay(old, prior_latest, now)
-            if prior_latest['secid'] == latest['secid'] and prior_latest['source_trade_date'] < latest['source_trade_date'] and len(old['batches']) < 8:
+            if _identity(prior_latest) == _identity(latest) and prior_latest['source_trade_date'] < latest['source_trade_date'] and len(old['batches']) < 8:
                 batches = deepcopy(old['batches'])
                 start = min(week(end)[0], source._date(prior_latest['source_trade_date']))
         except (ValueError, TypeError, KeyError, OverflowError, AttributeError, IndexError):
@@ -179,7 +187,7 @@ def acquire(latest, *, previous=None, audit_root, clock=lambda: datetime.now(tim
         incoming = _page_rows(batch, latest, accepted)
         previous_rows = replay(old, prior['anchor'], now) if batches else []
         combined = [row for row in previous_rows if row['TRADEDATE'] < start.isoformat()] + incoming
-        identity = {k: latest[k] for k in ('secid', 'expiry', 'board', 'price_unit', 'source_unit_text')}
+        identity = _identity(latest)
         evidence = {'schema_version': SCHEMA, 'identity': identity, 'batches': batches+[batch],
             'source_revision_id': payload_digest({'identity': identity, 'rows': combined}),
             'received_at': pages[-1]['received_at'], 'accepted_at': accepted.isoformat(), 'full_check_date_moscow': full_date}
@@ -190,7 +198,7 @@ def acquire(latest, *, previous=None, audit_root, clock=lambda: datetime.now(tim
         evidence['audit_version_ref'] = sha256(version_bytes).hexdigest()
         replay(evidence, latest, accepted)
         immutable(audit_root, 'versions', version_bytes)
-        return {'evidence': evidence, 'anchor': {k: deepcopy(latest[k]) for k in ('secid', 'expiry', 'board', 'price_unit', 'source_unit_text', 'source_trade_date', 'ohlc')},
+        return {'evidence': evidence, 'anchor': {**deepcopy(identity), **{k: deepcopy(latest[k]) for k in ('source_trade_date', 'ohlc')}},
             'last_attempt': {'status': 'RECEIVED', 'at': accepted.isoformat(), 'request_count': len(pages), 'received_bytes': byte_count,
                 'elapsed_seconds': round(monotonic()-started, 6), 'reason': None}}
     except (ValueError, TypeError, KeyError, OverflowError, AttributeError, IndexError, OSError) as exc:
@@ -220,6 +228,7 @@ def describe(context, latest, *, now):
             except (ValueError, TypeError, KeyError, OverflowError, AttributeError, IndexError):
                 pass
         evidence = context['evidence']; rows = replay(evidence, latest, now)
+        result.update(source.quote_unit_metadata(latest))
         source._require(context.get('last_attempt', {}).get('status') != 'FAILED', 'latest_history_refresh_failed: '+str(context.get('last_attempt', {}).get('reason')))
         start, end = bounds(latest, now)
         source._require(evidence['batches'][0]['from_date'] <= start.isoformat(), 'history requested range does not cover review window')

@@ -5,7 +5,7 @@ TASK_ID=brent_daily_weekly_context_v1
 
 The existing `oil_brent_factual_acceptance_v1` anchor remains unchanged: three
 official requests, dynamic nearest expiry at least seven calendar days away,
-native USD/barrel, prior-date history CLOSE, and the existing 1,200-second receipt
+verified USD/barrel, prior-date history CLOSE, and the existing 1,200-second receipt
 recheck policy. This extension neither grants live freshness nor changes that
 policy. History failures are local and do not invalidate an otherwise admitted
 latest OHLC. There is no continuous series, roll adjustment, historical front
@@ -39,6 +39,16 @@ lookup. Replay checks the raw digest, parsed native rows, request/receipt/accept
 chronology, version digest, range, cursor chain and latest-anchor consistency.
 Raw evidence is not sent to the compact consumer; `source_revision_id`,
 `audit_version_ref` and request/receipt references intentionally survive compacting.
+
+For native currency-only `UNIT=USD`, the versioned BR quote-unit evidence defined
+in `oil_brent_factual_acceptance_v1.md` and the ten-barrel contract size are also
+bound into history identity, source revision, immutable version and saved anchor.
+Replay validates that policy before accepting history. A unit-policy change cannot
+reuse an old prefix; it requires a full bounded acquisition. The original explicit
+Russian unit format retains its existing identity keys, bytes and digests.
+Full and compact consumers preserve native unit, currency, size and versioned
+quote-unit evidence on the oil fact and available D1/W1 context. The reverse
+projection check refuses omitted, added or altered normalization metadata.
 
 The oil fact's `values.daily_weekly_context` contains up to 30 D1 source-observed
 dates and 1/5/20-observation comparisons. Each comparison names both dates and
