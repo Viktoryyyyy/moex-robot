@@ -44,7 +44,7 @@ def _proof(record):
     provenance = record.get("provenance") or {}
     return {"record_sha256": sha256(encoded(record)).hexdigest(),
         "source_identity": pick(record, IDENTITY),
-        "provenance": pick(provenance, (*IDENTITY, "publication_run_id", "publication_audit",
+        "provenance": pick(provenance, (*IDENTITY, "pair_balance_policy", "publication_run_id", "publication_audit",
             "raw_partition_ref", "raw_partition_sha256", "raw_quality_report_ref", "raw_quality_report_sha256",
             "raw_refresh_manifest_ref", "raw_refresh_manifest_sha256"))}
 

@@ -1,0 +1,20 @@
+{
+  "project": "MOEX_Bot",
+  "schema_version": "futoi_pair_balance_policy.v1",
+  "policy": "max_one_side_contracts_1pct_v1",
+  "scope": "Si_CR_root_v2_current_previous_dated_statistics_existing_admission_only",
+  "residual": "abs(FIZ.net + YUR.net)",
+  "denominator": "max(FIZ.long + YUR.long, FIZ.short + YUR.short)",
+  "short_semantics": "absolute_contract_count",
+  "limit_percent": 1,
+  "inclusive_integer_comparison": "100 * residual <= denominator",
+  "zero_contract_denominator": "only_zero_residual_passes_percentage_undefined",
+  "source_values_modified": false,
+  "per_side_net_identity": "exact_long_minus_absolute_short",
+  "total_open_interest": "sum_of_long_contracts_preserved",
+  "latest_source_pair_selected_before_quality": true,
+  "older_pair_fallback": false,
+  "unversioned_or_legacy_frozen_evidence": "exact_zero_v1",
+  "existing_v1_EOD_and_Stage5_contracts": "unchanged",
+  "TTL_governance_scope_and_trading_authority": "unchanged"
+}

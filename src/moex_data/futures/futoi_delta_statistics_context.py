@@ -223,11 +223,16 @@ def _normalized_factual(
 
     fiz = side(fiz_raw, "fiz")
     yur = side(yur_raw, "yur")
-    if int(fiz["net"]) + int(yur["net"]) != 0:
-        _fail(field + " FIZ/YUR net balance failed")
+    from . import futoi_pair_balance as balance
+    if version == 'v2':
+        policy = balance.validate_factual(value)
+    else:
+        policy = balance.STRICT
+        if 'balance_check' in value or int(fiz["net"]) + int(yur["net"]) != 0:
+            _fail(field + " FIZ/YUR net balance failed")
     if int(fiz["long"]) + int(yur["long"]) != oi:
         _fail(field + " total long OI identity failed")
-    if int(fiz["short"]) + int(yur["short"]) != oi:
+    if policy == balance.STRICT and int(fiz["short"]) + int(yur["short"]) != oi:
         _fail(field + " total short OI identity failed")
 
     result = {
@@ -249,6 +254,8 @@ def _normalized_factual(
     }
 
     if version == "v2":
+        if 'balance_check' in value:
+            result['balance_check'] = deepcopy(value['balance_check'])
         session = source._as_int(value.get("sess_id"), field + ".sess_id")
         records = deepcopy(value["selected_source_records"])
         for group, record in records.items():
@@ -937,16 +944,18 @@ def _root_raw_identity(instrument_id: str) -> dict[str, object]:
     }
 
 
-def _decode_root_raw(content: bytes, *, instrument_id: str, trade_date: str) -> dict[str, object]:
+def _decode_root_raw(content: bytes, *, instrument_id: str, trade_date: str, pair_balance_policy=None) -> dict[str, object]:
     # The exact buffer that was hashed is decoded, never a second pathname read.
     frame = pd.read_parquet(BytesIO(content))
     return source.latest_aligned_factual(
         frame, expected_trade_date=trade_date, expected_instrument_id=instrument_id,
         expected_source_ticker=source.ROOT_TICKERS[instrument_id], raw_schema_version="v2",
+        pair_balance_policy=pair_balance_policy,
     )
 
 
 def _raw_root_factual(root: Path, *, instrument_id: str, trade_date: str) -> dict[str, object]:
+    from . import futoi_pair_balance as balance
     identity = _root_raw_identity(instrument_id)
     relative = _root_raw_relative(instrument_id, trade_date)
     ref = source.ROOT_REF_PREFIX + relative.as_posix()
@@ -967,6 +976,7 @@ def _raw_root_factual(root: Path, *, instrument_id: str, trade_date: str) -> dic
             "original_raw_partition_ref": ref, "raw_partition_ref": ref,
             "raw_partition_sha256": sha256(content).hexdigest(),
             "factual_validation": "NOT_VALIDATED",
+            "pair_balance_policy": balance.RELATIVE,
         }
         factual = _decode_root_raw(content, instrument_id=instrument_id, trade_date=trade_date)
         normalized = _normalized_factual(factual, field="raw_v2." + trade_date, raw_schema_version="v2")
@@ -989,6 +999,7 @@ def _replay_root_raw_factual(
     root: Path, provenance: Mapping[str, object], *, instrument_id: str, trade_date: str,
 ) -> dict[str, object]:
     """Distinguish full native publication evidence from raw-only validation."""
+    from . import futoi_pair_balance as balance
     identity = _root_raw_identity(instrument_id)
     relative = _root_raw_relative(instrument_id, trade_date)
     if not isinstance(provenance, Mapping) or any(provenance.get(k) != v for k, v in identity.items()):
@@ -1008,6 +1019,8 @@ def _replay_root_raw_factual(
         "original_raw_partition_ref": source.ROOT_REF_PREFIX + relative.as_posix(),
         "factual_validation": "PASS",
     }
+    if 'pair_balance_policy' in provenance:
+        required['pair_balance_policy'] = balance.from_provenance(provenance)
     if (set(provenance) != set(required) | {"raw_partition_ref", "raw_partition_sha256"}
             or any(provenance.get(k) != v for k, v in required.items())):
         _fail("v2 raw-only evidence shape/state/path mismatch")
@@ -1027,7 +1040,8 @@ def _replay_root_raw_factual(
         # Only this exact content-addressed object is allowed. The old canonical
         # partition may have been replaced or removed; it is not read in replay.
         content = source._root_proof_bytes(root, ref, digest, ".parquet")
-    return _decode_root_raw(content, instrument_id=instrument_id, trade_date=trade_date)
+    return _decode_root_raw(content, instrument_id=instrument_id, trade_date=trade_date,
+                            pair_balance_policy=balance.from_provenance(provenance))
 
 
 def _root_factual_for_date(

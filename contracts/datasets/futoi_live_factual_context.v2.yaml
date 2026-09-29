@@ -47,8 +47,11 @@ latest_pair:
   cross_group_seqnum_equality_required: false
   shared_session_required: true
   per_row_net_identity: exact
-  fiz_yur_net_balance: exact_zero
-  total_long_short_balance: exact
+  pair_balance_policy_ref: contracts/intelligence/futoi_pair_balance_tolerance_v1.json
+  fiz_yur_net_balance: absolute_residual_lte_one_percent_of_max_total_long_total_short
+  total_open_interest: sum_long_preserved
+  balance_check: versioned_policy_and_exact_integer_arithmetic_evidence_required
+  legacy_frozen_evidence_without_policy: exact_zero_v1
   incomplete_or_unbalanced_latest_pair_older_fallback: forbidden
   selected_source_records: preserve_exact_FIZ_YUR_keys_revisions_and_clocks
   publication_audit_engine: moex_data.futures.futoi_publication_audit

@@ -228,11 +228,16 @@ def latest_aligned_factual(
     expected_source_ticker: str,
     expected_secid: str | None = None,
     raw_schema_version: str = "v1",
+    pair_balance_policy: str | None = None,
 ) -> dict[str, object]:
+    from . import futoi_pair_balance as balance
     if _raw_version(raw_schema_version) == RAW_SCHEMA_V2:
         return _latest_root_factual(frame, expected_trade_date=expected_trade_date,
             expected_instrument_id=expected_instrument_id, expected_source_ticker=expected_source_ticker,
-            expected_secid=expected_secid)
+            expected_secid=expected_secid,
+            pair_balance_policy=balance.RELATIVE if pair_balance_policy is None else pair_balance_policy)
+    if pair_balance_policy not in (None, balance.STRICT):
+        _fail("legacy FUTOI only supports the exact-zero balance policy")
     if "raw_schema_version" in frame and not frame["raw_schema_version"].eq("v1").all():
         _fail("v1 reader cannot admit another raw schema version")
     required = {
@@ -947,6 +952,7 @@ def _validated_root_frame(
 def _latest_root_factual(
     frame: pd.DataFrame, *, expected_trade_date: str, expected_instrument_id: str,
     expected_source_ticker: str, expected_secid: str | None,
+    pair_balance_policy: str,
 ) -> dict[str, object]:
     if expected_secid is not None:
         _fail("v2 root identity cannot be selected with a contract secid")
@@ -981,11 +987,12 @@ def _latest_root_factual(
             "ingest_ts_utc": _aware_utc(row["ingest_ts"], "ingest_ts").isoformat(),
         }
     fiz, yur = sides["FIZ"], sides["YUR"]
-    if fiz["net"] + yur["net"] != 0:
-        _fail("FIZ/YUR net positions do not balance to zero")
+    from . import futoi_pair_balance as balance
+    try:
+        balance_check = balance.admit(fiz, yur, pair_balance_policy)
+    except ValueError as exc:
+        _fail(str(exc))
     total = fiz["long"] + yur["long"]
-    if total != fiz["short"] + yur["short"]:
-        _fail("FIZ/YUR total long and short open interest do not balance")
     return {
         "trade_date": expected_trade_date, "snapshot_ts": latest.isoformat(),
         "source_publication_time": max(_aware_utc(r["source_publication_time"], "source_publication_time") for r in records.values()).isoformat(),
@@ -995,6 +1002,7 @@ def _latest_root_factual(
         "source_identity_scope": ROOT_IDENTITY_SCOPE,
         "sess_id": next(iter(sessions)), "selected_source_records": records,
         "fiz": fiz, "yur": yur, "total_open_interest": total,
+        **({"balance_check": balance_check} if balance_check is not None else {}),
         "short_semantics": "absolute_contract_count",
         "timestamp_semantics": "source_event_and_publication_localized_from_Europe/Moscow_to_UTC",
         "fiz_yur_alignment": "latest_exact_shared_source_event_ts_and_sess_id_after_max_seqnum_revision_resolution",
@@ -1126,10 +1134,12 @@ def _verified_root_frame(
 def replay_root_factual(
     root: Path, provenance: Mapping[str, object], *, instrument_id: str, trade_date: str,
 ) -> dict[str, object]:
+    from . import futoi_pair_balance as balance
     frame = _verified_root_frame(root, provenance, instrument_id=instrument_id, trade_date=trade_date)
     factual = latest_aligned_factual(
         frame, expected_trade_date=trade_date, expected_instrument_id=instrument_id,
         expected_source_ticker=ROOT_TICKERS[instrument_id], raw_schema_version=RAW_SCHEMA_V2,
+        pair_balance_policy=balance.from_provenance(provenance),
     )
     from . import futoi_publication_audit as audit
     receipt = provenance.get("publication_audit")
@@ -1137,7 +1147,7 @@ def replay_root_factual(
         _fail("v2 publication audit is missing")
     report = json.loads(_root_proof_bytes(root, receipt.get("ref"), receipt.get("sha256"), ".json"))
     if (not isinstance(report, Mapping) or report.get("schema_version") != audit.SCHEMA
-            or report.get("policy") != audit.POLICY or report.get("instrument_id") != instrument_id
+            or report.get("policy") != audit.policy_for_factual(factual) or report.get("instrument_id") != instrument_id
             or report.get("trade_date") != trade_date or report.get("latest_status") != "PASS"
             or report.get("latest_factual") != factual
             or report.get("provenance") != {k: v for k, v in provenance.items() if k != "publication_audit"}):

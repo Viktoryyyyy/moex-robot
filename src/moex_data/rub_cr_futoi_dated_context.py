@@ -202,6 +202,8 @@ def _public_record(record):
     if proof.get("raw_schema_version") == "v2":
         result["factual"].update({key: deepcopy(fact[key]) for key in (
             "raw_schema_version", "source_identity_scope", "source_ticker", "sess_id", "selected_source_records")})
+        if "balance_check" in fact:
+            result["factual"]["balance_check"] = deepcopy(fact["balance_check"])
         result["provenance"] = deepcopy(proof)
     elif record["source_kind"] == "accepted_eod":
         p = proof["accepted_pointer"]
@@ -249,10 +251,14 @@ def _validated_current_capture(stored):
         raise ValueError("cr_current_publication_audit_digest")
     report = json.loads(audit["text"])
     from moex_data.futures import futoi_publication_audit as audit_source
-    if report.get("schema_version") != audit_source.SCHEMA or report.get("policy") != audit_source.POLICY or report.get("instrument_id") != INSTRUMENT or report.get("latest_status") != "PASS" or report.get("latest_factual") != fact:
+    if report.get("schema_version") != audit_source.SCHEMA or report.get("policy") != audit_source.policy_for_factual(fact) or report.get("instrument_id") != INSTRUMENT or report.get("latest_status") != "PASS" or report.get("latest_factual") != fact:
         raise ValueError("cr_current_publication_audit_fact_mismatch")
     if "publication_count" not in report or "rejected_count" not in report:
         raise ValueError("cr_current_publication_audit_admission_result_missing")
+    from moex_data.futures import futoi_pair_balance as balance
+    if (balance.from_provenance(proof["original_provenance"]) != balance.validate_factual(fact)
+            or balance.from_provenance(report["provenance"]) != balance.validate_factual(fact)):
+        raise ValueError("cr_current_pair_balance_policy_mismatch")
     receipt = proof["original_provenance"]["publication_audit"]
     common._ref(receipt["ref"])
     if receipt["sha256"] != audit["sha256"]:
@@ -596,6 +602,8 @@ def verify_projection(snapshot, release, *, now):
         if proof.get("raw_schema_version") == "v2":
             result["factual"].update({key: deepcopy(fact[key]) for key in (
                 "raw_schema_version", "source_identity_scope", "source_ticker", "sess_id", "selected_source_records")})
+            if "balance_check" in fact:
+                result["factual"]["balance_check"] = deepcopy(fact["balance_check"])
             result["provenance"] = deepcopy(proof)
         elif record["source_kind"] == "accepted_eod":
             result["provenance"] = {"source_kind": "accepted_stage5_eod_historical_context_only", "accepted_pointer": {

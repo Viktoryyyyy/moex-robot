@@ -173,13 +173,16 @@ def test_root_factual_serializes_exact_selected_revisions_without_secid(instrume
     assert all(r["seqnum"] == 2**53 + 1 for r in result["selected_source_records"].values())
 
 
-def test_root_latest_plus_six_refuses_even_with_older_balanced_revision():
+def test_root_latest_plus_six_is_accepted_without_replacing_latest_revision():
     older = _root_frame(seqnum=42)
     latest = _root_frame()
     latest.loc[0, ["pos", "pos_long", "pos_short"]] = [726369, 927387, -201018]
     latest.loc[1, ["pos", "pos_long", "pos_short"]] = [-726363, 4297389, -5023752]
-    with pytest.raises(source.FutoiSourceNativeRefreshError, match="balance to zero"):
-        _root_fact(pd.concat([older, latest], ignore_index=True))
+    fact = _root_fact(pd.concat([older, latest], ignore_index=True))
+    assert fact["fiz"]["net"] == 726369 and fact["yur"]["net"] == -726363
+    assert fact["balance_check"]["signed_net_imbalance"] == 6
+    assert fact["balance_check"]["accepted"] is True
+    assert fact["selected_source_records"]["FIZ"]["seqnum"] == int(latest.iloc[0]["seqnum"])
 
 
 def test_root_incomplete_frontier_never_selects_an_older_pair():
@@ -380,7 +383,7 @@ def _parquet_setup(monkeypatch, tmp_path, instrument, *, imbalance=False, day="2
     monkeypatch.setattr(materializer, "_registry_binding", lambda _path, inst: _binding_for(inst))
     raw = _root_frame(day=day, instrument=instrument)
     if imbalance:
-        raw.loc[0, ["pos", "pos_long", "pos_short"]] = [726369, 927387, -201018]
+        raw.loc[0, ["pos", "pos_long", "pos_short"]] = [826369, 1027387, -201018]
         raw.loc[1, ["pos", "pos_long", "pos_short"]] = [-726363, 4297389, -5023752]
     calls = []
     def fetch(ticker, trade_date, timeout, base):
@@ -428,7 +431,7 @@ def test_parquet_native_root_completed_chain_preserves_exact_proof_and_v1(monkey
 def test_parquet_root_rejected_latest_pair_has_frozen_audit_for_both_roots(monkeypatch, tmp_path, instrument):
     import json
     _parquet_setup(monkeypatch, tmp_path, instrument, imbalance=True)
-    with pytest.raises(source.FutoiSourceNativeRefreshError, match="balance to zero") as failure:
+    with pytest.raises(source.FutoiSourceNativeRefreshError, match="exceeds 1%") as failure:
         source._materialize_target(
             tmp_path, "2026-09-23", "rejected", instrument_id=instrument,
             timeout=1, raw_schema_version="v2",
@@ -668,10 +671,13 @@ def test_real_refresh_to_saved_snapshot_and_consumer_preserves_independent_roles
     def fetch(ticker, day, timeout, base):
         instrument = "si_futures_family" if ticker == "si" else "cr_futures_family"
         raw = _root_frame(day=day, instrument=instrument)
+        # Reconstructed +6 discrepancy is accepted without changing source values.
+        raw.loc[0, ["pos", "pos_long", "pos_short"]] = [726369, 927387, -201018]
+        raw.loc[1, ["pos", "pos_long", "pos_short"]] = [-726363, 4297389, -5023752]
         if (ticker, day) == failed:
             latest = raw.copy()
             latest["seqnum"] = 44
-            latest.loc[0, ["pos", "pos_long", "pos_short"]] = [726369, 927387, -201018]
+            latest.loc[0, ["pos", "pos_long", "pos_short"]] = [826369, 1027387, -201018]
             latest.loc[1, ["pos", "pos_long", "pos_short"]] = [-726363, 4297389, -5023752]
             raw = pd.concat([raw, latest], ignore_index=True)
         return raw, "https://apim.moex.com/iss/analyticalproducts/futoi/securities/" + ticker + ".json"
@@ -720,6 +726,9 @@ def test_real_refresh_to_saved_snapshot_and_consumer_preserves_independent_roles
             assert record["expected_trade_date"] == day
             assert record["raw_schema_version"] == "v2"
             assert record["status"] == ("ERROR" if (ticker, day) == failed else "FRESH")
+            if (ticker, day) != failed:
+                assert record["factual"]["balance_check"]["signed_net_imbalance"] == 6
+                assert record["factual"]["balance_check"]["accepted"] is True
             if (ticker, day) == failed:
                 assert record["factual"] is None
                 assert "publication_audit" in record["failed_attempt_evidence"]
@@ -793,13 +802,76 @@ def test_real_refresh_to_saved_snapshot_and_consumer_preserves_independent_roles
             assert repeated[module.STORE_KEY]["evidence"]["accepted_at_utc"] == first[module.STORE_KEY]["evidence"]["accepted_at_utc"]
             assert repeated[module.STORE_KEY]["evidence_sha256"] == first[module.STORE_KEY]["evidence_sha256"]
         runner.base._atomic_write(path, repeated)
-        reread = json.loads(path.read_text(encoding="utf-8"))
+        reread, read_path = runner.base.read_current_snapshot(now_fn=lambda: now)
+        assert read_path == path
+        for component in ("futoi_live", "futoi_live_cr"):
+            fact = reread["components"][component]["data"]["current_intraday"]["factual"]
+            assert fact["balance_check"]["signed_net_imbalance"] == 6
+            assert fact["balance_check"]["accepted"] is True
         temporal.apply(reread, now=now)
         output = projection.consumer_context(reread)
         for module in (si_dated, si_stats, cr_dated, cr_stats):
             module.attach_consumer(reread, output, now=now)
         for module in (si_dated, cr_dated, si_stats, cr_stats):
             module.verify_projection(reread, output, now=now)
+        from moex_data import rub_market_factual_delivery as delivery
+        final = delivery.project(reread, now=now, code_revision="a" * 40)
+        for ticker in ("si", "cr"):
+            item = final["futoi"][ticker]
+            assert item["status"] == "AVAILABLE"
+            assert item["values"]["balance_check"]["signed_net_imbalance"] == 6
+            assert item["evidence"]["provenance"]["pair_balance_policy"] == item["values"]["balance_check"]["policy"]
+
+
+@pytest.mark.parametrize("instrument", source.LIVE_INSTRUMENT_IDS)
+def test_v2_frozen_strict_policy_replays_without_upgrading_old_evidence(monkeypatch, tmp_path, instrument):
+    """Reconstructed legacy publication; existing bytes and shape stay strict."""
+    import json
+    from copy import deepcopy
+    from moex_data.futures import futoi_pair_balance as balance
+    from moex_data.futures import futoi_publication_audit as audit
+    _parquet_setup(monkeypatch, tmp_path, instrument)
+    _, proof = source._materialize_target(tmp_path, "2026-09-23", "old_policy",
+        instrument_id=instrument, timeout=1, raw_schema_version="v2")
+    report = json.loads(source._root_proof_bytes(tmp_path, proof["publication_audit"]["ref"],
+                                               proof["publication_audit"]["sha256"], ".json"))
+    proof.pop("publication_audit")
+    proof.pop("pair_balance_policy")
+    report["policy"] = audit.POLICY
+    report["provenance"] = deepcopy(proof)
+    report["latest_factual"].pop("balance_check")
+    for publication in report["publications"]:
+        publication["factual"].pop("balance_check")
+    proof["publication_audit"] = audit._freeze_json(tmp_path, report)
+    before = {p: p.read_bytes() for p in tmp_path.rglob("*") if p.is_file()}
+    assert source.replay_root_factual(tmp_path, proof, instrument_id=instrument,
+        trade_date="2026-09-23") == report["latest_factual"]
+    assert balance.validate_factual(report["latest_factual"]) == balance.STRICT
+    assert before == {p: p.read_bytes() for p in before}
+
+
+@pytest.mark.parametrize("damage", ["missing_policy", "unknown_policy", "strict_policy",
+                                   "missing_check", "denominator", "audit_policy"])
+def test_v2_full_publication_replay_rejects_balance_policy_tampering(monkeypatch, tmp_path, damage):
+    import json
+    from moex_data.futures import futoi_publication_audit as audit
+    _parquet_setup(monkeypatch, tmp_path, source.SI_INSTRUMENT_ID)
+    _, proof = source._materialize_target(tmp_path, "2026-09-23", "policy_damage",
+        instrument_id=source.SI_INSTRUMENT_ID, timeout=1, raw_schema_version="v2")
+    report = json.loads(source._root_proof_bytes(tmp_path, proof["publication_audit"]["ref"],
+                                               proof["publication_audit"]["sha256"], ".json"))
+    if damage == "missing_policy":
+        proof.pop("pair_balance_policy")
+    elif damage in ("unknown_policy", "strict_policy"):
+        proof["pair_balance_policy"] = "future_policy" if damage == "unknown_policy" else "exact_zero_v1"
+    else:
+        if damage == "missing_check": report["latest_factual"].pop("balance_check")
+        elif damage == "denominator": report["latest_factual"]["balance_check"]["denominator_contracts"] *= 2
+        else: report["policy"] = audit.POLICY
+        proof["publication_audit"] = audit._freeze_json(tmp_path, report)
+    with pytest.raises(ValueError):
+        source.replay_root_factual(tmp_path, proof, instrument_id=source.SI_INSTRUMENT_ID,
+                                  trade_date="2026-09-23")
 
 
 @pytest.mark.parametrize("damage", ["missing", "bytes"])
@@ -966,12 +1038,12 @@ def test_role_v2_si_failure_does_not_cancel_cr(role_v2_module, monkeypatch, tmp_
 def test_role_v2_failed_pair_evidence_and_previous_are_preserved(role_v2_module, monkeypatch, tmp_path):
     from moex_data.futures import futoi_intraday_previous_session_context as core
     now, _, _, errors, _, calls = _role_v2_setup(monkeypatch, tmp_path)
-    error = source.FutoiSourceNativeRefreshError("FIZ/YUR net positions do not balance to zero")
-    error.attempt_provenance = {"synthetic_reconstructed": True, "imbalance": 6}
+    error = source.FutoiSourceNativeRefreshError("FIZ/YUR net imbalance exceeds 1% of total contracts")
+    error.attempt_provenance = {"synthetic_reconstructed": True, "imbalance": 100006}
     errors[(source.SI_INSTRUMENT_ID, "2026-09-24")] = error
     result = role_v2_module.run_refresh(
         through_date="2026-09-24", instrument_id=source.SI_INSTRUMENT_ID,
-        run_id="latest_plus_six", now_fn=lambda: now, raw_schema_version="v2",
+        run_id="latest_over_one_percent", now_fn=lambda: now, raw_schema_version="v2",
     )
     assert result[core.CURRENT_ROLE]["status"] == "ERROR"
     assert result[core.CURRENT_ROLE]["failed_attempt_evidence"] == error.attempt_provenance
@@ -1074,7 +1146,7 @@ def test_role_v2_parquet_end_to_end_with_expired_registry(
         calls.append((ticker, day))
         raw = _root_frame(day=day, instrument=instrument)
         if bad_current and day == "2026-09-24":
-            raw.loc[0, ["pos", "pos_long", "pos_short"]] = [726369, 927387, -201018]
+            raw.loc[0, ["pos", "pos_long", "pos_short"]] = [826369, 1027387, -201018]
             raw.loc[1, ["pos", "pos_long", "pos_short"]] = [-726363, 4297389, -5023752]
         return raw, "https://apim.moex.com/iss/analyticalproducts/futoi/securities/" + ticker + ".json"
     monkeypatch.setattr(materializer, "_fetch_exact", fetch)

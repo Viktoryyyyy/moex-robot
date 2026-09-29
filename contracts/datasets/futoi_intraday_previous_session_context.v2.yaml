@@ -55,7 +55,9 @@ factual:
   replay: same_SHA_verified_frozen_raw_quality_manifest
   publication_audit: existing_engine_for_both_roots
   actual_latest_source_pair_selected_before_validation: true
-  exact_balance_required: true
+  pair_balance_policy_ref: contracts/intelligence/futoi_pair_balance_tolerance_v1.json
+  balance_check: versioned_policy_and_exact_integer_arithmetic_evidence_required
+  legacy_frozen_evidence_without_policy: exact_zero_v1
   earlier_balanced_pair_substitution: forbidden
   selected_source_identifiers_preserve_exact_integer_precision: true
   receipt_ingest_validation_microseconds_preserved: true
