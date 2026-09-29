@@ -5,9 +5,47 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import futoi_publication_audit as audit
+from . import futoi_pair_balance as balance
 
 SCOPE = "current_intraday_latest_pair_only"
 MAX_AGE_SECONDS = 1200  # Existing heavy snapshot lifetime; source event also expires.
+AMENDMENT_REF = "contracts/intelligence/futoi_cr_current_pair_balance_amendment_v1.json"
+ORIGINAL_GRANT_REF = "contracts/intelligence/futoi_cr_current_pair_acceptance_2026-09-07.json"
+ORIGINAL_GRANT_SHA256 = "6ee9abc2f44c61b325a165f966cead981b9f68e64ba3a4574bb95f974e8d46ab"
+
+
+def _amendment_content():
+    return dict(schema_version="futoi_cr_current_pair_balance_amendment.v1",
+        instrument_id="cr_futures_family", source_id="moex_algopack_futoi",
+        source_ticker="cr", source_identity_scope="source_ticker_root", raw_schema_version="v2",
+        scope=SCOPE, original_grant_ref=ORIGINAL_GRANT_REF,
+        original_grant_sha256=ORIGINAL_GRANT_SHA256, original_audit_policy=audit.POLICY,
+        audit_policy=audit.RELATIVE_POLICY, pair_balance_policy=balance.RELATIVE,
+        balance_contract_ref=balance.CONTRACT, maximum_age_seconds=MAX_AGE_SECONDS,
+        historical_authority=False, completed_session_authority=False,
+        dated_statistics_authority=False, stage5_authority=False, trading_authority=False)
+
+
+def validate_policy_binding(policy, entry, amendment=None):
+    """Bind a verified audit to its grant, including immutable retained evidence."""
+    if policy == audit.POLICY:
+        if amendment is not None:
+            raise ValueError("strict audit must retain its original policy admission")
+        return
+    if policy != audit.RELATIVE_POLICY:
+        raise ValueError("unsupported current pair audit policy")
+    if (entry.get("evidence_ref") != ORIGINAL_GRANT_REF
+            or entry.get("evidence_sha256") != ORIGINAL_GRANT_SHA256):
+        raise ValueError("balance amendment original grant mismatch")
+    if not isinstance(amendment, dict) or set(amendment) != {"ref", "text", "sha256"}:
+        raise ValueError("balance policy amendment missing or malformed")
+    if (amendment["ref"] != AMENDMENT_REF or not isinstance(amendment["text"], str)
+            or hashlib.sha256(amendment["text"].encode()).hexdigest() != amendment["sha256"]):
+        raise ValueError("balance policy amendment reference or SHA mismatch")
+    content = json.loads(amendment["text"])
+    # Compare typed content, not merely a digest an altered snapshot can recompute.
+    if json.dumps(content, sort_keys=True) != json.dumps(_amendment_content(), sort_keys=True):
+        raise ValueError("balance policy amendment does not prove the required policy and scope")
 
 
 def _utc(value):
@@ -61,6 +99,16 @@ def admit(values, record, *, root, repo_root, now):
             raise ValueError("acceptance evidence does not prove the required scope")
         check_time(record, now)
         result = audit.verify_current(root, record)
+        amendment = None
+        if result["policy"] == audit.RELATIVE_POLICY:
+            path = Path(repo_root) / AMENDMENT_REF
+            if path.is_symlink() or not path.resolve().is_relative_to(Path(repo_root).resolve()):
+                raise ValueError("invalid balance policy amendment path")
+            content = path.read_bytes()
+            amendment = dict(ref=AMENDMENT_REF, text=content.decode(), sha256=hashlib.sha256(content).hexdigest())
+        validate_policy_binding(result["policy"], entry, amendment)
+        if amendment is not None:
+            result["policy_amendment"] = amendment
         return dict(result, allowed=True, error=None)
     except (ValueError, KeyError, TypeError, OSError) as exc:
         return {"scope": SCOPE, "allowed": False, "error": str(exc)}

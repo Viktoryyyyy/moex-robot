@@ -193,12 +193,12 @@ def test_v2_raw_is_root_scoped_and_preserves_exact_source_records(instrument, ti
         "trade_date", "sess_id", "seqnum", "source_ticker", "clgroup")
 
 
-def test_raw_v2_keeps_reconstructed_plus_six_for_separate_pair_refusal():
+def test_raw_v2_keeps_reconstructed_plus_six_for_separate_pair_policy():
     frame = _synthetic_root_pair(seqnum=43)
     frame.loc[frame["clgroup"] == "FIZ", ["pos", "pos_long", "pos_short"]] = [726369, 927387, -201018]
     frame.loc[frame["clgroup"] == "YUR", ["pos", "pos_long", "pos_short"]] = [-726363, 4297389, -5023752]
     result, _ = _root_normalize(frame)
-    # Raw structural pass must not hide bad latest data or grant pair admission.
+    # Raw structural pass must not change the discrepancy or grant pair admission.
     assert result["pos"].sum() == 6
     assert len(result) == 2
 
@@ -696,11 +696,11 @@ def test_reader_parquet_exact_v2_read_and_common_frozen_replay(tmp_path, instrum
     assert proof["raw_partition_sha256"] == hashlib.sha256(original).hexdigest()
 
 
-def test_reader_parquet_latest_plus_six_refuses_without_older_revision_or_eod(tmp_path):
+def test_reader_parquet_latest_over_one_percent_refuses_without_older_revision_or_eod(tmp_path):
     path, frame = _reader_parquet(tmp_path, "si_futures_family")
     latest = frame.copy()
     latest["seqnum"] = 2**53 + 2
-    latest.loc[latest["clgroup"] == "FIZ", ["pos", "pos_long", "pos_short"]] = [726369, 927387, -201018]
+    latest.loc[latest["clgroup"] == "FIZ", ["pos", "pos_long", "pos_short"]] = [826369, 1027387, -201018]
     latest.loc[latest["clgroup"] == "YUR", ["pos", "pos_long", "pos_short"]] = [-726363, 4297389, -5023752]
     pd.concat([frame, latest], ignore_index=True).to_parquet(path, index=False)
     result = reader._factual_for_date(
@@ -708,7 +708,7 @@ def test_reader_parquet_latest_plus_six_refuses_without_older_revision_or_eod(tm
         previous={}, eod=object(), eod_provenance={}, raw_schema_version="v2",
     )
     assert result["status"] == "UNAVAILABLE" and result["factual"] is None
-    assert "balance to zero" in result["error"]
+    assert "exceeds 1%" in result["error"]
 
 
 def test_reader_parquet_wrong_ticker_in_selected_v2_refuses(tmp_path):

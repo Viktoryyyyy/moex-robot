@@ -202,6 +202,8 @@ def _public_record(record):
     if proof.get("raw_schema_version") == "v2":
         result["factual"].update({key: deepcopy(fact[key]) for key in (
             "raw_schema_version", "source_identity_scope", "source_ticker", "sess_id", "selected_source_records")})
+        if "balance_check" in fact:
+            result["factual"]["balance_check"] = deepcopy(fact["balance_check"])
         result["provenance"] = deepcopy(proof)
     elif record["source_kind"] == "accepted_eod":
         p = proof["accepted_pointer"]
@@ -242,17 +244,21 @@ def _validated_current_capture(stored):
     proof = stored["evidence"]
     if set(proof) != {"record", "captured_at_utc", "causal_cutoff_at_utc", "publication_audit", "original_provenance", "original_source_attempt", "original_current_admission"} or not common._stamp(proof["causal_cutoff_at_utc"]) <= common._stamp(proof["captured_at_utc"]):
         raise ValueError("cr_current_byte_witness_shape_or_clock")
-    _validated_original_admission(proof["original_current_admission"])
     fact = proof["record"]["factual"]
     audit = proof["publication_audit"]
     if set(audit) != {"text", "sha256"} or sha256(audit["text"].encode()).hexdigest() != audit["sha256"]:
         raise ValueError("cr_current_publication_audit_digest")
     report = json.loads(audit["text"])
+    _validated_original_admission(proof["original_current_admission"], audit_policy=report.get("policy"))
     from moex_data.futures import futoi_publication_audit as audit_source
-    if report.get("schema_version") != audit_source.SCHEMA or report.get("policy") != audit_source.POLICY or report.get("instrument_id") != INSTRUMENT or report.get("latest_status") != "PASS" or report.get("latest_factual") != fact:
+    if report.get("schema_version") != audit_source.SCHEMA or report.get("policy") != audit_source.policy_for_factual(fact) or report.get("instrument_id") != INSTRUMENT or report.get("latest_status") != "PASS" or report.get("latest_factual") != fact:
         raise ValueError("cr_current_publication_audit_fact_mismatch")
     if "publication_count" not in report or "rejected_count" not in report:
         raise ValueError("cr_current_publication_audit_admission_result_missing")
+    from moex_data.futures import futoi_pair_balance as balance
+    if (balance.from_provenance(proof["original_provenance"]) != balance.validate_factual(fact)
+            or balance.from_provenance(report["provenance"]) != balance.validate_factual(fact)):
+        raise ValueError("cr_current_pair_balance_policy_mismatch")
     receipt = proof["original_provenance"]["publication_audit"]
     common._ref(receipt["ref"])
     if receipt["sha256"] != audit["sha256"]:
@@ -284,10 +290,13 @@ def _repo_ref(value):
     return value
 
 
-def _validated_original_admission(value):
+def _validated_original_admission(value, *, audit_policy):
     """Original authority.admit predicates applied to retained artifact bytes."""
     from moex_data.futures import futoi_current_pair_authority as authority
-    if not isinstance(value, dict) or set(value) != {"governance_ref", "governance_text", "governance_sha256", "evidence_ref", "evidence_text", "evidence_sha256"}:
+    keys = {"governance_ref", "governance_text", "governance_sha256", "evidence_ref", "evidence_text", "evidence_sha256"}
+    if audit_policy == authority.audit.RELATIVE_POLICY:
+        keys.add("policy_amendment")
+    if not isinstance(value, dict) or set(value) != keys:
         raise ValueError("cr_original_admission_shape")
     if value["governance_ref"] != "contracts/intelligence/usdrubf_futoi_live_acceptance_governance_v1.json":
         raise ValueError("cr_original_governance_reference")
@@ -309,6 +318,7 @@ def _validated_original_admission(value):
             or evidence.get("instrument_id") != INSTRUMENT or evidence.get("canonical_live_smoke") != "PASS"
             or evidence.get("negative_replay") != "PASS" or evidence.get("historical_authority") is not False):
         raise ValueError("cr_original_evidence_does_not_prove_current_scope")
+    authority.validate_policy_binding(audit_policy, entry, value.get("policy_amendment"))
 
 
 def _current(snapshot, e, now):
@@ -470,7 +480,9 @@ def _capture_current(snapshot, cutoff):
     evidence_bytes = evidence_path.read_bytes()
     original_admission = {"governance_ref": governance_ref, "governance_text": governance_bytes.decode(), "governance_sha256": sha256(governance_bytes).hexdigest(),
         "evidence_ref": evidence_ref, "evidence_text": evidence_bytes.decode(), "evidence_sha256": sha256(evidence_bytes).hexdigest()}
-    _validated_original_admission(original_admission)
+    if "policy_amendment" in allowed:
+        original_admission["policy_amendment"] = deepcopy(allowed["policy_amendment"])
+    _validated_original_admission(original_admission, audit_policy=allowed["policy"])
     original = record["provenance"]
     fact, proof = common._freeze_raw_fact(root, original, record["factual"]["trade_date"], normalized=False, instrument_id=INSTRUMENT,
                                         **({"raw_schema_version": version} if version == "v2" else {}))
@@ -596,6 +608,8 @@ def verify_projection(snapshot, release, *, now):
         if proof.get("raw_schema_version") == "v2":
             result["factual"].update({key: deepcopy(fact[key]) for key in (
                 "raw_schema_version", "source_identity_scope", "source_ticker", "sess_id", "selected_source_records")})
+            if "balance_check" in fact:
+                result["factual"]["balance_check"] = deepcopy(fact["balance_check"])
             result["provenance"] = deepcopy(proof)
         elif record["source_kind"] == "accepted_eod":
             result["provenance"] = {"source_kind": "accepted_stage5_eod_historical_context_only", "accepted_pointer": {

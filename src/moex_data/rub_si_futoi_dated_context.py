@@ -141,9 +141,12 @@ def _fact(record, expected, at, *, instrument_id=INSTRUMENT):
         if "net_share_of_oi" in raw and raw["net_share_of_oi"] != share:
             raise ValueError("net_share_identity_failed")
         values[side + ".net_share_of_oi"] = share
-    if values["fiz.net"] + values["yur.net"] != 0:
-        raise ValueError("net_balance_failed")
-    if any(values["fiz." + k] + values["yur." + k] != oi for k in ("long", "short")):
+    from moex_data.futures import futoi_pair_balance as balance
+    policy = balance.validate_factual(fact)
+    if fact.get("raw_schema_version") == "v2" and balance.from_provenance(provenance) != policy:
+        raise ValueError("retained_pair_balance_policy_mismatch")
+    sides = ('long', 'short') if policy == balance.STRICT else ('long',)
+    if any(values["fiz." + k] + values["yur." + k] != oi for k in sides):
         raise ValueError("total_open_interest_identity_failed")
     return values
 
@@ -326,6 +329,9 @@ def _economic_identity(factual):
         fact.pop("availability_ts_utc", None)
         fact.pop("ingest_ts_utc", None)
         if fact.get("raw_schema_version") == "v2":
+            # Validated quality-policy metadata is not a new economic observation.
+            # Keep the original acceptance/evidence when only that policy changes.
+            fact.pop("balance_check", None)
             for record in fact.get("selected_source_records", {}).values():
                 record.pop("availability_ts_utc", None)
                 record.pop("ingest_ts_utc", None)
@@ -464,6 +470,8 @@ def _statistics_root_identity(factual, provenance):
     if provenance.get("raw_schema_version", "v1") == "v1":
         return {}
     keys = ("raw_schema_version", "source_identity_scope", "source_ticker", "sess_id", "selected_source_records")
+    if 'balance_check' in factual:
+        keys += ('balance_check',)
     return {"factual_identity": {key: deepcopy(factual[key]) for key in keys}}
 
 
@@ -494,7 +502,9 @@ def _restore_statistics_identity(factual, proof, *, instrument_id):
     metadata = proof.get("factual_identity")
     expected = {"raw_schema_version": "v2", "source_identity_scope": source.ROOT_IDENTITY_SCOPE,
                 "source_ticker": source.ROOT_TICKERS[instrument_id]}
-    if (not isinstance(metadata, dict) or set(metadata) != set(expected) | {"sess_id", "selected_source_records"}
+    from moex_data.futures import futoi_pair_balance as balance
+    extra = {'balance_check'} if balance.from_provenance(provenance) == balance.RELATIVE else set()
+    if (not isinstance(metadata, dict) or set(metadata) != set(expected) | {"sess_id", "selected_source_records"} | extra
             or provenance.get("instrument_id") != instrument_id or provenance.get("source_id") != SOURCE
             or any(metadata.get(k) != v or provenance.get(k) != v for k, v in expected.items())):
         raise ValueError("statistics_root_identity_mismatch")

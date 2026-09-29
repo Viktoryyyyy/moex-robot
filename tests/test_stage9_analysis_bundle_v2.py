@@ -80,7 +80,8 @@ def source_io(root, monkeypatch, *, failed=None):
         if (ticker, day) == failed:
             latest = raw.copy()
             latest["seqnum"] = 2**53+4
-            latest.loc[0, ["pos", "pos_long", "pos_short"]] = [726369, 927387, -201018]
+            # Preserve this fixture's refusal scenario under the new 1% policy.
+            latest.loc[0, ["pos", "pos_long", "pos_short"]] = [826369, 1027387, -201018]
             latest.loc[1, ["pos", "pos_long", "pos_short"]] = [-726363, 4297389, -5023752]
             raw = pd.concat([raw, latest], ignore_index=True)
         return raw, "https://apim.moex.com/iss/analyticalproducts/futoi/securities/"+ticker+".json"

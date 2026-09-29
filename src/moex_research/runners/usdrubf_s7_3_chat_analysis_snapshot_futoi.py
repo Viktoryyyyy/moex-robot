@@ -553,7 +553,7 @@ def _load_root_candidate(root: Path, instrument_id: str, *, now: datetime | None
     require(isinstance(receipt, Mapping), "publication audit is missing")
     report = json.loads(futoi_source._root_proof_bytes(root, receipt.get("ref"), receipt.get("sha256"), ".json"))
     require(isinstance(report, Mapping)
-            and report.get("schema_version") == audit.SCHEMA and report.get("policy") == audit.POLICY
+            and report.get("schema_version") == audit.SCHEMA and report.get("policy") == audit.policy_for_factual(replayed)
             and report.get("instrument_id") == instrument_id and report.get("trade_date") == target
             and report.get("latest_status") == "PASS" and report.get("latest_factual") == replayed
             and report.get("provenance") == {k: v for k, v in provenance.items() if k != "publication_audit"},

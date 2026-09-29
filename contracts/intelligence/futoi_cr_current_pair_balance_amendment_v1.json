@@ -1,0 +1,21 @@
+{
+  "schema_version": "futoi_cr_current_pair_balance_amendment.v1",
+  "instrument_id": "cr_futures_family",
+  "source_id": "moex_algopack_futoi",
+  "source_ticker": "cr",
+  "source_identity_scope": "source_ticker_root",
+  "raw_schema_version": "v2",
+  "scope": "current_intraday_latest_pair_only",
+  "original_grant_ref": "contracts/intelligence/futoi_cr_current_pair_acceptance_2026-09-07.json",
+  "original_grant_sha256": "6ee9abc2f44c61b325a165f966cead981b9f68e64ba3a4574bb95f974e8d46ab",
+  "original_audit_policy": "latest_source_timestamp_no_fallback_exact_balance_v1",
+  "audit_policy": "latest_source_timestamp_no_fallback_relative_balance_1pct_v1",
+  "pair_balance_policy": "max_one_side_contracts_1pct_v1",
+  "balance_contract_ref": "contracts/intelligence/futoi_pair_balance_tolerance_v1.json",
+  "maximum_age_seconds": 1200,
+  "historical_authority": false,
+  "completed_session_authority": false,
+  "dated_statistics_authority": false,
+  "stage5_authority": false,
+  "trading_authority": false
+}

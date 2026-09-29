@@ -10,9 +10,15 @@ from collections.abc import Mapping
 import pandas as pd
 
 from . import futoi_live_factual_refresh_source_native as source
+from . import futoi_pair_balance as balance
 
 SCHEMA = "futoi_publication_audit.v1"
 POLICY = "latest_source_timestamp_no_fallback_exact_balance_v1"
+RELATIVE_POLICY = "latest_source_timestamp_no_fallback_relative_balance_1pct_v1"
+
+
+def policy_for_factual(factual):
+    return RELATIVE_POLICY if balance.validate_factual(factual) == balance.RELATIVE else POLICY
 
 
 def _freeze_json(root: Path, value: dict) -> dict:
@@ -30,6 +36,10 @@ def _freeze_json(root: Path, value: dict) -> dict:
 
 def audited_latest(root: Path, frame: pd.DataFrame, provenance: dict, **identity) -> dict:
     """Archive all per-timestamp outcomes before returning or rejecting the frontier."""
+    relative = identity.get('raw_schema_version', 'v1') == 'v2'
+    if relative:
+        identity = dict(identity, pair_balance_policy=balance.RELATIVE)
+        provenance['pair_balance_policy'] = balance.RELATIVE
     # The bytes used for replay must be the canonical, already frozen partition.
     path = _verified_path(root, provenance["raw_partition_ref"], provenance["raw_partition_sha256"])
     frozen_frame = pd.read_parquet(path)
@@ -53,7 +63,7 @@ def audited_latest(root: Path, frame: pd.DataFrame, provenance: dict, **identity
     except source.FutoiSourceNativeRefreshError as exc:
         failure = exc
         factual = None
-    report = {"schema_version": SCHEMA, "policy": POLICY,
+    report = {"schema_version": SCHEMA, "policy": RELATIVE_POLICY if relative else POLICY,
               "instrument_id": identity["expected_instrument_id"],
               "trade_date": identity["expected_trade_date"], "provenance": provenance,
               "publications": publications, "publication_count": len(publications),
@@ -94,7 +104,7 @@ def verify_current(root: Path, record: Mapping) -> dict:
     report = json.loads(path.read_text())
     if not isinstance(report, Mapping) or not isinstance(report.get("provenance"), Mapping):
         raise ValueError("invalid publication audit structure")
-    if (report.get("schema_version") != SCHEMA or report.get("policy") != POLICY
+    if (report.get("schema_version") != SCHEMA or report.get("policy") != policy_for_factual(record.get('factual') or {})
             or report.get("instrument_id") != source.CR_INSTRUMENT_ID
             or report.get("latest_status") != "PASS"
             or report.get("latest_factual") != record.get("factual")):
@@ -104,6 +114,9 @@ def verify_current(root: Path, record: Mapping) -> dict:
         if report["provenance"].get(key + "_ref") != ref or report["provenance"].get(key + "_sha256") != digest:
             raise ValueError("publication audit provenance mismatch")
         _verified_path(root, ref, digest)
-    return {"policy": POLICY, "audit_sha256": receipt["sha256"],
+    if (balance.from_provenance(provenance) != balance.validate_factual(record['factual'])
+            or balance.from_provenance(report['provenance']) != balance.from_provenance(provenance)):
+        raise ValueError("publication balance policy/provenance mismatch")
+    return {"policy": report['policy'], "audit_sha256": receipt["sha256"],
             "publication_count": report["publication_count"], "rejected_count": report["rejected_count"],
             "scope": "current_intraday_latest_pair_only"}

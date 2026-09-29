@@ -129,6 +129,7 @@ def _causal(value, now, maximum_age=None):
 def _same_pair(pair, current):
     """Compare the engine's normalized payload to the complete admitted pair."""
     keys = ('trade_date', 'snapshot_ts', 'source_publication_time', 'availability_ts_utc', 'ingest_ts_utc', 'total_open_interest')
+    if pair.get('balance_check') != current.get('balance_check'): return False
     if not all(pair.get(key) is not None and pair.get(key) == current.get(key) for key in keys): return False
     for side in ('fiz', 'yur'):
         left = _dict(pair.get(side)); right = _dict(current.get(side))
