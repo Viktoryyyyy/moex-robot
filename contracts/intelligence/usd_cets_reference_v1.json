@@ -22,5 +22,7 @@
   "basis_semantics": "futures_minus_ruble_settled_currency_position_reference",
   "carry_semantics": "annualized_relative_price_proxy_not_deliverable_currency_financing",
   "old_stage3_stage4_admission_changed": false,
-  "action_authority": false
+  "action_authority": false,
+  "current_requires_native_marketdata_trade_date": true,
+  "missing_native_trade_date": "last_received_observation_only_no_current_price_or_quote"
 }

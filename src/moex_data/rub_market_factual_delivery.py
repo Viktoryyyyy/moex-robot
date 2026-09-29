@@ -77,6 +77,7 @@ def project(snapshot, *, now, code_revision):
             "values": deepcopy(facts[key]["values"]) if allowed else None,
             "source_identity": pick(row, ("logical_id", "secid", "source_id", "asset_type", "source_trade_date",
                 "timestamp", "source_update_timestamp_utc", "received_at_utc", "timestamp_semantics",
+                "native_trade_date", "source_version_trade_date", "native_trade_date_verified", "last_trade_time_moscow",
                 "instrument_kind", "settlement", "deliverable_spot", "reference_semantics", "carry_semantics")),
             "freshness": _freshness(row.get("timestamp"), now, 60),
             "contract_metadata": deepcopy(admitted["contract_metadata"]),

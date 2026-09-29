@@ -89,6 +89,7 @@ QUOTE_FIELDS = ('bid', 'ask', 'spread')
 IDENTITY_FIELDS = ('secid', 'logical_id', 'asset_type', 'timestamp', 'source_trade_date',
     'timestamp_semantics', 'source_update_timestamp_utc', 'received_at_utc', 'source_id',
     'last_trade_time_moscow', 'source_trading_status', 'instrument_kind', 'settlement', 'deliverable_spot',
+    'native_trade_date', 'source_version_trade_date', 'native_trade_date_verified',
     'reference_semantics', 'carry_semantics')
 LEG_METADATA_FIELDS = ('raw_unit', 'normalization_divisor', 'normalized_unit', 'expiry_date', 'expiry_metadata')
 

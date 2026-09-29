@@ -22,6 +22,7 @@ def payload(*,age=5,status='A'):
     return {'securities':table({'SECID':usd.SECID,'BOARDID':'CETS','FACEUNIT':'USD','CURRENCYID':'RUB'}),
         'dataversion':table({'trade_date':local.date().isoformat(),'trade_session_date':local.date().isoformat()}),
         'marketdata':table({'SECID':usd.SECID,'BOARDID':'CETS','SYSTIME':local.replace(tzinfo=None).isoformat(sep=' '),
+            'TRADEDATE':local.date().isoformat(),
             'TIME':trade.time().isoformat(),'TRADINGSTATUS':status,'OPEN':84.,'HIGH':85.,'LOW':83.,'LAST':84.5,
             'WAPRICE':84.,'VOLTODAY':None,'NUMTRADES':28,'BID':None,'OFFER':None})}
 
@@ -107,7 +108,8 @@ def test_v3_corruption_does_not_restore_v1_USD_or_futures_dates(tmp_path):
     assert m['anchor'] is None and m['changes']['1']['change'] is None
 
 
-@pytest.mark.parametrize('defect',[None,'auth','outer_null','outer_list','raw_null','raw_list','table_null','row_null','url_list'])
+@pytest.mark.parametrize('defect',[None,'auth','outer_null','outer_list','raw_null','raw_list','table_null','row_null','url_list',
+    'native_date_missing','native_date_prior','native_date_empty','native_date_bad','native_date_future','closed_missing_date'])
 def test_real_fast_collection_disk_and_read_keep_USD_failure_independent(tmp_path,defect):
     from test_synchronized_live_market_oi_context import _payloads
     from moex_data import synchronized_live_market_oi_context_partial as live
@@ -138,6 +140,20 @@ def test_real_fast_collection_disk_and_read_keep_USD_failure_independent(tmp_pat
         raw=json.dumps(obj).encode()
         e['response']['bytes_base64']=base64.b64encode(raw).decode()
         e['response']['sha256']=usd.sha256(raw).hexdigest()
+    elif defect and (defect.startswith('native_date_') or defect=='closed_missing_date'):
+        obj=payload(status='N' if defect=='closed_missing_date' else 'A')
+        table=obj['marketdata'];index=table['columns'].index('TRADEDATE')
+        if defect in ('native_date_missing','closed_missing_date'):
+            table['columns'].pop(index);table['data'][0].pop(index)
+        else:
+            table['data'][0][index]={'native_date_prior':(NOW-timedelta(days=1)).date().isoformat(),
+                'native_date_future':(NOW+timedelta(days=1)).date().isoformat(),
+                'native_date_empty':'','native_date_bad':'not-a-date'}[defect]
+        raw=json.dumps(obj).encode();e['response']['bytes_base64']=base64.b64encode(raw).decode()
+        e['response']['sha256']=usd.sha256(raw).hexdigest()
+        # Keep a producer's normalized observation; replay must still reject
+        # current use after persisting the complete hash-consistent carrier.
+        m['instruments']['usd_tom']=usd.replay(e,now=NOW)
     value['market_sha256']=fast._digest(m)
     (folder/'current.json').write_text(json.dumps(value))
     raw=(folder/'current.json').read_bytes();assert json.loads(raw)==value
@@ -149,26 +165,54 @@ def test_real_fast_collection_disk_and_read_keep_USD_failure_independent(tmp_pat
     assert data['instruments']['si_front']['price_oi_usable'] is True
     assert data['instruments']['cr_front']['price_oi_usable'] is True
     assert len(projection.basis_metrics(view))==(30 if defect is None else 22)
+    if defect and (defect.startswith('native_date_') or defect=='closed_missing_date'):
+        row=data['instruments']['usd_tom'];state=row['market_state']
+        assert row['timestamp'] is None and row['native_trade_date_verified'] is False
+        assert row['read_freshness_reason'].startswith('USD_native_trade_date_')
+        assert state['current_price_usable'] is False
+        assert state['last_observation']['values']['last']==84.5
+        assert state['last_observation']['values']['timestamp'] is None
+        assert state['last_observation']['current_use_allowed'] is False
+        assert state['state']==('NOT_TRADING_OBSERVED' if defect=='closed_missing_date' else 'TRADING_OBSERVED')
     assert (folder/'current.json').read_bytes()==raw
 
 
-def test_real_heavy_saved_canonical_read_and_final_delivery_recheck_currency_TTL(tmp_path,monkeypatch):
+@pytest.mark.parametrize('missing_native_date',[False,True])
+def test_real_heavy_saved_canonical_read_and_final_delivery_recheck_currency_TTL(tmp_path,monkeypatch,missing_native_date):
     from test_stage9_analysis_bundle_v2 import source_io,live,shifted_market,NOW as clock
     from src.moex_research.consumers import usdrubf_chat_snapshot_consumer as consumer
     source_io(tmp_path,monkeypatch)
     monkeypatch.setitem(globals(),'NOW',clock)
     source=shifted_market(clock)
     source['instruments']['cnyrub_tom']['source_trading_status']='A'
-    source=usd.attach(source,evidence(),now=clock)
+    e=evidence()
+    if missing_native_date:
+        obj=json.loads(base64.b64decode(e['response']['bytes_base64']));t=obj['marketdata'];i=t['columns'].index('TRADEDATE')
+        t['columns'].pop(i);t['data'][0].pop(i)
+        raw=json.dumps(obj).encode();e['response']['bytes_base64']=base64.b64encode(raw).decode();e['response']['sha256']=usd.sha256(raw).hexdigest()
+    source=usd.attach(source,e,now=clock)
     _,path=live.refresh_snapshot(now_fn=lambda:clock,live_loader=lambda:source)
     raw=path.read_bytes()
     before=consumer.load_market_factual(now_fn=lambda:clock,reader=live.base.read_current_snapshot,code_revision='a'*40)
     times=iter((clock,clock+timedelta(seconds=61)))
     after=consumer.load_market_factual(now_fn=lambda:next(times),reader=live.base.read_current_snapshot,code_revision='a'*40)
     for key in ('cnyrub_tom','usd_tom'):
-        assert before['prices'][key]['status']=='AVAILABLE'
-        assert before['prices'][key]['market_state']['current_price_usable'] is True
+        admitted=key!='usd_tom' or not missing_native_date
+        assert before['prices'][key]['status']==('AVAILABLE' if admitted else 'UNAVAILABLE')
+        assert before['prices'][key]['market_state']['current_price_usable'] is admitted
         assert after['prices'][key]['status']=='UNAVAILABLE'
         assert after['prices'][key]['market_state']['current_price_usable'] is False
         assert after['prices'][key]['market_state']['last_observation']['current_use_allowed'] is False
+    if missing_native_date:
+        row=before['prices']['usd_tom']
+        assert row['source_identity']['timestamp'] is None
+        assert row['reason']=='USD_native_trade_date_missing_or_invalid'
+        assert row['market_state']['last_observation']['values']['last']==84.5
+        assert row['market_state']['last_observation']['values']['native_trade_date_verified'] is False
+        # This legacy heavy fixture lacks native expiry metadata, so its four
+        # existing carry metrics are unavailable independently of USD admission.
+        assert before['basis_carry']['admitted_metric_count']==18
+        assert all('usd_tom' not in item['values']['legs'] for item in before['basis_carry']['metrics'])
+    assert before['prices']['si_front']['status']=='AVAILABLE'
+    assert before['prices']['cr_front']['status']=='AVAILABLE'
     assert path.read_bytes()==raw

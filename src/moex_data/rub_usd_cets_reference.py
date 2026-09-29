@@ -31,6 +31,8 @@ POLICY = {'project':'MOEX_Bot', 'schema_version':'usd_cets_reference_admission.v
     'live_source':'https://apim.moex.com'+PATH,
     'dated_source':'https://iss.moex.com'+PATH.removesuffix('.json')+'/candles.json',
     'current_last_price_ttl_seconds':60, 'current_requires_trading_status':'A',
+    'current_requires_native_marketdata_trade_date':True,
+    'missing_native_trade_date':'last_received_observation_only_no_current_price_or_quote',
     'current_price_clock':'native_trade_date_and_last_trade_TIME',
     'dated_scope':'exact_own_5m_bar_intersection_no_fill',
     'basis_semantics':'futures_minus_ruble_settled_currency_position_reference',
@@ -104,22 +106,35 @@ def replay(e, *, now):
     require(isinstance(day,str) and datetime.fromisoformat(day).date().isoformat()==day
         and version.get('trade_session_date')==day and '2026-02-16'<=day<=now.astimezone(core.MOSCOW).date().isoformat(),'USD_trade_date')
     require(type(row.get('NUMTRADES')) is int and row['NUMTRADES']>0,'USD_no_same_session_trades')
-    trade=core._source_event_time(day+'T'+row['TIME'],'USD_last_trade')
     update=core._source_event_time(row['SYSTIME'],'USD_source_update')
-    require(trade<=update<=received,'USD_event_update_receipt_order')
+    require(update<=received,'USD_update_receipt_order')
     require(update.astimezone(core.MOSCOW).date().isoformat()==day,'USD_update_session_date_mismatch')
+    native_day=row.get('TRADEDATE')
+    try:
+        valid_day=isinstance(native_day,str) and datetime.fromisoformat(native_day).date().isoformat()==native_day
+    except ValueError: valid_day=False
+    date_verified=valid_day and native_day==day
+    trade=None
+    if date_verified:
+        trade=core._source_event_time(native_day+'T'+row['TIME'],'USD_last_trade')
+        require(trade<=update,'USD_event_update_receipt_order')
     normalized=core._normalize_row(logical_id='usd_tom',secid=SECID,row=row,source_id=IDENTITY['source_id'],
         received_at_utc=received,freshness_reference_utc=now,is_future=False)
-    age=(now-trade).total_seconds()
-    normalized.update(IDENTITY, timestamp=trade.isoformat(),source_trade_date=day,
-        timestamp_semantics='native_last_trade_date_and_TIME',source_update_timestamp_utc=update.isoformat(),
+    age=(now-trade).total_seconds() if trade is not None else None
+    normalized.update(IDENTITY, timestamp=trade.isoformat() if trade is not None else None,
+        source_trade_date=native_day if valid_day else None,native_trade_date=native_day,
+        source_version_trade_date=day,native_trade_date_verified=date_verified,
+        timestamp_semantics='native_last_trade_date_and_TIME' if date_verified else 'native_last_trade_date_unproven',
+        source_update_timestamp_utc=update.isoformat(),
         asset_type='ruble_settled_currency_position_reference',age_seconds=age,
-        stale=age>60 or row.get('TRADINGSTATUS')!='A',
+        stale=not date_verified or age>60 or row.get('TRADINGSTATUS')!='A',
         reference_semantics=POLICY['basis_semantics'],carry_semantics=POLICY['carry_semantics'])
     normalized['spot_price_usable']=normalized['stale'] is False and normalized.get('last') is not None and normalized['last']>0
     if normalized['stale']:
+        reason=('USD_native_trade_date_mismatch' if valid_day else 'USD_native_trade_date_missing_or_invalid') if not date_verified else (
+            'source_not_trading' if row.get('TRADINGSTATUS')!='A' else 'source_age_exceeds_threshold')
         normalized.update(quote_usable=False,quote_stale=True,
-            read_freshness_reason='source_not_trading' if row.get('TRADINGSTATUS')!='A' else 'source_age_exceeds_threshold')
+            read_freshness_reason=reason)
     return normalized
 
 
@@ -131,6 +146,7 @@ def usable(data, *, now):
         # Freshness diagnostics may be downgraded by the canonical reader. Facts,
         # identity and original clocks may never be substituted after replay.
         fields=(*IDENTITY,'last','open','high','low','timestamp','source_trade_date','source_trading_status',
+                'native_trade_date','source_version_trade_date','native_trade_date_verified','last_trade_time_moscow',
                 'source_update_timestamp_utc','received_at_utc','timestamp_semantics','reference_semantics','carry_semantics','bid','ask','spread','wap','volume','trades')
         require(all(stored.get(k)==row.get(k) for k in fields),'USD_normalized_original_mismatch')
         return row['spot_price_usable'] and stored.get('stale') is False

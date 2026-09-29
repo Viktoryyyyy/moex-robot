@@ -8,7 +8,7 @@ SCHEMA = 'rub_currency_market_state.v1'
 def describe(row, *, now, current_admitted=False):
     status = row.get('source_trading_status')
     reason = row.get('read_freshness_reason')
-    observed = row.get('last') is not None and row.get('timestamp') is not None
+    observed = row.get('last') is not None and (row.get('timestamp') is not None or row.get('received_at_utc') is not None)
     try:
         age=(now-datetime.fromisoformat(row['timestamp'])).total_seconds()
         fresh=-5<=age<=60
@@ -23,6 +23,7 @@ def describe(row, *, now, current_admitted=False):
             'scope':'last_received_source_observation_not_verified_session_close',
             'values':{k:deepcopy(row[k]) for k in ('last','secid','source_id','source_trade_date','timestamp',
                 'timestamp_semantics','source_update_timestamp_utc','last_trade_time_moscow','received_at_utc',
+                'native_trade_date','source_version_trade_date','native_trade_date_verified',
                 'price_unit','instrument_kind','settlement','deliverable_spot') if k in row}}
             if observed else None)}
 

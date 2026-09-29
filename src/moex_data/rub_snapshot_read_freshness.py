@@ -69,7 +69,7 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
         if key == "usd_tom":
             from moex_data.rub_usd_cets_reference import usable as usd_usable
             if not usd_usable(data, now=now):
-                reason = reason or item.get("read_freshness_reason") or "USD_reference_not_admitted"
+                reason = item.get("read_freshness_reason") or reason or "USD_reference_not_admitted"
         if reason is None and item.get("stale") is not False:
             reason = "persisted_source_not_fresh"
         item["age_seconds"] = age

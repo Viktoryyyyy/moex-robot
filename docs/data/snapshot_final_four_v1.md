@@ -23,6 +23,15 @@ September 29 native securities/marketdata response. Source update time cannot
 renew LAST: native trade date + TIME, trading status and unchanged 60-second TTL
 are checked with original response bytes on read. USD refusal does not revoke
 independent Si/CR/CNY facts. Legacy default collector APIs retain their old scope.
+The native **marketdata.TRADEDATE** must match the versioned table date before
+constructing a last-trade timestamp. Missing, malformed or conflicting row dates
+preserve the original observation but leave timestamp null and deny current
+price, quote and dependent basis use. DATAVERSION/SYSTIME/NUMTRADES alone cannot
+establish the date of LAST. The real September 29 USD API response lacks
+TRADEDATE: therefore current USD is **SOURCE_NATIVE_DATE_UNPROVEN** in that
+response, while its last received value remains visible and separately dated
+v3 candle comparisons can be admitted. This is an additional source limitation;
+do not report full current USD restoration or all four tasks completed.
 
 The bounded existing exact-date source collector uses a v3 admission for USD
 basis comparisons 1/5. It selects reviewed CETS dates before price quality, keeps
@@ -126,3 +135,14 @@ The earlier Windows archive also changed immutable grant line endings; all
 subsequent checks use a direct GitHub clone with the original grant SHA.
 Complete compileall/pytest CI of the published head remains mandatory before
 merge, followed by independent review of that exact head and server acceptance.
+
+First published head f5a56c914331e7c6a6f593cdac4402139198bb8a passed both
+complete CI runs (7640 tests and 37 subtests each). The pre-merge recheck found
+GitHub review comment 4137262027 / thread PRRT_kwDOP-F0yM6nQJ2N: bind LAST/TIME
+to the native row date. Merge was withheld. The correction adds the strict date
+binding above and tests fresh table timestamps with absent/old/bad/future row
+dates through saved fast JSON and heavy canonical delivery. CI and independent
+review must be repeated for the correcting head before merge.
+P1 correction validation: 70 tests passed in 156.42 seconds across USD source,
+currency state, Stage9 and final market delivery, including the real saved JSON
+paths and the absence of a native date without loss of the last observation.
