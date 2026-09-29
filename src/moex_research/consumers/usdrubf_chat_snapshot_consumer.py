@@ -106,9 +106,28 @@ def load_factual_release(*, now_fn=lambda: datetime.now(timezone.utc),
     return compact(snapshot, now=now, code_revision=code_revision or executing_revision())
 
 
+def load_market_factual(*, now_fn=lambda: datetime.now(timezone.utc),
+                        reader: SnapshotReader = read_current_snapshot, code_revision=None):
+    """One canonical read, then a bounded current projection at delivery time."""
+    from moex_data.rub_factual_release import executing_revision
+    from moex_data.rub_market_factual_delivery import project
+    started = now_fn()
+    if not isinstance(started, datetime) or started.utcoffset() is None:
+        raise ChatSnapshotConsumerError('aware current delivery clock required')
+    snapshot = load_analysis_chat_snapshot(now_fn=lambda: started, reader=reader)
+    if datetime.fromisoformat(snapshot['read_freshness']['read_at_utc']) != started:
+        raise ChatSnapshotConsumerError('reader returned a different consumption time')
+    completed = now_fn()
+    if not isinstance(completed, datetime) or completed.utcoffset() is None or completed < started:
+        raise ChatSnapshotConsumerError('aware causal delivery completion clock required')
+    return project(snapshot, now=completed.astimezone(timezone.utc),
+        code_revision=code_revision or executing_revision())
+
+
 __all__ = [
     "ChatSnapshotConsumerError",
     "load_analysis_chat_snapshot",
     "load_factual_release",
+    "load_market_factual",
     "validate_analysis_chat_snapshot",
 ]

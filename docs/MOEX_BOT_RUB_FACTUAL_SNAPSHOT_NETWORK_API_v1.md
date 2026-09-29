@@ -79,6 +79,14 @@ The response includes `Cache-Control: no-store`.
 
 ### `GET /v1/rub/factual-release`
 
+For bounded final Price/OI, FUTOI Si/CR and basis/carry presentation use the
+additive `GET /v1/rub/market-factual` route with the same Bearer authentication
+and no-store/query restrictions. It returns `rub_market_factual_delivery.v1`
+from one canonical read, with final delivery-time expiry checks, per-leg/per-root
+refusals, original clocks, identity and evidence references. It does not refresh
+sources or imply full analysis readiness. Oversize/invalid output fails closed.
+See [final market delivery](data/price_futoi_basis_final_delivery_v1.md).
+
 Authentication: the same required Bearer token. This route returns the compact
 `rub_factual_package.v1` through `load_factual_release`, the same builder used by
 manual current export. It captures one consumption time and uses the canonical

@@ -19,9 +19,11 @@ TOKEN_ENV = "MOEX_RUB_SNAPSHOT_API_TOKEN"
 ENV_FILE_ENV = "MOEX_ENV_FILE"
 UPSTREAM_BASE_URL = "http://127.0.0.1:8765"
 SNAPSHOT_PATH = "/v1/rub/factual-snapshot"
+MARKET_PATH = "/v1/rub/market-factual"
 READINESS_PATH = "/readyz"
 CONNECT_TIMEOUT_SECONDS = 2.0
-READ_TIMEOUT_SECONDS = 5.0
+# Transport budget for the measured canonical evidence replay, not a data TTL.
+READ_TIMEOUT_SECONDS = 60.0
 DEFAULT_MCP_HTTP_HOST = "127.0.0.1"
 DEFAULT_MCP_HTTP_PORT = 8766
 MCP_HTTP_PATH = "/mcp"
@@ -110,6 +112,7 @@ class RubFactualSnapshotHTTPBridge:
                     "Accept": "application/json",
                 },
                 timeout=(CONNECT_TIMEOUT_SECONDS, READ_TIMEOUT_SECONDS),
+                allow_redirects=False,
             )
         except requests.RequestException as exc:
             raise RubSnapshotBridgeError("factual API unavailable") from exc
@@ -145,6 +148,16 @@ class RubFactualSnapshotHTTPBridge:
         if status_code == 401:
             raise RubSnapshotBridgeError("factual API authentication failed")
         raise RubSnapshotBridgeError(f"factual API readiness request failed (HTTP {status_code})")
+
+    def get_market_factual(self) -> dict[str, Any]:
+        status_code, payload = self._get_json(MARKET_PATH)
+        if status_code == 200:
+            if payload.get("schema_version") != "rub_market_factual_delivery.v1":
+                raise RubSnapshotBridgeError("factual API market delivery schema mismatch")
+            return payload
+        if status_code == 401:
+            raise RubSnapshotBridgeError("factual API authentication failed")
+        raise RubSnapshotBridgeError(f"factual API market delivery unavailable (HTTP {status_code})")
 
 
 _bridge: RubFactualSnapshotHTTPBridge | None = None
@@ -184,12 +197,23 @@ def get_rub_snapshot_readiness() -> dict[str, Any]:
     return _configured_bridge().get_readiness()
 
 
+def get_rub_market_factual() -> dict[str, Any]:
+    """Get current Price/OI, FUTOI Si/CR and basis/carry for the final chat response.
+
+    Prefer this bounded canonical view for these three topics. Values include
+    original source clocks, identities, units, evidence and explicit refusals.
+    Recheck source deadlines at analysis time. PARTIAL is not full analysis READY.
+    No refresh, source lookup, fallback to old data or trading action occurs.
+    """
+    return _configured_bridge().get_market_factual()
+
+
 def build_mcp_server(
     *,
     host: str = DEFAULT_MCP_HTTP_HOST,
     port: int = DEFAULT_MCP_HTTP_PORT,
 ) -> FastMCP:
-    """Build the same two-tool MCP surface with SDK-1.x transport settings."""
+    """Keep legacy tools and add the bounded canonical market delivery."""
 
     bound_host, bound_port = _validated_http_origin(host, port)
     server = FastMCP(
@@ -202,6 +226,7 @@ def build_mcp_server(
     )
     server.tool(annotations=READ_ONLY_ANNOTATIONS)(get_rub_factual_snapshot)
     server.tool(annotations=READ_ONLY_ANNOTATIONS)(get_rub_snapshot_readiness)
+    server.tool(annotations=READ_ONLY_ANNOTATIONS)(get_rub_market_factual)
     return server
 
 
