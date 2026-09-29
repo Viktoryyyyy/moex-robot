@@ -241,8 +241,9 @@ def _view(e,*,oracle=False):
                 'anchor':deepcopy(anchor),'previous_comparable':previous,'changes':changes}
         result[pair]={'metrics':metrics,'role_binding_as_of_utc':anchor_pair.get('role_binding_as_of_utc'),
             'run_id':anchor_pair.get('run_id')}
-    return {'status':'AVAILABLE' if any(v['status']=='AVAILABLE' for p in result.values() for v in p['metrics'].values()) else 'UNAVAILABLE',
-        'anchor_trade_date':anchor_date,'pairs':result}
+    from moex_data.rub_exact_comparisons import basis_coverage
+    return basis_coverage({'status':'AVAILABLE' if any(v['status']=='AVAILABLE' for p in result.values() for v in p['metrics'].values()) else 'UNAVAILABLE',
+        'anchor_trade_date':anchor_date,'pairs':result},e)
 
 
 def _oracle_view(e):
@@ -273,13 +274,15 @@ def _oracle_view(e):
                 'anchor':deepcopy(anchor),'previous_comparable':previous,'changes':changes}
         result[pair]={'metrics':metrics,'role_binding_as_of_utc':anchor_pair.get('role_binding_as_of_utc'),
             'run_id':anchor_pair.get('run_id')}
-    return {'status':'AVAILABLE' if any(v['status']=='AVAILABLE' for p in result.values() for v in p['metrics'].values()) else 'UNAVAILABLE',
-        'anchor_trade_date':anchor_date,'pairs':result}
+    from moex_data.rub_exact_comparisons import basis_coverage
+    return basis_coverage({'status':'AVAILABLE' if any(v['status']=='AVAILABLE' for p in result.values() for v in p['metrics'].values()) else 'UNAVAILABLE',
+        'anchor_trade_date':anchor_date,'pairs':result},e)
 
 
 def _describe(snapshot,now,*,oracle=False):
     try:
-        now=stamp(now);e=_admit(snapshot,now);store=snapshot[STORE_KEY]
+        from moex_data.rub_exact_comparisons import enrich_basis
+        now=stamp(now);e=enrich_basis(_admit(snapshot,now),snapshot,now);store=snapshot[STORE_KEY]
         result={'project':'MOEX_Bot','schema_version':SCHEMA,'scope':SCOPE,'status':'PARTIAL',
             'phase':'C1_DATED_ONLY_C2_NATIVE_CURRENT_NOT_ADMITTED','checked_at_utc':now.isoformat(),
             'dated':_view(e,oracle=oracle),'current':{'status':'UNAVAILABLE','reason':'native_current_proof_not_admitted'},
@@ -321,7 +324,8 @@ def _describe(snapshot,now,*,oracle=False):
 
 def _oracle_description(snapshot,now):
     try:
-        now=stamp(now);e=_admit(snapshot,now);store=snapshot[STORE_KEY]
+        from moex_data.rub_exact_comparisons import enrich_basis
+        now=stamp(now);e=enrich_basis(_admit(snapshot,now),snapshot,now);store=snapshot[STORE_KEY]
         result={'project':'MOEX_Bot','schema_version':SCHEMA,'scope':SCOPE,'status':'PARTIAL',
             'phase':'C1_DATED_ONLY_C2_NATIVE_CURRENT_NOT_ADMITTED','checked_at_utc':now.isoformat(),
             'dated':_oracle_view(e),'current':{'status':'UNAVAILABLE','reason':'native_current_proof_not_admitted'},

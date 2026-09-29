@@ -341,7 +341,12 @@ def refresh_snapshot(
         from moex_data.rub_historical_basis_carry_context import capture_snapshot as capture_historical_basis
         historical_basis_completed = capture_historical_basis(snapshot, previous, now_fn=now_fn, refresh_started_at=now,
             previous_capture_completed=contract_pairs_completed or cr_statistics_completed or cr_completed or previous_capture_completed)
+        from moex_data.rub_exact_comparisons import capture_snapshot as capture_exact_comparisons
+        exact_comparisons_completed = capture_exact_comparisons(snapshot, previous, root=root, now_fn=now_fn,
+                                                               refresh_started_at=now)
         completed = base._aware(now_fn(), "refresh_completed_at")
+        if exact_comparisons_completed is not None and completed < exact_comparisons_completed:
+            raise base.ChatAnalysisSnapshotError("refresh completion precedes exact comparison capture completion")
         if historical_basis_completed is not None and completed < historical_basis_completed:
             raise base.ChatAnalysisSnapshotError("refresh completion precedes historical basis capture completion")
         if contract_pairs_completed is not None and completed < contract_pairs_completed:
@@ -360,11 +365,14 @@ def refresh_snapshot(
                      hour_acquisition=hour_acquisition, cny_hour_acquisition=cny_hour_acquisition)
         from moex_data.rub_analysis_bundle_v2 import prepare, finish
         prepared_bundles = prepare(snapshot, now=completed)
+        from moex_data.rub_exact_comparisons import prepare_publication_expiry, apply_publication_expiry
+        prepare_publication_expiry(snapshot, prepared_bundles, now=completed)
         published = base._aware(now_fn(), "publication_checked_at")
         if published < completed:
             raise base.ChatAnalysisSnapshotError("publication check precedes capture completion")
         snapshot = _live_context_at_publication(snapshot, root=root, now=published)
         base.finalize_snapshot_timing(snapshot, started=now, completed=published)
+        apply_publication_expiry(prepared_bundles, now=published)
         finish(snapshot, prepared_bundles, now=published)
         base._atomic_write(path, snapshot)
     return snapshot, path
