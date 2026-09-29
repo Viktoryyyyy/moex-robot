@@ -116,10 +116,13 @@ def test_positive_exact_lags_and_weekend_without_CETS(tmp_path):
             assert change['baseline']['secid']==item['secid'] and change['baseline']['trade_date']==change['target_observed_trade_date']
             assert change['baseline']['market_open_interest']==2**53+3
             assert change['baseline']['evidence_reference']['response_digest']
-    assert b['dated']['comparison_coverage']['1']['available']==14
+    assert b['dated']['comparison_coverage']['1']['available']==22
     assert b['dated']['comparison_coverage']['5']['available']==22
     cny=b['dated']['pairs']['cny_rub']['metrics']
-    assert 'EMPTY' in cny['front_spot_basis_abs']['changes']['1']['reason']
+    assert cny['front_spot_basis_abs']['changes']['1']['target_observed_trade_date']=='2026-09-11'
+    assert cny['front_spot_basis_abs']['changes']['1']['change'] is not None
+    assert cny['front_spot_basis_abs']['changes']['5']['target_observed_trade_date']=='2026-09-07'
+    assert cny['front_perpetual_basis_abs']['changes']['1']['target_observed_trade_date']=='2026-09-13'
     assert cny['front_perpetual_basis_abs']['changes']['1']['change'] is not None
     out={'contract_price_market_oi_context':p,basis.OUTPUT_KEY:b}
     price.verify_projection(s,out,now=NOW);basis.verify_projection(s,out,now=NOW)
@@ -227,7 +230,11 @@ def test_real_heavy_refresh_saved_json_canonical_reader_stage9_and_compact(tmp_p
             p=items['contract_price_market_oi_context']['values']['dated']
             assert all(p['comparison_coverage'][lag]['available']==4 for lag in ('1','5','20'))
             b=items['historical_basis_carry_context']
-            assert b['status']=='PARTIAL' and b['values']['dated']['comparison_coverage']['1']['available']==14
+            assert b['status']=='PARTIAL' and b['values']['dated']['comparison_coverage']['1']['available']==22
+            metric=b['values']['dated']['pairs']['cny_rub']['metrics']['front_spot_basis_abs']
+            assert metric['date_selection']['calendar_sha256']
+            assert metric['changes']['1']['target_observed_trade_date']=='2026-09-11'
+            assert metric['changes']['5']['target_observed_trade_date']=='2026-09-07'
     compact=release.compact(read,now=NOW,code_revision='a'*40)
     assert compact['contract_price_market_oi_context']['dated']['comparison_coverage']['20']['available']==4
     target=compact['contract_price_market_oi_context']['dated']['contracts']['si_front']['changes']['1']

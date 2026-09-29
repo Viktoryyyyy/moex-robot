@@ -49,15 +49,26 @@ class Budget:
             self.charge(base64.b64decode(page['response_base64'], validate=True))
 
 
-def contract():
-    value = custody._source_object((Path(__file__).resolve().parents[2]/CONTRACT).read_bytes())
-    require(value['schema_version'] == 'exact_comparison_sources_admission.v1'
-            and value['dated_lifetime_seconds'] == 345600 and value['max_target_dates'] == 7
-            and value['max_sources'] == 37 and value['max_pages_per_source'] == MAX_PAGES
+def contract(version='v1'):
+    require(version in ('v1','v2'), 'exact_source_contract_version')
+    value = custody._source_object((Path(__file__).resolve().parents[2]/CONTRACT.replace('_v1.', '_'+version+'.')).read_bytes())
+    require(value['schema_version'] == 'exact_comparison_sources_admission.'+version
+            and value['dated_lifetime_seconds'] == 345600 and value['max_target_dates'] == (7 if version=='v1' else 10)
+            and value['max_sources'] == (37 if version=='v1' else 46) and value['max_pages_per_source'] == MAX_PAGES
             and value['max_rows_per_source'] == MAX_ROWS and value['max_page_bytes'] == MAX_PAGE_BYTES
             and value['max_total_bytes'] == 16_000_000 and value['price_oi_lags'] == [1, 5, 20]
             and value['basis_carry_lags'] == [1, 5] and value['action_authority'] is False,
             'exact_source_contract_invalid')
+    if version == 'v2':
+        from moex_data import rub_cny_basis_calendar as calendar
+        expected = contract()
+        expected.update(schema_version='exact_comparison_sources_admission.v2',task_id='cny_basis_calendar_repair_v1',
+            max_target_dates=10,max_sources=46,
+            CNY_spot_target_selection='futures_observed_dates_intersect_reviewed_CETS_calendar_before_quality',
+            CNY_spot_calendar_contract=calendar.CONTRACT,CNY_spot_calendar_sha256=calendar.SHA256,
+            CNY_spot_anchor='latest_common_eligible_date_within_retained_witness',
+            CNY_spot_lags='1_and_5_common_eligible_dates_no_price_quality_filter')
+        require(value == expected, 'exact_v2_contract_invalid')
     return value
 
 

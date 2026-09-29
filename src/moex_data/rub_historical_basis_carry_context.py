@@ -7,6 +7,7 @@ import base64
 import json
 from moex_data import rub_contract_price_market_oi_observed as bytesource
 from moex_data import rub_accepted_stage4_resolver as resolver
+from moex_data import rub_cny_basis_calendar as calendar
 
 SCHEMA='historical_basis_carry_observed.v1'
 STORE_KEY='accepted_historical_basis_carry'
@@ -218,12 +219,14 @@ def _view(e,*,oracle=False):
     for pair in ('usd_rub','cny_rub'):
         metrics={};anchor_pair=e['history'].get(anchor_date,{}).get(pair,{})
         for name in METRICS:
-            anchor=anchor_pair.get('metrics',{}).get(name)
+            metric_dates=calendar.metric_dates(e,pair,name)
+            metric_anchor=metric_dates[-1] if metric_dates else None
+            anchor=e['history'].get(metric_anchor,{}).get(pair,{}).get('metrics',{}).get(name)
             admitted=anchor is not None and anchor['status']=='AVAILABLE'
             if oracle and admitted:require(anchor['value']==_metric_value(anchor,name),'historical_basis_oracle_anchor_arithmetic')
             changes={}
             for lag in (1,5):
-                target=dates[-lag-1] if len(dates)>lag else None
+                target=metric_dates[-lag-1] if len(metric_dates)>lag else None
                 baseline=e['history'].get(target,{}).get(pair,{}).get('metrics',{}).get(name)
                 available=admitted and baseline is not None and baseline['status']=='AVAILABLE' and _compatible(anchor,baseline)
                 if oracle and available:require(baseline['value']==_metric_value(baseline,name),'historical_basis_oracle_baseline_arithmetic')
@@ -232,13 +235,14 @@ def _view(e,*,oracle=False):
                     'change_unit':METRICS[name][2],
                     'reason':None if available else 'exact_anchor_or_baseline_unavailable_or_contract_identity_changed'}
             previous=None
-            for distance,day in enumerate(reversed(dates[:-1]),1):
+            for distance,day in enumerate(reversed(metric_dates[:-1]),1):
                 item=e['history'].get(day,{}).get(pair,{}).get('metrics',{}).get(name)
                 if admitted and item and item['status']=='AVAILABLE' and _compatible(anchor,item):
                     previous={'trade_date':day,'observed_distance':distance,'observation':deepcopy(item),'is_exact_previous_observation':distance==1};break
             metrics[name]={'status':'AVAILABLE' if admitted else 'UNAVAILABLE',
-                'reason':None if admitted else anchor.get('reason') if anchor else e['source_errors'].get(anchor_date,'metric_not_admitted'),
+                'reason':None if admitted else anchor.get('reason') if anchor else e['source_errors'].get(metric_anchor,'metric_not_admitted'),
                 'anchor':deepcopy(anchor),'previous_comparable':previous,'changes':changes}
+            calendar.decorate_metric(e,pair,name,metrics[name])
         result[pair]={'metrics':metrics,'role_binding_as_of_utc':anchor_pair.get('role_binding_as_of_utc'),
             'run_id':anchor_pair.get('run_id')}
     from moex_data.rub_exact_comparisons import basis_coverage
@@ -251,12 +255,14 @@ def _oracle_view(e):
     for pair in ('usd_rub','cny_rub'):
         metrics={};anchor_pair=e['history'].get(anchor_date,{}).get(pair,{})
         for name in ('perpetual_spot_basis_abs','perpetual_spot_basis_bps','front_spot_basis_abs','front_spot_basis_bps','next_spot_basis_abs','next_spot_basis_bps','front_perpetual_basis_abs','front_perpetual_basis_bps','next_perpetual_basis_abs','next_perpetual_basis_bps','front_next_spread_abs','front_next_spread_bps','front_spot_implied_carry_annualized','next_spot_implied_carry_annualized','front_next_term_carry_annualized'):
-            anchor=anchor_pair.get('metrics',{}).get(name)
+            metric_dates=calendar.metric_dates(e,pair,name)
+            metric_anchor=metric_dates[-1] if metric_dates else None
+            anchor=e['history'].get(metric_anchor,{}).get(pair,{}).get('metrics',{}).get(name)
             admitted=anchor is not None and anchor['status']=='AVAILABLE'
             if admitted:require(anchor['value']==_metric_value(anchor,name),'historical_basis_oracle_anchor_arithmetic')
             changes={}
             for lag in (1,5):
-                target=dates[-lag-1] if len(dates)>lag else None
+                target=metric_dates[-lag-1] if len(metric_dates)>lag else None
                 baseline=e['history'].get(target,{}).get(pair,{}).get('metrics',{}).get(name)
                 available=admitted and baseline is not None and baseline['status']=='AVAILABLE' and _compatible(anchor,baseline)
                 if available:require(baseline['value']==_metric_value(baseline,name),'historical_basis_oracle_baseline_arithmetic')
@@ -265,13 +271,14 @@ def _oracle_view(e):
                     'change_unit':METRICS[name][2],
                     'reason':None if available else 'exact_anchor_or_baseline_unavailable_or_contract_identity_changed'}
             previous=None
-            for distance,day in enumerate(reversed(dates[:-1]),1):
+            for distance,day in enumerate(reversed(metric_dates[:-1]),1):
                 item=e['history'].get(day,{}).get(pair,{}).get('metrics',{}).get(name)
                 if admitted and item and item['status']=='AVAILABLE' and _compatible(anchor,item):
                     previous={'trade_date':day,'observed_distance':distance,'observation':deepcopy(item),'is_exact_previous_observation':distance==1};break
             metrics[name]={'status':'AVAILABLE' if admitted else 'UNAVAILABLE',
-                'reason':None if admitted else anchor.get('reason') if anchor else e['source_errors'].get(anchor_date,'metric_not_admitted'),
+                'reason':None if admitted else anchor.get('reason') if anchor else e['source_errors'].get(metric_anchor,'metric_not_admitted'),
                 'anchor':deepcopy(anchor),'previous_comparable':previous,'changes':changes}
+            calendar.decorate_metric(e,pair,name,metrics[name])
         result[pair]={'metrics':metrics,'role_binding_as_of_utc':anchor_pair.get('role_binding_as_of_utc'),
             'run_id':anchor_pair.get('run_id')}
     from moex_data.rub_exact_comparisons import basis_coverage
@@ -286,7 +293,7 @@ def _describe(snapshot,now,*,oracle=False):
         result={'project':'MOEX_Bot','schema_version':SCHEMA,'scope':SCOPE,'status':'PARTIAL',
             'phase':'C1_DATED_ONLY_C2_NATIVE_CURRENT_NOT_ADMITTED','checked_at_utc':now.isoformat(),
             'dated':_view(e,oracle=oracle),'current':{'status':'UNAVAILABLE','reason':'native_current_proof_not_admitted'},
-            'observed_trade_dates':e['observed_dates'],'horizon_basis':'exact_common_witness_indices_not_archive_success_positions',
+            'observed_trade_dates':e['observed_dates'],'horizon_basis':calendar.horizon_basis(e),
             'previous_comparable_scope':'nearest_compatible_available_source_within_retained_witness_not_exact_lag_substitution',
             'accepted_at_utc':e['accepted_at_utc'],'valid_until_utc':(stamp(e['accepted_at_utc'])+timedelta(seconds=TTL)).isoformat(),
             'evidence_sha256':store['evidence_sha256'],'audit_reference':'input_snapshot.json#/'+STORE_KEY+'/evidence',
@@ -329,7 +336,7 @@ def _oracle_description(snapshot,now):
         result={'project':'MOEX_Bot','schema_version':SCHEMA,'scope':SCOPE,'status':'PARTIAL',
             'phase':'C1_DATED_ONLY_C2_NATIVE_CURRENT_NOT_ADMITTED','checked_at_utc':now.isoformat(),
             'dated':_oracle_view(e),'current':{'status':'UNAVAILABLE','reason':'native_current_proof_not_admitted'},
-            'observed_trade_dates':e['observed_dates'],'horizon_basis':'exact_common_witness_indices_not_archive_success_positions',
+            'observed_trade_dates':e['observed_dates'],'horizon_basis':calendar.horizon_basis(e),
             'previous_comparable_scope':'nearest_compatible_available_source_within_retained_witness_not_exact_lag_substitution',
             'accepted_at_utc':e['accepted_at_utc'],'valid_until_utc':(stamp(e['accepted_at_utc'])+timedelta(seconds=TTL)).isoformat(),
             'evidence_sha256':store['evidence_sha256'],'audit_reference':'input_snapshot.json#/'+STORE_KEY+'/evidence',
