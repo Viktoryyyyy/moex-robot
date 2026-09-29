@@ -36,13 +36,13 @@ def build(snapshot):
         rows.append(dict(block_id=block,requirement=role,collection_present=bool(collected),
             usable_for_full_forecast=bool(usable),reason=reason,evidence_path=evidence))
     market=components.get('synchronized_live_market_oi',{}).get('data',{}).get('instruments',{})
-    for key in ('si_front','si_next','cr_front','cr_next','usdrubf','cnyrubf','cnyrub_tom'):
+    for key in ('si_front','si_next','cr_front','cr_next','usdrubf','cnyrubf','cnyrub_tom','usd_tom'):
         item=market.get(key,{})
         # A record's mere presence or collector READY never grants freshness.
-        usable=item.get('price_oi_usable') is True if key!='cnyrub_tom' else spot_usable(snapshot)
+        usable=item.get('price_oi_usable') is True if key not in ('cnyrub_tom','usd_tom') else spot_usable(snapshot,key)
         add(key,'required',bool(item),usable,item.get('read_freshness_reason') or ('ready' if usable else 'freshness_or_identity_not_proven'),
             'components.synchronized_live_market_oi.data.instruments.'+key)
-    add('usd_spot','conditional_usd_basis',False,False,'current_live_schema_unsupported','components.live_basis_carry')
+    add('usd_spot','deliverable_spot_not_requested',False,False,'USD_reference_is_ruble_settled_without_currency_delivery','components.synchronized_live_market_oi.data.usd_reference_evidence')
     for key in ('futoi_live','futoi_live_cr'):
         component=components.get(key,{});data=component.get('data',{})
         usable=component.get('status')=='READY' and data.get('consumer_factual_use_allowed') is True and data.get('factual_authority') is True

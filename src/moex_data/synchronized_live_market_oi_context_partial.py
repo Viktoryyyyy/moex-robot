@@ -105,3 +105,16 @@ def fetch_live_snapshot(**kwargs: object) -> dict[str, object]:
 
 SCHEMA_VERSION = apim.SCHEMA_VERSION
 SynchronizedLiveMarketOIError = core.SynchronizedLiveMarketOIError
+
+
+def fetch_live_snapshot_with_usd(**kwargs):
+    """Existing collection path with an independent, explicitly admitted USD leg."""
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import datetime, timezone
+    from moex_data import rub_usd_cets_reference as usd
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="moex-usd-reference") as executor:
+        pending = executor.submit(usd.capture, **kwargs)
+        result = fetch_live_snapshot(**kwargs)
+        evidence = pending.result()
+    now = kwargs.get('now_fn', lambda: datetime.now(timezone.utc))()
+    return usd.attach(result, evidence, now=now)

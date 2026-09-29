@@ -112,4 +112,6 @@ def test_original_live_basis_projection_supported_by_dimensions():
     result = release.build(view, now=LIVE_NOW, code_revision='a' * 40)
     dimensions = readiness_dimensions(result, coverage(result))
     assert dimensions['current_live']['basis_available'] is True
-    assert all(dimensions['current_live']['markets'].values())
+    assert all(value for key,value in dimensions['current_live']['markets'].items() if key!='usd_tom')
+    assert dimensions['current_live']['markets']['usd_tom'] is False
+    assert dimensions['current_live']['status']=='PARTIAL'

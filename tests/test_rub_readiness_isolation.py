@@ -19,12 +19,15 @@ BASIS = (
     'cny_rub.front_next_term_carry_annualized',
 )
 COVERAGE = {'requirements': [], 'external_blockers': []}
+CURRENT_BASIS = BASIS + tuple('usd_rub.'+name for name in (
+    'perpetual_spot_basis_abs','perpetual_spot_basis_bps','front_spot_basis_abs','front_spot_basis_bps',
+    'next_spot_basis_abs','next_spot_basis_bps','front_spot_implied_carry_annualized','next_spot_implied_carry_annualized'))
 
 
 def fixture(*, live=False, dated=False):
     """Synthetic post-admission release shape, not production/source replay."""
-    facts = ([{'factor': key} for key in MARKETS] + [{'factor': 'basis_carry', 'values': {
-        'metrics': [{'values': {'metric_id': key}} for key in BASIS]}}]) if live else []
+    facts = ([{'factor': key} for key in (*MARKETS,'usd_tom')] + [{'factor': 'basis_carry', 'values': {
+        'metrics': [{'values': {'metric_id': key}} for key in CURRENT_BASIS]}}]) if live else []
     observations = ({'market:' + key: {} for key in MARKETS} | {'basis:' + key: {} for key in BASIS} |
                     {'structure:observed_range_levels.USDRUBF': {},
                      'timeframe:observed_1H.USDRUBF': {'values': {'values': {'timeframe': '1H'}}}}) if dated else {}
@@ -80,6 +83,21 @@ def test_absent_live_and_dated_remain_independently_unavailable():
     assert result['preparation']['markets'] == {key: False for key in MARKETS}
     assert result['preparation']['basis']['available_metric_ids'] == []
     assert result['current_live']['status'] == 'UNAVAILABLE'
+
+
+@pytest.mark.parametrize('missing',['USD_reference','USD_basis'])
+def test_new_USD_current_scope_cannot_revoke_legacy_dated_preparation(missing):
+    value=fixture(live=True,dated=True)
+    if missing=='USD_reference':
+        value['facts']=[row for row in value['facts'] if row['factor']!='usd_tom']
+    else:
+        metrics=next(row for row in value['facts'] if row['factor']=='basis_carry')['values']['metrics']
+        metrics[:]=[row for row in metrics if row['values']['metric_id']!='usd_rub.front_spot_basis_abs']
+    result=readiness_dimensions(value,COVERAGE)
+    assert result['current_live']['status']=='PARTIAL'
+    assert result['preparation']['status']=='COMPLETE'
+    assert result['preparation']['markets']=={key:True for key in MARKETS}
+    assert result['current_live']['basis_complete_for_supported_sources'] is (missing=='USD_reference')
 
 
 def test_live_levels_and_hour_do_not_substitute_and_origin_a_keys_remain_supported():
@@ -205,13 +223,15 @@ def test_real_origin_a_current_and_saved_witness_have_independent_admission():
     live.attach_live_market_oi_context(view, raw, attempted_at_utc=NOW.isoformat())
     live.attach_live_basis_carry_context(view, raw, attempted_at_utc=NOW.isoformat())
     live_only = release.compact(view, now=NOW, code_revision='a' * 40)['readiness_dimensions']
-    assert live_only['current_live']['status'] == 'AVAILABLE'
+    assert live_only['current_live']['status'] == 'PARTIAL'
+    assert live_only['current_live']['markets']['usd_tom'] is False
     assert live_only['preparation']['markets'] == {key: False for key in MARKETS}
     view['accepted_dated_market'] = dated.capture(None, components=view['components'], now=NOW, kind='market')
     before = deepcopy(view)
     both = release.compact(view, now=NOW, code_revision='a' * 40)
     assert both['readiness_dimensions']['preparation']['markets'] == {key: True for key in MARKETS}
-    assert both['readiness_dimensions']['current_live']['status'] == 'AVAILABLE'
+    assert both['readiness_dimensions']['current_live']['status'] == 'PARTIAL'
+    assert both['readiness_dimensions']['current_live']['markets']['usd_tom'] is False
     assert all('origin' not in frame for frame in view['accepted_dated_market']['frames'].values())
     assert view == before
 

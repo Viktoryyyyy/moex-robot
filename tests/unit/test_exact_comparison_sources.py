@@ -30,7 +30,7 @@ def http_factory(*, defects=None, calls=None):
     def get(url, **kwargs):
         query = kwargs['params']; day = query['from']; secid = url.rsplit('/',1)[-1].removesuffix('.json')
         spot = secid == 'candles'
-        if spot: secid = 'CNYRUB_TOM'
+        if spot: secid = url.rsplit('/',2)[-2]
         if calls is not None: calls.append((day,secid))
         defect = defects.get((day,secid)) or defects.get(secid)
         if defect == 'timeout': raise requests.Timeout('synthetic timeout')
@@ -38,7 +38,8 @@ def http_factory(*, defects=None, calls=None):
         if defect == 'ERROR_MESSAGE': return Response({'ERROR_MESSAGE':'synthetic unavailable'},url,query)
         if spot:
             cols = ['open','high','low','close','volume','begin','end']
-            rows = [] if query['start'] or date_weekend(day) or defect == 'empty' else [[12,12,12,12,2,day+' 18:59:00',day+' 18:59:59']]
+            rate = 84 if secid == 'USD000UTSTOM' else 12
+            rows = [] if query['start'] or date_weekend(day) or defect == 'empty' else [[rate,rate,rate,rate,2,day+' 18:59:00',day+' 18:59:59']]
             return Response({'candles':{'columns':cols,'data':rows}},url,query)
         cols = ['secid','tradedate','tradetime','pr_open','pr_high','pr_low','pr_close','oi_open','oi_high','oi_low','oi_close','SYSTIME']
         rows = [[secid,day,t,100,100,100,100,2**53+3,2**53+3,2**53+3,2**53+3,day+' '+t[:-2]+'45'] for t in ('18:55:00','19:00:00')]
@@ -224,13 +225,16 @@ def test_real_heavy_refresh_saved_json_canonical_reader_stage9_and_compact(tmp_p
     def no_network(*a,**kw):raise AssertionError('reader/publication attempted acquisition')
     monkeypatch.setattr(requests,'get',no_network)
     for value in (saved,read):
+        assert value['status_presentation']['display_status']=='PARTIAL'
+        assert value['status_presentation']['currency_calendar_coverage']['following_year_status']=='NOT_VERIFIED'
         for scope in ('daily','weekly'):
             data=value['components']['stage9_'+scope]['data']
             items=data['sections']['historical_comparisons']['items']
             p=items['contract_price_market_oi_context']['values']['dated']
             assert all(p['comparison_coverage'][lag]['available']==4 for lag in ('1','5','20'))
             b=items['historical_basis_carry_context']
-            assert b['status']=='PARTIAL' and b['values']['dated']['comparison_coverage']['1']['available']==22
+            assert saved[exact.STORE_KEY]['evidence']['schema_version']==exact.SCHEMA_V3
+            assert b['values']['dated']['comparison_coverage']['1']['available']==30
             metric=b['values']['dated']['pairs']['cny_rub']['metrics']['front_spot_basis_abs']
             assert metric['date_selection']['calendar_sha256']
             assert metric['changes']['1']['target_observed_trade_date']=='2026-09-11'

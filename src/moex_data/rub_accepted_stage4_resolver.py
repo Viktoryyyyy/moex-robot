@@ -237,8 +237,12 @@ def validate_run(source,run,*,now):
     return result
 
 
-def metric_endpoint(name,c,r,legs,days,unit,horizon,root):
-    if root=='Si' and 'spot' in (c,r):return {'status':'UNAVAILABLE','reason':'USD_spot_production_scope_not_admitted','value':None}
+def metric_endpoint(name,c,r,legs,days,unit,horizon,root,*,usd_reference=None):
+    if usd_reference is not None:
+        from moex_data import rub_usd_cets_reference as usd
+        require(usd_reference == usd.contract(), 'USD_reference_contract_invalid')
+        require(all(item.get('secid')==usd.SECID and item.get('instrument_id')=='usd_tom' for item in legs.get('spot',{}).values()), 'USD_reference_leg_identity')
+    if root=='Si' and 'spot' in (c,r) and usd_reference is None:return {'status':'UNAVAILABLE','reason':'USD_spot_production_scope_not_admitted','value':None}
     times=set(legs[c])&set(legs[r])
     if not times:return {'status':'UNAVAILABLE','reason':'exact_own_leg_timestamp_intersection_missing','value':None}
     event=max(times);a,b=legs[c][event],legs[r][event]

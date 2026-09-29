@@ -1,0 +1,13 @@
+{
+  "project": "MOEX_Bot",
+  "schema_version": "snapshot_status_presentation.v1",
+  "legacy_component_status": "component_processing_result_not_global_current_market_admission",
+  "current_market": "existing_Stage9_current_section_admission_at_publication_or_read_clock",
+  "dated_context": "available_observation_with_original_date_not_current_price_or_session_completion",
+  "partial_day": "observed_partial_day_no_session_completion_claim",
+  "nontrading": "native_N_state_not_network_failure_or_session_completion_proof",
+  "full_ready": "both_daily_and_weekly_analysis_bundle_complete",
+  "new_admission": false,
+  "ttl_extension": false,
+  "action_authority": false
+}

@@ -97,10 +97,11 @@ def eligible(frame):
         original_quotes = quality.get('quote_usable_by_instrument', {})
         if not isinstance(original_quotes, dict): original_quotes = {}
         instruments = raw['instruments']
-        if not isinstance(instruments, dict) or set(instruments) - set(MARKETS): raise ValueError('market_scope_mismatch')
+        if not isinstance(instruments, dict) or set(instruments) - set(MARKETS) - {'usd_tom'}: raise ValueError('market_scope_mismatch')
         invalid = set()
         from moex_data.synchronized_live_market_oi_context import FORTS_SOURCE_ID, CETS_SOURCE_ID
         for key, item in instruments.items():
+            if key == 'usd_tom': continue  # separate original-byte reference admission; no legacy dated promotion
             try:
                 if item.get('logical_id') != key or not item.get('secid') or raw['bindings'].get(key) != item['secid']:
                     raise ValueError('market_identity_mismatch')

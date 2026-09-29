@@ -137,6 +137,8 @@ def _leg(
             reason = "source_timestamp_missing_or_invalid"
     if reason is None and raw.get("stale") is not False:
         reason = "source_leg_stale"
+    if reason is None and logical_id in ('cnyrub_tom','usd_tom') and raw.get('source_trading_status') == 'N':
+        reason = 'source_not_trading'
     if reason is None and (age is None or age > MAX_FRESHNESS_SECONDS):
         reason = "source_leg_freshness_exceeds_threshold"
     source_id = str(raw.get("source_id") or "").strip() or None
@@ -450,6 +452,13 @@ def _pair(spec: PairSpec, instruments: Mapping[str, object]) -> dict[str, object
 
 
 def build_context(live_snapshot: Mapping[str, object]) -> dict[str, object]:
+    from moex_data import rub_usd_cets_reference as usd
+    if 'usd_reference_evidence' in live_snapshot:
+        live_snapshot = dict(live_snapshot)
+        clock = live_snapshot.get('snapshot_received_at_utc')
+        if not usd.usable(live_snapshot, now=clock):
+            live_snapshot['instruments'] = {**live_snapshot.get('instruments', {})}
+            live_snapshot['instruments'].pop('usd_tom', None)
     if live_snapshot.get("schema_version") != live_core.SCHEMA_VERSION:
         raise LiveBasisCarryContextError("synchronized live market/OI schema mismatch")
     instruments = live_snapshot.get("instruments")

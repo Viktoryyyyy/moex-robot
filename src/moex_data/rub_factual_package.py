@@ -8,7 +8,8 @@ from zoneinfo import ZoneInfo
 
 SCHEMA = 'rub_factual_package.v1'
 MOSCOW = ZoneInfo('Europe/Moscow')
-MARKETS = ('usdrubf', 'si_front', 'si_next', 'cnyrubf', 'cr_front', 'cr_next', 'cnyrub_tom')
+MARKETS = ('usdrubf', 'si_front', 'si_next', 'cnyrubf', 'cr_front', 'cr_next', 'cnyrub_tom', 'usd_tom')
+DATED_MARKETS = tuple(key for key in MARKETS if key != 'usd_tom')
 AUDIT_KEYS = {'snapshot_path', 'evidence_path', 'verified_evidence_path', 'liquidity_evidence_path',
     'manifest_path', 'document_manifest_path', 'index_manifest_path', 'raw_path', 'path',
     'pointer_ref', 'partition_ref', 'manifest_ref', 'quality_report_ref', 'source_registry_ref',
@@ -93,7 +94,7 @@ def coverage(release):
             'usable': bool(available), 'scope': scope, 'reason': None if available else reason})
     for key in MARKETS:
         item = release['market_usability'][key]
-        add(key, key in facts, item['missing_reason'], scope='current_price_oi' if key != 'cnyrub_tom' else 'current_spot_price')
+        add(key, key in facts, item['missing_reason'], scope='current_ruble_settled_USD_reference' if key=='usd_tom' else 'current_price_oi' if key != 'cnyrub_tom' else 'current_spot_price')
         rows[-1].update(quote_usable=item['quote_usable'],
             cross_market_comparison_usable=item['cross_market_comparison_usable'],
             missing_metadata=item['missing_metadata'])
@@ -162,9 +163,12 @@ def readiness_dimensions(release, coverage):
     """Content applicability and projection delivery, never deployment acceptance."""
     dated = release.get('dated_context', {}).get('observations', {})
     facts = {row['factor']: row for row in release['facts']}
-    markets = {key: 'market:' + key in dated for key in MARKETS}
+    # Legacy dated witnesses do not grant admission to the new USD reference.
+    # Its exact-date history is independently covered in the Stage9 v3 section.
+    markets = {key: 'market:' + key in dated for key in DATED_MARKETS}
     from moex_data.rub_dated_basis_source import refusals
     required_basis = {key for key, reason in refusals({}, {}).items() if reason != 'usd_spot_source_not_supported'}
+    required_current_basis = set(refusals({}, {}))
     available_basis = {key for key in dated if key.startswith('basis:')}
     current_basis = set()
     if 'basis_carry' in facts:
@@ -184,9 +188,11 @@ def readiness_dimensions(release, coverage):
                           'complete_for_supported_sources': not missing_basis, 'usd_spot_source_supported': False},
                 'observed_levels_available': levels, 'timeframes': timeframes,
                 'current_or_session_completion_claimed': False, 'model_ready': False},
-            'current_live': {'status': 'AVAILABLE' if all(live.values()) and required_basis <= current_basis else 'PARTIAL' if any(live.values()) else 'UNAVAILABLE',
-                             'scope': 'market_price_oi_and_supported_basis', 'markets': live, 'basis_available': bool(current_basis),
-                             'basis_complete_for_supported_sources': required_basis <= current_basis},
+            'current_live': {'status': 'AVAILABLE' if all(live.values()) and required_current_basis <= current_basis else 'PARTIAL' if any(live.values()) else 'UNAVAILABLE',
+                             'scope': 'eight_current_markets_and_thirty_basis_metrics_including_USD_reference',
+                             'markets': live, 'basis_available': bool(current_basis),
+                             'basis_complete_for_supported_sources': required_current_basis <= current_basis,
+                             'missing_required_metric_ids': sorted(required_current_basis-current_basis)},
             'external_required': {'status': 'BLOCKED' if blockers else 'SATISFIED', 'blockers': blockers,
                                   'minfin_plan_required': True}}
 
@@ -257,6 +263,7 @@ def build_package(snapshot, release, *, now):
         'presentation_integrity': {'status': 'VALIDATED_PROJECTION', 'factual_only': True},
         'factual_coverage': readiness, 'review_horizons': review_horizons(snapshot, release, now=now),
         'readiness_dimensions': readiness_dimensions(release, readiness),
+        'status_presentation': deepcopy(release.get('status_presentation')),
         'generations': {'slow_snapshot_generated_at_utc': snapshot['identity']['generated_at_utc'],
             'fast_market': deepcopy(snapshot.get('fast_market_read', {'status': 'NOT_ENABLED'})),
             'components': versions}, **chosen,

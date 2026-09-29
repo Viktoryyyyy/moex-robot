@@ -66,12 +66,23 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
             )
         except (ValueError, TypeError, OverflowError):
             age, reason = None, "invalid_source_timestamp"
+        if key == "usd_tom":
+            from moex_data.rub_usd_cets_reference import usable as usd_usable
+            if not usd_usable(data, now=now):
+                reason = item.get("read_freshness_reason") or reason or "USD_reference_not_admitted"
         if reason is None and item.get("stale") is not False:
             reason = "persisted_source_not_fresh"
         item["age_seconds"] = age
         item["freshness_reference_utc"] = now.isoformat()
         item["stale"] = reason is not None
         item["read_freshness_reason"] = reason
+        if key in ('cnyrub_tom','usd_tom'):
+            from moex_data.rub_currency_market_state import enforce, annotate
+            enforce(item)
+            reason = item.get('read_freshness_reason')
+            admitted = (live.get('status') in ('READY','PARTIAL') and reason is None
+                        and (key=='usd_tom' or data.get('quality',{}).get('spot_price_usable') is True))
+            annotate(item, now=now, current_admitted=admitted)
         if "quote_stale" in item:
             item["quote_stale"] = reason is not None
         if reason:
@@ -86,6 +97,9 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
                     item["quote_reason"] = "source_not_fresh_at_read"
 
     if isinstance(data, dict):
+        if 'usd_reference_evidence' in data:
+            from moex_data.rub_usd_cets_reference import recheck_synchronization
+            recheck_synchronization(data,now=now)
         sync = data.get("synchronization", {})
         quality = data.get("quality", {})
         if not isinstance(sync, dict) or not isinstance(quality, dict):
