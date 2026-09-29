@@ -282,6 +282,19 @@ def test_three_retries_and_expired_attempts_keep_first_acceptance(tmp_path):
             assert exact._supplement(s,NOW+timedelta(seconds=offset))[0] is None
 
 
+def test_whole_capture_failure_keeps_unexpired_retained_admission_and_diagnostic(tmp_path,monkeypatch):
+    s=captured(tmp_path);prior=deepcopy(s);original=deepcopy(s[exact.STORE_KEY]['evidence'])
+    def over_budget(*args,**kwargs):raise src.BudgetExceeded('exact_source_total_byte_limit')
+    monkeypatch.setattr(src,'retained',over_budget)
+    exact.capture_snapshot(s,prior,root=tmp_path,now_fn=lambda:NOW+timedelta(minutes=1),refresh_started_at=NOW)
+    assert s[exact.STORE_KEY]['evidence']==original
+    out=price.describe(s,now=NOW+timedelta(minutes=1))['dated']
+    assert all(out['comparison_coverage'][lag]['available']==4 for lag in ('1','5','20'))
+    assert 'exact_source_total_byte_limit' in out['supplemental_evidence']['last_capture_error']
+    assert out['supplemental_evidence']['accepted_at_utc']==original['accepted_at_utc']
+    assert exact._supplement(s,NOW+timedelta(hours=97))[0] is None
+
+
 def test_failure_retry_clock_is_distinct_from_first_evidence(tmp_path):
     calls=[];get=http_factory(defects={'SiU6':'timeout'},calls=calls)
     values=[]

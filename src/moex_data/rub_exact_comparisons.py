@@ -114,8 +114,9 @@ def capture_snapshot(snapshot, previous, *, root, now_fn, refresh_started_at, ht
 def _validate(store, now, *, enforce_lifetime=True):
     require(set(store) == {'evidence', 'evidence_sha256', 'checked_at_utc', 'error'}, 'exact_store_shape')
     require(stamp(store['checked_at_utc']) <= now, 'exact_store_check_future')
-    require(store['error'] is None, str(store['error']))
-    e = store['evidence']; require(digest(e) == store['evidence_sha256'], 'exact_evidence_hash')
+    require(store['error'] is None or isinstance(store['error'],str), 'exact_capture_error_shape')
+    e = store['evidence']; require(e is not None, store['error'] or 'exact_evidence_missing')
+    require(digest(e) == store['evidence_sha256'], 'exact_evidence_hash')
     require(set(e) == {'schema_version', 'contract', 'bindings', 'binding_proof', 'observed_dates', 'witness_proof',
             'original_byte_buffers', 'expiry_dates', 'current_candidate_date', 'price_target_dates', 'basis_target_dates',
             'capture_started_at_utc', 'accepted_at_utc', 'entries'} and e['schema_version'] == SCHEMA
@@ -157,6 +158,7 @@ def _supplement(snapshot, now):
 
 def _metadata(snapshot, extra, errors):
     return {'errors':errors,'evidence_sha256':snapshot[STORE_KEY].get('evidence_sha256'),
+        'last_capture_error':snapshot[STORE_KEY].get('error'),
         'admission_contract':source.CONTRACT,
         'accepted_at_utc':extra['accepted_at_utc'] if extra else None,
         'valid_until_utc':(stamp(extra['accepted_at_utc'])+timedelta(seconds=345600)).isoformat() if extra else None,
@@ -319,11 +321,19 @@ def prepare_publication_expiry(snapshot, prepared, *, now):
     extra, _, _ = _supplement(snapshot, now)
     if extra is None: return
     masked = dict(snapshot)
-    masked[STORE_KEY] = {**snapshot[STORE_KEY], 'error':'exact_source_admission_expired'}
+    masked[STORE_KEY] = {**snapshot[STORE_KEY], 'evidence':None, 'evidence_sha256':None,
+                        'error':'exact_source_admission_expired'}
     prepared['exact_comparison_expiry'] = {
         'valid_until_utc':(stamp(extra['accepted_at_utc'])+timedelta(seconds=345600)).isoformat(),
         'contexts':{'contract_price_market_oi_context':price.describe(masked,now=now),
                     basis.OUTPUT_KEY:basis.describe(masked,now=now)}}
+    # The forced projection refusal is not a new source capture failure.
+    for context in prepared['exact_comparison_expiry']['contexts'].values():
+        for view in ('dated','current'):
+            metadata = context.get(view,{}).get('supplemental_evidence')
+            if metadata is not None:
+                metadata['evidence_digest'] = snapshot[STORE_KEY]['evidence_sha256']
+                metadata['last_capture_error'] = snapshot[STORE_KEY]['error']
 
 
 def apply_publication_expiry(prepared, *, now):

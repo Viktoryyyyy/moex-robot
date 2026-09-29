@@ -55,7 +55,10 @@ Each comparison carries exact target, original baseline, numeric changes or a
 specific refusal, and evidence references. Each horizon has explicit available /
 required coverage; Stage9 sees partial coverage instead of AVAILABLE anchors
 concealing missing lags. First economic acceptance survives repeated captures
-and expiry. A separate failed-attempt clock controls retries; failures do not
+and expiry. A failed whole refresh retains independently revalidated, unexpired
+prior evidence and exposes its latest-attempt diagnostic; a rejected selected
+source entry remains a refusal without older-source substitution.
+A separate failed-attempt clock controls retries; failures do not
 renew the evidence lifetime. A legacy-only projection is prepared before the
 final live clock and selected if only supplemental admission expires before
 publication, preserving independent legacy results without final-clock source
@@ -98,9 +101,12 @@ PYTHONPATH=.:src python -m pytest -q
 ```
 
 Existing Price/OI and basis/carry regression suites: **227 passed** on the
-isolated server Python/Parquet environment. The initial new source/refresh suite:
-**28 passed**, including saved JSON, canonical read and compact/manual export;
-additional receipt and precision regressions are included in final CI.
+isolated server Python/Parquet environment. The final new source/refresh suite:
+**36 passed**, including saved JSON, canonical read, compact/manual export,
+publication-time supplemental expiry and retained admission after capture failure.
+Stage9 bundle regressions: **12 passed** in a full Git checkout. An earlier ZIP
+copy changed CRLF-sensitive immutable acceptance bytes and was discarded for
+full-suite validation; final CI uses canonical Git bytes.
 
 Preliminary independent review found and corrected first-acceptance renewal,
 legacy metric isolation, aggregate acquisition budget, and retry-clock defects;
