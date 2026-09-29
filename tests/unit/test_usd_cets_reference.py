@@ -108,6 +108,59 @@ def test_v3_corruption_does_not_restore_v1_USD_or_futures_dates(tmp_path):
     assert m['anchor'] is None and m['changes']['1']['change'] is None
 
 
+@pytest.mark.parametrize('scenario',['aligned','date_boundary','usd_skew','usd_stale'])
+def test_all_eight_sync_through_real_fast_collection_saved_json_and_consumer(tmp_path,monkeypatch,scenario):
+    from test_synchronized_live_market_oi_context import _payloads
+    from moex_data import synchronized_live_market_oi_context_partial as live,rub_fast_market as fast
+    from moex_data.rub_snapshot_read_freshness import apply_read_freshness
+    clock=NOW.replace(hour=21,minute=0,second=5) if scenario=='date_boundary' else NOW
+    monkeypatch.setitem(globals(),'NOW',clock)
+    forts,cny=_payloads()
+    allowed={r[0] for r in forts['marketdata']['data']}
+    forts['securities']['data']=[r for r in forts['securities']['data'] if r[0] in allowed]
+    source_time=(clock+timedelta(seconds=4 if scenario=='usd_skew' else -2)).astimezone(usd.core.MOSCOW).strftime('%Y-%m-%d %H:%M:%S')
+    for body in (forts,cny):
+        t=body['marketdata']
+        for row in t['data']:row[t['columns'].index('SYSTIME')]=source_time
+    obj=payload(age={'date_boundary':7,'usd_skew':59,'usd_stale':61}.get(scenario,5))
+    if scenario=='date_boundary':
+        update=(clock-timedelta(seconds=6)).astimezone(usd.core.MOSCOW)
+        t=obj['marketdata'];t['data'][0][t['columns'].index('TRADEDATE')]=update.date().isoformat()
+        t['data'][0][t['columns'].index('SYSTIME')]=update.replace(tzinfo=None).isoformat(sep=' ')
+        obj['dataversion']['data'][0]=[update.date().isoformat()]*2
+    def get(url,**kw):return Response(obj if usd.SECID in url else cny if 'CNYRUB_TOM' in url else forts,url,kw['params'])
+    def loader():return live.fetch_live_snapshot_with_usd(http_get=get,now_fn=lambda:clock,env={'MOEX_API_KEY':'synthetic'})
+    value=fast.refresh(tmp_path,loader=loader,clock=lambda:clock)
+    assert value['status']=='COLLECTED'
+    market=value['market'];expected=scenario=='aligned'
+    assert market['synchronization']['synchronized'] is expected
+    assert market['quality']['analysis_usable'] is expected
+    assert market['status']==('READY' if expected else 'PARTIAL')
+    assert usd.usable(market,now=clock) is (scenario!='usd_stale')
+    assert set(market['synchronization']['instrument_scope'])==set(usd.core.LOGICAL_ORDER)|{'usd_tom'}
+    assert market['synchronization']['source_trade_dates_aligned'] is (scenario!='date_boundary')
+    if scenario=='usd_skew':assert market['synchronization']['max_skew_seconds']==63
+    if scenario=='date_boundary':assert market['synchronization']['max_skew_seconds']==5
+    # Re-admission must not trust a copied, hash-consistent seven-leg PASS.
+    market['synchronization']['synchronized']=True
+    market['quality']['analysis_usable']=True
+    value['market_sha256']=fast._digest(market)
+    folder=fast.state_path(tmp_path);(folder/'enabled').write_text(fast.SCHEMA)
+    (folder/'current.json').write_text(json.dumps(value));raw=(folder/'current.json').read_bytes()
+    snapshot={'identity':{'generated_at_utc':clock.isoformat()},'components':{},'authority':{},'analysis_views':{},'analysis_workflow':{}}
+    read=apply_read_freshness(fast.apply(snapshot,root=tmp_path,now=clock),now=clock)
+    market=read['components']['synchronized_live_market_oi']['data']
+    assert market['synchronization']['synchronized'] is expected
+    assert market['quality']['analysis_usable'] is expected
+    context=projection.consumer_context(read)
+    for key in ('usd_tom','si_front','cr_front'):
+        assert context['market_usability'][key]['cross_market_comparison_usable'] is expected
+    assert market['instruments']['si_front']['price_oi_usable'] is True
+    assert market['instruments']['cr_front']['price_oi_usable'] is True
+    assert projection.spot_usable(read,'usd_tom') is (scenario!='usd_stale')
+    assert (folder/'current.json').read_bytes()==raw
+
+
 @pytest.mark.parametrize('defect',[None,'auth','outer_null','outer_list','raw_null','raw_list','table_null','row_null','url_list',
     'native_date_missing','native_date_prior','native_date_empty','native_date_bad','native_date_future','closed_missing_date'])
 def test_real_fast_collection_disk_and_read_keep_USD_failure_independent(tmp_path,defect):

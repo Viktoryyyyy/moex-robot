@@ -162,10 +162,50 @@ def attach(snapshot,e,*,now):
              'read_freshness_reason':str(exc),'evidence_ref':'usd_reference_evidence'}
     snapshot.setdefault('instruments',{})['usd_tom']=row
     snapshot.setdefault('bindings',{})['usd_tom']=SECID
-    if not row['spot_price_usable'] and snapshot.get('status')=='READY': snapshot['status']='PARTIAL'
     snapshot['quality']['usd_reference_usable']=row['spot_price_usable']
-    snapshot['quality']['analysis_usable']=snapshot['quality'].get('analysis_usable') is True and row['spot_price_usable']
+    recheck_synchronization(snapshot,now=now)
     return snapshot
+
+
+def recheck_synchronization(snapshot,*,now):
+    """Downgrade full-market gates over all eight legs; keep individual facts."""
+    now=core._aware_utc(now,'USD_sync_clock')
+    instruments=snapshot.get('instruments',{})
+    sync=snapshot.setdefault('synchronization',{})
+    quality=snapshot.setdefault('quality',{})
+    if not isinstance(sync,dict): sync={};snapshot['synchronization']=sync
+    if not isinstance(quality,dict): quality={};snapshot['quality']=quality
+    required=(*core.LOGICAL_ORDER,'usd_tom')
+    timestamps={}
+    all_fresh=False
+    try:
+        timestamps={key:core._aware_utc(instruments[key]['timestamp'],key+'.timestamp') for key in required}
+        all_fresh=all(instruments[key].get('stale') is False and
+            -core.MAX_FUTURE_CLOCK_SKEW_SECONDS <= (now-value).total_seconds() <= core.MAX_FRESHNESS_SECONDS
+            for key,value in timestamps.items())
+    except (ValueError,KeyError,TypeError,core.SynchronizedLiveMarketOIError): pass
+    complete=len(timestamps)==len(required)
+    dates={value.astimezone(core.MOSCOW).date() for value in timestamps.values()}
+    oldest=min(timestamps.values()) if complete else None
+    newest=max(timestamps.values()) if complete else None
+    skew=(newest-oldest).total_seconds() if complete else None
+    usd_allowed=usable(snapshot,now=now)
+    combined=bool(complete and all_fresh and len(dates)==1 and skew<=core.MAX_SKEW_SECONDS and usd_allowed)
+    sync.update(synchronized=sync.get('synchronized') is True and combined,
+        all_instruments_fresh=all_fresh,as_of_utc=core._iso(newest) if complete else None,
+        oldest_timestamp_utc=core._iso(oldest) if complete else None,max_skew_seconds=round(skew,3) if skew is not None else None,
+        freshness_reference_utc=now.isoformat(),instrument_scope=list(required),
+        source_trade_dates_aligned=complete and len(dates)==1)
+    sync['status']='PASS' if sync['synchronized'] else 'FAIL'
+    quality['usd_reference_usable']=usd_allowed
+    quality['analysis_usable']=quality.get('analysis_usable') is True and sync['synchronized'] and usd_allowed
+    quotes=quality.setdefault('quote_usable_by_instrument',{})
+    if not isinstance(quotes,dict): quotes={};quality['quote_usable_by_instrument']=quotes
+    quotes['usd_tom']=usd_allowed and instruments.get('usd_tom',{}).get('quote_usable') is True
+    quality['quote_all_instruments_usable']=bool(set(quotes)==set(required) and all(quotes.values()))
+    if not quality['analysis_usable']:
+        if snapshot.get('status')=='READY': snapshot['status']='PARTIAL'
+        if quality.get('status')=='PASS': quality['status']='PARTIAL'
 
 
 def annotate_basis(derived):

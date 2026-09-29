@@ -146,3 +146,15 @@ review must be repeated for the correcting head before merge.
 P1 correction validation: 70 tests passed in 156.42 seconds across USD source,
 currency state, Stage9 and final market delivery, including the real saved JSON
 paths and the absence of a native date without loss of the last observation.
+
+The next pre-merge review identified P2 comment 4137546237: the full-market
+synchronization gate still covered the legacy seven instruments. Merge was
+withheld again. The correction checks all eight native timestamp dates, TTL
+and skew at USD attachment and canonical read, only downgrades full-market
+gates and preserves independent price/OI admission. Reconstructed regressions
+enter the real fast collector, persist JSON and inspect the consumer projection
+for aligned dates, a fresh midnight date mismatch, excess USD skew and expired
+USD; a copied seven-leg PASS cannot authorize the combined market on read.
+Full final-head CI and independent review remain mandatory before merge/apply.
+P2 correction validation: all 74 USD/currency/Stage9/final-delivery tests passed
+in 149.07 seconds using the ordinary venv and real Parquet engine.

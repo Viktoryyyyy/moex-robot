@@ -97,6 +97,9 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
                     item["quote_reason"] = "source_not_fresh_at_read"
 
     if isinstance(data, dict):
+        if 'usd_reference_evidence' in data:
+            from moex_data.rub_usd_cets_reference import recheck_synchronization
+            recheck_synchronization(data,now=now)
         sync = data.get("synchronization", {})
         quality = data.get("quality", {})
         if not isinstance(sync, dict) or not isinstance(quality, dict):
