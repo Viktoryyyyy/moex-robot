@@ -91,3 +91,9 @@ regressions use the repository venv, ordinary imports and real PyArrow in an
 isolated full checkout. Full test counts, CI run URLs, final exact-head review and
 production acceptance are attached to [PR #557](https://github.com/Viktoryyyyy/moex-robot/pull/557)
 to avoid claiming a future CI or deployment result in its own untested head.
+
+The initial full CI also exposed six existing runner-clock regressions when the
+Price/OI precondition was absent. Capture now records an explicit not-started
+refusal with no check/completion timestamp and consumes no additional clock.
+This preserves the real runner's clock sequence and still refuses CNY v2 selection
+without a valid binding. Existing temporal assertions were not weakened or edited.

@@ -59,6 +59,12 @@ def _basis_missing(e, day, bindings):
 
 def capture_snapshot(snapshot, previous, *, root, now_fn, refresh_started_at, http_get=None, env=None):
     """Called once by the existing heavy builder after legacy evidence capture."""
+    if price.STORE_KEY not in snapshot:
+        # Preconditions failed before capture. Do not consume a capture clock,
+        # invent a completion time or silently restore the v1 spot date policy.
+        snapshot[STORE_KEY] = {'evidence': None, 'evidence_sha256': None,
+            'checked_at_utc': None, 'error': 'exact_capture_not_started_missing_price_binding'}
+        return None
     started = stamp(now_fn()); require(started >= stamp(refresh_started_at), 'exact_capture_clock')
     try:
         p = price._admit(snapshot, started); e = _core(p)
@@ -120,6 +126,9 @@ def capture_snapshot(snapshot, previous, *, root, now_fn, refresh_started_at, ht
 
 def _validate(store, now, *, enforce_lifetime=True):
     require(set(store) == {'evidence', 'evidence_sha256', 'checked_at_utc', 'error'}, 'exact_store_shape')
+    if (store['evidence'] is None and store['evidence_sha256'] is None and store['checked_at_utc'] is None
+            and store['error'] == 'exact_capture_not_started_missing_price_binding'):
+        raise ValueError(store['error'])
     require(stamp(store['checked_at_utc']) <= now, 'exact_store_check_future')
     require(store['error'] is None or isinstance(store['error'],str), 'exact_capture_error_shape')
     require(store['error'] != 'exact_source_admission_expired', 'exact_source_admission_expired')
@@ -175,7 +184,7 @@ def _supplement(snapshot, now):
 
 def _metadata(snapshot, extra, errors):
     return {'errors':errors,'evidence_sha256':snapshot[STORE_KEY].get('evidence_sha256'),
-        'schema_version':(snapshot[STORE_KEY].get('evidence') or {}).get('schema_version',SCHEMA),
+        'schema_version':(snapshot[STORE_KEY].get('evidence') or {}).get('schema_version'),
         'last_capture_error':snapshot[STORE_KEY].get('error'),
         'admission_contract':source.CONTRACT.replace('_v1.', '_v2.') if (snapshot[STORE_KEY].get('evidence') or {}).get('schema_version')==SCHEMA_V2 else source.CONTRACT,
         'accepted_at_utc':extra['accepted_at_utc'] if extra else None,

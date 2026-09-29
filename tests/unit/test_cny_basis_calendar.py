@@ -113,8 +113,10 @@ def test_weekend_anchor_uses_own_eligible_date_through_real_capture(tmp_path):
 
 def test_new_capture_missing_binding_does_not_restore_old_v1_policy(tmp_path):
     s=basis_fixture(tmp_path,weekend_observations=True)
-    exact.capture_snapshot(s,None,root=tmp_path,now_fn=lambda:NOW,refresh_started_at=NOW)
+    def no_capture_clock():raise AssertionError('capture not started; no clock read')
+    assert exact.capture_snapshot(s,None,root=tmp_path,now_fn=no_capture_clock,refresh_started_at=NOW) is None
     assert s[exact.STORE_KEY]['error'] is not None
+    assert s[exact.STORE_KEY]['checked_at_utc'] is None
     metric=basis.describe(s,now=NOW)['dated']['pairs']['cny_rub']['metrics']['front_spot_basis_abs']
     assert metric['anchor'] is None and metric['changes']['1']['change'] is None
 
