@@ -11,7 +11,7 @@ import re
 
 SCHEMA = "rub_market_factual_delivery.v1"
 MAX_BYTES = 131072
-MARKETS = ("usdrubf", "si_front", "si_next", "cnyrubf", "cr_front", "cr_next", "cnyrub_tom")
+MARKETS = ("usdrubf", "si_front", "si_next", "cnyrubf", "cr_front", "cr_next", "cnyrub_tom", "usd_tom")
 IDENTITY = ("instrument_id", "source_id", "source_ticker", "source_identity_scope", "raw_schema_version")
 
 
@@ -72,11 +72,12 @@ def project(snapshot, *, now, code_revision):
         allowed = key in facts and selected[key]["status"] == "AVAILABLE" and fresh(row, now)
         quote_allowed = admitted["quote_usable"] is True and fresh(row, now)
         prices[key] = {"status": "AVAILABLE" if allowed else "UNAVAILABLE",
-            "scope": "current_spot_price" if key == "cnyrub_tom" else "current_price_oi",
+            "scope": "current_ruble_settled_USD_reference" if key == "usd_tom" else "current_spot_price" if key == "cnyrub_tom" else "current_price_oi",
             "reason": None if allowed else admitted.get("missing_reason") or "source_expired_before_delivery",
             "values": deepcopy(facts[key]["values"]) if allowed else None,
             "source_identity": pick(row, ("logical_id", "secid", "source_id", "asset_type", "source_trade_date",
-                "timestamp", "source_update_timestamp_utc", "received_at_utc", "timestamp_semantics")),
+                "timestamp", "source_update_timestamp_utc", "received_at_utc", "timestamp_semantics",
+                "instrument_kind", "settlement", "deliverable_spot", "reference_semantics", "carry_semantics")),
             "freshness": _freshness(row.get("timestamp"), now, 60),
             "contract_metadata": deepcopy(admitted["contract_metadata"]),
             "missing_metadata": deepcopy(admitted["missing_metadata"]),
@@ -85,6 +86,9 @@ def project(snapshot, *, now, code_revision):
             "cross_market_comparison_usable": allowed and admitted["cross_market_comparison_usable"],
             "evidence_ref": "components.synchronized_live_market_oi.data.instruments."+key,
             "source_record_sha256": sha256(encoded(row)).hexdigest()}
+        if key in ('cnyrub_tom','usd_tom'):
+            from moex_data.rub_currency_market_state import describe as currency_state
+            prices[key]['market_state'] = currency_state(row, now=now, current_admitted=allowed)
     futoi = {}
     for ticker, name in (("si", "futoi_live"), ("cr", "futoi_live_cr")):
         item = selected[name]
@@ -172,7 +176,9 @@ def project(snapshot, *, now, code_revision):
         "additional_context": {"full_factual_release_path": "/v1/rub/factual-release",
             "daily_weekly_status": {s: v["readiness"]["bundle_status"] for s,v in release["analysis_bundles"].items()},
             "historical_context_in_this_response": False, "external_context_in_this_response": False,
-            "position_risk_in_this_response": False, "missing_source": "USD_TOM_not_in_existing_live_schema"},
+            "position_risk_in_this_response": False,
+            "USD_reference_status": prices['usd_tom']['status'],
+            "USD_reference_reason": prices['usd_tom']['reason']},
         "authority": {"session_completion_proven": False, "analysis_bundle_complete": False,
             "model_ready": False, "forecast_generated": False, "action_authority": False, "broker_execution": False},
         "consumption_rule": "recheck_each_original_source_deadline_at_actual_use_no_TTL_extension_or_dated_fallback"}

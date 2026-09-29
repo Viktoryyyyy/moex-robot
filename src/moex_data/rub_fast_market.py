@@ -37,7 +37,7 @@ def state_path(root):
 
 def refresh(root, *, loader=None, clock=lambda: datetime.now(timezone.utc)):
     from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot as base
-    from moex_data.synchronized_live_market_oi_context_partial import fetch_live_snapshot
+    from moex_data.synchronized_live_market_oi_context_partial import fetch_live_snapshot_with_usd as fetch_live_snapshot
     folder = state_path(root)
     folder.mkdir(parents=True, exist_ok=True)
     with base._single_refresh_lock(folder):
@@ -142,11 +142,22 @@ def apply(snapshot, *, root, now):
         market = value["market"]
         if _digest(market) != value["market_sha256"]:
             raise ValueError("fast market digest mismatch")
-        if not isinstance(market, dict) or not isinstance(market.get("instruments"), dict) or set(market["instruments"]) != set(LOGICAL_ORDER):
+        from moex_data import rub_usd_cets_reference as usd
+        usd_selected = isinstance(market, dict) and 'usd_reference_evidence' in market
+        expected_instruments = set(LOGICAL_ORDER) | ({'usd_tom'} if usd_selected else set())
+        if not isinstance(market, dict) or not isinstance(market.get("instruments"), dict) or set(market["instruments"]) != expected_instruments:
             raise ValueError("fast market instrument scope mismatch")
         if market.get("schema_version") != SCHEMA_VERSION or not isinstance(market.get("bindings"), dict):
             raise ValueError("fast market schema or bindings missing")
         for key, item in market["instruments"].items():
+            if key == 'usd_tom':
+                # USD has its own complete original-byte admission. A malformed
+                # USD carrier/row must not revoke the seven independent legs.
+                if not isinstance(item,dict):
+                    market['instruments'][key] = {**usd.IDENTITY,'last':None,'stale':True,
+                        'spot_price_usable':False,'quote_usable':False,
+                        'read_freshness_reason':'USD_normalized_not_object'}
+                continue
             if not isinstance(item, dict):
                 raise ValueError("invalid market row")
             if item.get("logical_id") != key or not item.get("secid") or market["bindings"].get(key) != item["secid"]:

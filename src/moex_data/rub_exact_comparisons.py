@@ -12,6 +12,7 @@ from moex_data import rub_cny_basis_calendar as calendar
 STORE_KEY = 'accepted_exact_comparison_sources'
 SCHEMA = 'exact_comparison_evidence.v1'
 SCHEMA_V2 = 'exact_comparison_evidence.v2'
+SCHEMA_V3 = 'exact_comparison_evidence.v3'
 require = source.require
 stamp = source.stamp
 digest = source.digest
@@ -57,7 +58,8 @@ def _basis_missing(e, day, bindings):
     return False
 
 
-def capture_snapshot(snapshot, previous, *, root, now_fn, refresh_started_at, http_get=None, env=None):
+def capture_snapshot(snapshot, previous, *, root, now_fn, refresh_started_at, http_get=None, env=None, version="v2"):
+    require(version in ("v2", "v3"), "exact_capture_version")
     """Called once by the existing heavy builder after legacy evidence capture."""
     if price.STORE_KEY not in snapshot:
         # Preconditions failed before capture. Do not consume a capture clock,
@@ -77,9 +79,10 @@ def capture_snapshot(snapshot, previous, *, root, now_fn, refresh_started_at, ht
         price_days, basis_days = targets(e['observed_dates'], current_day)
         require(len(price_days) <= 7, 'exact_target_date_limit')
         selection = calendar.select(e['observed_dates'])
-        e.update(schema_version=SCHEMA_V2, contract=source.contract('v2'), cny_spot_selection=selection, current_candidate_date=current_day,
+        e.update(schema_version=SCHEMA_V3 if version=='v3' else SCHEMA_V2, contract=source.contract(version), cny_spot_selection=selection, current_candidate_date=current_day,
                  expiry_dates=expiries, price_target_dates=price_days, basis_target_dates=basis_days,
                  capture_started_at_utc=started.isoformat(), entries={})
+        if version == 'v3': e['usd_reference_selection'] = usd_selection(e['observed_dates'])
         try: b = basis._admit(snapshot, started)
         except (ValueError, KeyError, TypeError): b = None
         wanted = set()
@@ -94,6 +97,10 @@ def capture_snapshot(snapshot, previous, *, root, now_fn, refresh_started_at, ht
             for day in selection['target_dates']:
                 if day < current_day and _basis_missing(b, day, e['bindings']):
                     wanted.update((day, secid) for secid in (e['bindings']['cr_front'], e['bindings']['cr_next'], 'CNYRUBF', 'CNYRUB_TOM'))
+            if version == 'v3':
+                for day in e['usd_reference_selection']['target_dates']:
+                    if day < current_day and (_basis_missing(b, day, e['bindings']) or day in b['history']):
+                        wanted.update((day, secid) for secid in (e['bindings']['si_front'], e['bindings']['si_next'], 'USDRUBF', 'USD000UTSTOM'))
         require(len(wanted) <= e['contract']['max_sources'], 'exact_target_source_limit')
         for day, secid in sorted(wanted):
             key = day+'/'+secid
@@ -109,15 +116,15 @@ def capture_snapshot(snapshot, previous, *, root, now_fn, refresh_started_at, ht
         if old and old.get('evidence') is not None:
             try:
                 prior = _validate({**old,'error':None}, completed, enforce_lifetime=False)[0]
-                keys = ('bindings', 'observed_dates', 'expiry_dates', 'price_target_dates', 'basis_target_dates', 'entries', 'contract', 'cny_spot_selection')
-                if all(prior.get(k) == e[k] for k in keys): e = deepcopy(prior)
+                keys = ('bindings', 'observed_dates', 'expiry_dates', 'price_target_dates', 'basis_target_dates', 'entries', 'contract', 'cny_spot_selection', 'usd_reference_selection')
+                if all(prior.get(k) == e.get(k) for k in keys): e = deepcopy(prior)
             except (ValueError, KeyError, TypeError): pass
         store = {'evidence': e, 'evidence_sha256': digest(e), 'checked_at_utc': completed.isoformat(), 'error': None}
         _validate(store, completed, enforce_lifetime=False)
         snapshot[STORE_KEY] = store
     except (ValueError, KeyError, TypeError, OSError) as exc:
         old = (previous or {}).get(STORE_KEY) or {}
-        if (old.get('evidence') or {}).get('schema_version') != SCHEMA_V2:
+        if (old.get('evidence') or {}).get('schema_version') != (SCHEMA_V3 if version=='v3' else SCHEMA_V2):
             old = {}  # A new v2 capture failure never opts back into historical v1.
         snapshot[STORE_KEY] = {'evidence': deepcopy(old.get('evidence')), 'evidence_sha256':old.get('evidence_sha256'),
             'checked_at_utc': stamp(now_fn()).isoformat(), 'error': type(exc).__name__+': '+str(exc)[:180]}
@@ -134,12 +141,13 @@ def _validate(store, now, *, enforce_lifetime=True):
     require(store['error'] != 'exact_source_admission_expired', 'exact_source_admission_expired')
     e = store['evidence']; require(e is not None, store['error'] or 'exact_evidence_missing')
     require(digest(e) == store['evidence_sha256'], 'exact_evidence_hash')
-    v2 = e.get('schema_version') == SCHEMA_V2
+    v3 = e.get('schema_version') == SCHEMA_V3
+    v2 = e.get('schema_version') in (SCHEMA_V2, SCHEMA_V3)
     expected_fields = {'schema_version', 'contract', 'bindings', 'binding_proof', 'observed_dates', 'witness_proof',
             'original_byte_buffers', 'expiry_dates', 'current_candidate_date', 'price_target_dates', 'basis_target_dates',
-            'capture_started_at_utc', 'accepted_at_utc', 'entries'} | ({'cny_spot_selection'} if v2 else set())
-    require(set(e) == expected_fields and e['schema_version'] in (SCHEMA,SCHEMA_V2)
-            and e['contract'] == source.contract('v2' if v2 else 'v1'), 'exact_evidence_identity_or_contract')
+            'capture_started_at_utc', 'accepted_at_utc', 'entries'} | ({'cny_spot_selection'} if v2 else set()) | ({'usd_reference_selection'} if v3 else set())
+    require(set(e) == expected_fields and e['schema_version'] in (SCHEMA,SCHEMA_V2,SCHEMA_V3)
+            and e['contract'] == source.contract('v3' if v3 else 'v2' if v2 else 'v1'), 'exact_evidence_identity_or_contract')
     start, accepted = stamp(e['capture_started_at_utc']), stamp(e['accepted_at_utc'])
     require(start <= accepted <= stamp(store['checked_at_utc']) <= now, 'exact_evidence_noncausal')
     require(not enforce_lifetime or (now-accepted).total_seconds() <= 345600, 'exact_source_admission_expired')
@@ -157,14 +165,19 @@ def _validate(store, now, *, enforce_lifetime=True):
     if v2:
         require(e['cny_spot_selection'] == calendar.select(dates), 'exact_CNY_calendar_selection_mismatch')
         cny = e['cny_spot_selection']['target_dates']
-    require(len(set(p+b+cny)) <= e['contract']['max_target_dates'], 'exact_target_date_limit')
+    usd = []
+    if v3:
+        require(e['usd_reference_selection'] == usd_selection(dates), 'exact_USD_selection_mismatch')
+        usd = e['usd_reference_selection']['target_dates']
+    require(len(set(p+b+cny+usd)) <= e['contract']['max_target_dates'], 'exact_target_date_limit')
     entries = e['entries']; require(isinstance(entries, dict) and len(entries) <= e['contract']['max_sources'], 'exact_source_inventory_limit')
     budget = source.Budget(buffers.values()); rows = {}; errors = {}
     for key, item in entries.items():
         day, secid = key.split('/')
         require((day in p and secid in e['bindings'].values())
                 or (day in b and secid in (('USDRUBF','CNYRUBF') if v2 else ('USDRUBF','CNYRUBF','CNYRUB_TOM')))
-                or (day in cny and secid in (e['bindings']['cr_front'],e['bindings']['cr_next'],'CNYRUBF','CNYRUB_TOM')), 'exact_source_outside_selected_targets')
+                or (day in cny and secid in (e['bindings']['cr_front'],e['bindings']['cr_next'],'CNYRUBF','CNYRUB_TOM'))
+                or (day in usd and secid in (e['bindings']['si_front'],e['bindings']['si_next'],'USDRUBF','USD000UTSTOM')), 'exact_source_outside_selected_targets')
         require(set(item) == {'source', 'source_sha256', 'refusal'}, 'exact_source_entry_shape')
         if item['source'] is None:
             require(item['source_sha256'] is None and isinstance(item['refusal'], str) and bool(item['refusal']), 'exact_source_failure_shape')
@@ -186,7 +199,7 @@ def _metadata(snapshot, extra, errors):
     return {'errors':errors,'evidence_sha256':snapshot[STORE_KEY].get('evidence_sha256'),
         'schema_version':(snapshot[STORE_KEY].get('evidence') or {}).get('schema_version'),
         'last_capture_error':snapshot[STORE_KEY].get('error'),
-        'admission_contract':source.CONTRACT.replace('_v1.', '_v2.') if (snapshot[STORE_KEY].get('evidence') or {}).get('schema_version')==SCHEMA_V2 else source.CONTRACT,
+        'admission_contract':source.CONTRACT.replace('_v1.', '_v3.' if (snapshot[STORE_KEY].get('evidence') or {}).get('schema_version')==SCHEMA_V3 else '_v2.') if (snapshot[STORE_KEY].get('evidence') or {}).get('schema_version') in (SCHEMA_V2,SCHEMA_V3) else source.CONTRACT,
         'accepted_at_utc':extra['accepted_at_utc'] if extra else None,
         'valid_until_utc':(stamp(extra['accepted_at_utc'])+timedelta(seconds=345600)).isoformat() if extra else None,
         'source_scope':'exact_official_TradeStats_and_existing_CETS_5m_normalization',
@@ -223,7 +236,7 @@ def _legs(rows, day, secid, role, prefix, expiry):
         from moex_data.currency.materialize_cets_tom_raw_5m import normalize_to_5m
         for row in rows: source.quote(row, spot=True)
         frame = pd.DataFrame([{k.lower():v for k,v in r['raw'].items()} for r in rows])
-        frame = normalize_to_5m(frame, trade_date=day, instrument_id='cny_tom', secid=secid, source_url=source.endpoint(secid))
+        frame = normalize_to_5m(frame, trade_date=day, instrument_id='usd_tom' if prefix=='si' else 'cny_tom', secid=secid, source_url=source.endpoint(secid))
         # The existing normalizer owns the grid. Its fresh ingest clock is not evidence.
         normalized = []
         for bar in frame.to_dict('records'):
@@ -235,7 +248,7 @@ def _legs(rows, day, secid, role, prefix, expiry):
         try:
             value, publication = source.quote(row, spot=spot)
             divisor = 1000 if prefix == 'si' and role in ('front','next') else 1
-            result[row['event']] = {'secid':secid, 'instrument_id':prefix+'_'+role+'_contract' if role in ('front','next') else 'cny_tom' if spot else secid.lower()+'_futures_family',
+            result[row['event']] = {'secid':secid, 'instrument_id':prefix+'_'+role+'_contract' if role in ('front','next') else ('usd_tom' if prefix=='si' else 'cny_tom') if spot else secid.lower()+'_futures_family',
                 'trade_date':day,'source_timestamp_utc':row['event'].isoformat(),'received_at_utc':row['receipt'].isoformat(),
                 'price':value,'normalization_divisor':divisor,'normalized_rate':float(Decimal(str(value))/divisor),
                 'expiry_date':expiry,'price_source_field':'close' if spot else 'PR_CLOSE',
@@ -257,7 +270,7 @@ def _basis_day(extra, rows, errors, day):
         require(all(v > 0 for v in days.values()), 'exact_basis_expiry_tenor')
         for role, secid in secids.items():
             key = day+'/'+secid; legs[role] = {}
-            if role == 'spot' and prefix == 'si': failures[role] = 'USD_spot_production_scope_not_admitted'; continue
+            if role == 'spot' and prefix == 'si' and extra['schema_version'] != SCHEMA_V3: failures[role] = 'USD_spot_production_scope_not_admitted'; continue
             if key not in rows: failures[role] = errors.get(key, 'exact_target_source_not_captured'); continue
             try: legs[role] = _legs(rows[key], day, secid, role, prefix, expiry.get(secid))
             except (ValueError, KeyError, TypeError) as exc: failures[role] = str(exc)
@@ -269,7 +282,10 @@ def _basis_day(extra, rows, errors, day):
                 reason = legs[c][selected].get('error') or legs[r][selected].get('error')
             if reason:
                 item = {'status':'UNAVAILABLE','reason':reason,'value':None}
-            else: item = basis.resolver.metric_endpoint(name,c,r,legs,days,unit,horizon,root)
+            else: item = basis.resolver.metric_endpoint(name,c,r,legs,days,unit,horizon,root, usd_reference=extra['contract'].get('USD_reference_contract') if prefix=='si' else None)
+            if prefix=='si' and 'spot' in (c,r) and extra['schema_version']==SCHEMA_V3:
+                from moex_data import rub_usd_cets_reference as usd
+                item.update(reference_identity=deepcopy(usd.IDENTITY), reference_semantics=usd.POLICY['basis_semantics'],carry_semantics=usd.POLICY['carry_semantics'])
             metrics[name] = item
         result[pair] = {'trade_date':day,'run_id':None,'source_kind':'EXACT_TARGET_OWN_LEGS_V1',
             'role_binding_as_of_utc':extra['binding_proof']['binding_as_of_utc'],
@@ -286,22 +302,32 @@ def enrich_basis(e, snapshot, now):
         # A damaged/expired selected v2 cannot silently restore the v1 calendar.
         result['_cny_spot_selection'] = {'eligible_observed_dates': [], 'target_dates': [],
             'reason': errors.get('*','exact_CNY_selection_unavailable'), 'schema_version':calendar.SCHEMA}
+    if selected.get('schema_version') == SCHEMA_V3 or 'usd_reference_selection' in selected:
+        result['_usd_reference_selection'] = {'eligible_observed_dates': [], 'target_dates': [], 'reason': errors.get('*','exact_USD_selection_unavailable')}
     if extra is None: return result
     if extra['observed_dates'] != e['observed_dates']:
         result['_exact']['errors'] = {'*':'exact_source_witness_changed'}; return result
     cny_days = []
-    if extra['schema_version'] == SCHEMA_V2:
+    if extra['schema_version'] in (SCHEMA_V2, SCHEMA_V3):
         result['_cny_spot_selection'] = deepcopy(extra['cny_spot_selection'])
         cny_days = extra['cny_spot_selection']['target_dates']
-    for day in sorted(set(extra['basis_target_dates']+cny_days)):
-        if not _basis_missing(e, day, extra['bindings']): continue
+    usd_days = []
+    if extra['schema_version'] == SCHEMA_V3:
+        result['_usd_reference_selection'] = deepcopy(extra['usd_reference_selection'])
+        usd_days = extra['usd_reference_selection']['target_dates']
+    for day in sorted(set(extra['basis_target_dates']+cny_days+usd_days)):
+        missing = _basis_missing(e, day, extra['bindings'])
+        if not missing and not (day in usd_days and day in e['history']): continue
         try:
             additions = _basis_day(extra, rows, errors, day)
-            if extra['schema_version'] == SCHEMA_V2:
+            if extra['schema_version'] in (SCHEMA_V2, SCHEMA_V3):
                 for pair in list(additions):
                     additions[pair]['metrics'] = {name:item for name,item in additions[pair]['metrics'].items()
                         if (pair=='cny_rub' and 'spot' in name and day in cny_days)
-                        or (not (pair=='cny_rub' and 'spot' in name) and day in extra['basis_target_dates'])}
+                        or (pair=='usd_rub' and 'spot' in name and day in usd_days)
+                        or (not (pair=='cny_rub' and 'spot' in name) and not (usd_days and pair=='usd_rub' and 'spot' in name) and day in extra['basis_target_dates'])}
+            if not missing:
+                additions = {'usd_rub': {**additions['usd_rub'], 'metrics': {n:v for n,v in additions['usd_rub']['metrics'].items() if 'spot' in n}}}
             # Preserve an already admitted metric with the same leg identities.
             for pair, pair_data in additions.items():
                 old = e['history'].get(day,{}).get(pair,{}).get('metrics',{})
@@ -315,7 +341,7 @@ def enrich_basis(e, snapshot, now):
             for pair, pair_data in additions.items():
                 retained = result['history'].get(day,{}).get(pair,{}).get('metrics',{})
                 pair_data['metrics'] = {**retained, **pair_data['metrics']}
-            result['history'][day] = additions
+            result['history'][day] = {**result['history'].get(day,{}), **additions}
             result['source_errors'].pop(day,None)
         except (ValueError, KeyError, TypeError) as exc: result['_exact']['errors'][day] = str(exc)
     return result
@@ -388,3 +414,12 @@ def apply_publication_expiry(prepared, *, now):
     for key, context in fallback['contexts'].items():
         prepared['release'][key] = deepcopy(context)
         prepared['release'][key]['checked_at_utc'] = stamp(now).isoformat()
+
+
+def usd_selection(dates):
+    selection = calendar.select(dates)
+    eligible = [day for day in selection['eligible_observed_dates'] if day >= '2026-02-16']
+    return {**selection, 'schema_version':'usd_CETS_reference_date_selection.v1',
+        'instrument_id':'usd_tom', 'reference_kind':'ruble_settled_currency_position_instrument',
+        'eligible_observed_dates':eligible, 'target_dates':[eligible[-1-lag] for lag in (0,1,5) if len(eligible)>lag],
+        'reason':None if eligible else selection['reason'] or 'USD_reference_before_regime_start'}

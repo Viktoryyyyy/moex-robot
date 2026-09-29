@@ -246,11 +246,12 @@ def projection_completeness(snapshot, value, *, now):
         expected_metadata = matching[0] if matching and all(item == matching[0] for item in matching) else None
         actual_metadata = value['market_usability'][key]['contract_metadata']
         _require((actual_metadata or {}).get('values') == expected_metadata, 'contract metadata completeness ' + key)
-        usable = expected_spot if key == 'cnyrub_tom' else item.get('price_oi_usable') is True
+        from moex_data.rub_usd_cets_reference import usable as usd_usable
+        usable = usd_usable(market,now=now) if key=='usd_tom' else expected_spot if key == 'cnyrub_tom' else item.get('price_oi_usable') is True
         _require((key in facts) == usable, 'market completeness ' + key)
         if not usable: continue
         admitted_fields = fields + (('bid', 'ask', 'spread') if item.get('quote_usable') is True else ())
-        expected_values = {name: item[name] for name in admitted_fields if name in item and not (key == 'cnyrub_tom' and name == 'oi')}
+        expected_values = {name: item[name] for name in admitted_fields if name in item and not (key in ('cnyrub_tom','usd_tom') and name == 'oi')}
         _require(facts[key]['values'] == expected_values, 'market values ' + key)
     structure = components.get('live_market_structure', {})
     levels = (structure.get('data') or {}).get('structural_levels', {})

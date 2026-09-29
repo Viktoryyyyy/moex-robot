@@ -58,11 +58,11 @@ def describe(snapshot, *, stage9_periods=None, stage9_current_checks=None, inclu
     facts = []
     market = (components.get('synchronized_live_market_oi', {}).get('data') or {}).get('instruments', {})
     for key, item in market.items():
-        if (spot_usable(snapshot) if key == 'cnyrub_tom' else item.get('price_oi_usable') is True and fresh(item, target_now)):
+        if (spot_usable(snapshot, key) if key in ('cnyrub_tom','usd_tom') else item.get('price_oi_usable') is True and fresh(item, target_now)):
             facts.append({'factor': key, 'scope': 'current_source_row',
                 'snapshot_path': f'components.synchronized_live_market_oi.data.instruments.{key}',
                 'source_identity': {k: item.get(k) for k in IDENTITY_FIELDS if k in item},
-                'values': market_values(item, spot=key == 'cnyrub_tom')})
+                'values': market_values(item, spot=key in ('cnyrub_tom','usd_tom'))})
     metrics = basis_metrics(snapshot)
     if metrics:
         facts.append({'factor': 'basis_carry', 'scope': 'individual_READY_metrics_only',

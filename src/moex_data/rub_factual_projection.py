@@ -32,14 +32,17 @@ def fresh(item, now):
         return False
 
 
-def spot_usable(snapshot):
+def spot_usable(snapshot, key="cnyrub_tom"):
+    if key == "usd_tom":
+        from moex_data.rub_usd_cets_reference import usable
+        return usable(market_data(snapshot), now=reference(snapshot))
     data = market_data(snapshot)
     item = _dict(_dict(data.get('instruments')).get('cnyrub_tom'))
     quality = _dict(data.get('quality'))
     value = item.get('last')
     return (isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value) and value > 0
             and fresh(item, reference(snapshot)) and item.get('spot_price_usable') is not False
-            and quality.get('spot_price_usable') is True)
+            and quality.get('spot_price_usable') is True and item.get('source_trading_status') != 'N')
 
 
 def basis_metrics(snapshot):
@@ -73,7 +76,8 @@ def basis_metrics(snapshot):
         value = metric.get('value')
         if (metric.get('status') == 'READY' and isinstance(legs, list) and legs
                 and isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value)
-                and all(isinstance(leg, str) and fresh(instruments.get(leg, {}), now) for leg in legs)):
+                and all(isinstance(leg, str) and fresh(instruments.get(leg, {}), now) for leg in legs)
+                and ('usd_tom' not in legs or spot_usable(snapshot, 'usd_tom'))):
             result.append((path, metric))
     return result
 
@@ -84,7 +88,8 @@ MARKET_FIELDS = ('last', 'oi', 'open', 'high', 'low', 'close', 'volume', 'trades
 QUOTE_FIELDS = ('bid', 'ask', 'spread')
 IDENTITY_FIELDS = ('secid', 'logical_id', 'asset_type', 'timestamp', 'source_trade_date',
     'timestamp_semantics', 'source_update_timestamp_utc', 'received_at_utc', 'source_id',
-    'last_trade_time_moscow', 'source_trading_status')
+    'last_trade_time_moscow', 'source_trading_status', 'instrument_kind', 'settlement', 'deliverable_spot',
+    'reference_semantics', 'carry_semantics')
 LEG_METADATA_FIELDS = ('raw_unit', 'normalization_divisor', 'normalized_unit', 'expiry_date', 'expiry_metadata')
 
 
@@ -146,9 +151,9 @@ def consumer_context(snapshot, *, stage9_periods=None):
     components = _dict(snapshot.get('components')); now = reference(snapshot)
     market = market_data(snapshot); instruments = _dict(market.get('instruments'))
     market_context = {}
-    for key in ('usdrubf', 'si_front', 'si_next', 'cnyrubf', 'cr_front', 'cr_next', 'cnyrub_tom'):
+    for key in ('usdrubf', 'si_front', 'si_next', 'cnyrubf', 'cr_front', 'cr_next', 'cnyrub_tom', 'usd_tom'):
         item = _dict(instruments.get(key))
-        usable = spot_usable(snapshot) if key == 'cnyrub_tom' else item.get('price_oi_usable') is True and fresh(item, now)
+        usable = spot_usable(snapshot, key) if key in ('cnyrub_tom', 'usd_tom') else item.get('price_oi_usable') is True and fresh(item, now)
         metadata = contract_metadata(snapshot, key, item)
         metadata_values = _dict(_dict(metadata).get('values'))
         quote_allowed = item.get('quote_usable') is True and fresh(item, now)

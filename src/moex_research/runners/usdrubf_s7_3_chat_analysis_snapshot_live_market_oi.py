@@ -60,7 +60,9 @@ def _load_live_or_unavailable(live_loader: LiveLoader) -> dict[str, object]:
 
 def _load_basis_carry_or_unavailable(live_snapshot: Mapping[str, object]) -> dict[str, object]:
     source_snapshot = dict(live_snapshot)
-    usd_tom_supported = "usd_tom" in live_basis_carry.live_core.LOGICAL_ORDER
+    from moex_data import rub_usd_cets_reference as usd
+    usd_evidence = live_snapshot.get("usd_reference_evidence")
+    usd_tom_supported = isinstance(usd_evidence, Mapping) and usd_evidence.get("contract") == usd.contract()
     instruments = live_snapshot.get("instruments")
     if isinstance(instruments, Mapping):
         sanitized_instruments = dict(instruments)
@@ -128,7 +130,7 @@ def _load_basis_carry_or_unavailable(live_snapshot: Mapping[str, object]) -> dic
     derived["current_live_scope_status"] = current_live_scope_status
     derived["current_live_schema_usd_tom_supported"] = usd_tom_supported
     derived["structurally_unavailable_metric_ids"] = sorted(structural_unavailable)
-    return derived
+    return usd.annotate_basis(derived) if usd_tom_supported else derived
 
 
 def _recompute_readiness_with_partial(snapshot: dict[str, object]) -> None:
@@ -268,7 +270,7 @@ def attach_live_basis_carry_context(
 def refresh_snapshot(
     *,
     now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
-    live_loader: LiveLoader = live_market.fetch_live_snapshot,
+    live_loader: LiveLoader = live_market.fetch_live_snapshot_with_usd,
 ) -> tuple[dict[str, object], object]:
     base.load_dotenv(base.PROJECT_ENV_PATH, override=False)
     base.install_timestamp_policy()
@@ -343,7 +345,7 @@ def refresh_snapshot(
             previous_capture_completed=contract_pairs_completed or cr_statistics_completed or cr_completed or previous_capture_completed)
         from moex_data.rub_exact_comparisons import capture_snapshot as capture_exact_comparisons
         exact_comparisons_completed = capture_exact_comparisons(snapshot, previous, root=root, now_fn=now_fn,
-                                                               refresh_started_at=now)
+                                                               refresh_started_at=now, version="v3")
         completed = base._aware(now_fn(), "refresh_completed_at")
         if exact_comparisons_completed is not None and completed < exact_comparisons_completed:
             raise base.ChatAnalysisSnapshotError("refresh completion precedes exact comparison capture completion")
@@ -414,7 +416,7 @@ def load_live_analysis_snapshot(
     *,
     now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     reader: Callable[..., tuple[dict[str, object], object]] = current_context.read_current_snapshot,
-    live_loader: LiveLoader = live_market.fetch_live_snapshot,
+    live_loader: LiveLoader = live_market.fetch_live_snapshot_with_usd,
 ) -> dict[str, object]:
     base.load_dotenv(base.PROJECT_ENV_PATH, override=False)
     snapshot, _path = reader(now_fn=now_fn)

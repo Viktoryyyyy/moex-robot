@@ -92,6 +92,7 @@ DISPLAY_LABELS: Final[dict[str, str]] = {
     "cr_front": "CR front",
     "cr_next": "CR next",
     "cnyrub_tom": "CNYRUB_TOM",
+    "usd_tom": "USD/RUB CETS (ruble-settled reference)",
 }
 
 

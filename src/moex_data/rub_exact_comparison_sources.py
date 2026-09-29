@@ -50,11 +50,11 @@ class Budget:
 
 
 def contract(version='v1'):
-    require(version in ('v1','v2'), 'exact_source_contract_version')
+    require(version in ('v1','v2','v3'), 'exact_source_contract_version')
     value = custody._source_object((Path(__file__).resolve().parents[2]/CONTRACT.replace('_v1.', '_'+version+'.')).read_bytes())
     require(value['schema_version'] == 'exact_comparison_sources_admission.'+version
             and value['dated_lifetime_seconds'] == 345600 and value['max_target_dates'] == (7 if version=='v1' else 10)
-            and value['max_sources'] == (37 if version=='v1' else 46) and value['max_pages_per_source'] == MAX_PAGES
+            and value['max_sources'] == {'v1':37,'v2':46,'v3':58}[version] and value['max_pages_per_source'] == MAX_PAGES
             and value['max_rows_per_source'] == MAX_ROWS and value['max_page_bytes'] == MAX_PAGE_BYTES
             and value['max_total_bytes'] == 16_000_000 and value['price_oi_lags'] == [1, 5, 20]
             and value['basis_carry_lags'] == [1, 5] and value['action_authority'] is False,
@@ -69,13 +69,20 @@ def contract(version='v1'):
             CNY_spot_anchor='latest_common_eligible_date_within_retained_witness',
             CNY_spot_lags='1_and_5_common_eligible_dates_no_price_quality_filter')
         require(value == expected, 'exact_v2_contract_invalid')
+    if version == 'v3':
+        from moex_data import rub_usd_cets_reference as usd
+        expected = contract('v2')
+        expected.update(schema_version='exact_comparison_sources_admission.v3',task_id='snapshot_final_four_v1',max_sources=58,
+            USD_spot_policy='ruble_settled_CETS_reference_not_deliverable_spot',USD_reference_contract=usd.contract(),
+            USD_reference_target_selection='same_reviewed_CETS_eligible_dates_before_quality_after_2026_02_16')
+        require(value == expected, 'exact_v3_contract_invalid')
     return value
 
 
 def endpoint(secid):
     import re
-    if secid == 'CNYRUB_TOM':
-        return 'https://iss.moex.com/iss/engines/currency/markets/selt/boards/CETS/securities/CNYRUB_TOM/candles.json'
+    if secid in ('CNYRUB_TOM','USD000UTSTOM'):
+        return 'https://iss.moex.com/iss/engines/currency/markets/selt/boards/CETS/securities/'+secid+'/candles.json'
     require(secid in ('USDRUBF', 'CNYRUBF') or re.fullmatch(r'(Si|CR)[HMUZ][0-9]', secid) is not None,
             'exact_source_SECID_scope')
     return 'https://apim.moex.com/iss/datashop/algopack/fo/tradestats/'+secid+'.json'
@@ -83,7 +90,7 @@ def endpoint(secid):
 
 def params(day, secid, start):
     value = {'from': day, 'till': day, 'start': start, 'iss.meta': 'off'}
-    if secid == 'CNYRUB_TOM': value['interval'] = 1
+    if secid in ('CNYRUB_TOM','USD000UTSTOM'): value['interval'] = 1
     return value
 
 
@@ -104,7 +111,7 @@ def acquire(day, secid, *, now_fn, http_get=None, env=None, budget=None):
     require(0 < (started.astimezone(transport.MOSCOW).date()-datetime.fromisoformat(day).date()).days <= 45,
             'exact_source_completed_date_scope')
     try:
-        headers = {'User-Agent': 'moex_bot_step3_cets_tom/1.0'} if secid == 'CNYRUB_TOM' else transport._auth_headers(active)
+        headers = {'User-Agent': 'moex_bot_step3_cets_tom/1.0'} if secid in ('CNYRUB_TOM','USD000UTSTOM') else transport._auth_headers(active)
         for _ in range(MAX_PAGES):
             requested = stamp(now_fn()); query = params(day, secid, start)
             # Capture bytes before the ordinary adapter parses or rejects them.
@@ -116,10 +123,10 @@ def acquire(day, secid, *, now_fn, http_get=None, env=None, budget=None):
                 return response
             payload, _, _ = transport._fetch_json(url=endpoint(secid), params=query, headers=headers,
                 timeout=12.0, http_get=retained_get, now_fn=now_fn)
-            table = custody._table(payload, 'candles' if secid == 'CNYRUB_TOM' else 'data')
+            table = custody._table(payload, 'candles' if secid in ('CNYRUB_TOM','USD000UTSTOM') else 'data')
             start += len(table)
             require(start <= MAX_ROWS, 'exact_source_row_limit')
-            if secid == 'CNYRUB_TOM':
+            if secid in ('CNYRUB_TOM','USD000UTSTOM'):
                 if not table: break
             else:
                 cursor = custody._table(payload, 'data.cursor')
@@ -193,7 +200,7 @@ def replay(source, *, day, secid, now):
     if source['acquisition_error'] is not None:
         raise ValueError('exact_source_acquisition_'+source['acquisition_error'])
     require(bool(pages), 'exact_source_pages_missing')
-    rows = []; total = None; seen = set(); spot = secid == 'CNYRUB_TOM'
+    rows = []; total = None; seen = set(); spot = secid in ('CNYRUB_TOM','USD000UTSTOM')
     for index, (page, raw, receipt) in enumerate(decoded):
         require(page['http_status'] == 200, 'exact_source_http_'+str(page['http_status']))
         expected = params(day, secid, len(rows)); url = urlsplit(page['source_url']); route = urlsplit(endpoint(secid))

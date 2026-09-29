@@ -22,7 +22,7 @@ POLICY = {
     "partial_is_ready": False, "new_collection": False, "historical_pointer_writes": False,
     "model_authority": False, "trading_authority": False,
 }
-MARKETS = ("usdrubf", "cnyrubf", "si_front", "si_next", "cr_front", "cr_next", "cnyrub_tom")
+MARKETS = ("usdrubf", "cnyrubf", "si_front", "si_next", "cr_front", "cr_next", "cnyrub_tom", "usd_tom")
 FLAGS = {"session_completion_proven": False, "historical_pit_usable": False,
          "model_usable": False, "action_authority": False, "stage5_full_mode_ready": False}
 
@@ -194,13 +194,15 @@ def _current(snapshot, checks, *, now):
     items = {}
     for key in MARKETS:
         row = market.get(key, {})
-        usable = spot_usable(snapshot) if key == "cnyrub_tom" else row.get("price_oi_usable") is True and fresh(row, now)
+        usable = spot_usable(snapshot, key) if key in ("cnyrub_tom", "usd_tom") else row.get("price_oi_usable") is True and fresh(row, now)
         usable = usable and component_allowed
         items[key] = ({"block_id": key, "status": "AVAILABLE", "source_ref": "components.synchronized_live_market_oi.data.instruments."+key,
                        "values": deepcopy(row), "source_time_ages": deepcopy(row.get("source_time_ages"))}
                       if usable else _refusal(key, row.get("read_freshness_reason") or "source_missing_stale_or_not_admitted",
                           evidence=deepcopy(row), source_time_ages=deepcopy(row.get("source_time_ages"))))
-    items["usd_tom"] = _refusal("usd_tom", "source_not_in_existing_live_schema")
+        if key in ('cnyrub_tom','usd_tom'):
+            from moex_data.rub_currency_market_state import describe as currency_state
+            items[key]['market_state'] = currency_state(row, now=now, current_admitted=usable)
     basis = snapshot.get("components", {}).get("live_basis_carry", {})
     metrics = basis_metrics(snapshot)
     total = sum(len(pair.get("metrics", [])) for pair in (basis.get("data") or {}).get("pairs", {}).values())
@@ -518,6 +520,8 @@ def finish(snapshot, prepared, *, now):
     views["stage9_bundle_refs"] = {scope: "components.stage9_"+scope+".data.sections" for scope in bundles}
     views["carry"] = deepcopy(bundles.get("daily", {}).get("sections", {}).get("current_market", {}).get("items", {}).get("basis_carry", {}).get("values", []))
     views["cny_accepted_context_scope"] = "legacy_accepted_context_not_current_market"
+    from moex_data.rub_snapshot_status_presentation import apply as present_status
+    present_status(snapshot, now=now)
 
 
 def reconcile(snapshot, *, now):
@@ -533,6 +537,7 @@ def reconcile(snapshot, *, now):
 
 
 def attach_release(snapshot, release):
+    release['status_presentation'] = deepcopy(snapshot.get('status_presentation'))
     release["analysis_bundles"] = {}
     for scope,horizon in (("daily","D1"),("weekly","W1")):
         data = snapshot["components"].get("stage9_"+scope, {}).get("data") or {}
@@ -591,15 +596,13 @@ def verify_projection(snapshot, release, *, now, periods):
         require(set(current) == set(MARKETS) | {"usd_tom", "basis_carry", "futoi_live", "futoi_live_cr"}, "current inventory")
         for key in MARKETS:
             row = market.get(key, {})
-            usable = spot_usable(snapshot) if key == "cnyrub_tom" else row.get("price_oi_usable") is True and fresh(row, now)
+            usable = spot_usable(snapshot, key) if key in ("cnyrub_tom", "usd_tom") else row.get("price_oi_usable") is True and fresh(row, now)
             usable = usable and components.get("synchronized_live_market_oi", {}).get("status") in ("READY", "PARTIAL")
             item = current[key]
             require(item.get("status") == ("AVAILABLE" if usable else "UNAVAILABLE"), "market admission")
             require(item.get("values") == (row if usable else None), "market values/identity/times")
             if not usable:
                 require(item.get("evidence") == row and bool(item.get("reason")), "market refusal evidence")
-        require(current["usd_tom"].get("status") == "UNAVAILABLE" and current["usd_tom"].get("values") is None,
-                "unsupported USD spot cannot become available")
         require(current["basis_carry"].get("values") == [{"source_ref": path, "metric": value}
                 for path, value in basis_metrics(snapshot)], "basis metric inventory and values")
         for name, root in (("futoi_live", "si"), ("futoi_live_cr", "cr")):
