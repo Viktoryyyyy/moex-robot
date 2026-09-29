@@ -999,8 +999,9 @@ def _view(e,anchor_day,anchors,dates,*,comparison_refusal=None):
             'source_timestamp_utc':front['source_timestamp_utc'],'two_contract_market_open_interest':total,
             'front_share_fraction':front['market_open_interest']/total if total else None,'next_share_fraction':nxt['market_open_interest']/total if total else None,
             'scope':'two_anchor_bound_contracts_not_total_market'}
-    return {'status':'AVAILABLE' if any(r['status']=='AVAILABLE' for r in contracts.values()) else 'UNAVAILABLE',
-        'anchor_trade_date':anchor_day,'contracts':contracts,'front_next_market_oi_distribution':distributions}
+    from moex_data.rub_exact_comparisons import price_coverage
+    return price_coverage({'status':'AVAILABLE' if any(r['status']=='AVAILABLE' for r in contracts.values()) else 'UNAVAILABLE',
+        'anchor_trade_date':anchor_day,'contracts':contracts,'front_next_market_oi_distribution':distributions},e)
 
 
 def describe(snapshot,*,now):
@@ -1008,7 +1009,8 @@ def describe(snapshot,*,now):
         now=_stamp(now)
         failure=_capture_failure(snapshot,now)
         if STORE_KEY not in snapshot and failure is not None: raise ValueError(failure['error'])
-        e=_admit(snapshot,now)
+        from moex_data.rub_exact_comparisons import enrich_price
+        e=enrich_price(_admit(snapshot,now),snapshot,now)
         dates=e['observed_dates']; dated_day=dates[-1]
         result={'schema_version':SCHEMA,'status':'AVAILABLE','scope':SCOPE,'checked_at_utc':now.isoformat(),
             'accepted_at_utc':e['accepted_at_utc'],'evidence_sha256':snapshot[STORE_KEY]['evidence_sha256'],
@@ -1248,8 +1250,9 @@ def _oracle_view(e,day,anchors,dates,*,comparison_refusal=None):
                 'source_timestamp_utc':a['source_timestamp_utc'],'two_contract_market_open_interest':total,
                 'front_share_fraction':float(Decimal(a['market_open_interest'])/total) if total else None,
                 'next_share_fraction':float(Decimal(b['market_open_interest'])/total) if total else None,'scope':'two_anchor_bound_contracts_not_total_market'}
-    return {'status':'AVAILABLE' if any(value['status']=='AVAILABLE' for value in contracts.values()) else 'UNAVAILABLE',
-        'anchor_trade_date':day,'contracts':contracts,'front_next_market_oi_distribution':distributions}
+    from moex_data.rub_exact_comparisons import price_coverage
+    return price_coverage({'status':'AVAILABLE' if any(value['status']=='AVAILABLE' for value in contracts.values()) else 'UNAVAILABLE',
+        'anchor_trade_date':day,'contracts':contracts,'front_next_market_oi_distribution':distributions},e)
 
 
 def verify_projection(snapshot,release,*,now):
@@ -1257,7 +1260,8 @@ def verify_projection(snapshot,release,*,now):
     try:
         now=_stamp(now); failure=_capture_failure(snapshot,now)
         if STORE_KEY not in snapshot and failure is not None: raise ValueError(failure['error'])
-        e=_admit(snapshot,now)
+        from moex_data.rub_exact_comparisons import enrich_price
+        e=enrich_price(_admit(snapshot,now),snapshot,now)
         dates=e['observed_dates']; day=dates[-1]
         expected={'schema_version':SCHEMA,'status':'AVAILABLE','scope':SCOPE,'checked_at_utc':now.isoformat(),
             'accepted_at_utc':e['accepted_at_utc'],'evidence_sha256':snapshot[STORE_KEY]['evidence_sha256'],

@@ -341,7 +341,12 @@ def refresh_snapshot(
         from moex_data.rub_historical_basis_carry_context import capture_snapshot as capture_historical_basis
         historical_basis_completed = capture_historical_basis(snapshot, previous, now_fn=now_fn, refresh_started_at=now,
             previous_capture_completed=contract_pairs_completed or cr_statistics_completed or cr_completed or previous_capture_completed)
+        from moex_data.rub_exact_comparisons import capture_snapshot as capture_exact_comparisons
+        exact_comparisons_completed = capture_exact_comparisons(snapshot, previous, root=root, now_fn=now_fn,
+                                                               refresh_started_at=now)
         completed = base._aware(now_fn(), "refresh_completed_at")
+        if exact_comparisons_completed is not None and completed < exact_comparisons_completed:
+            raise base.ChatAnalysisSnapshotError("refresh completion precedes exact comparison capture completion")
         if historical_basis_completed is not None and completed < historical_basis_completed:
             raise base.ChatAnalysisSnapshotError("refresh completion precedes historical basis capture completion")
         if contract_pairs_completed is not None and completed < contract_pairs_completed:
