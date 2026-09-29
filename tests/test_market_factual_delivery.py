@@ -12,6 +12,7 @@ from test_stage9_analysis_bundle_v2 import NOW, source_io, live, shifted_market
 from src.moex_research.consumers import usdrubf_chat_snapshot_consumer as consumer
 from src.misc import rub_factual_snapshot_http_server as api
 from src.misc import mcp_rub_factual_snapshot_bridge as bridge
+from src.misc import moex_analyst_web_chat as chat
 from moex_data import rub_market_factual_delivery as delivery
 
 
@@ -64,6 +65,28 @@ def test_real_refresh_saved_reader_http_mcp_final_delivery(tmp_path, monkeypatch
                 assert item['values'] is None and item['reason']
         expected = load()
         assert result == expected
+        # Only external model I/O is synthetic; the actual chat client routes
+        # the tool request through MCP and the canonical HTTP reader again.
+        posts = []
+        def post(*args, **kwargs):
+            posts.append(kwargs['json'])
+            class Response:
+                status_code = 200
+                def json(self):
+                    if len(posts) == 1:
+                        return {'output': [{'type': 'function_call', 'name': 'get_rub_market_factual',
+                            'call_id': 'synthetic-market-call', 'arguments': '{}'}]}
+                    assert json.loads(posts[-1]['input'][-1]['output']) == result
+                    return {'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': 'Synthetic model answer'}]}]}
+            return Response()
+        def tool_caller(url, name):
+            assert name == 'get_rub_market_factual'
+            return asyncio.run(call())
+        client = chat.OpenAIResponsesClient(api_key='synthetic', model=chat.DEFAULT_MODEL,
+            mcp_url=chat.DEFAULT_MCP_URL, post=post, tool_caller=tool_caller)
+        assert client.answer([{'role': 'user', 'content': 'Price FUTOI basis carry'}]) == 'Synthetic model answer'
+        assert 'get_rub_market_factual' in [tool['name'] for tool in posts[0]['tools']]
+        assert 'use get_rub_market_factual' in posts[0]['instructions']
         if corrupt:
             freshness = result['prices']['cr_next']['freshness'] if corrupt[0] == 'price' else result['futoi']['si']['freshness']['source']
             assert freshness['source_timestamp'] == corrupt[1]

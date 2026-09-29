@@ -67,7 +67,7 @@ Properties:
 - Streamable HTTP endpoint is `/mcp`;
 - `stateless_http=true`;
 - `json_response=true`;
-- no extra MCP tools are added;
+- only the three documented read-only MCP tools are exposed;
 - no public TLS listener is implemented by the application;
 - no source, producer, refresh, analysis, trading, broker, or Telegram path is added.
 

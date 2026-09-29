@@ -41,6 +41,7 @@ OPENAI_READ_TIMEOUT_SECONDS = 120.0
 ALLOWED_TOOL_NAMES = (
     "get_rub_factual_snapshot",
     "get_rub_snapshot_readiness",
+    "get_rub_market_factual",
 )
 
 INSTRUCTIONS = """You are the private MOEX_Bot RUB factual analyst interface.
@@ -49,10 +50,13 @@ Use the provided tools whenever the answer depends on the current canonical RUB 
 or its readiness. Treat tool output as authoritative factual input exactly as returned.
 
 Rules:
+- For current Price/OI, FUTOI Si/CR and basis/carry, use get_rub_market_factual.
+  Preserve per-record refusals and source deadlines at the actual analysis time.
+  Its bounded current view does not claim a complete daily/weekly analysis bundle.
 - Do not invent missing market data or silently upgrade readiness.
 - Explicitly state PARTIAL, STALE, NOT_READY, GOVERNED_BLOCKED, RETAINED_PREVIOUS, or other degraded
   states when they materially affect the answer.
-- Do not refresh data, access source systems, or claim access beyond the two provided tools.
+- Do not refresh data, access source systems, or claim access beyond the provided tools.
 - Do not execute trades, broker actions, Telegram actions, or other state-changing operations.
 - Keep factual observations separate from interpretation.
 - If the tools do not support a requested fact, say that the current factual snapshot does not
@@ -92,6 +96,13 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
 ]
+TOOLS.append({
+    "type": "function",
+    "name": "get_rub_market_factual",
+    "description": "Preferred current Price/OI, FUTOI Si/CR and basis/carry view with original clocks, evidence and explicit independent refusals; not full analysis READY.",
+    "strict": True,
+    "parameters": {"type": "object", "properties": {}, "required": [], "additionalProperties": False},
+})
 
 
 class WebChatConfigurationError(RuntimeError):

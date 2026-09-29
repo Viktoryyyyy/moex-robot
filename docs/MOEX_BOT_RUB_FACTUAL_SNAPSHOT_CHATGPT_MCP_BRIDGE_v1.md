@@ -114,7 +114,7 @@ Authorization: Bearer <existing governed factual API token>
 
 HTTP `200` and canonical HTTP `503 NOT_READY` JSON objects are returned unchanged. A `503` readiness response is factual operational state; the bridge does not reinterpret it as analytical or trading readiness.
 
-Both tools are advertised with MCP annotations:
+All tools are advertised with MCP annotations:
 
 ```text
 readOnlyHint=true

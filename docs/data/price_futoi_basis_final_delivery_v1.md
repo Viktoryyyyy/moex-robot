@@ -55,6 +55,10 @@ external source I/O and clocks are controlled. They cover current Si/CR refusal
 isolation, full v2 evidence and >2**53 identifiers, delayed-delivery TTL crossing,
 independent quote use, lossless metric values and partial leg failure, immutable
 input bytes, bounded response and no fallback on transport/schema errors.
+The existing MOEX Analyst web-chat caller also exposes the new tool and selects
+it for the three current-market topics. Its real function-call routing and
+lossless tool-result handoff are tested with synthetic external model responses;
+there is no new analysis engine, model configuration or remote transport.
 Full final-head CI, independent review and exact merged-SHA runtime acceptance
 are required; their final evidence is recorded in the PR.
 
