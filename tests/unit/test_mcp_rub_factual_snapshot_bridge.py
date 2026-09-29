@@ -110,6 +110,7 @@ def test_snapshot_tool_preserves_factual_api_payload_exactly() -> None:
                 bridge.CONNECT_TIMEOUT_SECONDS,
                 bridge.READ_TIMEOUT_SECONDS,
             ),
+            "allow_redirects": False,
         }
     ]
 
@@ -286,12 +287,13 @@ def test_bridge_source_imports_no_data_refresh_analysis_or_trading_modules() -> 
     assert "Popen(" not in source
 
 
-def test_mcp_surface_has_exactly_two_explicitly_read_only_tools() -> None:
+def test_mcp_surface_has_legacy_and_bounded_market_read_only_tools() -> None:
     async def inspect_tools() -> None:
         tools = await bridge.mcp.list_tools()
         assert [tool.name for tool in tools] == [
             "get_rub_factual_snapshot",
             "get_rub_snapshot_readiness",
+            "get_rub_market_factual",
         ]
         for tool in tools:
             assert tool.annotations is not None
@@ -405,6 +407,7 @@ def test_stdio_mcp_round_trip_matches_secure_tunnel_supported_transport() -> Non
                 assert [tool.name for tool in listed.tools] == [
                     "get_rub_factual_snapshot",
                     "get_rub_snapshot_readiness",
+                    "get_rub_market_factual",
                 ]
                 result = await session.call_tool("get_rub_factual_snapshot", arguments={})
                 assert _is_error(result) is False

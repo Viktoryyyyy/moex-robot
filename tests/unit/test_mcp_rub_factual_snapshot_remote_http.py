@@ -194,12 +194,13 @@ def test_streamable_http_run_builds_bounded_server_then_uses_transport(monkeypat
     assert run_calls == ["streamable-http"]
 
 
-def test_streamable_http_surface_still_has_only_two_read_only_tools() -> None:
+def test_streamable_http_surface_includes_bounded_market_read_only_tool() -> None:
     async def inspect_tools() -> None:
         tools = await bridge.mcp.list_tools()
         assert [tool.name for tool in tools] == [
             "get_rub_factual_snapshot",
             "get_rub_snapshot_readiness",
+            "get_rub_market_factual",
         ]
         for tool in tools:
             assert tool.annotations is not None
@@ -257,6 +258,7 @@ def test_streamable_http_round_trip_preserves_canonical_snapshot() -> None:
                         assert [tool.name for tool in tools.tools] == [
                             "get_rub_factual_snapshot",
                             "get_rub_snapshot_readiness",
+                            "get_rub_market_factual",
                         ]
                         result = await session.call_tool(
                             "get_rub_factual_snapshot", arguments={}

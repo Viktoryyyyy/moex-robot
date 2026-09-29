@@ -85,7 +85,12 @@ Transport:
 stdio
 ```
 
-The bridge exposes exactly two tools.
+The bridge preserves the two legacy tools and adds the bounded current-market
+tool `get_rub_market_factual`. Use it for final Price/OI, FUTOI Si/CR and
+basis/carry delivery instead of transferring the full audit snapshot. It calls
+`GET /v1/rub/market-factual` and returns `rub_market_factual_delivery.v1` unchanged.
+The HTTP read budget is 60 seconds for canonical replay; source TTLs are unchanged.
+See [final market delivery](data/price_futoi_basis_final_delivery_v1.md).
 
 ### `get_rub_factual_snapshot`
 
@@ -296,7 +301,7 @@ Repository tests must prove:
 - explicit auth/unavailable/malformed failures;
 - exact localhost factual API routes;
 - no direct source/refresh/analysis/trading imports;
-- exactly two no-argument read-only MCP tools;
+- the two legacy no-argument tools and the bounded read-only `get_rub_market_factual` tool;
 - fail-closed secret configuration;
 - real stdio MCP client round-trip through the canonical factual HTTP server.
 

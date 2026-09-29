@@ -73,16 +73,17 @@ Properties:
 
 The local origin is intentionally inaccessible from the public Internet by itself.
 
-## MCP tool contract remains unchanged
+## MCP tool contract
 
-Exactly two tools are exposed:
+The two legacy tools remain unchanged; bounded current-market delivery is additive:
 
 ```text
 get_rub_factual_snapshot
 get_rub_snapshot_readiness
+get_rub_market_factual
 ```
 
-Both remain explicitly annotated:
+All remain explicitly annotated:
 
 ```text
 readOnlyHint=true
@@ -235,9 +236,9 @@ Then, on an eligible ChatGPT account/workspace:
 3. enter the real public HTTPS `/mcp` endpoint;
 4. select/configure the approved authentication mechanism;
 5. click Scan Tools;
-6. verify exactly `get_rub_factual_snapshot` and `get_rub_snapshot_readiness`;
+6. verify `get_rub_factual_snapshot`, `get_rub_snapshot_readiness` and `get_rub_market_factual`;
 7. invoke readiness;
-8. invoke factual snapshot;
+8. invoke bounded `get_rub_market_factual` for Price/OI, FUTOI and basis/carry; use the legacy full snapshot for audit;
 9. verify current `identity.generated_at_utc`, `read_freshness`, provenance, component statuses, and authority fields.
 
 Current OpenAI plan/account restrictions are a separate product gate and must be checked against the actual target account before claiming end-to-end completion.
