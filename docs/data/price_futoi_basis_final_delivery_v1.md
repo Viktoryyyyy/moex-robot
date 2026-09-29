@@ -38,6 +38,10 @@ TTL remains 60 seconds for Price/OI/basis and 1200 seconds for FUTOI current
 source/receipt and previous receipt/witness. Data admitted at the start of a
 slow read can only be revoked, never upgraded or replaced by dated/EOD data.
 Consumers must recheck original deadlines at their actual analysis time.
+Current receipt freshness uses the governing envelope `last_success_at`, not
+source availability. Previous dated observations expose their original receipt
+and witness refresh clocks, request time and the earlier governing deadline;
+their historical event timestamp is explicitly not subject to the current TTL.
 
 The response is limited to 128 KiB of strict JSON. An unexpected oversize is an
 explicit failure, never silent truncation of metrics, identity or refusals. Raw

@@ -117,6 +117,40 @@ def test_delivery_clock_revokes_expired_read_without_refresh_or_fallback(tmp_pat
     assert result['as_of_utc'] == (NOW+timedelta(seconds=seconds)).isoformat()
 
 
+def test_distinct_receipt_and_witness_deadlines_survive_saved_reader_and_expiry(tmp_path, monkeypatch):
+    source_io(tmp_path, monkeypatch)
+    saved, path = live.refresh_snapshot(now_fn=lambda: NOW, live_loader=lambda: shifted_market(NOW))
+    receipt = NOW+timedelta(seconds=10)
+    witness = NOW-timedelta(seconds=30)
+    data = saved['components']['futoi_live']['data']
+    data['current_intraday']['last_success_at'] = receipt.isoformat()
+    data['previous_completed_session']['last_success_at'] = receipt.isoformat()
+    data['context_refresh']['refresh_attempted_at'] = witness.isoformat()
+    live.base._atomic_write(path, saved)
+    read_at = NOW+timedelta(seconds=20)
+    result = consumer.load_market_factual(now_fn=lambda: read_at, reader=live.base.read_current_snapshot, code_revision='a'*40)
+    si = result['futoi']['si']
+    assert si['status'] == 'AVAILABLE'
+    assert si['freshness']['receipt']['source_timestamp'] == receipt.isoformat()
+    assert si['freshness']['receipt']['source_timestamp'] != si['values']['availability_ts_utc']
+    assert si['freshness']['receipt']['age_seconds'] == 10
+    previous = si['previous_dated_observation']
+    assert previous['status'] == 'AVAILABLE_DATED'
+    assert previous['freshness']['receipt']['source_timestamp'] == receipt.isoformat()
+    assert previous['freshness']['witness']['source_timestamp'] == witness.isoformat()
+    assert previous['date_witness']['refresh_attempted_at'] == witness.isoformat()
+    deadline = witness+timedelta(seconds=1200)
+    assert previous['freshness']['valid_until_utc'] == deadline.isoformat()
+    assert previous['freshness']['source_event_age_limited'] is False
+    clock = iter((read_at, deadline+timedelta(seconds=1)))
+    expired = consumer.load_market_factual(now_fn=lambda: next(clock), reader=live.base.read_current_snapshot, code_revision='a'*40)
+    previous = expired['futoi']['si']['previous_dated_observation']
+    assert previous['values'] is None
+    assert previous['reason'] == 'invalid_or_expired_observed_date_witness'
+    assert previous['freshness']['receipt']['age_seconds'] < 1200
+    assert previous['freshness']['valid_until_utc'] == deadline.isoformat()
+
+
 def test_bounded_delivery_preserves_partial_metrics_and_refuses_oversize(tmp_path, monkeypatch):
     source_io(tmp_path, monkeypatch)
     saved, path = live.refresh_snapshot(now_fn=lambda: NOW, live_loader=lambda: shifted_market(NOW))

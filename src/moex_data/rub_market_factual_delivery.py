@@ -101,10 +101,17 @@ def project(snapshot, *, now, code_revision):
                 allowed, reason = False, str(exc)
         previous = release["futoi_context"][name].get("previous_observation")
         previous_record = data.get("previous_completed_session") or {}
+        context = data.get("context_refresh") or {}
+        previous_freshness = {
+            "receipt": _freshness(previous_record.get("last_success_at"), now, 1200),
+            "witness": _freshness(context.get("refresh_attempted_at"), now, 1200),
+            "source_event_age_limited": False,
+            "refresh_attempted_at": previous_record.get("refresh_attempted_at")}
+        deadlines = [previous_freshness[key]["valid_until_utc"] for key in ("receipt", "witness")]
+        previous_freshness["valid_until_utc"] = min(deadlines, key=datetime.fromisoformat) if all(deadlines) else None
         previous_reason = "previous_observation_not_admitted_in_existing_consumer_scope"
         if previous is not None:
             from moex_data.rub_temporal_applicability import _previous_witness, _previous_reason
-            context = data.get("context_refresh") or {}
             previous_reason = _previous_reason(previous_record, context,
                 expected=_previous_witness(context, now), instrument=ticker+"_futures_family", data=data, now=now)
             if previous_reason is not None:
@@ -115,13 +122,16 @@ def project(snapshot, *, now, code_revision):
             "requested_trade_date": record.get("expected_trade_date"), "source_trade_date": fact.get("trade_date"),
             "values": deepcopy(fact) if allowed else None,
             "freshness": {"source": _freshness(fact.get("snapshot_ts"), now, 1200),
-                "receipt": _freshness(fact.get("availability_ts_utc"), now, 1200)},
+                "receipt": _freshness(record.get("last_success_at"), now, 1200)},
             "evidence_verification": deepcopy(item.get("evidence_verification")),
             "evidence": _proof(record), "evidence_ref": "components."+name+".data.current_intraday",
             "failure": pick(record, ("refresh_error", "refresh_error_class", "failed_attempt_at", "failure_stage", "date_witness_observations")),
             "previous_dated_observation": {"status": "AVAILABLE_DATED" if previous is not None else "UNAVAILABLE",
                 "scope": "existing_independent_previous_admission_not_current_or_completed_session",
                 "values": deepcopy(previous), "current_usable": False,
+                "freshness": previous_freshness,
+                "date_witness": pick(context, ("observed_trade_dates", "observed_current_trade_date",
+                    "previous_observed_trade_date", "through_date", "refresh_attempted_at")),
                 "evidence": _proof(previous_record),
                 "reason": None if previous is not None else previous_reason}}
     # Reuse the existing per-metric selector at the final clock. It performs no
