@@ -801,6 +801,10 @@ def test_real_refresh_to_saved_snapshot_and_consumer_preserves_independent_roles
         for module in (si_dated, cr_dated, si_stats, cr_stats):
             assert repeated[module.STORE_KEY]["evidence"]["accepted_at_utc"] == first[module.STORE_KEY]["evidence"]["accepted_at_utc"]
             assert repeated[module.STORE_KEY]["evidence_sha256"] == first[module.STORE_KEY]["evidence_sha256"]
+        from moex_data import rub_analysis_bundle_v2 as stage9
+        for scope in ("daily", "weekly"):
+            repeated["components"]["stage9_" + scope] = {
+                "status": "PARTIAL", "data": stage9.seed(scope=scope, now=now)}
         runner.base._atomic_write(path, repeated)
         reread, read_path = runner.base.read_current_snapshot(now_fn=lambda: now)
         assert read_path == path

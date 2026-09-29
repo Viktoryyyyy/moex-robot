@@ -91,3 +91,15 @@ def test_legacy_is_strict_and_original_values_are_never_adjusted():
     assert balance.from_provenance({}) == balance.STRICT
     with pytest.raises(ValueError):
         balance.from_provenance({"pair_balance_policy": None})
+
+
+def test_policy_migration_is_not_a_new_economic_observation():
+    from moex_data.rub_si_futoi_dated_context import _economic_identity
+    fiz, yur = sides(10000, 10000)
+    old = {"raw_schema_version": "v2", "source_identity_scope": "source_ticker_root",
+           "fiz": fiz, "yur": yur}
+    current = {**deepcopy(old), "balance_check": balance.admit(fiz, yur, balance.RELATIVE)}
+    assert balance.validate_factual(old) == balance.STRICT
+    assert balance.validate_factual(current) == balance.RELATIVE
+    assert _economic_identity(old) == _economic_identity(current)
+    assert "balance_check" in current  # Retained original records remain untouched.

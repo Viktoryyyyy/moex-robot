@@ -329,6 +329,9 @@ def _economic_identity(factual):
         fact.pop("availability_ts_utc", None)
         fact.pop("ingest_ts_utc", None)
         if fact.get("raw_schema_version") == "v2":
+            # Validated quality-policy metadata is not a new economic observation.
+            # Keep the original acceptance/evidence when only that policy changes.
+            fact.pop("balance_check", None)
             for record in fact.get("selected_source_records", {}).values():
                 record.pop("availability_ts_utc", None)
                 record.pop("ingest_ts_utc", None)

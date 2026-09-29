@@ -35,6 +35,8 @@ authority are rewritten. Latest-pair selection still precedes validation;
 over-limit latest pairs retain refusal evidence without an older-pair fallback.
 Current/previous and Si/CR remain independent. Clocks, TTL and the separate CR
 current-only, dated and statistics admissions remain unchanged.
+Changing validation metadata alone does not create a new economic observation
+or reset the first acceptance time of an already accepted balanced observation.
 
 ## Implementation scope
 
@@ -43,7 +45,7 @@ current-only, dated and statistics admissions remain unchanged.
 - Existing Si/CR dated serializers and retained evidence checks.
 - Existing snapshot FUTOI reader and factual/market-delivery projections.
 - Two existing v2 dataset declarations.
-- Existing live-date/identity regressions and new boundary/arithmetic tests.
+- Existing live-date/identity and Stage9 refusal fixtures, plus new boundary/arithmetic tests.
 - This task record.
 
 There is no new collector, source, history backfill, HTTP/MCP transport change,
@@ -53,6 +55,12 @@ scheduler change or widening of governance grants.
 
 Targeted native refresh, frozen Parquet replay, boundary and compatibility tests:
 `PYTHONPATH=.:src pytest -q tests/unit/test_futoi_pair_balance_tolerance.py tests/test_futoi_live_date_identity_repair_v1.py tests/test_futoi_live_identity_compatibility_v1.py tests/unit/test_futoi_publication_audit.py`.
+Result before final publication: 354 passed (Python 3.12, real PyArrow).
+Stage9/final delivery regression command:
+`PYTHONPATH=.:src pytest -q tests/test_stage9_analysis_bundle_v2.py tests/test_market_factual_delivery.py`;
+31 passed. The original +6 refusal fixture is migrated to a discrepancy above
+1%, preserving its negative scenario. The new final-delivery test seeds Stage9
+through the real builder before saved JSON/canonical read.
 
 The end-to-end tests enter real regular/fast refresh, preserve both role results,
 write JSON, use the canonical reader and final market projection, and exercise
