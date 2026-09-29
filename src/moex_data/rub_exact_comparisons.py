@@ -122,6 +122,7 @@ def _validate(store, now, *, enforce_lifetime=True):
     require(set(store) == {'evidence', 'evidence_sha256', 'checked_at_utc', 'error'}, 'exact_store_shape')
     require(stamp(store['checked_at_utc']) <= now, 'exact_store_check_future')
     require(store['error'] is None or isinstance(store['error'],str), 'exact_capture_error_shape')
+    require(store['error'] != 'exact_source_admission_expired', 'exact_source_admission_expired')
     e = store['evidence']; require(e is not None, store['error'] or 'exact_evidence_missing')
     require(digest(e) == store['evidence_sha256'], 'exact_evidence_hash')
     v2 = e.get('schema_version') == SCHEMA_V2
@@ -176,7 +177,7 @@ def _metadata(snapshot, extra, errors):
     return {'errors':errors,'evidence_sha256':snapshot[STORE_KEY].get('evidence_sha256'),
         'schema_version':(snapshot[STORE_KEY].get('evidence') or {}).get('schema_version',SCHEMA),
         'last_capture_error':snapshot[STORE_KEY].get('error'),
-        'admission_contract':source.CONTRACT.replace('_v1.', '_v2.') if extra and extra['schema_version']==SCHEMA_V2 else source.CONTRACT,
+        'admission_contract':source.CONTRACT.replace('_v1.', '_v2.') if (snapshot[STORE_KEY].get('evidence') or {}).get('schema_version')==SCHEMA_V2 else source.CONTRACT,
         'accepted_at_utc':extra['accepted_at_utc'] if extra else None,
         'valid_until_utc':(stamp(extra['accepted_at_utc'])+timedelta(seconds=345600)).isoformat() if extra else None,
         'source_scope':'exact_official_TradeStats_and_existing_CETS_5m_normalization',
@@ -355,8 +356,9 @@ def prepare_publication_expiry(snapshot, prepared, *, now):
     extra, _, _ = _supplement(snapshot, now)
     if extra is None: return
     masked = dict(snapshot)
-    masked[STORE_KEY] = {**snapshot[STORE_KEY], 'evidence':None, 'evidence_sha256':None,
-                        'error':'exact_source_admission_expired'}
+    # Retain the selected schema identity while explicitly refusing admission.
+    # A v1 expiry must keep its independent legacy calendar/metrics unchanged.
+    masked[STORE_KEY] = {**snapshot[STORE_KEY], 'error':'exact_source_admission_expired'}
     prepared['exact_comparison_expiry'] = {
         'valid_until_utc':(stamp(extra['accepted_at_utc'])+timedelta(seconds=345600)).isoformat(),
         'contexts':{'contract_price_market_oi_context':price.describe(masked,now=now),

@@ -74,3 +74,20 @@ and separate apply of the exact confirmed merged SHA after these gates in the
 ongoing snapshot delivery task. Runtime acceptance must read the new saved JSON
 and report actual dates and coverage; USD-dependent gaps remain separate.
 Final test, review, merge and applied-state evidence is recorded in the PR.
+
+## Independent review correction
+
+Review of initial head `7f22173d659f20a5a82f8fb8af35e14906ad6dcd` found that the
+existing publication-expiry mask removed the selected envelope entirely. With
+the new calendar this could wrongly revoke independent legacy CNY metrics for
+v1 and relabel v2 supplemental metadata as v1. The mask now preserves the original
+versioned envelope and explicitly refuses its admission. Regression for both
+versions checks the full prepared/published JSON against subsequent canonical
+projection and the independent oracle, including version and admission reference.
+The weekend-anchor fixture also uses the actual retained-witness constructor.
+
+Local Python compilation and `git diff --check` passed. The targeted server
+regressions use the repository venv, ordinary imports and real PyArrow in an
+isolated full checkout. Full test counts, CI run URLs, final exact-head review and
+production acceptance are attached to [PR #557](https://github.com/Viktoryyyyy/moex-robot/pull/557)
+to avoid claiming a future CI or deployment result in its own untested head.

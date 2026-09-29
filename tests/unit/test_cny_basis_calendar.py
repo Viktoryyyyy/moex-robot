@@ -89,7 +89,8 @@ def test_weekend_anchor_uses_own_eligible_date_through_real_capture(tmp_path):
     import pandas as pd
     from moex_data import step9_rub_analysis_bundle as step9
     from moex_data.futures import futoi_delta_statistics_context as engine
-    s=snapshot(witness_end='2026-09-13');basis_fixture(tmp_path,weekend_observations=True)
+    from test_contract_price_market_oi_observed import _source_snapshot
+    s=deepcopy(_source_snapshot(witness_end='2026-09-13'));basis_fixture(tmp_path,weekend_observations=True)
     spec=engine._spec(stage=7,dataset_id=engine.OBSERVED_DATE_WITNESS_DATASET_ID,
         instrument_id=engine.OBSERVED_DATE_WITNESS_INSTRUMENT_ID,timeframe=engine.OBSERVED_DATE_WITNESS_TIMEFRAME)
     path=step9._pointer_path(tmp_path,spec);pointer=json.loads(path.read_bytes())
@@ -116,3 +117,31 @@ def test_new_capture_missing_binding_does_not_restore_old_v1_policy(tmp_path):
     assert s[exact.STORE_KEY]['error'] is not None
     metric=basis.describe(s,now=NOW)['dated']['pairs']['cny_rub']['metrics']['front_spot_basis_abs']
     assert metric['anchor'] is None and metric['changes']['1']['change'] is None
+
+
+@pytest.mark.parametrize('version',['v1','v2'])
+def test_publication_expiry_preserves_full_versioned_projection(tmp_path,version):
+    s=captured(tmp_path);e=s[exact.STORE_KEY]['evidence']
+    if version=='v1':
+        e['schema_version']=exact.SCHEMA;e['contract']=src.contract();e.pop('cny_spot_selection')
+        e['entries']={k:v for k,v in e['entries'].items() if k.split('/')[0] in e['price_target_dates']+e['basis_target_dates']}
+    s[exact.STORE_KEY]['evidence_sha256']=src.digest(e)
+    for key in (price.STORE_KEY,basis.STORE_KEY):
+        store=s[key];store['evidence']['accepted_at_utc']=(NOW+timedelta(hours=1)).isoformat()
+        store['last_capture_attempt_at_utc']=(NOW+timedelta(hours=1)).isoformat()
+        store['evidence_sha256']=src.digest(store['evidence'])
+    before=NOW+timedelta(hours=96)-timedelta(seconds=1)
+    after=NOW+timedelta(hours=96,seconds=1)
+    prepared={'release':{basis.OUTPUT_KEY:basis.describe(s,now=before)}}
+    exact.prepare_publication_expiry(s,prepared,now=before)
+    exact.apply_publication_expiry(prepared,now=after)
+    expected=basis.describe(s,now=after)
+    actual=prepared['release'][basis.OUTPUT_KEY]
+    assert actual==expected
+    assert actual['dated']['supplemental_evidence']['schema_version']=='exact_comparison_evidence.'+version
+    assert actual['dated']['supplemental_evidence']['admission_contract'].endswith('_'+version+'.json')
+    path=tmp_path/'published.json';path.write_text(json.dumps(prepared['release']))
+    basis.verify_projection(s,json.loads(path.read_bytes()),now=after)
+    metric=actual['dated']['pairs']['cny_rub']['metrics']['front_spot_basis_abs']
+    if version=='v1':assert metric['anchor']['status']=='AVAILABLE' and 'date_selection' not in metric
+    else:assert metric['anchor'] is None and metric['date_selection']['reason']=='exact_source_admission_expired'
