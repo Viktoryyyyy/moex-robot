@@ -241,6 +241,35 @@ def test_real_heavy_refresh_saved_json_canonical_reader_stage9_and_compact(tmp_p
     second,_=live.refresh_snapshot(now_fn=lambda:NOW,live_loader=_native_body)
     assert second[exact.STORE_KEY]['evidence_sha256']==saved[exact.STORE_KEY]['evidence_sha256']
 
+    # A newer legacy acceptance may coexist with an unchanged older supplement.
+    # Cross only the supplemental deadline during real prepare/finalize/finish.
+    older=deepcopy(saved)
+    for key in (price.STORE_KEY,basis.STORE_KEY):
+        store=older[key];store['evidence']['accepted_at_utc']=(NOW+timedelta(hours=1)).isoformat()
+        store['last_capture_attempt_at_utc']=(NOW+timedelta(hours=1)).isoformat()
+        store['evidence_sha256']=src.digest(store['evidence'])
+    before_expiry=NOW+timedelta(hours=96)-timedelta(seconds=1)
+    after_expiry=NOW+timedelta(hours=96,seconds=1)
+    prepared=bundles.prepare(older,now=before_expiry)
+    exact.prepare_publication_expiry(older,prepared,now=before_expiry)
+    assert prepared['release']['contract_price_market_oi_context']['dated']['comparison_coverage']['1']['available']==4
+    exact.apply_publication_expiry(prepared,now=after_expiry)
+    live.base.finalize_snapshot_timing(older,started=before_expiry,completed=after_expiry)
+    bundles.finish(older,prepared,now=after_expiry)
+    live.base._atomic_write(path,older)
+    late,_=live.base.read_current_snapshot(now_fn=lambda:after_expiry)
+    for view in (json.loads(path.read_bytes()),late):
+        for scope in ('daily','weekly'):
+            items=view['components']['stage9_'+scope]['data']['sections']['historical_comparisons']['items']
+            ctx=items['contract_price_market_oi_context']['values']['dated']
+            assert ctx['comparison_coverage']['1']['available']==0
+            assert ctx['comparison_coverage']['5']['available']==4  # independent legacy base
+            assert ctx['contracts']['si_front']['changes']['1']['reason']=='exact_source_admission_expired'
+            assert items['historical_basis_carry_context']['values']['dated']['pairs']['cny_rub']['metrics']['front_next_spread_abs']['anchor']['status']=='AVAILABLE'
+    late_compact=release.compact(late,now=after_expiry,code_revision='a'*40)
+    assert late_compact['contract_price_market_oi_context']['dated']['comparison_coverage']['1']['available']==0
+    assert late_compact['contract_price_market_oi_context']['dated']['comparison_coverage']['5']['available']==4
+
 
 def test_three_retries_and_expired_attempts_keep_first_acceptance(tmp_path):
     s=captured(tmp_path); original=deepcopy(s[exact.STORE_KEY]['evidence'])

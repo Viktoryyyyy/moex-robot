@@ -114,15 +114,15 @@ def capture_snapshot(snapshot, previous, *, root, now_fn, refresh_started_at, ht
 def _validate(store, now, *, enforce_lifetime=True):
     require(set(store) == {'evidence', 'evidence_sha256', 'checked_at_utc', 'error'}, 'exact_store_shape')
     require(stamp(store['checked_at_utc']) <= now, 'exact_store_check_future')
-    require(store['error'] is None, 'exact_capture_refused: '+str(store['error']))
+    require(store['error'] is None, str(store['error']))
     e = store['evidence']; require(digest(e) == store['evidence_sha256'], 'exact_evidence_hash')
     require(set(e) == {'schema_version', 'contract', 'bindings', 'binding_proof', 'observed_dates', 'witness_proof',
             'original_byte_buffers', 'expiry_dates', 'current_candidate_date', 'price_target_dates', 'basis_target_dates',
             'capture_started_at_utc', 'accepted_at_utc', 'entries'} and e['schema_version'] == SCHEMA
             and e['contract'] == source.contract(), 'exact_evidence_identity_or_contract')
     start, accepted = stamp(e['capture_started_at_utc']), stamp(e['accepted_at_utc'])
-    require(start <= accepted <= stamp(store['checked_at_utc']) <= now and (not enforce_lifetime or (now-accepted).total_seconds() <= 345600),
-            'exact_evidence_expired_or_noncausal')
+    require(start <= accepted <= stamp(store['checked_at_utc']) <= now, 'exact_evidence_noncausal')
+    require(not enforce_lifetime or (now-accepted).total_seconds() <= 345600, 'exact_source_admission_expired')
     buffers = price._decode_buffers(e['original_byte_buffers'])
     require(set(buffers) == {d for _,d in price._proof_references({k:v for k,v in e.items() if k != 'entries'})}, 'exact_binding_buffer_inventory')
     require(e['expiry_dates'] == _binding(e, buffers, start), 'exact_expiry_original_mismatch')
@@ -306,3 +306,30 @@ def basis_coverage(view, e):
     view['supplemental_evidence'] = {'schema_version':SCHEMA, 'evidence_digest':e['_exact']['evidence_sha256'],
         **{k:v for k,v in e['_exact'].items() if k!='evidence_sha256'}, 'audit_reference':'input_snapshot.json#/'+STORE_KEY}
     return view
+
+
+def prepare_publication_expiry(snapshot, prepared, *, now):
+    """Precompute a verified legacy-only projection before the final live clock.
+
+    The supplemental deadline can precede the legacy deadline. No evidence I/O
+    or new acquisition is deferred to final publication; valid legacy metrics
+    remain available if just the supplemental admission expires in that gap.
+    """
+    if prepared is None or STORE_KEY not in snapshot: return
+    extra, _, _ = _supplement(snapshot, now)
+    if extra is None: return
+    masked = dict(snapshot)
+    masked[STORE_KEY] = {**snapshot[STORE_KEY], 'error':'exact_source_admission_expired'}
+    prepared['exact_comparison_expiry'] = {
+        'valid_until_utc':(stamp(extra['accepted_at_utc'])+timedelta(seconds=345600)).isoformat(),
+        'contexts':{'contract_price_market_oi_context':price.describe(masked,now=now),
+                    basis.OUTPUT_KEY:basis.describe(masked,now=now)}}
+
+
+def apply_publication_expiry(prepared, *, now):
+    """Pure downgrade at the publication clock; never renew source or admission."""
+    fallback = (prepared or {}).get('exact_comparison_expiry')
+    if fallback is None or stamp(now) <= stamp(fallback['valid_until_utc']): return
+    for key, context in fallback['contexts'].items():
+        prepared['release'][key] = deepcopy(context)
+        prepared['release'][key]['checked_at_utc'] = stamp(now).isoformat()

@@ -56,7 +56,10 @@ specific refusal, and evidence references. Each horizon has explicit available /
 required coverage; Stage9 sees partial coverage instead of AVAILABLE anchors
 concealing missing lags. First economic acceptance survives repeated captures
 and expiry. A separate failed-attempt clock controls retries; failures do not
-renew the evidence lifetime. The shared byte budget is sticky before subsequent
+renew the evidence lifetime. A legacy-only projection is prepared before the
+final live clock and selected if only supplemental admission expires before
+publication, preserving independent legacy results without final-clock source
+I/O. The shared byte budget is sticky before subsequent
 requests or cache writes and includes original binding buffers.
 
 ## Actual source verification, 2026-09-29
