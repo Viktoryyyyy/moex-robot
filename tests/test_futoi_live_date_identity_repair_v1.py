@@ -792,6 +792,11 @@ def test_real_refresh_to_saved_snapshot_and_consumer_preserves_independent_roles
             assert si_stats.describe(value, now=now)["status"] == "AVAILABLE"
             assert cr_stats.describe(value, now=now)["status"] == "AVAILABLE"
         capture_all(snapshot, None)
+        from moex_data.futures import futoi_current_pair_authority as authority
+        admission = snapshot["components"]["futoi_live_cr"]["data"]["current_pair_admission"]
+        retained = snapshot[cr_dated.CURRENT_KEY]["evidence"]["original_current_admission"]
+        assert retained["policy_amendment"] == admission["policy_amendment"]
+        assert retained["policy_amendment"]["ref"] == authority.AMENDMENT_REF
         first = deepcopy(snapshot)
         first_received = first["components"]["futoi_live"]["data"]["previous_completed_session"]["factual"]["availability_ts_utc"]
         now += timedelta(seconds=30)
@@ -808,6 +813,26 @@ def test_real_refresh_to_saved_snapshot_and_consumer_preserves_independent_roles
         runner.base._atomic_write(path, repeated)
         reread, read_path = runner.base.read_current_snapshot(now_fn=lambda: now)
         assert read_path == path
+        assert cr_dated._validated_current_capture(reread[cr_dated.CURRENT_KEY])[
+            "original_current_admission"]["policy_amendment"] == retained["policy_amendment"]
+        # Rehashing the outer envelope cannot authorize a different policy/root/grant.
+        import json
+        for defect in ("missing", "digest", "source_ticker", "scope", "original_grant_sha256", "audit_policy"):
+            corrupted = deepcopy(reread[cr_dated.CURRENT_KEY])
+            captured = corrupted["evidence"]["original_current_admission"]
+            if defect == "missing":
+                captured.pop("policy_amendment")
+            elif defect == "digest":
+                captured["policy_amendment"]["sha256"] = "0" * 64
+            else:
+                amendment = captured["policy_amendment"]
+                contents = json.loads(amendment["text"])
+                contents[defect] = "wrong"
+                amendment["text"] = json.dumps(contents)
+                amendment["sha256"] = sha256(amendment["text"].encode()).hexdigest()
+            corrupted["evidence_sha256"] = cr_dated.common._digest(corrupted["evidence"])
+            with pytest.raises(ValueError):
+                cr_dated._validated_current_capture(corrupted)
         for component in ("futoi_live", "futoi_live_cr"):
             fact = reread["components"][component]["data"]["current_intraday"]["factual"]
             assert fact["balance_check"]["signed_net_imbalance"] == 6
@@ -825,6 +850,57 @@ def test_real_refresh_to_saved_snapshot_and_consumer_preserves_independent_roles
             assert item["status"] == "AVAILABLE"
             assert item["values"]["balance_check"]["signed_net_imbalance"] == 6
             assert item["evidence"]["provenance"]["pair_balance_policy"] == item["values"]["balance_check"]["policy"]
+
+
+@pytest.mark.parametrize("defect", [None, "missing", "source_ticker", "scope", "original_grant_sha256",
+    "audit_policy", "pair_balance_policy", "maximum_age_seconds", "historical_authority",
+    "revoked_grant", "failed_gate", "expired", "different_grant"])
+def test_relative_cr_current_requires_exact_policy_amendment(monkeypatch, tmp_path, defect):
+    """Real materialization/audit/admission; only source I/O and clocks are replaced."""
+    from copy import deepcopy
+    from datetime import timedelta
+    from hashlib import sha256
+    import json
+    from pathlib import Path
+    from moex_data.futures import futoi_current_pair_authority as authority
+    materializer, _ = _parquet_setup(monkeypatch, tmp_path, source.CR_INSTRUMENT_ID, day="2026-09-24")
+    monkeypatch.setattr(materializer, "_utc_now_root", lambda: "2026-09-24T07:36:00+00:00")
+    _, proof = source._materialize_target(tmp_path, "2026-09-24", "amendment",
+        instrument_id=source.CR_INSTRUMENT_ID, timeout=1, raw_schema_version="v2")
+    fact = source.replay_root_factual(tmp_path, proof, instrument_id=source.CR_INSTRUMENT_ID,
+                                    trade_date="2026-09-24")
+    now = pd.Timestamp("2026-09-24T07:36:00Z").to_pydatetime()
+    record = dict(status="FRESH", factual=fact, provenance=proof, last_success_at=now.isoformat(), failed_attempt_at=None)
+    repo = Path(__file__).resolve().parents[1]
+    governance_ref = "contracts/intelligence/usdrubf_futoi_live_acceptance_governance_v1.json"
+    values = json.loads((repo / governance_ref).read_bytes())
+    entry = values["instrument_acceptance"][source.CR_INSTRUMENT_ID]["current_pair_acceptance"]
+    for ref in (entry["evidence_ref"], authority.AMENDMENT_REF):
+        path = tmp_path / ref
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((repo / ref).read_bytes())
+    amendment_path = tmp_path / authority.AMENDMENT_REF
+    if defect == "missing":
+        amendment_path.unlink()
+    elif defect == "revoked_grant":
+        entry["accepted"] = False
+    elif defect == "failed_gate":
+        next(g for g in values["gates"] if g.get("required") is True)["status"] = "BLOCKED"
+    elif defect == "expired":
+        now += timedelta(seconds=authority.MAX_AGE_SECONDS + 1)
+    elif defect == "different_grant":
+        entry["evidence_ref"] = "another-grant.json"
+        (tmp_path / entry["evidence_ref"]).write_bytes((repo / authority.ORIGINAL_GRANT_REF).read_bytes())
+    elif defect is not None:
+        content = json.loads(amendment_path.read_bytes())
+        content[defect] = True if defect == "historical_authority" else "wrong"
+        amendment_path.write_text(json.dumps(content))
+    result = authority.admit(values, record, root=tmp_path, repo_root=tmp_path, now=now)
+    assert result["allowed"] is (defect is None), result
+    if defect is None:
+        amendment = result["policy_amendment"]
+        assert amendment["sha256"] == sha256(amendment_path.read_bytes()).hexdigest()
+        authority.validate_policy_binding(result["policy"], entry, deepcopy(amendment))
 
 
 @pytest.mark.parametrize("instrument", source.LIVE_INSTRUMENT_IDS)

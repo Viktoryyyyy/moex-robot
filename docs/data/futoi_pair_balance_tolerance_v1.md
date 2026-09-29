@@ -43,6 +43,7 @@ or reset the first acceptance time of an already accepted balanced observation.
 - New arithmetic helper and versioned policy contract.
 - Existing source-native v2 producer, publication audit and delta/statistics reader.
 - Existing Si/CR dated serializers and retained evidence checks.
+- Existing CR current-pair authority and a versioned quality-policy amendment.
 - Existing snapshot FUTOI reader and factual/market-delivery projections.
 - Two existing v2 dataset declarations.
 - Existing live-date/identity and Stage9 refusal fixtures, plus new boundary/arithmetic tests.
@@ -50,6 +51,19 @@ or reset the first acceptance time of an already accepted balanced observation.
 
 There is no new collector, source, history backfill, HTTP/MCP transport change,
 scheduler change or widening of governance grants.
+
+Review 5354696425 / inline 4135195535 identified an audit/grant policy mismatch.
+The new CR current-only amendment binds the unchanged original grant reference
+and SHA to the relative audit policy, root identity and balance contract.
+Admission still requires the original governance gates and 1200-second TTL.
+Its exact validated bytes are retained in current capture; portable replay
+checks the actual audit policy against the retained amendment. Missing,
+altered, incorrectly scoped or rehashed forged amendments fail closed.
+Legacy strict evidence retains its original admission without an amendment.
+Correction validation: `PYTHONPATH=.:src pytest -q
+tests/test_futoi_live_date_identity_repair_v1.py
+tests/unit/test_futoi_publication_audit.py
+tests/unit/test_cr_futoi_dated_comparisons.py` — 417 passed with real PyArrow.
 
 ## Validation and delivery
 
