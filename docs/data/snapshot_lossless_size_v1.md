@@ -55,6 +55,9 @@ unchanged. The existing MCP bridge forwards the self-describing JSON unchanged.
   `tests/test_futoi_live_date_identity_repair_v1.py` and
   `tests/unit/test_usd_cets_reference.py`: decode the new carrier before their
   unchanged semantic assertions.
+- `tests/unit/test_exact_comparison_sources.py`: the same carrier migration for
+  saved current JSON, retaining full 1/5/20 Price/OI, 1/5 basis/carry, immutable
+  replay, repeated-observation identity and publication-expiry assertions.
 - `tests/unit/test_rub_factual_snapshot_http_server.py`: optional test-client
   timeout for real-builder serialization tests, default unchanged. Production
   deadlines/TTLs are untouched.
@@ -62,6 +65,7 @@ unchanged. The existing MCP bridge forwards the self-describing JSON unchanged.
   `docs/MOEX_BOT_RUB_SNAPSHOT_MANUAL_EXPORT.md`,
   `docs/MOEX_BOT_RUB_FACTUAL_SNAPSHOT_NETWORK_API_v1.md`,
   `docs/MOEX_BOT_RUB_FACTUAL_SNAPSHOT_CHATGPT_MCP_BRIDGE_v1.md`,
+  `docs/USDRUBF_RUB_INTELLIGENCE_S7_3_CHAT_ANALYSIS_SNAPSHOT_V1.md`,
   `docs/USDRUBF_RUB_INTELLIGENCE_S7_3_ANALYSIS_CHAT_CONSUMER_CONTRACT_V1.md`,
   `docs/USDRUBF_RUB_INTELLIGENCE_S7_3_DAILY_ANALYSIS_CHAT_CONTRACT_V1.md`, and
   `docs/USDRUBF_RUB_INTELLIGENCE_S7_3_WEEKLY_ANALYSIS_CHAT_CONTRACT_V1.md`.
@@ -95,6 +99,15 @@ refresh or mutate input. The 2-second unit HTTP client deadline was unsuitable
 for the real-builder integration under suite load; that one test now requests
 30 seconds explicitly, without changing production timeouts or TTL. Correction
 validation across codec, real builder and HTTP tests passed **58 tests in 17.71 s**.
+
+The first full CI run (36687247806 at 229567fd14ddd998588913a38a3d33f55aeef58d)
+compiled successfully and reported 7,694 passed, 37 subtests passed and one failure
+in the exact-comparison regression's direct raw-JSON assertion. The two saved
+snapshot reads in that test now expand the carrier; frozen audit input reads
+remain unchanged. This was a test migration failure, not an infrastructure fault.
+The complete exact-comparison test file then passed **36 tests in 95.82 s**,
+including saved JSON, canonical/Stage9/compact views, full frozen export replay,
+repeat capture and publication TTL expiry. Final exact-head CI remains required.
 
 Final-head review, complete compileall/pytest CI, merge and applied-state evidence
 are recorded on the task PR after verification. They are mandatory apply gates.

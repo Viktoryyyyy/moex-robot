@@ -35,6 +35,18 @@ On the canonical server service unit, `MOEX_DATA_ROOT=/home/trader/moex_bot/data
 
 A process-scoped non-blocking lock prevents overlapping refresh writers. A reader therefore sees either the previous complete snapshot or the new complete snapshot, never a partially written JSON document.
 
+Large persisted files use the lossless `rub_snapshot_storage.v1` carrier. The
+canonical reader expands and verifies its complete canonical JSON bytes before
+applying the existing logical `rub_chat_analysis_snapshot.v1` validation. Large
+HTTP/current-export payloads may use `rub_snapshot_references.v1`, with all
+distinct values and exact-repeat references inside `data`. Every field path and
+freshness rule in this contract addresses the expanded logical snapshot.
+Standalone raw consumers must use `moex_data.rub_snapshot_serialization.loads` or
+`python -m moex_data.rub_snapshot_serialization --expand FILE` first and reject
+decoding errors. Legacy expanded files remain readable. Representation changes
+never prune history, alter evidence/clocks or grant admission. See
+`MOEX_BOT_RUB_SNAPSHOT_MANUAL_EXPORT.md` for the current export and full fallback.
+
 ## Top-level freshness
 
 - expected refresh interval: 600 seconds;
