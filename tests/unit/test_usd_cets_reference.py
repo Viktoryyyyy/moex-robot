@@ -32,6 +32,50 @@ def evidence(**kwargs):
     return usd.capture(now_fn=lambda:NOW,http_get=get,env={'MOEX_API_KEY':'synthetic'})
 
 
+def zero_payload(*,status='T',native_date=False,last=None):
+    obj=payload(status=status);table=obj['marketdata']
+    for field,value in {'NUMTRADES':0,'LAST':last,'OPEN':None,'HIGH':None,'LOW':None,'WAPRICE':None,'TIME':'09:00:00'}.items():
+        table['data'][0][table['columns'].index(field)]=value
+    if not native_date:
+        index=table['columns'].index('TRADEDATE');table['columns'].pop(index);table['data'][0].pop(index)
+    return obj
+
+
+@pytest.mark.parametrize('status',['T','A','N'])
+@pytest.mark.parametrize('native_date,last',[(False,None),(True,84.5)])
+def test_zero_trades_preserve_valid_source_without_inventing_a_trade(status,native_date,last):
+    from moex_data.rub_currency_market_state import describe
+    obj=zero_payload(status=status,native_date=native_date,last=last)
+    e=usd.capture(now_fn=lambda:NOW,http_get=lambda url,**kw:Response(obj,url,kw['params']),env={'MOEX_API_KEY':'synthetic'})
+    row=usd.replay(e,now=NOW);data=usd.attach(market(),e,now=NOW)
+    assert row['trades']==0 and row['source_trading_status']==status and row['last']==last
+    assert row['timestamp'] is None and row['age_seconds'] is None
+    assert row['timestamp_semantics']=='no_same_session_trade'
+    assert row['read_freshness_reason']=='USD_no_same_session_trades'
+    assert row['received_at_utc']==e['response']['received_at_utc']
+    assert row['source_update_timestamp_utc']==NOW.isoformat()
+    assert not row['quote_usable'] and not usd.usable(data,now=NOW)
+    state=describe(row,now=NOW,current_admitted=True)
+    assert state['state']==('NOT_TRADING_OBSERVED' if status=='N' else 'NO_TRADES_OBSERVED')
+    assert state['reported_trade_count']==0 and state['trade_activity']=='NO_TRADES_OBSERVED'
+    assert not state['current_price_usable'] and not state['session_completion_proven']
+    if last is None:assert state['last_observation'] is None
+    else:assert state['last_observation']['values']['last']==last
+    later=usd.replay(e,now=NOW+timedelta(seconds=61))
+    assert later['timestamp'] is None and later['received_at_utc']==row['received_at_utc']
+    assert later['source_update_timestamp_utc']==row['source_update_timestamp_utc']
+
+
+@pytest.mark.parametrize('count',[-1,False,0.0,'0',None])
+def test_invalid_trade_counter_remains_a_source_error(count):
+    obj=zero_payload();t=obj['marketdata'];t['data'][0][t['columns'].index('NUMTRADES')]=count
+    e=usd.capture(now_fn=lambda:NOW,http_get=lambda url,**kw:Response(obj,url,kw['params']),env={'MOEX_API_KEY':'synthetic'})
+    with pytest.raises(ValueError,match='USD_invalid_numtrades'):usd.replay(e,now=NOW)
+    row=usd.attach(market(),e,now=NOW)['instruments']['usd_tom']
+    from moex_data.rub_currency_market_state import describe
+    assert describe(row,now=NOW)['state']=='SOURCE_UNAVAILABLE'
+
+
 def test_live_reference_replays_identity_without_deliverable_spot_claim():
     e=evidence();data=usd.attach(market(),e,now=NOW)
     assert usd.usable(data,now=NOW)
@@ -162,7 +206,8 @@ def test_all_eight_sync_through_real_fast_collection_saved_json_and_consumer(tmp
 
 
 @pytest.mark.parametrize('defect',[None,'auth','outer_null','outer_list','raw_null','raw_list','table_null','row_null','url_list',
-    'native_date_missing','native_date_prior','native_date_empty','native_date_bad','native_date_future','closed_missing_date'])
+    'native_date_missing','native_date_prior','native_date_empty','native_date_bad','native_date_future','closed_missing_date',
+    'zero_T','zero_A','zero_N'])
 def test_real_fast_collection_disk_and_read_keep_USD_failure_independent(tmp_path,defect):
     from test_synchronized_live_market_oi_context import _payloads
     from moex_data import synchronized_live_market_oi_context_partial as live
@@ -176,7 +221,9 @@ def test_real_fast_collection_disk_and_read_keep_USD_failure_independent(tmp_pat
         columns=body['marketdata']['columns']
         for row in body['marketdata']['data']:row[columns.index('SYSTIME')]=source_time
     def get(url,**kw):
-        if usd.SECID in url:return Response(payload(),url,kw['params'],status=401 if defect=='auth' else 200)
+        if usd.SECID in url:
+            obj=zero_payload(status=defect[-1]) if defect and defect.startswith('zero_') else payload()
+            return Response(obj,url,kw['params'],status=401 if defect=='auth' else 200)
         return Response(cny if 'CNYRUB_TOM' in url else forts,url,kw['params'])
     def loader():return live.fetch_live_snapshot_with_usd(http_get=get,now_fn=lambda:NOW,env={'MOEX_API_KEY':'synthetic'})
     value=fast.refresh(tmp_path,loader=loader,clock=lambda:NOW)
@@ -218,6 +265,14 @@ def test_real_fast_collection_disk_and_read_keep_USD_failure_independent(tmp_pat
     assert data['instruments']['si_front']['price_oi_usable'] is True
     assert data['instruments']['cr_front']['price_oi_usable'] is True
     assert len(projection.basis_metrics(view))==(30 if defect is None else 22)
+    if defect and defect.startswith('zero_'):
+        row=data['instruments']['usd_tom'];state=row['market_state']
+        assert row['trades']==0 and row['last'] is None and row['timestamp'] is None
+        assert row['read_freshness_reason']=='USD_no_same_session_trades'
+        assert state['state']==('NOT_TRADING_OBSERVED' if defect=='zero_N' else 'NO_TRADES_OBSERVED')
+        assert state['native_trading_status']==defect[-1] and state['reported_trade_count']==0
+        assert state['last_observation'] is None and state['current_price_usable'] is False
+        assert row['received_at_utc']==e['response']['received_at_utc']
     if defect and (defect.startswith('native_date_') or defect=='closed_missing_date'):
         row=data['instruments']['usd_tom'];state=row['market_state']
         assert row['timestamp'] is None and row['native_trade_date_verified'] is False
@@ -230,8 +285,8 @@ def test_real_fast_collection_disk_and_read_keep_USD_failure_independent(tmp_pat
     assert (folder/'current.json').read_bytes()==raw
 
 
-@pytest.mark.parametrize('missing_native_date',[False,True])
-def test_real_heavy_saved_canonical_read_and_final_delivery_recheck_currency_TTL(tmp_path,monkeypatch,missing_native_date):
+@pytest.mark.parametrize('source_case',['fresh','missing_native_date','zero_trades'])
+def test_real_heavy_saved_canonical_read_and_final_delivery_recheck_currency_TTL(tmp_path,monkeypatch,source_case):
     from test_stage9_analysis_bundle_v2 import source_io,live,shifted_market,NOW as clock
     from src.moex_research.consumers import usdrubf_chat_snapshot_consumer as consumer
     source_io(tmp_path,monkeypatch)
@@ -239,10 +294,12 @@ def test_real_heavy_saved_canonical_read_and_final_delivery_recheck_currency_TTL
     source=shifted_market(clock)
     source['instruments']['cnyrub_tom']['source_trading_status']='A'
     e=evidence()
-    if missing_native_date:
+    if source_case=='missing_native_date':
         obj=json.loads(base64.b64decode(e['response']['bytes_base64']));t=obj['marketdata'];i=t['columns'].index('TRADEDATE')
         t['columns'].pop(i);t['data'][0].pop(i)
         raw=json.dumps(obj).encode();e['response']['bytes_base64']=base64.b64encode(raw).decode();e['response']['sha256']=usd.sha256(raw).hexdigest()
+    elif source_case=='zero_trades':
+        e=usd.capture(now_fn=lambda:clock,http_get=lambda url,**kw:Response(zero_payload(),url,kw['params']),env={'MOEX_API_KEY':'synthetic'})
     source=usd.attach(source,e,now=clock)
     _,path=live.refresh_snapshot(now_fn=lambda:clock,live_loader=lambda:source)
     raw=path.read_bytes()
@@ -250,18 +307,28 @@ def test_real_heavy_saved_canonical_read_and_final_delivery_recheck_currency_TTL
     times=iter((clock,clock+timedelta(seconds=61)))
     after=consumer.load_market_factual(now_fn=lambda:next(times),reader=live.base.read_current_snapshot,code_revision='a'*40)
     for key in ('cnyrub_tom','usd_tom'):
-        admitted=key!='usd_tom' or not missing_native_date
+        admitted=key!='usd_tom' or source_case=='fresh'
         assert before['prices'][key]['status']==('AVAILABLE' if admitted else 'UNAVAILABLE')
         assert before['prices'][key]['market_state']['current_price_usable'] is admitted
         assert after['prices'][key]['status']=='UNAVAILABLE'
         assert after['prices'][key]['market_state']['current_price_usable'] is False
-        assert after['prices'][key]['market_state']['last_observation']['current_use_allowed'] is False
-    if missing_native_date:
+        observation=after['prices'][key]['market_state']['last_observation']
+        if observation is not None:assert observation['current_use_allowed'] is False
+    if source_case!='fresh':
         row=before['prices']['usd_tom']
         assert row['source_identity']['timestamp'] is None
-        assert row['reason']=='USD_native_trade_date_missing_or_invalid'
-        assert row['market_state']['last_observation']['values']['last']==84.5
-        assert row['market_state']['last_observation']['values']['native_trade_date_verified'] is False
+        if source_case=='missing_native_date':
+            assert row['reason']=='USD_native_trade_date_missing_or_invalid'
+            assert row['market_state']['last_observation']['values']['last']==84.5
+            assert row['market_state']['last_observation']['values']['native_trade_date_verified'] is False
+        else:
+            assert row['reason']=='USD_no_same_session_trades'
+            assert row['market_state']['state']=='NO_TRADES_OBSERVED'
+            assert row['market_state']['reported_trade_count']==0
+            assert row['market_state']['native_trading_status']=='T'
+            assert row['market_state']['last_observation'] is None
+            saved=json.loads(raw)['components']['synchronized_live_market_oi']['data']['instruments']['usd_tom']
+            assert saved['trades']==0 and saved['market_state']['state']=='NO_TRADES_OBSERVED'
         # This legacy heavy fixture lacks native expiry metadata, so its four
         # existing carry metrics are unavailable independently of USD admission.
         assert before['basis_carry']['admitted_metric_count']==18

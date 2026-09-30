@@ -105,7 +105,8 @@ def replay(e, *, now):
     day=version['trade_date']
     require(isinstance(day,str) and datetime.fromisoformat(day).date().isoformat()==day
         and version.get('trade_session_date')==day and '2026-02-16'<=day<=now.astimezone(core.MOSCOW).date().isoformat(),'USD_trade_date')
-    require(type(row.get('NUMTRADES')) is int and row['NUMTRADES']>0,'USD_no_same_session_trades')
+    require(type(row.get('NUMTRADES')) is int and row['NUMTRADES']>=0,'USD_invalid_numtrades')
+    has_trades=row['NUMTRADES']>0
     update=core._source_event_time(row['SYSTIME'],'USD_source_update')
     require(update<=received,'USD_update_receipt_order')
     require(update.astimezone(core.MOSCOW).date().isoformat()==day,'USD_update_session_date_mismatch')
@@ -115,7 +116,7 @@ def replay(e, *, now):
     except ValueError: valid_day=False
     date_verified=valid_day and native_day==day
     trade=None
-    if date_verified:
+    if date_verified and has_trades:
         trade=core._source_event_time(native_day+'T'+row['TIME'],'USD_last_trade')
         require(trade<=update,'USD_event_update_receipt_order')
     normalized=core._normalize_row(logical_id='usd_tom',secid=SECID,row=row,source_id=IDENTITY['source_id'],
@@ -124,15 +125,17 @@ def replay(e, *, now):
     normalized.update(IDENTITY, timestamp=trade.isoformat() if trade is not None else None,
         source_trade_date=native_day if valid_day else None,native_trade_date=native_day,
         source_version_trade_date=day,native_trade_date_verified=date_verified,
-        timestamp_semantics='native_last_trade_date_and_TIME' if date_verified else 'native_last_trade_date_unproven',
+        timestamp_semantics=('no_same_session_trade' if not has_trades else
+            'native_last_trade_date_and_TIME' if date_verified else 'native_last_trade_date_unproven'),
         source_update_timestamp_utc=update.isoformat(),
         asset_type='ruble_settled_currency_position_reference',age_seconds=age,
-        stale=not date_verified or age>60 or row.get('TRADINGSTATUS')!='A',
+        stale=not has_trades or not date_verified or age>60 or row.get('TRADINGSTATUS')!='A',
         reference_semantics=POLICY['basis_semantics'],carry_semantics=POLICY['carry_semantics'])
     normalized['spot_price_usable']=normalized['stale'] is False and normalized.get('last') is not None and normalized['last']>0
     if normalized['stale']:
         reason=('USD_native_trade_date_mismatch' if valid_day else 'USD_native_trade_date_missing_or_invalid') if not date_verified else (
             'source_not_trading' if row.get('TRADINGSTATUS')!='A' else 'source_age_exceeds_threshold')
+        if not has_trades: reason='USD_no_same_session_trades'
         normalized.update(quote_usable=False,quote_stale=True,
             read_freshness_reason=reason)
     return normalized
