@@ -299,6 +299,7 @@ def test_real_fast_collection_disk_and_read_keep_USD_failure_independent(tmp_pat
 
 @pytest.mark.parametrize('source_case',['fresh','missing_native_date','zero_trades','stored_count_zero'])
 def test_real_heavy_saved_canonical_read_and_final_delivery_recheck_currency_TTL(tmp_path,monkeypatch,source_case):
+    from moex_data.rub_snapshot_serialization import loads
     from test_stage9_analysis_bundle_v2 import source_io,live,shifted_market,NOW as clock
     from src.moex_research.consumers import usdrubf_chat_snapshot_consumer as consumer
     source_io(tmp_path,monkeypatch)
@@ -315,7 +316,7 @@ def test_real_heavy_saved_canonical_read_and_final_delivery_recheck_currency_TTL
     source=usd.attach(source,e,now=clock)
     _,path=live.refresh_snapshot(now_fn=lambda:clock,live_loader=lambda:source)
     if source_case=='stored_count_zero':
-        saved=json.loads(path.read_bytes());row=saved['components']['synchronized_live_market_oi']['data']['instruments']['usd_tom']
+        saved=loads(path.read_bytes());row=saved['components']['synchronized_live_market_oi']['data']['instruments']['usd_tom']
         row.update(trades=0,read_freshness_reason='USD_no_same_session_trades',
                    market_state={'state':'NO_TRADES_OBSERVED','source_evidence_verified':True})
         path.write_text(json.dumps(saved))
@@ -352,7 +353,7 @@ def test_real_heavy_saved_canonical_read_and_final_delivery_recheck_currency_TTL
             assert row['market_state']['reported_trade_count']==0
             assert row['market_state']['native_trading_status']=='T'
             assert row['market_state']['last_observation'] is None
-            saved=json.loads(raw)['components']['synchronized_live_market_oi']['data']['instruments']['usd_tom']
+            saved=loads(raw)['components']['synchronized_live_market_oi']['data']['instruments']['usd_tom']
             assert saved['trades']==0 and saved['market_state']['state']=='NO_TRADES_OBSERVED'
         else:
             assert row['reason']=='USD_normalized_original_mismatch'

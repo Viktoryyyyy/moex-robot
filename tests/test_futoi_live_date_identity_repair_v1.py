@@ -709,7 +709,8 @@ def test_real_refresh_to_saved_snapshot_and_consumer_preserves_independent_roles
             assert completed["source_context_schema_version"] == source.SCHEMA_VERSION_V2
             assert completed["source_factual_scope"] == "latest_completed_observed_date_not_current_intraday"
     snapshot, path = runner.refresh_snapshot(now_fn=lambda: now)
-    saved = json.loads(path.read_text(encoding="utf-8"))
+    from moex_data.rub_snapshot_serialization import loads
+    saved = loads(path.read_text(encoding="utf-8"))
     assert saved == snapshot
     temporal.apply(saved, now=now)
     consumer = projection.consumer_context(saved)["futoi_context"]

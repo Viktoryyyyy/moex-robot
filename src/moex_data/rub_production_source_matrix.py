@@ -168,6 +168,7 @@ def build(snapshot):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--snapshot',type=Path,required=True);parser.add_argument('--output',type=Path,required=True)
-    args=parser.parse_args();raw=args.snapshot.read_bytes();result=build(json.loads(raw));result['snapshot_sha256']=hashlib.sha256(raw).hexdigest()
+    from moex_data.rub_snapshot_serialization import loads
+    args=parser.parse_args();raw=args.snapshot.read_bytes();result=build(loads(raw));result['snapshot_sha256']=hashlib.sha256(raw).hexdigest()
     with args.output.open('x',encoding='utf-8') as stream:json.dump(result,stream,indent=2)
     print(json.dumps({k:v for k,v in result.items() if k not in ('rows','news_view','news_acquisition_summary')},indent=2))

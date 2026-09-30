@@ -185,7 +185,8 @@ def _load_previous(path: Path) -> Mapping[str, object] | None:
     if path.is_symlink() or not path.is_file():
         raise ChatAnalysisSnapshotError("current snapshot must be a regular non-symlink file")
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        from moex_data.rub_snapshot_serialization import loads
+        value = loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
         raise ChatAnalysisSnapshotError("current snapshot is not valid JSON") from exc
     if not isinstance(value, Mapping):
@@ -205,8 +206,9 @@ def _atomic_write(path: Path, payload: Mapping[str, object]) -> None:
     if path.exists() and path.is_symlink():
         raise ChatAnalysisSnapshotError("snapshot output must not be a symlink")
     path.parent.mkdir(parents=True, exist_ok=True)
+    from moex_data.rub_snapshot_serialization import storage
     serialized = json.dumps(
-        _jsonable(payload),
+        storage(_jsonable(payload)),
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),

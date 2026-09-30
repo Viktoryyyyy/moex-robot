@@ -811,7 +811,8 @@ def main(argv=None):
     if args.snapshot:
         if not args.as_of:
             parser.error('--as-of is required with --snapshot')
-        snapshot = json.loads(args.snapshot.read_text(encoding='utf-8'))
+        from moex_data.rub_snapshot_serialization import loads
+        snapshot = loads(args.snapshot.read_text(encoding='utf-8'))
         now = datetime.fromisoformat(args.as_of)
     else:
         url = urlsplit(args.api_url)
@@ -830,7 +831,8 @@ def main(argv=None):
                                    timeout=60, allow_redirects=False)
         if response.status_code != 200:
             parser.error('local factual API did not return HTTP 200')
-        snapshot = response.json()
+        from moex_data.rub_snapshot_serialization import expand
+        snapshot = expand(response.json())
         now = datetime.now(timezone.utc)
     report = run(snapshot, now=now, code_revision=revision, output=args.output)
     print(json.dumps(report, ensure_ascii=False, indent=2))
