@@ -497,3 +497,22 @@ def test_registrar_clock_rollback_fails_without_forecast_commit(tmp_path):
 def test_invalid_input_reference_shapes(inputs):
     with pytest.raises(ForecastJournalError):
         validate_forecast(forecast(inputs=inputs))
+
+
+@pytest.mark.parametrize("invalid_spec", [{}, {"schema_version": "wrong"}])
+def test_cli_validation_errors_are_clean_and_do_not_commit(tmp_path, invalid_spec):
+    root = Path(__file__).resolve().parents[2]
+    spec_path = tmp_path / "invalid.json"
+    spec_path.write_bytes(encode(invalid_spec))
+    store = tmp_path / "store"
+    result = subprocess.run(
+        [sys.executable, "-m", "src.moex_research.intelligence.usdrubf_forecast_journal",
+         "--root", str(store), "register", "--id", "invalid", "--spec", str(spec_path)],
+        cwd=root, env=dict(os.environ, PYTHONPATH=str(root)),
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr.startswith("forecast journal: ")
+    assert "Traceback" not in result.stderr
+    assert not (store / "records" / "forecast.invalid.json").exists()
