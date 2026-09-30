@@ -349,4 +349,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # Use the canonical module so evaluator and CLI share one exception class.
+    from .usdrubf_forecast_journal import main as _entrypoint
+    raise SystemExit(_entrypoint())
