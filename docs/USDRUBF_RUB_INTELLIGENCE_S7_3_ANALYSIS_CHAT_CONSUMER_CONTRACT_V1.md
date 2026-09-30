@@ -14,7 +14,18 @@ The server publishes data/context only. Analysis chats interpret that context. T
 
 For current market/news/macro facts, the snapshot supplied to the chat is the only allowed factual source.
 
-The snapshot may be supplied as raw `current.json` or through the canonical reader. In either form, the chat MUST recompute freshness at the actual analysis time from:
+The snapshot may be supplied through the canonical reader, or as the full logical
+content of `current.json` after decoding its versioned carrier. Raw storage may
+use `rub_snapshot_storage.v1`; readable delivery may use
+`rub_snapshot_references.v1`, whose `data` contains all values and in-document
+duplicate references. Before the logical-schema checks and interpretation, use
+`moex_data.rub_snapshot_serialization.loads` or the documented
+`python -m moex_data.rub_snapshot_serialization --expand FILE` command in
+`MOEX_BOT_RUB_SNAPSHOT_MANUAL_EXPORT.md`. Reject invalid length/hash/references;
+never interpret compressed text or unresolved references as missing facts.
+The canonical reader already returns the expanded logical snapshot. All evidence
+paths below address that logical snapshot. In either form, the chat MUST
+recompute freshness at the actual analysis time from:
 - current UTC time;
 - `identity.generated_at_utc`;
 - `refresh_policy.snapshot_stale_after_seconds`.

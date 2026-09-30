@@ -22,7 +22,13 @@ not copy the heavy persisted current.json. One clock is captured before reading;
 `as_of_utc`, source dates and slow/fast generation metadata are preserved.
 A later export receives a later consumption time, never a backdated one.
 
-The JSON uses `rub_factual_package.v1`. Its status reports mandatory factual
+The logical JSON uses `rub_factual_package.v1`. Large outputs are carried in
+`rub_snapshot_references.v1`: `data` holds the complete package, with each sole
+`$snapshot_ref` resolved as an RFC 6901 pointer within `data`. Distinct values
+remain readable. A sole `$snapshot_literal` holds unchanged literal application
+data. No historical rows are removed. The wrapper records expanded length and
+SHA-256; `moex_data.rub_snapshot_serialization.loads` verifies and reconstructs
+the original logical package. The logical package's status reports mandatory factual
 coverage, with each unavailable requirement and its reason. Presentation
 integrity and model readiness are separate. Minfin remains a required external
 blocker until an accepted latest announcement is available. The file preserves
@@ -43,3 +49,17 @@ hashes and manifests remain available through the separate frozen audit workflow
 `python -m moex_data.rub_factual_release --snapshot PATH --output DIRECTORY
 --code-revision EXACT_COMMIT --as-of AWARE_TIME`. Audit replay requires original
 evidence files; the compact upload does not substitute for that audit bundle.
+
+For the full raw snapshot fallback, expand the stored carrier before passing it
+to a consumer that requires the logical schema at its root:
+
+```bash
+cd ~/moex_bot && source venv/bin/activate && cd moex-robot && PYTHONPATH=.:src python -m moex_data.rub_snapshot_serialization --expand /home/trader/moex_bot/data/state/rub_intelligence/chat_analysis_snapshot/current.json
+```
+
+This prints the complete expanded JSON to stdout without fetching data or
+changing generation/acceptance times. It also accepts a readable delivery file
+or legacy expanded JSON. Do not redirect it over its input file. Decoding failure
+means unusable input; never treat compressed payload text as market facts.
+Recompute freshness at analysis time after decoding; decoding itself grants no
+admission or freshness. The canonical Python reader already performs expansion.

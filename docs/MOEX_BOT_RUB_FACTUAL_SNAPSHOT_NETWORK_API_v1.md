@@ -22,7 +22,7 @@ The API does not collect, refresh, generate, reinterpret, aggregate, forecast, r
 
 ## Canonical source and consumer
 
-Canonical schema:
+Canonical logical schema (after representation expansion):
 
 ```text
 rub_chat_analysis_snapshot.v1
@@ -60,9 +60,16 @@ Authentication: required Bearer token.
 
 Success: `200 application/json`.
 
-The response body is the governed consumer result itself. The transport does not wrap, rename, aggregate, synthesize, or reinterpret factual fields.
+The response contains the full governed consumer result. Large payloads use the
+lossless `rub_snapshot_references.v1` JSON representation: `data` contains all
+distinct values and explicit in-document references for exact repeats. Expand
+with `moex_data.rub_snapshot_serialization.expand` before checking the logical
+schema or interpreting logical field paths. The wrapper verifies expanded byte
+count/SHA-256 and rejects invalid references; it grants no factual admission.
+Small payloads retain the expanded logical form. Routes, authentication and
+readiness behavior are unchanged.
 
-Consequently, existing fields remain visible exactly under their canonical names, including:
+After expansion, existing fields retain exactly their canonical names, including:
 
 - `schema_version`;
 - `identity.generated_at_utc`;
@@ -87,15 +94,17 @@ refusals, original clocks, identity and evidence references. It does not refresh
 sources or imply full analysis readiness. Oversize/invalid output fails closed.
 See [final market delivery](data/price_futoi_basis_final_delivery_v1.md).
 
-Authentication: the same required Bearer token. This route returns the compact
+Authentication: the same required Bearer token. This route returns the logical
 `rub_factual_package.v1` through `load_factual_release`, the same builder used by
 manual current export. It captures one consumption time and uses the canonical
 reader with fast market overlay. It returns HTTP 200 for valid PARTIAL factual
 coverage, with explicit missing requirements; invalid source/read-view validation
 returns HTTP 503 without falling back to an old package. Query clocks are refused.
 `Cache-Control: no-store` applies. No upstream refresh or model API is invoked.
+Large serialized responses/current exports use the same
+`rub_snapshot_references.v1` representation and expansion rules as above.
 
-The heavy `/v1/rub/factual-snapshot` route remains compatible. Its legacy forecast
+The heavy `/v1/rub/factual-snapshot` logical result is unchanged after expansion. Its legacy forecast
 matrix and readiness are retained for audit consumers; the compact route presents
 mandatory factual coverage separately from model readiness. See the
 [manual export instructions](MOEX_BOT_RUB_SNAPSHOT_MANUAL_EXPORT.md).

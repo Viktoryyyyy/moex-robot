@@ -55,6 +55,18 @@ unchanged. The existing MCP bridge forwards the self-describing JSON unchanged.
   `tests/test_futoi_live_date_identity_repair_v1.py` and
   `tests/unit/test_usd_cets_reference.py`: decode the new carrier before their
   unchanged semantic assertions.
+- `tests/unit/test_rub_factual_snapshot_http_server.py`: optional test-client
+  timeout for real-builder serialization tests, default unchanged. Production
+  deadlines/TTLs are untouched.
+- Direct consumer documentation: `RUB_SNAPSHOT_EXPORT.md`,
+  `docs/MOEX_BOT_RUB_SNAPSHOT_MANUAL_EXPORT.md`,
+  `docs/MOEX_BOT_RUB_FACTUAL_SNAPSHOT_NETWORK_API_v1.md`,
+  `docs/MOEX_BOT_RUB_FACTUAL_SNAPSHOT_CHATGPT_MCP_BRIDGE_v1.md`,
+  `docs/USDRUBF_RUB_INTELLIGENCE_S7_3_ANALYSIS_CHAT_CONSUMER_CONTRACT_V1.md`,
+  `docs/USDRUBF_RUB_INTELLIGENCE_S7_3_DAILY_ANALYSIS_CHAT_CONTRACT_V1.md`, and
+  `docs/USDRUBF_RUB_INTELLIGENCE_S7_3_WEEKLY_ANALYSIS_CHAT_CONTRACT_V1.md`.
+  These describe logical-root expansion and the existing canonical current-export
+  command, not new transport or analysis authority.
 - This task document.
 
 No source acquisition/backfill, TTL change, admission/governance expansion,
@@ -74,6 +86,15 @@ corruption/expansion refusal, Rosstat retention fail-closed behavior, real heavy
 refresh, canonical legacy/encoded parity, actual HTTP JSON/current export parity,
 source matrix CLI, unchanged accepted pointers and current TTL expiry with dated
 weekly context retained.
+
+P1 review correction: migrated the quick-reference command and daily/weekly/common
+raw fallback contracts, plus API/MCP representation documentation. The tested
+`python -m moex_data.rub_snapshot_serialization --expand FILE` command restores
+the complete logical root, validates the carrier before printing and does not
+refresh or mutate input. The 2-second unit HTTP client deadline was unsuitable
+for the real-builder integration under suite load; that one test now requests
+30 seconds explicitly, without changing production timeouts or TTL. Correction
+validation across codec, real builder and HTTP tests passed **58 tests in 17.71 s**.
 
 Final-head review, complete compileall/pytest CI, merge and applied-state evidence
 are recorded on the task PR after verification. They are mandatory apply gates.

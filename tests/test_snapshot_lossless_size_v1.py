@@ -33,8 +33,8 @@ def test_real_refresh_stored_json_canonical_reader_and_delivery_are_lossless(tmp
     helpers = runpy.run_path(str(Path(__file__).parent/'unit/test_rub_factual_snapshot_http_server.py'))
     with helpers['_running_server'](lambda: live.base.read_current_snapshot(now_fn=lambda: NOW)[0],
                                   release_loader=lambda: package) as port:
-        status, _, body = helpers['_request'](port, helpers['api'].SNAPSHOT_PATH)
-        release_status, _, package_body = helpers['_request'](port, helpers['api'].RELEASE_PATH)
+        status, _, body = helpers['_request'](port, helpers['api'].SNAPSHOT_PATH, timeout=30)
+        release_status, _, package_body = helpers['_request'](port, helpers['api'].RELEASE_PATH, timeout=30)
     assert status == release_status == 200
     assert body['schema_version'] == package_body['schema_version'] == codec.DELIVERY_SCHEMA
     assert codec.expand(body) == encoded_read

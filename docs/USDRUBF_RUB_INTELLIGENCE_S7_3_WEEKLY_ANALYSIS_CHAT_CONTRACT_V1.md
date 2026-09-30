@@ -18,7 +18,18 @@ Preferred input form:
 - reader-enriched output from `read_current_snapshot()`, including diagnostic `read_freshness` metadata.
 
 Allowed fallback input form:
-- raw `current.json`.
+- the complete logical content of `current.json`, expanded from its versioned
+  carrier first, as described in `MOEX_BOT_RUB_SNAPSHOT_MANUAL_EXPORT.md`.
+
+`rub_snapshot_storage.v1` is compressed storage, not directly readable factual
+input. `rub_snapshot_references.v1` contains readable `data` and exact duplicate
+references within that data. Expand/verify either with
+`moex_data.rub_snapshot_serialization.loads` (CLI: `python -m
+moex_data.rub_snapshot_serialization --expand FILE`) before the logical-schema
+checks below. Reject an undecodable carrier. All field paths below refer to the
+expanded logical snapshot, including history and evidence; unpacking grants no
+freshness or additional authority. Canonical `read_current_snapshot()` already
+returns the expanded logical schema.
 
 In both cases the chat MUST establish freshness again at the actual analysis time; previously recorded `read_freshness.status` is never sufficient by itself.
 
@@ -46,7 +57,7 @@ If `read_freshness` exists, use it only as a cross-check. Its `status`, `snapsho
 
 If the generation timestamp, stale threshold, or current UTC time is unusable, set `snapshot_freshness = UNKNOWN`, set `snapshot_age_seconds = null`, explain why, and do not make a fresh weekly market-state assertion. The directional context must be `UNCERTAIN` unless supported by independently fresh snapshot components.
 
-A raw `current.json` or cached reader-enriched payload must never remain `FRESH` indefinitely merely because an earlier read classified it as fresh.
+The decoded content of `current.json` or cached reader-enriched payload must never remain `FRESH` indefinitely merely because an earlier read classified it as fresh.
 
 Component semantics:
 - `READY`: factual data may be used;

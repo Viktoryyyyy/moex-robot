@@ -112,3 +112,19 @@ def test_source_matrix_cli_expands_input_but_hashes_supplied_bytes(tmp_path, mon
     result = json.loads(output.read_bytes())
     assert result.pop('snapshot_sha256') == codec.sha256(raw).hexdigest()
     assert result == matrix.build(source)
+
+
+@pytest.mark.parametrize('pack', [codec.storage, codec.delivery, lambda value:value])
+def test_documented_raw_fallback_cli_restores_logical_root_without_mutation(tmp_path, capsys, pack):
+    source = document(); path = tmp_path/'current.json'
+    original = codec.encoded(pack(source)); path.write_bytes(original)
+    assert codec.main(['--expand', str(path)]) == 0
+    assert capsys.readouterr().out.encode('utf-8') == codec.encoded(source)+b'\n'
+    assert path.read_bytes() == original
+
+
+def test_decoder_cli_does_not_emit_partial_output_on_bad_evidence(tmp_path, capsys):
+    value = codec.storage(document()); value['expanded_sha256'] = '0'*64
+    path = tmp_path/'current.json'; path.write_bytes(codec.encoded(value))
+    with pytest.raises(ValueError, match='digest'): codec.main(['--expand', str(path)])
+    assert capsys.readouterr().out == ''

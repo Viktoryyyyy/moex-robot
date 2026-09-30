@@ -194,3 +194,20 @@ def expand(value):
 
 def loads(raw):
     return expand(json.loads(raw))
+
+
+def main(argv=None):
+    """Decode an existing carrier to stdout without refreshing or changing clocks."""
+    import argparse
+    from pathlib import Path
+    import sys
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--expand', type=Path, required=True, metavar='FILE')
+    args = parser.parse_args(argv)
+    raw = encoded(loads(args.expand.read_bytes()))
+    sys.stdout.buffer.write(raw + b'\n')
+    return 0
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
