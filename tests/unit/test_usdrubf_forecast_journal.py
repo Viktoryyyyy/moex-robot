@@ -78,6 +78,24 @@ def registered(tmp_path, *, late=False):
     return journal, ref, clock, source_bytes
 
 
+def test_aggregate_evaluation_budget_rejects_before_scoring(monkeypatch):
+    from src.moex_research.intelligence import usdrubf_forecast_evaluation as evaluator
+    grid = [[at(i), at(i + 1)] for i in range(1000)]
+    scenarios = [scenario(id=str(i), targets=[str(103 + j) for j in range(20)]) for i in range(100)]
+    spec = forecast(horizon_end=at(1000), observation_grid=grid, scenarios=scenarios)
+    monkeypatch.setattr(evaluator, "_scenario", lambda *args: pytest.fail("must reject before scoring"))
+    with pytest.raises(ForecastJournalError, match="aggregate scenario-by-bar"):
+        validate_forecast(spec)
+
+
+def test_aggregate_evaluation_budget_boundary(monkeypatch):
+    from src.moex_research.intelligence import usdrubf_forecast_evaluation as evaluator
+    monkeypatch.setattr(evaluator, "MAX_EVALUATION_WORK", 6)
+    assert validate_forecast(forecast())
+    with pytest.raises(ForecastJournalError, match="aggregate scenario-by-bar"):
+        validate_forecast(forecast(scenarios=[scenario(targets=["103", "104"])]))
+
+
 def test_complete_round_trip_and_restart(tmp_path):
     journal, ref, clock, source_bytes = registered(tmp_path)
     source_ref = journal.read(ref)["payload"]["inputs"][0]

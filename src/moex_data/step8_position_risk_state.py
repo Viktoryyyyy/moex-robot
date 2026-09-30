@@ -626,6 +626,15 @@ def build_forecast_risk(request, forecast, *, now):
         # Funding may be a credit. Other scenario costs cannot be negative.
         costs.append(None if value is None else signed_money(value) if key == "funding_roll_rub" else price(value, zero=True))
     margin = None if assumptions["margin_per_contract_rub"] is None else price(assumptions["margin_per_contract_rub"], zero=True)
+    # Bound output memory and repeated prefix arithmetic before materializing
+    # levels/results. Independent input-array limits do not bound their product.
+    prefix_count = 1 + max((len(_list(row.get("tranches"), "tranches")) for row in rows), default=0)
+    portfolio_work = max(1, len(rows) + sum(len(row["tranches"]) for row in rows))
+    level_count = 1
+    for scenario in _list(forecast["scenarios"], "scenarios"):
+        level_count += len(_list(scenario["targets"], "targets")) + (scenario["invalidation"] is not None)
+        if prefix_count * level_count > 10_000 or prefix_count * level_count * portfolio_work > 2_000_000:
+            _fail("aggregate scenario risk resource bound")
     levels = [("gap", gap)]
     for scenario in forecast["scenarios"]:
         levels += [(scenario["id"] + ":target:" + str(i), price(target)) for i, target in enumerate(scenario["targets"])]

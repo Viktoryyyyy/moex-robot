@@ -227,6 +227,17 @@ def test_short_and_ambient_decimal_context():
         assert build_forecast_risk(req, request(), now=BASE) == expected
 
 
+@pytest.mark.parametrize("target_count", [1, 10])
+def test_risk_rejects_aggregate_compute_and_output_budgets(target_count):
+    spec = request()
+    spec["scenarios"][0]["targets"] = [str(103 + i) for i in range(target_count)]
+    risk = risk_request()
+    risk["position"]["positions"][0]["tranches"] = [
+        {"id": str(i), "contracts_delta": 1, "assumed_fill_price": "100"} for i in range(1000)]
+    with pytest.raises(ValueError, match="aggregate scenario risk resource bound"):
+        build_forecast_risk(risk, spec, now=BASE)
+
+
 def test_risk_version_retains_original(tmp_path):
     journal, _, forecast, _ = setup(tmp_path)
     req = risk_request()

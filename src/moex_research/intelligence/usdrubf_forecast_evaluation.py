@@ -10,6 +10,7 @@ FORECAST_VERSION = "usdrubf.forecast.v1"
 FORECAST_V2 = "usdrubf.forecast.v2"
 FACTS_VERSION = "usdrubf.forecast_facts.v1"
 EVALUATOR_VERSION = "usdrubf.forecast_evaluation.v2"
+MAX_EVALUATION_WORK = 2_000_000
 
 
 def price(value: object, *, zero: bool = False) -> Decimal:
@@ -121,8 +122,13 @@ def validate_forecast(spec: object) -> dict:
     if any(right[0] < left[1] for left, right in zip(grid, grid[1:])):
         raise ForecastJournalError("grid must be ordered and nonoverlapping")
     ids = set()
+    scenario_work = 0
     for item in array(spec["scenarios"]):
         fields(item, {"id", "direction", "activation", "confirmation", "targets", "invalidation"})
+        targets_raw = array(item["targets"])
+        scenario_work += 1 + len(targets_raw)
+        if len(grid) * scenario_work > MAX_EVALUATION_WORK:
+            raise ForecastJournalError("aggregate scenario-by-bar evaluation resource bound")
         identifier = text(item["id"])
         if identifier in ids:
             raise ForecastJournalError("duplicate scenario ID")
@@ -131,7 +137,7 @@ def validate_forecast(spec: object) -> dict:
             raise ForecastJournalError("scenario must have an explicit direction")
         predicate(item["activation"])
         predicate(item["confirmation"])
-        targets = [price(value) for value in array(item["targets"])]
+        targets = [price(value) for value in targets_raw]
         if len(set(targets)) != len(targets):
             raise ForecastJournalError("duplicate target level")
         stop = None if item["invalidation"] is None else price(item["invalidation"])

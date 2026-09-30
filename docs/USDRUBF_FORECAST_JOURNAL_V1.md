@@ -158,6 +158,12 @@ The CLI emits one JSON result to stdout, exit 0; malformed/schema/integrity/I/O
 errors exit 2 without traceback. PENDING and retryable NOT_EVALUABLE are valid
 results. Templates contain nulls deliberately and must be completed by the owner.
 
+Aggregate resource gates apply in addition to individual array limits: declared
+bars times the sum of `(1 + target_count)` across scenarios cannot exceed 2,000,000.
+Risk output is limited to 10,000 prefix/level rows and 2,000,000 conservative
+prefix/level/portfolio-term work units. Oversized combinations fail before
+scenario scoring or risk-result materialization, with the same clean exit 2.
+
 ## Existing research evidence
 
 `research --id ID --request FILE` freezes existing Phase06/06A/07 or S7.2 outputs.
