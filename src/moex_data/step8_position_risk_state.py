@@ -533,6 +533,180 @@ def build_position_risk_state(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def build_forecast_risk(request, forecast, *, now):
+    """Versioned explicit scenario extension; v1 supplied aggregates are untouched.
+
+    Results are change from the supplied account mark, not recomputed broker P&L.
+    Tranches are conditional assumed fills, never recommended orders.
+    """
+    from moex_research.intelligence.usdrubf_forecast_journal import fields, timestamp, text, digest, encode
+    from moex_research.intelligence.usdrubf_forecast_evaluation import price
+    from decimal import Context, ROUND_HALF_EVEN
+    def bounded_count(value, field, **options):
+        number = _int(value, field, **options)
+        if abs(number) > 1_000_000_000:
+            _fail(field + " exceeds exact scenario domain")
+        return number
+
+    def signed_money(value):
+        if isinstance(value, bool) or not isinstance(value, (str, int)) or len(str(value)) > 64:
+            _fail("bounded exact decimal string/integer required")
+        raw = str(value)
+        negative = raw.startswith("-")
+        magnitude = price(raw[1:] if negative else raw, zero=True)
+        return magnitude.copy_negate() if negative else magnitude
+    fields(request, {"schema_version", "position", "specification", "assumptions",
+                     "supersedes", "revision_reason"})
+    if request["schema_version"] != "step8_forecast_risk_request.v1":
+        _fail("unsupported scenario request")
+    position = request["position"]
+    if position is None:
+        return {"status": "POSITION_ABSENT", "money_risk": None}
+    fields(position, {"schema_version", "id", "version", "source", "as_of", "received_at",
+                      "max_age_seconds", "explicit_empty", "account", "positions", "stage8_supplied"})
+    if position["schema_version"] != "step8_forecast_position.v1":
+        _fail("unsupported position schema")
+    _safe_token(position["id"], "position.id")
+    _int(position["version"], "position.version", minimum=1)
+    fields(position["source"], {"mode", "reference"})
+    if position["source"]["mode"] != "manual":
+        _fail("broker export format not supplied; use explicit manual input")
+    text(position["source"]["reference"])
+    as_of, received = timestamp(position["as_of"]), timestamp(position["received_at"])
+    age = _int(position["max_age_seconds"], "max_age_seconds", minimum=0)
+    if not as_of <= received <= now:
+        _fail("position clock order invalid")
+    if (now - as_of).total_seconds() > age:
+        return {"status": "POSITION_STALE", "money_risk": None}
+    rows = _list(position["positions"], "positions")
+    if any(not isinstance(row, dict) for row in rows):
+        _fail("positions must contain objects")
+    if type(position["explicit_empty"]) is not bool or position["explicit_empty"] != (len(rows) == 0):
+        _fail("empty portfolio must be explicitly confirmed")
+    if len(rows) > 100 or sum(len(row.get("tranches", [])) for row in rows) > 1000:
+        _fail("position resource bound")
+    account = fields(position["account"], {"currency", "free_funds_rub", "current_initial_margin_rub",
+        "reserve_rub", "max_total_contracts", "max_loss_rub", "supplied_account_pnl_rub"})
+    if account["currency"] != "RUB":
+        _fail("unsupported account currency")
+    funds = price(account["free_funds_rub"], zero=True)
+    margin_now = None if account["current_initial_margin_rub"] is None else price(account["current_initial_margin_rub"], zero=True)
+    reserve = price(account["reserve_rub"], zero=True)
+    max_contracts = bounded_count(account["max_total_contracts"], "max_total_contracts", minimum=0)
+    max_loss = price(account["max_loss_rub"], zero=True)
+    if account["supplied_account_pnl_rub"] is not None:
+        signed_money(account["supplied_account_pnl_rub"])
+    spec = request["specification"]
+    if spec is None:
+        return {"status": "SPECIFICATION_MISSING", "money_risk": None}
+    fields(spec, {"instrument", "quote_unit", "contract_size", "tick_size", "tick_value_rub",
+                  "settlement_currency", "effective_from", "effective_until", "source_url", "verified_at"})
+    expected = {"instrument": "USDRUBF", "quote_unit": "RUB_PER_USD", "contract_size": "1000",
+                "tick_size": "0.01", "tick_value_rub": "10", "settlement_currency": "RUB"}
+    if any(spec[key] != value for key, value in expected.items()):
+        return {"status": "UNSUPPORTED_INSTRUMENT_OR_UNIT_MAPPING", "money_risk": None}
+    if spec["source_url"] != "https://www.moex.com/ru/derivatives/perpetual-futures/usdrubf":
+        _fail("primary instrument specification reference required")
+    if (not timestamp(spec["effective_from"]) <= as_of <= timestamp(spec["effective_until"])
+            or timestamp(spec["effective_until"]) < timestamp(forecast["horizon_end"])
+            or timestamp(spec["verified_at"]) > now):
+        _fail("instrument specification not applicable at position date")
+    assumptions = fields(request["assumptions"], {"gap_price", "commission_rub", "funding_roll_rub",
+        "slippage_rub", "margin_per_contract_rub", "cost_scope", "margin_policy", "gap_policy"})
+    if assumptions["cost_scope"] != "total_for_each_scenario_including_all_assumed_tranches_and_exit":
+        _fail("explicit total cost scope required")
+    if assumptions["margin_policy"] != "explicit_scenario_not_broker_guarantee":
+        _fail("margin is a supplied scenario assumption")
+    if assumptions["gap_policy"] != "explicit_gap_price_no_stop_fill_guarantee":
+        _fail("explicit adverse gap policy required")
+    gap = price(assumptions["gap_price"])
+    costs = []
+    for key in ("commission_rub", "funding_roll_rub", "slippage_rub"):
+        value = assumptions[key]
+        # Funding may be a credit. Other scenario costs cannot be negative.
+        costs.append(None if value is None else signed_money(value) if key == "funding_roll_rub" else price(value, zero=True))
+    margin = None if assumptions["margin_per_contract_rub"] is None else price(assumptions["margin_per_contract_rub"], zero=True)
+    # Bound output memory and repeated prefix arithmetic before materializing
+    # levels/results. Independent input-array limits do not bound their product.
+    prefix_count = 1 + max((len(_list(row.get("tranches"), "tranches")) for row in rows), default=0)
+    portfolio_work = max(1, len(rows) + sum(len(row["tranches"]) for row in rows))
+    level_count = 1
+    for scenario in _list(forecast["scenarios"], "scenarios"):
+        level_count += len(_list(scenario["targets"], "targets")) + (scenario["invalidation"] is not None)
+        if prefix_count * level_count > 10_000 or prefix_count * level_count * portfolio_work > 2_000_000:
+            _fail("aggregate scenario risk resource bound")
+    levels = [("gap", gap)]
+    for scenario in forecast["scenarios"]:
+        levels += [(scenario["id"] + ":target:" + str(i), price(target)) for i, target in enumerate(scenario["targets"])]
+        if scenario["invalidation"] is not None:
+            levels.append((scenario["id"] + ":invalidation", price(scenario["invalidation"])))
+    ids = set()
+    portfolios = []
+    for row in rows:
+        fields(row, {"id", "instrument", "contracts", "mark_price", "tranches"})
+        identifier = text(row["id"])
+        if identifier in ids:
+            _fail("duplicate position ID")
+        ids.add(identifier)
+        if row["instrument"] != "USDRUBF":
+            return {"status": "UNSUPPORTED_INSTRUMENT_OR_UNIT_MAPPING", "money_risk": None}
+        count = bounded_count(row["contracts"], "contracts", nonzero=True)
+        mark = price(row["mark_price"])
+        tranches = []
+        tranche_ids = set()
+        for tranche in _list(row["tranches"], "tranches"):
+            fields(tranche, {"id", "contracts_delta", "assumed_fill_price"})
+            tid = text(tranche["id"])
+            if tid in tranche_ids:
+                _fail("duplicate tranche ID")
+            tranche_ids.add(tid)
+            delta = bounded_count(tranche["contracts_delta"], "contracts_delta", nonzero=True)
+            tranches.append((tid, delta, price(tranche["assumed_fill_price"])))
+        portfolios.append((identifier, count, mark, tranches))
+    supplied = None if position["stage8_supplied"] is None else build_position_risk_state(position["stage8_supplied"])
+    with localcontext(Context(prec=120, rounding=ROUND_HALF_EVEN)) as context:
+        context.traps[Inexact] = True
+        multiplier = Decimal(spec["tick_value_rub"]) / Decimal(spec["tick_size"])
+        if multiplier != Decimal(spec["contract_size"]):
+            _fail("tick/contract multiplier mismatch")
+        tick = Decimal(spec["tick_size"])
+        for value in [v for _, v in levels] + [p[2] for p in portfolios] + [t[2] for p in portfolios for t in p[3]]:
+            if value % tick:
+                _fail("scenario price outside instrument tick grid")
+        gross_current = sum(abs(p[1]) for p in portfolios)
+        gross_conservative = gross_current + sum(abs(t[1]) for p in portfolios for t in p[3])
+        results = []
+        # Prefixes are separate assumed portfolios, not an intrabar execution path.
+        max_steps = max((len(p[3]) for p in portfolios), default=0)
+        for step in range(max_steps + 1):
+            gross_contracts = sum(abs(p[1] + sum(t[1] for t in p[3][:step])) for p in portfolios)
+            for name, level in levels:
+                gross = sum((level - p[2]) * p[1] * multiplier +
+                    sum((level - t[2]) * t[1] * multiplier for t in p[3][:step]) for p in portfolios)
+                net = None if any(c is None for c in costs) else gross - sum(costs)
+                modeled_margin = None if margin is None else margin * gross_contracts
+                free = None if net is None or modeled_margin is None or margin_now is None else funds + net + margin_now - modeled_margin
+                results.append({"assumed_tranche_prefix": step, "scenario": name, "price": str(level),
+                    "gross_pnl_change_rub": str(gross), "net_pnl_change_rub": None if net is None else str(net),
+                    "gross_contracts": gross_contracts, "contract_limit_breach": gross_contracts > max_contracts,
+                    "loss_limit_breach": None if net is None else -net > max_loss,
+                    "modeled_margin_rub": None if modeled_margin is None else str(modeled_margin),
+                    "modeled_free_funds_rub": None if free is None else str(free),
+                    "reserve_breach": None if free is None else free < reserve})
+    return {"schema_version": "step8_forecast_risk_state.v1",
+        "status": "EXPLICIT_EMPTY" if not rows else "PARTIAL" if any(c is None for c in costs) or margin is None or margin_now is None else "SCENARIO_CALCULATED",
+        "position_sha256": digest(encode(position)), "specification_sha256": digest(encode(spec)),
+        "assumptions_sha256": digest(encode(assumptions)), "supplied_stage8": supplied,
+        "supplied_account_pnl_rub": account["supplied_account_pnl_rub"],
+        "current_gross_contracts": gross_current, "planned_conservative_gross_contracts": gross_conservative,
+        "planned_conservative_contract_limit_breach": gross_conservative > max_contracts,
+        "money_risk": results, "execution": "NONE", "limitations": [
+            "mark_to_scenario_price_change_not_broker_variation_margin_statement",
+            "funding_roll_and_fees_are_explicit_assumptions_not_future_known_rates",
+            "tranche_prefixes_assume_fills_not_proven_execution",
+            "gap_stop_fill_not_guaranteed", "margin_not_broker_requirement"]}
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Validate and aggregate explicit Stage 8 position/risk state."
