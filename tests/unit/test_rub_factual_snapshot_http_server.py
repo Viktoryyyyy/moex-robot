@@ -97,11 +97,11 @@ def _running_server(loader, *, release_loader=None):
         thread.join(timeout=2)
 
 
-def _request(port: int, path: str, *, token: str | None = TOKEN, method: str = "GET"):
+def _request(port: int, path: str, *, token: str | None = TOKEN, method: str = "GET", timeout=2):
     headers = {}
     if token is not None:
         headers["Authorization"] = f"Bearer {token}"
-    connection = http.client.HTTPConnection(api.DEFAULT_HOST, port, timeout=2)
+    connection = http.client.HTTPConnection(api.DEFAULT_HOST, port, timeout=timeout)
     connection.request(method, path, headers=headers)
     response = connection.getresponse()
     raw = response.read()

@@ -233,7 +233,8 @@ def export_current(*, output, now_fn=lambda: datetime.now(timezone.utc), reader=
     options = {'now_fn': now_fn, 'code_revision': code_revision}
     if reader is not None: options['reader'] = reader
     package = load_factual_release(**options)
-    raw = _encoded(package)
+    from moex_data.rub_snapshot_serialization import delivery
+    raw = _encoded(delivery(package))
     directory = Path(output); directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     stamp = datetime.fromisoformat(package['as_of_utc']).strftime('%Y-%m-%dT%H-%M-%S.%fZ')
     path = directory / (stamp + '_' + sha256(raw).hexdigest()[:12] + '_rub_factual.json')
@@ -267,7 +268,8 @@ def main(argv=None):
         print(str(directory)); return 0
     if not all((args.output, args.code_revision, args.as_of)):
         parser.error('frozen audit export requires --output, --code-revision and --as-of')
-    directory = export(json.loads(args.snapshot.read_text()), now=datetime.fromisoformat(args.as_of),
+    from moex_data.rub_snapshot_serialization import loads
+    directory = export(loads(args.snapshot.read_text()), now=datetime.fromisoformat(args.as_of),
         code_revision=args.code_revision, output=args.output)
     print(str(directory)); return 0
 

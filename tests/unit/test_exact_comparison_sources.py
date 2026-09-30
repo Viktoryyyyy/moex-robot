@@ -199,6 +199,7 @@ def test_no_current_source_role_substitution_or_closest_date(tmp_path):
 
 
 def test_real_heavy_refresh_saved_json_canonical_reader_stage9_and_compact(tmp_path,monkeypatch):
+    from moex_data.rub_snapshot_serialization import loads
     from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_live_market_oi as live
     from moex_data import rub_factual_release as release
     from moex_data import rub_analysis_bundle_v2 as bundles
@@ -219,7 +220,7 @@ def test_real_heavy_refresh_saved_json_canonical_reader_stage9_and_compact(tmp_p
     monkeypatch.setattr('moex_data.rub_dated_hour_source.acquire',lambda **kw:{'latest_attempts':{}})
     saved,path=live.refresh_snapshot(now_fn=lambda:NOW,live_loader=_native_body)
     assert saved[exact.STORE_KEY]['error'] is None
-    assert json.loads(path.read_bytes())==saved
+    assert loads(path.read_bytes())==saved
     disk=path.read_bytes();read,_=live.base.read_current_snapshot(now_fn=lambda:NOW)
     assert path.read_bytes()==disk
     def no_network(*a,**kw):raise AssertionError('reader/publication attempted acquisition')
@@ -269,7 +270,7 @@ def test_real_heavy_refresh_saved_json_canonical_reader_stage9_and_compact(tmp_p
     bundles.finish(older,prepared,now=after_expiry)
     live.base._atomic_write(path,older)
     late,_=live.base.read_current_snapshot(now_fn=lambda:after_expiry)
-    for view in (json.loads(path.read_bytes()),late):
+    for view in (loads(path.read_bytes()),late):
         for scope in ('daily','weekly'):
             items=view['components']['stage9_'+scope]['data']['sections']['historical_comparisons']['items']
             ctx=items['contract_price_market_oi_context']['values']['dated']

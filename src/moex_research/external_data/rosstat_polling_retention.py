@@ -193,7 +193,12 @@ def _current_snapshot_refs(root: Path) -> list[tuple[str, str]]:
     path = root / CURRENT_SNAPSHOT_RELATIVE_PATH
     if not path.exists():
         return []
-    return _snapshot_refs(_read_object(path))
+    from moex_data.rub_snapshot_serialization import expand
+    try:
+        snapshot = expand(_read_object(path))
+    except ValueError as exc:
+        raise RosstatPollingRetentionError('invalid current snapshot representation') from exc
+    return _snapshot_refs(snapshot)
 
 
 def _vintage_refs(root: Path) -> list[tuple[str, str]]:

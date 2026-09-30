@@ -102,8 +102,9 @@ class SnapshotRequestHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _encode_json(payload: object) -> bytes:
+        from moex_data.rub_snapshot_serialization import delivery
         return json.dumps(
-            payload,
+            delivery(payload),
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),

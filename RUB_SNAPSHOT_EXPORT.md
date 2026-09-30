@@ -20,7 +20,13 @@ Canonical export directory:
 Canonical one-line export command:
 
 ```bash
-SRC=/home/trader/moex_bot/data/state/rub_intelligence/chat_analysis_snapshot/current.json && DIR=/home/trader/moex_bot/exports/rub_snapshots && mkdir -p "$DIR" && chmod 700 "$DIR" && TS="$(jq -er '.identity.generated_at_utc' "$SRC")" && NAME="$(TZ=Europe/Moscow date -d "$TS" '+%Y-%m-%d_%H-%M-%S_MSK')_rub_snapshot.json" && install -m 600 "$SRC" "$DIR/$NAME" && printf 'PROJECT=MOEX_Bot\nfile=%s\n' "$DIR/$NAME"
+cd ~/moex_bot && source venv/bin/activate && cd moex-robot && PYTHONPATH=.:src python -m moex_data.rub_factual_release --current
 ```
 
-The command is fail-fast and does not refresh data; it copies the current canonical snapshot only.
+The command reads the canonical snapshot and fast overlay, verifies evidence and
+freshness, and writes the current factual package without refreshing sources.
+It prints the exclusively created export filename. Large JSON uses the readable
+`rub_snapshot_references.v1` representation; follow its in-document references
+or expand it with `python -m moex_data.rub_snapshot_serialization --expand FILE`.
+Do not use `jq .identity` on raw `current.json`: its lossless storage envelope is
+decoded by the canonical reader. See the detailed runbook for full raw fallback.

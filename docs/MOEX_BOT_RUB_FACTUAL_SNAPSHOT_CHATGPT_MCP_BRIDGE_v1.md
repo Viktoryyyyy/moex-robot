@@ -26,11 +26,21 @@ The bridge does not collect, refresh, generate, mutate, analyze, forecast, recom
 
 ## Repository inventory and selected boundaries
 
-Canonical persisted schema:
+Canonical logical schema (the reader expands any storage representation):
 
 ```text
 rub_chat_analysis_snapshot.v1
 ```
+
+Large HTTP responses can use `rub_snapshot_references.v1`, carrying complete
+logical `data` with explicit references to exact repeats in the same document.
+The bridge forwards this self-describing JSON unchanged. Consumers expand and
+verify it with `moex_data.rub_snapshot_serialization.expand` before logical schema,
+evidence and analysis-time freshness checks. All original values/history remain
+present; this changes representation only, not MCP routing or authority. Raw
+`current.json` can use `rub_snapshot_storage.v1`; decode it using the canonical
+reader or the CLI in `MOEX_BOT_RUB_SNAPSHOT_MANUAL_EXPORT.md`, never parse compressed
+payload text as facts. The legacy direct stdio adapter still returns expanded JSON.
 
 Canonical persisted state relative to `MOEX_DATA_ROOT`:
 

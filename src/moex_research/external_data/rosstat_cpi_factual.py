@@ -209,8 +209,9 @@ def _current_index_manifests(root, component=COMPONENT):
     if not path.exists(): return ()
     if path.is_symlink() or not path.is_file(): return None
     try:
-        snapshot = json.loads(path.read_text(encoding='utf-8'))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        from moex_data.rub_snapshot_serialization import loads
+        snapshot = loads(path.read_text(encoding='utf-8'))
+    except (OSError, UnicodeDecodeError, ValueError):
         return None
     if not isinstance(snapshot, dict): return None
     components = snapshot.get('components')

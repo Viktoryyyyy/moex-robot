@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from moex_data import rub_analysis_bundle_v2 as bundle
+from moex_data.rub_snapshot_serialization import loads as load_snapshot_json
 from moex_data import step9_rub_analysis_bundle as legacy
 from moex_data import step7_rub_native_d1_w1_materializer as stage7
 from src.moex_research.runners import usdrubf_s7_3_chat_analysis_snapshot_live_market_oi as live
@@ -102,7 +103,7 @@ def test_heavy_refresh_saved_json_and_reader_keep_sections_and_independent_roots
     source_io(tmp_path, monkeypatch, failed=failed)
     before = {str(p): p.read_bytes() for p in tmp_path.rglob("current.json")}
     saved, path = live.refresh_snapshot(now_fn=lambda: NOW, live_loader=lambda: shifted_market(NOW))
-    assert json.loads(path.read_bytes()) == saved
+    assert load_snapshot_json(path.read_bytes()) == saved
     frozen_bytes = path.read_bytes()
     read, _ = live.base.read_current_snapshot(now_fn=lambda: NOW)
     assert path.read_bytes() == frozen_bytes
@@ -161,7 +162,7 @@ def test_heavy_refresh_saved_json_and_reader_keep_sections_and_independent_roots
                 assert block["frozen_evidence_ref"]["bytes_in_compact_package"] is False
         exported_path = rub_factual_release.export_current(output=tmp_path/"export", now_fn=lambda: NOW,
             reader=live.base.read_current_snapshot, code_revision="a"*40)
-        assert json.loads(exported_path.read_bytes())["analysis_bundles"] == package["analysis_bundles"]
+        assert load_snapshot_json(exported_path.read_bytes())["analysis_bundles"] == package["analysis_bundles"]
         from moex_data.rub_factual_release_acceptance import projection_completeness
         for seconds in (1, 61, 1201):
             later = NOW+timedelta(seconds=seconds)
