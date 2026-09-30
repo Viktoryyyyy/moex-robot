@@ -141,17 +141,32 @@ def replay(e, *, now):
     return normalized
 
 
+def verified_observation(data, *, now):
+    """Validate observation facts independently of their current-price admission."""
+    row=replay(data['usd_reference_evidence'],now=now)
+    stored=data['instruments']['usd_tom']
+    require(isinstance(stored,dict),'USD_normalized_not_object')
+    # Freshness diagnostics may be downgraded by the canonical reader. Facts,
+    # identity and original clocks may never be substituted after replay.
+    fields=(*IDENTITY,'last','open','high','low','timestamp','source_trade_date','source_trading_status',
+            'native_trade_date','source_version_trade_date','native_trade_date_verified','last_trade_time_moscow',
+            'source_update_timestamp_utc','received_at_utc','timestamp_semantics','reference_semantics','carry_semantics','bid','ask','spread','wap','volume','trades')
+    require(type(stored.get('trades')) is int and all(stored.get(k)==row.get(k) for k in fields),
+            'USD_normalized_original_mismatch')
+    return row
+
+
+def observation_verified(data, *, now):
+    try:
+        verified_observation(data,now=now)
+        return True
+    except (ValueError,KeyError,TypeError,core.SynchronizedLiveMarketOIError): return False
+
+
 def usable(data, *, now):
     try:
-        row=replay(data['usd_reference_evidence'],now=now)
+        row=verified_observation(data,now=now)
         stored=data['instruments']['usd_tom']
-        require(isinstance(stored,dict),'USD_normalized_not_object')
-        # Freshness diagnostics may be downgraded by the canonical reader. Facts,
-        # identity and original clocks may never be substituted after replay.
-        fields=(*IDENTITY,'last','open','high','low','timestamp','source_trade_date','source_trading_status',
-                'native_trade_date','source_version_trade_date','native_trade_date_verified','last_trade_time_moscow',
-                'source_update_timestamp_utc','received_at_utc','timestamp_semantics','reference_semantics','carry_semantics','bid','ask','spread','wap','volume','trades')
-        require(all(stored.get(k)==row.get(k) for k in fields),'USD_normalized_original_mismatch')
         return row['spot_price_usable'] and stored.get('stale') is False
     except (ValueError,KeyError,TypeError,core.SynchronizedLiveMarketOIError): return False
 

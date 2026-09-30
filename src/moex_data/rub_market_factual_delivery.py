@@ -89,7 +89,10 @@ def project(snapshot, *, now, code_revision):
             "source_record_sha256": sha256(encoded(row)).hexdigest()}
         if key in ('cnyrub_tom','usd_tom'):
             from moex_data.rub_currency_market_state import describe as currency_state
-            prices[key]['market_state'] = currency_state(row, now=now, current_admitted=allowed)
+            from moex_data.rub_usd_cets_reference import observation_verified
+            verified = observation_verified(market_data(snapshot),now=now) if key=='usd_tom' else None
+            prices[key]['market_state'] = currency_state(row, now=now, current_admitted=allowed,
+                                                        usd_evidence_verified=verified)
     futoi = {}
     for ticker, name in (("si", "futoi_live"), ("cr", "futoi_live_cr")):
         item = selected[name]

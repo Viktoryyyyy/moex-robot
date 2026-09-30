@@ -202,7 +202,10 @@ def _current(snapshot, checks, *, now):
                           evidence=deepcopy(row), source_time_ages=deepcopy(row.get("source_time_ages"))))
         if key in ('cnyrub_tom','usd_tom'):
             from moex_data.rub_currency_market_state import describe as currency_state
-            items[key]['market_state'] = currency_state(row, now=now, current_admitted=usable)
+            from moex_data.rub_usd_cets_reference import observation_verified
+            verified = observation_verified(market_data(snapshot),now=now) if key=='usd_tom' else None
+            items[key]['market_state'] = currency_state(row, now=now, current_admitted=usable,
+                                                       usd_evidence_verified=verified)
     basis = snapshot.get("components", {}).get("live_basis_carry", {})
     metrics = basis_metrics(snapshot)
     total = sum(len(pair.get("metrics", [])) for pair in (basis.get("data") or {}).get("pairs", {}).values())

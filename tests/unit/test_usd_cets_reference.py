@@ -55,7 +55,7 @@ def test_zero_trades_preserve_valid_source_without_inventing_a_trade(status,nati
     assert row['received_at_utc']==e['response']['received_at_utc']
     assert row['source_update_timestamp_utc']==NOW.isoformat()
     assert not row['quote_usable'] and not usd.usable(data,now=NOW)
-    state=describe(row,now=NOW,current_admitted=True)
+    state=describe(row,now=NOW,current_admitted=True,usd_evidence_verified=usd.observation_verified(data,now=NOW))
     assert state['state']==('NOT_TRADING_OBSERVED' if status=='N' else 'NO_TRADES_OBSERVED')
     assert state['reported_trade_count']==0 and state['trade_activity']=='NO_TRADES_OBSERVED'
     assert not state['current_price_usable'] and not state['session_completion_proven']
@@ -207,7 +207,7 @@ def test_all_eight_sync_through_real_fast_collection_saved_json_and_consumer(tmp
 
 @pytest.mark.parametrize('defect',[None,'auth','outer_null','outer_list','raw_null','raw_list','table_null','row_null','url_list',
     'native_date_missing','native_date_prior','native_date_empty','native_date_bad','native_date_future','closed_missing_date',
-    'zero_T','zero_A','zero_N'])
+    'zero_T','zero_A','zero_N','stored_count_zero','stored_count_zero_forged_reason','zero_evidence_hash'])
 def test_real_fast_collection_disk_and_read_keep_USD_failure_independent(tmp_path,defect):
     from test_synchronized_live_market_oi_context import _payloads
     from moex_data import synchronized_live_market_oi_context_partial as live
@@ -222,7 +222,7 @@ def test_real_fast_collection_disk_and_read_keep_USD_failure_independent(tmp_pat
         for row in body['marketdata']['data']:row[columns.index('SYSTIME')]=source_time
     def get(url,**kw):
         if usd.SECID in url:
-            obj=zero_payload(status=defect[-1]) if defect and defect.startswith('zero_') else payload()
+            obj=zero_payload(status=defect[-1]) if defect in ('zero_T','zero_A','zero_N') else zero_payload() if defect=='zero_evidence_hash' else payload()
             return Response(obj,url,kw['params'],status=401 if defect=='auth' else 200)
         return Response(cny if 'CNYRUB_TOM' in url else forts,url,kw['params'])
     def loader():return live.fetch_live_snapshot_with_usd(http_get=get,now_fn=lambda:NOW,env={'MOEX_API_KEY':'synthetic'})
@@ -231,7 +231,13 @@ def test_real_fast_collection_disk_and_read_keep_USD_failure_independent(tmp_pat
     folder=fast.state_path(tmp_path);(folder/'enabled').write_text(fast.SCHEMA)
     # Hash-consistent corruption must reach the real original-evidence check.
     m=value['market'];e=m['usd_reference_evidence']
-    if defect=='outer_null':m['usd_reference_evidence']=None
+    if defect in ('stored_count_zero','stored_count_zero_forged_reason'):
+        m['instruments']['usd_tom']['trades']=0
+        if defect=='stored_count_zero_forged_reason':
+            m['instruments']['usd_tom']['read_freshness_reason']='USD_no_same_session_trades'
+            m['instruments']['usd_tom']['market_state']={'state':'NO_TRADES_OBSERVED','source_evidence_verified':True}
+    elif defect=='zero_evidence_hash':e['response']['sha256']='0'*64
+    elif defect=='outer_null':m['usd_reference_evidence']=None
     elif defect=='outer_list':m['usd_reference_evidence']=[]
     elif defect=='row_null':m['instruments']['usd_tom']=None
     elif defect=='url_list':e['response']['url']=[]
@@ -265,7 +271,13 @@ def test_real_fast_collection_disk_and_read_keep_USD_failure_independent(tmp_pat
     assert data['instruments']['si_front']['price_oi_usable'] is True
     assert data['instruments']['cr_front']['price_oi_usable'] is True
     assert len(projection.basis_metrics(view))==(30 if defect is None else 22)
-    if defect and defect.startswith('zero_'):
+    if defect in ('stored_count_zero','stored_count_zero_forged_reason','zero_evidence_hash'):
+        row=data['instruments']['usd_tom'];state=row['market_state']
+        assert state['state']=='SOURCE_UNAVAILABLE' and state['source_evidence_verified'] is False
+        assert state['reported_trade_count'] is None and state['last_observation'] is None
+        assert state['trade_activity']!='NO_TRADES_OBSERVED'
+        assert row['read_freshness_reason']==('USD_response_hash' if defect=='zero_evidence_hash' else 'USD_normalized_original_mismatch')
+    if defect in ('zero_T','zero_A','zero_N'):
         row=data['instruments']['usd_tom'];state=row['market_state']
         assert row['trades']==0 and row['last'] is None and row['timestamp'] is None
         assert row['read_freshness_reason']=='USD_no_same_session_trades'
@@ -285,7 +297,7 @@ def test_real_fast_collection_disk_and_read_keep_USD_failure_independent(tmp_pat
     assert (folder/'current.json').read_bytes()==raw
 
 
-@pytest.mark.parametrize('source_case',['fresh','missing_native_date','zero_trades'])
+@pytest.mark.parametrize('source_case',['fresh','missing_native_date','zero_trades','stored_count_zero'])
 def test_real_heavy_saved_canonical_read_and_final_delivery_recheck_currency_TTL(tmp_path,monkeypatch,source_case):
     from test_stage9_analysis_bundle_v2 import source_io,live,shifted_market,NOW as clock
     from src.moex_research.consumers import usdrubf_chat_snapshot_consumer as consumer
@@ -302,10 +314,23 @@ def test_real_heavy_saved_canonical_read_and_final_delivery_recheck_currency_TTL
         e=usd.capture(now_fn=lambda:clock,http_get=lambda url,**kw:Response(zero_payload(),url,kw['params']),env={'MOEX_API_KEY':'synthetic'})
     source=usd.attach(source,e,now=clock)
     _,path=live.refresh_snapshot(now_fn=lambda:clock,live_loader=lambda:source)
+    if source_case=='stored_count_zero':
+        saved=json.loads(path.read_bytes());row=saved['components']['synchronized_live_market_oi']['data']['instruments']['usd_tom']
+        row.update(trades=0,read_freshness_reason='USD_no_same_session_trades',
+                   market_state={'state':'NO_TRADES_OBSERVED','source_evidence_verified':True})
+        path.write_text(json.dumps(saved))
     raw=path.read_bytes()
     before=consumer.load_market_factual(now_fn=lambda:clock,reader=live.base.read_current_snapshot,code_revision='a'*40)
     times=iter((clock,clock+timedelta(seconds=61)))
     after=consumer.load_market_factual(now_fn=lambda:next(times),reader=live.base.read_current_snapshot,code_revision='a'*40)
+    read,_=live.base.read_current_snapshot(now_fn=lambda:clock)
+    expected_state=('SOURCE_UNAVAILABLE' if source_case=='stored_count_zero' else
+                    'NO_TRADES_OBSERVED' if source_case=='zero_trades' else 'TRADING_OBSERVED')
+    for scope in ('daily','weekly'):
+        item=read['factual_release']['analysis_bundles'][scope]['sections']['current_market']['items']['usd_tom']
+        assert item['market_state']['state']==expected_state
+        assert item['market_state']['source_evidence_verified'] is (source_case!='stored_count_zero')
+    assert before['prices']['usd_tom']['market_state']['state']==expected_state
     for key in ('cnyrub_tom','usd_tom'):
         admitted=key!='usd_tom' or source_case=='fresh'
         assert before['prices'][key]['status']==('AVAILABLE' if admitted else 'UNAVAILABLE')
@@ -316,12 +341,12 @@ def test_real_heavy_saved_canonical_read_and_final_delivery_recheck_currency_TTL
         if observation is not None:assert observation['current_use_allowed'] is False
     if source_case!='fresh':
         row=before['prices']['usd_tom']
-        assert row['source_identity']['timestamp'] is None
+        if source_case!='stored_count_zero':assert row['source_identity']['timestamp'] is None
         if source_case=='missing_native_date':
             assert row['reason']=='USD_native_trade_date_missing_or_invalid'
             assert row['market_state']['last_observation']['values']['last']==84.5
             assert row['market_state']['last_observation']['values']['native_trade_date_verified'] is False
-        else:
+        elif source_case=='zero_trades':
             assert row['reason']=='USD_no_same_session_trades'
             assert row['market_state']['state']=='NO_TRADES_OBSERVED'
             assert row['market_state']['reported_trade_count']==0
@@ -329,6 +354,12 @@ def test_real_heavy_saved_canonical_read_and_final_delivery_recheck_currency_TTL
             assert row['market_state']['last_observation'] is None
             saved=json.loads(raw)['components']['synchronized_live_market_oi']['data']['instruments']['usd_tom']
             assert saved['trades']==0 and saved['market_state']['state']=='NO_TRADES_OBSERVED'
+        else:
+            assert row['reason']=='USD_normalized_original_mismatch'
+            assert row['market_state']['state']=='SOURCE_UNAVAILABLE'
+            assert row['market_state']['source_evidence_verified'] is False
+            assert row['market_state']['reported_trade_count'] is None
+            assert row['market_state']['last_observation'] is None
         # This legacy heavy fixture lacks native expiry metadata, so its four
         # existing carry metrics are unavailable independently of USD admission.
         assert before['basis_carry']['admitted_metric_count']==18

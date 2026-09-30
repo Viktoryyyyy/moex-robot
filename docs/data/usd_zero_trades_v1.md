@@ -20,7 +20,10 @@ it is not inferred to prove active trading or session completion. A retained
 LAST, if supplied, is only the last received observation, never a current fact.
 
 Scope is this document, `src/moex_data/rub_usd_cets_reference.py`,
-`src/moex_data/rub_currency_market_state.py` and
+`src/moex_data/rub_currency_market_state.py`,
+`src/moex_data/rub_snapshot_read_freshness.py`,
+`src/moex_data/rub_analysis_bundle_v2.py`,
+`src/moex_data/rub_market_factual_delivery.py` and
 `tests/unit/test_usd_cets_reference.py`. The existing admission contract and TTL
 remain unchanged: zero trades still denies current use. Historical contracts,
 bytes, accepted pointers, collectors, FUTOI policy and HTTP/MCP are unchanged.
@@ -40,3 +43,18 @@ tests/test_stage9_analysis_bundle_v2.py tests/test_market_factual_delivery.py`
 passed: **89 tests in 140.39 seconds**, using the existing Python venv and real
 Parquet engine in an isolated complete GitHub checkout. No production history
 was requested by this run. Full exact-head CI remains a pre-merge requirement.
+
+Review correction (GitHub comment 4141522619): a stored counter changed from a
+positive value to zero could pass through presentation despite failing original
+evidence admission. The canonical reader and final delivery now explicitly
+validate the full original envelope and normalized row before classification;
+copied status/reason/validation fields cannot authorize an observation. An
+integrity failure shows SOURCE_UNAVAILABLE with no asserted trade count or last
+observation. The canonical reader, Stage9 bundle and final delivery are the
+three exact presentation callers added to scope for explicit validation.
+New regressions persist hash-consistent altered rows and damaged zero-trade
+evidence, then enter the actual saved fast/heavy readers and final consumer.
+The correcting head requires repeat independent review and full CI.
+Final correction validation: the same four-file pytest command passed **93
+tests in 148.21 seconds**, including explicit daily/weekly agreement and rejection
+of copied counter/reason/validation markers in the saved canonical snapshot.

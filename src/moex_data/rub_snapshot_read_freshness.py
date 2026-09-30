@@ -66,10 +66,17 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
             )
         except (ValueError, TypeError, OverflowError):
             age, reason = None, "invalid_source_timestamp"
+        usd_evidence_verified = None
         if key == "usd_tom":
-            from moex_data.rub_usd_cets_reference import usable as usd_usable
-            if not usd_usable(data, now=now):
-                reason = item.get("read_freshness_reason") or reason or "USD_reference_not_admitted"
+            from moex_data.rub_usd_cets_reference import verified_observation, core as usd_core
+            try:
+                observation = verified_observation(data, now=now)
+                usd_evidence_verified = True
+                if not observation['spot_price_usable'] or item.get('stale') is not False:
+                    reason = item.get("read_freshness_reason") or reason or "USD_reference_not_admitted"
+            except (ValueError,KeyError,TypeError,usd_core.SynchronizedLiveMarketOIError) as exc:
+                usd_evidence_verified = False
+                reason = str(exc)
         if reason is None and item.get("stale") is not False:
             reason = "persisted_source_not_fresh"
         item["age_seconds"] = age
@@ -82,7 +89,7 @@ def apply_read_freshness(snapshot: Mapping[str, object], *, now: datetime) -> di
             reason = item.get('read_freshness_reason')
             admitted = (live.get('status') in ('READY','PARTIAL') and reason is None
                         and (key=='usd_tom' or data.get('quality',{}).get('spot_price_usable') is True))
-            annotate(item, now=now, current_admitted=admitted)
+            annotate(item, now=now, current_admitted=admitted, usd_evidence_verified=usd_evidence_verified)
         if "quote_stale" in item:
             item["quote_stale"] = reason is not None
         if reason:
