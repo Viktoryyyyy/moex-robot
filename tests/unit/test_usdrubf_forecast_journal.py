@@ -95,6 +95,70 @@ def test_complete_round_trip_and_restart(tmp_path):
     assert report["scenarios"][0]["status"] == "TARGETS_REACHED"
 
 
+@pytest.mark.parametrize("bullish,opening", [(True,"103"),(True,"105"),(False,"97"),(False,"95")])
+@pytest.mark.parametrize("with_stop", [False, True])
+def test_start_target_already_passed_is_not_success(bullish, opening, with_stop):
+    item = scenario(direction="BULLISH_USD" if bullish else "BEARISH_USD",
+        targets=["103", "110"] if bullish else ["97", "90"],
+        invalidation=("97" if bullish else "103") if with_stop else None)
+    data = facts([(opening, "112", "88", "100")] * 3)
+    outcome = score(forecast(scenarios=[item]), data)["scenarios"][0]
+    assert outcome["status"] == "NOT_EVALUABLE"
+    assert outcome["reason"] == "TARGET_ALREADY_PASSED_AT_HORIZON_START"
+    assert all(t["status"] == "NOT_APPLICABLE" for t in outcome["targets"])
+
+
+def test_durable_init_syncs_each_parent_in_order_and_on_retry(tmp_path, monkeypatch):
+    calls = []
+    real = ForecastJournal._sync_directory
+    def sync(path):
+        calls.append(path)
+        real(path)
+    monkeypatch.setattr(ForecastJournal, "_sync_directory", staticmethod(sync))
+    root = tmp_path / "a" / "b" / "journal"
+    ForecastJournal(root)
+    assert calls.index(tmp_path) < calls.index(tmp_path / "a") < calls.index(tmp_path / "a" / "b")
+    assert calls.count(root) == 2
+    calls.clear()
+    ForecastJournal(root)
+    assert tmp_path in calls and root in calls
+
+
+def test_init_fsync_failure_is_not_acknowledged_and_retry_repairs(tmp_path, monkeypatch):
+    root = tmp_path / "a" / "journal"
+    real = ForecastJournal._sync_directory
+    def fail(path):
+        if path == tmp_path:
+            raise OSError("synthetic fsync failure")
+        real(path)
+    monkeypatch.setattr(ForecastJournal, "_sync_directory", staticmethod(fail))
+    with pytest.raises(OSError, match="fsync failure"):
+        ForecastJournal(root)
+    monkeypatch.setattr(ForecastJournal, "_sync_directory", staticmethod(real))
+    assert ForecastJournal(root).capture("ok", b"{}", metadata())
+
+
+def test_retry_after_record_link_fsync_failure_syncs_existing_entry(tmp_path, monkeypatch):
+    journal = ForecastJournal(tmp_path / "journal")
+    real = ForecastJournal._sync_directory
+    def fail(path):
+        if path == journal.root / "records":
+            raise OSError("synthetic after-link failure")
+        real(path)
+    monkeypatch.setattr(ForecastJournal, "_sync_directory", staticmethod(fail))
+    with pytest.raises(OSError, match="after-link"):
+        journal.capture("one", b"{}", metadata())
+    original = read = (journal.root / "records/input.one.json").read_bytes()
+    calls = []
+    def success(path):
+        calls.append(path)
+        real(path)
+    monkeypatch.setattr(ForecastJournal, "_sync_directory", staticmethod(success))
+    journal.capture("one", b"{}", metadata())
+    assert journal.root / "records" in calls
+    assert (journal.root / "records/input.one.json").read_bytes() == original
+
+
 def test_idempotent_retry_does_not_move_original_clock(tmp_path):
     journal, ref, clock, _ = registered(tmp_path)
     original = journal.read(ref)

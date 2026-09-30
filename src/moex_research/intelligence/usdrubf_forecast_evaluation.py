@@ -7,8 +7,9 @@ from decimal import Context, Decimal, InvalidOperation, ROUND_HALF_EVEN, localco
 from .usdrubf_forecast_journal import ForecastJournalError, _hash, _token, encode, fields, text, timestamp
 
 FORECAST_VERSION = "usdrubf.forecast.v1"
+FORECAST_V2 = "usdrubf.forecast.v2"
 FACTS_VERSION = "usdrubf.forecast_facts.v1"
-EVALUATOR_VERSION = "usdrubf.forecast_evaluation.v1"
+EVALUATOR_VERSION = "usdrubf.forecast_evaluation.v2"
 
 
 def price(value: object, *, zero: bool = False) -> Decimal:
@@ -55,6 +56,34 @@ def predicate(value: object) -> None:
 
 
 def validate_forecast(spec: object) -> dict:
+    context = None
+    if isinstance(spec, dict) and spec.get("schema_version") == FORECAST_V2:
+        context = spec.get("context")
+        legacy = {k: v for k, v in spec.items() if k != "context"}
+        legacy["schema_version"] = FORECAST_VERSION
+        validate_forecast(legacy)
+        context = fields(context, {"original_text", "interpretation", "external_context",
+            "registration_class", "grid_provenance", "baseline", "horizon_label"})
+        text(context["original_text"])
+        text(context["interpretation"])
+        if context["registration_class"] not in {"SYNTHETIC", "RETROSPECTIVE", "PROSPECTIVE_LOCAL"}:
+            raise ForecastJournalError("explicit registration class required")
+        if context["horizon_label"] not in {"DAY", "WEEK"}:
+            raise ForecastJournalError("DAY/WEEK horizon label required")
+        grid = fields(context["grid_provenance"], {"source", "completeness_scope"})
+        text(grid["source"])
+        text(grid["completeness_scope"])
+        baseline = fields(context["baseline"], {"input", "pointer", "timestamp_pointer", "status"})
+        if baseline["input"] not in spec["inputs"] or baseline["status"] not in {"CANONICAL_FIELD", "EXTERNAL_UNVERIFIED"}:
+            raise ForecastJournalError("baseline must reference a linked input")
+        text(baseline["pointer"])
+        text(baseline["timestamp_pointer"])
+        for item in array(context["external_context"]):
+            fields(item, {"input", "interpretation"})
+            if item["input"] not in spec["inputs"]:
+                raise ForecastJournalError("external context must reference frozen input")
+            text(item["interpretation"])
+        return spec
     spec = fields(spec, {"schema_version", "instrument", "contract", "issued_at",
                          "horizon_start", "horizon_end", "reference_price", "reference_price_at",
                          "bias", "neutral_band_bps", "range", "method_version", "inputs",
@@ -138,11 +167,17 @@ def _scenario(spec: dict, bars: list[dict], start: str) -> dict:
               "targets": [{"level": target, "status": "NOT_REACHED", "first_touch_bar": None}
                           for target in spec["targets"]]}
     consecutive = 0
-    for bar in bars:
+    for index, bar in enumerate(bars):
         low, high, close = (price(bar[key]) for key in ("low", "high", "close"))
         span = [bar["open_at"], bar["close_at"]]
         stop = None if spec["invalidation"] is None else price(spec["invalidation"])
         stopped = stop is not None and (low <= stop if bullish else high >= stop)
+        if index == 0 and phase == "active":
+            opening = price(bar["open"])
+            if any((opening >= price(t) if bullish else opening <= price(t)) for t in spec["targets"]):
+                result["status"] = "NOT_EVALUABLE"
+                result["reason"] = "TARGET_ALREADY_PASSED_AT_HORIZON_START"
+                break
         if phase != "active":
             # Cancellation occurred by this close, before a close-based trigger can be used.
             if stopped:
@@ -262,6 +297,7 @@ def evaluate(spec: dict, facts: object, *, evaluated_at: datetime,
             scenarios.append({"id": scenario["id"], "status": "NOT_EVALUABLE",
                               "reason": "INCOMPLETE_GRID_OR_SOURCE_QUALITY_LIMITATIONS"})
     return {"schema_version": EVALUATOR_VERSION,
+            "baseline_status": spec.get("context", {}).get("baseline", {}).get("status", "LEGACY_CALLER_DECLARED"),
             "coverage": {"status": "COMPLETE_FOR_DECLARED_GRID" if complete else "PARTIAL",
                          "expected_bars": len(expected), "observed_bars": len(seen),
                          "missing_intervals": missing, "quality_limitations": limitations},

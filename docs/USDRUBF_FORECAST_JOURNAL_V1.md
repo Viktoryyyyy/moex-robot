@@ -1,4 +1,195 @@
-# USDRUBF forecast journal and deterministic outcome evaluation v1
+# USDRUBF forecast cycle — current runbook
+
+PROJECT=MOEX_Bot; Task `usdrubf_forecast_journal_v1`; PR #561.
+
+## Current supported workflow
+
+The downstream interface is `moex_research.consumers.usdrubf_forecast_cycle`.
+It reuses the canonical snapshot reader and the existing journal. The server
+producer still supplies facts only. No forecast generation, order placement,
+new scheduler, model training, promotion or paper execution is enabled.
+The implemented mode is **FORECAST_OBSERVATION**; paper P&L is null.
+
+Configuration: `configs/research/usdrubf_forecast_cycle.v1.json`. Its server
+research path is a new suggestion, not a claim of an existing production journal.
+Always pass `--root`. New journal directories are private (0700); use an
+owner-controlled private parent. Never commit actual snapshots or positions.
+
+The commands below assume the existing activated environment, repository working
+directory and `PYTHONPATH=.:src`. Run each separately. Redirected request/ref files
+belong in a private working directory; choose fresh filenames for new versions.
+
+### 1. Capture the actual canonical input
+
+```sh
+python -m moex_research.consumers.usdrubf_forecast_cycle --root /home/trader/moex_bot/data/research/usdrubf_forecast_journal_v1 capture --current --id input-001 > input-ref.json
+```
+
+`--source exact-export.json` imports an existing logical snapshot or the existing
+`rub_snapshot_references.v1` / `rub_snapshot_storage.v1` carrier. Original transport
+bytes and expanded logical bytes have separate hashes. The existing decoder
+checks expansion length, digest and schema. No history is truncated; over 64 MiB
+is refused. A standalone import is **EXTERNAL_UNVERIFIED** for baseline origin;
+the original source admission is not proved by a self-asserted package field.
+`--current` uses the repository canonical reader and records
+`CANONICAL_READER_OUTPUT`; only this route grants `CANONICAL_FIELD` baseline status.
+This is local process provenance, not a signature or source-level PIT audit.
+
+The reference is bound to exact USDRUBF/source identity, LAST field and timestamp.
+Future, stale (>1200 seconds), foreign or contradictory observations are refused.
+RFUD USDRUBF LAST uses the independently checked RUB/USD instrument mapping in
+`contracts/datasets/position_risk_scenarios.v1.json`; conflicting declared units
+are refused. An imported package does not inherit live freshness.
+
+### 2. Prepare and register the analyst's forecast
+
+```sh
+python -m moex_research.consumers.usdrubf_forecast_cycle --root /home/trader/moex_bot/data/research/usdrubf_forecast_journal_v1 template forecast > forecast-request.json
+```
+
+Fill the nulls with the actual original forecast, interpretation, method version,
+DAY/WEEK label, exact horizon boundaries, neutral band, explicit observation grid
+and its provenance/completeness scope. A grid is not inferred from weekdays or
+observed rows. The approved factual adapter consumes explicitly listed 5-minute
+intervals spanning day/1–3-day or week/1–4-week horizons. Arbitrary calendar or
+intrabar completion is not inferred. Scenario objects retain the legacy schema
+below: direction, optional activation/confirmation, targets and invalidation.
+No probability or trading size is invented. `issued_at` is optional and filled
+from the local registration clock. Historical imports should explicitly set
+RETROSPECTIVE; actual late registration cannot become forward evidence regardless
+of a claimed older issue time. Synthetic fixtures must set SYNTHETIC.
+
+```sh
+python -m moex_research.consumers.usdrubf_forecast_cycle --root /home/trader/moex_bot/data/research/usdrubf_forecast_journal_v1 register --id forecast-001 --input-ref input-ref.json --request forecast-request.json > forecast-ref.json
+```
+
+Instrument, source references, price/time binding and hashes are automatic.
+External context is separately frozen with the legacy `capture` API below and
+linked through `external_inputs` plus `context.external_context` entries
+`{"input": <returned ref>, "interpretation": "..."}`. Their source metadata must
+state actual availability and limitations; download time is not publication proof.
+
+### 3. Attach explicitly supplied position and risk
+
+```sh
+python -m moex_research.consumers.usdrubf_forecast_cycle --root /home/trader/moex_bot/data/research/usdrubf_forecast_journal_v1 template risk > risk-request.json
+```
+
+Enter a dated manual position, account limits, freshness policy, verified applicable
+instrument parameters and explicit assumptions. No documented broker-export
+format was supplied, so unknown broker formats are unsupported. `position: null`
+means POSITION_ABSENT. Empty positions require `explicit_empty: true`; stale
+positions yield POSITION_STALE. Neither is silently replaced by a remembered
+account. Position IDs/versions are immutable; a changed position requires a higher
+version and a risk predecessor/reason. The legacy supplied Stage 8 input may be
+attached as `stage8_supplied`; its conservative gross semantics remain unchanged.
+
+Each position has `id`, `instrument`, signed integer `contracts`, current account
+`mark_price`, and ordered `tranches`. A tranche has `id`, signed `contracts_delta`,
+and `assumed_fill_price`. These are supplied hypothetical fills, not orders.
+The current price reference is the supplied account mark, so P&L is incremental
+scenario change, not a fabricated broker variation-margin statement.
+
+Money inputs are bounded exact decimal strings/integers (no binary floats).
+The USDRUBF multiplier is 1000 RUB per 1 RUB/USD move; tick size 0.01 costs 10 RUB.
+These parameters were checked against [MOEX](https://www.moex.com/ru/derivatives/perpetual-futures/usdrubf)
+on 2026-09-30. Historical applicability is not inferred from today's page.
+Supply an applicable specification interval covering the scenario horizon.
+Commissions, funding/roll and slippage are explicit total per-scenario assumptions;
+unknown cost yields null net P&L. Unknown margin yields null modeled free funds.
+Future funding is not a known rate. Stops do not guarantee fills across gaps.
+Separate prefix portfolios, supplied account P&L and conservative gross exposure
+are reported independently. Breaches are displayed; no reductions are executed.
+
+```sh
+python -m moex_research.consumers.usdrubf_forecast_cycle --root /home/trader/moex_bot/data/research/usdrubf_forecast_journal_v1 risk --id risk-001 --forecast-ref forecast-ref.json --request risk-request.json > risk-ref.json
+```
+
+### 4. Observe closed horizons and replay/report
+
+```sh
+python -m moex_research.consumers.usdrubf_forecast_cycle --root /home/trader/moex_bot/data/research/usdrubf_forecast_journal_v1 template observation > observation-request.json
+```
+
+Fill the existing data root and the exact admitted Stage2 history bounds. The
+adapter calls `accepted_quote_history` and reuses its real physical validator;
+the underlying accepted-history resolver requires the full admitted date range.
+Only bounded horizon-relevant partitions are decoded/frozen. Missing admitted
+data produces retryable NOT_EVALUABLE, never source substitution or a backfill.
+
+```sh
+python -m moex_research.consumers.usdrubf_forecast_cycle --root /home/trader/moex_bot/data/research/usdrubf_forecast_journal_v1 observe --request observation-request.json --forecast-ref forecast-ref.json > observation-result.json
+```
+
+For multiple forecasts, supply their previously returned references in `forecasts`
+and omit `--forecast-ref`; at most 100 forecasts per pass. An unfinished horizon
+is PENDING. Closed source bytes, admission anchors and facts are frozen before
+assessment. Restart resumes those bytes, checks their integrity and avoids duplicate
+results. A null watermark means no closed bar was observed.
+
+Corrected facts require an explicit new assessment: request `revision` contains
+`supersedes` (the previous observation ref) and `reason`, with exactly one forecast.
+Old facts/assessments stay readable. The revision is independently immutable and
+does not replace the first observation. Report only one chosen version per root
+forecast; duplicates/revisions cannot inflate the denominator.
+
+```sh
+python -m moex_research.consumers.usdrubf_forecast_cycle --root /home/trader/moex_bot/data/research/usdrubf_forecast_journal_v1 report --run-result observation-result.json > forecast-report.json
+```
+
+Reporting reproduces saved evaluations with no source refetch. It separates
+method/horizon/registration class, coverage, direction, scenario outcomes and
+unverifiable reasons. Accuracy, monetary risk and paper P&L are not merged.
+Direct replay also supports `reproduce --evaluation-ref FILE`.
+
+## Replay, revisions and validation boundary
+
+Forecast v1 remains readable; v2 adds original text/context/grid provenance and
+baseline binding. Evaluation v2 records all executable Python/.inc helpers,
+contracts/config hashes, Git revision, Python and installed dependency versions.
+Reproduction refuses a different runtime. Use the recorded code/environment for
+old assessments; old records are never rewritten. Source hashes detect tampering,
+not privileged owner rewriting. Preserve returned references outside the journal.
+
+Identical retries preserve original clocks. Different content under the same ID
+fails. New directories and retry acknowledgements fsync directory entries; tests
+exercise call ordering/fault boundaries/concurrency, not actual power failures.
+The CLI emits one JSON result to stdout, exit 0; malformed/schema/integrity/I/O
+errors exit 2 without traceback. PENDING and retryable NOT_EVALUABLE are valid
+results. Templates contain nulls deliberately and must be completed by the owner.
+
+## Existing research evidence
+
+`research --id ID --request FILE` freezes existing Phase06/06A/07 or S7.2 outputs.
+Request schema `usdrubf.research_evidence_request.v1` has `kind` (PHASE06, PHASE06A,
+PHASE07, S7.2), exact `directory`, `inputs` mapping and optional `reproduction`
+with exact comparison `directory` and `artifact_names`. It does not run training.
+`experiment --id ID --request FILE` preregisters explicit hypothesis/rules,
+horizons, baseline, metrics, costs, exclusions, samples and prior experiment refs.
+Viewed/historical samples cannot become fresh OOS; overlapping OOS is refused.
+Overlap checks cover declared and linked samples, not unknown external research.
+
+On 2026-09-30 the unchanged Phase06, Phase06A and Phase07 runners reproduced the
+existing 2026-09-16 archive from their exact six hash-verified inputs. All 16
+compared substantive outputs matched byte-for-byte; run manifests naturally have
+different run identities. Phase07 keeps three independent entry dates, all 5/10/20
+session horizons and the full stop/sizing grid; it does not select a best stop.
+No new edge, OOS result or strategy promotion is claimed.
+
+No S7.2 runtime outputs were found in the bounded server research/validation
+inventory. Its code and contract remain unchanged. The reader requires its
+yearly/sample/sparse-vs-complete policy fields and marks legacy manifests without
+original partition hashes BLOCKED_MISSING_EVIDENCE. Majority-class reference
+remains post-hoc descriptive. Artifact capture alone is not research acceptance.
+
+No actual owner forecast/position or completed real forecast cycle was supplied.
+Synthetic tests establish mechanics only. Current source bundle remains PARTIAL;
+optional source gaps do not manufacture missing prices, positions or outcomes.
+The data-refresh incident #539 and general futures refresh remain separate.
+
+---
+
+# Legacy explicit-input API reference (v1 forecasts)
 
 PROJECT=MOEX_Bot
 
@@ -12,7 +203,7 @@ broker/scheduler/Telegram integration. No existing live bridge or snapshot
 consumer is modified. Import the exact JSON already used by the analyst; do not
 refetch a source later and call it the original input.
 
-Implementation:
+Original core implementation (additional files are listed in `USDRUBF_FORECAST_CYCLE_SCOPE_V1.md`):
 - `src/moex_research/intelligence/usdrubf_forecast_journal.py`
 - `src/moex_research/intelligence/usdrubf_forecast_evaluation.py`
 - `tests/unit/test_usdrubf_forecast_journal.py`
@@ -36,8 +227,8 @@ hashes, with method version, issue time, reference price/time, explicit horizon,
 bias/range/scenarios and an explicit observation grid.
 
 `evaluation`: an independent immutable record linking the exact forecast, exact
-future-facts bytes and metadata, evaluator version and evaluator source-file
-SHA-256, registration classification, and the deterministic criterion report.
+future-facts bytes and metadata, evaluator version, runtime inventory,
+registration classification, and the deterministic criterion report.
 A new evaluation never edits the forecast. A corrected factual source requires
 a new evaluation ID; the old assessment remains available.
 

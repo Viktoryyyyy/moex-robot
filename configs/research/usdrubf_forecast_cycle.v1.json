@@ -1,0 +1,16 @@
+{
+  "schema_version": "usdrubf.forecast_cycle_config.v1",
+  "journal_root_policy": "explicit_cli_root_required",
+  "suggested_server_research_root": "/home/trader/moex_bot/data/research/usdrubf_forecast_journal_v1",
+  "production_scheduler": false,
+  "broker_write": false,
+  "mode": "FORECAST_OBSERVATION",
+  "canonical_baseline_max_age_seconds": 1200,
+  "max_forecasts_per_pass": 100,
+  "max_factual_partitions_per_forecast": 40,
+  "max_factual_bytes_per_forecast": 67108864,
+  "approved_fact_reader": "moex_data.futures.freeze_step7_accepted_raw_5m.accepted_quote_history",
+  "observation_grid": "explicit_5m_intervals_with_user_supplied_provenance_not_calendar_inference",
+  "paper_execution": "UNAVAILABLE_NO_APPROVED_EXECUTION_CONTRACT",
+  "broker_export": "UNSUPPORTED_NO_DOCUMENTED_FORMAT_SUPPLIED"
+}

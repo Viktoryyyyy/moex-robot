@@ -1,0 +1,30 @@
+{
+  "contract_id": "position_risk_scenarios.v1",
+  "implementation": "moex_data.step8_position_risk_state.build_forecast_risk",
+  "request_schema": "step8_forecast_risk_request.v1",
+  "position_schema": "step8_forecast_position.v1",
+  "output_schema": "step8_forecast_risk_state.v1",
+  "legacy_stage8": "step8_position_risk_input.v1 supplied aggregation remains unchanged",
+  "source_modes": ["manual"],
+  "broker_export": "unsupported_until_documented_sample_available",
+  "supported_mapping": {
+    "instrument": "USDRUBF", "quote_unit": "RUB_PER_USD",
+    "contract_size": "1000", "tick_size": "0.01", "tick_value_rub": "10",
+    "settlement_currency": "RUB",
+    "primary_source": "https://www.moex.com/ru/derivatives/perpetual-futures/usdrubf",
+    "funding_source": "https://www.moex.com/a8141",
+    "parameter_verification_date": "2026-09-30",
+    "historical_applicability": "not_inferred_from_current_webpage"
+  },
+  "position_states": ["POSITION_ABSENT", "POSITION_STALE", "EXPLICIT_EMPTY", "PARTIAL", "SCENARIO_CALCULATED", "SPECIFICATION_MISSING", "UNSUPPORTED_INSTRUMENT_OR_UNIT_MAPPING"],
+  "formula": "sum(q * (scenario_price - supplied_mark_price) * 1000) + sum(assumed_tranche_delta * (scenario_price - assumed_fill_price) * 1000)",
+  "pnl_basis": "change_since_supplied_account_mark_not_broker_variation_margin_statement",
+  "tranche_model": "explicit_assumed_fill_prefix_per_position_not_proven_execution_sequence",
+  "conservative_gross": "sum(abs(current_contracts)) + sum(abs(all_tranche_deltas))",
+  "unknown_cost_or_funding": "net_pnl_null",
+  "unknown_margin": "modeled_free_funds_null",
+  "free_funds_formula": "supplied_free_funds + scenario_net_change + supplied_current_margin - modeled_margin",
+  "supplied_account_pnl": "preserved_separately_never_added_twice",
+  "gap_policy": "explicit_adverse_price_stop_fill_not_guaranteed",
+  "execution_authority": false
+}

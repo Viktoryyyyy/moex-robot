@@ -9,6 +9,9 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
+import sys
+from importlib.metadata import distributions
 from tempfile import NamedTemporaryFile
 from typing import Callable
 
@@ -122,6 +125,30 @@ def read_bytes(path: Path) -> bytes:
         os.close(fd)
 
 
+def runtime_identity() -> dict:
+    """Pin every repository Python helper, contracts and installed distributions.
+
+    A commit alone cannot prove a dirty checkout; the file inventory is authoritative.
+    """
+    repo = Path(__file__).resolve().parents[3]
+    files = {}
+    for folder in ("src", "contracts", "configs"):
+        for path in sorted((repo / folder).rglob("*")):
+            if path.is_file() and path.suffix in {".py", ".inc", ".json", ".yaml", ".yml", ".toml", ".txt"}:
+                files[path.relative_to(repo).as_posix()] = digest(read_bytes(path))
+    for name in ("requirements.txt", "pyproject.toml", "pytest.ini"):
+        if (repo / name).is_file():
+            files[name] = digest(read_bytes(repo / name))
+    try:
+        revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo,
+                                          stderr=subprocess.DEVNULL, text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        revision = "UNAVAILABLE_SOURCE_TREE_ONLY"
+    return {"code_revision": revision, "files_sha256": digest(encode(files)), "files": files,
+            "python": sys.version, "dependencies": sorted(
+                (d.metadata.get("Name", "unknown"), d.version) for d in distributions())}
+
+
 class ForecastJournal:
     """Local-clock registration, not an independent timestamp/notarization service.
 
@@ -136,10 +163,21 @@ class ForecastJournal:
         self.root = Path(root).absolute()
         self.clock = clock
         for directory in (self.root, self.root / "objects", self.root / "records"):
-            for part in (directory, *directory.parents):
+            # Top-down, including existing ancestors: a concurrent creator or a
+            # previous failed fsync may have left a visible but non-durable entry.
+            for part in reversed((directory, *directory.parents)):
                 if part.is_symlink():
                     raise ForecastJournalError("symlink journal directory")
-            directory.mkdir(parents=True, exist_ok=True)
+                part.mkdir(exist_ok=True, mode=0o700)
+                self._sync_directory(part.parent)
+
+    @staticmethod
+    def _sync_directory(directory: Path) -> None:
+        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
     def _now(self) -> datetime:
         now = self.clock()
@@ -169,12 +207,9 @@ class ForecastJournal:
             try:
                 os.link(temp, path)
             except FileExistsError:
-                return
-            directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
+                pass
+            # Also sync on retry/concurrent publication before acknowledging it.
+            ForecastJournal._sync_directory(path.parent)
         finally:
             if temp is not None:
                 temp.unlink(missing_ok=True)
@@ -194,7 +229,7 @@ class ForecastJournal:
         return data
 
     def _path(self, kind: str, identifier: str) -> Path:
-        if not isinstance(kind, str) or kind not in {"input", "forecast", "evaluation"}:
+        if not isinstance(kind, str) or kind not in {"input", "forecast", "evaluation", "position", "risk", "observation", "experiment", "research"}:
             raise ForecastJournalError("unsupported record kind")
         return self.root / "records" / (kind + "." + _token(identifier) + ".json")
 
@@ -229,6 +264,28 @@ class ForecastJournal:
         self._validate_record(record, ref["kind"], ref["id"])
         return record
 
+    def acknowledge(self, ref: dict) -> dict:
+        """Durably acknowledge an existing record after an interrupted publish."""
+        record = self.read(ref)
+        if timestamp(record["recorded_at"]) > self._now():
+            raise ForecastJournalError("existing record is ahead of registrar clock")
+        self._sync_directory(self.root / "objects")
+        self._sync_directory(self.root / "records")
+        return ref
+
+    def verify_input(self, ref: dict) -> dict:
+        record = self.read(ref)
+        if record["kind"] != "input":
+            raise ForecastJournalError("input reference required")
+        payload = record["payload"]
+        raw = self.object_bytes(payload["object_sha256"])
+        if "logical_sha256" in payload:
+            from moex_data.rub_snapshot_serialization import expand
+            logical = self.object_bytes(payload["logical_sha256"])
+            if len(logical) != payload["logical_length"] or encode(expand(decode(raw))) != logical:
+                raise ForecastJournalError("logical input mismatch")
+        return record
+
     def capture(self, identifier: str, data: bytes, metadata: dict) -> dict:
         """Freeze exact source bytes; metadata timestamps are caller declarations."""
         now = self._now()
@@ -245,14 +302,18 @@ class ForecastJournal:
         if issued > now:
             raise ForecastJournalError("forecast issued_at is in the future")
         for ref in spec["inputs"]:
-            record = self.read(ref)
+            record = self.verify_input(ref)
             if record["kind"] != "input" or timestamp(record["recorded_at"]) > now:
                 raise ForecastJournalError("input record required before registration")
             source = record["payload"]
             validate_source(source["source"], now)
-            if timestamp(source["source"]["received_at"]) > issued:
+            cutoff = "available_at" if spec.get("context") is not None else "received_at"
+            if timestamp(source["source"][cutoff]) > issued:
                 raise ForecastJournalError("future input relative to forecast issued_at")
             self.object_bytes(source["object_sha256"])
+        if spec.get("context") is not None:
+            from ..consumers.usdrubf_forecast_cycle import validate_baseline
+            validate_baseline(self, spec)
         if spec["supersedes"] is not None:
             previous = self.read(spec["supersedes"])
             if previous["kind"] != "forecast" or previous["id"] == identifier:
@@ -264,16 +325,28 @@ class ForecastJournal:
                 raise ForecastJournalError("revision predates original")
         return self._put("forecast", identifier, spec, self._finished(now))
 
-    def evaluate(self, identifier: str, forecast_ref: dict, facts: bytes, source: dict) -> dict:
+    def evaluate(self, identifier: str, forecast_ref: dict, facts: bytes, source: dict, *,
+                 supersedes: dict | None = None, revision_reason: str | None = None) -> dict:
         from . import usdrubf_forecast_evaluation as rules
         now = self._now()
         record = self.read(forecast_ref)
         if record["kind"] != "forecast" or timestamp(record["recorded_at"]) > now:
             raise ForecastJournalError("past registered forecast required")
+        if supersedes is not None:
+            previous = self.read(supersedes)
+            if (previous["kind"] != "evaluation" or previous["id"] == identifier
+                    or previous["payload"]["forecast"] != forecast_ref
+                    or timestamp(previous["recorded_at"]) > now):
+                raise ForecastJournalError("evaluation revision requires distinct prior assessment of same forecast")
+            text(revision_reason)
+        elif revision_reason is not None:
+            raise ForecastJournalError("evaluation revision reason without predecessor")
         # Recheck every linked byte, even when the evaluator needs only the frozen spec.
         for ref in record["payload"]["inputs"]:
-            item = self.read(ref)
-            self.object_bytes(item["payload"]["object_sha256"])
+            self.verify_input(ref)
+        if record["payload"].get("context") is not None:
+            from ..consumers.usdrubf_forecast_cycle import validate_baseline
+            validate_baseline(self, record["payload"])
         validate_source(source, now)
         raw = decode(facts)
         report = rules.evaluate(record["payload"], raw, evaluated_at=now,
@@ -281,11 +354,17 @@ class ForecastJournal:
                           limitations=source["quality_limitations"])
         key = self._object(facts)
         prospective = timestamp(record["recorded_at"]) <= timestamp(record["payload"]["horizon_start"])
+        declared = record["payload"].get("context", {}).get("registration_class")
+        category = ("SYNTHETIC" if declared == "SYNTHETIC" else
+                    "PROSPECTIVE_LOCAL" if prospective and declared != "RETROSPECTIVE" else "RETROSPECTIVE")
         payload = {"forecast": forecast_ref, "facts_sha256": key, "facts_source": source,
                    "evaluator_version": rules.EVALUATOR_VERSION,
                    "evaluator_sha256": digest(read_bytes(Path(rules.__file__))),
-                   "registration_class": "PROSPECTIVE_LOCAL" if prospective else "RETROSPECTIVE",
+                   "runtime": runtime_identity(),
+                   "registration_class": category,
                    "report": report}
+        if supersedes is not None:
+            payload.update(supersedes=supersedes, revision_reason=revision_reason)
         return self._put("evaluation", identifier, payload, self._finished(now))
 
     def reproduce(self, evaluation_ref: dict) -> dict:
@@ -294,13 +373,17 @@ class ForecastJournal:
         if saved["kind"] != "evaluation":
             raise ForecastJournalError("evaluation reference required")
         payload = saved["payload"]
+        if "runtime" in payload and encode(payload["runtime"]) != encode(runtime_identity()):
+            raise ForecastJournalError("use the exact recorded code and dependencies")
         if (payload["evaluator_version"] != rules.EVALUATOR_VERSION
                 or payload["evaluator_sha256"] != digest(read_bytes(Path(rules.__file__)))):
             raise ForecastJournalError("use the exact recorded evaluator version")
         forecast = self.read(payload["forecast"])
         for ref in forecast["payload"]["inputs"]:
-            item = self.read(ref)
-            self.object_bytes(item["payload"]["object_sha256"])
+            self.verify_input(ref)
+        if forecast["payload"].get("context") is not None:
+            from ..consumers.usdrubf_forecast_cycle import validate_baseline
+            validate_baseline(self, forecast["payload"])
         source = payload["facts_source"]
         result = rules.evaluate(forecast["payload"], decode(self.object_bytes(payload["facts_sha256"])),
                           evaluated_at=timestamp(saved["recorded_at"]),
@@ -327,6 +410,8 @@ def main(argv: list[str] | None = None) -> int:
     score.add_argument("--forecast-ref", type=Path, required=True)
     score.add_argument("--facts", type=Path, required=True)
     score.add_argument("--metadata", type=Path, required=True)
+    score.add_argument("--supersedes", type=Path)
+    score.add_argument("--revision-reason")
     replay = sub.add_parser("reproduce")
     replay.add_argument("--evaluation-ref", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -339,7 +424,9 @@ def main(argv: list[str] | None = None) -> int:
             result = journal.register(args.id, load(args.spec))
         elif args.action == "evaluate":
             result = journal.evaluate(args.id, load(args.forecast_ref),
-                                      read_bytes(args.facts), load(args.metadata))
+                                      read_bytes(args.facts), load(args.metadata),
+                                      supersedes=load(args.supersedes) if args.supersedes else None,
+                                      revision_reason=args.revision_reason)
         else:
             result = journal.reproduce(load(args.evaluation_ref))
         print(encode(result).decode("utf-8"))
