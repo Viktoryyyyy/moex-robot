@@ -62,6 +62,8 @@ validation_rules:
 - availability_status must be available, unavailable, partial, error, or not_checked.
 - no loader implementation may use this report as completed unless probe_status is completed.
 - available status requires the actual FUTOI data schema, including participant-position fields and a supported timestamp representation.
+- a structurally valid `futoi` block with the required data columns and zero rows is unavailable for the probed route and interval, with no source error; it does not prove permanent instrument unavailability or complete FUTOI coverage.
+- missing/malformed `futoi` blocks, missing required columns, and error payloads retain source diagnostics and require retry; service blocks must never substitute for the data block.
 
 blocking_conditions:
 - duplicate primary key.
