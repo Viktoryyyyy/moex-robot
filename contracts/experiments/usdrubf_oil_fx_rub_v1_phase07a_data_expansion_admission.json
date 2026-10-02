@@ -1,0 +1,95 @@
+{
+  "contract_identity": {
+    "contract_id": "usdrubf_oil_fx_rub_v1_phase07a_data_expansion_admission",
+    "contract_version": "1.0",
+    "project": "MOEX_Bot",
+    "task_id": "STRAT_OIL_FX_RUB_V1_07A_DATA_EXPANSION_ADMISSION"
+  },
+  "purpose": {
+    "data_expansion_admission_allowed": true,
+    "historical_brent_retrieval_allowed": true,
+    "signal_evaluation_allowed": false,
+    "backtest_allowed": false,
+    "parameter_optimization_allowed": false,
+    "model_fit_allowed": false,
+    "strategy_promotion_allowed": false,
+    "broker_action_allowed": false,
+    "trading_allowed": false
+  },
+  "usdrubf_frozen_prefix": {
+    "source_mode": "accepted_current_prefix",
+    "source_instrument_id": "usdrubf_futures_family",
+    "target_instrument_id": "forts.usdrubf",
+    "prefix_start_date": "2022-04-26",
+    "prefix_end_date": "2026-10-01",
+    "accepted_date_count": 1143,
+    "raw_row_count": 188760,
+    "partition_content_set_sha256": "d29ca00d590609e09254f8c4298e335571b673ab0b0de534bfa3c51e478aa66e",
+    "target_identity_count": 1142,
+    "first_target_trade_date": "2022-04-27",
+    "last_target_trade_date": "2026-10-01",
+    "prior_trade_date_rule": "immediately previous admitted USDRUBF trade_date inside frozen prefix",
+    "mutable_current_tail_allowed_in_prefix": false
+  },
+  "brent_admission": {
+    "source_id": "moex_brent_futures_daily",
+    "official_host": "iss.moex.com",
+    "asset_code": "BR",
+    "board_id": "RFUD",
+    "contract_selection_rule": "nearest explicit BR RFUD contract whose official expiration or last-trade date is at least seven calendar days after target date",
+    "minimum_days_to_expiration": 7,
+    "candle_trade_date": "exact prior_trade_date",
+    "decision_cutoff_local_time": "08:45:00",
+    "timezone": "Europe/Moscow",
+    "target_day_or_future_candle_allowed": false,
+    "continuous_alias_allowed": false,
+    "contract_code_inference_allowed": false,
+    "volume_or_open_interest_roll_allowed": false,
+    "cross_contract_return_allowed": false
+  },
+  "evaluation_segmentation": {
+    "pre_discovery_extension": {
+      "rule": "target_trade_date < 2024-08-05"
+    },
+    "discovery_reference": {
+      "start_date": "2024-08-05",
+      "end_date": "2026-06-11"
+    },
+    "forward_extension": {
+      "rule": "target_trade_date > 2026-06-11"
+    },
+    "phase07a_performance_evaluation_allowed": false
+  },
+  "runtime_artifacts": [
+    "input_identity_verification.json",
+    "expanded_target_identities.parquet",
+    "brent_contract_universe.parquet",
+    "brent_daily_candles_normalized.parquet",
+    "brent_pit_acceptance_matrix.parquet",
+    "contract_roll_diagnostics.csv",
+    "coverage_summary.json",
+    "research_manifest.json",
+    "gate_results.json"
+  ],
+  "gates": {
+    "G1_usdrubf_prefix": "accepted_current contains the exact frozen prefix date count, raw row count and partition-content SHA256",
+    "G2_target_identity": "1142 target identities are the exact consecutive admitted-date pairs inside the frozen prefix",
+    "G3_brent_official_identity": "official MOEX ISS BR/RFUD explicit-contract identity and provenance only",
+    "G4_brent_pit": "selected candle equals prior_trade_date, expiration distance is at least seven days and candle end is before target 08:45 Europe/Moscow",
+    "G5_exact_coverage": "1142/1142 identities covered once and in frozen order",
+    "G6_roll_integrity": "every contract transition is explicit and no cross-contract return is calculated",
+    "G7_segmentation": "every identity belongs to exactly one frozen pre-discovery/discovery-reference/forward-extension segment",
+    "G8_research_only": "no signal evaluation, performance calculation, model fit, optimization, promotion, broker or trading action",
+    "G9_final": "complete only when G1 through G8 pass"
+  },
+  "authority_boundary": {
+    "network_access_allowed": true,
+    "network_scope": "official MOEX ISS Brent routes used by existing moex_brent_history primitive only",
+    "source_mutation_allowed": false,
+    "model_fit_allowed": false,
+    "parameter_optimization_allowed": false,
+    "strategy_promotion_allowed": false,
+    "broker_action_allowed": false,
+    "trading_action_allowed": false
+  }
+}
