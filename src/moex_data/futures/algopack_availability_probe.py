@@ -624,9 +624,22 @@ def iter_tradestats_history(read_page: Callable[[int], Any], secid: str, date_st
 
 
 
+def _futoi_probe_frame(data: Dict[str, Any]) -> pd.DataFrame:
+    """Require the actual data block before treating zero rows as unavailable."""
+    raw = data.get("futoi")
+    if not isinstance(raw, dict):
+        raise ValueError("missing_futoi_data_block")
+    columns, rows = raw.get("columns"), raw.get("data")
+    if (not isinstance(columns, list) or not columns
+            or any(not isinstance(c, str) or not c or c != c.strip() for c in columns)
+            or len({c.lower() for c in columns}) != len(columns)
+            or not isinstance(rows, list)
+            or any(not isinstance(row, list) or len(row) != len(columns) for row in rows)):
+        raise ValueError("malformed_futoi_data_block")
+    return pd.DataFrame(rows, columns=columns)
+
+
 def _futoi_schema_error(frame: pd.DataFrame) -> str:
-    if frame.empty:
-        return "empty_response"
     columns = {str(c).strip().lower() for c in frame.columns}
     if "error_message" in columns:
         return "ERROR_MESSAGE payload"
@@ -650,9 +663,10 @@ def probe_one_path(base_url: str, path: str, params: Dict[str, Any], timeout: fl
                 raise TradeStatsSourceError("TradeStats path and requested SECID disagree")
             frame, _ = tradestats_page(data, requested, params.get("from"), params.get("till"))
             _tradestats_cursor(data, int(params.get("start", 0)), len(frame))
+        elif is_futoi:
+            frame = _futoi_probe_frame(data)
         else:
-            preferred = ["futoi"] if is_futoi else ["data", "securities", "tradestats", "obstats", "hi2"]
-            frame = block_to_frame(data, preferred)
+            frame = block_to_frame(data, ["data", "securities", "tradestats", "obstats", "hi2"])
         if is_futoi:
             error = _futoi_schema_error(frame)
             if error:
