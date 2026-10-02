@@ -305,8 +305,7 @@ def template(kind):
                 "grid_provenance": {"source": None, "completeness_scope": None}}}
     if kind == "observation":
         return {"schema_version": "usdrubf.forecast_observation_request.v1", "limit": 1,
-            "forecasts": [], "reader": {"mode": "accepted_stage2", "data_root": None,
-                "accepted_start_date": None, "accepted_end_date": None}}
+            "forecasts": [], "reader": {"mode": "accepted_current", "data_root": None}}
     return {"schema_version": "step8_forecast_risk_request.v1", "supersedes": None, "revision_reason": None,
         "position": {"schema_version": "step8_forecast_position.v1", "id": None, "version": 1,
             "source": {"mode": "manual", "reference": None}, "as_of": None, "received_at": None,

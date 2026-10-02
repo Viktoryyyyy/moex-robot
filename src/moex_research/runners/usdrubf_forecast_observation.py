@@ -30,16 +30,21 @@ def accepted_facts(journal, spec, reader, now):
     import pyarrow.parquet as pq
     from moex_data.futures import freeze_step7_accepted_raw_5m as layer
     from moex_data.step9_rub_analysis_bundle import PointerSpec, _to_utc_series
-    fields(reader, {"mode", "data_root", "accepted_start_date", "accepted_end_date"})
+    current = reader.get("mode") == "accepted_current"
+    fields(reader, {"mode", "data_root"} if current else {"mode", "data_root", "accepted_start_date", "accepted_end_date"})
     root = Path(reader["data_root"]).resolve(strict=True)
     repo = Path(__file__).resolve().parents[3]
-    scope = layer.accepted_quote_history(root, "usdrubf_futures_family",
-        reader["accepted_start_date"], reader["accepted_end_date"], repo_root=repo)
+    if current:
+        scope = layer.accepted_quote_history(root, "usdrubf_futures_family", repo_root=repo, current=True, as_of=now)
+    else:
+        scope = layer.accepted_quote_history(root, "usdrubf_futures_family",
+            reader["accepted_start_date"], reader["accepted_end_date"], repo_root=repo)
     start, end = timestamp(spec["horizon_start"]), timestamp(spec["horizon_end"])
     if any(timestamp(b) - timestamp(a) != timedelta(minutes=5) for a, b in spec["observation_grid"]):
         raise ForecastJournalError("approved factual adapter requires explicit 5m observation grid")
     expectation = layer.quote_validation_expectation("usdrubf_futures_family",
-        reader["accepted_start_date"], reader["accepted_end_date"])
+        scope.accepted_dates[0] if current else reader["accepted_start_date"],
+        scope.accepted_dates[-1] if current else reader["accepted_end_date"])
     selected = [r for r in scope.records if (start - timedelta(days=1)).date().isoformat() <= r["trade_date"] <= (end + timedelta(days=1)).date().isoformat()]
     if len(selected) > 40:
         raise ForecastJournalError("factual partition bound exceeded")
@@ -79,7 +84,8 @@ def accepted_facts(journal, spec, reader, now):
     bars.sort(key=lambda b: timestamp(b["close_at"]))
     # Freeze the exact admission anchors, not only their identifiers.
     anchors = []
-    for ref, expected in ((scope.pointer_ref, scope.marker_sha256), (scope.manifest_ref, scope.manifest_sha256)):
+    for ref, expected in (scope.admission_anchors if current else
+                         ((scope.pointer_ref, scope.marker_sha256), (scope.manifest_ref, scope.manifest_sha256))):
         path = layer._expand_root_ref(root, ref, "forecast admission anchor")
         raw = read_bytes(path)
         if digest(raw) != expected:
@@ -87,7 +93,7 @@ def accepted_facts(journal, spec, reader, now):
         anchors.append({"source_ref": ref, "object_sha256": journal._object(raw)})
     facts = {"schema_version": FACTS_VERSION, "instrument": "USDRUBF", "contract": "USDRUBF", "bars": bars}
     as_of = max((timestamp(b["close_at"]) for b in bars), default=start)
-    source = {"source_ref": "stage2_content_attested:" + scope.acceptance_run_id,
+    source = {"source_ref": ("accepted_quote_history:" if current else "stage2_content_attested:") + scope.acceptance_run_id,
         "schema_version": FACTS_VERSION, "code_revision": "recorded_in_evaluation_runtime",
         "data_as_of": as_of.isoformat(), "available_at": now.isoformat(), "received_at": now.isoformat(),
         "quality_limitations": []}
@@ -155,7 +161,7 @@ def run(journal, request):
                     raise ForecastJournalError("synthetic reader cannot score a real forecast")
                 fields(reader, {"mode", "facts", "source"})
                 raw, source, provenance = encode(reader["facts"]), reader["source"], {"synthetic": True}
-            elif reader.get("mode") == "accepted_stage2":
+            elif reader.get("mode") in {"accepted_stage2", "accepted_current"}:
                 try:
                     raw, source, provenance = accepted_facts(journal, spec, reader, now)
                 except (ValueError, OSError) as exc:

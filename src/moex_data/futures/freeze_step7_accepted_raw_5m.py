@@ -47,6 +47,7 @@ class AcceptedQuoteHistory:
     partition_content_set_sha256: str
     records: tuple[Mapping[str, object], ...]
     row_count: int
+    admission_anchors: tuple[tuple[str, str], ...] = ()
 
 
 def _fail(message: str) -> None:
@@ -129,10 +130,15 @@ def _require_stage2_root(root: Path) -> None:
         _fail("data_root differs from canonical MOEX_DATA_ROOT")
 
 
-def accepted_quote_history(root: Path, instrument_id: str, start_date: str, end_date: str, *, repo_root: str | Path = ".") -> AcceptedQuoteHistory:
+def accepted_quote_history(root: Path, instrument_id: str, start_date: str | None = None, end_date: str | None = None, *, repo_root: str | Path = ".", current: bool = False, as_of=None) -> AcceptedQuoteHistory:
     instrument = _safe_token(instrument_id, "instrument_id")
     if instrument not in ALLOWED_INSTRUMENTS:
         _fail("Stage 7 production quote scope is USDRUBF/CNYRUBF only")
+    if current:
+        if start_date is not None or end_date is not None:
+            _fail("current admitted history cannot override its accepted range")
+        from .accepted_quote_history_current import resolve
+        return resolve(root, instrument, repo_root=Path(repo_root).resolve(), as_of=as_of)
     start = _iso_date(start_date, "start_date")
     end = _iso_date(end_date, "end_date")
     _require_stage2_root(root)
