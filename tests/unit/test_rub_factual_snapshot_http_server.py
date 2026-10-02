@@ -20,6 +20,33 @@ from src.moex_research.consumers.usdrubf_chat_snapshot_consumer import (
 TOKEN = "test-bearer-token"
 
 
+@pytest.mark.parametrize('path', [api.SNAPSHOT_PATH, api.RELEASE_PATH, api.MARKET_PATH])
+def test_response_serialized_once_before_sending(path, monkeypatch):
+    payload = _snapshot()
+    calls = []
+    encode = api.SnapshotRequestHandler._encode_json
+    def counted(value):
+        calls.append(value)
+        return encode(value)
+    monkeypatch.setattr(api.SnapshotRequestHandler, '_encode_json', staticmethod(counted))
+    monkeypatch.setattr(api, 'load_market_factual', lambda: deepcopy(payload))
+    with _running_server(lambda: deepcopy(payload), release_loader=lambda: deepcopy(payload)) as port:
+        status, headers, body = _request(port, path)
+    assert status == 200 and body == payload
+    assert int(headers['Content-Length']) == len(encode(payload))
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('path', [api.SNAPSHOT_PATH, api.RELEASE_PATH, api.MARKET_PATH, api.READINESS_PATH])
+def test_invalid_json_never_commits_success_headers(path, monkeypatch):
+    payload = _snapshot()
+    payload['invalid'] = float('nan')
+    monkeypatch.setattr(api, 'load_market_factual', lambda: payload)
+    with _running_server(lambda: payload, release_loader=lambda: payload) as port:
+        status, headers, _ = _request(port, path)
+    assert status == 503 and headers['Cache-Control'] == 'no-store'
+
+
 def _snapshot(*, readiness: str = "READY", freshness: str = "FRESH") -> dict[str, object]:
     return {
         "schema_version": "rub_chat_analysis_snapshot.v1",

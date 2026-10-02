@@ -13,6 +13,44 @@ URL = 'https://rosstat.gov.ru/storage/mediabank/134_02-09-2026.html'
 RAW = (Path(__file__).parents[1] / 'fixtures/rosstat/weekly_cpi_excerpt.html').read_bytes()
 
 
+def test_archive_scan_count_does_not_grow_with_row_count():
+    class CountedNodes(list):
+        scans = 0
+        def __iter__(self):
+            self.scans += 1
+            return super().__iter__()
+
+    raw = index(*([row(day='26.08.2026')] * 500), row())
+    parser = source._parse_index(raw)
+    parser.nodes = CountedNodes(parser.nodes)
+    assert source._select(parser, now=NOW) == source.select(index(), now=NOW)
+    assert parser.nodes.scans == 3
+
+
+@pytest.mark.parametrize('extra', [
+    '<div class="document-list__item-title">duplicate</div>',
+    '<div class="document-list__item-info">duplicate</div>',
+    '<div class="document-list__item--row"><div class="document-list__item-title">nested</div></div>',
+])
+def test_nested_or_duplicate_archive_descendants_still_rejected(extra):
+    malformed = row()[:-6] + '<div>' + extra + '</div></div>'
+    with pytest.raises(ValueError, match='ambiguous weekly archive row'):
+        source.select(index(malformed), now=NOW)
+
+
+def test_replay_parses_archive_once_and_rechecks_on_next_read(tmp_path, monkeypatch):
+    original = source.Index
+    calls = []
+    def counted():
+        calls.append(1)
+        return original()
+    monkeypatch.setattr(source, 'Index', counted)
+    value = component(tmp_path)
+    assert len(calls) == 1
+    assert source.reconcile(value, now=NOW)['status'] == 'READY'
+    assert len(calls) == 2
+
+
 def row(url=URL, label='с 25 по 31 августа 2026 года', day='02.09.2026'):
     return f'<div class="document-list__item document-list__item--row"><a href="{url}">HTML</a><div class="document-list__item-title">{label}</div><div class="document-list__item-info">135.09 Кб, {day}</div></div>'
 

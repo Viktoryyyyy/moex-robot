@@ -138,10 +138,9 @@ def resolve(root: Path, instrument: str, *, repo_root: Path, as_of=None):
     buffers = {field: ev.read(pointer[field], pointer[field.removesuffix("_ref") + "_sha256"])
                for field in ("manifest_ref", "quality_report_ref", "partition_ref")}
     # Existing canonical admission/identity/quality/causality checks, same bytes.
-    ev.frame(pointer["partition_ref"], pointer["partition_sha256"])
+    accepted = ev.frame(pointer["partition_ref"], pointer["partition_sha256"])
     step9._read_pointer_block(root, spec, now, pointer_bytes=ev.read(pointer_path), evidence_buffers=buffers)
     need(pointer.get("promotion_basis") == "stage10_validated_rolling_refresh", "current history requires Stage10 admission")
-    accepted = ev.frame(pointer["partition_ref"])
     _check_frame(accepted, instrument, now)
     indexed = accepted.set_index("trade_date")
     base_dates = set(base.accepted_dates)
@@ -203,12 +202,14 @@ def resolve(root: Path, instrument: str, *, repo_root: Path, as_of=None):
         need(clock(manifest["build_ts_utc"]) <= clock(parent["finished_at_utc"]), "delta build after parent finish")
         expected_dates = [d for d in indexed.index if d <= max(dates)]
         need(output.trade_date.tolist() == expected_dates, "delta output not an admitted history prefix")
+        accepted_prefix = accepted.loc[accepted.trade_date.isin(expected_dates)]
         for field in FIELDS:
-            need(output[field].reset_index(drop=True).equals(accepted.loc[accepted.trade_date.isin(expected_dates), field].reset_index(drop=True)),
+            need(output[field].reset_index(drop=True).equals(accepted_prefix[field].reset_index(drop=True)),
                  "delta output differs from admitted history prefix: " + field)
         need(base_frame.trade_date.tolist() == [d for d in expected_dates if d < min(dates)], "delta base dates mismatch")
+        output_base = output.loc[output.trade_date < min(dates)]
         for field in FIELDS:
-            need(base_frame[field].reset_index(drop=True).equals(output.loc[output.trade_date < min(dates), field].reset_index(drop=True)),
+            need(base_frame[field].reset_index(drop=True).equals(output_base[field].reset_index(drop=True)),
                  "delta base content mismatch: " + field)
         need(lineage["base_history_end"] < min(dates) and lineage["delta_start"] == min(dates)
              and lineage["delta_end"] == max(dates), "delta lineage range mismatch")
