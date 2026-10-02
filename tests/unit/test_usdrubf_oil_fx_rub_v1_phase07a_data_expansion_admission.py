@@ -98,6 +98,8 @@ def test_validate_brent_minimal_valid_grid():
             "enumeration_route": ["https://iss.moex.com/iss/history/x"],
             "metadata_raw_payload_sha256": ["a" * 64],
             "enumeration_raw_payload_sha256": ["b" * 64],
+            "metadata_retrieved_at_utc": ["2026-10-02T10:00:00+00:00"],
+            "enumeration_retrieved_at_utc": ["2026-10-02T10:00:01+00:00"],
         }
     )
     candles = pd.DataFrame(
@@ -107,6 +109,7 @@ def test_validate_brent_minimal_valid_grid():
                 "https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities/BRQ4/candles.json"
             ],
             "raw_payload_sha256": ["c" * 64],
+            "retrieved_at_utc": ["2026-10-02T10:00:02+00:00"],
         }
     )
     matrix = pd.DataFrame(
@@ -124,6 +127,11 @@ def test_validate_brent_minimal_valid_grid():
             "brent_contract_code": ["BRQ4", "BRQ4", "BRN6"],
             "brent_contract_changed": [False, False, True],
             "brent_previous_contract_code": [None, "BRQ4", "BRQ4"],
+            "brent_retrieved_at_utc": [
+                "2026-10-02T10:00:02+00:00",
+                "2026-10-02T10:00:03+00:00",
+                "2026-10-02T10:00:04+00:00",
+            ],
         }
     )
     rolls = pd.DataFrame(
@@ -141,3 +149,83 @@ def test_validate_brent_minimal_valid_grid():
     finally:
         monkeypatch.undo()
     assert all(item["passed"] for item in gates.values())
+
+
+def test_non_utc_brent_provenance_fails_gate():
+    identities = pd.DataFrame(
+        [
+            {
+                "target_trade_date": "2024-08-05",
+                "target_instrument_id": "forts.usdrubf",
+                "prior_trade_date": "2024-08-02",
+                "evaluation_segment": "discovery_reference",
+            },
+            {
+                "target_trade_date": "2026-06-12",
+                "target_instrument_id": "forts.usdrubf",
+                "prior_trade_date": "2026-06-11",
+                "evaluation_segment": "forward_extension",
+            },
+            {
+                "target_trade_date": "2024-08-02",
+                "target_instrument_id": "forts.usdrubf",
+                "prior_trade_date": "2024-08-01",
+                "evaluation_segment": "pre_discovery_extension",
+            },
+        ]
+    ).iloc[[2, 0, 1]].reset_index(drop=True)
+    universe = pd.DataFrame(
+        {
+            "source_id": [phase07a.phase84a.SOURCE_ID],
+            "asset_code": [phase07a.phase84a.ASSET_CODE],
+            "board_id": [phase07a.phase84a.BOARD_ID],
+            "metadata_route": ["https://iss.moex.com/iss/securities/BRQ4.json"],
+            "enumeration_route": ["https://iss.moex.com/iss/history/x"],
+            "metadata_raw_payload_sha256": ["a" * 64],
+            "enumeration_raw_payload_sha256": ["b" * 64],
+            "metadata_retrieved_at_utc": ["2026-10-02T10:00:00"],
+            "enumeration_retrieved_at_utc": ["2026-10-02T10:00:01+00:00"],
+        }
+    )
+    candles = pd.DataFrame(
+        {
+            "source_id": [phase07a.phase84a.SOURCE_ID],
+            "source_route": [
+                "https://iss.moex.com/iss/engines/futures/markets/forts/boards/RFUD/securities/BRQ4/candles.json"
+            ],
+            "raw_payload_sha256": ["c" * 64],
+            "retrieved_at_utc": ["2026-10-02T10:00:02+00:00"],
+        }
+    )
+    matrix = pd.DataFrame(
+        {
+            "target_trade_date": identities["target_trade_date"],
+            "target_instrument_id": identities["target_instrument_id"],
+            "prior_trade_date": identities["prior_trade_date"],
+            "brent_trade_date": identities["prior_trade_date"],
+            "brent_days_to_expiration": [30, 30, 30],
+            "brent_candle_end": [
+                "2024-08-01T23:50:00+03:00",
+                "2024-08-02T23:50:00+03:00",
+                "2026-06-11T23:50:00+03:00",
+            ],
+            "brent_contract_code": ["BRQ4", "BRQ4", "BRN6"],
+            "brent_contract_changed": [False, False, True],
+            "brent_previous_contract_code": [None, "BRQ4", "BRQ4"],
+            "brent_retrieved_at_utc": [
+                "2026-10-02T10:00:02+00:00",
+                "2026-10-02T10:00:03+00:00",
+                "2026-10-02T10:00:04+00:00",
+            ],
+        }
+    )
+    rolls = pd.DataFrame(
+        [{"target_or_future_information_used": False, "cross_contract_return_calculated": False}]
+    )
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(phase07a, "EXPECTED_TARGET_COUNT", 3)
+    try:
+        gates = phase07a._validate_brent(identities, universe, candles, matrix, rolls)
+    finally:
+        monkeypatch.undo()
+    assert gates["G3_brent_official_identity"]["passed"] is False
