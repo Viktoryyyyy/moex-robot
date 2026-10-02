@@ -97,7 +97,7 @@ def advance(h, day, mutation=None):
         "new_trading_dates": [day], "latest_completed_trading_date": day,
         "started_at_utc": "2026-09-01T00:00:00Z", "finished_at_utc": "2029-01-01T00:00:00Z",
         "stage7": {"canonical_pointer_promotion": {"status": "promoted", "pointer_count": 8}}})
-    pointer_path, pointer = scheduler._pointer_from_output(h.root, output, run_id)
+    pointer_path, pointer = scheduler._pointer_from_output(h.root, {**output, "quality_path": output["quality_report_path"]}, run_id)
     write(pointer_path, pointer)
     item = SimpleNamespace(run=run, raw=raw, frozen=frozen, lineage=lineage, parent=parent,
                            pointer=pointer_path, output=output)
