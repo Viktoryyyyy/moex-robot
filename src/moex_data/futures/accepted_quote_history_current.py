@@ -7,7 +7,7 @@ prices alone, bind every appended date to that boundary.
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from hashlib import sha256
 from io import BytesIO
 import json
@@ -226,9 +226,13 @@ def resolve(root: Path, instrument: str, *, repo_root: Path, as_of=None):
     need(set(found) == wanted, "admitted raw tail coverage incomplete")
     records = base.records + tuple(found[d] for d in sorted(found))
     dates = tuple(r["trade_date"] for r in records)
+    first_day, last_day = date.fromisoformat(expectation.date_start), date.fromisoformat(dates[-1])
+    date_set = set(dates)
+    missing = tuple(day.isoformat() for offset in range((last_day - first_day).days + 1)
+                    if (day := first_day + timedelta(days=offset)).isoformat() not in date_set)
     anchors = ev.anchors(raw_paths)
     identity = sha256(json.dumps(anchors, separators=(",", ":")).encode()).hexdigest()
-    return replace(base, accepted_dates=dates, records=records, row_count=sum(r["row_count"] for r in records),
+    return replace(base, accepted_dates=dates, missing_dates=missing, records=records, row_count=sum(r["row_count"] for r in records),
         acceptance_run_id="stage7_current_" + identity, partition_dates_sha256=layer._date_set_sha(list(dates)),
         partition_content_set_sha256=sha256("".join(r["trade_date"] + "\t" + r["sha256"] + "\n" for r in records).encode()).hexdigest(),
         admission_anchors=anchors)

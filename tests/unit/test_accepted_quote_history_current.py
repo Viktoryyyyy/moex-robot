@@ -117,6 +117,7 @@ def test_normal_update_sunday_and_repeat_without_reader_configuration_change(his
     first = advance(history, "2026-09-27")  # Source-observed Sunday; Saturday is not invented.
     a = resolve(history)
     assert a.accepted_dates == ("2026-09-25", "2026-09-27")
+    assert a.missing_dates == ("2026-09-26",)
     assert a == resolve(history)
     baseline_bytes = Path(history.base.records[0]["snapshot_path"]).read_bytes()
     old_objects = {ref: layer._expand_root_ref(history.root, ref, "test").read_bytes()
@@ -129,6 +130,8 @@ def test_normal_update_sunday_and_repeat_without_reader_configuration_change(his
     # Exact captured anchors remain independently replayable after current moves.
     assert all(sha256(old_objects[ref]).hexdigest() == digest_ for ref, digest_ in a.admission_anchors)
     assert layer.accepted_quote_history(history.root, INSTRUMENT, "2026-09-25", "2026-09-25") == history.base
+    advance(history, "2026-09-30")
+    assert resolve(history).missing_dates == ("2026-09-26", "2026-09-29")
 
 
 @pytest.mark.parametrize("failure", ["failed", "unpromoted", "hash", "missing", "observed_gap", "lineage",

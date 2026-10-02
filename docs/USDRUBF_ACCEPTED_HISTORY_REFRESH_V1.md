@@ -40,6 +40,13 @@ Existing observation retry/reproduction uses those frozen objects, not a new
 current read. Calling accepted_facts directly can probe real bars without
 registering a forecast or running an evaluation.
 
+In the returned current scope, pointer_ref/manifest_ref/acceptance_report_ref
+and their hashes still identify the immutable Stage2 baseline. They alone do
+not certify the extended range. The complete admission_anchors tuple and its
+composite acceptance_run_id identify the current composition. Counts and content
+digests cover the whole composition. missing_dates lists calendar dates without
+partitions across that range, not missing exchange trading sessions.
+
 Closed dates must precede the current Moscow date, D1 availability and successful
 parent finish must not exceed the reader clock, and individual future bars are
 excluded. Intraday absence is not filled; the evaluator still uses the explicit
