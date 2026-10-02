@@ -73,7 +73,9 @@ class Evidence:
 
     def anchors(self, exclude):
         for path, raw in self.raw.items():
-            need(path.read_bytes() == raw, "history evidence changed during resolution")
+            need(path.stat().st_size == len(raw), "history evidence changed during resolution")
+            with path.open("rb") as stream:
+                need(stream.read(len(raw) + 1) == raw, "history evidence changed during resolution")
         return tuple((layer.ROOT_PREFIX + path.relative_to(self.root).as_posix(), sha256(raw).hexdigest())
                      for path, raw in sorted(self.raw.items()) if path not in exclude)
 
@@ -216,7 +218,7 @@ def resolve(root: Path, instrument: str, *, repo_root: Path, as_of=None):
                 else:
                     found[day] = {"trade_date": day, "snapshot_path": str(path), "sha256": record["sha256"], "row_count": rows}
         rebuilt = materializer.build_d1(data_root=root, frozen_manifest_path=frozen_path,
-            instrument_id=instrument, history_start=min(dates), history_end=max(dates)).set_index("trade_date")
+            instrument_id=instrument, history_start=min(dates), history_end=max(dates), evidence_buffers=ev.raw).set_index("trade_date")
         for day in wanted.intersection(dates):
             for field in FIELDS:
                 a, b = rebuilt.loc[day, field], indexed.loc[day, field]

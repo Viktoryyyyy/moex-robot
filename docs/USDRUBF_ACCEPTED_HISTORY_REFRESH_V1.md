@@ -9,7 +9,10 @@ Base/main/server: 2d2cc1a792a0870617792b67e817cf839893d325.
 Single mutation owner: this Codex task. Independent read-only review is separate.
 Branch: codex/usdrubf-accepted-history-refresh-v1.
 Scope: canonical accepted_quote_history current-history resolver, observation
-adapter, regression tests and this runbook. No collector, scheduler, training,
+adapter/default CLI observation template, bounded-buffer option in the existing
+Stage7 D1 materializer, regression tests and this runbook. The latter two source
+files were also checked against the same open-PR inventory before modification.
+No collector, scheduler, training,
 trading, forecast registration or historical pointer mutation.
 All 27 open PR file lists checked on 2026-10-02. No overlapping source files;
 PR562 changes handoff documentation/examples, PR371 ingestion contracts,

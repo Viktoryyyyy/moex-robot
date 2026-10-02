@@ -199,3 +199,49 @@ def test_evidence_resource_bounds(history, monkeypatch):
     monkeypatch.setattr(current, "MAX_FILE", 10)
     with pytest.raises(ValueError, match="bound exceeded"):
         resolve(history)
+
+
+def test_final_recheck_does_not_read_grown_file_unbounded(tmp_path, monkeypatch):
+    path = write(tmp_path / "evidence.json", {})
+    ev = current.Evidence(tmp_path)
+    ev.read(path)
+    path.write_bytes(b"x" * 1000)
+    monkeypatch.setattr(Path, "read_bytes", lambda self: pytest.fail("unbounded reread"))
+    with pytest.raises(ValueError, match="changed during resolution"):
+        ev.anchors(set())
+
+
+def test_d1_uses_captured_bytes_and_final_recheck_refuses_rotation(history, monkeypatch):
+    item = advance(history, "2026-09-27")
+    original = m.build_d1
+    def rotate(**kwargs):
+        assert kwargs["evidence_buffers"][item.raw] == item.raw.read_bytes()
+        item.raw.write_bytes(b"oversized replacement" * 1000)
+        result = original(**kwargs)
+        assert result.iloc[0]["close"] == 103.0
+        return result
+    monkeypatch.setattr(m, "build_d1", rotate)
+    with pytest.raises(ValueError, match="changed during resolution"):
+        resolve(history)
+
+
+def test_missing_intermediate_successful_parent_is_not_filled(history):
+    first = advance(history, "2026-09-27")
+    advance(history, "2026-09-28")
+    first.parent.unlink()
+    with pytest.raises(ValueError, match="tail coverage incomplete"):
+        resolve(history)
+
+
+def test_same_prices_different_raw_version_is_refused(history):
+    item = advance(history, "2026-09-27")
+    frame = pd.read_parquet(item.raw)
+    frame["ingest_ts"] = "2026-09-27T11:00:00Z"
+    frame.to_parquet(item.raw, index=False)
+    frozen = json.loads(item.frozen.read_text())
+    frozen["partitions"][0]["sha256"] = digest(item.raw)
+    frozen["frozen_content_sha256"] = sha256(("2026-09-27\t" + digest(item.raw) + "\n").encode()).hexdigest()
+    write(item.frozen, frozen)
+    mutate(item.lineage, lambda x: x.update(delta_manifest_sha256=digest(item.frozen)))
+    with pytest.raises(ValueError, match="conflicting admitted raw version"):
+        resolve(history)

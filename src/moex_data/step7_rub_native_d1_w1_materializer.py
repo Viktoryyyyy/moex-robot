@@ -102,8 +102,9 @@ def _availability_w1(week_end_date: str) -> str:
     return local.astimezone(timezone.utc).isoformat()
 
 
-def _validate_frozen_manifest(root: Path, manifest_path: Path, instrument_id: str, history_start: str, history_end: str) -> tuple[list[dict[str, object]], str]:
-    values = _load_json(manifest_path, "frozen raw manifest")
+def _validate_frozen_manifest(root: Path, manifest_path: Path, instrument_id: str, history_start: str, history_end: str, *, evidence_buffers=None) -> tuple[list[dict[str, object]], str]:
+    values = (_load_json(manifest_path, "frozen raw manifest") if evidence_buffers is None
+              else json.loads(evidence_buffers[manifest_path]))
     if values.get("schema_version") != "step7_frozen_raw_5m_manifest.v1":
         _fail("frozen raw manifest schema mismatch")
     if values.get("dataset_id") != SOURCE_DATASET or values.get("instrument_id") != instrument_id:
@@ -137,7 +138,8 @@ def _validate_frozen_manifest(root: Path, manifest_path: Path, instrument_id: st
         if len(expected_sha) != 64:
             _fail("frozen raw partition SHA-256 missing")
         path = _expand_ref(root, row.get("frozen_ref"), "frozen_ref")
-        if _sha_file(path) != expected_sha:
+        actual_sha = _sha_file(path) if evidence_buffers is None else hashlib.sha256(evidence_buffers[path]).hexdigest()
+        if actual_sha != expected_sha:
             _fail("frozen raw partition SHA-256 mismatch")
         checked.append({**row, "trade_date": trade_date, "path": path})
         content_lines.append(trade_date + "\t" + expected_sha + "\n")
@@ -147,18 +149,22 @@ def _validate_frozen_manifest(root: Path, manifest_path: Path, instrument_id: st
     return checked, digest
 
 
-def build_d1(*, data_root: str | Path, frozen_manifest_path: str | Path, instrument_id: str, history_start: str, history_end: str) -> pd.DataFrame:
+def build_d1(*, data_root: str | Path, frozen_manifest_path: str | Path, instrument_id: str, history_start: str, history_end: str, evidence_buffers=None) -> pd.DataFrame:
     root = Path(data_root).resolve()
     instrument = _safe_token(instrument_id, "instrument_id")
     if instrument not in ALLOWED_INSTRUMENTS:
         _fail("Stage 7 D1 scope is USDRUBF/CNYRUBF only")
     start = _iso_date(history_start, "history_start")
     end = _iso_date(history_end, "history_end")
-    records, _ = _validate_frozen_manifest(root, Path(frozen_manifest_path).resolve(), instrument, start, end)
+    records, _ = _validate_frozen_manifest(root, Path(frozen_manifest_path).resolve(), instrument, start, end, evidence_buffers=evidence_buffers)
     result: list[dict[str, object]] = []
     expected_secid = EXPECTED_SECID[instrument]
     for record in records:
-        frame = pd.read_parquet(record["path"])
+        if evidence_buffers is None:
+            frame = pd.read_parquet(record["path"])
+        else:
+            from io import BytesIO
+            frame = pd.read_parquet(BytesIO(evidence_buffers[record["path"]]))
         required = ["instrument_id", "trade_date", "ts", "secid", "open", "high", "low", "close", "volume", "value", "num_trades"]
         missing = [c for c in required if c not in frame.columns]
         if missing or frame.empty:
