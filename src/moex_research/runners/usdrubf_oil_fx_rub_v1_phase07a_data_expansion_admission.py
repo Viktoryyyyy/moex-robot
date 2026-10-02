@@ -4,7 +4,7 @@ import argparse
 import hashlib
 import json
 import re
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Final, Mapping
 from zoneinfo import ZoneInfo
@@ -157,6 +157,14 @@ def _prefix_records(scope: Any) -> tuple[tuple[dict[str, Any], ...], tuple[str, 
     return records, dates, rows, content
 
 
+def _is_utc_timestamp(value: object) -> bool:
+    try:
+        parsed = pd.Timestamp(value)
+    except Exception:
+        return False
+    return parsed.tzinfo is not None and parsed.utcoffset() == timedelta(0)
+
+
 def _segment(target: str) -> str:
     if target < DISCOVERY_START:
         return "pre_discovery_extension"
@@ -208,6 +216,10 @@ def _validate_brent(
         and universe["metadata_raw_payload_sha256"].astype(str).map(lambda x: bool(_SHA64.fullmatch(x))).all()
         and universe["enumeration_raw_payload_sha256"].astype(str).map(lambda x: bool(_SHA64.fullmatch(x))).all()
         and candles["raw_payload_sha256"].astype(str).map(lambda x: bool(_SHA64.fullmatch(x))).all()
+        and universe["metadata_retrieved_at_utc"].map(_is_utc_timestamp).all()
+        and universe["enumeration_retrieved_at_utc"].map(_is_utc_timestamp).all()
+        and candles["retrieved_at_utc"].map(_is_utc_timestamp).all()
+        and matrix["brent_retrieved_at_utc"].map(_is_utc_timestamp).all()
     )
 
     target = pd.to_datetime(matrix["target_trade_date"])
