@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import json
+import re
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
@@ -229,3 +233,69 @@ def test_non_utc_brent_provenance_fails_gate():
     finally:
         monkeypatch.undo()
     assert gates["G3_brent_official_identity"]["passed"] is False
+
+
+# Explicit regression inventory for the previously unchecked P2 boundaries.
+UNVALIDATED_BOUNDARY_PATHS = [
+    "usdrubf_frozen_prefix.prior_trade_date_rule",
+    "brent_admission.official_host",
+    "brent_admission.timezone",
+    "brent_admission.contract_selection_rule",
+    "evaluation_segmentation.pre_discovery_extension.rule",
+    "evaluation_segmentation.discovery_reference.start_date",
+    "evaluation_segmentation.discovery_reference.end_date",
+    "evaluation_segmentation.forward_extension.rule",
+    "evaluation_segmentation.phase07a_performance_evaluation_allowed",
+    "authority_boundary.network_access_allowed",
+    "authority_boundary.network_scope",
+    "authority_boundary.source_mutation_allowed",
+    "authority_boundary.model_fit_allowed",
+    "authority_boundary.parameter_optimization_allowed",
+    "authority_boundary.strategy_promotion_allowed",
+    "authority_boundary.broker_action_allowed",
+    "authority_boundary.trading_action_allowed",
+]
+
+
+@pytest.mark.parametrize("field", UNVALIDATED_BOUNDARY_PATHS)
+@pytest.mark.parametrize("mutation", ["changed", "missing", "null", "wrong_type"])
+def test_main_rejects_invalid_boundaries_before_io(tmp_path, monkeypatch, field, mutation):
+    contract = json.loads(Path(
+        "contracts/experiments/usdrubf_oil_fx_rub_v1_phase07a_data_expansion_admission.json"
+    ).read_text(encoding="utf-8"))
+    keys = field.split(".")
+    parent = contract
+    for key in keys[:-1]:
+        parent = parent[key]
+    old = parent[keys[-1]]
+    if mutation == "missing":
+        del parent[keys[-1]]
+    elif mutation == "null":
+        parent[keys[-1]] = None
+    elif mutation == "wrong_type":
+        parent[keys[-1]] = int(old) if type(old) is bool else []
+    else:
+        parent[keys[-1]] = not old if type(old) is bool else old + " changed"
+
+    contract_path = tmp_path / "invalid_contract.json"
+    contract_path.write_text(json.dumps(contract), encoding="utf-8")
+    data_root = tmp_path / "data"
+    data_root.mkdir()
+    output_dir = tmp_path / "outputs" / "admission"
+    accepted = Mock(side_effect=AssertionError("accepted_current must not be read"))
+    brent = Mock(side_effect=AssertionError("Brent must not be retrieved"))
+    monkeypatch.setattr(phase07a.step7, "accepted_quote_history", accepted)
+    monkeypatch.setattr(phase07a.phase84a, "build_brent_pit_matrix", brent)
+
+    with pytest.raises(phase07a.Phase07AError, match=re.escape(field)):
+        phase07a.main([
+            "--contract-path", str(contract_path),
+            "--data-root", str(data_root),
+            "--output-dir", str(output_dir),
+            "--run-id", "invalid-contract-test",
+            "--git-commit-sha", "a" * 40,
+        ])
+    accepted.assert_not_called()
+    brent.assert_not_called()
+    assert not output_dir.parent.exists()
+    assert list(data_root.iterdir()) == []

@@ -59,22 +59,27 @@ def _read_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _validate_contract(contract: Mapping[str, Any]) -> None:
-    identity = contract.get("contract_identity")
-    expected_identity = {
+# Independent frozen specification: never derive expectations from the supplied
+# contract. Keep every declared boundary aligned with this runner's semantics.
+_EXPECTED_CONTRACT: Final[dict[str, Any]] = {
+    "contract_identity": {
         "contract_id": CONTRACT_ID,
         "contract_version": CONTRACT_VERSION,
         "project": PROJECT,
         "task_id": TASK_ID,
-    }
-    if not isinstance(identity, Mapping):
-        raise Phase07AError("contract_identity missing")
-    for key, expected in expected_identity.items():
-        if identity.get(key) != expected:
-            raise Phase07AError(f"contract identity mismatch: {key}")
-
-    prefix = contract.get("usdrubf_frozen_prefix")
-    expected_prefix = {
+    },
+    "purpose": {
+        "data_expansion_admission_allowed": True,
+        "historical_brent_retrieval_allowed": True,
+        "signal_evaluation_allowed": False,
+        "backtest_allowed": False,
+        "parameter_optimization_allowed": False,
+        "model_fit_allowed": False,
+        "strategy_promotion_allowed": False,
+        "broker_action_allowed": False,
+        "trading_allowed": False,
+    },
+    "usdrubf_frozen_prefix": {
         "source_mode": "accepted_current_prefix",
         "source_instrument_id": SOURCE_INSTRUMENT,
         "target_instrument_id": TARGET_INSTRUMENT,
@@ -86,56 +91,83 @@ def _validate_contract(contract: Mapping[str, Any]) -> None:
         "target_identity_count": EXPECTED_TARGET_COUNT,
         "first_target_trade_date": "2022-04-27",
         "last_target_trade_date": PREFIX_END,
+        "prior_trade_date_rule": "immediately previous admitted USDRUBF trade_date inside frozen prefix",
         "mutable_current_tail_allowed_in_prefix": False,
-    }
-    if not isinstance(prefix, Mapping):
-        raise Phase07AError("usdrubf_frozen_prefix missing")
-    for key, expected in expected_prefix.items():
-        if prefix.get(key) != expected:
-            raise Phase07AError(f"frozen prefix mismatch: {key}")
+    },
+    "brent_admission": {
+        "source_id": "moex_brent_futures_daily",
+        "official_host": "iss.moex.com",
+        "asset_code": "BR",
+        "board_id": "RFUD",
+        "contract_selection_rule": "nearest explicit BR RFUD contract whose official expiration or last-trade date is at least seven calendar days after target date",
+        "minimum_days_to_expiration": 7,
+        "candle_trade_date": "exact prior_trade_date",
+        "decision_cutoff_local_time": "08:45:00",
+        "timezone": "Europe/Moscow",
+        "target_day_or_future_candle_allowed": False,
+        "continuous_alias_allowed": False,
+        "contract_code_inference_allowed": False,
+        "volume_or_open_interest_roll_allowed": False,
+        "cross_contract_return_allowed": False,
+    },
+    "evaluation_segmentation": {
+        "pre_discovery_extension": {
+            "rule": f"target_trade_date < {DISCOVERY_START}",
+        },
+        "discovery_reference": {
+            "start_date": DISCOVERY_START,
+            "end_date": DISCOVERY_END,
+        },
+        "forward_extension": {
+            "rule": f"target_trade_date > {DISCOVERY_END}",
+        },
+        "phase07a_performance_evaluation_allowed": False,
+    },
+    "runtime_artifacts": list(DECLARED_OUTPUTS),
+    "gates": {
+        "G1_usdrubf_prefix": "accepted_current contains the exact frozen prefix date count, raw row count and partition-content SHA256",
+        "G2_target_identity": "1142 target identities are the exact consecutive admitted-date pairs inside the frozen prefix",
+        "G3_brent_official_identity": "official MOEX ISS BR/RFUD explicit-contract identity and provenance only",
+        "G4_brent_pit": "selected candle equals prior_trade_date, expiration distance is at least seven days and candle end is before target 08:45 Europe/Moscow",
+        "G5_exact_coverage": "1142/1142 identities covered once and in frozen order",
+        "G6_roll_integrity": "every contract transition is explicit and no cross-contract return is calculated",
+        "G7_segmentation": "every identity belongs to exactly one frozen pre-discovery/discovery-reference/forward-extension segment",
+        "G8_research_only": "no signal evaluation, performance calculation, model fit, optimization, promotion, broker or trading action",
+        "G9_final": "complete only when G1 through G8 pass",
+    },
+    "authority_boundary": {
+        "network_access_allowed": True,
+        "network_scope": "official MOEX ISS Brent routes used by existing moex_brent_history primitive only",
+        "source_mutation_allowed": False,
+        "model_fit_allowed": False,
+        "parameter_optimization_allowed": False,
+        "strategy_promotion_allowed": False,
+        "broker_action_allowed": False,
+        "trading_action_allowed": False,
+    },
+}
 
-    purpose = contract.get("purpose")
-    if not isinstance(purpose, Mapping):
-        raise Phase07AError("purpose missing")
-    if purpose.get("data_expansion_admission_allowed") is not True or purpose.get("historical_brent_retrieval_allowed") is not True:
-        raise Phase07AError("required admission permission missing")
-    for key in (
-        "signal_evaluation_allowed",
-        "backtest_allowed",
-        "parameter_optimization_allowed",
-        "model_fit_allowed",
-        "strategy_promotion_allowed",
-        "broker_action_allowed",
-        "trading_allowed",
-    ):
-        if purpose.get(key) is not False:
-            raise Phase07AError(f"research boundary widened: {key}")
 
-    brent = contract.get("brent_admission")
-    if not isinstance(brent, Mapping):
-        raise Phase07AError("brent_admission missing")
-    if (
-        brent.get("source_id") != phase84a.SOURCE_ID
-        or brent.get("asset_code") != phase84a.ASSET_CODE
-        or brent.get("board_id") != phase84a.BOARD_ID
-        or brent.get("minimum_days_to_expiration") != 7
-        or brent.get("candle_trade_date") != "exact prior_trade_date"
-        or brent.get("decision_cutoff_local_time") != "08:45:00"
-    ):
-        raise Phase07AError("Brent admission semantics mismatch")
-    for key in (
-        "target_day_or_future_candle_allowed",
-        "continuous_alias_allowed",
-        "contract_code_inference_allowed",
-        "volume_or_open_interest_roll_allowed",
-        "cross_contract_return_allowed",
-    ):
-        if brent.get(key) is not False:
-            raise Phase07AError(f"Brent boundary widened: {key}")
+def _validate_frozen_value(value: Any, expected: Any, field: str) -> None:
+    if isinstance(expected, dict):
+        if not isinstance(value, Mapping):
+            raise Phase07AError(f"{field}: expected object")
+        for key, expected_value in expected.items():
+            child = f"{field}.{key}"
+            if key not in value:
+                raise Phase07AError(f"{child}: required field missing")
+            _validate_frozen_value(value[key], expected_value, child)
+        unexpected = set(value) - set(expected)
+        if unexpected:
+            raise Phase07AError(f"{field}: unexpected fields {sorted(unexpected, key=str)}")
+    elif type(value) is not type(expected) or value != expected:
+        # Exact type prevents bool/int and int/float equality from admitting
+        # malformed JSON values. Missing values are never replaced by defaults.
+        raise Phase07AError(f"{field}: frozen value or type mismatch")
 
-    if contract.get("runtime_artifacts") != list(DECLARED_OUTPUTS):
-        raise Phase07AError("runtime artifact inventory mismatch")
 
+def _validate_contract(contract: Mapping[str, Any]) -> None:
+    _validate_frozen_value(contract, _EXPECTED_CONTRACT, "contract")
 
 def _prefix_records(scope: Any) -> tuple[tuple[dict[str, Any], ...], tuple[str, ...], int, str]:
     records = tuple(dict(row) for row in scope.records if str(row["trade_date"]) <= PREFIX_END)
