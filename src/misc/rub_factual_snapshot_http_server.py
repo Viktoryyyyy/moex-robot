@@ -113,6 +113,10 @@ class SnapshotRequestHandler(BaseHTTPRequestHandler):
 
     def _send_json(self, status_code: int, payload: object) -> None:
         body = self._encode_json(payload)
+        self._send_encoded_json(status_code, body)
+
+    def _send_encoded_json(self, status_code: int, body: bytes) -> None:
+        """Send the exact bytes already validated before committing headers."""
         self.send_response(status_code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
@@ -142,30 +146,31 @@ class SnapshotRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
         return False
 
-    def _load_snapshot(self) -> dict[str, object] | None:
+    def _load_snapshot(self) -> tuple[dict[str, object], bytes] | None:
         try:
             snapshot = self.server.snapshot_loader()
             if not isinstance(snapshot, dict):
                 raise RuntimeError("governed snapshot consumer returned a non-object")
-            self._encode_json(snapshot)
-            return snapshot
+            body = self._encode_json(snapshot)
+            return snapshot, body
         except Exception:
             self.log_error("canonical snapshot read/validation failed")
             return None
 
     def _serve_snapshot(self) -> None:
-        snapshot = self._load_snapshot()
-        if snapshot is None:
+        loaded = self._load_snapshot()
+        if loaded is None:
             self._send_json(503, {"error": "snapshot_unavailable"})
             return
-        self._send_json(200, snapshot)
+        self._send_encoded_json(200, loaded[1])
 
     def _serve_readiness(self) -> None:
-        snapshot = self._load_snapshot()
-        if snapshot is None:
+        loaded = self._load_snapshot()
+        if loaded is None:
             self._send_json(503, {"status": "NOT_READY", "reason": "snapshot_unavailable"})
             return
 
+        snapshot = loaded[0]
         readiness = snapshot.get("readiness")
         freshness = snapshot.get("read_freshness")
         identity = snapshot.get("identity")
@@ -187,12 +192,12 @@ class SnapshotRequestHandler(BaseHTTPRequestHandler):
     def _serve_release(self, *, market=False) -> None:
         try:
             package = self.server.market_loader() if market else self.server.release_loader()
-            self._encode_json(package)
+            body = self._encode_json(package)
         except Exception:
             self.log_error('canonical compact release validation failed')
             self._send_json(503, {'error': 'factual_release_unavailable'})
             return
-        self._send_json(200, package)
+        self._send_encoded_json(200, body)
 
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler contract
         parsed = urlsplit(self.path)

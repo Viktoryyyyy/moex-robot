@@ -67,11 +67,19 @@ def _text(node):
     return ' '.join(''.join(node['text']).split())
 
 
-def calendar(raw, *, selected, now):
-    """A dated, bounded weekly publication schedule; no invented release hour."""
+def _parse_index(raw):
     parser = Index()
     parser.feed(raw.decode('utf-8-sig'))
     parser.close()
+    return parser
+
+
+def calendar(raw, *, selected, now):
+    """A dated, bounded weekly publication schedule; no invented release hour."""
+    return _calendar(_parse_index(raw), selected=selected, now=now)
+
+
+def _calendar(parser, *, selected, now):
     today = document._utc(now).astimezone(ZoneInfo('Europe/Moscow')).date()
     titles = [n for n in parser.nodes if 'toggle-card__title' in n['classes'] and
               re.fullmatch(r'ГРАФИК размещения срочных информаций и справок на сайте Росстата (?:в I|во II) полугодии ' + str(today.year) + ' года', _text(n))]
@@ -120,9 +128,10 @@ def calendar(raw, *, selected, now):
 
 def select(raw, *, now):
     if not 0 < len(raw) <= transport.MAX_BYTES: raise ValueError('invalid archive size')
-    parser = Index()
-    parser.feed(raw.decode('utf-8-sig'))
-    parser.close()
+    return _select(_parse_index(raw), now=now)
+
+
+def _select(parser, *, now):
     titles = [n for n in parser.nodes if 'toggle-card__title' in n['classes'] and _text(n) == TITLE]
     if len(titles) != 1: raise ValueError('one weekly CPI archive required')
     sections = [n for n in titles[0]['ancestors'] if 'toggle-card' in n['classes']]
@@ -131,9 +140,19 @@ def select(raw, *, now):
     rows = [n for n in parser.nodes if 'document-list__item--row' in n['classes']
             and any(a is section for a in n['ancestors'])]
     if not rows: raise ValueError('empty weekly archive')
+    # Index relevant descendants once, preserving DOM order and every ancestor
+    # match (including malformed nested rows, which must remain ambiguous).
+    descendants = {id(row): [] for row in rows}
+    for node in parser.nodes:
+        if not any(c in node['classes'] for c in ('document-list__item-title', 'document-list__item-info')):
+            continue
+        for ancestor in node['ancestors']:
+            children = descendants.get(id(ancestor))
+            if children is not None:
+                children.append(node)
     candidates = []
     for row in rows:
-        children = [n for n in parser.nodes if any(a is row for a in n['ancestors'])]
+        children = descendants[id(row)]
         labels = [_text(n) for n in children if 'document-list__item-title' in n['classes']]
         infos = [_text(n) for n in children if 'document-list__item-info' in n['classes']]
         if len(labels) != 1 or len(infos) != 1 or len(row['links']) != 1:
@@ -181,8 +200,10 @@ def _receipt(path, digest, *, now, expected_url=None):
 
 def _replay(refs, *, now):
     index, raw = _receipt(refs['index_manifest_path'], refs['index_manifest_sha256'], now=now, expected_url=INDEX_URL)
-    selected = select(raw, now=now)
-    scheduled = calendar(raw, selected=selected, now=now)
+    if not 0 < len(raw) <= transport.MAX_BYTES: raise ValueError('invalid archive size')
+    parser = _parse_index(raw)
+    selected = _select(parser, now=now)
+    scheduled = _calendar(parser, selected=selected, now=now)
     receipt, _ = _receipt(refs['document_manifest_path'], refs['document_manifest_sha256'], now=now,
                           expected_url=selected['source_url'])
     if document._utc(index['received_at_utc']) > document._utc(receipt['requested_at_utc']):
