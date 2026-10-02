@@ -248,3 +248,30 @@ def test_same_prices_different_raw_version_is_refused(history):
     mutate(item.lineage, lambda x: x.update(delta_manifest_sha256=digest(item.frozen)))
     with pytest.raises(ValueError, match="conflicting admitted raw version"):
         resolve(history)
+
+
+def test_full_scheduler_promoted_manifest_is_readable(history):
+    item = advance(history, "2026-09-27")
+    def full(parent):
+        parent["stage7"] = {"status": "refreshed", "output_count": 8}
+        parent["derived_pointer_promotion"] = {"status": "promoted", "pointer_count": 12}
+    mutate(item.parent, full)
+    assert resolve(history).accepted_dates[-1] == "2026-09-27"
+
+
+@pytest.mark.parametrize("status", ["blocked_by_futoi_governance", "no_op"])
+def test_unpublished_historical_candidate_cannot_poison_current(history, status):
+    advance(history, "2026-09-27")
+    before = resolve(history)
+    run = history.root / "runs" / "step10_rub_daily_refresh" / "run_id=unpublished"
+    write(run / "run_manifest.json", {"status": "succeeded", "new_trading_dates": ["2026-09-27"],
+        "stage7": {"status": "prepared_not_promoted", "output_count": 8},
+        "derived_pointer_promotion": {"status": status, "pointer_count": 0}})
+    write(run / "inputs" / "stage7_frozen" / ("instrument_id=" + INSTRUMENT) / "manifest.json", {})
+    assert resolve(history) == before
+
+
+@pytest.mark.parametrize("dates,count,expected", [([],8,True),([],12,False),(["2026-09-27"],12,True),(["2026-09-27"],8,False)])
+def test_full_scheduler_promotion_cohort(dates, count, expected):
+    assert current._promoted({"stage7": {"status": "refreshed", "output_count": 8}, "new_trading_dates": dates,
+        "derived_pointer_promotion": {"status": "promoted", "pointer_count": count}}) is expected

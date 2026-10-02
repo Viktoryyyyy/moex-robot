@@ -86,15 +86,26 @@ def clock(value):
     return result.astimezone(timezone.utc)
 
 
+def _promoted(parent):
+    stage7 = parent.get("stage7", {})
+    promotion = stage7.get("canonical_pointer_promotion")
+    if promotion is not None:
+        return promotion.get("status") == "promoted" and promotion.get("pointer_count") == 8
+    # The original full scheduler promotes Stage5+Stage7 together (12 pointers),
+    # or only the eight Stage7 pointers for a weekly boundary without new dates.
+    promotion = parent.get("derived_pointer_promotion", {})
+    expected_count = 12 if parent.get("new_trading_dates") else 8
+    return (promotion.get("status") == "promoted" and promotion.get("pointer_count") == expected_count
+            and stage7.get("output_count") == 8 and stage7.get("status") == "refreshed")
+
+
 def _parent(ev, path, now):
     parent = ev.json(path)
     need(parent.get("status") == "succeeded" and parent.get("stage") == 10,
          "history parent must be successful Stage10")
     need(parent.get("acceptance_contract_id") == "step10_rub_daily_refresh_acceptance.v1", "history parent contract mismatch")
     need(path.parent.name == "run_id=" + str(parent.get("run_id")), "history parent run mismatch")
-    promoted = parent.get("stage7", {}).get("canonical_pointer_promotion", {})
-    need(promoted.get("status") == "promoted" and promoted.get("pointer_count") == 8,
-         "history parent did not promote Stage7")
+    need(_promoted(parent), "history parent did not promote Stage7")
     need(clock(parent["started_at_utc"]) <= clock(parent["finished_at_utc"]) <= now, "history parent clock mismatch")
     through = layer._iso_date(parent["through_date"], "parent through_date")
     need(through < now.astimezone(ZoneInfo("Europe/Moscow")).date().isoformat(), "history parent includes unclosed date")
@@ -162,7 +173,8 @@ def resolve(root: Path, instrument: str, *, repo_root: Path, as_of=None):
         # cannot supply facts. The exact admitted raw SHA remains authoritative.
         parent = ev.json(parent_path)
         dates = parent.get("new_trading_dates", [])
-        if parent.get("status") != "succeeded" or not isinstance(dates, list) or not wanted.intersection(dates):
+        if (parent.get("status") != "succeeded" or not _promoted(parent)
+                or not isinstance(dates, list) or not wanted.intersection(dates)):
             if parent_path.resolve() != (current_run / "run_manifest.json").resolve():
                 ev.total -= len(ev.raw.pop(parent_path.resolve()))
             continue
