@@ -88,6 +88,34 @@ linked through `external_inputs` plus `context.external_context` entries
 `{"input": <returned ref>, "interpretation": "..."}`. Their source metadata must
 state actual availability and limitations; download time is not publication proof.
 
+#### Original text with deferred automatic evaluation
+
+When the owner explicitly chooses text registration before supplying an evaluation
+plan, use the same immutable request and add the registration option:
+
+```sh
+python -m moex_research.consumers.usdrubf_forecast_cycle --root /home/trader/moex_bot/data/research/usdrubf_forecast_journal_v1 register --id forecast-text-001 --input-ref input-ref.json --request forecast-request.json --defer-evaluation-reason "Owner selected original-text registration with deferred automatic evaluation" > forecast-text-ref.json
+```
+
+This produces `usdrubf.forecast.v3` with an explicit `evaluation_policy` containing
+`mode: DEFERRED`, the supplied reason and `requires_new_forecast_revision: true`.
+An empty `observation_grid` and its null provenance source are permitted only in
+this mode. Original text, interpretation, horizons, issue time and existing
+analytical fields are preserved; no calendar, retest or cancellation rules are
+invented. Identity, source causality, baseline binding, price and revision checks
+still apply. Without this explicit option the normal v2 grid requirements remain.
+
+Registration yields a real immutable forecast reference and registrar timestamp.
+The observer returns `DEFERRED` before and after the horizon without reading facts
+or writing an evaluation. Direct evaluation refuses the record; no result enters
+scoring or report denominators. `report --run-result` exposes deferred items in
+`pending_or_unavailable`. An empty scenario array does not mean text was scored.
+
+To enable evaluation, supply the agreed grid and machine rules in a new forecast
+revision with a distinct ID, `supersedes` and `revision_reason`. The original stays
+deferred permanently. Later rules do not inherit its earlier registration time;
+the usual actual-record-time classification still applies to the new revision.
+
 ### 3. Attach explicitly supplied position and risk
 
 ```sh

@@ -8,6 +8,7 @@ from .usdrubf_forecast_journal import ForecastJournalError, _hash, _token, encod
 
 FORECAST_VERSION = "usdrubf.forecast.v1"
 FORECAST_V2 = "usdrubf.forecast.v2"
+FORECAST_V3 = "usdrubf.forecast.v3"
 FACTS_VERSION = "usdrubf.forecast_facts.v1"
 EVALUATOR_VERSION = "usdrubf.forecast_evaluation.v2"
 MAX_EVALUATION_WORK = 2_000_000
@@ -57,12 +58,19 @@ def predicate(value: object) -> None:
 
 
 def validate_forecast(spec: object) -> dict:
-    context = None
-    if isinstance(spec, dict) and spec.get("schema_version") == FORECAST_V2:
+    if isinstance(spec, dict) and spec.get("schema_version") in (FORECAST_V2, FORECAST_V3):
+        deferred = spec["schema_version"] == FORECAST_V3
+        excluded = {"context"}
+        if deferred:
+            policy = fields(spec.get("evaluation_policy"), {"mode", "reason", "requires_new_forecast_revision"})
+            if policy["mode"] != "DEFERRED" or policy["requires_new_forecast_revision"] is not True:
+                raise ForecastJournalError("v3 requires explicit deferred evaluation policy")
+            text(policy["reason"])
+            excluded.add("evaluation_policy")
         context = spec.get("context")
-        legacy = {k: v for k, v in spec.items() if k != "context"}
+        legacy = {k: v for k, v in spec.items() if k not in excluded}
         legacy["schema_version"] = FORECAST_VERSION
-        validate_forecast(legacy)
+        _validate_forecast_core(legacy, allow_empty_grid=deferred)
         context = fields(context, {"original_text", "interpretation", "external_context",
             "registration_class", "grid_provenance", "baseline", "horizon_label"})
         text(context["original_text"])
@@ -72,7 +80,8 @@ def validate_forecast(spec: object) -> dict:
         if context["horizon_label"] not in {"DAY", "WEEK"}:
             raise ForecastJournalError("DAY/WEEK horizon label required")
         grid = fields(context["grid_provenance"], {"source", "completeness_scope"})
-        text(grid["source"])
+        if not (deferred and not spec["observation_grid"] and grid["source"] is None):
+            text(grid["source"])
         text(grid["completeness_scope"])
         baseline = fields(context["baseline"], {"input", "pointer", "timestamp_pointer", "status"})
         if baseline["input"] not in spec["inputs"] or baseline["status"] not in {"CANONICAL_FIELD", "EXTERNAL_UNVERIFIED"}:
@@ -85,6 +94,10 @@ def validate_forecast(spec: object) -> dict:
                 raise ForecastJournalError("external context must reference frozen input")
             text(item["interpretation"])
         return spec
+    return _validate_forecast_core(spec)
+
+
+def _validate_forecast_core(spec: object, *, allow_empty_grid: bool = False) -> dict:
     spec = fields(spec, {"schema_version", "instrument", "contract", "issued_at",
                          "horizon_start", "horizon_end", "reference_price", "reference_price_at",
                          "bias", "neutral_band_bps", "range", "method_version", "inputs",
@@ -116,8 +129,8 @@ def validate_forecast(spec: object) -> dict:
         fields(bounds, {"lower", "upper"})
         if price(bounds["lower"]) > price(bounds["upper"]):
             raise ForecastJournalError("reversed forecast range")
-    grid = [interval(item) for item in array(spec["observation_grid"], nonempty=True)]
-    if grid[0][0] != start or grid[-1][1] != end:
+    grid = [interval(item) for item in array(spec["observation_grid"], nonempty=not allow_empty_grid)]
+    if grid and (grid[0][0] != start or grid[-1][1] != end):
         raise ForecastJournalError("grid must explicitly span the forecast horizon")
     if any(right[0] < left[1] for left, right in zip(grid, grid[1:])):
         raise ForecastJournalError("grid must be ordered and nonoverlapping")
@@ -127,7 +140,7 @@ def validate_forecast(spec: object) -> dict:
         fields(item, {"id", "direction", "activation", "confirmation", "targets", "invalidation"})
         targets_raw = array(item["targets"])
         scenario_work += 1 + len(targets_raw)
-        if len(grid) * scenario_work > MAX_EVALUATION_WORK:
+        if max(1, len(grid)) * scenario_work > MAX_EVALUATION_WORK:
             raise ForecastJournalError("aggregate scenario-by-bar evaluation resource bound")
         identifier = text(item["id"])
         if identifier in ids:
@@ -243,6 +256,8 @@ def _scenario(spec: dict, bars: list[dict], start: str) -> dict:
 def evaluate(spec: dict, facts: object, *, evaluated_at: datetime,
              source_as_of: datetime, limitations: list[str]) -> dict:
     spec = validate_forecast(spec)
+    if spec["schema_version"] == FORECAST_V3:
+        raise ForecastJournalError("automatic evaluation deferred; explicit new forecast revision required")
     if (not isinstance(evaluated_at, datetime) or evaluated_at.utcoffset() is None
             or not isinstance(source_as_of, datetime) or source_as_of.utcoffset() is None):
         raise ForecastJournalError("aware evaluation/source clocks required")

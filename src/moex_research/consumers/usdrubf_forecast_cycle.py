@@ -11,7 +11,7 @@ from ..intelligence.usdrubf_forecast_journal import (
     ForecastJournal, ForecastJournalError, decode, digest, encode, fields,
     read_bytes, runtime_identity, text, timestamp,
 )
-from ..intelligence.usdrubf_forecast_evaluation import FORECAST_V2, price
+from ..intelligence.usdrubf_forecast_evaluation import FORECAST_V2, FORECAST_V3, price
 
 
 def pointer(document, path):
@@ -242,7 +242,7 @@ def baseline(journal, ref, now):
         "binding": {"input": ref, "pointer": field, "timestamp_pointer": timefield, "status": status}}
 
 
-def register_forecast(journal, identifier, request, input_ref):
+def register_forecast(journal, identifier, request, input_ref, *, defer_evaluation_reason=None):
     now = journal._now()
     request = deepcopy(request)
     # User supplies all hypotheses/grid/rules. Only technical provenance is filled.
@@ -257,6 +257,12 @@ def register_forecast(journal, identifier, request, input_ref):
         inputs=[input_ref] + request.pop("external_inputs", []),
         reference_price=selected["reference_price"], reference_price_at=selected["reference_price_at"])
     request["context"]["baseline"] = selected["binding"]
+    if defer_evaluation_reason is not None:
+        if "evaluation_policy" in request:
+            raise ForecastJournalError("evaluation policy must be supplied by the explicit registration option")
+        request["schema_version"] = FORECAST_V3
+        request["evaluation_policy"] = {"mode": "DEFERRED", "reason": text(defer_evaluation_reason),
+            "requires_new_forecast_revision": True}
     request.setdefault("supersedes", None)
     request.setdefault("revision_reason", None)
     return journal.register(identifier, request)
@@ -277,6 +283,8 @@ def main(argv=None):
     register.add_argument("--id", required=True)
     register.add_argument("--request", type=Path, required=True)
     register.add_argument("--input-ref", type=Path, required=True)
+    register.add_argument("--defer-evaluation-reason",
+        help="Explicitly register preserved analysis with automatic evaluation deferred until a new forecast revision")
     attach = commands.add_parser("risk")
     attach.add_argument("--id", required=True)
     attach.add_argument("--request", type=Path, required=True)
@@ -308,7 +316,8 @@ def main(argv=None):
                 raw = read_bytes(args.source)
                 result = capture_canonical(journal, args.id, raw)
         elif args.action == "register":
-            result = register_forecast(journal, args.id, load(args.request), load(args.input_ref))
+            result = register_forecast(journal, args.id, load(args.request), load(args.input_ref),
+                defer_evaluation_reason=args.defer_evaluation_reason)
         elif args.action == "risk":
             result = attach_risk(journal, args.id, load(args.forecast_ref), load(args.request))
         elif args.action == "observe":
