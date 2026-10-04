@@ -151,13 +151,12 @@ def baseline(journal, ref, now):
     document = decode(journal.object_bytes(payload["logical_sha256"]))
     schema = document["schema_version"]
     if schema == "rub_chat_analysis_snapshot.v1":
-        from moex_data.rub_factual_projection import fresh
-        from moex_data.rub_snapshot_read_freshness import apply_read_freshness
-        view = apply_read_freshness(document, now=now)
-        node = view["components"]["synchronized_live_market_oi"]["data"]["instruments"]["usdrubf"]
+        # Registration binds the dated observation admitted in the frozen input.
+        # Reapplying live-reader TTL here would impose an age limit on that input.
+        node = document["components"]["synchronized_live_market_oi"]["data"]["instruments"]["usdrubf"]
         prefix = "/components/synchronized_live_market_oi/data/instruments/usdrubf"
-        if node.get("price_oi_usable") is not True or not fresh(node, now):
-            raise ForecastJournalError("canonical USDRUBF price unavailable/stale")
+        if node.get("price_oi_usable") is not True:
+            raise ForecastJournalError("canonical USDRUBF price unavailable")
         value, at = node.get("last"), node.get("timestamp")
         field, timefield = prefix + "/last", prefix + "/timestamp"
         identity = node
@@ -178,9 +177,10 @@ def baseline(journal, ref, now):
         raise ForecastJournalError("foreign canonical price identity")
     observed = timestamp(at)
     received = timestamp(identity.get("received_at_utc"))
-    # Explicit downstream consumption policy; never rejuvenate an imported quote.
-    if not observed <= received <= available <= now or (now - observed).total_seconds() > 1200:
-        raise ForecastJournalError("canonical baseline stale/future")
+    # Keep source chronology without expiring an already frozen observation.
+    # Its original timestamp remains the forecast's reference_price_at.
+    if not observed <= received <= available <= now:
+        raise ForecastJournalError("canonical baseline future/inconsistent timestamps")
     # Unit values are preserved, not rescaled. A standalone imported projection
     # has no replay of original admission and must remain explicitly unverified.
     status = "CANONICAL_FIELD" if payload.get("schema_validation") == "CANONICAL_READER_OUTPUT" else "EXTERNAL_UNVERIFIED"

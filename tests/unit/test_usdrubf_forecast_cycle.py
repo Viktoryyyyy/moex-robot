@@ -111,7 +111,7 @@ def test_canonical_metadata_rejection(tmp_path, change):
 
 
 @pytest.mark.parametrize("change", ["secid", "source_id", "timestamp", "received_at_utc", "price"])
-def test_baseline_binding_rejects_foreign_stale_future_and_tampered_price(tmp_path, change):
+def test_baseline_binding_rejects_foreign_future_and_tampered_price(tmp_path, change):
     journal, _, forecast, _ = setup(tmp_path)
     if change == "price":
         spec = deepcopy(journal.read(forecast)["payload"]); spec["reference_price"] = "101"
@@ -119,7 +119,7 @@ def test_baseline_binding_rejects_foreign_stale_future_and_tampered_price(tmp_pa
         return
     document = package()
     document["facts"][0]["source_identity"][change] = {"secid": "SiU6", "source_id": "foreign",
-        "timestamp": at(-60), "received_at_utc": at(10)}[change]
+        "timestamp": at(1), "received_at_utc": at(10)}[change]
     ref = capture_canonical(journal, "bad-input", encode(document))
     with pytest.raises(ValueError): register_forecast(journal, "bad", request(), ref)
 
@@ -413,6 +413,45 @@ def test_current_reader_capture_and_storage_carrier(tmp_path):
     assert carrier["schema_version"] == "rub_snapshot_storage.v1"
     captured = capture_canonical(journal, "storage", encode(carrier))
     assert decode(journal.object_bytes(journal.read(captured)["payload"]["logical_sha256"])) == value
+
+
+@pytest.mark.parametrize("kind", ["projection", "snapshot"])
+@pytest.mark.parametrize("age_seconds", [1200, 1201, 3600, 3 * 24 * 3600])
+def test_registration_accepts_dated_frozen_baseline_without_age_limit(tmp_path, kind, age_seconds):
+    document = package() if kind == "projection" else snapshot()
+    observed_at = (BASE - timedelta(seconds=age_seconds)).isoformat()
+    if kind == "projection":
+        identity = document["facts"][0]["source_identity"]
+    else:
+        identity = document["components"]["synchronized_live_market_oi"]["data"]["instruments"]["usdrubf"]
+    identity.update(timestamp=observed_at, received_at_utc=observed_at)
+    raw = encode(document)
+    journal = ForecastJournal(tmp_path, clock=lambda: BASE)
+    captured = capture_canonical(journal, "dated-input", raw)
+    forecast = register_forecast(journal, "dated-forecast", request(), captured)
+    saved = journal.read(forecast)["payload"]
+    assert saved["reference_price"] == "100"
+    assert saved["reference_price_at"] == observed_at
+    assert saved["issued_at"] == request()["issued_at"]
+    assert saved["context"]["baseline"]["status"] == "EXTERNAL_UNVERIFIED"
+    assert journal.object_bytes(journal.read(captured)["payload"]["object_sha256"]) == raw
+    assert register_forecast(journal, "dated-forecast", request(), captured) == forecast
+
+
+@pytest.mark.parametrize("kind", ["projection", "snapshot", "omitted_projection_price"])
+def test_age_policy_does_not_restore_unusable_or_omitted_baseline(tmp_path, kind):
+    document = snapshot() if kind == "snapshot" else package()
+    if kind == "snapshot":
+        document["components"]["synchronized_live_market_oi"]["data"]["instruments"]["usdrubf"]["price_oi_usable"] = False
+    else:
+        document["market_usability"]["usdrubf"]["price_oi_usable"] = False
+        if kind == "omitted_projection_price":
+            document["facts"] = []
+    journal = ForecastJournal(tmp_path, clock=lambda: BASE)
+    captured = capture_canonical(journal, "unavailable-input", encode(document))
+    with pytest.raises(ValueError, match="price unavailable"):
+        register_forecast(journal, "unavailable-forecast", request(), captured)
+    assert not list((journal.root / "records").glob("forecast.*"))
 
 
 @pytest.mark.parametrize("mutation", [None, "hash", "foreign", "rows", "anchor", "duplicate"])

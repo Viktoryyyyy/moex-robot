@@ -36,10 +36,17 @@ the original source admission is not proved by a self-asserted package field.
 This is local process provenance, not a signature or source-level PIT audit.
 
 The reference is bound to exact USDRUBF/source identity, LAST field and timestamp.
-Future, stale (>1200 seconds), foreign or contradictory observations are refused.
+Registration has no maximum baseline age (`canonical_baseline_max_age_seconds:
+null`). It uses the price and source-usability decision preserved in the frozen
+input without reapplying a live-reader TTL at `issued_at`. The original
+`reference_price_at` is retained. Future, foreign, contradictory, missing or
+explicitly unusable observations are refused; source observation, receipt,
+availability and issue times must remain ordered.
 RFUD USDRUBF LAST uses the independently checked RUB/USD instrument mapping in
 `contracts/datasets/position_risk_scenarios.v1.json`; conflicting declared units
-are refused. An imported package does not inherit live freshness.
+are refused. An imported package does not inherit live freshness. This registration
+policy does not change producer/live-reader freshness rules or recover a price
+omitted from an export. A package with no admitted USDRUBF price still cannot register.
 
 ### 2. Prepare and register the analyst's forecast
 
