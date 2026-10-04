@@ -47,6 +47,89 @@ def request():
             "grid_provenance": {"source": "synthetic explicit grid", "completeness_scope": "synthetic intervals only"}}}
 
 
+def dated_package():
+    document = package()
+    document["facts"] = []
+    document["market_usability"]["usdrubf"]["price_oi_usable"] = False
+    document["dated_context"] = {"observations": {"market:usdrubf": {
+        "scope": "LAST_ACCEPTED_DATED_PREPARATION_ONLY", "current_usable": False,
+        "acceptance_evidence_id": "b" * 64, "accepted_at_utc": at(-2998),
+        "source_generation_at_utc": at(-2998), "checked_at_utc": at(-1),
+        "source_identity": {"secid": "USDRUBF", "source_id": FORTS_SOURCE_ID,
+            "logical_id": "usdrubf", "asset_type": "future", "timestamp": at(-3000),
+            "received_at_utc": at(-2999)}, "values": {"last": 84.1},
+        "source_times": {"source_observation_at_utc": at(-3000), "received_at_utc": at(-2999)},
+        "contract_metadata": {"scope": "exact_source_contract_metadata_independent_of_live_price",
+            "secid": "USDRUBF", "applicable_source_timestamp_utc": at(-3000),
+            "received_at_utc": at(-2999), "checked_at_utc": at(-2998),
+            "values": {"normalized_unit": "RUB_per_USD", "raw_unit": "RUB_per_USD",
+                "normalization_divisor": 1.0}}}}}
+    return document
+
+
+def test_dated_projection_registration_preserves_bytes_and_never_claims_live(tmp_path):
+    document = dated_package()
+    raw = encode(document)
+    journal = ForecastJournal(tmp_path, clock=lambda: BASE)
+    ref = capture_canonical(journal, "dated", raw)
+    forecast = register_forecast(journal, "dated-forecast", request(), ref)
+    spec = journal.read(forecast)["payload"]
+    assert spec["reference_price"] == "84.1"
+    assert spec["reference_price_at"] == at(-3000)
+    assert spec["context"]["baseline"] == {"input": ref,
+        "pointer": "/dated_context/observations/market:usdrubf/values/last",
+        "timestamp_pointer": "/dated_context/observations/market:usdrubf/source_identity/timestamp",
+        "status": "EXTERNAL_UNVERIFIED"}
+    assert journal.object_bytes(journal.verify_input(ref)["payload"]["object_sha256"]) == raw
+    assert document["market_usability"]["usdrubf"]["price_oi_usable"] is False
+    assert register_forecast(journal, "dated-forecast", request(), ref) == forecast
+    for field, value in [("reference_price", "84.2"), ("reference_price_at", at(-1))]:
+        tampered = deepcopy(spec); tampered[field] = value
+        with pytest.raises(ValueError): journal.register("tampered", tampered)
+
+
+@pytest.mark.parametrize("path,value", [
+    ("scope", "current_source_row"), ("current_usable", True),
+    ("acceptance_evidence_id", None), ("acceptance_evidence_id", "unverified"),
+    ("accepted_at_utc", at(1)), ("source_generation_at_utc", at(1)),
+    ("checked_at_utc", at(1)), ("accepted_at_utc", at(-3001)),
+    ("source_identity/secid", "SiU6"), ("source_identity/source_id", "foreign"),
+    ("source_identity/logical_id", "si_front"), ("source_identity/asset_type", "spot"),
+    ("source_identity/timestamp", at(1)), ("source_identity/received_at_utc", at(-3001)),
+    ("source_times/source_observation_at_utc", at(-3001)), ("source_times/received_at_utc", at(-1)),
+    ("values/last", None), ("values/last", 0),
+    ("contract_metadata/scope", "unknown"), ("contract_metadata/secid", "SiU6"),
+    ("contract_metadata/applicable_source_timestamp_utc", at(-1)),
+    ("contract_metadata/received_at_utc", at(-1)), ("contract_metadata/checked_at_utc", at(1)),
+    ("contract_metadata/values/normalized_unit", "points"),
+    ("contract_metadata/values/raw_unit", "points"),
+    ("contract_metadata/values/normalization_divisor", 1000),
+    ("contract_metadata/values/normalization_divisor", True),
+])
+def test_dated_baseline_rejects_unbound_or_inconsistent_metadata(tmp_path, path, value):
+    document = dated_package()
+    target = document["dated_context"]["observations"]["market:usdrubf"]
+    parts = path.split("/")
+    for key in parts[:-1]: target = target[key]
+    target[parts[-1]] = value
+    journal = ForecastJournal(tmp_path, clock=lambda: BASE)
+    ref = capture_canonical(journal, "input", encode(document))
+    with pytest.raises(ValueError): register_forecast(journal, "bad", request(), ref)
+    assert not list((tmp_path / "records").glob("forecast.*"))
+
+
+def test_dated_baseline_does_not_mask_conflicting_current_rows(tmp_path):
+    document = dated_package()
+    document["facts"] = package()["facts"]
+    journal = ForecastJournal(tmp_path, clock=lambda: BASE)
+    ref = capture_canonical(journal, "inconsistent", encode(document))
+    with pytest.raises(ValueError): register_forecast(journal, "bad", request(), ref)
+    document["market_usability"]["usdrubf"]["price_oi_usable"] = True
+    ref = capture_canonical(journal, "current", encode(document))
+    forecast = register_forecast(journal, "current", request(), ref)
+    assert journal.read(forecast)["payload"]["reference_price"] == "100"
+
+
 def setup(tmp_path):
     clock = [BASE]
     journal = ForecastJournal(tmp_path / "journal", clock=lambda: clock[0])

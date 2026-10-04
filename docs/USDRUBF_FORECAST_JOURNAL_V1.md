@@ -39,14 +39,26 @@ The reference is bound to exact USDRUBF/source identity, LAST field and timestam
 Registration has no maximum baseline age (`canonical_baseline_max_age_seconds:
 null`). It uses the price and source-usability decision preserved in the frozen
 input without reapplying a live-reader TTL at `issued_at`. The original
-`reference_price_at` is retained. Future, foreign, contradictory, missing or
-explicitly unusable observations are refused; source observation, receipt,
+`reference_price_at` is retained. Future, foreign, contradictory or missing
+observations are refused; source observation, receipt,
 availability and issue times must remain ordered.
 RFUD USDRUBF LAST uses the independently checked RUB/USD instrument mapping in
 `contracts/datasets/position_risk_scenarios.v1.json`; conflicting declared units
 are refused. An imported package does not inherit live freshness. This registration
 policy does not change producer/live-reader freshness rules or recover a price
-omitted from an export. A package with no admitted USDRUBF price still cannot register.
+omitted from an export.
+
+When a factual package has no current USDRUBF fact and its current usability is
+false, registration can bind the price already exported at
+`/dated_context/observations/market:usdrubf/values/last`. The dated row must retain
+its preparation-only scope, acceptance evidence digest, ordered original source,
+generation/acceptance/check timestamps, exact source/contract identity and unit
+metadata. The reference time is that row's original source timestamp. Current
+usability remains false, and the imported baseline remains **EXTERNAL_UNVERIFIED**:
+checking projected metadata does not replay the original acceptance evidence.
+A contradictory current row is rejected instead of falling back to dated data.
+No price is obtained from other history or supplied manually by this fallback.
+With neither an admitted current row nor a valid dated row, registration fails.
 
 ### 2. Prepare and register the analyst's forecast
 

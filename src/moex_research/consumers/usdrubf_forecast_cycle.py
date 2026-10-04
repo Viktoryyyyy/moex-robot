@@ -146,6 +146,48 @@ def validate_baseline(journal, spec):
             raise ForecastJournalError("canonical baseline identity mismatch")
 
 
+def dated_projection_baseline(document):
+    """Bind the exported dated row; its acceptance digest is not source replay."""
+    prefix = "/dated_context/observations/market:usdrubf"
+    try:
+        node = pointer(document, prefix)
+    except ForecastJournalError as exc:
+        raise ForecastJournalError("canonical USDRUBF price unavailable; dated row missing") from exc
+    if (not isinstance(node, dict)
+            or node.get("scope") != "LAST_ACCEPTED_DATED_PREPARATION_ONLY"
+            or node.get("current_usable") is not False
+            or not isinstance(node.get("acceptance_evidence_id"), str)
+            or not re.fullmatch("[0-9a-f]{64}", node["acceptance_evidence_id"])):
+        raise ForecastJournalError("dated baseline acceptance metadata missing")
+    identity = pointer(node, "/source_identity")
+    values = pointer(node, "/values")
+    if (not isinstance(identity, dict) or not isinstance(values, dict)
+            or identity.get("logical_id") != "usdrubf" or identity.get("asset_type") != "future"):
+        raise ForecastJournalError("dated baseline identity missing")
+    observed = timestamp(identity.get("timestamp"))
+    received = timestamp(identity.get("received_at_utc"))
+    accepted = timestamp(node.get("accepted_at_utc"))
+    checked = timestamp(node.get("checked_at_utc"))
+    if not (observed <= received <= timestamp(node.get("source_generation_at_utc"))
+            <= accepted <= checked <= timestamp(document["as_of_utc"])):
+        raise ForecastJournalError("dated baseline future/inconsistent acceptance timestamps")
+    if (timestamp(pointer(node, "/source_times/source_observation_at_utc")) != observed
+            or timestamp(pointer(node, "/source_times/received_at_utc")) != received):
+        raise ForecastJournalError("dated baseline source time mismatch")
+    metadata = pointer(node, "/contract_metadata")
+    if (not isinstance(metadata, dict)
+            or metadata.get("scope") != "exact_source_contract_metadata_independent_of_live_price"
+            or metadata.get("secid") != "USDRUBF"
+            or timestamp(metadata.get("applicable_source_timestamp_utc")) != observed
+            or timestamp(metadata.get("received_at_utc")) != received
+            or not received <= timestamp(metadata.get("checked_at_utc")) <= checked
+            or pointer(metadata, "/values/normalized_unit") != "RUB_per_USD"
+            or pointer(metadata, "/values/raw_unit") != "RUB_per_USD"
+            or str(pointer(metadata, "/values/normalization_divisor")) not in {"1", "1.0"}):
+        raise ForecastJournalError("dated baseline contract/unit metadata mismatch")
+    return identity, values, prefix + "/values/last", prefix + "/source_identity/timestamp"
+
+
 def baseline(journal, ref, now):
     payload = journal.read(ref)["payload"]
     document = decode(journal.object_bytes(payload["logical_sha256"]))
@@ -164,14 +206,17 @@ def baseline(journal, ref, now):
         available = timestamp(document.get("read_freshness", {}).get("read_at_utc", document["identity"]["generated_at_utc"]))
     else:
         candidates = [(i, fact) for i, fact in enumerate(document["facts"]) if fact.get("factor") == "usdrubf"]
-        if len(candidates) != 1 or document["market_usability"]["usdrubf"].get("price_oi_usable") is not True:
+        usable = document["market_usability"]["usdrubf"].get("price_oi_usable") is True
+        if len(candidates) > 1 or (candidates and not usable) or (not candidates and usable):
             raise ForecastJournalError("canonical USDRUBF price unavailable/ambiguous")
-        index, fact = candidates[0]
-        identity = fact["source_identity"]
-        value, at = fact["values"].get("last"), identity.get("timestamp")
-        values = fact["values"]
+        if candidates:
+            index, fact = candidates[0]
+            identity, values = fact["source_identity"], fact["values"]
+            field, timefield = f"/facts/{index}/values/last", f"/facts/{index}/source_identity/timestamp"
+        else:
+            identity, values, field, timefield = dated_projection_baseline(document)
+        value, at = values.get("last"), identity.get("timestamp")
         available = timestamp(document["as_of_utc"])
-        field, timefield = f"/facts/{index}/values/last", f"/facts/{index}/source_identity/timestamp"
     from moex_data.synchronized_live_market_oi_context import FORTS_SOURCE_ID
     if identity.get("secid") != "USDRUBF" or identity.get("source_id") != FORTS_SOURCE_ID:
         raise ForecastJournalError("foreign canonical price identity")
