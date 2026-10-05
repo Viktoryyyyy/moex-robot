@@ -1,6 +1,7 @@
 """Recovery preserves evidence; a new acquisition never rewrites historical PIT."""
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -9,6 +10,8 @@ from moex_data.futures import algopack_availability_probe as registry
 from moex_data.futures import date_source_provenance as provenance
 from moex_data.futures import expiration_map_builder as expiry
 from moex_data.futures import raw_admission_versions as versions
+from moex_data.futures import universal_daily_refresh_runner as daily
+from moex_data.futures import continuous_quality_report as quality_component
 from test_futures_date_source_provenance import DAYS, INGEST, admit, continuous, make_admitted, sha
 
 
@@ -234,3 +237,62 @@ def test_legitimate_non_anchor_registry_changes_are_allowed(tmp_path):
     result = expiry.verified_historical_registry(tmp_path, "2026-10-05", ["SiM6"])
     assert result.iloc[0]["lot_size"] == 1000
     assert len(json.loads(result.iloc[0]["expiration_source_evidence_json"])["corroborating_versions"]) == 2
+
+
+def quality_fixture(root):
+    args = SimpleNamespace(run_date="2026-10-05", snapshot_date="2026-10-05", data_root_resolved=root)
+    mp = quality_component.resolve_contract_path(Path.cwd(), root, quality_component.CONTRACT_MANIFEST, {"run_date": args.run_date})
+    qp = quality_component.resolve_contract_path(Path.cwd(), root, quality_component.CONTRACT_QUALITY_REPORT, {"run_date": args.run_date})
+    identity = dict(run_id="current-quality-run", run_date=args.run_date, snapshot_date=args.snapshot_date,
+                    roll_policy_id=daily.ROLL_POLICY_ID, adjustment_policy_id=daily.ADJUSTMENT_POLICY_ID)
+    frame = pd.DataFrame([{**identity, "schema_version": quality_component.SCHEMA_QUALITY_REPORT,
+                           "check_id": check, "check_status": "pass", "family_code": "Si"}
+                          for check in quality_component.REQUIRED_QUALITY_CHECKS])
+    outputs = {"manifest": str(mp), "quality_report": str(qp)}
+    manifest = {**identity, "schema_version": quality_component.SCHEMA_MANIFEST,
+                "builder_result_verdict": "pass", "blockers": [], "quality_status_counts": {"pass": len(frame)},
+                "row_counts": {"quality_report": len(frame)}, "output_artifacts": outputs,
+                "started_ts": "2026-10-05T12:00:00Z", "completed_ts": "2026-10-05T12:00:01Z"}
+    mp.parent.mkdir(parents=True, exist_ok=True)
+    qp.parent.mkdir(parents=True, exist_ok=True)
+    mp.write_text(json.dumps(manifest))
+    frame.to_parquet(qp, index=False)
+    stdout = 'run_id: "current-quality-run"\noutput_artifacts_created: ' + json.dumps(outputs)
+    return args, mp, qp, manifest, frame, stdout, pd.Timestamp("2026-10-05T12:00:00Z").timestamp()
+
+
+@pytest.mark.parametrize("fault", [None, "missing", "stale", "wrong_run", "wrong_count", "failed_check", "missing_check", "wrong_path"])
+def test_required_quality_readback_rejects_stale_or_inconsistent_success(tmp_path, fault):
+    args, mp, qp, manifest, frame, stdout, started = quality_fixture(tmp_path)
+    if fault == "stale": manifest["started_ts"] = "2026-10-04T12:00:00Z"
+    if fault == "wrong_run": frame["run_id"] = "previous-child"
+    if fault == "wrong_count": manifest["row_counts"]["quality_report"] += 1
+    if fault == "failed_check": frame.loc[0, "check_status"] = "fail"
+    if fault == "missing_check": frame = frame.iloc[1:]
+    if fault == "wrong_path": manifest["output_artifacts"]["quality_report"] = "/unexpected/report"
+    mp.write_text(json.dumps(manifest))
+    frame.to_parquet(qp, index=False)
+    if fault == "missing": qp.unlink()
+    if fault:
+        with pytest.raises(RuntimeError):
+            daily.verify_quality_artifacts(Path.cwd(), args, stdout, started, started + 2)
+    else:
+        result = daily.verify_quality_artifacts(Path.cwd(), args, stdout, started, started + 2)
+        assert result["manifest_sha256"] == sha(mp)
+        assert result["quality_sha256"] == sha(qp)
+
+
+def test_quality_stage_executes_real_component_and_propagates_missing_outputs(tmp_path, monkeypatch):
+    monkeypatch.setattr(daily, "load_dotenv", None)
+    monkeypatch.setattr(daily, "CANONICAL_STAGE_IDS", ["quality_reports", "unified_manifest"])
+    monkeypatch.setattr(daily.sys, "argv", ["daily", "--data-root", str(tmp_path), "--snapshot-date", "2026-10-05", "--run-date", "2026-10-05"])
+    with pytest.raises(RuntimeError, match="requires execution"):
+        daily.metadata_gate("quality_reports")
+    assert daily.main() == 1
+    manifest = json.loads(Path(daily.output_paths(tmp_path, "2026-10-05")["manifest"]).read_text())
+    assert manifest["executed_stage_order"] == ["quality_reports"]
+    child = manifest["child_component_status"][0]
+    assert child["returncode"] != 0
+    assert child["status"] == "fail"
+    assert "continuous_quality_report.py" in child["command"][1]
+    assert manifest["universal_daily_refresh_result_verdict"] == "fail"
