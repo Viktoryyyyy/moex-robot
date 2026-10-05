@@ -133,6 +133,8 @@ def test_mixed_history_preserves_per_date_quality_and_manifest_summaries(tmp_pat
 def test_invalid_raw_never_admitted(tmp_path, field, value):
     paths, _, _ = make_admitted(tmp_path)
     frame = pd.read_parquet(paths[0])
+    if field == "open":
+        frame["open"] = frame["open"].astype(float)
     frame.loc[0, field] = value
     frame.to_parquet(paths[0], index=False)
     with pytest.raises(RuntimeError, match="date_source_provenance"):
