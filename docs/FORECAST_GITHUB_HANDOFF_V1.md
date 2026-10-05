@@ -221,7 +221,23 @@ Codex добавляет новый комментарий; ранее выда�
 Квитанция `moex.forecast_handoff_receipt.v1` содержит `project`, `submission_id`,
 `status`, `payload_sha256`, `source_url`, `received_at`, `reason`, `next_action`.
 Для `REGISTERED` дополнительно обязательны `forecast_ref` (kind/id/sha256),
-`input_ref`, `recorded_at`, `effective_registration_class`, `server_code_sha`.
+`input_ref`, `input_refs`, `recorded_at`, `effective_registration_class`,
+`server_code_sha`, `registrar_files_sha256`, `registrar_runtime_manifest_sha256`.
+`input_ref` — основной snapshot; `input_refs` — полный упорядоченный список
+`payload.inputs`, включая `external_inputs`, после проверки каждого input.
+Первый элемент должен совпадать с `input_ref`; список копируется из readback,
+а не из ещё не зарегистрированного конверта.
+Перед регистрацией сохранить приватный полный `runtime_identity()` выбранного
+регистратора; сразу после неё проверить ту же идентичность файлов. В квитанцию
+копировать `code_revision` как `server_code_sha`, `files_sha256` как
+`registrar_files_sha256` и SHA-256 сохранённых байтов runtime manifest как
+`registrar_runtime_manifest_sha256`. Полный inventory, Python/dependencies и
+место хранения вернуть владельцу приватно; одного Git SHA недостаточно.
+При восстановлении после сбоя использовать сохранённый manifest того вызова,
+а не идентичность сегодняшнего checkout. Если его нельзя проверить, явно
+отметить неполное evidence регистратора; не выдумывать хэши и не регистрировать
+forecast повторно. Старые квитанции и manifest остаются неизменными; дополнение
+evidence оформляется новой отдельной квитанцией со ссылкой на прежнюю.
 До регистрации эти поля отсутствуют, а не заполнены вымышленными значениями.
 Времена копируются из реальных событий/записей, не из примеров.
 
