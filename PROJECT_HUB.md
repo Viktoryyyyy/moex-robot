@@ -37,3 +37,5 @@
 - [ ] API-driven сбор баров (trades/orderbook) для online без файлов
 - [ ] Бот: webhook + автопуш
 - [ ] Мониторинг: журнал сигналов/сделок, дашборд
+
+<!-- flowise-e2e-test -->
