@@ -296,6 +296,28 @@ def test_continuous_d1_provenance_tampering_is_reported(tmp_path):
     assert provenance.continuous_seam_blockers(five, bars)
 
 
+@pytest.mark.parametrize("missing_side", ["5m", "D1"])
+def test_continuous_quality_rejects_missing_counterpart_groups(tmp_path, missing_side):
+    paths, _, _ = make_admitted(tmp_path)
+    five, bars, mapping = continuous(admit(tmp_path, paths))
+    assert not provenance.continuous_seam_blockers(five, bars)
+    if missing_side == "D1":
+        bars = bars.loc[bars["trade_date"] != DAYS[0]]
+    else:
+        five = five.loc[five["trade_date"] != DAYS[0]]
+    blockers = provenance.continuous_seam_blockers(five, bars)
+    assert any("key sets differ" in item for item in blockers)
+    placeholder = tmp_path / "placeholder.parquet"
+    report = pd.DataFrame(quality.build_quality_rows(Path.cwd(), tmp_path, "run", "2026-05-21", "2026-05-21",
+        ["USDRUBF"], [], placeholder, placeholder, placeholder, [placeholder], [placeholder],
+        True, True, True, five, bars, mapping, pd.DataFrame()))
+    assert report.loc[report["check_id"] == "date_source_provenance", "check_status"].eq("fail").all()
+    manifest = quality.build_manifest("run", "2026-05-21", "2026-05-21", INGEST, INGEST,
+        ["USDRUBF"], [], placeholder, placeholder, placeholder, [placeholder], [placeholder],
+        placeholder, placeholder, tmp_path, tmp_path, five, bars, mapping, report, "a" * 40)
+    assert manifest["builder_result_verdict"] == "fail"
+
+
 @pytest.mark.parametrize("field,value", [("raw_sha256", "invalid"), ("run_id", None),
     ("partition", "futures/raw_5m/trade_date=2026-05-17/family=USDRUBF/secid=USDRUBF/part.parquet")])
 def test_downstream_rejects_malformed_or_mismatched_evidence(tmp_path, field, value):

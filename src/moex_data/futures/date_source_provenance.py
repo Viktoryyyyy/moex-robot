@@ -498,6 +498,11 @@ def continuous_seam_blockers(c5, d1):
     if STATUS not in c5 or STATUS not in d1:
         return ["continuous date-source lineage missing at D1 boundary"]
     by_key = {key: derived_fields(part) for key, part in c5.groupby(["continuous_symbol", "trade_date"])}
+    d1_keys = set(d1.groupby(["continuous_symbol", "trade_date"]).groups)
+    if set(by_key) != d1_keys:
+        blockers.append("continuous 5m/D1 date-source key sets differ: missing D1="
+            + str(sorted(map(str, set(by_key) - d1_keys))) + "; missing 5m="
+            + str(sorted(map(str, d1_keys - set(by_key)))))
     for key, part in d1.groupby(["continuous_symbol", "trade_date"]):
         if by_key.get(key) != derived_fields(part):
             blockers.append("continuous D1 date-source evidence differs from 5m: " + str(key))
