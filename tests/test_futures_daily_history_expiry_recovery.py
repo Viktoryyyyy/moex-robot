@@ -343,3 +343,15 @@ def test_malformed_quality_manifest_becomes_failed_child_and_fresh_universal_rec
     assert result["universal_daily_refresh_result_verdict"] == "fail"
     assert result["executed_stage_order"] == ["quality_reports"]
     assert "row_counts" in result["child_component_status"][0]["failure_reason"]
+
+
+@pytest.mark.parametrize("apim_url", ["https://apim.moex.com", "https://configured-apim.example"])
+def test_roll_stage_uses_configured_observed_source_host_not_registry_host(tmp_path, apim_url):
+    args = SimpleNamespace(snapshot_date="2026-10-05", run_date="2026-10-05",
+        data_root_resolved=tmp_path, timeout=60, iss_base_url="https://iss.moex.com", apim_base_url=apim_url)
+    command = daily.command_for_stage(Path.cwd(), "roll_map", args)
+    assert "--iss-base-url" not in command
+    assert command[command.index("--apim-base-url") + 1] == apim_url
+    assert command[command.index("--snapshot-date") + 1] == args.snapshot_date
+    assert command[command.index("--data-root") + 1] == str(tmp_path)
+    assert "--from" not in command and "--till" not in command and "--whitelist" not in command

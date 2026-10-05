@@ -125,6 +125,9 @@ legacy_boundary:
 - The scheduler canonical entrypoint must point to moex_data.futures.universal_daily_refresh_runner.
 - Legacy futures_daily_data_refresh_manifest.v1 may remain for compatibility but must not define the future canonical universe scope.
 
+source_argument_binding:
+- The roll_map command receives the configured APIM base through --apim-base-url for its observed TradeStats source; the registry ISS base must not replace that source.
+
 forbidden_scope:
 - no strategy changes
 - no research result generation
