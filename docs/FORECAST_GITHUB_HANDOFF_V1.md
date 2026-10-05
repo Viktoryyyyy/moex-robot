@@ -222,7 +222,16 @@ Codex добавляет новый комментарий; ранее выда�
 `status`, `payload_sha256`, `source_url`, `received_at`, `reason`, `next_action`.
 Для `REGISTERED` дополнительно обязательны `forecast_ref` (kind/id/sha256),
 `input_ref`, `input_refs`, `recorded_at`, `effective_registration_class`,
-`server_code_sha`, `registrar_files_sha256`, `registrar_runtime_manifest_sha256`.
+`server_code_sha`, `registrar_files_sha256`, `registrar_runtime_manifest_sha256`,
+`registrar_evidence_status`, `registrar_evidence_reason`.
+Для проверенного manifest статус — `VERIFIED`, reason — null, три поля SHA —
+проверенные строки (Git SHA: 40 hex; два SHA-256: 64 hex). При восстановлении
+committed forecast с отсутствующим/непроверяемым историческим evidence статус —
+`INCOMPLETE`, reason — конкретная непустая причина; каждое недоказанное поле SHA
+явно равно null, доказанные значения сохраняются. `REGISTERED` в таком случае
+подтверждает только readback записи и inputs, не полную идентичность регистратора.
+Такой вариант допустим только для восстановления существующей записи: новый
+вызов `register` требует заранее сохранённого и проверенного runtime manifest.
 `input_ref` — основной snapshot; `input_refs` — полный упорядоченный список
 `payload.inputs`, включая `external_inputs`, после проверки каждого input.
 Первый элемент должен совпадать с `input_ref`; список копируется из readback,
