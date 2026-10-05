@@ -246,12 +246,20 @@ def quality_fixture(root):
     identity = dict(run_id="current-quality-run", run_date=args.run_date, snapshot_date=args.snapshot_date,
                     roll_policy_id=daily.ROLL_POLICY_ID, adjustment_policy_id=daily.ADJUSTMENT_POLICY_ID)
     frame = pd.DataFrame([{**identity, "schema_version": quality_component.SCHEMA_QUALITY_REPORT,
-                           "check_id": check, "check_status": "pass", "family_code": "Si"}
-                          for check in quality_component.REQUIRED_QUALITY_CHECKS])
+                           "quality_report_id": family + "-" + check, "continuous_symbol": quality_component.family_symbol(family),
+                           "dataset_id": "fixture", "calendar_status": provenance.OBSERVED,
+                           "date_source_summary_json": "{}", "date_source_evidence_json": "[]",
+                           "affected_source_secid": None, "affected_trade_date": None, "observed_value": None,
+                           "expected_value": None, "review_notes": None,
+                           "check_id": check, "check_status": "pass", "family_code": family}
+                          for family in ("Si", "USDRUBF") for check in quality_component.REQUIRED_QUALITY_CHECKS])
     outputs = {"manifest": str(mp), "quality_report": str(qp)}
     manifest = {**identity, "schema_version": quality_component.SCHEMA_MANIFEST,
                 "builder_result_verdict": "pass", "blockers": [], "quality_status_counts": {"pass": len(frame)},
                 "row_counts": {"quality_report": len(frame)}, "output_artifacts": outputs,
+                "family_summaries": [{"family_code": "Si"}, {"family_code": "USDRUBF"}],
+                "usdrubf_identity_check": {"status": "pass"}, "source_lineage_check": {"status": "pass"},
+                "partial_chain_gap_summary": {"status": "explicit_gap"},
                 "started_ts": "2026-10-05T12:00:00Z", "completed_ts": "2026-10-05T12:00:01Z"}
     mp.parent.mkdir(parents=True, exist_ok=True)
     qp.parent.mkdir(parents=True, exist_ok=True)
@@ -261,7 +269,9 @@ def quality_fixture(root):
     return args, mp, qp, manifest, frame, stdout, pd.Timestamp("2026-10-05T12:00:00Z").timestamp()
 
 
-@pytest.mark.parametrize("fault", [None, "missing", "stale", "wrong_run", "wrong_count", "failed_check", "missing_check", "wrong_path"])
+@pytest.mark.parametrize("fault", [None, "missing", "stale", "wrong_run", "wrong_count", "failed_check", "missing_check", "wrong_path",
+    "failed_identity_summary", "failed_lineage_summary", "missing_family_check", "missing_family", "duplicate_check", "missing_column",
+    "null_row_counts", "null_outputs", "null_summary", "malformed_roster"])
 def test_required_quality_readback_rejects_stale_or_inconsistent_success(tmp_path, fault):
     args, mp, qp, manifest, frame, stdout, started = quality_fixture(tmp_path)
     if fault == "stale": manifest["started_ts"] = "2026-10-04T12:00:00Z"
@@ -270,6 +280,21 @@ def test_required_quality_readback_rejects_stale_or_inconsistent_success(tmp_pat
     if fault == "failed_check": frame.loc[0, "check_status"] = "fail"
     if fault == "missing_check": frame = frame.iloc[1:]
     if fault == "wrong_path": manifest["output_artifacts"]["quality_report"] = "/unexpected/report"
+    if fault == "failed_identity_summary": manifest["usdrubf_identity_check"]["status"] = "fail"
+    if fault == "failed_lineage_summary": manifest["source_lineage_check"]["status"] = "fail"
+    if fault == "missing_family_check": frame = frame.loc[~((frame["family_code"] == "USDRUBF") & (frame["check_id"] == "usdrubf_identity_validation"))]
+    if fault == "missing_family":
+        frame = frame.loc[frame["family_code"] == "Si"]
+        manifest["family_summaries"] = [{"family_code": "Si"}]
+    if fault == "duplicate_check": frame = pd.concat([frame, frame.iloc[:1]], ignore_index=True)
+    if fault == "missing_column": frame = frame.drop(columns=["quality_report_id"])
+    if fault in {"missing_family_check", "missing_family", "duplicate_check"}:
+        manifest["quality_status_counts"] = {"pass": len(frame)}
+        manifest["row_counts"]["quality_report"] = len(frame)
+    if fault == "null_row_counts": manifest["row_counts"] = None
+    if fault == "null_outputs": manifest["output_artifacts"] = None
+    if fault == "null_summary": manifest["source_lineage_check"] = None
+    if fault == "malformed_roster": manifest["family_summaries"] = [None]
     mp.write_text(json.dumps(manifest))
     frame.to_parquet(qp, index=False)
     if fault == "missing": qp.unlink()
@@ -296,3 +321,18 @@ def test_quality_stage_executes_real_component_and_propagates_missing_outputs(tm
     assert child["status"] == "fail"
     assert "continuous_quality_report.py" in child["command"][1]
     assert manifest["universal_daily_refresh_result_verdict"] == "fail"
+
+
+def test_malformed_quality_manifest_becomes_failed_child_and_fresh_universal_receipt(tmp_path, monkeypatch):
+    args, mp, _, manifest, _, stdout, _ = quality_fixture(tmp_path)
+    manifest["row_counts"] = None
+    mp.write_text(json.dumps(manifest))
+    monkeypatch.setattr(daily, "load_dotenv", None)
+    monkeypatch.setattr(daily, "CANONICAL_STAGE_IDS", ["quality_reports", "unified_manifest"])
+    monkeypatch.setattr(daily.sys, "argv", ["daily", "--data-root", str(tmp_path), "--snapshot-date", args.snapshot_date, "--run-date", args.run_date])
+    monkeypatch.setattr(daily.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=0, stdout=stdout, stderr=""))
+    assert daily.main() == 1
+    result = json.loads(Path(daily.output_paths(tmp_path, args.run_date)["manifest"]).read_text())
+    assert result["universal_daily_refresh_result_verdict"] == "fail"
+    assert result["executed_stage_order"] == ["quality_reports"]
+    assert "row_counts" in result["child_component_status"][0]["failure_reason"]

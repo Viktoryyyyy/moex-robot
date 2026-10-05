@@ -254,6 +254,8 @@ def verify_quality_artifacts(root, args, stdout, started_at, completed_at):
     from moex_data.futures import continuous_quality_report as component
     parsed = parse_json_line_output(stdout)
     outputs = parsed.get("output_artifacts_created", {})
+    if not isinstance(outputs, dict):
+        raise RuntimeError("invalid quality output artifact mapping")
     mp = component.resolve_contract_path(root, args.data_root_resolved, component.CONTRACT_MANIFEST, {"run_date": args.run_date})
     qp = component.resolve_contract_path(root, args.data_root_resolved, component.CONTRACT_QUALITY_REPORT, {"run_date": args.run_date})
     for name, path in (("manifest", mp), ("quality_report", qp)):
@@ -262,6 +264,40 @@ def verify_quality_artifacts(root, args, stdout, started_at, completed_at):
     mbytes, qbytes = mp.read_bytes(), qp.read_bytes()
     manifest = json.loads(mbytes)
     quality = pd.read_parquet(io.BytesIO(qbytes))
+    if not isinstance(manifest, dict):
+        raise RuntimeError("invalid quality manifest mapping")
+    for field in ("row_counts", "output_artifacts", "quality_status_counts",
+                  "usdrubf_identity_check", "source_lineage_check", "partial_chain_gap_summary"):
+        if not isinstance(manifest.get(field), dict):
+            raise RuntimeError("invalid quality manifest mapping: " + field)
+    roster = manifest.get("family_summaries")
+    if (not isinstance(roster, list) or not roster
+            or any(not isinstance(row, dict) or not isinstance(row.get("family_code"), str)
+                   or not row["family_code"].strip() for row in roster)):
+        raise RuntimeError("invalid quality manifest family roster")
+    families = {row["family_code"] for row in roster}
+    # These are the existing component's mandatory families, not a new universe.
+    if len(families) != len(roster) or not set(component.EXPECTED_CONTINUOUS_SYMBOLS) <= families:
+        raise RuntimeError("incomplete or duplicate quality family roster")
+    required_fields = {"quality_report_id", "run_id", "run_date", "snapshot_date", "family_code",
+                       "continuous_symbol", "check_id", "dataset_id", "schema_version", "roll_policy_id",
+                       "adjustment_policy_id", "calendar_status", "date_source_summary_json",
+                       "date_source_evidence_json", "check_status", "affected_source_secid", "affected_trade_date",
+                       "observed_value", "expected_value", "review_notes"}
+    if not required_fields <= set(quality.columns):
+        raise RuntimeError("incomplete quality artifact schema")
+    if (quality["family_code"].isna().any() or set(quality["family_code"]) != families
+            or quality["quality_report_id"].isna().any()
+            or quality.duplicated(["quality_report_id", "run_id", "family_code", "check_id"]).any()
+            or quality.duplicated(["family_code", "check_id"]).any()):
+        raise RuntimeError("quality family roster or unique checks disagree")
+    for family, rows in quality.groupby("family_code"):
+        if not set(component.REQUIRED_QUALITY_CHECKS) <= set(rows["check_id"]):
+            raise RuntimeError("missing required quality checks for family: " + family)
+    if (manifest["usdrubf_identity_check"].get("status") != "pass"
+            or manifest["source_lineage_check"].get("status") != "pass"
+            or manifest["partial_chain_gap_summary"].get("status") != "explicit_gap"):
+        raise RuntimeError("quality manifest mandatory summary contradicts success")
     identities = {"run_id": parsed.get("run_id"), "run_date": args.run_date,
                   "snapshot_date": args.snapshot_date, "roll_policy_id": ROLL_POLICY_ID,
                   "adjustment_policy_id": ADJUSTMENT_POLICY_ID}
