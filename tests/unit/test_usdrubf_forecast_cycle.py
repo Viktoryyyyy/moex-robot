@@ -118,6 +118,77 @@ def test_dated_baseline_rejects_unbound_or_inconsistent_metadata(tmp_path, path,
     assert not list((tmp_path / "records").glob("forecast.*"))
 
 
+@pytest.fixture(scope="module")
+def native_dated_package():
+    from test_rub_dated_market_source import acquisitions, NOW
+    from test_rub_fast_market import snapshot
+    from moex_data import rub_dated_market_source, rub_factual_release
+    view = snapshot()
+    view["identity"]["generated_at_utc"] = NOW.isoformat()
+    view["accepted_dated_market"] = rub_dated_market_source.capture(None, acquisitions(), now=NOW)
+    document = rub_factual_release.compact(view, now=NOW, code_revision="a" * 40)
+    assert not any(fact.get("factor") == "usdrubf" for fact in document["facts"])
+    assert document["market_usability"]["usdrubf"]["price_oi_usable"] is False
+    return document
+
+
+@pytest.mark.parametrize("deferred", [False, True])
+def test_native_replay_export_registration_and_retry(tmp_path, deferred, native_dated_package):
+    document = deepcopy(native_dated_package)
+    raw = encode(document)
+    node = document["dated_context"]["observations"]["market:usdrubf"]
+    assert node["origin"] == "source_observation_acquired_now"
+    journal = ForecastJournal(tmp_path, clock=lambda: BASE)
+    ref = capture_canonical(journal, "native", raw)
+    original = request()
+    options = {"defer_evaluation_reason": "Owner retains original analysis"} if deferred else {}
+    forecast = register_forecast(journal, "native-forecast", original, ref, **options)
+    spec = journal.read(forecast)["payload"]
+    assert spec["reference_price"] == "80.0"
+    assert spec["reference_price_at"] == node["source_identity"]["timestamp"]
+    assert spec["context"]["baseline"]["status"] == "EXTERNAL_UNVERIFIED"
+    assert spec["context"]["original_text"] == original["context"]["original_text"]
+    assert original == request()
+    assert journal.object_bytes(journal.verify_input(ref)["payload"]["object_sha256"]) == raw
+    assert register_forecast(journal, "native-forecast", original, ref, **options) == forecast
+    if deferred:
+        assert spec["evaluation_policy"]["mode"] == "DEFERRED"
+
+
+@pytest.mark.parametrize("path,value", [
+    ("origin", "unknown"), ("origin", None), ("contract_metadata", None),
+    ("contract_metadata/native_security_row", None),
+    ("contract_metadata/native_security_row/SECID", "CNYRUBF"),
+    ("contract_metadata/native_security_row/BOARDID", "OTHER"),
+    ("contract_metadata/native_security_row/MINSTEP", True),
+    ("contract_metadata/native_security_row/STEPPRICE", 0),
+    ("contract_metadata/secid", "SiZ6"), ("contract_metadata/boardid", "OTHER"),
+    ("contract_metadata/units/last", "RUB_per_1000_USD"),
+    ("contract_metadata/units/oi", "lots"),
+    ("contract_metadata/binding_at_utc", "2026-09-13T11:59:58+00:00"),
+    ("contract_metadata/binding_at_utc", "2026-09-13T12:00:01+00:00"),
+    ("contract_metadata/binding_semantics", "historical_front"),
+    ("request_started_at_utc", "2026-09-13T12:00:01+00:00"),
+    ("source_generation_at_utc", "2026-09-13T11:59:59+00:00"),
+    ("source_identity/secid", "CNYRUBF"), ("source_identity/source_id", "foreign"),
+    ("source_times/source_observation_at_utc", at(-1)),
+    ("revision_id", None), ("raw_source_digest", "unverified"),
+    ("revision_semantics", "historical_pit"), ("model_usable", True),
+])
+def test_native_dated_projection_rejects_contradictions(tmp_path, path, value, native_dated_package):
+    document = deepcopy(native_dated_package)
+    target = document["dated_context"]["observations"]["market:usdrubf"]
+    parts = path.split("/")
+    for key in parts[:-1]:
+        target = target[key]
+    target[parts[-1]] = value
+    journal = ForecastJournal(tmp_path, clock=lambda: BASE)
+    ref = capture_canonical(journal, "native-invalid", encode(document))
+    with pytest.raises(ValueError):
+        register_forecast(journal, "bad", request(), ref)
+    assert not list((tmp_path / "records").glob("forecast.*"))
+
+
 def test_dated_baseline_does_not_mask_conflicting_current_rows(tmp_path):
     document = dated_package()
     document["facts"] = package()["facts"]

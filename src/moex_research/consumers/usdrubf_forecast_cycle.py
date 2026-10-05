@@ -175,7 +175,27 @@ def dated_projection_baseline(document):
             or timestamp(pointer(node, "/source_times/received_at_utc")) != received):
         raise ForecastJournalError("dated baseline source time mismatch")
     metadata = pointer(node, "/contract_metadata")
-    if (not isinstance(metadata, dict)
+    if node.get("origin") == "source_observation_acquired_now":
+        # Native replay/describe exports a receipt-time binding, not the legacy
+        # live-admission wrapper. Validate that format without changing it.
+        from moex_data.rub_dated_context import _number
+        native = metadata.get("native_security_row") if isinstance(metadata, dict) else None
+        if (not isinstance(native, dict)
+                or metadata.get("secid") != "USDRUBF" or metadata.get("boardid") != "RFUD"
+                or metadata.get("units") != {"last": "RUB_per_USD", "oi": "contracts"}
+                or native.get("SECID") != "USDRUBF" or native.get("BOARDID") != "RFUD"
+                or any(not _number(native.get(key), True) for key in ("MINSTEP", "STEPPRICE"))
+                or metadata.get("binding_semantics") != "concrete_contract_selected_at_receipt_not_historical_front"
+                or not received <= timestamp(metadata.get("binding_at_utc")) <= accepted
+                or timestamp(node.get("source_generation_at_utc")) != accepted
+                or timestamp(node.get("request_started_at_utc")) > received
+                or node.get("revision_semantics") != "observed_now_not_historical_pit"
+                or node.get("model_usable") is not False or node.get("historical_pit_usable") is not False
+                or any(not isinstance(node.get(key), str) or not re.fullmatch("[0-9a-f]{64}", node[key])
+                       for key in ("revision_id", "raw_source_digest"))):
+            raise ForecastJournalError("dated baseline native contract/unit/binding metadata mismatch")
+    elif (node.get("origin") not in (None, "previously_accepted_live")
+            or not isinstance(metadata, dict)
             or metadata.get("scope") != "exact_source_contract_metadata_independent_of_live_price"
             or metadata.get("secid") != "USDRUBF"
             or timestamp(metadata.get("applicable_source_timestamp_utc")) != observed
