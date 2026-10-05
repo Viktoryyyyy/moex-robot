@@ -210,6 +210,7 @@ class AdmissionIndex:
         self.rows = {}
         self.cache = {}
         self.versioned_reports = {}
+        self.published_manifests = {}
         if quality is None:
             frames = []
             paths = quality_paths(self.root)
@@ -225,6 +226,7 @@ class AdmissionIndex:
         for frame, quality_path, manifest_path in versions.admission_reports(self.root):
             frames.append(frame)
             self.versioned_reports[(quality_path, str(manifest_path))] = manifest_path
+            self.published_manifests.setdefault(Path(quality_path).name, set()).add(manifest_path.name)
         quality = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
         for row in quality.to_dict("records"):
             if row.get("quality_status") == "pass":
@@ -285,6 +287,8 @@ class AdmissionIndex:
         if versioned_report:
             mp = self.versioned_reports[pair]
         mbytes = mp.read_bytes()
+        if qhash in self.published_manifests and versions.sha256(mbytes) not in self.published_manifests[qhash]:
+            fail("published quality/manifest binding mismatch")
         if versioned_report and versions.sha256(mbytes) != mp.name:
             fail("immutable admission manifest digest mismatch")
         m = json.loads(mbytes)

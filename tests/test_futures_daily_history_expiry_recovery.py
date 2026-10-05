@@ -82,11 +82,14 @@ def test_same_quality_bytes_retain_each_independent_manifest_binding(tmp_path):
     assert len({r["quality_sha256"] for r in evidence}) == 1
 
 
-@pytest.mark.parametrize("fault", ["missing_mapping", "null_mapping", "missing_scope"])
+@pytest.mark.parametrize("fault", ["missing_mapping", "null_mapping", "missing_scope", "both_absent"])
 def test_partial_version_metadata_does_not_fall_back_to_unpinned_alias(tmp_path, fault):
     paths, qp, mp = make_admitted(tmp_path)
     manifest = freeze(tmp_path, qp, mp)
-    if fault == "missing_mapping":
+    if fault == "both_absent":
+        manifest.pop("raw_partition_versions")
+        manifest.pop("admission_version_scope")
+    elif fault == "missing_mapping":
         manifest.pop("raw_partition_versions")
     elif fault == "null_mapping":
         manifest["raw_partition_versions"] = None
