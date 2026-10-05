@@ -82,6 +82,24 @@ def test_same_quality_bytes_retain_each_independent_manifest_binding(tmp_path):
     assert len({r["quality_sha256"] for r in evidence}) == 1
 
 
+@pytest.mark.parametrize("fault", ["missing_mapping", "null_mapping", "missing_scope"])
+def test_partial_version_metadata_does_not_fall_back_to_unpinned_alias(tmp_path, fault):
+    paths, qp, mp = make_admitted(tmp_path)
+    manifest = freeze(tmp_path, qp, mp)
+    if fault == "missing_mapping":
+        manifest.pop("raw_partition_versions")
+    elif fault == "null_mapping":
+        manifest["raw_partition_versions"] = None
+    else:
+        manifest.pop("admission_version_scope")
+    mp.write_text(json.dumps(manifest))
+    raw = pd.read_parquet(paths[0])
+    raw["volume"] += 1
+    raw.to_parquet(paths[0], index=False)
+    with pytest.raises(RuntimeError, match="unverifiable partition"):
+        admit(tmp_path, paths)
+
+
 @pytest.mark.parametrize("fault", ["missing_raw", "tampered_raw", "missing_quality", "tampered_manifest", "tampered_receipt"])
 def test_missing_or_tampered_immutable_evidence_fails_closed(tmp_path, fault):
     paths, qp, mp = make_admitted(tmp_path)

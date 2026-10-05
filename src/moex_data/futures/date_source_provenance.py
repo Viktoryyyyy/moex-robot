@@ -288,12 +288,12 @@ class AdmissionIndex:
         if versioned_report and versions.sha256(mbytes) != mp.name:
             fail("immutable admission manifest digest mismatch")
         m = json.loads(mbytes)
-        pinned = "raw_partition_versions" in m
+        pinned = "raw_partition_versions" in m or "admission_version_scope" in m
         if pinned:
             manifest_members = m.get("partition_paths_created", []) if legacy else m.get("output_partitions", [])
             required_versions = {relative_partition(partition_identity(x)).as_posix() for x in manifest_members}
             if (m.get("admission_version_scope") != "publication_bytes_not_historical_PIT"
-                    or not isinstance(m["raw_partition_versions"], dict)
+                    or not isinstance(m.get("raw_partition_versions"), dict)
                     or set(m["raw_partition_versions"]) != required_versions):
                 fail("raw admission version membership/scope mismatch")
         elif versioned_report:
