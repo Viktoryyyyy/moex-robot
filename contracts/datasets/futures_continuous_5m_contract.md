@@ -6,6 +6,17 @@ artifact_class: external_pattern
 format: parquet
 schema_version: futures_continuous_5m.v1
 
+date_source_compatibility: docs/FUTURES_D1_DATE_PROVENANCE_COMPATIBILITY_V1.md
+new_output_provenance_fields:
+- calendar_denominator_status: the admitted raw partition status, never copied from roll-map status
+- date_source_evidence_json: preserved raw partition and retained admission hashes/identities/scope
+- roll_date_source_status: the selecting roll-map calendar_status
+- roll_date_source: the selecting roll-map calendar_source
+provenance_rules:
+- Validate raw admission at the actual read boundary before selecting continuous bars; do not modify roll windows, policy or prices.
+- Reject contradictory raw provenance within a continuous symbol/date group.
+- Legacy v1 outputs lacking all four additive fields remain readable with provenance unrecorded; do not fabricate XML evidence for them.
+
 purpose: Unadjusted 5-minute continuous futures bars built from futures_raw_5m according to futures_continuous_roll_map.v1.
 
 producer: src/moex_data/futures/continuous_series_builder.py

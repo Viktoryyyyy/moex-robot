@@ -46,7 +46,8 @@ validation_rules:
 - dataset_id must equal futures_derived_d1_ohlcv.
 - one report row must exist for each accepted whitelist instrument.
 - quality_status must be pass for accepted closeout.
-- calendar_denominator_status must equal canonical_apim_futures_xml.
+- calendar_denominator_status preserves the single supported source or mixed_date_sources for a multi-date instrument history.
+- New quality rows include date_source_summary_json, date_source_by_trade_date_json and date_source_evidence_json, agreeing with D1 output and manifest evidence.
 - d1_rows must equal raw_trade_dates for each secid.
 - partition_count must equal d1_rows for each secid.
 - raw_5m_rows must be greater than zero for each accepted whitelist instrument.
@@ -60,5 +61,7 @@ blocking_conditions:
 - quality_status other than pass.
 - d1_rows does not equal raw_trade_dates.
 - partition_count does not equal d1_rows.
-- non-canonical calendar_denominator_status.
+- missing, contradictory, unsupported or unverifiable date-source evidence.
+
+date_source_compatibility: docs/FUTURES_D1_DATE_PROVENANCE_COMPATIBILITY_V1.md
 - report row exists for excluded instruments SiH7 or SiM7.

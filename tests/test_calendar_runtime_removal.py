@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pandas as pd
@@ -30,6 +31,60 @@ def _tradestats_payload(rows: list[list[object]]) -> dict[str, object]:
     }
 
 
+def _without_retained_source_identifier(text: str) -> str:
+    """Allow one historical metadata value, never a calendar client dependency."""
+    approved = "MOEX_APIM_XML:/iss/calendars"
+    tree = ast.parse(text)
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    mappings = [node.value for node in tree.body if isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == "ROLL_SOURCES" for target in node.targets)]
+    assert len(mappings) == 1 and isinstance(mappings[0], ast.Dict)
+    legacy = [value for key, value in zip(mappings[0].keys, mappings[0].values)
+              if isinstance(key, ast.Name) and key.id == "XML"]
+    assert len(legacy) == 1 and isinstance(legacy[0], ast.Constant) and legacy[0].value == approved
+    assert text.count(approved) == 1
+    allowed_imports = {"hashlib", "json", "os", "re", "tempfile", "pathlib", "urllib.parse",
+                       "numpy", "pandas", "moex_data.futures", "moex_data.futures.slice1_common"}
+    allowed_observed = {"OBSERVED_DATE_SOURCE_ID", "OBSERVED_DATE_SOURCE_ENDPOINT",
+                        "observed_date_source_endpoint"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            assert all(alias.name in allowed_imports for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            assert node.module in allowed_imports
+            if node.module == "moex_data.futures":
+                assert [(alias.name, alias.asname) for alias in node.names] == [
+                    ("refresh_forts_raw_5m_incremental", "observed")]
+        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "observed":
+            assert node.attr in allowed_observed
+            if node.attr == "observed_date_source_endpoint":
+                parent = parents.get(node)
+                assert isinstance(parent, ast.Call) and parent.func is node
+        elif isinstance(node, ast.Name) and node.id == "observed":
+            parent = parents.get(node)
+            assert isinstance(node.ctx, ast.Load)
+            assert isinstance(parent, ast.Attribute) and parent.value is node and parent.attr in allowed_observed
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            assert node.func.id not in {"__import__", "eval", "exec", "getattr"}
+    return text.replace(approved, "")
+
+
+@pytest.mark.parametrize("network_dependency", [
+    "import requests\n",
+    "from urllib.request import urlopen\n",
+    "observed.requests.get('https://example.invalid')\n",
+    "observed.fetch_observed_tradestats_dates('2026-10-01', '2026-10-02')\n",
+    "client = observed\nclient.fetch_observed_tradestats_dates('2026-10-01', '2026-10-02')\n",
+    "observed = object()\n",
+    "observed.observed_date_source_endpoint.__globals__['fetch_observed_tradestats_dates']('2026-10-01', '2026-10-02')\n",
+    "formatter = observed.observed_date_source_endpoint\n",
+])
+def test_retained_source_identifier_does_not_allow_network_dependency(network_dependency: str) -> None:
+    text = Path("src/moex_data/futures/date_source_provenance.py").read_text(encoding="utf-8")
+    with pytest.raises(AssertionError):
+        _without_retained_source_identifier(text + "\n" + network_dependency)
+
+
 def test_active_src_has_no_legacy_calendar_runtime_dependency() -> None:
     forbidden = (
         "/iss/" + "calendars",
@@ -56,6 +111,10 @@ def test_active_src_has_no_legacy_calendar_runtime_dependency() -> None:
                     'historical_pit_acceptance', 'action_authority'} <= set(published.DENIED)
             assert text.count(approved) == 1
             text = text.replace(approved, '')
+        if path.as_posix() == 'src/moex_data/futures/date_source_provenance.py':
+            # Retained roll metadata is compared locally; it cannot supply dates.
+            # Every other forbidden token in this module remains checked below.
+            text = _without_retained_source_identifier(text)
         for token in forbidden:
             if token in text:
                 violations.append(path.as_posix() + ":" + token)

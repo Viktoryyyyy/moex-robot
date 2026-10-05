@@ -1,6 +1,7 @@
 import pandas as pd
 
 from moex_data.futures import derived_d1_ohlcv_builder as mod
+from moex_data.futures import date_source_provenance as provenance
 
 
 def _config():
@@ -72,7 +73,14 @@ def test_raw_d1_chunk_groups_are_family_driven_and_deferred_visible():
 
 def test_raw_d1_aggregate_is_raw_5m_only_and_outputs_stage():
     raw = mod.normalize_raw(_raw_frame())
-    mod.validate_raw(raw)
+    # Arithmetic unit input; retained admission is exercised with real parquet,
+    # quality and manifests in test_futures_date_source_provenance.
+    raw[provenance.EVIDENCE] = raw.apply(lambda row: provenance.canonical_json([{
+        "status": provenance.XML, "scope": provenance.EVIDENCE_SCOPE,
+        "partition": row["_source_partition_path"].replace("/tmp/raw/", "/tmp/futures/raw_5m/"), "raw_sha256": "a" * 64,
+        "quality_sha256": "b" * 64, "manifest_sha256": "c" * 64,
+        "raw_ingest_ts": "2026-05-19T00:00:00Z", "run_id": "unit-arithmetic",
+        "quality_path": "unit-quality", "manifest_path": "unit-manifest"}]), axis=1)
     d1 = mod.aggregate_d1(raw, "2026-05-19T00:00:00Z")
     assert set(d1["dataset_stage"].unique()) == {"raw_d1"}
     assert set(d1["source_dataset_id"].unique()) == {"futures_raw_5m"}

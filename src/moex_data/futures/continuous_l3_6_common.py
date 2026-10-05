@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
+from moex_data.futures import date_source_provenance as provenance
 
 ROLL_POLICY_ID = "expiration_minus_1_trading_session_v1"
 ADJUSTMENT_POLICY_ID = "unadjusted_v1"
@@ -180,7 +181,7 @@ def roll_buildable_map(roll_map: pd.DataFrame) -> Dict[str, Tuple[bool, str]]:
         policy_ok = str(row.get("roll_policy_id")) == ROLL_POLICY_ID
         adjustment_ok = str(row.get("adjustment_policy_id")) == ADJUSTMENT_POLICY_ID
         factor_ok = float(pd.to_numeric(pd.Series([row.get("adjustment_factor")]), errors="coerce").iloc[0]) == ADJUSTMENT_FACTOR
-        calendar_ok = str(row.get("calendar_status")) == CALENDAR_STATUS
+        calendar_ok = provenance.roll_source_valid(row)
         ok = status in BUILDABLE_ROLL_STATUSES and policy_ok and adjustment_ok and factor_ok and calendar_ok
         reason = status if ok else "roll_map_not_buildable:" + status
         out[secid.upper()] = (ok, reason)

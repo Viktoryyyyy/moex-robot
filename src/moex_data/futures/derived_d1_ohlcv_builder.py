@@ -15,6 +15,7 @@ except Exception:
 import pandas as pd
 
 from moex_data.futures import liquidity_history_metrics_probe as base
+from moex_data.futures import date_source_provenance as provenance
 
 from moex_data.futures.slice1_common import DEFAULT_EXCLUDED
 from moex_data.futures.slice1_common import DEFAULT_WHITELIST
@@ -121,7 +122,7 @@ def accepted_quality(quality_paths, from_date, till):
     frames = []
     for path in quality_paths:
         if path.exists():
-            frame = pd.read_parquet(path)
+            frame = provenance.read_quality(path)
             if len(frame):
                 frame["_quality_report_path"] = str(path)
                 frames.append(frame)
@@ -237,25 +238,13 @@ def filter_selected_by_raw_paths(refined, selected, raw_paths):
 def read_raw(paths):
     frames = []
     for path in paths:
-        frame = pd.read_parquet(path)
-        frame["_source_partition_path"] = str(path)
+        frame = provenance.read_partition(path)
         frames.append(frame)
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
-def validate_raw(frame):
-    required = ["trade_date", "ts", "board", "secid", "family_code", "open", "high", "low", "close", "volume", "schema_version", "calendar_denominator_status"]
-    missing = [x for x in required if x not in frame.columns]
-    if missing:
-        raise RuntimeError("Raw 5m input missing required fields: " + ", ".join(missing))
-    schemas = sorted([str(x) for x in frame["schema_version"].dropna().unique().tolist()])
-    if schemas != ["futures_raw_5m.v1"]:
-        raise RuntimeError("Raw 5m schema mismatch: " + json.dumps(schemas, ensure_ascii=False))
-    calendar = sorted([str(x) for x in frame["calendar_denominator_status"].dropna().unique().tolist()])
-    if calendar != ["canonical_apim_futures_xml"]:
-        raise RuntimeError("Raw 5m calendar status mismatch: " + json.dumps(calendar, ensure_ascii=False))
-    if sorted([str(x) for x in frame["board"].dropna().unique().tolist()]) != ["RFUD"]:
-        raise RuntimeError("Raw D1 derivation supports RFUD board only")
+def validate_raw(frame, data_root, quality=None):
+    return provenance.AdmissionIndex(data_root, quality).admit(frame)
 
 
 def normalize_raw(frame):
@@ -288,6 +277,7 @@ def aggregate_d1(raw, ingest_ts):
         value_sum = float(part["value"].sum()) if "value" in part.columns and part["value"].notna().any() else None
         trades_sum = float(part["num_trades"].sum()) if "num_trades" in part.columns and part["num_trades"].notna().any() else None
         rows.append({
+            **provenance.group_fields(part),
             "trade_date": str(trade_date),
             "session_date": first_string(part["session_date"]) if "session_date" in part.columns else str(trade_date),
             "board": first_string(part["board"]),
@@ -310,7 +300,6 @@ def aggregate_d1(raw, ingest_ts):
             "ingest_ts": ingest_ts,
             "schema_version": SCHEMA_D1,
             "short_history_flag": first_bool(part["short_history_flag"]) if "short_history_flag" in part.columns else False,
-            "calendar_denominator_status": "canonical_apim_futures_xml",
             "dataset_stage": DATASET_STAGE,
         })
     return pd.DataFrame(rows).sort_values(["trade_date", "family_code", "secid"]).reset_index(drop=True) if rows else pd.DataFrame()
@@ -363,7 +352,7 @@ def write_partitions(d1, data_root):
     for _, row in clean.iterrows():
         path = d1_path(data_root, row["trade_date"], row["family_code"], row["secid"])
         path.parent.mkdir(parents=True, exist_ok=True)
-        pd.DataFrame([row.to_dict()]).to_parquet(path, index=False)
+        provenance.write_derived_partition(path, pd.DataFrame([row.to_dict()]))
         paths.append(str(path))
     return paths
 
@@ -379,6 +368,9 @@ def per_instrument(raw, d1, paths):
         short_history_flag = first_bool(part["short_history_flag"]) if "short_history_flag" in part.columns else False
         status = "pass" if int(len(d1_part)) == int(part["trade_date"].nunique()) else "fail"
         summaries[str(secid)] = {
+            "date_source_summary": provenance.summary(d1_part),
+            "date_source_by_trade_date": {str(r["trade_date"]): r[provenance.STATUS] for _, r in d1_part.iterrows()},
+            "date_source_evidence": {str(r["trade_date"]): json.loads(r[provenance.EVIDENCE]) for _, r in d1_part.iterrows()},
             "raw_5m_rows": int(len(part)),
             "raw_trade_dates": int(part["trade_date"].nunique()),
             "d1_rows": int(len(d1_part)),
@@ -427,7 +419,10 @@ def build_quality_rows(run_id, run_date, summaries):
             "raw_trade_dates": summary.get("raw_trade_dates"),
             "d1_rows": summary.get("d1_rows"),
             "partition_count": summary.get("partition_count"),
-            "calendar_denominator_status": "canonical_apim_futures_xml",
+            "calendar_denominator_status": summary["date_source_summary"]["status"],
+            "date_source_summary_json": provenance.canonical_json(summary["date_source_summary"]),
+            "date_source_by_trade_date_json": provenance.canonical_json(summary["date_source_by_trade_date"]),
+            "date_source_evidence_json": provenance.canonical_json(summary["date_source_evidence"]),
         })
     return pd.DataFrame(rows).sort_values(["secid"]).reset_index(drop=True)
 
@@ -475,10 +470,8 @@ def main():
     refined_path = refined_eligibility_path(data_root, snapshot_date, str(args.output_eligibility or ""))
     raw_paths = discover_raw_paths(data_root, selected, from_date, till)
     refined, selected = filter_selected_by_raw_paths(refined, selected, raw_paths)
-    write_parquet(refined_path, refined)
-
     raw = read_raw(raw_paths)
-    validate_raw(raw)
+    raw = validate_raw(raw, data_root, quality)
     raw = normalize_raw(raw)
     validate_selected_scope(raw, selected)
 
@@ -487,13 +480,18 @@ def main():
     d1 = aggregate_d1(raw, ingest_ts)
     counts = quality_counts(raw, d1)
     aggregate_status, aggregate_notes = status_from_counts(counts)
-    partition_paths = write_partitions(d1, data_root) if aggregate_status != "fail" else []
-    summaries = per_instrument(raw, d1, partition_paths)
+    if aggregate_status == "fail":
+        raise RuntimeError(aggregate_notes)
+    summaries = per_instrument(raw, d1, [])
 
     for secid, summary in summaries.items():
         if secid not in SHORT_HISTORY_ALLOWED and summary.get("short_history_flag") is True:
             raise RuntimeError("Unexpected short_history_flag=true for " + str(secid))
 
+    # Every admission and output gate precedes the first mutation.
+    write_parquet(refined_path, refined)
+    partition_paths = write_partitions(d1, data_root)
+    summaries = per_instrument(raw, d1, partition_paths)
     quality_rows = build_quality_rows(run_id, run_date, summaries)
     quality_counts_by_status = {str(k): int(v) for k, v in quality_rows["quality_status"].astype(str).value_counts(dropna=False).to_dict().items()}
     aggregate_outputs = output_paths(data_root, run_date)
@@ -507,6 +505,8 @@ def main():
         chunk_quality = quality_rows.loc[quality_rows["secid"].astype(str).isin(frame["secid"].astype(str).tolist())].copy()
         write_parquet(chunk_out["quality_report"], chunk_quality)
         chunk_manifest = {
+            "date_source_summary": provenance.summary(d1.loc[d1["family_code"] == fam]),
+            "instrument_summaries": {s: summaries[s] for s in frame["secid"].astype(str) if s in summaries},
             "schema_version": SCHEMA_MANIFEST,
             "run_id": run_id,
             "chunk_id": chunk_id,
@@ -561,7 +561,10 @@ def main():
         "instrument_summaries": summaries,
         "quality_status_counts": quality_counts_by_status,
         "source_to_output_row_check": counts,
-        "calendar_validation_summary": {"calendar_denominator_status": "canonical_apim_futures_xml"},
+        "calendar_validation_summary": {"calendar_denominator_status": provenance.summary(d1)["status"],
+            "date_source_summary": provenance.summary(d1),
+            "closed_before_msk_date": raw.attrs.get("date_source_cutoff_msk_date"),
+            "closure_claim": "elapsed_Moscow_calendar_date_not_session_completeness"},
         "builder_result_verdict": "pass" if quality_counts_by_status.get("fail", 0) == 0 and aggregate_status == "pass" else "fail",
         "aggregate_review_notes": aggregate_notes,
         "forbidden_scope_checks": {

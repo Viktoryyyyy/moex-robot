@@ -16,6 +16,7 @@ except Exception:
 import pandas as pd
 
 from moex_data.futures import liquidity_history_metrics_probe as base
+from moex_data.futures import date_source_provenance as provenance
 from moex_data.futures.slice1_common import DEFAULT_EXCLUDED
 from moex_data.futures.slice1_common import DEFAULT_WHITELIST
 from moex_data.futures.slice1_common import parse_list
@@ -193,6 +194,7 @@ def validate_roll_map(frame: pd.DataFrame, roll_policy_id: str, adjustment_polic
         "valid_from_session",
         "valid_through_session",
         "calendar_status",
+        "calendar_source",
         "roll_policy_id",
         "adjustment_policy_id",
         "adjustment_factor",
@@ -228,7 +230,7 @@ def validate_roll_map(frame: pd.DataFrame, roll_policy_id: str, adjustment_polic
     bad_adjustment_factor = frame.loc[pd.to_numeric(frame["adjustment_factor"], errors="coerce") != ADJUSTMENT_FACTOR]
     if not bad_adjustment_factor.empty:
         blockers.append("invalid_adjustment_factor_rows:" + str(len(bad_adjustment_factor)))
-    bad_calendar = frame.loc[frame["calendar_status"].astype(str) != CALENDAR_STATUS]
+    bad_calendar = frame.loc[~frame.apply(provenance.roll_source_valid, axis=1)]
     if not bad_calendar.empty:
         blockers.append("invalid_calendar_status_rows:" + str(len(bad_calendar)))
     statuses = {str(x) for x in frame["roll_status"].dropna().astype(str).tolist()}
@@ -300,8 +302,7 @@ def discover_raw_paths(root: Path, data_root: Path, source_secids: List[str], ex
 def read_raw(paths: List[Path]) -> pd.DataFrame:
     frames = []
     for path in paths:
-        part = pd.read_parquet(path)
-        part["_source_partition_path"] = str(path)
+        part = provenance.read_partition(path)
         frames.append(part)
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
@@ -338,10 +339,10 @@ def validate_raw(frame: pd.DataFrame, source_secids: List[str], excluded: List[s
     schemas = sorted([str(x) for x in frame["schema_version"].dropna().unique().tolist()])
     if schemas != [SCHEMA_RAW_5M]:
         blockers.append("invalid_raw_schema_versions:" + json.dumps(schemas, ensure_ascii=False))
-    if "calendar_denominator_status" in frame.columns:
-        calendars = sorted([str(x) for x in frame["calendar_denominator_status"].dropna().unique().tolist()])
-        if calendars != [CALENDAR_STATUS]:
-            blockers.append("invalid_raw_calendar_status:" + json.dumps(calendars, ensure_ascii=False))
+    try:
+        provenance.validate_structure(frame)
+    except RuntimeError as exc:
+        blockers.append(str(exc))
     null_ohlc = int(frame[["open", "high", "low", "close"]].isna().any(axis=1).sum())
     if null_ohlc > 0:
         blockers.append("raw_null_ohlc_rows:" + str(null_ohlc))
@@ -425,6 +426,10 @@ def select_continuous_rows(raw: pd.DataFrame, roll_map: pd.DataFrame, ingest_ts:
         mrow = matched.iloc[0]
         is_boundary = (secid, str(mrow.get("continuous_symbol")), session_date) in boundary_keys
         records.append({
+            provenance.STATUS: row[provenance.STATUS],
+            provenance.EVIDENCE: row[provenance.EVIDENCE],
+            "roll_date_source_status": mrow["calendar_status"],
+            "roll_date_source": mrow["calendar_source"],
             "trade_date": str(row.get("trade_date")),
             "end": row.get("end"),
             "session_date": session_date,
@@ -455,7 +460,7 @@ def select_continuous_rows(raw: pd.DataFrame, roll_map: pd.DataFrame, ingest_ts:
 
 
 def validate_continuous(frame: pd.DataFrame, excluded: List[str], roll_policy_id: str, adjustment_policy_id: str) -> List[str]:
-    blockers: List[str] = []
+    blockers: List[str] = provenance.derived_blockers(frame)
     required = [
         "trade_date",
         "end",
@@ -549,7 +554,7 @@ def write_partitions(root: Path, data_root: Path, frame: pd.DataFrame, roll_poli
     for (family_code, trade_date), part in clean.groupby(["family_code", "trade_date"], sort=True):
         path = output_partition_path(root, data_root, roll_policy_id, adjustment_policy_id, str(family_code), str(trade_date))
         path.parent.mkdir(parents=True, exist_ok=True)
-        part.sort_values(["continuous_symbol", "end"]).to_parquet(path, index=False)
+        provenance.write_derived_partition(path, part.sort_values(["continuous_symbol", "end"]).reset_index(drop=True))
         paths.append(str(path))
     return paths
 
@@ -560,6 +565,8 @@ def summarize(frame: pd.DataFrame, partition_paths: List[str], raw_paths: List[P
     boundary_counts = {str(k): int(v) for k, v in frame.loc[frame["is_roll_boundary"].astype(bool), "continuous_symbol"].astype(str).value_counts(dropna=False).to_dict().items()}
     return {
         "rows": int(len(frame)),
+        "date_source_summary": provenance.summary(frame),
+        "roll_date_source_summary": provenance.summary(roll_map, "calendar_status"),
         "continuous_symbols": sorted([str(x) for x in frame["continuous_symbol"].dropna().unique().tolist()]),
         "source_secids": sorted([str(x) for x in frame["source_secid"].dropna().unique().tolist()]),
         "rows_by_continuous_symbol": rows_by_symbol,
@@ -627,6 +634,7 @@ def main() -> int:
         print_json_line("blockers", raw_blockers)
         return 1
 
+    raw = provenance.AdmissionIndex(data_root).admit(raw)
     raw = normalize_raw(raw)
     continuous = select_continuous_rows(raw, roll_map, ingest_ts, roll_policy_id, adjustment_policy_id)
     continuous_blockers = validate_continuous(continuous, excluded, roll_policy_id, adjustment_policy_id)

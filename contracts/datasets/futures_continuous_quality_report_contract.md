@@ -76,7 +76,8 @@ validation_rules:
 - dataset_id must be one of futures_continuous_roll_map, futures_continuous_5m, futures_continuous_d1, futures_continuous_series_v1.
 - roll_policy_id must equal expiration_minus_1_trading_session_v1.
 - adjustment_policy_id must equal unadjusted_v1.
-- calendar_status must equal canonical_apim_futures_xml for pass rows.
+- calendar_status reports the validated roll-map status/source pair; raw provenance is separately reported in date_source_summary_json and date_source_evidence_json.
+- date_source_provenance validates the 5m-to-D1 evidence seam. Legacy outputs with no recorded fields are explicitly not_applicable, without an invented historical claim.
 - every required check must be represented for each relevant run/family, either as pass, fail, not_applicable, or explicit_gap.
 - check_status allowed values are pass, fail, not_applicable, explicit_gap.
 - any fail check_status blocks builder_result_verdict=pass.
@@ -90,7 +91,9 @@ blocking_conditions:
 - quality report missing after builder run.
 - any required check missing.
 - any required check_status=fail.
-- calendar_status not canonical_apim_futures_xml.
+- unsupported or mismatched roll-map calendar_status/calendar_source pair; missing/conflicting new raw provenance or 5m/D1 evidence mismatch.
+
+date_source_compatibility: docs/FUTURES_D1_DATE_PROVENANCE_COMPATIBILITY_V1.md
 - USDRUBF identity validation not pass.
 - source lineage completeness not pass.
 - excluded instrument included.

@@ -61,7 +61,9 @@ validation_rules:
 - The Slice 1 whitelist remains a compatibility baseline, not the all-universe selection rule.
 - excluded_instruments_confirmed must include SiH7 and SiM7 for Slice 1 closeout.
 - builder_result_verdict must be pass only when quality_status_counts.fail is absent or zero.
-- calendar_validation_summary.calendar_denominator_status must equal canonical_apim_futures_xml.
+- calendar_validation_summary.calendar_denominator_status must reflect the admitted output: one supported raw status, or mixed_date_sources for different dates. It must not relabel a mixed history as XML.
+- calendar_validation_summary.date_source_summary records statuses, counts and evidence scope; closed_before_msk_date records the fixed elapsed-date cutoff, not session completeness.
+- instrument_summaries preserve date_source_by_trade_date and date_source_evidence; family chunk manifests carry the corresponding subset and summary.
 - input_artifacts.raw_5m_partition_root must reference the futures_raw_5m external pattern.
 - partition_paths_created must contain no path with secid=SiH7 or secid=SiM7 for Slice 1 compatibility runs.
 - short_history_handling must include SiU7 and its per-instrument short_history_flag must be true for Slice 1 compatibility runs.
@@ -74,6 +76,8 @@ blocking_conditions:
 - missing accepted whitelist instrument from instrument_summaries in Slice 1 compatibility runs.
 - missing eligibility-selected instrument from instrument_summaries in eligibility-snapshot-driven runs.
 - excluded instrument appears in partition_paths_created.
-- APIM futures calendar validation not canonical in source rows.
+- source provenance lacks matching retained admission evidence or contradicts output/quality evidence.
+
+date_source_compatibility: docs/FUTURES_D1_DATE_PROVENANCE_COMPATIBILITY_V1.md
 - source_to_output_row_check shows missing D1 rows.
 - SiU7 short_history_flag not true in short_history_handling for Slice 1 compatibility runs.

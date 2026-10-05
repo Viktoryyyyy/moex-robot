@@ -6,6 +6,17 @@ artifact_class: external_pattern
 format: parquet
 schema_version: futures_continuous_d1.v1
 
+date_source_compatibility: docs/FUTURES_D1_DATE_PROVENANCE_COMPATIBILITY_V1.md
+new_output_provenance_fields:
+- calendar_denominator_status
+- date_source_evidence_json
+- roll_date_source_status
+- roll_date_source
+provenance_rules:
+- Preserve the unique admitted raw status and union of input evidence inside each continuous symbol/date group; reject conflicts or incomplete new provenance fields.
+- Preserve and validate roll-date source separately; OHLCV arithmetic and roll policy are unchanged.
+- Legacy v1 inputs without the additive provenance fields remain readable with provenance unrecorded. New derivation from them does not invent historical evidence.
+
 purpose: Unadjusted daily continuous futures OHLCV bars derived from futures_continuous_5m.v1.
 
 producer: src/moex_data/futures/continuous_d1_builder.py
