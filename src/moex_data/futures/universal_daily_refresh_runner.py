@@ -298,6 +298,13 @@ def verify_quality_artifacts(root, args, stdout, started_at, completed_at):
             or manifest["source_lineage_check"].get("status") != "pass"
             or manifest["partial_chain_gap_summary"].get("status") != "explicit_gap"):
         raise RuntimeError("quality manifest mandatory summary contradicts success")
+    identity_checks = quality.loc[(quality["check_id"] == "usdrubf_identity_validation") & (quality["family_code"] == "USDRUBF")]
+    lineage_checks = quality.loc[quality["check_id"] == "continuous_output_row_source_lineage_completeness"]
+    gap_checks = quality.loc[(quality["check_id"] == "explicit_partial_chain_gap_for_excluded_SiH7_SiM7") & (quality["family_code"] == "Si")]
+    if (not identity_checks["check_status"].eq("pass").all()
+            or not lineage_checks["check_status"].eq("pass").all()
+            or not gap_checks["check_status"].eq("explicit_gap").all()):
+        raise RuntimeError("quality checks contradict mandatory manifest summaries")
     identities = {"run_id": parsed.get("run_id"), "run_date": args.run_date,
                   "snapshot_date": args.snapshot_date, "roll_policy_id": ROLL_POLICY_ID,
                   "adjustment_policy_id": ADJUSTMENT_POLICY_ID}

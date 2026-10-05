@@ -253,9 +253,13 @@ def quality_fixture(root):
                            "expected_value": None, "review_notes": None,
                            "check_id": check, "check_status": "pass", "family_code": family}
                           for family in ("Si", "USDRUBF") for check in quality_component.REQUIRED_QUALITY_CHECKS])
+    gap = frame["check_id"] == "explicit_partial_chain_gap_for_excluded_SiH7_SiM7"
+    frame.loc[gap & (frame["family_code"] == "Si"), "check_status"] = "explicit_gap"
+    frame.loc[gap & (frame["family_code"] == "USDRUBF"), "check_status"] = "not_applicable"
+    frame.loc[(frame["check_id"] == "usdrubf_identity_validation") & (frame["family_code"] == "Si"), "check_status"] = "not_applicable"
     outputs = {"manifest": str(mp), "quality_report": str(qp)}
     manifest = {**identity, "schema_version": quality_component.SCHEMA_MANIFEST,
-                "builder_result_verdict": "pass", "blockers": [], "quality_status_counts": {"pass": len(frame)},
+                "builder_result_verdict": "pass", "blockers": [], "quality_status_counts": quality_component.quality_status_counts(frame),
                 "row_counts": {"quality_report": len(frame)}, "output_artifacts": outputs,
                 "family_summaries": [{"family_code": "Si"}, {"family_code": "USDRUBF"}],
                 "usdrubf_identity_check": {"status": "pass"}, "source_lineage_check": {"status": "pass"},
@@ -271,7 +275,7 @@ def quality_fixture(root):
 
 @pytest.mark.parametrize("fault", [None, "missing", "stale", "wrong_run", "wrong_count", "failed_check", "missing_check", "wrong_path",
     "failed_identity_summary", "failed_lineage_summary", "missing_family_check", "missing_family", "duplicate_check", "missing_column",
-    "null_row_counts", "null_outputs", "null_summary", "malformed_roster"])
+    "null_row_counts", "null_outputs", "null_summary", "malformed_roster", "identity_not_applicable", "lineage_not_applicable", "gap_not_explicit"])
 def test_required_quality_readback_rejects_stale_or_inconsistent_success(tmp_path, fault):
     args, mp, qp, manifest, frame, stdout, started = quality_fixture(tmp_path)
     if fault == "stale": manifest["started_ts"] = "2026-10-04T12:00:00Z"
@@ -288,8 +292,11 @@ def test_required_quality_readback_rejects_stale_or_inconsistent_success(tmp_pat
         manifest["family_summaries"] = [{"family_code": "Si"}]
     if fault == "duplicate_check": frame = pd.concat([frame, frame.iloc[:1]], ignore_index=True)
     if fault == "missing_column": frame = frame.drop(columns=["quality_report_id"])
-    if fault in {"missing_family_check", "missing_family", "duplicate_check"}:
-        manifest["quality_status_counts"] = {"pass": len(frame)}
+    if fault == "identity_not_applicable": frame.loc[frame["check_id"] == "usdrubf_identity_validation", "check_status"] = "not_applicable"
+    if fault == "lineage_not_applicable": frame.loc[frame["check_id"] == "continuous_output_row_source_lineage_completeness", "check_status"] = "not_applicable"
+    if fault == "gap_not_explicit": frame.loc[frame["check_id"] == "explicit_partial_chain_gap_for_excluded_SiH7_SiM7", "check_status"] = "pass"
+    if fault in {"missing_family_check", "missing_family", "duplicate_check", "identity_not_applicable", "lineage_not_applicable", "gap_not_explicit"}:
+        manifest["quality_status_counts"] = quality_component.quality_status_counts(frame)
         manifest["row_counts"]["quality_report"] = len(frame)
     if fault == "null_row_counts": manifest["row_counts"] = None
     if fault == "null_outputs": manifest["output_artifacts"] = None
