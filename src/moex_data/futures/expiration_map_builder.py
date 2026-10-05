@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
+import io
 import json
 import os
 import sys
@@ -16,6 +18,7 @@ except Exception:
 import pandas as pd
 
 from moex_data.futures import liquidity_history_metrics_probe as base
+from moex_data.futures import algopack_availability_probe as registry_producer
 from moex_data.futures.slice1_common import DEFAULT_EXCLUDED
 from moex_data.futures.slice1_common import DEFAULT_WHITELIST
 from moex_data.futures.slice1_common import parse_list
@@ -116,6 +119,93 @@ def choose_source_row(normalized: pd.DataFrame, secid: str) -> pd.Series:
     return matches.tail(1).iloc[0]
 
 
+def _evidence_value(value):
+    return None if value is None or pd.isna(value) or value == "" else value
+
+
+def verified_historical_registry(data_root: Path, snapshot_date: str, whitelist: List[str]) -> pd.DataFrame:
+    """Resolve required contracts from retained ISS snapshots without relabeling them.
+
+    Every candidate must agree with its own raw source payload and the actual
+    normalizer. Cross-snapshot economic identities/anchors cannot conflict.
+    Prices, registry membership and original snapshot bytes are never changed.
+    """
+    candidates = {secid: [] for secid in whitelist}
+    base_path = Path(data_root) / "futures/registry"
+    for normalized_path in sorted(base_path.glob("snapshot_date=*/futures_normalized_instrument_registry.parquet")):
+        source_date = normalized_path.parent.name.removeprefix("snapshot_date=")
+        parsed, invalid = parse_source_date(source_date)
+        if invalid or parsed != source_date:
+            raise RuntimeError("historical registry snapshot path date invalid")
+        if source_date > snapshot_date:
+            continue
+        nbytes = normalized_path.read_bytes()
+        normalized = pd.read_parquet(io.BytesIO(nbytes))
+        if "secid" not in normalized:
+            raise RuntimeError("historical normalized registry missing identity")
+        wanted = normalized["secid"].astype(str).str.upper().isin({x.upper() for x in whitelist})
+        if not wanted.any():
+            continue
+        raw_path = normalized_path.with_name("futures_registry_snapshot.parquet")
+        rbytes = raw_path.read_bytes()
+        raw = pd.read_parquet(io.BytesIO(rbytes))
+        if "secid" not in raw:
+            raise RuntimeError("historical source registry missing identity")
+        for secid in whitelist:
+            nrows = normalized.loc[normalized["secid"].astype(str).str.upper() == secid.upper()]
+            if nrows.empty:
+                continue
+            rrows = raw.loc[raw["secid"].astype(str).str.upper() == secid.upper()]
+            if len(nrows) != 1 or len(rrows) != 1:
+                raise RuntimeError("ambiguous historical registry identity: " + secid)
+            nrow, rrow = nrows.iloc[0], rrows.iloc[0]
+            payload = json.loads(rrow.get("raw_payload_json", "null"))
+            if not isinstance(payload, dict) or str(payload.get("SECID", "")) != secid or str(payload.get("BOARDID", "")).upper() != "RFUD":
+                raise RuntimeError("historical registry payload identity mismatch: " + secid)
+            rebuilt_raw = registry_producer.build_registry_snapshot(pd.DataFrame([payload]), source_date)
+            if len(rebuilt_raw) != 1:
+                raise RuntimeError("historical registry payload rebuild failed: " + secid)
+            rebuilt_normalized = registry_producer.build_normalized_registry(rebuilt_raw).iloc[0]
+            for original, rebuilt in ((rrow, rebuilt_raw.iloc[0]), (nrow, rebuilt_normalized)):
+                for field, expected in rebuilt.items():
+                    if field == "raw_payload_json":
+                        continue
+                    actual = _evidence_value(original.get(field))
+                    expected = _evidence_value(expected)
+                    if field == "board":
+                        actual, expected = str(actual).upper(), str(expected).upper()
+                    if actual != expected:
+                        raise RuntimeError("historical registry evidence mismatch: " + secid + ":" + field)
+            if _evidence_value(nrow.get("first_trade_date")) is not None:
+                raise RuntimeError("historical registry has unsupported first_trade_date: " + secid)
+            evidence = {"source_snapshot_date": source_date,
+                "normalized_path": str(normalized_path.relative_to(data_root)),
+                "normalized_sha256": hashlib.sha256(nbytes).hexdigest(),
+                "raw_registry_path": str(raw_path.relative_to(data_root)),
+                "raw_registry_sha256": hashlib.sha256(rbytes).hexdigest(),
+                "scope": "retained_ISS_payload_and_normalizer_verified_not_historical_PIT"}
+            candidates[secid].append((nrow.to_dict(), evidence))
+    resolved = []
+    fixed = ["secid", "board", "engine", "market", "family_code", "contract_code",
+             "instrument_kind", "is_perpetual_candidate", "expiration_date", "last_trade_date"]
+    for secid, versions in candidates.items():
+        if not versions:
+            raise RuntimeError("required contract has no verified retained registry evidence: " + secid)
+        for field in fixed:
+            values = {_evidence_value(row.get(field)) for row, _ in versions}
+            values.discard(None)
+            if field == "board":
+                values = {str(x).upper() for x in values}
+            if len(values) > 1:
+                raise RuntimeError("conflicting historical registry evidence: " + secid + ":" + field)
+        row, evidence = versions[-1]
+        row["expiration_source_evidence_json"] = json.dumps({"selected": evidence,
+            "corroborating_versions": [item for _, item in versions]}, sort_keys=True)
+        row["expiration_source_snapshot_date"] = evidence["source_snapshot_date"]
+        resolved.append(row)
+    return pd.DataFrame(resolved)
+
+
 def build_expiration_row(source_row: pd.Series, requested_secid: str, snapshot_date: str, run_id: str) -> Dict[str, Any]:
     secid = str(normalized_column_value(source_row, "secid") or requested_secid).strip()
     board = str(normalized_column_value(source_row, "board") or "rfud").strip()
@@ -180,6 +270,8 @@ def build_expiration_row(source_row: pd.Series, requested_secid: str, snapshot_d
         "source_normalized_schema_version": normalized_column_value(source_row, "schema_version"),
         "build_run_id": run_id,
         "build_ts": utc_now_iso(),
+        "expiration_source_snapshot_date": normalized_column_value(source_row, "expiration_source_snapshot_date"),
+        "expiration_source_evidence_json": normalized_column_value(source_row, "expiration_source_evidence_json"),
     }
 
 
@@ -300,7 +392,7 @@ def main() -> int:
     if not normalized_path.exists():
         raise FileNotFoundError("Missing normalized registry artifact: " + str(normalized_path))
 
-    normalized = pd.read_parquet(normalized_path)
+    normalized = verified_historical_registry(data_root, snapshot_date, whitelist)
     expiration_map = build_expiration_map(normalized, snapshot_date, whitelist, excluded, run_id)
     blockers = validate_expiration_map(expiration_map, whitelist, excluded)
     write_parquet(expiration_map, output_path)
