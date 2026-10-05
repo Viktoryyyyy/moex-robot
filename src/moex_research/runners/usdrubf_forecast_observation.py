@@ -8,7 +8,7 @@ from pathlib import Path
 from ..intelligence.usdrubf_forecast_journal import (
     ForecastJournalError, decode, digest, encode, fields, read_bytes, timestamp,
 )
-from ..intelligence.usdrubf_forecast_evaluation import FACTS_VERSION, price, evaluate
+from ..intelligence.usdrubf_forecast_evaluation import FACTS_VERSION, FORECAST_V3, price, evaluate, validate_forecast
 
 
 def _existing(journal, kind, identifier):
@@ -134,7 +134,11 @@ def run(journal, request):
             raise ForecastJournalError("observation revision identity/clock mismatch")
     output = []
     for ref, record in zip(refs, records):
-        spec = record["payload"]
+        spec = validate_forecast(record["payload"])
+        if spec["schema_version"] == FORECAST_V3:
+            output.append({"forecast": ref, "status": "DEFERRED",
+                "reason": spec["evaluation_policy"]["reason"], "requires_new_forecast_revision": True})
+            continue
         identifier = "observe-" + ref["sha256"]
         if revision is not None:
             identifier = "revision-" + digest(encode({"forecast": ref, "revision": revision}))

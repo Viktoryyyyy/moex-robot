@@ -47,6 +47,160 @@ def request():
             "grid_provenance": {"source": "synthetic explicit grid", "completeness_scope": "synthetic intervals only"}}}
 
 
+def dated_package():
+    document = package()
+    document["facts"] = []
+    document["market_usability"]["usdrubf"]["price_oi_usable"] = False
+    document["dated_context"] = {"observations": {"market:usdrubf": {
+        "scope": "LAST_ACCEPTED_DATED_PREPARATION_ONLY", "current_usable": False,
+        "acceptance_evidence_id": "b" * 64, "accepted_at_utc": at(-2998),
+        "source_generation_at_utc": at(-2998), "checked_at_utc": at(-1),
+        "source_identity": {"secid": "USDRUBF", "source_id": FORTS_SOURCE_ID,
+            "logical_id": "usdrubf", "asset_type": "future", "timestamp": at(-3000),
+            "received_at_utc": at(-2999)}, "values": {"last": 84.1},
+        "source_times": {"source_observation_at_utc": at(-3000), "received_at_utc": at(-2999)},
+        "contract_metadata": {"scope": "exact_source_contract_metadata_independent_of_live_price",
+            "secid": "USDRUBF", "applicable_source_timestamp_utc": at(-3000),
+            "received_at_utc": at(-2999), "checked_at_utc": at(-2998),
+            "values": {"normalized_unit": "RUB_per_USD", "raw_unit": "RUB_per_USD",
+                "normalization_divisor": 1.0}}}}}
+    return document
+
+
+def test_dated_projection_registration_preserves_bytes_and_never_claims_live(tmp_path):
+    document = dated_package()
+    raw = encode(document)
+    journal = ForecastJournal(tmp_path, clock=lambda: BASE)
+    ref = capture_canonical(journal, "dated", raw)
+    forecast = register_forecast(journal, "dated-forecast", request(), ref)
+    spec = journal.read(forecast)["payload"]
+    assert spec["reference_price"] == "84.1"
+    assert spec["reference_price_at"] == at(-3000)
+    assert spec["context"]["baseline"] == {"input": ref,
+        "pointer": "/dated_context/observations/market:usdrubf/values/last",
+        "timestamp_pointer": "/dated_context/observations/market:usdrubf/source_identity/timestamp",
+        "status": "EXTERNAL_UNVERIFIED"}
+    assert journal.object_bytes(journal.verify_input(ref)["payload"]["object_sha256"]) == raw
+    assert document["market_usability"]["usdrubf"]["price_oi_usable"] is False
+    assert register_forecast(journal, "dated-forecast", request(), ref) == forecast
+    for field, value in [("reference_price", "84.2"), ("reference_price_at", at(-1))]:
+        tampered = deepcopy(spec); tampered[field] = value
+        with pytest.raises(ValueError): journal.register("tampered", tampered)
+
+
+@pytest.mark.parametrize("path,value", [
+    ("scope", "current_source_row"), ("current_usable", True),
+    ("acceptance_evidence_id", None), ("acceptance_evidence_id", "unverified"),
+    ("accepted_at_utc", at(1)), ("source_generation_at_utc", at(1)),
+    ("checked_at_utc", at(1)), ("accepted_at_utc", at(-3001)),
+    ("source_identity/secid", "SiU6"), ("source_identity/source_id", "foreign"),
+    ("source_identity/logical_id", "si_front"), ("source_identity/asset_type", "spot"),
+    ("source_identity/timestamp", at(1)), ("source_identity/received_at_utc", at(-3001)),
+    ("source_times/source_observation_at_utc", at(-3001)), ("source_times/received_at_utc", at(-1)),
+    ("values/last", None), ("values/last", 0),
+    ("contract_metadata/scope", "unknown"), ("contract_metadata/secid", "SiU6"),
+    ("contract_metadata/applicable_source_timestamp_utc", at(-1)),
+    ("contract_metadata/received_at_utc", at(-1)), ("contract_metadata/checked_at_utc", at(1)),
+    ("contract_metadata/values/normalized_unit", "points"),
+    ("contract_metadata/values/raw_unit", "points"),
+    ("contract_metadata/values/normalization_divisor", 1000),
+    ("contract_metadata/values/normalization_divisor", True),
+])
+def test_dated_baseline_rejects_unbound_or_inconsistent_metadata(tmp_path, path, value):
+    document = dated_package()
+    target = document["dated_context"]["observations"]["market:usdrubf"]
+    parts = path.split("/")
+    for key in parts[:-1]: target = target[key]
+    target[parts[-1]] = value
+    journal = ForecastJournal(tmp_path, clock=lambda: BASE)
+    ref = capture_canonical(journal, "input", encode(document))
+    with pytest.raises(ValueError): register_forecast(journal, "bad", request(), ref)
+    assert not list((tmp_path / "records").glob("forecast.*"))
+
+
+@pytest.fixture(scope="module")
+def native_dated_package():
+    from test_rub_dated_market_source import acquisitions, NOW
+    from test_rub_fast_market import snapshot
+    from moex_data import rub_dated_market_source, rub_factual_release
+    view = snapshot()
+    view["identity"]["generated_at_utc"] = NOW.isoformat()
+    view["accepted_dated_market"] = rub_dated_market_source.capture(None, acquisitions(), now=NOW)
+    document = rub_factual_release.compact(view, now=NOW, code_revision="a" * 40)
+    assert not any(fact.get("factor") == "usdrubf" for fact in document["facts"])
+    assert document["market_usability"]["usdrubf"]["price_oi_usable"] is False
+    return document
+
+
+@pytest.mark.parametrize("deferred", [False, True])
+def test_native_replay_export_registration_and_retry(tmp_path, deferred, native_dated_package):
+    document = deepcopy(native_dated_package)
+    raw = encode(document)
+    node = document["dated_context"]["observations"]["market:usdrubf"]
+    assert node["origin"] == "source_observation_acquired_now"
+    journal = ForecastJournal(tmp_path, clock=lambda: BASE)
+    ref = capture_canonical(journal, "native", raw)
+    original = request()
+    options = {"defer_evaluation_reason": "Owner retains original analysis"} if deferred else {}
+    forecast = register_forecast(journal, "native-forecast", original, ref, **options)
+    spec = journal.read(forecast)["payload"]
+    assert spec["reference_price"] == "80.0"
+    assert spec["reference_price_at"] == node["source_identity"]["timestamp"]
+    assert spec["context"]["baseline"]["status"] == "EXTERNAL_UNVERIFIED"
+    assert spec["context"]["original_text"] == original["context"]["original_text"]
+    assert original == request()
+    assert journal.object_bytes(journal.verify_input(ref)["payload"]["object_sha256"]) == raw
+    assert register_forecast(journal, "native-forecast", original, ref, **options) == forecast
+    if deferred:
+        assert spec["evaluation_policy"]["mode"] == "DEFERRED"
+
+
+@pytest.mark.parametrize("path,value", [
+    ("origin", "unknown"), ("origin", None), ("contract_metadata", None),
+    ("contract_metadata/native_security_row", None),
+    ("contract_metadata/native_security_row/SECID", "CNYRUBF"),
+    ("contract_metadata/native_security_row/BOARDID", "OTHER"),
+    ("contract_metadata/native_security_row/MINSTEP", True),
+    ("contract_metadata/native_security_row/STEPPRICE", 0),
+    ("contract_metadata/secid", "SiZ6"), ("contract_metadata/boardid", "OTHER"),
+    ("contract_metadata/units/last", "RUB_per_1000_USD"),
+    ("contract_metadata/units/oi", "lots"),
+    ("contract_metadata/binding_at_utc", "2026-09-13T11:59:58+00:00"),
+    ("contract_metadata/binding_at_utc", "2026-09-13T12:00:01+00:00"),
+    ("contract_metadata/binding_semantics", "historical_front"),
+    ("request_started_at_utc", "2026-09-13T12:00:01+00:00"),
+    ("source_generation_at_utc", "2026-09-13T11:59:59+00:00"),
+    ("source_identity/secid", "CNYRUBF"), ("source_identity/source_id", "foreign"),
+    ("source_times/source_observation_at_utc", at(-1)),
+    ("revision_id", None), ("raw_source_digest", "unverified"),
+    ("revision_semantics", "historical_pit"), ("model_usable", True),
+])
+def test_native_dated_projection_rejects_contradictions(tmp_path, path, value, native_dated_package):
+    document = deepcopy(native_dated_package)
+    target = document["dated_context"]["observations"]["market:usdrubf"]
+    parts = path.split("/")
+    for key in parts[:-1]:
+        target = target[key]
+    target[parts[-1]] = value
+    journal = ForecastJournal(tmp_path, clock=lambda: BASE)
+    ref = capture_canonical(journal, "native-invalid", encode(document))
+    with pytest.raises(ValueError):
+        register_forecast(journal, "bad", request(), ref)
+    assert not list((tmp_path / "records").glob("forecast.*"))
+
+
+def test_dated_baseline_does_not_mask_conflicting_current_rows(tmp_path):
+    document = dated_package()
+    document["facts"] = package()["facts"]
+    journal = ForecastJournal(tmp_path, clock=lambda: BASE)
+    ref = capture_canonical(journal, "inconsistent", encode(document))
+    with pytest.raises(ValueError): register_forecast(journal, "bad", request(), ref)
+    document["market_usability"]["usdrubf"]["price_oi_usable"] = True
+    ref = capture_canonical(journal, "current", encode(document))
+    forecast = register_forecast(journal, "current", request(), ref)
+    assert journal.read(forecast)["payload"]["reference_price"] == "100"
+
+
 def setup(tmp_path):
     clock = [BASE]
     journal = ForecastJournal(tmp_path / "journal", clock=lambda: clock[0])
@@ -111,7 +265,7 @@ def test_canonical_metadata_rejection(tmp_path, change):
 
 
 @pytest.mark.parametrize("change", ["secid", "source_id", "timestamp", "received_at_utc", "price"])
-def test_baseline_binding_rejects_foreign_stale_future_and_tampered_price(tmp_path, change):
+def test_baseline_binding_rejects_foreign_future_and_tampered_price(tmp_path, change):
     journal, _, forecast, _ = setup(tmp_path)
     if change == "price":
         spec = deepcopy(journal.read(forecast)["payload"]); spec["reference_price"] = "101"
@@ -119,7 +273,7 @@ def test_baseline_binding_rejects_foreign_stale_future_and_tampered_price(tmp_pa
         return
     document = package()
     document["facts"][0]["source_identity"][change] = {"secid": "SiU6", "source_id": "foreign",
-        "timestamp": at(-60), "received_at_utc": at(10)}[change]
+        "timestamp": at(1), "received_at_utc": at(10)}[change]
     ref = capture_canonical(journal, "bad-input", encode(document))
     with pytest.raises(ValueError): register_forecast(journal, "bad", request(), ref)
 
@@ -285,6 +439,138 @@ def test_missing_research_is_blocked_not_fabricated(tmp_path):
     assert journal.read(ref)["payload"]["status"] == "BLOCKED_MISSING_EVIDENCE"
 
 
+def deferred_request():
+    req = request()
+    req.update(observation_grid=[], scenarios=[])
+    req["context"]["original_text"] = "H1 breakout, retest, second H1 close.\nQuick return cancels."
+    req["context"]["grid_provenance"] = {"source": None, "completeness_scope": "No approved grid supplied"}
+    return req
+
+
+def test_deferred_registration_is_explicit_immutable_and_idempotent(tmp_path):
+    journal, input_ref, _, clock = setup(tmp_path)
+    req = deferred_request()
+    original = encode(req)
+    with pytest.raises(ValueError): register_forecast(journal, "not-deferred", req, input_ref)
+    reason = "Owner selected original-text registration with deferred automatic evaluation"
+    ref = register_forecast(journal, "deferred", req, input_ref, defer_evaluation_reason=reason)
+    record = journal.read(ref)
+    spec = record["payload"]
+    assert encode(req) == original
+    assert spec["schema_version"] == "usdrubf.forecast.v3"
+    assert spec["evaluation_policy"] == {"mode": "DEFERRED", "reason": reason, "requires_new_forecast_revision": True}
+    for key, value in req.items():
+        if key == "context":
+            assert {k: v for k, v in spec[key].items() if k != "baseline"} == value
+        else:
+            assert spec[key] == value
+    clock[0] += timedelta(days=3)
+    assert register_forecast(journal, "deferred", req, input_ref, defer_evaluation_reason=reason) == ref
+    assert journal.read(ref)["recorded_at"] == record["recorded_at"]
+    for changed in ("different decision", ""):
+        with pytest.raises(ValueError):
+            register_forecast(journal, "deferred", req, input_ref, defer_evaluation_reason=changed)
+    req["context"]["original_text"] += " Revised."
+    with pytest.raises(ValueError):
+        register_forecast(journal, "deferred", req, input_ref, defer_evaluation_reason=reason)
+    assert journal.read(ref) == record
+
+
+@pytest.mark.parametrize("has_grid", [False, True])
+def test_deferred_never_reads_or_scores_before_or_after_horizon(tmp_path, monkeypatch, has_grid):
+    from moex_research.intelligence.usdrubf_forecast_evaluation import evaluate
+    from moex_research.runners import usdrubf_forecast_observation as observer
+    journal, input_ref, _, clock = setup(tmp_path)
+    ref = register_forecast(journal, "deferred", request() if has_grid else deferred_request(), input_ref,
+        defer_evaluation_reason="Owner deferred evaluation")
+    spec = journal.read(ref)["payload"]
+    def forbidden(*args, **kwargs): raise AssertionError("deferred forecast read factual data")
+    monkeypatch.setattr(observer, "accepted_facts", forbidden)
+    req = {"schema_version": "usdrubf.forecast_observation_request.v1", "forecasts": [ref], "limit": 1,
+        "reader": {"mode": "accepted_current", "data_root": "/must-not-be-read"}}
+    before = sorted(str(p.relative_to(journal.root)) for p in journal.root.rglob("*"))
+    for minute in (0, 20, 1000):
+        clock[0] = BASE + timedelta(minutes=minute)
+        assert run(journal, req)["items"] == [{"forecast": ref, "status": "DEFERRED",
+            "reason": "Owner deferred evaluation", "requires_new_forecast_revision": True}]
+        with pytest.raises(ValueError, match="automatic evaluation deferred"):
+            evaluate(spec, None, evaluated_at=clock[0], source_as_of=clock[0], limitations=[])
+    facts = observation(ref)["reader"]
+    with pytest.raises(ValueError, match="automatic evaluation deferred"):
+        journal.evaluate("forbidden", ref, encode(facts["facts"]), facts["source"])
+    assert sorted(str(p.relative_to(journal.root)) for p in journal.root.rglob("*")) == before
+    assert report(journal, [])["groups"] == []
+
+
+@pytest.mark.parametrize("change", ["mode", "reason", "resume", "extra", "missing", "legacy", "time", "unit", "text"])
+def test_deferred_schema_does_not_weaken_other_validation(tmp_path, change):
+    from moex_research.intelligence.usdrubf_forecast_evaluation import validate_forecast
+    journal, input_ref, _, _ = setup(tmp_path)
+    ref = register_forecast(journal, "deferred", deferred_request(), input_ref, defer_evaluation_reason="Owner decision")
+    spec = deepcopy(journal.read(ref)["payload"])
+    if change == "mode": spec["evaluation_policy"]["mode"] = "AUTOMATIC"
+    if change == "reason": spec["evaluation_policy"]["reason"] = ""
+    if change == "resume": spec["evaluation_policy"]["requires_new_forecast_revision"] = False
+    if change == "extra": spec["evaluation_policy"]["extra"] = True
+    if change == "missing": spec.pop("evaluation_policy")
+    if change == "legacy": spec["schema_version"] = "usdrubf.forecast.v2"
+    if change == "time": spec["issued_at"] = at(2)
+    if change == "unit": spec["instrument"] = "SiU6"
+    if change == "text": spec["context"]["original_text"] = ""
+    with pytest.raises(ValueError): validate_forecast(spec)
+
+
+def test_deferred_enablement_requires_new_immutable_revision(tmp_path):
+    journal, input_ref, _, clock = setup(tmp_path)
+    req = deferred_request(); req["context"]["registration_class"] = "PROSPECTIVE_LOCAL"
+    original = register_forecast(journal, "original", req, input_ref, defer_evaluation_reason="Owner decision")
+    saved = journal.read(original)
+    clock[0] = BASE + timedelta(minutes=20)
+    revised = request()
+    revised["context"]["registration_class"] = "PROSPECTIVE_LOCAL"
+    revised.update(supersedes=original, revision_reason="Explicitly supplied evaluation plan")
+    with pytest.raises(ValueError): register_forecast(journal, "original", revised, input_ref)
+    ref = register_forecast(journal, "revised", revised, input_ref)
+    assert journal.read(ref)["payload"]["supersedes"] == original
+    facts = observation(ref)["reader"]
+    evaluation = journal.evaluate("later-plan", ref, encode(facts["facts"]), facts["source"])
+    assert journal.read(evaluation)["payload"]["registration_class"] == "RETROSPECTIVE"
+    assert journal.read(original) == saved
+
+
+def test_deferred_empty_grid_retains_aggregate_resource_bound(tmp_path, monkeypatch):
+    from moex_research.intelligence import usdrubf_forecast_evaluation as rules
+    journal, input_ref, _, _ = setup(tmp_path)
+    req = deferred_request(); req["scenarios"] = request()["scenarios"]
+    monkeypatch.setattr(rules, "MAX_EVALUATION_WORK", 1)
+    with pytest.raises(ValueError, match="aggregate scenario-by-bar"):
+        register_forecast(journal, "oversized", req, input_ref, defer_evaluation_reason="Owner decision")
+    assert not journal._path("forecast", "oversized").exists()
+
+
+def test_deferred_cli_registration_and_report(tmp_path):
+    root = Path(__file__).resolve().parents[2]
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join((str(root), str(root / "src"))))
+    journal = ForecastJournal(tmp_path / "journal")
+    input_ref = capture_canonical(journal, "input", encode(package()))
+    (tmp_path / "input.json").write_bytes(encode(input_ref))
+    (tmp_path / "request.json").write_bytes(encode(deferred_request()))
+    prefix = [sys.executable, "-m", "moex_research.consumers.usdrubf_forecast_cycle", "--root", str(journal.root)]
+    args = ["register", "--id", "text", "--request", str(tmp_path / "request.json"), "--input-ref", str(tmp_path / "input.json"),
+        "--defer-evaluation-reason", "Owner selected deferred automatic evaluation"]
+    first = subprocess.run(prefix + args, cwd=root, env=env, capture_output=True, text=True)
+    assert first.returncode == 0, first.stderr
+    again = subprocess.run(prefix + args, cwd=root, env=env, capture_output=True, text=True)
+    assert again.returncode == 0 and again.stdout == first.stdout
+    forecast = decode(first.stdout.encode())
+    result = run(journal, {"schema_version": "usdrubf.forecast_observation_request.v1", "forecasts": [forecast], "limit": 1, "reader": {}})
+    (tmp_path / "run.json").write_bytes(encode(result))
+    reported = subprocess.run(prefix + ["report", "--run-result", str(tmp_path / "run.json")], cwd=root, env=env, capture_output=True, text=True)
+    assert reported.returncode == 0, reported.stderr
+    summary = json.loads(reported.stdout)
+    assert summary["groups"] == [] and summary["pending_or_unavailable"][0]["status"] == "DEFERRED"
+
+
 def test_experiment_rejects_historical_and_overlapping_oos(tmp_path):
     journal = ForecastJournal(tmp_path / "j", clock=lambda: BASE)
     manifest = {"schema_version": "usdrubf.experiment.v1", "hypothesis": "synthetic", "method_version": "synthetic-v1",
@@ -413,6 +699,45 @@ def test_current_reader_capture_and_storage_carrier(tmp_path):
     assert carrier["schema_version"] == "rub_snapshot_storage.v1"
     captured = capture_canonical(journal, "storage", encode(carrier))
     assert decode(journal.object_bytes(journal.read(captured)["payload"]["logical_sha256"])) == value
+
+
+@pytest.mark.parametrize("kind", ["projection", "snapshot"])
+@pytest.mark.parametrize("age_seconds", [1200, 1201, 3600, 3 * 24 * 3600])
+def test_registration_accepts_dated_frozen_baseline_without_age_limit(tmp_path, kind, age_seconds):
+    document = package() if kind == "projection" else snapshot()
+    observed_at = (BASE - timedelta(seconds=age_seconds)).isoformat()
+    if kind == "projection":
+        identity = document["facts"][0]["source_identity"]
+    else:
+        identity = document["components"]["synchronized_live_market_oi"]["data"]["instruments"]["usdrubf"]
+    identity.update(timestamp=observed_at, received_at_utc=observed_at)
+    raw = encode(document)
+    journal = ForecastJournal(tmp_path, clock=lambda: BASE)
+    captured = capture_canonical(journal, "dated-input", raw)
+    forecast = register_forecast(journal, "dated-forecast", request(), captured)
+    saved = journal.read(forecast)["payload"]
+    assert saved["reference_price"] == "100"
+    assert saved["reference_price_at"] == observed_at
+    assert saved["issued_at"] == request()["issued_at"]
+    assert saved["context"]["baseline"]["status"] == "EXTERNAL_UNVERIFIED"
+    assert journal.object_bytes(journal.read(captured)["payload"]["object_sha256"]) == raw
+    assert register_forecast(journal, "dated-forecast", request(), captured) == forecast
+
+
+@pytest.mark.parametrize("kind", ["projection", "snapshot", "omitted_projection_price"])
+def test_age_policy_does_not_restore_unusable_or_omitted_baseline(tmp_path, kind):
+    document = snapshot() if kind == "snapshot" else package()
+    if kind == "snapshot":
+        document["components"]["synchronized_live_market_oi"]["data"]["instruments"]["usdrubf"]["price_oi_usable"] = False
+    else:
+        document["market_usability"]["usdrubf"]["price_oi_usable"] = False
+        if kind == "omitted_projection_price":
+            document["facts"] = []
+    journal = ForecastJournal(tmp_path, clock=lambda: BASE)
+    captured = capture_canonical(journal, "unavailable-input", encode(document))
+    with pytest.raises(ValueError, match="price unavailable"):
+        register_forecast(journal, "unavailable-forecast", request(), captured)
+    assert not list((journal.root / "records").glob("forecast.*"))
 
 
 @pytest.mark.parametrize("mutation", [None, "hash", "foreign", "rows", "anchor", "duplicate"])

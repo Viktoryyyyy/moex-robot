@@ -36,10 +36,29 @@ the original source admission is not proved by a self-asserted package field.
 This is local process provenance, not a signature or source-level PIT audit.
 
 The reference is bound to exact USDRUBF/source identity, LAST field and timestamp.
-Future, stale (>1200 seconds), foreign or contradictory observations are refused.
+Registration has no maximum baseline age (`canonical_baseline_max_age_seconds:
+null`). It uses the price and source-usability decision preserved in the frozen
+input without reapplying a live-reader TTL at `issued_at`. The original
+`reference_price_at` is retained. Future, foreign, contradictory or missing
+observations are refused; source observation, receipt,
+availability and issue times must remain ordered.
 RFUD USDRUBF LAST uses the independently checked RUB/USD instrument mapping in
 `contracts/datasets/position_risk_scenarios.v1.json`; conflicting declared units
-are refused. An imported package does not inherit live freshness.
+are refused. An imported package does not inherit live freshness. This registration
+policy does not change producer/live-reader freshness rules or recover a price
+omitted from an export.
+
+When a factual package has no current USDRUBF fact and its current usability is
+false, registration can bind the price already exported at
+`/dated_context/observations/market:usdrubf/values/last`. The dated row must retain
+its preparation-only scope, acceptance evidence digest, ordered original source,
+generation/acceptance/check timestamps, exact source/contract identity and unit
+metadata. The reference time is that row's original source timestamp. Current
+usability remains false, and the imported baseline remains **EXTERNAL_UNVERIFIED**:
+checking projected metadata does not replay the original acceptance evidence.
+A contradictory current row is rejected instead of falling back to dated data.
+No price is obtained from other history or supplied manually by this fallback.
+With neither an admitted current row nor a valid dated row, registration fails.
 
 ### 2. Prepare and register the analyst's forecast
 
@@ -68,6 +87,34 @@ External context is separately frozen with the legacy `capture` API below and
 linked through `external_inputs` plus `context.external_context` entries
 `{"input": <returned ref>, "interpretation": "..."}`. Their source metadata must
 state actual availability and limitations; download time is not publication proof.
+
+#### Original text with deferred automatic evaluation
+
+When the owner explicitly chooses text registration before supplying an evaluation
+plan, use the same immutable request and add the registration option:
+
+```sh
+python -m moex_research.consumers.usdrubf_forecast_cycle --root /home/trader/moex_bot/data/research/usdrubf_forecast_journal_v1 register --id forecast-text-001 --input-ref input-ref.json --request forecast-request.json --defer-evaluation-reason "Owner selected original-text registration with deferred automatic evaluation" > forecast-text-ref.json
+```
+
+This produces `usdrubf.forecast.v3` with an explicit `evaluation_policy` containing
+`mode: DEFERRED`, the supplied reason and `requires_new_forecast_revision: true`.
+An empty `observation_grid` and its null provenance source are permitted only in
+this mode. Original text, interpretation, horizons, issue time and existing
+analytical fields are preserved; no calendar, retest or cancellation rules are
+invented. Identity, source causality, baseline binding, price and revision checks
+still apply. Without this explicit option the normal v2 grid requirements remain.
+
+Registration yields a real immutable forecast reference and registrar timestamp.
+The observer returns `DEFERRED` before and after the horizon without reading facts
+or writing an evaluation. Direct evaluation refuses the record; no result enters
+scoring or report denominators. `report --run-result` exposes deferred items in
+`pending_or_unavailable`. An empty scenario array does not mean text was scored.
+
+To enable evaluation, supply the agreed grid and machine rules in a new forecast
+revision with a distinct ID, `supersedes` and `revision_reason`. The original stays
+deferred permanently. Later rules do not inherit its earlier registration time;
+the usual actual-record-time classification still applies to the new revision.
 
 ### 3. Attach explicitly supplied position and risk
 

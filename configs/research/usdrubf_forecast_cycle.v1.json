@@ -5,7 +5,7 @@
   "production_scheduler": false,
   "broker_write": false,
   "mode": "FORECAST_OBSERVATION",
-  "canonical_baseline_max_age_seconds": 1200,
+  "canonical_baseline_max_age_seconds": null,
   "max_forecasts_per_pass": 100,
   "max_factual_partitions_per_forecast": 40,
   "max_factual_bytes_per_forecast": 67108864,

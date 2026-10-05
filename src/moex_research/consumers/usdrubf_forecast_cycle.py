@@ -11,7 +11,7 @@ from ..intelligence.usdrubf_forecast_journal import (
     ForecastJournal, ForecastJournalError, decode, digest, encode, fields,
     read_bytes, runtime_identity, text, timestamp,
 )
-from ..intelligence.usdrubf_forecast_evaluation import FORECAST_V2, price
+from ..intelligence.usdrubf_forecast_evaluation import FORECAST_V2, FORECAST_V3, price
 
 
 def pointer(document, path):
@@ -146,18 +146,79 @@ def validate_baseline(journal, spec):
             raise ForecastJournalError("canonical baseline identity mismatch")
 
 
+def dated_projection_baseline(document):
+    """Bind the exported dated row; its acceptance digest is not source replay."""
+    prefix = "/dated_context/observations/market:usdrubf"
+    try:
+        node = pointer(document, prefix)
+    except ForecastJournalError as exc:
+        raise ForecastJournalError("canonical USDRUBF price unavailable; dated row missing") from exc
+    if (not isinstance(node, dict)
+            or node.get("scope") != "LAST_ACCEPTED_DATED_PREPARATION_ONLY"
+            or node.get("current_usable") is not False
+            or not isinstance(node.get("acceptance_evidence_id"), str)
+            or not re.fullmatch("[0-9a-f]{64}", node["acceptance_evidence_id"])):
+        raise ForecastJournalError("dated baseline acceptance metadata missing")
+    identity = pointer(node, "/source_identity")
+    values = pointer(node, "/values")
+    if (not isinstance(identity, dict) or not isinstance(values, dict)
+            or identity.get("logical_id") != "usdrubf" or identity.get("asset_type") != "future"):
+        raise ForecastJournalError("dated baseline identity missing")
+    observed = timestamp(identity.get("timestamp"))
+    received = timestamp(identity.get("received_at_utc"))
+    accepted = timestamp(node.get("accepted_at_utc"))
+    checked = timestamp(node.get("checked_at_utc"))
+    if not (observed <= received <= timestamp(node.get("source_generation_at_utc"))
+            <= accepted <= checked <= timestamp(document["as_of_utc"])):
+        raise ForecastJournalError("dated baseline future/inconsistent acceptance timestamps")
+    if (timestamp(pointer(node, "/source_times/source_observation_at_utc")) != observed
+            or timestamp(pointer(node, "/source_times/received_at_utc")) != received):
+        raise ForecastJournalError("dated baseline source time mismatch")
+    metadata = pointer(node, "/contract_metadata")
+    if node.get("origin") == "source_observation_acquired_now":
+        # Native replay/describe exports a receipt-time binding, not the legacy
+        # live-admission wrapper. Validate that format without changing it.
+        from moex_data.rub_dated_context import _number
+        native = metadata.get("native_security_row") if isinstance(metadata, dict) else None
+        if (not isinstance(native, dict)
+                or metadata.get("secid") != "USDRUBF" or metadata.get("boardid") != "RFUD"
+                or metadata.get("units") != {"last": "RUB_per_USD", "oi": "contracts"}
+                or native.get("SECID") != "USDRUBF" or native.get("BOARDID") != "RFUD"
+                or any(not _number(native.get(key), True) for key in ("MINSTEP", "STEPPRICE"))
+                or metadata.get("binding_semantics") != "concrete_contract_selected_at_receipt_not_historical_front"
+                or not received <= timestamp(metadata.get("binding_at_utc")) <= accepted
+                or timestamp(node.get("source_generation_at_utc")) != accepted
+                or timestamp(node.get("request_started_at_utc")) > received
+                or node.get("revision_semantics") != "observed_now_not_historical_pit"
+                or node.get("model_usable") is not False or node.get("historical_pit_usable") is not False
+                or any(not isinstance(node.get(key), str) or not re.fullmatch("[0-9a-f]{64}", node[key])
+                       for key in ("revision_id", "raw_source_digest"))):
+            raise ForecastJournalError("dated baseline native contract/unit/binding metadata mismatch")
+    elif (node.get("origin") not in (None, "previously_accepted_live")
+            or not isinstance(metadata, dict)
+            or metadata.get("scope") != "exact_source_contract_metadata_independent_of_live_price"
+            or metadata.get("secid") != "USDRUBF"
+            or timestamp(metadata.get("applicable_source_timestamp_utc")) != observed
+            or timestamp(metadata.get("received_at_utc")) != received
+            or not received <= timestamp(metadata.get("checked_at_utc")) <= checked
+            or pointer(metadata, "/values/normalized_unit") != "RUB_per_USD"
+            or pointer(metadata, "/values/raw_unit") != "RUB_per_USD"
+            or str(pointer(metadata, "/values/normalization_divisor")) not in {"1", "1.0"}):
+        raise ForecastJournalError("dated baseline contract/unit metadata mismatch")
+    return identity, values, prefix + "/values/last", prefix + "/source_identity/timestamp"
+
+
 def baseline(journal, ref, now):
     payload = journal.read(ref)["payload"]
     document = decode(journal.object_bytes(payload["logical_sha256"]))
     schema = document["schema_version"]
     if schema == "rub_chat_analysis_snapshot.v1":
-        from moex_data.rub_factual_projection import fresh
-        from moex_data.rub_snapshot_read_freshness import apply_read_freshness
-        view = apply_read_freshness(document, now=now)
-        node = view["components"]["synchronized_live_market_oi"]["data"]["instruments"]["usdrubf"]
+        # Registration binds the dated observation admitted in the frozen input.
+        # Reapplying live-reader TTL here would impose an age limit on that input.
+        node = document["components"]["synchronized_live_market_oi"]["data"]["instruments"]["usdrubf"]
         prefix = "/components/synchronized_live_market_oi/data/instruments/usdrubf"
-        if node.get("price_oi_usable") is not True or not fresh(node, now):
-            raise ForecastJournalError("canonical USDRUBF price unavailable/stale")
+        if node.get("price_oi_usable") is not True:
+            raise ForecastJournalError("canonical USDRUBF price unavailable")
         value, at = node.get("last"), node.get("timestamp")
         field, timefield = prefix + "/last", prefix + "/timestamp"
         identity = node
@@ -165,22 +226,26 @@ def baseline(journal, ref, now):
         available = timestamp(document.get("read_freshness", {}).get("read_at_utc", document["identity"]["generated_at_utc"]))
     else:
         candidates = [(i, fact) for i, fact in enumerate(document["facts"]) if fact.get("factor") == "usdrubf"]
-        if len(candidates) != 1 or document["market_usability"]["usdrubf"].get("price_oi_usable") is not True:
+        usable = document["market_usability"]["usdrubf"].get("price_oi_usable") is True
+        if len(candidates) > 1 or (candidates and not usable) or (not candidates and usable):
             raise ForecastJournalError("canonical USDRUBF price unavailable/ambiguous")
-        index, fact = candidates[0]
-        identity = fact["source_identity"]
-        value, at = fact["values"].get("last"), identity.get("timestamp")
-        values = fact["values"]
+        if candidates:
+            index, fact = candidates[0]
+            identity, values = fact["source_identity"], fact["values"]
+            field, timefield = f"/facts/{index}/values/last", f"/facts/{index}/source_identity/timestamp"
+        else:
+            identity, values, field, timefield = dated_projection_baseline(document)
+        value, at = values.get("last"), identity.get("timestamp")
         available = timestamp(document["as_of_utc"])
-        field, timefield = f"/facts/{index}/values/last", f"/facts/{index}/source_identity/timestamp"
     from moex_data.synchronized_live_market_oi_context import FORTS_SOURCE_ID
     if identity.get("secid") != "USDRUBF" or identity.get("source_id") != FORTS_SOURCE_ID:
         raise ForecastJournalError("foreign canonical price identity")
     observed = timestamp(at)
     received = timestamp(identity.get("received_at_utc"))
-    # Explicit downstream consumption policy; never rejuvenate an imported quote.
-    if not observed <= received <= available <= now or (now - observed).total_seconds() > 1200:
-        raise ForecastJournalError("canonical baseline stale/future")
+    # Keep source chronology without expiring an already frozen observation.
+    # Its original timestamp remains the forecast's reference_price_at.
+    if not observed <= received <= available <= now:
+        raise ForecastJournalError("canonical baseline future/inconsistent timestamps")
     # Unit values are preserved, not rescaled. A standalone imported projection
     # has no replay of original admission and must remain explicitly unverified.
     status = "CANONICAL_FIELD" if payload.get("schema_validation") == "CANONICAL_READER_OUTPUT" else "EXTERNAL_UNVERIFIED"
@@ -197,7 +262,7 @@ def baseline(journal, ref, now):
         "binding": {"input": ref, "pointer": field, "timestamp_pointer": timefield, "status": status}}
 
 
-def register_forecast(journal, identifier, request, input_ref):
+def register_forecast(journal, identifier, request, input_ref, *, defer_evaluation_reason=None):
     now = journal._now()
     request = deepcopy(request)
     # User supplies all hypotheses/grid/rules. Only technical provenance is filled.
@@ -212,6 +277,12 @@ def register_forecast(journal, identifier, request, input_ref):
         inputs=[input_ref] + request.pop("external_inputs", []),
         reference_price=selected["reference_price"], reference_price_at=selected["reference_price_at"])
     request["context"]["baseline"] = selected["binding"]
+    if defer_evaluation_reason is not None:
+        if "evaluation_policy" in request:
+            raise ForecastJournalError("evaluation policy must be supplied by the explicit registration option")
+        request["schema_version"] = FORECAST_V3
+        request["evaluation_policy"] = {"mode": "DEFERRED", "reason": text(defer_evaluation_reason),
+            "requires_new_forecast_revision": True}
     request.setdefault("supersedes", None)
     request.setdefault("revision_reason", None)
     return journal.register(identifier, request)
@@ -232,6 +303,8 @@ def main(argv=None):
     register.add_argument("--id", required=True)
     register.add_argument("--request", type=Path, required=True)
     register.add_argument("--input-ref", type=Path, required=True)
+    register.add_argument("--defer-evaluation-reason",
+        help="Explicitly register preserved analysis with automatic evaluation deferred until a new forecast revision")
     attach = commands.add_parser("risk")
     attach.add_argument("--id", required=True)
     attach.add_argument("--request", type=Path, required=True)
@@ -263,7 +336,8 @@ def main(argv=None):
                 raw = read_bytes(args.source)
                 result = capture_canonical(journal, args.id, raw)
         elif args.action == "register":
-            result = register_forecast(journal, args.id, load(args.request), load(args.input_ref))
+            result = register_forecast(journal, args.id, load(args.request), load(args.input_ref),
+                defer_evaluation_reason=args.defer_evaluation_reason)
         elif args.action == "risk":
             result = attach_risk(journal, args.id, load(args.forecast_ref), load(args.request))
         elif args.action == "observe":
