@@ -1,0 +1,39 @@
+{
+  "project": "MOEX_Bot",
+  "schema_version": "moex.forecast_handoff.v1",
+  "message_type": "FORECAST",
+  "submission_id": null,
+  "mode": "REAL",
+  "supersedes_submission_id": null,
+  "revision_reason": null,
+  "snapshot_binding": {
+    "snapshot_id": null,
+    "input_ref": null,
+    "transport_sha256": null,
+    "logical_sha256": null,
+    "data_as_of": null
+  },
+  "forecast_request": {
+    "issued_at": null,
+    "horizon_start": null,
+    "horizon_end": null,
+    "bias": null,
+    "neutral_band_bps": null,
+    "range": null,
+    "method_version": null,
+    "observation_grid": [],
+    "scenarios": [],
+    "external_inputs": [],
+    "context": {
+      "original_text": null,
+      "interpretation": null,
+      "external_context": [],
+      "registration_class": "PROSPECTIVE_LOCAL",
+      "horizon_label": null,
+      "grid_provenance": {
+        "source": null,
+        "completeness_scope": null
+      }
+    }
+  }
+}
