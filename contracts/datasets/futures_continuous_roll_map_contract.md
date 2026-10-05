@@ -73,6 +73,7 @@ allowed_values:
   - unadjusted_v1
   calendar_status:
   - canonical_apim_futures_xml
+  - authoritative_observed_algopack_tradestats
   decision_source:
   - registry_expiration_date
   - registry_last_trade_date_fallback
@@ -89,7 +90,8 @@ allowed_values:
 validation_rules:
 - schema_version must equal futures_continuous_roll_map.v1.
 - adjustment_factor must equal 1.0 for every row.
-- calendar_status must equal canonical_apim_futures_xml for all buildable rows.
+- Buildable rows require a supported calendar_status/calendar_source pair: canonical_apim_futures_xml with MOEX_APIM_XML:/iss/calendars, or authoritative_observed_algopack_tradestats with moex_algopack_fo_tradestats_5m:/iss/datashop/algopack/fo/tradestats.json.
+- These are roll-date selection provenance, separately preserved from each raw bar's date-source provenance. Observed dates do not prove complete exchange-calendar coverage.
 - roll_policy_id must equal expiration_minus_1_trading_session_v1.
 - adjustment_policy_id must equal unadjusted_v1.
 - decision_source is mandatory and must be one of the allowed enum values.
@@ -113,4 +115,6 @@ blocking_conditions:
 - USDRUBF identity validation fails.
 - adjustment_factor is not 1.0.
 - unexpected included instruments appear.
+
+date_source_compatibility: docs/FUTURES_D1_DATE_PROVENANCE_COMPATIBILITY_V1.md
 - excluded instruments SiH7 or SiM7 appear.

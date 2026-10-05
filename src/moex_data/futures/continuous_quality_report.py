@@ -15,6 +15,7 @@ except Exception:
 import pandas as pd
 
 from moex_data.futures import liquidity_history_metrics_probe as base
+from moex_data.futures import date_source_provenance as provenance
 from moex_data.futures.slice1_common import DEFAULT_EXCLUDED
 from moex_data.futures.slice1_common import DEFAULT_WHITELIST
 from moex_data.futures.slice1_common import parse_list
@@ -80,6 +81,7 @@ REQUIRED_QUALITY_CHECKS = [
     "unexpected_included_instruments",
     "excluded_instruments_included",
     "continuous_output_row_source_lineage_completeness",
+    "date_source_provenance",
 ]
 
 EXTRA_QUALITY_CHECKS = [
@@ -243,8 +245,7 @@ def read_parquet_if_exists(path: Path) -> Tuple[pd.DataFrame, bool]:
 def read_partitions(paths: List[Path]) -> pd.DataFrame:
     frames = []
     for path in paths:
-        part = pd.read_parquet(path)
-        part["_source_partition_path"] = str(path)
+        part = provenance.read_derived_partition(path)
         frames.append(part)
     if not frames:
         return pd.DataFrame()
@@ -324,7 +325,7 @@ def status_row(
         "schema_version": SCHEMA_QUALITY_REPORT,
         "roll_policy_id": ROLL_POLICY_ID,
         "adjustment_policy_id": ADJUSTMENT_POLICY_ID,
-        "calendar_status": CALENDAR_STATUS if check_status != "fail" else CALENDAR_STATUS,
+        "calendar_status": "not_validated",
         "check_status": check_status,
         "affected_source_secid": affected_source_secid,
         "affected_trade_date": affected_trade_date,
@@ -500,9 +501,7 @@ def build_quality_rows(
         f: ("pass" if unresolved == 0 else "fail", unresolved, 0, None) for f in families
     })
 
-    invalid_calendar = 0
-    if "calendar_status" in roll_map.columns:
-        invalid_calendar += int((roll_map["calendar_status"].astype(str) != CALENDAR_STATUS).sum())
+    invalid_calendar = 1 if roll_map.empty else int((~roll_map.apply(provenance.roll_source_valid, axis=1)).sum())
     add_quality_rows(rows, run_id, run_date, snapshot_date, families, "invalid_calendar_status", DATASET_ROLL_MAP, {
         f: ("pass" if invalid_calendar == 0 else "fail", invalid_calendar, 0, None) for f in families
     })
@@ -668,6 +667,19 @@ def build_quality_rows(
         f: ("pass" if bad_ohlc == 0 else "fail", bad_ohlc, 0, None) for f in families
     })
 
+    source_blockers = provenance.continuous_seam_blockers(continuous_5m, continuous_d1)
+    add_quality_rows(rows, run_id, run_date, snapshot_date, families, "date_source_provenance", DATASET_CONTINUOUS_SERIES, {
+        f: ("fail" if source_blockers else ("pass" if provenance.STATUS in continuous_5m else "not_applicable"),
+            "; ".join(source_blockers) if source_blockers else "retained lineage checked; legacy fields may be absent",
+            "matching 5m/D1 raw provenance; roll provenance separate", None) for f in families
+    })
+    for row in rows:
+        family = row["family_code"]
+        rm = roll_map.loc[roll_map["family_code"] == family] if "family_code" in roll_map else pd.DataFrame()
+        raw = continuous_5m.loc[continuous_5m["family_code"] == family] if "family_code" in continuous_5m else pd.DataFrame()
+        row["calendar_status"] = provenance.summary(rm, "calendar_status")["status"] if not rm.empty and rm.apply(provenance.roll_source_valid, axis=1).all() else "invalid"
+        row["date_source_summary_json"] = provenance.canonical_json(provenance.summary(raw))
+        row["date_source_evidence_json"] = provenance.canonical_json(provenance.evidence_inventory(raw))
     return rows
 
 
@@ -775,7 +787,7 @@ def build_manifest(
     gap_rows = quality.loc[quality["check_id"] == "explicit_partial_chain_gap_for_excluded_SiH7_SiM7"] if not quality.empty else pd.DataFrame()
     gap_status = "explicit_gap" if not gap_rows.empty and "explicit_gap" in set(gap_rows["check_status"].astype(str).tolist()) else "fail"
     calendar_rows = quality.loc[quality["check_id"] == "invalid_calendar_status"] if not quality.empty else pd.DataFrame()
-    calendar_status = CALENDAR_STATUS if not calendar_rows.empty and "fail" not in set(calendar_rows["check_status"].astype(str).tolist()) else "invalid"
+    calendar_status = provenance.summary(roll_map, "calendar_status")["status"] if not calendar_rows.empty and "fail" not in set(calendar_rows["check_status"].astype(str).tolist()) else "invalid"
     verdict = "pass" if not blockers else "fail"
     output_artifacts = {
         "roll_map": str(roll_map_path),
@@ -828,6 +840,9 @@ def build_manifest(
         "roll_policy_id": ROLL_POLICY_ID,
         "adjustment_policy_id": ADJUSTMENT_POLICY_ID,
         "calendar_status": calendar_status,
+        "roll_date_source_summary": provenance.summary(roll_map, "calendar_status"),
+        "raw_date_source_summary": provenance.summary(continuous_5m),
+        "date_source_evidence": provenance.evidence_inventory(continuous_5m),
         "input_artifacts": input_artifacts,
         "output_artifacts": output_artifacts,
         "roll_map_artifact": {
@@ -971,6 +986,8 @@ def main() -> int:
         "roll_policy_id",
         "adjustment_policy_id",
         "calendar_status",
+        "date_source_summary_json",
+        "date_source_evidence_json",
         "check_status",
         "affected_source_secid",
         "affected_trade_date",

@@ -15,6 +15,7 @@ except Exception:
 import pandas as pd
 
 from moex_data.futures import liquidity_history_metrics_probe as base
+from moex_data.futures import date_source_provenance as provenance
 from moex_data.futures.slice1_common import DEFAULT_EXCLUDED
 from moex_data.futures.slice1_common import parse_list
 from moex_data.futures.slice1_common import print_json_line
@@ -170,14 +171,13 @@ def discover_continuous_5m_paths(root: Path, data_root: Path, roll_policy_id: st
 def read_partitions(paths: List[Path]) -> pd.DataFrame:
     frames = []
     for path in paths:
-        part = pd.read_parquet(path)
-        part["_source_partition_path"] = str(path)
+        part = provenance.read_derived_partition(path)
         frames.append(part)
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
 
 def validate_continuous_5m(frame: pd.DataFrame, excluded: List[str], roll_policy_id: str, adjustment_policy_id: str) -> List[str]:
-    blockers: List[str] = []
+    blockers: List[str] = provenance.derived_blockers(frame)
     required = [
         "trade_date",
         "end",
@@ -291,6 +291,7 @@ def aggregate_d1(continuous_5m: pd.DataFrame, ingest_ts: str) -> pd.DataFrame:
         source_contracts = ordered_distinct(part["source_contract"])
         roll_map_ids = ordered_distinct(part["roll_map_id"])
         rows.append({
+            **provenance.derived_fields(part),
             "trade_date": str(trade_date),
             "session_date": session_dates[0],
             "continuous_symbol": str(continuous_symbol),
@@ -341,7 +342,7 @@ def source_contract_hits(source_contracts: Any, excluded_upper: set) -> List[str
 
 
 def validate_d1(d1: pd.DataFrame, continuous_5m: pd.DataFrame, excluded: List[str], roll_policy_id: str, adjustment_policy_id: str) -> List[str]:
-    blockers: List[str] = []
+    blockers: List[str] = provenance.derived_blockers(d1)
     required = [
         "trade_date",
         "session_date",
@@ -436,7 +437,7 @@ def write_partitions(root: Path, data_root: Path, d1: pd.DataFrame, roll_policy_
     for (family_code, trade_date), part in clean.groupby(["family_code", "trade_date"], sort=True):
         path = output_partition_path(root, data_root, roll_policy_id, adjustment_policy_id, str(family_code), str(trade_date))
         path.parent.mkdir(parents=True, exist_ok=True)
-        part.sort_values(["continuous_symbol"]).to_parquet(path, index=False)
+        provenance.write_derived_partition(path, part.sort_values(["continuous_symbol"]).reset_index(drop=True))
         paths.append(str(path))
     return paths
 
@@ -453,6 +454,7 @@ def summarize(d1: pd.DataFrame, continuous_5m: pd.DataFrame, partition_paths: Li
         source_contracts_by_symbol[str(symbol)] = ordered_distinct(values)
     return {
         "continuous_5m_rows": int(len(continuous_5m)),
+        "date_source_summary": provenance.summary(d1),
         "continuous_d1_rows": int(len(d1)),
         "continuous_symbols": sorted([str(x) for x in d1["continuous_symbol"].dropna().unique().tolist()]),
         "families": sorted([str(x) for x in d1["family_code"].dropna().unique().tolist()]),

@@ -60,7 +60,8 @@ validation_rules:
 - excluded_instruments_confirmed must include SiH7 and SiM7.
 - roll_policy_id must equal expiration_minus_1_trading_session_v1.
 - adjustment_policy_id must equal unadjusted_v1.
-- calendar_status must equal canonical_apim_futures_xml.
+- calendar_status reports the validated roll-date source status (or mixed_date_sources for multiple supported roll sources), separately from raw provenance.
+- New manifests include roll_date_source_summary, raw_date_source_summary and date_source_evidence, consistent with continuous 5m/D1 and quality rows.
 - input_artifacts must reference normalized registry, expiration map, futures_raw_5m, and futures_derived_d1_ohlcv as applicable.
 - roll_map_artifact must reference futures_continuous_roll_map.v1.
 - output_artifacts must include roll_map, continuous_5m_partition_root, continuous_d1_partition_root, quality_report, and manifest.
@@ -78,6 +79,8 @@ blocking_conditions:
 - roll map missing or invalid.
 - unresolved decision_source for buildable ordinary row.
 - invalid calendar_status.
+
+date_source_compatibility: docs/FUTURES_D1_DATE_PROVENANCE_COMPATIBILITY_V1.md
 - missing raw source partition.
 - ambiguous active source contract.
 - overlapping roll-map windows.

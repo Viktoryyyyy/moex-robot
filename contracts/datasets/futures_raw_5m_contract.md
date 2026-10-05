@@ -61,3 +61,10 @@ compatibility_rules:
 - this file exists only so legacy readers can resolve already-existing historical compatibility data.
 - no new instrument onboarding, canonical materialization, accepted pointer, scheduler enablement, or research readiness may be inferred from this file.
 - migration of legacy readers to canonical accepted datasets is a separate workstream.
+
+date_source_read_compatibility:
+- D1/continuous readers may consume canonical_apim_futures_xml or authoritative_observed_algopack_tradestats only after retained admission metadata validation described in docs/FUTURES_D1_DATE_PROVENANCE_COMPATIBILITY_V1.md.
+- A label alone is insufficient. Exact instrument/family/date/partition identity, source endpoint, raw quality, matching producer manifest and chronology are required. source_endpoint_url is mandatory for admission even though older artifacts may store null.
+- The old raw_5m_loader and all_universe_raw_5m_backfill evidence layouts retain their original meanings; this extension does not authorize new legacy ingestion.
+- Mixed histories across dates are valid; contradictory labels within one secid/trade_date are rejected. Observed dates never establish a complete exchange calendar.
+- Missing retained evidence is a blocker. Readers do not repair labels, rewrite raw, fabricate receipts or fetch replacement history.

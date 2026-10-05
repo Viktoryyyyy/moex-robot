@@ -59,7 +59,8 @@ validation_rules:
 - schema_version must equal futures_derived_d1_ohlcv.v1.
 - source_dataset_id must equal futures_raw_5m.
 - source_schema_version must equal futures_raw_5m.v1.
-- calendar_denominator_status must equal canonical_apim_futures_xml.
+- calendar_denominator_status must preserve the single admitted raw-group value: canonical_apim_futures_xml or authoritative_observed_algopack_tradestats.
+- New outputs require date_source_evidence_json containing the actually read raw/quality/manifest hashes, identities and limited retained-admission evidence scope. Older v1 outputs remain readable without retroactively adding this field.
 - OHLC fields must be non-null.
 - high must be greater than or equal to low.
 - open and close must be within low/high inclusive.
@@ -78,7 +79,9 @@ blocking_conditions:
 - missing required field.
 - duplicate primary key.
 - invalid OHLC ordering.
-- non-canonical calendar_denominator_status.
+- missing, unsupported, contradictory or unverifiable date-source provenance; unclosed Moscow calendar date; raw duplicates or invalid raw OHLCV before aggregation.
 - missing D1 row for a raw 5m secid/trade_date pair.
 - partition created for excluded instruments SiH7 or SiM7.
 - FUTOI join or continuous series output added in this Slice 1 dataset.
+
+date_source_compatibility: docs/FUTURES_D1_DATE_PROVENANCE_COMPATIBILITY_V1.md
