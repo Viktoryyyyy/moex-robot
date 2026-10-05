@@ -57,6 +57,9 @@ def _without_retained_source_identifier(text: str) -> str:
                     ("refresh_forts_raw_5m_incremental", "observed")]
         elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "observed":
             assert node.attr in allowed_observed
+            if node.attr == "observed_date_source_endpoint":
+                parent = parents.get(node)
+                assert isinstance(parent, ast.Call) and parent.func is node
         elif isinstance(node, ast.Name) and node.id == "observed":
             parent = parents.get(node)
             assert isinstance(node.ctx, ast.Load)
@@ -73,6 +76,8 @@ def _without_retained_source_identifier(text: str) -> str:
     "observed.fetch_observed_tradestats_dates('2026-10-01', '2026-10-02')\n",
     "client = observed\nclient.fetch_observed_tradestats_dates('2026-10-01', '2026-10-02')\n",
     "observed = object()\n",
+    "observed.observed_date_source_endpoint.__globals__['fetch_observed_tradestats_dates']('2026-10-01', '2026-10-02')\n",
+    "formatter = observed.observed_date_source_endpoint\n",
 ])
 def test_retained_source_identifier_does_not_allow_network_dependency(network_dependency: str) -> None:
     text = Path("src/moex_data/futures/date_source_provenance.py").read_text(encoding="utf-8")

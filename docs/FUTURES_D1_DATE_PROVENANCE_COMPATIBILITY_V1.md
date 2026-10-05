@@ -71,6 +71,11 @@ Malformed partial new fields are rejected. Source/eligibility/roll/expiry select
 and aggregation arithmetic are unchanged. No producer, collector or scheduler is
 added, and canonical ingestion migration remains a separate workstream.
 
+The Slice 1 compatibility runner validates the actual retained roll map's
+status/source pairs against the continuous manifest. New observed or mixed
+manifests require a matching roll summary; old XML manifests without the additive
+summary remain readable when their retained roll map agrees.
+
 Admission and D1 validation precede output mutations. A failed retry preserves
 previous artifacts. Identical derived partitions are not replaced just to change
 their ingest clock; changed valid outputs retain the existing partition semantics.
@@ -79,9 +84,9 @@ Prior raw, quality and producer manifests are never edited by these readers.
 ## Scope and verification
 
 One implementation owner; independent review is read-only. The affected-file
-manifest was posted to #571 before editing: the shared admission helper, five
-existing readers/quality modules, two test files, nine directly affected dataset
-contracts and this document. #371 overlaps only the raw compatibility contract;
+manifest and amendments were posted to #571 before editing: the shared admission
+helper, six existing readers/quality modules, three test files, nine directly
+affected dataset contracts and this document. #371 overlaps only the raw compatibility contract;
 its collector/registry work is not copied.
 
 Regression coverage exercises real Parquet raw/admission → D1 → continuous

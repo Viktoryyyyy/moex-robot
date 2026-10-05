@@ -13,6 +13,7 @@ from moex_data.futures import continuous_quality_report as quality
 from moex_data.futures import continuous_roll_map_builder as roll
 from moex_data.futures import continuous_series_builder as c5
 from moex_data.futures import date_source_provenance as provenance
+from moex_data.futures import daily_refresh_runner as compatibility_daily
 from moex_data.futures import derived_d1_ohlcv_builder as d1
 from moex_data.futures import raw_5m_loader as loader
 from moex_data.futures import universal_daily_refresh_runner as daily
@@ -372,3 +373,53 @@ def test_continuous_quality_and_manifest_keep_raw_and_roll_sources_separate(tmp_
     assert result["calendar_status"] == provenance.OBSERVED
     assert result["raw_date_source_summary"]["status"] == provenance.XML
     assert result["date_source_evidence"][0]["status"] == provenance.XML
+
+
+def compatibility_manifest_fixture(root, labels):
+    mapping = pd.DataFrame([{"schema_version": "futures_continuous_roll_map.v1",
+        "calendar_status": label, "calendar_source": provenance.ROLL_SOURCES[label]} for label in labels])
+    paths = {"continuous_builder_manifest": str(root / "manifest.json"),
+        "continuous_quality_report": str(root / "quality.parquet"), "continuous_roll_map": str(root / "roll.parquet")}
+    mapping.to_parquet(paths["continuous_roll_map"], index=False)
+    pd.DataFrame([{"schema_version": "futures_continuous_quality_report.v1", "check_status": "pass"}]).to_parquet(
+        paths["continuous_quality_report"], index=False)
+    summary = provenance.summary(mapping, "calendar_status")
+    manifest = {"schema_version": "futures_continuous_builder_manifest.v1", "builder_result_verdict": "pass",
+        "builder_whitelist_applied": ["USDRUBF"], "excluded_instruments_confirmed": [],
+        "roll_policy_id": compatibility_daily.ROLL_POLICY_ID, "adjustment_policy_id": compatibility_daily.ADJUSTMENT_POLICY_ID,
+        "calendar_status": summary["status"], "roll_date_source_summary": summary,
+        "quality_status_counts": {"pass": 1}, "usdrubf_identity_check": {"status": "pass"}, "source_lineage_check": {"status": "pass"}}
+    Path(paths["continuous_builder_manifest"]).write_text(json.dumps(manifest))
+    return paths, manifest, mapping
+
+
+@pytest.mark.parametrize("labels", [[provenance.XML], [provenance.OBSERVED], [provenance.XML, provenance.OBSERVED]])
+def test_compatibility_runner_accepts_actual_roll_provenance(tmp_path, labels):
+    paths, manifest, _ = compatibility_manifest_fixture(tmp_path, labels)
+    actual, _ = compatibility_daily.validate_continuous_manifest(paths, ["USDRUBF"], [])
+    assert actual["calendar_status"] == manifest["calendar_status"]
+
+
+def test_compatibility_runner_keeps_legacy_xml_manifest_readable(tmp_path):
+    paths, manifest, _ = compatibility_manifest_fixture(tmp_path, [provenance.XML])
+    manifest.pop("roll_date_source_summary")
+    Path(paths["continuous_builder_manifest"]).write_text(json.dumps(manifest))
+    assert compatibility_daily.validate_continuous_manifest(paths, ["USDRUBF"], [])[0] == manifest
+
+
+@pytest.mark.parametrize("mutation", ["wrong_source", "null_source", "missing_source", "unsupported_status",
+    "relabeled_manifest", "wrong_summary", "missing_summary", "empty_roll_map"])
+def test_compatibility_runner_rejects_unverifiable_roll_provenance(tmp_path, mutation):
+    paths, manifest, mapping = compatibility_manifest_fixture(tmp_path, [provenance.OBSERVED])
+    if mutation == "wrong_source": mapping["calendar_source"] = provenance.ROLL_SOURCES[provenance.XML]
+    elif mutation == "null_source": mapping["calendar_source"] = None
+    elif mutation == "missing_source": mapping = mapping.drop(columns=["calendar_source"])
+    elif mutation == "unsupported_status": mapping["calendar_status"] = "untrusted"
+    elif mutation == "relabeled_manifest": manifest["calendar_status"] = provenance.XML
+    elif mutation == "wrong_summary": manifest["roll_date_source_summary"]["rows_by_status"][provenance.OBSERVED] = 2
+    elif mutation == "missing_summary": manifest.pop("roll_date_source_summary")
+    elif mutation == "empty_roll_map": mapping = mapping.iloc[:0]
+    mapping.to_parquet(paths["continuous_roll_map"], index=False)
+    Path(paths["continuous_builder_manifest"]).write_text(json.dumps(manifest))
+    with pytest.raises(RuntimeError):
+        compatibility_daily.validate_continuous_manifest(paths, ["USDRUBF"], [])

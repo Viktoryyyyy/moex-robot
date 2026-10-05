@@ -18,6 +18,7 @@ except Exception:
 import pandas as pd
 
 from moex_data.futures import liquidity_history_metrics_probe as base
+from moex_data.futures import date_source_provenance as provenance
 from moex_data.futures.slice1_common import DEFAULT_EXCLUDED
 from moex_data.futures.slice1_common import DEFAULT_WHITELIST
 from moex_data.futures.slice1_common import SHORT_HISTORY_ALLOWED
@@ -31,7 +32,6 @@ SCHEMA_DAILY_REFRESH_MANIFEST = "futures_daily_data_refresh_manifest.v1"
 ROLL_POLICY_ID = "expiration_minus_1_trading_session_v1"
 ADJUSTMENT_POLICY_ID = "unadjusted_v1"
 ADJUSTMENT_FACTOR = 1.0
-CALENDAR_STATUS = "canonical_apim_futures_xml"
 
 REQUIRED_CONTRACTS = [
     "contracts/datasets/futures_registry_refresh_manifest_contract.md",
@@ -283,8 +283,18 @@ def validate_continuous_manifest(paths, whitelist, excluded):
         raise RuntimeError("continuous manifest roll_policy_id mismatch")
     if str(manifest.get("adjustment_policy_id") or "") != ADJUSTMENT_POLICY_ID:
         raise RuntimeError("continuous manifest adjustment_policy_id mismatch")
-    if str(manifest.get("calendar_status") or "") != CALENDAR_STATUS:
+    roll_map = read_parquet(paths["continuous_roll_map"], "futures_continuous_roll_map.v1", "continuous_roll_map")
+    if roll_map.empty or not roll_map.apply(provenance.roll_source_valid, axis=1).all():
+        raise RuntimeError("continuous manifest roll status/source mismatch")
+    roll_summary = provenance.summary(roll_map, "calendar_status")
+    if manifest.get("calendar_status") != roll_summary["status"]:
         raise RuntimeError("continuous manifest calendar_status mismatch")
+    recorded_summary = manifest.get("roll_date_source_summary")
+    if recorded_summary is not None:
+        if recorded_summary != roll_summary:
+            raise RuntimeError("continuous manifest roll date-source summary mismatch")
+    elif roll_summary["status"] != provenance.XML:
+        raise RuntimeError("continuous manifest missing roll date-source summary")
     quality = manifest.get("quality_status_counts") or {}
     if int(quality.get("fail") or 0) != 0:
         raise RuntimeError("continuous manifest quality fail rows present")
