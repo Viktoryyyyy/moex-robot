@@ -493,16 +493,26 @@ def evidence_inventory(frame):
 
 def continuous_seam_blockers(c5, d1):
     blockers = derived_blockers(c5) + derived_blockers(d1)
-    if blockers or (STATUS not in c5 and STATUS not in d1):
+    if blockers:
+        return blockers
+    keys = []
+    for name, frame in (("5m", c5), ("D1", d1)):
+        if frame.empty:
+            keys.append(set())
+            continue
+        columns = ["continuous_symbol", "trade_date"]
+        if any(column not in frame for column in columns) or frame[columns].isna().any().any():
+            return ["continuous date-source group identity missing at " + name]
+        keys.append(set(zip(frame["continuous_symbol"], frame["trade_date"])))
+    if keys[0] != keys[1]:
+        blockers.append("continuous 5m/D1 date-source key sets differ: missing D1="
+            + str(sorted(map(str, keys[0] - keys[1]))) + "; missing 5m="
+            + str(sorted(map(str, keys[1] - keys[0]))))
+    if STATUS not in c5 and STATUS not in d1:
         return blockers
     if STATUS not in c5 or STATUS not in d1:
-        return ["continuous date-source lineage missing at D1 boundary"]
+        return blockers + ["continuous date-source lineage missing at D1 boundary"]
     by_key = {key: derived_fields(part) for key, part in c5.groupby(["continuous_symbol", "trade_date"])}
-    d1_keys = set(d1.groupby(["continuous_symbol", "trade_date"]).groups)
-    if set(by_key) != d1_keys:
-        blockers.append("continuous 5m/D1 date-source key sets differ: missing D1="
-            + str(sorted(map(str, set(by_key) - d1_keys))) + "; missing 5m="
-            + str(sorted(map(str, d1_keys - set(by_key)))))
     for key, part in d1.groupby(["continuous_symbol", "trade_date"]):
         if by_key.get(key) != derived_fields(part):
             blockers.append("continuous D1 date-source evidence differs from 5m: " + str(key))

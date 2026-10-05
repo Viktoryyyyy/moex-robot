@@ -297,14 +297,19 @@ def test_continuous_d1_provenance_tampering_is_reported(tmp_path):
 
 
 @pytest.mark.parametrize("missing_side", ["5m", "D1"])
-def test_continuous_quality_rejects_missing_counterpart_groups(tmp_path, missing_side):
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize("remove_all", [False, True])
+def test_continuous_quality_rejects_missing_counterpart_groups(tmp_path, missing_side, legacy, remove_all):
     paths, _, _ = make_admitted(tmp_path)
     five, bars, mapping = continuous(admit(tmp_path, paths))
+    if legacy:
+        five = five.drop(columns=list(provenance.DERIVED_FIELDS))
+        bars = bars.drop(columns=list(provenance.DERIVED_FIELDS))
     assert not provenance.continuous_seam_blockers(five, bars)
     if missing_side == "D1":
-        bars = bars.loc[bars["trade_date"] != DAYS[0]]
+        bars = bars.iloc[:0] if remove_all else bars.loc[bars["trade_date"] != DAYS[0]]
     else:
-        five = five.loc[five["trade_date"] != DAYS[0]]
+        five = five.iloc[:0] if remove_all else five.loc[five["trade_date"] != DAYS[0]]
     blockers = provenance.continuous_seam_blockers(five, bars)
     assert any("key sets differ" in item for item in blockers)
     placeholder = tmp_path / "placeholder.parquet"
