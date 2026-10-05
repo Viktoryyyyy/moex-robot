@@ -35,6 +35,7 @@ def _without_retained_source_identifier(text: str) -> str:
     """Allow one historical metadata value, never a calendar client dependency."""
     approved = "MOEX_APIM_XML:/iss/calendars"
     tree = ast.parse(text)
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     mappings = [node.value for node in tree.body if isinstance(node, ast.Assign)
                 and any(isinstance(target, ast.Name) and target.id == "ROLL_SOURCES" for target in node.targets)]
     assert len(mappings) == 1 and isinstance(mappings[0], ast.Dict)
@@ -56,6 +57,10 @@ def _without_retained_source_identifier(text: str) -> str:
                     ("refresh_forts_raw_5m_incremental", "observed")]
         elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "observed":
             assert node.attr in allowed_observed
+        elif isinstance(node, ast.Name) and node.id == "observed":
+            parent = parents.get(node)
+            assert isinstance(node.ctx, ast.Load)
+            assert isinstance(parent, ast.Attribute) and parent.value is node and parent.attr in allowed_observed
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             assert node.func.id not in {"__import__", "eval", "exec", "getattr"}
     return text.replace(approved, "")
@@ -66,6 +71,8 @@ def _without_retained_source_identifier(text: str) -> str:
     "from urllib.request import urlopen\n",
     "observed.requests.get('https://example.invalid')\n",
     "observed.fetch_observed_tradestats_dates('2026-10-01', '2026-10-02')\n",
+    "client = observed\nclient.fetch_observed_tradestats_dates('2026-10-01', '2026-10-02')\n",
+    "observed = object()\n",
 ])
 def test_retained_source_identifier_does_not_allow_network_dependency(network_dependency: str) -> None:
     text = Path("src/moex_data/futures/date_source_provenance.py").read_text(encoding="utf-8")
