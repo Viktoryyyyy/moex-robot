@@ -1,0 +1,302 @@
+{
+  "project": "MOEX_Bot",
+  "oos_event_method_rows": 197351,
+  "event_counts": [
+    {
+      "tf": "D1",
+      "horizon": "four_weeks",
+      "fold": -1,
+      "n": 123
+    },
+    {
+      "tf": "D1",
+      "horizon": "four_weeks",
+      "fold": 0,
+      "n": 28
+    },
+    {
+      "tf": "D1",
+      "horizon": "four_weeks",
+      "fold": 1,
+      "n": 28
+    },
+    {
+      "tf": "D1",
+      "horizon": "four_weeks",
+      "fold": 2,
+      "n": 25
+    },
+    {
+      "tf": "D1",
+      "horizon": "four_weeks",
+      "fold": 3,
+      "n": 29
+    },
+    {
+      "tf": "D1",
+      "horizon": "four_weeks",
+      "fold": 4,
+      "n": 43
+    },
+    {
+      "tf": "D1",
+      "horizon": "intraday",
+      "fold": -1,
+      "n": 101
+    },
+    {
+      "tf": "D1",
+      "horizon": "intraday",
+      "fold": 0,
+      "n": 35
+    },
+    {
+      "tf": "D1",
+      "horizon": "intraday",
+      "fold": 1,
+      "n": 33
+    },
+    {
+      "tf": "D1",
+      "horizon": "intraday",
+      "fold": 2,
+      "n": 32
+    },
+    {
+      "tf": "D1",
+      "horizon": "intraday",
+      "fold": 3,
+      "n": 32
+    },
+    {
+      "tf": "D1",
+      "horizon": "intraday",
+      "fold": 4,
+      "n": 51
+    },
+    {
+      "tf": "D1",
+      "horizon": "two_weeks",
+      "fold": -1,
+      "n": 114
+    },
+    {
+      "tf": "D1",
+      "horizon": "two_weeks",
+      "fold": 0,
+      "n": 31
+    },
+    {
+      "tf": "D1",
+      "horizon": "two_weeks",
+      "fold": 1,
+      "n": 29
+    },
+    {
+      "tf": "D1",
+      "horizon": "two_weeks",
+      "fold": 2,
+      "n": 28
+    },
+    {
+      "tf": "D1",
+      "horizon": "two_weeks",
+      "fold": 3,
+      "n": 31
+    },
+    {
+      "tf": "D1",
+      "horizon": "two_weeks",
+      "fold": 4,
+      "n": 46
+    },
+    {
+      "tf": "D1",
+      "horizon": "week",
+      "fold": -1,
+      "n": 108
+    },
+    {
+      "tf": "D1",
+      "horizon": "week",
+      "fold": 0,
+      "n": 33
+    },
+    {
+      "tf": "D1",
+      "horizon": "week",
+      "fold": 1,
+      "n": 31
+    },
+    {
+      "tf": "D1",
+      "horizon": "week",
+      "fold": 2,
+      "n": 29
+    },
+    {
+      "tf": "D1",
+      "horizon": "week",
+      "fold": 3,
+      "n": 31
+    },
+    {
+      "tf": "D1",
+      "horizon": "week",
+      "fold": 4,
+      "n": 49
+    },
+    {
+      "tf": "H1",
+      "horizon": "four_weeks",
+      "fold": -1,
+      "n": 1101
+    },
+    {
+      "tf": "H1",
+      "horizon": "four_weeks",
+      "fold": 0,
+      "n": 272
+    },
+    {
+      "tf": "H1",
+      "horizon": "four_weeks",
+      "fold": 1,
+      "n": 243
+    },
+    {
+      "tf": "H1",
+      "horizon": "four_weeks",
+      "fold": 2,
+      "n": 302
+    },
+    {
+      "tf": "H1",
+      "horizon": "four_weeks",
+      "fold": 3,
+      "n": 328
+    },
+    {
+      "tf": "H1",
+      "horizon": "four_weeks",
+      "fold": 4,
+      "n": 599
+    },
+    {
+      "tf": "H1",
+      "horizon": "intraday",
+      "fold": -1,
+      "n": 136
+    },
+    {
+      "tf": "H1",
+      "horizon": "intraday",
+      "fold": 0,
+      "n": 33
+    },
+    {
+      "tf": "H1",
+      "horizon": "intraday",
+      "fold": 1,
+      "n": 15
+    },
+    {
+      "tf": "H1",
+      "horizon": "intraday",
+      "fold": 2,
+      "n": 25
+    },
+    {
+      "tf": "H1",
+      "horizon": "intraday",
+      "fold": 3,
+      "n": 24
+    },
+    {
+      "tf": "H1",
+      "horizon": "intraday",
+      "fold": 4,
+      "n": 79
+    },
+    {
+      "tf": "H1",
+      "horizon": "two_weeks",
+      "fold": -1,
+      "n": 1007
+    },
+    {
+      "tf": "H1",
+      "horizon": "two_weeks",
+      "fold": 0,
+      "n": 298
+    },
+    {
+      "tf": "H1",
+      "horizon": "two_weeks",
+      "fold": 1,
+      "n": 263
+    },
+    {
+      "tf": "H1",
+      "horizon": "two_weeks",
+      "fold": 2,
+      "n": 324
+    },
+    {
+      "tf": "H1",
+      "horizon": "two_weeks",
+      "fold": 3,
+      "n": 354
+    },
+    {
+      "tf": "H1",
+      "horizon": "two_weeks",
+      "fold": 4,
+      "n": 641
+    },
+    {
+      "tf": "H1",
+      "horizon": "week",
+      "fold": -1,
+      "n": 948
+    },
+    {
+      "tf": "H1",
+      "horizon": "week",
+      "fold": 0,
+      "n": 309
+    },
+    {
+      "tf": "H1",
+      "horizon": "week",
+      "fold": 1,
+      "n": 277
+    },
+    {
+      "tf": "H1",
+      "horizon": "week",
+      "fold": 2,
+      "n": 342
+    },
+    {
+      "tf": "H1",
+      "horizon": "week",
+      "fold": 3,
+      "n": 368
+    },
+    {
+      "tf": "H1",
+      "horizon": "week",
+      "fold": 4,
+      "n": 659
+    }
+  ],
+  "no_duplicate_event_method": true,
+  "confirmation_before_entry": true,
+  "test_labels_contained": true,
+  "training_labels_purged": true,
+  "integer_qty": true,
+  "nominal_risk_within_10000": true,
+  "current_stop_or_strategy_changed": false,
+  "history_pit_vintage_proven": false
+}

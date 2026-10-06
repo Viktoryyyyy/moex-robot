@@ -1,0 +1,31 @@
+{
+  "project": "MOEX_Bot",
+  "passed": 25,
+  "checks": [
+    "protective_long_tick_rounding",
+    "protective_short_tick_rounding",
+    "five_kopecks_example",
+    "stop_before_later_target",
+    "stop_gap_fills_worse_than_trigger",
+    "ambiguous_5m_conservative",
+    "short_stop_symmetric",
+    "target_gap_at_open",
+    "funding_signed_exact_amount",
+    "funding_clock_transition",
+    "all_confirmations_causal",
+    "all_quantile_labels_purged",
+    "no_overlap_('D1', 'four_weeks')",
+    "no_overlap_('D1', 'intraday')",
+    "no_overlap_('D1', 'two_weeks')",
+    "no_overlap_('D1', 'week')",
+    "no_overlap_('H1', 'four_weeks')",
+    "no_overlap_('H1', 'intraday')",
+    "no_overlap_('H1', 'two_weeks')",
+    "no_overlap_('H1', 'week')",
+    "all_stops_protective",
+    "all_stops_on_tick",
+    "no_exit_after_fixed_expiry",
+    "no_exit_before_entry",
+    "no_ns_us_unit_mixing"
+  ]
+}
