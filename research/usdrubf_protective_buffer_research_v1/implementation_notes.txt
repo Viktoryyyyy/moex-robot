@@ -1,0 +1,8 @@
+PROJECT=MOEX_Bot
+Implementation notes and qualifications (no grid/entry/target changes):
+1. Penetration quantiles use the full first target-touch 5m bar. The exact intra-bar first-touch path is unknown; this is a conservative upper bound on penetration before target, not tick-perfect measurement. Calibration uses past matured labels only and every eligible event, including failures.
+2. Daily bars are civil-date/native-tradedate aggregates, not exchange settlement-session daily bars. This follows the existing project panel's group-by trade_date arithmetic. The context is known at following midnight; all inputs are retrospective retrieved history, not point-in-time archived revisions.
+3. The greedy drawdown series reserves each event until its original expiry, even when a stop/target exits early. Thus schedules are identical across methods. Event-level mean uses all signals with month block uncertainty and is not a realizable overlapping portfolio PnL.
+4. Bonferroni bootstrap bounds use 2,000 resamples as frozen; extreme empirical quantiles are coarse and do not establish a precise familywise error guarantee. Pointwise intervals and independent-event counts must also be inspected.
+5. Missing 2022 funding is stressed as a debit, not estimated as historical fact. Out-of-sample 2024-2026 funding is tested for coverage separately.
+6. One 5m interval disagrees with the minute-source OHLC. It remains unresolved and is stop-first, with an explicit order upper bound. No source price is overwritten.

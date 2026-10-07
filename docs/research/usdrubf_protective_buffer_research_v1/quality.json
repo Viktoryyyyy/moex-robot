@@ -1,0 +1,80 @@
+{
+  "raw_rows": 189334,
+  "duplicate_keys": 0,
+  "invalid_or_zero_volume_rows": 0,
+  "off_tick_prices": 0,
+  "min_timestamp": "2022-04-26 10:05:00",
+  "max_timestamp": "2026-10-05 23:50:00",
+  "dates": 1147,
+  "observed_hours": 17001,
+  "complete_hours": 11215,
+  "incomplete_hours": 5786,
+  "daily_comparison_counts": {
+    "both": 1129,
+    "left_only": 18,
+    "right_only": 0
+  },
+  "official_funding_missing": 153,
+  "funding_missing_minmax": [
+    "2022-04-26",
+    "2022-12-02"
+  ],
+  "daily_open_mismatches": 939,
+  "daily_high_mismatches": 352,
+  "daily_low_mismatches": 339,
+  "daily_close_mismatches": 917,
+  "daily_volume_mismatches": 1011,
+  "cache_vs_accepted_keys": {
+    "both": 188963,
+    "left_only": 0,
+    "right_only": 0
+  },
+  "cache_vs_accepted_ohlc_mismatch": 0,
+  "spread_missing_bars": 2516,
+  "spread_quantiles_rub": {
+    "0.5": 0.0157301,
+    "0.9": 0.029700999999999998,
+    "0.99": 0.060388678999999994
+  },
+  "yearly": {
+    "2022": {
+      "bars": 23373,
+      "dates": 173,
+      "missing_spread": 154
+    },
+    "2023": {
+      "bars": 42746,
+      "dates": 254,
+      "missing_spread": 938
+    },
+    "2024": {
+      "bars": 42162,
+      "dates": 256,
+      "missing_spread": 231
+    },
+    "2025": {
+      "bars": 43932,
+      "dates": 254,
+      "missing_spread": 506
+    },
+    "2026": {
+      "bars": 37121,
+      "dates": 210,
+      "missing_spread": 687
+    }
+  },
+  "events": {
+    "('D1', 'four_weeks')": 276,
+    "('D1', 'intraday')": 284,
+    "('D1', 'two_weeks')": 279,
+    "('D1', 'week')": 281,
+    "('H1', 'four_weeks')": 2845,
+    "('H1', 'intraday')": 312,
+    "('H1', 'two_weeks')": 2887,
+    "('H1', 'week')": 2903
+  },
+  "excluded_events": {
+    "wrong_side_or_no_context": 31,
+    "atr_warmup": 26
+  }
+}

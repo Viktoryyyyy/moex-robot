@@ -1,0 +1,11 @@
+{
+ "project":"MOEX_Bot",
+ "before_any_pnl_calculation":true,
+ "reason":"Source verification, not result-based tuning",
+ "original_protocol_sha256":"f8fb571a47bb7df33159e9e8ebb4b9f0dc34279792fe58c867ba17b5fcc2ee25",
+ "funding_timing":"18:50 MSK before 2026-03-23; 23:50 MSK from 2026-03-23. Official history clearing dates only; native weekend observations are not independent funding days.",
+ "sources":["https://www.moex.com/media/moex-gid-ets.pdf","https://www.moex.com/n98363?nt=106","https://www.moex.com/n95317?nt=107"],
+ "daily_semantics":"D1 denotes calendar-date OHLC aggregated from native tradedate as in project D1 panel, available conservatively at following midnight. It is not official exchange trading-session OHLC, which differs historically. All H1 pivots use consecutive complete observed hours, which can be separated by incomplete hours/session breaks; two confirmation bars can take longer than two clock hours.",
+ "funding_stress":"Alongside base timing, calculate +/- one official clearing-row shift of SWAPRATE and +10 minutes clearing time as mapping/timing sensitivity. Missing funding remains explicit adverse approximation, never zero.",
+ "timestamp_uncertainty":"Intrabar executions use minute/bar end as timestamp upper bound; actual stop time is unknown within bar. This affects funding near clearing; sensitivity is mandatory."
+}
