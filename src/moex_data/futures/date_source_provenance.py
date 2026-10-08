@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 
 from moex_data.futures import refresh_forts_raw_5m_incremental as observed
+from moex_data.futures import raw_admission_versions as versions
 from moex_data.futures.slice1_common import today_msk
 
 XML = "canonical_apim_futures_xml"
@@ -208,6 +209,8 @@ class AdmissionIndex:
         self.cutoff = closed_before or today_msk()
         self.rows = {}
         self.cache = {}
+        self.versioned_reports = {}
+        self.published_manifests = {}
         if quality is None:
             frames = []
             paths = quality_paths(self.root)
@@ -220,13 +223,17 @@ class AdmissionIndex:
             for path in paths:
                 frame = read_quality(path)
                 frames.append(frame)
+        for frame, quality_path, manifest_path in versions.admission_reports(self.root):
+            frames.append(frame)
+            self.versioned_reports[(quality_path, str(manifest_path))] = manifest_path
+            self.published_manifests.setdefault(Path(quality_path).name, set()).add(manifest_path.name)
         quality = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
         for row in quality.to_dict("records"):
             if row.get("quality_status") == "pass":
                 self.rows.setdefault((str(row.get("family_code")), str(row.get("secid"))), []).append(row)
 
     def cohort(self, q):
-        cache_key = (q.get("_quality_report_path"), q.get("secid"), q.get("run_id"))
+        cache_key = (q.get("_quality_report_path"), q.get("secid"), q.get("run_id"), str(q.get("_admission_manifest_path")))
         if cache_key in self.cache:
             value = self.cache[cache_key]
             if isinstance(value, Exception):
@@ -275,8 +282,26 @@ class AdmissionIndex:
         for field in ("duplicate_ts_count", "null_ohlc_count", "invalid_ohlc_count"):
             if pd.isna(q.get(field)) or float(q[field]) != 0:
                 fail("raw quality error: " + field)
+        pair = (str(qp), str(q.get("_admission_manifest_path")))
+        versioned_report = pair in self.versioned_reports
+        if versioned_report:
+            mp = self.versioned_reports[pair]
         mbytes = mp.read_bytes()
+        if qhash in self.published_manifests and versions.sha256(mbytes) not in self.published_manifests[qhash]:
+            fail("published quality/manifest binding mismatch")
+        if versioned_report and versions.sha256(mbytes) != mp.name:
+            fail("immutable admission manifest digest mismatch")
         m = json.loads(mbytes)
+        pinned = "raw_partition_versions" in m or "admission_version_scope" in m
+        if pinned:
+            manifest_members = m.get("partition_paths_created", []) if legacy else m.get("output_partitions", [])
+            required_versions = {relative_partition(partition_identity(x)).as_posix() for x in manifest_members}
+            if (m.get("admission_version_scope") != "publication_bytes_not_historical_PIT"
+                    or not isinstance(m.get("raw_partition_versions"), dict)
+                    or set(m["raw_partition_versions"]) != required_versions):
+                fail("raw admission version membership/scope mismatch")
+        elif versioned_report:
+            fail("immutable manifest missing raw admission versions")
         if legacy:
             if m.get("schema_version") != "futures_raw_5m_loader_manifest.v1" or m.get("run_id") != q.get("run_id"):
                 fail("legacy manifest/run mismatch")
@@ -327,7 +352,13 @@ class AdmissionIndex:
         frames, hashes = [], {}
         for key in keys:
             path = self.root / relative_partition(key)
-            part = read_partition(path)
+            if pinned:
+                expected_hash = m.get("raw_partition_versions", {}).get(relative_partition(key).as_posix())
+                part = versions.read_frame(self.root, expected_hash)
+                part["_source_partition_path"] = str(path)
+                part["_source_partition_sha256"] = expected_hash
+            else:
+                part = read_partition(path)
             before = single(part, "_source_partition_sha256")
             frames.append(part)
             hashes[key] = before
