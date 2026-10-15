@@ -1,0 +1,41 @@
+{
+  "asof": "2026-10-05",
+  "status": "Exploratory research on already observed history; no untouched out-of-sample claim",
+  "source": "Existing plain Excel daily panel and native project AlgoPack TradeStats five-minute bars",
+  "breakout": "First daily close beyond latest confirmed same-kind pivot of level 1, 2 or 3 as known at previous close; no prior close beyond that pivot since its date. Same-day same-direction signals deduplicated at highest currently known level.",
+  "structure": "Latest confirmed opposite level-1 pivot available before breakout; frozen at signal. This is a local structure invalidation, not a claim that the whole level-3 or level-4 trend reversed.",
+  "scale": "Simple average of 20 true daily ranges through signal day (ATR20); source-observed dates, including weekend trading. Sensitivity excluding weekend observations.",
+  "entry_strategies": [
+    "next_open",
+    "retest_level",
+    "atr_0.25",
+    "atr_0.50",
+    "atr_0.75",
+    "atr_1.00",
+    "swing_0.25",
+    "swing_0.382",
+    "swing_0.50",
+    "swing_0.618"
+  ],
+  "limit_anchor": "Frozen breakout-day high for longs / low for shorts; swing retracement uses the frozen opposite level-1 pivot. Entry prices rounded toward deeper pullback to MOEX tick 0.01.",
+  "limit_expiry_sessions": 5,
+  "outcome_horizon_sessions": 20,
+  "invalidation_stop": "Frozen opposite confirmed L1/H1 plus one tick beyond. A standing limit crossed by an opening gap fills at the better opening price; a gap beyond invalidation causes immediate exit with costs. Inactive conditional trailing patterns are cancelled on structural breach.",
+  "target": "2 times actual entry-to-stop distance, same risk unit across strategies",
+  "execution_cost_assumption_price_units_round_trip": 0.05,
+  "execution_cost_sensitivity": [
+    0.02,
+    0.1
+  ],
+  "funding": "Historical SwapRate if verifiably available; otherwise price-path study with explicit funding exclusion, never presented as net investable return",
+  "uncertain_intrabar_order": "Five-minute bar touching entry and target cannot take target until following bar. If stop and target both touched in the same bar, adverse stop first. Same-bar new-high/low ordering never uses unobserved path.",
+  "optimization": "Maximize mean outcome in entry-to-stop R per original signal, assigning zero to unfilled signals; train 2022-2024, select once, report 2025 and matured 2026 separately. Also report return in price units and percent, fill rate, stop/target rates, missed continuation, and conditional success.",
+  "overlap": "All signals descriptive; separately fixed 20-session cooldown across both directions for nonoverlapping outcome windows. Chronological regimes can still correlate.",
+  "first_correction": "First 0.50 ATR20 adverse move from previously observed post-breakout extreme. Freeze that peak/trough, measure deepest correction until recovery by one tick, structural invalidation or horizon. Same-bar recovery and invalidation resolved adversely.",
+  "contexts": "H1/H2/H3 and L1/L2/L3 separately; long/short separately. Retrospective level-4 labels only descriptive, never used for signal generation or strategy selection. Strong candle subgroup: directional close location >=75% and daily range >=ATR20.",
+  "current_application": "Breakout on 2026-10-05 of 85.61; forecast frozen to close of Oct05. Any later quote is a separately timestamped follow-up, not a training input.",
+  "funding_missing_policy": "Missing published SwapRate remains unavailable; no zero imputation. Funding comparison excludes the same incomplete whole outcome windows for every strategy.",
+  "standing_limit_gap_policy": "Standing limits crossed by an opening gap fill at the better opening price; gaps beyond invalidation cause immediate exit with costs. Inactive conditional trailing patterns are cancelled on structural breach.",
+  "additional_extension_hypothesis": "After fixed-entry results, a separate predeclared grid activates a trailing pullback entry only after advance 0, 0.5, 1 or 1.5 ATR beyond the broken level; depths 0.25,0.5,0.75,1 ATR. Only past completed five-minute peaks may update the next-bar order. Same chronological split; this is exploratory, not an untouched test.",
+  "publication_clarification": "The invalidation_stop text above reconciles the original protocol with its later standing_limit_gap_policy and the executed simulator. Numerical results are unchanged; the original protocol and full individual-event results remain local."
+}

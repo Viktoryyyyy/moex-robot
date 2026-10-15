@@ -1,0 +1,1635 @@
+{
+  "publication_scope": "Aggregate research statistics only; no individual events or raw bars.",
+  "source_sha256": "15775bac8589b506ca24b2b6ceb303c05c167e98dd5fa654fe8a5b4f4ee4168a",
+  "bar_rows": 189334,
+  "daily_rows": 1147,
+  "all_daily_ohlcv_reconciled": true,
+  "events_total": 185,
+  "events_mature": 179,
+  "strategy_names": [
+    "next_open",
+    "retest_level",
+    "atr_0.25",
+    "atr_0.50",
+    "atr_0.75",
+    "atr_1.00",
+    "swing_0.25",
+    "swing_0.382",
+    "swing_0.50",
+    "swing_0.618",
+    "trail_0.00_0.25",
+    "trail_0.00_0.50",
+    "trail_0.00_0.75",
+    "trail_0.00_1.00",
+    "trail_0.50_0.25",
+    "trail_0.50_0.50",
+    "trail_0.50_0.75",
+    "trail_0.50_1.00",
+    "trail_1.00_0.25",
+    "trail_1.00_0.50",
+    "trail_1.00_0.75",
+    "trail_1.00_1.00",
+    "trail_1.50_0.25",
+    "trail_1.50_0.50",
+    "trail_1.50_0.75",
+    "trail_1.50_1.00"
+  ],
+  "selection": {
+    "funding_adjusted_training_winner": "atr_0.25",
+    "price_only_training_winner": "atr_0.25",
+    "funding_adjusted_winner_by_period": {
+      "validation_2025": "next_open",
+      "test_2026": "trail_0.50_0.25"
+    }
+  },
+  "summary": {
+    "all": {
+      "next_open": {
+        "signals": 179,
+        "filled": 179,
+        "fill_pct": 100.0,
+        "mean_R_per_signal": 0.457678442588238,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.6219044187950116
+      },
+      "retest_level": {
+        "signals": 179,
+        "filled": 140,
+        "fill_pct": 78.2122905027933,
+        "mean_R_per_signal": 0.3563229164014421,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.4446152752248411
+      },
+      "atr_0.25": {
+        "signals": 179,
+        "filled": 167,
+        "fill_pct": 93.29608938547486,
+        "mean_R_per_signal": 0.43557846792566546,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.5880179323003977
+      },
+      "atr_0.50": {
+        "signals": 179,
+        "filled": 142,
+        "fill_pct": 79.32960893854748,
+        "mean_R_per_signal": 0.2689587688231469,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.3571023998690056
+      },
+      "atr_0.75": {
+        "signals": 179,
+        "filled": 116,
+        "fill_pct": 64.80446927374301,
+        "mean_R_per_signal": 0.18875278290757438,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.20081621423202362
+      },
+      "atr_1.00": {
+        "signals": 179,
+        "filled": 91,
+        "fill_pct": 50.83798882681564,
+        "mean_R_per_signal": 0.17572176311410231,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.24677318940832513
+      },
+      "swing_0.25": {
+        "signals": 179,
+        "filled": 132,
+        "fill_pct": 73.74301675977654,
+        "mean_R_per_signal": 0.2714426309962955,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.34904359041918626
+      },
+      "swing_0.382": {
+        "signals": 179,
+        "filled": 100,
+        "fill_pct": 55.865921787709496,
+        "mean_R_per_signal": 0.27813332209006475,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.3258894614195499
+      },
+      "swing_0.50": {
+        "signals": 179,
+        "filled": 80,
+        "fill_pct": 44.6927374301676,
+        "mean_R_per_signal": 0.19057526275995362,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.2069262400378807
+      },
+      "swing_0.618": {
+        "signals": 179,
+        "filled": 63,
+        "fill_pct": 35.19553072625698,
+        "mean_R_per_signal": 0.1916087790610632,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.24502774752945583
+      },
+      "trail_0.00_0.25": {
+        "signals": 179,
+        "filled": 179,
+        "fill_pct": 100.0,
+        "mean_R_per_signal": 0.44657137163749,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.6068350954237411
+      },
+      "trail_0.00_0.50": {
+        "signals": 179,
+        "filled": 174,
+        "fill_pct": 97.20670391061452,
+        "mean_R_per_signal": 0.3390171888707296,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.46992900363183987
+      },
+      "trail_0.00_0.75": {
+        "signals": 179,
+        "filled": 169,
+        "fill_pct": 94.41340782122904,
+        "mean_R_per_signal": 0.2970369442759593,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.38793508221646184
+      },
+      "trail_0.00_1.00": {
+        "signals": 179,
+        "filled": 152,
+        "fill_pct": 84.91620111731844,
+        "mean_R_per_signal": 0.28893994516405386,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.354856918339334
+      },
+      "trail_0.50_0.25": {
+        "signals": 179,
+        "filled": 156,
+        "fill_pct": 87.15083798882682,
+        "mean_R_per_signal": 0.39593983874177585,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.5491285988766677
+      },
+      "trail_0.50_0.50": {
+        "signals": 179,
+        "filled": 151,
+        "fill_pct": 84.35754189944134,
+        "mean_R_per_signal": 0.31922257171137475,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.4400174852885902
+      },
+      "trail_0.50_0.75": {
+        "signals": 179,
+        "filled": 146,
+        "fill_pct": 81.56424581005587,
+        "mean_R_per_signal": 0.28786425098347757,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.3805916418867182
+      },
+      "trail_0.50_1.00": {
+        "signals": 179,
+        "filled": 134,
+        "fill_pct": 74.86033519553072,
+        "mean_R_per_signal": 0.27741635322382147,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.36776412419392823
+      },
+      "trail_1.00_0.25": {
+        "signals": 179,
+        "filled": 123,
+        "fill_pct": 68.71508379888269,
+        "mean_R_per_signal": 0.34852115960193814,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.4585912100575896
+      },
+      "trail_1.00_0.50": {
+        "signals": 179,
+        "filled": 118,
+        "fill_pct": 65.92178770949721,
+        "mean_R_per_signal": 0.2731251699270425,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.3656760229014657
+      },
+      "trail_1.00_0.75": {
+        "signals": 179,
+        "filled": 112,
+        "fill_pct": 62.56983240223464,
+        "mean_R_per_signal": 0.2516516228840173,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.3244706158378031
+      },
+      "trail_1.00_1.00": {
+        "signals": 179,
+        "filled": 103,
+        "fill_pct": 57.54189944134078,
+        "mean_R_per_signal": 0.1915737673278247,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.24987119333713728
+      },
+      "trail_1.50_0.25": {
+        "signals": 179,
+        "filled": 96,
+        "fill_pct": 53.63128491620112,
+        "mean_R_per_signal": 0.22440550462348471,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.30604308968743527
+      },
+      "trail_1.50_0.50": {
+        "signals": 179,
+        "filled": 90,
+        "fill_pct": 50.279329608938546,
+        "mean_R_per_signal": 0.16264547876263202,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.23069900084999534
+      },
+      "trail_1.50_0.75": {
+        "signals": 179,
+        "filled": 83,
+        "fill_pct": 46.36871508379888,
+        "mean_R_per_signal": 0.160918905135568,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.22662578693743482
+      },
+      "trail_1.50_1.00": {
+        "signals": 179,
+        "filled": 75,
+        "fill_pct": 41.899441340782126,
+        "mean_R_per_signal": 0.10897341015033311,
+        "funding_covered_signals": 159,
+        "mean_net_R_per_signal": 0.1624898203335182
+      }
+    },
+    "long": {
+      "next_open": {
+        "signals": 101,
+        "filled": 101,
+        "fill_pct": 100.0,
+        "mean_R_per_signal": 0.5341253766340289,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.4943190243441899
+      },
+      "retest_level": {
+        "signals": 101,
+        "filled": 80,
+        "fill_pct": 79.20792079207921,
+        "mean_R_per_signal": 0.4194711589155034,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.3584158382282043
+      },
+      "atr_0.25": {
+        "signals": 101,
+        "filled": 93,
+        "fill_pct": 92.07920792079207,
+        "mean_R_per_signal": 0.5250796202439606,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.4857851614340342
+      },
+      "atr_0.50": {
+        "signals": 101,
+        "filled": 77,
+        "fill_pct": 76.23762376237623,
+        "mean_R_per_signal": 0.3014277290590464,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.23127613088872226
+      },
+      "atr_0.75": {
+        "signals": 101,
+        "filled": 66,
+        "fill_pct": 65.34653465346534,
+        "mean_R_per_signal": 0.34034963781484534,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.2194415586077616
+      },
+      "atr_1.00": {
+        "signals": 101,
+        "filled": 50,
+        "fill_pct": 49.504950495049506,
+        "mean_R_per_signal": 0.2696739988399266,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.23988075999858696
+      },
+      "swing_0.25": {
+        "signals": 101,
+        "filled": 73,
+        "fill_pct": 72.27722772277228,
+        "mean_R_per_signal": 0.349683360268563,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.2796071000746716
+      },
+      "swing_0.382": {
+        "signals": 101,
+        "filled": 57,
+        "fill_pct": 56.43564356435643,
+        "mean_R_per_signal": 0.3293125685445433,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.27104674025154324
+      },
+      "swing_0.50": {
+        "signals": 101,
+        "filled": 46,
+        "fill_pct": 45.54455445544554,
+        "mean_R_per_signal": 0.2770109233081421,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.18068436014116251
+      },
+      "swing_0.618": {
+        "signals": 101,
+        "filled": 35,
+        "fill_pct": 34.65346534653465,
+        "mean_R_per_signal": 0.27570117919692977,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.26362127842220473
+      },
+      "trail_0.00_0.25": {
+        "signals": 101,
+        "filled": 101,
+        "fill_pct": 100.0,
+        "mean_R_per_signal": 0.5410650456319689,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.4985681293947399
+      },
+      "trail_0.00_0.50": {
+        "signals": 101,
+        "filled": 98,
+        "fill_pct": 97.02970297029702,
+        "mean_R_per_signal": 0.45264321943976077,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.38806791792733913
+      },
+      "trail_0.00_0.75": {
+        "signals": 101,
+        "filled": 97,
+        "fill_pct": 96.03960396039604,
+        "mean_R_per_signal": 0.43401497622616314,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.35771577106654995
+      },
+      "trail_0.00_1.00": {
+        "signals": 101,
+        "filled": 86,
+        "fill_pct": 85.14851485148515,
+        "mean_R_per_signal": 0.44048634188557917,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.3532733638103566
+      },
+      "trail_0.50_0.25": {
+        "signals": 101,
+        "filled": 88,
+        "fill_pct": 87.12871287128714,
+        "mean_R_per_signal": 0.5386398849982311,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.4974680702807724
+      },
+      "trail_0.50_0.50": {
+        "signals": 101,
+        "filled": 85,
+        "fill_pct": 84.15841584158416,
+        "mean_R_per_signal": 0.4812386899612481,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.41519956618367265
+      },
+      "trail_0.50_0.75": {
+        "signals": 101,
+        "filled": 84,
+        "fill_pct": 83.16831683168317,
+        "mean_R_per_signal": 0.3832206478941272,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.316469787358864
+      },
+      "trail_0.50_1.00": {
+        "signals": 101,
+        "filled": 76,
+        "fill_pct": 75.24752475247524,
+        "mean_R_per_signal": 0.37524672048130353,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.3394185301951412
+      },
+      "trail_1.00_0.25": {
+        "signals": 101,
+        "filled": 72,
+        "fill_pct": 71.2871287128713,
+        "mean_R_per_signal": 0.4904400131936702,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.482059098887186
+      },
+      "trail_1.00_0.50": {
+        "signals": 101,
+        "filled": 69,
+        "fill_pct": 68.31683168316832,
+        "mean_R_per_signal": 0.4123675321402901,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.3976381078019093
+      },
+      "trail_1.00_0.75": {
+        "signals": 101,
+        "filled": 64,
+        "fill_pct": 63.366336633663366,
+        "mean_R_per_signal": 0.3248842206020207,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.31092156240207725
+      },
+      "trail_1.00_1.00": {
+        "signals": 101,
+        "filled": 58,
+        "fill_pct": 57.42574257425743,
+        "mean_R_per_signal": 0.26000495363045373,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.2486889711429155
+      },
+      "trail_1.50_0.25": {
+        "signals": 101,
+        "filled": 55,
+        "fill_pct": 54.45544554455446,
+        "mean_R_per_signal": 0.3056731176395629,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.3141068096731954
+      },
+      "trail_1.50_0.50": {
+        "signals": 101,
+        "filled": 51,
+        "fill_pct": 50.495049504950494,
+        "mean_R_per_signal": 0.21628064115951812,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.21491217355264947
+      },
+      "trail_1.50_0.75": {
+        "signals": 101,
+        "filled": 46,
+        "fill_pct": 45.54455445544554,
+        "mean_R_per_signal": 0.17797243913703045,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.18159737536452097
+      },
+      "trail_1.50_1.00": {
+        "signals": 101,
+        "filled": 41,
+        "fill_pct": 40.59405940594059,
+        "mean_R_per_signal": 0.11450531087392668,
+        "funding_covered_signals": 92,
+        "mean_net_R_per_signal": 0.1211748463273603
+      }
+    },
+    "short": {
+      "next_open": {
+        "signals": 78,
+        "filled": 78,
+        "fill_pct": 100.0,
+        "mean_R_per_signal": 0.3586894638879188,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.7970963037125577
+      },
+      "retest_level": {
+        "signals": 78,
+        "filled": 60,
+        "fill_pct": 76.92307692307692,
+        "mean_R_per_signal": 0.2745540382742602,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.5629786812500737
+      },
+      "atr_0.25": {
+        "signals": 78,
+        "filled": 74,
+        "fill_pct": 94.87179487179488,
+        "mean_R_per_signal": 0.31968595018018076,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.7283972594601801
+      },
+      "atr_0.50": {
+        "signals": 78,
+        "filled": 65,
+        "fill_pct": 83.33333333333333,
+        "mean_R_per_signal": 0.22691562800486673,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.5298787692150665
+      },
+      "atr_0.75": {
+        "signals": 78,
+        "filled": 50,
+        "fill_pct": 64.1025641025641,
+        "mean_R_per_signal": -0.007545708703122553,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.17524111449220423
+      },
+      "atr_1.00": {
+        "signals": 78,
+        "filled": 41,
+        "fill_pct": 52.56410256410256,
+        "mean_R_per_signal": 0.054065663007586286,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.2562374208366223
+      },
+      "swing_0.25": {
+        "signals": 78,
+        "filled": 59,
+        "fill_pct": 75.64102564102564,
+        "mean_R_per_signal": 0.1701309174514363,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.4443892189519527
+      },
+      "swing_0.382": {
+        "signals": 78,
+        "filled": 43,
+        "fill_pct": 55.12820512820513,
+        "mean_R_per_signal": 0.21186275937336804,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.40119588451591703
+      },
+      "swing_0.50": {
+        "signals": 78,
+        "filled": 34,
+        "fill_pct": 43.58974358974359,
+        "mean_R_per_signal": 0.07865216384499164,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.24295986616471765
+      },
+      "swing_0.618": {
+        "signals": 78,
+        "filled": 28,
+        "fill_pct": 35.8974358974359,
+        "mean_R_per_signal": 0.08271990196205643,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.21949633197523347
+      },
+      "trail_0.00_0.25": {
+        "signals": 78,
+        "filled": 78,
+        "fill_pct": 100.0,
+        "mean_R_per_signal": 0.3242141783882287,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.7555001831053548
+      },
+      "trail_0.00_0.50": {
+        "signals": 78,
+        "filled": 76,
+        "fill_pct": 97.43589743589743,
+        "mean_R_per_signal": 0.19188604672365087,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.5823352705693636
+      },
+      "trail_0.00_0.75": {
+        "signals": 78,
+        "filled": 72,
+        "fill_pct": 92.3076923076923,
+        "mean_R_per_signal": 0.11966795418659289,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.4294302557357439
+      },
+      "trail_0.00_1.00": {
+        "signals": 78,
+        "filled": 66,
+        "fill_pct": 84.61538461538461,
+        "mean_R_per_signal": 0.0927067904348992,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.3570313514239
+      },
+      "trail_0.50_0.25": {
+        "signals": 78,
+        "filled": 68,
+        "fill_pct": 87.17948717948718,
+        "mean_R_per_signal": 0.21116157371739136,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.6200654441128222
+      },
+      "trail_0.50_0.50": {
+        "signals": 78,
+        "filled": 66,
+        "fill_pct": 84.61538461538461,
+        "mean_R_per_signal": 0.10943246987500026,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.4740958219699694
+      },
+      "trail_0.50_0.75": {
+        "signals": 78,
+        "filled": 62,
+        "fill_pct": 79.48717948717949,
+        "mean_R_per_signal": 0.16438994216327743,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.46863956153690595
+      },
+      "trail_0.50_1.00": {
+        "signals": 78,
+        "filled": 58,
+        "fill_pct": 74.35897435897436,
+        "mean_R_per_signal": 0.15073856998015875,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.4066864323713672
+      },
+      "trail_1.00_0.25": {
+        "signals": 78,
+        "filled": 51,
+        "fill_pct": 65.38461538461539,
+        "mean_R_per_signal": 0.16475443892546437,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.4263666462915766
+      },
+      "trail_1.00_0.50": {
+        "signals": 78,
+        "filled": 49,
+        "fill_pct": 62.82051282051282,
+        "mean_R_per_signal": 0.09282416244578587,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.32178778691876725
+      },
+      "trail_1.00_0.75": {
+        "signals": 78,
+        "filled": 48,
+        "fill_pct": 61.53846153846154,
+        "mean_R_per_signal": 0.15682479763378224,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.34307528622715794
+      },
+      "trail_1.00_1.00": {
+        "signals": 78,
+        "filled": 45,
+        "fill_pct": 57.69230769230769,
+        "mean_R_per_signal": 0.10296415429493329,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.2514945432157702
+      },
+      "trail_1.50_0.25": {
+        "signals": 78,
+        "filled": 41,
+        "fill_pct": 52.56410256410256,
+        "mean_R_per_signal": 0.11917436469240915,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.2949705189607199
+      },
+      "trail_1.50_0.50": {
+        "signals": 78,
+        "filled": 39,
+        "fill_pct": 50.0,
+        "mean_R_per_signal": 0.09319481976153593,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.25237643534784343
+      },
+      "trail_1.50_0.75": {
+        "signals": 78,
+        "filled": 37,
+        "fill_pct": 47.43589743589744,
+        "mean_R_per_signal": 0.1388367649541872,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.28845584461964485
+      },
+      "trail_1.50_1.00": {
+        "signals": 78,
+        "filled": 34,
+        "fill_pct": 43.58974358974359,
+        "mean_R_per_signal": 0.10181030793132093,
+        "funding_covered_signals": 67,
+        "mean_net_R_per_signal": 0.21922082941660062
+      }
+    },
+    "independent": {
+      "next_open": {
+        "signals": 46,
+        "filled": 46,
+        "fill_pct": 100.0,
+        "mean_R_per_signal": 0.49327897654315445,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.7272154742691078
+      },
+      "retest_level": {
+        "signals": 46,
+        "filled": 36,
+        "fill_pct": 78.26086956521739,
+        "mean_R_per_signal": 0.3967297599145881,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.4842256906961753
+      },
+      "atr_0.25": {
+        "signals": 46,
+        "filled": 45,
+        "fill_pct": 97.82608695652173,
+        "mean_R_per_signal": 0.5618522596796698,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.7978196872982279
+      },
+      "atr_0.50": {
+        "signals": 46,
+        "filled": 37,
+        "fill_pct": 80.43478260869566,
+        "mean_R_per_signal": 0.38728328641157317,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.4742368785842429
+      },
+      "atr_0.75": {
+        "signals": 46,
+        "filled": 29,
+        "fill_pct": 63.04347826086956,
+        "mean_R_per_signal": 0.30580739929118717,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.361060741531824
+      },
+      "atr_1.00": {
+        "signals": 46,
+        "filled": 25,
+        "fill_pct": 54.34782608695652,
+        "mean_R_per_signal": 0.37895538989142274,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.4481233121164172
+      },
+      "swing_0.25": {
+        "signals": 46,
+        "filled": 38,
+        "fill_pct": 82.6086956521739,
+        "mean_R_per_signal": 0.4912056168486648,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.587474680783049
+      },
+      "swing_0.382": {
+        "signals": 46,
+        "filled": 30,
+        "fill_pct": 65.21739130434783,
+        "mean_R_per_signal": 0.4271115772072562,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.48152172707296464
+      },
+      "swing_0.50": {
+        "signals": 46,
+        "filled": 23,
+        "fill_pct": 50.0,
+        "mean_R_per_signal": 0.37698205140141783,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.4274532061739034
+      },
+      "swing_0.618": {
+        "signals": 46,
+        "filled": 20,
+        "fill_pct": 43.47826086956522,
+        "mean_R_per_signal": 0.5018373092070059,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.5886471619964188
+      },
+      "trail_0.00_0.25": {
+        "signals": 46,
+        "filled": 46,
+        "fill_pct": 100.0,
+        "mean_R_per_signal": 0.5234888865428785,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.7581671395613225
+      },
+      "trail_0.00_0.50": {
+        "signals": 46,
+        "filled": 43,
+        "fill_pct": 93.47826086956522,
+        "mean_R_per_signal": 0.38790227856145615,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.5863232848413625
+      },
+      "trail_0.00_0.75": {
+        "signals": 46,
+        "filled": 40,
+        "fill_pct": 86.95652173913044,
+        "mean_R_per_signal": 0.3549141340506651,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.44661576167728023
+      },
+      "trail_0.00_1.00": {
+        "signals": 46,
+        "filled": 37,
+        "fill_pct": 80.43478260869566,
+        "mean_R_per_signal": 0.36722993675843557,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.46487840785779994
+      },
+      "trail_0.50_0.25": {
+        "signals": 46,
+        "filled": 40,
+        "fill_pct": 86.95652173913044,
+        "mean_R_per_signal": 0.33684620711097735,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.5520083778785271
+      },
+      "trail_0.50_0.50": {
+        "signals": 46,
+        "filled": 37,
+        "fill_pct": 80.43478260869566,
+        "mean_R_per_signal": 0.2676468160961911,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.4504021392941139
+      },
+      "trail_0.50_0.75": {
+        "signals": 46,
+        "filled": 34,
+        "fill_pct": 73.91304347826087,
+        "mean_R_per_signal": 0.29451284862819593,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.37774607293656826
+      },
+      "trail_0.50_1.00": {
+        "signals": 46,
+        "filled": 32,
+        "fill_pct": 69.56521739130434,
+        "mean_R_per_signal": 0.2731954365246439,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.36350255353297
+      },
+      "trail_1.00_0.25": {
+        "signals": 46,
+        "filled": 30,
+        "fill_pct": 65.21739130434783,
+        "mean_R_per_signal": 0.38003376093355135,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.527633340966416
+      },
+      "trail_1.00_0.50": {
+        "signals": 46,
+        "filled": 28,
+        "fill_pct": 60.869565217391305,
+        "mean_R_per_signal": 0.303447225087646,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.432867230248558
+      },
+      "trail_1.00_0.75": {
+        "signals": 46,
+        "filled": 24,
+        "fill_pct": 52.17391304347826,
+        "mean_R_per_signal": 0.30531344264952387,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.3648370465927714
+      },
+      "trail_1.00_1.00": {
+        "signals": 46,
+        "filled": 24,
+        "fill_pct": 52.17391304347826,
+        "mean_R_per_signal": 0.23820284183795348,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.27745307351385173
+      },
+      "trail_1.50_0.25": {
+        "signals": 46,
+        "filled": 19,
+        "fill_pct": 41.30434782608695,
+        "mean_R_per_signal": 0.32844569403231744,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.48482402047647466
+      },
+      "trail_1.50_0.50": {
+        "signals": 46,
+        "filled": 17,
+        "fill_pct": 36.95652173913044,
+        "mean_R_per_signal": 0.20359905874361,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.34187049900188415
+      },
+      "trail_1.50_0.75": {
+        "signals": 46,
+        "filled": 16,
+        "fill_pct": 34.78260869565217,
+        "mean_R_per_signal": 0.17761279471194827,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.31392717763366673
+      },
+      "trail_1.50_1.00": {
+        "signals": 46,
+        "filled": 15,
+        "fill_pct": 32.608695652173914,
+        "mean_R_per_signal": 0.1874944765955476,
+        "funding_covered_signals": 41,
+        "mean_net_R_per_signal": 0.29669825478938894
+      }
+    },
+    "train_2022_2024": {
+      "next_open": {
+        "signals": 108,
+        "filled": 108,
+        "fill_pct": 100.0,
+        "mean_R_per_signal": 0.46646484340662825,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.6934614907819561
+      },
+      "retest_level": {
+        "signals": 108,
+        "filled": 83,
+        "fill_pct": 76.85185185185185,
+        "mean_R_per_signal": 0.3855934479562611,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.5084078666658717
+      },
+      "atr_0.25": {
+        "signals": 108,
+        "filled": 100,
+        "fill_pct": 92.5925925925926,
+        "mean_R_per_signal": 0.4806894497442424,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.6939759497993294
+      },
+      "atr_0.50": {
+        "signals": 108,
+        "filled": 83,
+        "fill_pct": 76.85185185185185,
+        "mean_R_per_signal": 0.27401662572245594,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.3971695887274583
+      },
+      "atr_0.75": {
+        "signals": 108,
+        "filled": 68,
+        "fill_pct": 62.96296296296296,
+        "mean_R_per_signal": 0.20781767655462124,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.2113030425722201
+      },
+      "atr_1.00": {
+        "signals": 108,
+        "filled": 52,
+        "fill_pct": 48.148148148148145,
+        "mean_R_per_signal": 0.13669714168120498,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.20645647343607793
+      },
+      "swing_0.25": {
+        "signals": 108,
+        "filled": 78,
+        "fill_pct": 72.22222222222223,
+        "mean_R_per_signal": 0.288919449228282,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.3961549786611581
+      },
+      "swing_0.382": {
+        "signals": 108,
+        "filled": 58,
+        "fill_pct": 53.7037037037037,
+        "mean_R_per_signal": 0.3204604677500658,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.39110016914103213
+      },
+      "swing_0.50": {
+        "signals": 108,
+        "filled": 45,
+        "fill_pct": 41.666666666666664,
+        "mean_R_per_signal": 0.21164228268653534,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.24509050379338423
+      },
+      "swing_0.618": {
+        "signals": 108,
+        "filled": 38,
+        "fill_pct": 35.18518518518518,
+        "mean_R_per_signal": 0.18514837582888144,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.2505199017936268
+      },
+      "trail_0.00_0.25": {
+        "signals": 108,
+        "filled": 108,
+        "fill_pct": 100.0,
+        "mean_R_per_signal": 0.47428763893593884,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.6937680207289917
+      },
+      "trail_0.00_0.50": {
+        "signals": 108,
+        "filled": 105,
+        "fill_pct": 97.22222222222223,
+        "mean_R_per_signal": 0.3683469752425282,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.5717616888579101
+      },
+      "trail_0.00_0.75": {
+        "signals": 108,
+        "filled": 103,
+        "fill_pct": 95.37037037037037,
+        "mean_R_per_signal": 0.39008626833107635,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.5132586608954167
+      },
+      "trail_0.00_1.00": {
+        "signals": 108,
+        "filled": 91,
+        "fill_pct": 84.25925925925925,
+        "mean_R_per_signal": 0.28889753678115754,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.35065743216556444
+      },
+      "trail_0.50_0.25": {
+        "signals": 108,
+        "filled": 95,
+        "fill_pct": 87.96296296296296,
+        "mean_R_per_signal": 0.37481707244136886,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.5541396882671618
+      },
+      "trail_0.50_0.50": {
+        "signals": 108,
+        "filled": 92,
+        "fill_pct": 85.18518518518519,
+        "mean_R_per_signal": 0.32827326758195535,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.4845020443769311
+      },
+      "trail_0.50_0.75": {
+        "signals": 108,
+        "filled": 90,
+        "fill_pct": 83.33333333333333,
+        "mean_R_per_signal": 0.3466867479106137,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.46169707552664346
+      },
+      "trail_0.50_1.00": {
+        "signals": 108,
+        "filled": 82,
+        "fill_pct": 75.92592592592592,
+        "mean_R_per_signal": 0.2611774198719833,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.3561739542295047
+      },
+      "trail_1.00_0.25": {
+        "signals": 108,
+        "filled": 80,
+        "fill_pct": 74.07407407407408,
+        "mean_R_per_signal": 0.3117024718813224,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.466313176122746
+      },
+      "trail_1.00_0.50": {
+        "signals": 108,
+        "filled": 77,
+        "fill_pct": 71.29629629629629,
+        "mean_R_per_signal": 0.2691354128402467,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.41562719658292563
+      },
+      "trail_1.00_0.75": {
+        "signals": 108,
+        "filled": 73,
+        "fill_pct": 67.5925925925926,
+        "mean_R_per_signal": 0.29801160271110483,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.4105423824138651
+      },
+      "trail_1.00_1.00": {
+        "signals": 108,
+        "filled": 65,
+        "fill_pct": 60.18518518518518,
+        "mean_R_per_signal": 0.20499352331470064,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.28201189474722377
+      },
+      "trail_1.50_0.25": {
+        "signals": 108,
+        "filled": 61,
+        "fill_pct": 56.48148148148148,
+        "mean_R_per_signal": 0.23473559418951698,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.3450905249915805
+      },
+      "trail_1.50_0.50": {
+        "signals": 108,
+        "filled": 58,
+        "fill_pct": 53.7037037037037,
+        "mean_R_per_signal": 0.17859079639565448,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.27681988363988075
+      },
+      "trail_1.50_0.75": {
+        "signals": 108,
+        "filled": 53,
+        "fill_pct": 49.074074074074076,
+        "mean_R_per_signal": 0.2036675604569843,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.29497309226868024
+      },
+      "trail_1.50_1.00": {
+        "signals": 108,
+        "filled": 46,
+        "fill_pct": 42.592592592592595,
+        "mean_R_per_signal": 0.13684014207122344,
+        "funding_covered_signals": 88,
+        "mean_net_R_per_signal": 0.202440436163983
+      }
+    },
+    "validation_2025": {
+      "next_open": {
+        "signals": 42,
+        "filled": 42,
+        "fill_pct": 100.0,
+        "mean_R_per_signal": 0.25205432732572347,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.35906482661777567
+      },
+      "retest_level": {
+        "signals": 42,
+        "filled": 35,
+        "fill_pct": 83.33333333333333,
+        "mean_R_per_signal": 0.11473565847080794,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.21253316994593824
+      },
+      "atr_0.25": {
+        "signals": 42,
+        "filled": 41,
+        "fill_pct": 97.61904761904762,
+        "mean_R_per_signal": 0.21632578671316985,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.3292477181059604
+      },
+      "atr_0.50": {
+        "signals": 42,
+        "filled": 36,
+        "fill_pct": 85.71428571428571,
+        "mean_R_per_signal": 0.04744547614943257,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.13049108381632163
+      },
+      "atr_0.75": {
+        "signals": 42,
+        "filled": 29,
+        "fill_pct": 69.04761904761905,
+        "mean_R_per_signal": 0.03675366692540332,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.09067445124528209
+      },
+      "atr_1.00": {
+        "signals": 42,
+        "filled": 23,
+        "fill_pct": 54.76190476190476,
+        "mean_R_per_signal": 0.20044875542693946,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.3325887174107431
+      },
+      "swing_0.25": {
+        "signals": 42,
+        "filled": 32,
+        "fill_pct": 76.19047619047619,
+        "mean_R_per_signal": 0.03057462911086553,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.11417702522541695
+      },
+      "swing_0.382": {
+        "signals": 42,
+        "filled": 26,
+        "fill_pct": 61.904761904761905,
+        "mean_R_per_signal": 0.07065291283211989,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.1323548042836378
+      },
+      "swing_0.50": {
+        "signals": 42,
+        "filled": 22,
+        "fill_pct": 52.38095238095238,
+        "mean_R_per_signal": 0.013847801288560906,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.04852009932026281
+      },
+      "swing_0.618": {
+        "signals": 42,
+        "filled": 15,
+        "fill_pct": 35.714285714285715,
+        "mean_R_per_signal": 0.16298013849164825,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.25058971798881324
+      },
+      "trail_0.00_0.25": {
+        "signals": 42,
+        "filled": 42,
+        "fill_pct": 100.0,
+        "mean_R_per_signal": 0.1881663525066555,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.3052482489784972
+      },
+      "trail_0.00_0.50": {
+        "signals": 42,
+        "filled": 42,
+        "fill_pct": 100.0,
+        "mean_R_per_signal": 0.07355760368926184,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.15643749880445354
+      },
+      "trail_0.00_0.75": {
+        "signals": 42,
+        "filled": 41,
+        "fill_pct": 97.61904761904762,
+        "mean_R_per_signal": -0.020765222854504276,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.11233241006153728
+      },
+      "trail_0.00_1.00": {
+        "signals": 42,
+        "filled": 36,
+        "fill_pct": 85.71428571428571,
+        "mean_R_per_signal": 0.23140914556199038,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.35568862818344404
+      },
+      "trail_0.50_0.25": {
+        "signals": 42,
+        "filled": 37,
+        "fill_pct": 88.0952380952381,
+        "mean_R_per_signal": 0.20578083032177885,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.34157916534253324
+      },
+      "trail_0.50_0.50": {
+        "signals": 42,
+        "filled": 37,
+        "fill_pct": 88.0952380952381,
+        "mean_R_per_signal": 0.04310435169761092,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.15573001407743478
+      },
+      "trail_0.50_0.75": {
+        "signals": 42,
+        "filled": 36,
+        "fill_pct": 85.71428571428571,
+        "mean_R_per_signal": 0.008249602238396783,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.14127324173252964
+      },
+      "trail_0.50_1.00": {
+        "signals": 42,
+        "filled": 32,
+        "fill_pct": 76.19047619047619,
+        "mean_R_per_signal": 0.16334169713739943,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.293844143897889
+      },
+      "trail_1.00_0.25": {
+        "signals": 42,
+        "filled": 23,
+        "fill_pct": 54.76190476190476,
+        "mean_R_per_signal": 0.2648958414852461,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.2952288793843984
+      },
+      "trail_1.00_0.50": {
+        "signals": 42,
+        "filled": 23,
+        "fill_pct": 54.76190476190476,
+        "mean_R_per_signal": 0.07268894431366853,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.09401703577234086
+      },
+      "trail_1.00_0.75": {
+        "signals": 42,
+        "filled": 22,
+        "fill_pct": 52.38095238095238,
+        "mean_R_per_signal": 0.014011586124109436,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.05837010446400859
+      },
+      "trail_1.00_1.00": {
+        "signals": 42,
+        "filled": 21,
+        "fill_pct": 50.0,
+        "mean_R_per_signal": -0.01951176975516131,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.03174229032678962
+      },
+      "trail_1.50_0.25": {
+        "signals": 42,
+        "filled": 18,
+        "fill_pct": 42.857142857142854,
+        "mean_R_per_signal": 0.14708003846592407,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.18000519135530096
+      },
+      "trail_1.50_0.50": {
+        "signals": 42,
+        "filled": 18,
+        "fill_pct": 42.857142857142854,
+        "mean_R_per_signal": 0.07007036213908435,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.10170701261183564
+      },
+      "trail_1.50_0.75": {
+        "signals": 42,
+        "filled": 18,
+        "fill_pct": 42.857142857142854,
+        "mean_R_per_signal": 0.009365881149716985,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.055659047035153814
+      },
+      "trail_1.50_1.00": {
+        "signals": 42,
+        "filled": 18,
+        "fill_pct": 42.857142857142854,
+        "mean_R_per_signal": 0.006968080206330382,
+        "funding_covered_signals": 42,
+        "mean_net_R_per_signal": 0.053136009590943854
+      }
+    },
+    "test_2026": {
+      "next_open": {
+        "signals": 29,
+        "filled": 29,
+        "fill_pct": 100.0,
+        "mean_R_per_signal": 0.722757116817185,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.7854299545395903
+      },
+      "retest_level": {
+        "signals": 29,
+        "filled": 22,
+        "fill_pct": 75.86206896551724,
+        "mean_R_per_signal": 0.5972004138209653,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.5871566674628832
+      },
+      "atr_0.25": {
+        "signals": 29,
+        "filled": 26,
+        "fill_pct": 89.65517241379311,
+        "mean_R_per_signal": 0.5851173153228557,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.6412608101024794
+      },
+      "atr_0.50": {
+        "signals": 29,
+        "filled": 23,
+        "fill_pct": 79.3103448275862,
+        "mean_R_per_signal": 0.5709349670014442,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.5637149052024159
+      },
+      "atr_0.75": {
+        "signals": 29,
+        "filled": 19,
+        "fill_pct": 65.51724137931035,
+        "mean_R_per_signal": 0.33788914005826826,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.32850977118050134
+      },
+      "atr_1.00": {
+        "signals": 29,
+        "filled": 16,
+        "fill_pct": 55.172413793103445,
+        "mean_R_per_signal": 0.2852433299283696,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.24482901111371136
+      },
+      "swing_0.25": {
+        "signals": 29,
+        "filled": 22,
+        "fill_pct": 75.86206896551724,
+        "mean_R_per_signal": 0.55519986238021,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.5462364722414202
+      },
+      "swing_0.382": {
+        "signals": 29,
+        "filled": 16,
+        "fill_pct": 55.172413793103445,
+        "mean_R_per_signal": 0.42099006200570477,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.40830026556499327
+      },
+      "swing_0.50": {
+        "signals": 29,
+        "filled": 13,
+        "fill_pct": 44.827586206896555,
+        "mean_R_per_signal": 0.36806889137125265,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.3205332296811788
+      },
+      "swing_0.618": {
+        "signals": 29,
+        "filled": 10,
+        "fill_pct": 34.48275862068966,
+        "mean_R_per_signal": 0.2571303808883408,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.22030663254531616
+      },
+      "trail_0.00_0.25": {
+        "signals": 29,
+        "filled": 29,
+        "fill_pct": 100.0,
+        "mean_R_per_signal": 0.7175939211293024,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.7798195824526445
+      },
+      "trail_0.00_0.50": {
+        "signals": 29,
+        "filled": 27,
+        "fill_pct": 93.10344827586206,
+        "mean_R_per_signal": 0.6142477285075366,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.6149416554544623
+      },
+      "trail_0.00_0.75": {
+        "signals": 29,
+        "filled": 25,
+        "fill_pct": 86.20689655172414,
+        "mean_R_per_signal": 0.41077363467343586,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.40679154107021354
+      },
+      "trail_0.00_1.00": {
+        "signals": 29,
+        "filled": 25,
+        "fill_pct": 86.20689655172414,
+        "mean_R_per_signal": 0.3724183482205869,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.36639564143723424
+      },
+      "trail_0.50_0.25": {
+        "signals": 29,
+        "filled": 24,
+        "fill_pct": 82.75862068965517,
+        "mean_R_per_signal": 0.7500066357791497,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.8345113692928795
+      },
+      "trail_0.50_0.50": {
+        "signals": 29,
+        "filled": 22,
+        "fill_pct": 75.86206896551724,
+        "mean_R_per_signal": 0.6854118850408706,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.7167565401539181
+      },
+      "trail_0.50_0.75": {
+        "signals": 29,
+        "filled": 20,
+        "fill_pct": 68.96551724137932,
+        "mean_R_per_signal": 0.4737603054373634,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.4810776641681834
+      },
+      "trail_0.50_1.00": {
+        "signals": 29,
+        "filled": 20,
+        "fill_pct": 68.96551724137932,
+        "mean_R_per_signal": 0.5031039517627266,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.509990818307822
+      },
+      "trail_1.00_0.25": {
+        "signals": 29,
+        "filled": 20,
+        "fill_pct": 68.96551724137932,
+        "mean_R_per_signal": 0.6067515607994399,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.67175275745553
+      },
+      "trail_1.00_0.50": {
+        "signals": 29,
+        "filled": 18,
+        "fill_pct": 62.06896551724138,
+        "mean_R_per_signal": 0.5782705230696511,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.6075372013654236
+      },
+      "trail_1.00_0.75": {
+        "signals": 29,
+        "filled": 17,
+        "fill_pct": 58.62068965517241,
+        "mean_R_per_signal": 0.4231689926285237,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.4486742716655932
+      },
+      "trail_1.00_1.00": {
+        "signals": 29,
+        "filled": 17,
+        "fill_pct": 58.62068965517241,
+        "mean_R_per_signal": 0.44730683322102505,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.4682516141077232
+      },
+      "trail_1.50_0.25": {
+        "signals": 29,
+        "filled": 17,
+        "fill_pct": 58.62068965517241,
+        "mean_R_per_signal": 0.29792343239886615,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.37009196634898234
+      },
+      "trail_1.50_0.50": {
+        "signals": 29,
+        "filled": 14,
+        "fill_pct": 48.275862068965516,
+        "mean_R_per_signal": 0.23733722337720367,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.2775619601773331
+      },
+      "trail_1.50_0.75": {
+        "signals": 29,
+        "filled": 12,
+        "fill_pct": 41.37931034482759,
+        "mean_R_per_signal": 0.22120760281462956,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.26683406992868314
+      },
+      "trail_1.50_1.00": {
+        "signals": 29,
+        "filled": 11,
+        "fill_pct": 37.93103448275862,
+        "mean_R_per_signal": 0.1529257139500558,
+        "funding_covered_signals": 29,
+        "mean_net_R_per_signal": 0.1996348499234222
+      }
+    }
+  },
+  "corrections": {
+    "long": {
+      "n": 101,
+      "statuses": {
+        "resumed": 85,
+        "structure_broken": 9,
+        "unresolved": 7
+      },
+      "successful_corrections": 85,
+      "retested_level20": 70,
+      "extension_from_level_atr": {
+        "q25": 0.6055690727223602,
+        "median": 0.9101991060544532,
+        "q75": 1.2914046121593228,
+        "n": 85
+      },
+      "extension_from_level_pct": {
+        "q25": 0.7058101472995066,
+        "median": 1.2112711972459371,
+        "q75": 1.6912297656438822,
+        "n": 85
+      },
+      "sessions_until_first_pullback": {
+        "q25": 1.0,
+        "median": 1.0,
+        "q75": 1.0,
+        "n": 85
+      },
+      "correction_depth_atr": {
+        "q25": 0.6087575649697403,
+        "median": 0.8897742363877819,
+        "q75": 1.2732534105002111,
+        "n": 85
+      },
+      "correction_depth_pct": {
+        "q25": 0.7342914087905201,
+        "median": 1.2072434607645857,
+        "q75": 1.8207462495191715,
+        "n": 85
+      },
+      "retracement_fraction": {
+        "q25": 0.20149253731343253,
+        "median": 0.3347639484978548,
+        "q75": 0.5927977839335182,
+        "n": 85
+      },
+      "correction_to_low_sessions": {
+        "q25": 0.0,
+        "median": 1.0,
+        "q75": 1.0,
+        "n": 85
+      },
+      "correction_to_recovery_sessions": {
+        "q25": 1.0,
+        "median": 1.0,
+        "q75": 4.0,
+        "n": 85
+      }
+    },
+    "short": {
+      "n": 78,
+      "statuses": {
+        "resumed": 58,
+        "structure_broken": 14,
+        "unresolved": 6
+      },
+      "successful_corrections": 58,
+      "retested_level20": 54,
+      "extension_from_level_atr": {
+        "q25": 0.5528028757408062,
+        "median": 0.9687195330759713,
+        "q75": 1.4428120609684654,
+        "n": 58
+      },
+      "extension_from_level_pct": {
+        "q25": 0.8126956436159055,
+        "median": 1.3353742550121068,
+        "q75": 2.3071324495903296,
+        "n": 58
+      },
+      "sessions_until_first_pullback": {
+        "q25": 1.0,
+        "median": 1.0,
+        "q75": 1.0,
+        "n": 58
+      },
+      "correction_depth_atr": {
+        "q25": 0.6501608757517088,
+        "median": 0.929653552285949,
+        "q75": 1.4708066987279695,
+        "n": 58
+      },
+      "correction_depth_pct": {
+        "q25": 0.8460914319966637,
+        "median": 1.6032884972733523,
+        "q75": 2.388529056663548,
+        "n": 58
+      },
+      "retracement_fraction": {
+        "q25": 0.25752855265817587,
+        "median": 0.31795455951178314,
+        "q75": 0.5405143447919396,
+        "n": 58
+      },
+      "correction_to_low_sessions": {
+        "q25": 0.0,
+        "median": 1.0,
+        "q75": 1.0,
+        "n": 58
+      },
+      "correction_to_recovery_sessions": {
+        "q25": 1.0,
+        "median": 2.0,
+        "q75": 4.0,
+        "n": 58
+      }
+    }
+  }
+}
