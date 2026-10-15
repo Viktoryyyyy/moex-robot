@@ -434,14 +434,19 @@ def _fetch_frames(from_date: str, target_date: str, timeout: float) -> tuple[pd.
         timeout,
         True,
     )
-    futoi = source.fetch_paged_frame(
-        APIM_BASE_URL,
-        FUTOI_PATH,
-        {"from": from_date, "till": target_date, "latest": 0},
-        "futoi",
-        timeout,
-        True,
-    )
+    try:
+        futoi = source.fetch_paged_frame(
+            APIM_BASE_URL,
+            FUTOI_PATH,
+            {"from": from_date, "till": target_date, "latest": 0},
+            "futoi",
+            timeout,
+            True,
+        )
+    except Exception:
+        # FUTOI is an optional one-point confirmation. Its transport failure must
+        # never be converted to zero or suppress an otherwise valid price signal.
+        futoi = pd.DataFrame()
     return tradestats, futoi
 
 
@@ -468,11 +473,12 @@ def run_monitor(
         raise ReversalMonitorError("state_root must be absolute")
     _load_env_file(env_file)
     fetched = tradestats_frame is None
-    if fetched:
-        start = (date.fromisoformat(target_date) - timedelta(days=int(rules["lookback_calendar_days"]))).isoformat()
-        tradestats_frame, futoi_frame = _fetch_frames(start, target_date, timeout)
-    assert tradestats_frame is not None
     try:
+        if fetched:
+            start = (date.fromisoformat(target_date) - timedelta(days=int(rules["lookback_calendar_days"]))).isoformat()
+            tradestats_frame, futoi_frame = _fetch_frames(start, target_date, timeout)
+        if tradestats_frame is None:
+            raise ReversalMonitorError("TradeStats source returned no frame")
         normalized = normalize_tradestats(tradestats_frame)
         if target_date not in set(normalized["trade_date"]):
             result: dict[str, object] = {
@@ -530,7 +536,7 @@ def run_monitor(
                 "execution_authority": False,
             }
             result["notification"] = render_notification(result)
-    except ReversalMonitorError as exc:
+    except Exception as exc:
         result = {
             "schema_version": SCHEMA_VERSION,
             "project": PROJECT,
@@ -541,7 +547,11 @@ def run_monitor(
             "status": "DATA_BLOCKED",
             "notify": False,
             "notification": None,
-            "data_quality": {"status": "BLOCKED", "error_class": exc.__class__.__name__, "error": str(exc)},
+            "data_quality": {
+                "status": "BLOCKED",
+                "error_class": exc.__class__.__name__,
+                "error": str(exc)[:500],
+            },
             "execution_authority": False,
         }
     history_path = root / "history" / (target_date + ".json")

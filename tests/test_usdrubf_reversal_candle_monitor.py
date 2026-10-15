@@ -117,3 +117,22 @@ def test_monitor_persists_data_blocked_and_never_notifies(tmp_path: Path) -> Non
     current = json.loads((tmp_path / "state" / "current.json").read_text(encoding="utf-8"))
     assert current["status"] == "DATA_BLOCKED"
     assert (tmp_path / "state" / "history" / "2026-10-06.json").is_file()
+
+
+def test_optional_futoi_fetch_failure_does_not_replace_tradestats(monkeypatch) -> None:
+    expected = pd.DataFrame({"tradedate": ["2026-10-06"]})
+    calls = []
+
+    class FakeSource:
+        @staticmethod
+        def fetch_paged_frame(_base, _path, _params, block, _timeout, _apim):
+            calls.append(block)
+            if block == "futoi":
+                raise RuntimeError("optional source unavailable")
+            return expected
+
+    monkeypatch.setitem(__import__("sys").modules, "moex_data.futures.liquidity_history_metrics_probe", FakeSource)
+    tradestats, futoi = monitor._fetch_frames("2026-01-01", "2026-10-06", 1.0)
+    assert calls == ["tradestats", "futoi"]
+    assert tradestats.equals(expected)
+    assert futoi.empty
