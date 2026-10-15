@@ -53,8 +53,17 @@ def _without_retained_source_identifier(text: str) -> str:
         elif isinstance(node, ast.ImportFrom):
             assert node.module in allowed_imports
             if node.module == "moex_data.futures":
-                assert [(alias.name, alias.asname) for alias in node.names] == [
-                    ("refresh_forts_raw_5m_incremental", "observed")]
+                assert [(alias.name, alias.asname) for alias in node.names] in [
+                    [("refresh_forts_raw_5m_incremental", "observed")],
+                    [("raw_admission_versions", "versions")]]
+        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "versions":
+            assert node.attr in {"admission_reports", "sha256", "read_frame"}
+            parent = parents.get(node)
+            assert isinstance(parent, ast.Call) and parent.func is node
+        elif isinstance(node, ast.Name) and node.id == "versions":
+            parent = parents.get(node)
+            assert isinstance(node.ctx, ast.Load)
+            assert isinstance(parent, ast.Attribute) and parent.value is node
         elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "observed":
             assert node.attr in allowed_observed
             if node.attr == "observed_date_source_endpoint":
@@ -78,6 +87,9 @@ def _without_retained_source_identifier(text: str) -> str:
     "observed = object()\n",
     "observed.observed_date_source_endpoint.__globals__['fetch_observed_tradestats_dates']('2026-10-01', '2026-10-02')\n",
     "formatter = observed.observed_date_source_endpoint\n",
+    "reader = versions.read_frame\n",
+    "versions.read_frame.__globals__['os'].system('false')\n",
+    "versions.os.system('false')\n",
 ])
 def test_retained_source_identifier_does_not_allow_network_dependency(network_dependency: str) -> None:
     text = Path("src/moex_data/futures/date_source_provenance.py").read_text(encoding="utf-8")

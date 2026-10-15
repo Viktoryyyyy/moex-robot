@@ -41,3 +41,11 @@ compatibility_rules:
 - canonical Stage 2 ingestion contracts live in YAML and are referenced from configs/datasets/futures_data_lake.v1.yaml.
 - this file exists only to avoid breaking legacy runtime prerequisite checks while scheduler and research remain blocked.
 - it does not authorize canonical ingestion, accepted pointer creation, scheduler enablement, or new legacy-root onboarding.
+
+recovery_version_fields:
+- raw_partition_versions maps every distinct partition_paths_created logical path under futures/raw_5m to the SHA-256 of the exact published parquet bytes.
+- admission_version_scope must equal publication_bytes_not_historical_PIT for a versioned cohort.
+- Existing run_id, ingest_ts, instrument_summaries, membership and quality validation remain mandatory; byte versioning does not waive any admission check.
+- Immutable receipts under futures/raw_5m_admission/receipts/{sha256}.json bind schema_version=futures_raw_5m_admission_versions.v1, quality_path, quality_sha256, manifest_path and manifest_sha256. Objects and receipts are content-addressed and verified on read.
+- New producer publications archive previous raw, quality and manifest bytes before replacing current views. Repeating an identical publication compares existing bytes and creates no conflicting immutable version.
+- These additive fields support the explicitly authorized existing-scope recovery futures_daily_history_expiry_recovery_v1, without changing the general compatibility-only status of this contract.
