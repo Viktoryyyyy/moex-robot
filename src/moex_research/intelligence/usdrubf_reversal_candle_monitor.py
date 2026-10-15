@@ -423,10 +423,19 @@ def render_notification(result: Mapping[str, object]) -> str | None:
     )
 
 
-def _fetch_frames(from_date: str, target_date: str, timeout: float) -> tuple[pd.DataFrame, pd.DataFrame]:
-    from moex_data.futures import liquidity_history_metrics_probe as source
+def _fetch_frames(
+    from_date: str,
+    target_date: str,
+    timeout: float,
+    *,
+    fetch_fn=None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if fetch_fn is None:
+        from moex_data.futures import liquidity_history_metrics_probe as source
 
-    tradestats = source.fetch_paged_frame(
+        fetch_fn = source.fetch_paged_frame
+
+    tradestats = fetch_fn(
         APIM_BASE_URL,
         TRADESTATS_PATH,
         {"from": from_date, "till": target_date},
@@ -435,7 +444,7 @@ def _fetch_frames(from_date: str, target_date: str, timeout: float) -> tuple[pd.
         True,
     )
     try:
-        futoi = source.fetch_paged_frame(
+        futoi = fetch_fn(
             APIM_BASE_URL,
             FUTOI_PATH,
             {"from": from_date, "till": target_date, "latest": 0},
