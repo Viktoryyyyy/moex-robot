@@ -1,0 +1,48 @@
+{
+  "schema_version": "usdrubf_reversal_candle_rules.v1",
+  "instrument": "USDRUBF",
+  "timeframe": "5m",
+  "direction": "bearish_reversal_after_high",
+  "lookback_calendar_days": 180,
+  "minimum_intraday_rows": 60,
+  "new_high_lookback_sessions": 5,
+  "alert_score_threshold": 10,
+  "watch_score_threshold": 7,
+  "mandatory_gates": {
+    "new_5_session_high": true,
+    "price_rejection": {
+      "upper_wick_fraction_min": 0.4,
+      "close_location_max": 0.5
+    },
+    "intraday_confirmation": {
+      "break_previous_6_bar_low_with_negative_delta_within_minutes": 60,
+      "or_close_below_vwap_and_peak_to_close_atr_min": 0.5
+    }
+  },
+  "score": {
+    "upper_wick_fraction_gte_0_4": 2,
+    "close_location_lte_0_35": 2,
+    "close_below_session_vwap": 1,
+    "break_previous_6_bar_low_with_negative_delta_within_60m": 2,
+    "peak_to_close_atr_gte_0_5": 1,
+    "relative_volume_gte_1_3": 1,
+    "volume_vs_previous_gte_1_25": 1,
+    "daily_flow_pct_lte_minus_2": 1,
+    "daily_oi_pct_lte_minus_1": 1,
+    "post_peak_60m_flow_pct_lte_minus_5": 1,
+    "fiz_long_change_pp_lte_minus_1": 1,
+    "previous_session_up_and_close_location_gte_0_75": 1
+  },
+  "futoi_policy": {
+    "optional": true,
+    "groups": ["FIZ", "YUR"],
+    "pair_balance": "exact_zero",
+    "maximum_endpoint_age_minutes": 10,
+    "missing_or_unbalanced": "omit_without_zero_fill"
+  },
+  "notification_policy": {
+    "notify_statuses": ["ALERT"],
+    "suppress_statuses": ["WATCH", "NO_ALERT", "NO_SESSION", "DATA_BLOCKED"],
+    "execution_authority": false
+  }
+}
