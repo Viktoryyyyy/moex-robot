@@ -93,3 +93,10 @@ silent. The artifact is the server-to-chat handoff and retains
 The systemd timer `moex-usdrubf-reversal-candle.timer` runs every calendar day
 at 00:20 Europe/Moscow. It fetches the prior calendar date directly from MOEX,
 so it does not depend on the Stage 10 refresh scheduled for 00:30.
+
+Two deployment variants are versioned. `ops/systemd/` is the system-manager
+variant and declares `User=trader`. `ops/systemd/user/` is the user-manager
+variant and deliberately omits `User=` and owner-changing commands. The latter
+is canonical on hosts where `trader` has linger enabled but no passwordless
+sudo. Do not install the system-manager service unchanged in a user manager:
+it fails closed with `216/GROUP`.
