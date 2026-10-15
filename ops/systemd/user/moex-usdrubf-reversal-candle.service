@@ -1,0 +1,13 @@
+[Unit]
+Description=MOEX Bot completed-session USDRUBF reversal-candle monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/trader/moex_bot/moex-robot
+Environment=MOEX_DATA_ROOT=/home/trader/moex_bot/data
+Environment=PYTHONPATH=src
+Environment=MOEX_ENV_FILE=/home/trader/moex_bot/.env
+ExecStartPre=/usr/bin/install -d -m 0750 /home/trader/moex_bot/data/locks
+ExecStart=/usr/bin/flock -n /home/trader/moex_bot/data/locks/moex-usdrubf-reversal-candle.lock /bin/bash -lc 'trade_date="$(TZ=Europe/Moscow date -d yesterday +%%F)"; exec /home/trader/moex_bot/venv/bin/python -m moex_research.intelligence.usdrubf_reversal_candle_monitor --trade-date "$trade_date" --repo-root /home/trader/moex_bot/moex-robot --state-root /home/trader/moex_bot/data/state/usdrubf_reversal_candle --env-file "$MOEX_ENV_FILE"'
