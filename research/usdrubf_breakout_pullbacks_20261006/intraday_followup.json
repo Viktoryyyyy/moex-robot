@@ -1,0 +1,25 @@
+{
+  "snapshot_at_utc": "2026-10-06T13:11:27.496129+00:00",
+  "last_bar_time_moscow": "16:10:00",
+  "date": "2026-10-06",
+  "partial": true,
+  "last_price": 85.85,
+  "daily_high": 86.29,
+  "daily_low": 85.54,
+  "correction_low_after_1140": 85.66,
+  "zone_examined": [
+    86.1,
+    86.2
+  ],
+  "status": "Price returned below the examined resistance zone; breakout not held at snapshot time.",
+  "hypothetical_add_on_pullback_zone": [
+    85.65,
+    85.75
+  ],
+  "local_invalidation_level": 85.54,
+  "illustrative_entry": 85.7,
+  "illustrative_stop": 85.49,
+  "illustrative_target": 86.29,
+  "intraday_rules_backtested": false,
+  "new_raw_bars_added_to_historical_study": false
+}
