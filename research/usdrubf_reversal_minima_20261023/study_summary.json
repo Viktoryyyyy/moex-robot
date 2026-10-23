@@ -1,0 +1,69 @@
+{
+  "schema_version": "usdrubf_reversal_minima_summary.v1",
+  "analysis_end": "2026-10-06",
+  "timeframe": "5m",
+  "sample": {
+    "L3plus": 14,
+    "L4plus": 5,
+    "L5plus": 2,
+    "matched_L1_L2_controls": 28,
+    "modern_L3plus_from_2023_06_01": 11,
+    "modern_controls_from_2023_06_01": 22
+  },
+  "session_medians": {
+    "L3plus": {
+      "relative_volume_20": 1.8069,
+      "volume_vs_previous": 1.2929,
+      "close_location": 0.6582,
+      "lower_wick_fraction": 0.3241,
+      "low_to_close_atr20": 0.6849,
+      "daily_flow_pct": -2.6438,
+      "daily_oi_pct": 0.4160,
+      "fiz_long_change_pp": -0.3029,
+      "next_session_return_pct": 0.2844
+    },
+    "controls": {
+      "relative_volume_20": 1.2145,
+      "volume_vs_previous": 1.0918,
+      "close_location": 0.5980,
+      "lower_wick_fraction": 0.2958,
+      "low_to_close_atr20": 0.4989,
+      "daily_flow_pct": -1.9753,
+      "daily_oi_pct": 0.9564,
+      "fiz_long_change_pp": 0.5805,
+      "next_session_return_pct": 0.4541
+    },
+    "L4plus": {
+      "daily_oi_pct": -3.7560
+    },
+    "L5plus": {
+      "relative_volume_20": 3.6279,
+      "lower_wick_fraction": 0.8287,
+      "close_location": 0.9806,
+      "daily_oi_pct": -7.5638
+    }
+  },
+  "rule_diagnostic": {
+    "mandatory_all": {
+      "L3plus": 5,
+      "controls": 4
+    },
+    "alert_score_gte_10": {
+      "L3plus": 4,
+      "controls": 1,
+      "L4plus": 2,
+      "L5plus": 2,
+      "modern_L3plus": 2,
+      "modern_controls": 1
+    },
+    "alert_event_dates": [
+      "2022-06-29",
+      "2022-09-30",
+      "2025-03-18",
+      "2026-04-28"
+    ],
+    "alert_control_dates": ["2023-12-29"]
+  },
+  "futoi_conclusion": "No universal bullish FUTOI confirmation; retain as context only and do not score.",
+  "authority": "research_only_no_execution"
+}

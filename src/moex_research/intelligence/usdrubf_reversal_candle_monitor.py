@@ -14,13 +14,13 @@ import pandas as pd
 
 
 PROJECT: Final[str] = "MOEX_Bot"
-SCHEMA_VERSION: Final[str] = "usdrubf_reversal_candle_monitor.v1"
-RULES_SCHEMA_VERSION: Final[str] = "usdrubf_reversal_candle_rules.v1"
+SCHEMA_VERSION: Final[str] = "usdrubf_reversal_candle_monitor.v2"
+RULES_SCHEMA_VERSION: Final[str] = "usdrubf_reversal_candle_rules.v2"
 MARKET_TZ: Final[ZoneInfo] = ZoneInfo("Europe/Moscow")
 APIM_BASE_URL: Final[str] = "https://apim.moex.com"
 TRADESTATS_PATH: Final[str] = "/iss/datashop/algopack/fo/tradestats/USDRUBF.json"
 FUTOI_PATH: Final[str] = "/iss/analyticalproducts/futoi/securities/usdrubf.json"
-DEFAULT_RULES_PATH: Final[str] = "configs/monitoring/usdrubf_reversal_candle_v1.json"
+DEFAULT_RULES_PATH: Final[str] = "configs/monitoring/usdrubf_reversal_candle_v2.json"
 DEFAULT_ENV_PATH: Final[str] = "/home/trader/moex_bot/.env"
 
 
@@ -178,34 +178,66 @@ def intraday_features(day: pd.DataFrame) -> dict[str, object]:
     peak_index = int(part.index[part["pr_high"].eq(part["pr_high"].max())][0])
     peak = part.iloc[peak_index]
     peak_ts = pd.Timestamp(peak["ts"])
-    post60 = _complete_window(part, peak_ts, peak_ts + pd.Timedelta(minutes=60), 12)
-    break_record: dict[str, object] | None = None
-    for index in range(max(peak_index + 1, 6), len(part.index)):
-        row = part.iloc[index]
-        if pd.Timestamp(row["ts"]) > peak_ts + pd.Timedelta(minutes=60):
-            break
-        previous = part.iloc[index - 6:index]
-        timestamps = part.iloc[index - 6:index + 1]["ts"]
-        if not bool(timestamps.diff().dropna().eq(pd.Timedelta(minutes=5)).all()):
-            continue
-        if float(row["pr_close"]) < float(previous["pr_low"].min()) and float(row["delta"]) < 0:
-            break_record = {
-                "time": pd.Timestamp(row["ts"]).time().isoformat(),
-                "delay_minutes": float((pd.Timestamp(row["ts"]) - peak_ts).total_seconds() / 60),
-                "close": float(row["pr_close"]),
-                "publication_ts": pd.Timestamp(row["publication_ts"]).isoformat(),
-            }
-            break
-    post60_flow: float | None = None
-    if post60 is not None and float(post60["vol"].sum()) > 0:
-        post60_flow = float(100 * post60["delta"].sum() / post60["vol"].sum())
+    trough_index = int(part.index[part["pr_low"].eq(part["pr_low"].min())][0])
+    trough = part.iloc[trough_index]
+    trough_ts = pd.Timestamp(trough["ts"])
+
+    def transition(
+        extreme_index: int,
+        extreme_ts: pd.Timestamp,
+        *,
+        direction: str,
+    ) -> dict[str, object] | None:
+        for index in range(max(extreme_index + 1, 6), len(part.index)):
+            row = part.iloc[index]
+            if pd.Timestamp(row["ts"]) > extreme_ts + pd.Timedelta(minutes=60):
+                break
+            previous = part.iloc[index - 6:index]
+            timestamps = part.iloc[index - 6:index + 1]["ts"]
+            if not bool(timestamps.diff().dropna().eq(pd.Timedelta(minutes=5)).all()):
+                continue
+            bearish = (
+                float(row["pr_close"]) < float(previous["pr_low"].min())
+                and float(row["delta"]) < 0
+            )
+            bullish = (
+                float(row["pr_close"]) > float(previous["pr_high"].max())
+                and float(row["delta"]) > 0
+            )
+            if (direction == "bearish" and bearish) or (direction == "bullish" and bullish):
+                return {
+                    "time": pd.Timestamp(row["ts"]).time().isoformat(),
+                    "delay_minutes": float(
+                        (pd.Timestamp(row["ts"]) - extreme_ts).total_seconds() / 60
+                    ),
+                    "close": float(row["pr_close"]),
+                    "publication_ts": pd.Timestamp(row["publication_ts"]).isoformat(),
+                }
+        return None
+
+    post_peak_60 = _complete_window(part, peak_ts, peak_ts + pd.Timedelta(minutes=60), 12)
+    post_trough_60 = _complete_window(part, trough_ts, trough_ts + pd.Timedelta(minutes=60), 12)
+    bearish_break = transition(peak_index, peak_ts, direction="bearish")
+    bullish_break = transition(trough_index, trough_ts, direction="bullish")
+
+    def flow(window: pd.DataFrame | None) -> float | None:
+        if window is None or float(window["vol"].sum()) <= 0:
+            return None
+        return float(100 * window["delta"].sum() / window["vol"].sum())
+
     return {
         "peak_time": peak_ts.time().isoformat(),
         "peak_publication_ts": pd.Timestamp(peak["publication_ts"]).isoformat(),
-        "post_peak_60m_complete": post60 is not None,
-        "post_peak_60m_flow_pct": post60_flow,
-        "break_previous_6_bar_low_with_negative_delta_within_60m": break_record is not None,
-        "first_break": break_record,
+        "post_peak_60m_complete": post_peak_60 is not None,
+        "post_peak_60m_flow_pct": flow(post_peak_60),
+        "break_previous_6_bar_low_with_negative_delta_within_60m": bearish_break is not None,
+        "first_break": bearish_break,
+        "trough_time": trough_ts.time().isoformat(),
+        "trough_publication_ts": pd.Timestamp(trough["publication_ts"]).isoformat(),
+        "post_trough_60m_complete": post_trough_60 is not None,
+        "post_trough_60m_flow_pct": flow(post_trough_60),
+        "break_previous_6_bar_high_with_positive_delta_within_60m": bullish_break is not None,
+        "first_break_high": bullish_break,
     }
 
 
@@ -214,14 +246,14 @@ def session_metrics(
     target_date: str,
     *,
     minimum_rows: int,
-    new_high_lookback_sessions: int,
+    new_extreme_lookback_sessions: int,
 ) -> dict[str, object]:
     daily = build_daily(tradestats)
     matches = daily.index[daily["trade_date"].eq(target_date)].tolist()
     if not matches:
         raise ReversalMonitorError("target session is absent")
     index = int(matches[0])
-    if index < max(21, new_high_lookback_sessions):
+    if index < max(21, new_extreme_lookback_sessions):
         raise ReversalMonitorError("insufficient completed-session history")
     current = daily.iloc[index]
     previous = daily.iloc[index - 1]
@@ -259,13 +291,20 @@ def session_metrics(
         "daily_oi_pct": float(100 * (current["oi_close"] / previous["oi_close"] - 1)),
         "close_location": float((current["close"] - current["low"]) / range_value),
         "upper_wick_fraction": float((current["high"] - max(current["open"], current["close"])) / range_value),
+        "lower_wick_fraction": float((min(current["open"], current["close"]) - current["low"]) / range_value),
         "close_below_session_vwap": bool(current["close"] < current["vwap"]),
+        "close_above_session_vwap": bool(current["close"] > current["vwap"]),
         "atr20": atr20,
         "peak_to_close_atr": float((current["high"] - current["close"]) / atr20),
+        "low_to_close_atr": float((current["close"] - current["low"]) / atr20),
         "new_5_session_high": bool(
-            current["high"] >= prior.tail(new_high_lookback_sessions)["high"].max()
+            current["high"] >= prior.tail(new_extreme_lookback_sessions)["high"].max()
+        ),
+        "new_5_session_low": bool(
+            current["low"] <= prior.tail(new_extreme_lookback_sessions)["low"].min()
         ),
         "previous_session_up": bool(previous["close"] > daily.iloc[index - 2]["close"]),
+        "previous_session_down": bool(previous["close"] < daily.iloc[index - 2]["close"]),
         "previous_session_close_location": float(
             (previous["close"] - previous["low"]) / previous_range
         ),
@@ -338,50 +377,92 @@ def futoi_change(
     }
 
 
-def evaluate(metrics: Mapping[str, object], rules: Mapping[str, object]) -> dict[str, object]:
-    score_values = rules["score"]
+def evaluate(
+    metrics: Mapping[str, object],
+    rules: Mapping[str, object],
+    direction: str = "bearish",
+) -> dict[str, object]:
+    direction_rules = rules.get("direction_rules", {}).get(direction)
+    if not isinstance(direction_rules, Mapping):
+        raise ReversalMonitorError("direction rules are missing: " + direction)
+    score_values = direction_rules["score"]
     if not isinstance(score_values, Mapping):
         raise ReversalMonitorError("score configuration must be an object")
-    checks = {
-        "upper_wick_fraction_gte_0_4": float(metrics["upper_wick_fraction"]) >= 0.4,
-        "close_location_lte_0_35": float(metrics["close_location"]) <= 0.35,
-        "close_below_session_vwap": bool(metrics["close_below_session_vwap"]),
-        "break_previous_6_bar_low_with_negative_delta_within_60m": bool(metrics["break_previous_6_bar_low_with_negative_delta_within_60m"]),
-        "peak_to_close_atr_gte_0_5": float(metrics["peak_to_close_atr"]) >= 0.5,
-        "relative_volume_gte_1_3": float(metrics["relative_volume_20"]) >= 1.3,
-        "volume_vs_previous_gte_1_25": float(metrics["volume_vs_previous"]) >= 1.25,
-        "daily_flow_pct_lte_minus_2": float(metrics["daily_flow_pct"]) <= -2.0,
-        "daily_oi_pct_lte_minus_1": float(metrics["daily_oi_pct"]) <= -1.0,
-        "post_peak_60m_flow_pct_lte_minus_5": metrics.get("post_peak_60m_flow_pct") is not None
-        and float(metrics["post_peak_60m_flow_pct"]) <= -5.0,
-        "fiz_long_change_pp_lte_minus_1": metrics.get("fiz_long_change_pp") is not None
-        and float(metrics["fiz_long_change_pp"]) <= -1.0,
-        "previous_session_up_and_close_location_gte_0_75": bool(metrics["previous_session_up"])
-        and float(metrics["previous_session_close_location"]) >= 0.75,
-    }
-    score = sum(int(score_values[name]) for name, passed in checks.items() if passed)
-    new_high = bool(metrics["new_5_session_high"])
-    price_rejection = (
-        float(metrics["upper_wick_fraction"]) >= 0.4
-        and float(metrics["close_location"]) <= 0.5
-    )
-    intraday_confirmation = (
-        bool(metrics["break_previous_6_bar_low_with_negative_delta_within_60m"])
-        or (
-            bool(metrics["close_below_session_vwap"])
-            and float(metrics["peak_to_close_atr"]) >= 0.5
+    if direction == "bearish":
+        checks = {
+            "upper_wick_fraction_gte_0_4": float(metrics["upper_wick_fraction"]) >= 0.4,
+            "close_location_lte_0_35": float(metrics["close_location"]) <= 0.35,
+            "close_below_session_vwap": bool(metrics["close_below_session_vwap"]),
+            "break_previous_6_bar_low_with_negative_delta_within_60m": bool(
+                metrics["break_previous_6_bar_low_with_negative_delta_within_60m"]
+            ),
+            "peak_to_close_atr_gte_0_5": float(metrics["peak_to_close_atr"]) >= 0.5,
+            "relative_volume_gte_1_3": float(metrics["relative_volume_20"]) >= 1.3,
+            "volume_vs_previous_gte_1_25": float(metrics["volume_vs_previous"]) >= 1.25,
+            "daily_flow_pct_lte_minus_2": float(metrics["daily_flow_pct"]) <= -2.0,
+            "daily_oi_pct_lte_minus_1": float(metrics["daily_oi_pct"]) <= -1.0,
+            "post_peak_60m_flow_pct_lte_minus_5": metrics.get("post_peak_60m_flow_pct") is not None
+            and float(metrics["post_peak_60m_flow_pct"]) <= -5.0,
+            "fiz_long_change_pp_lte_minus_1": metrics.get("fiz_long_change_pp") is not None
+            and float(metrics["fiz_long_change_pp"]) <= -1.0,
+            "previous_session_up_and_close_location_gte_0_75": bool(metrics["previous_session_up"])
+            and float(metrics["previous_session_close_location"]) >= 0.75,
+        }
+        new_extreme = bool(metrics["new_5_session_high"])
+        price_rejection = (
+            float(metrics["upper_wick_fraction"]) >= 0.4
+            and float(metrics["close_location"]) <= 0.5
         )
-    )
+        intraday_confirmation = (
+            bool(metrics["break_previous_6_bar_low_with_negative_delta_within_60m"])
+            or (
+                bool(metrics["close_below_session_vwap"])
+                and float(metrics["peak_to_close_atr"]) >= 0.5
+            )
+        )
+        extreme_name = "new_5_session_high"
+    elif direction == "bullish":
+        checks = {
+            "lower_wick_fraction_gte_0_4": float(metrics["lower_wick_fraction"]) >= 0.4,
+            "close_location_gte_0_65": float(metrics["close_location"]) >= 0.65,
+            "close_above_session_vwap": bool(metrics["close_above_session_vwap"]),
+            "break_previous_6_bar_high_with_positive_delta_within_60m": bool(
+                metrics["break_previous_6_bar_high_with_positive_delta_within_60m"]
+            ),
+            "low_to_close_atr_gte_0_5": float(metrics["low_to_close_atr"]) >= 0.5,
+            "relative_volume_gte_1_3": float(metrics["relative_volume_20"]) >= 1.3,
+            "volume_vs_previous_gte_1_25": float(metrics["volume_vs_previous"]) >= 1.25,
+            "daily_flow_pct_lte_minus_2": float(metrics["daily_flow_pct"]) <= -2.0,
+            "daily_oi_pct_lte_minus_1": float(metrics["daily_oi_pct"]) <= -1.0,
+            "previous_session_down_and_close_location_lte_0_25": bool(metrics["previous_session_down"])
+            and float(metrics["previous_session_close_location"]) <= 0.25,
+        }
+        new_extreme = bool(metrics["new_5_session_low"])
+        price_rejection = (
+            float(metrics["lower_wick_fraction"]) >= 0.4
+            and float(metrics["close_location"]) >= 0.5
+        )
+        intraday_confirmation = (
+            bool(metrics["break_previous_6_bar_high_with_positive_delta_within_60m"])
+            or (
+                bool(metrics["close_above_session_vwap"])
+                and float(metrics["low_to_close_atr"]) >= 0.5
+            )
+        )
+        extreme_name = "new_5_session_low"
+    else:
+        raise ReversalMonitorError("unsupported direction: " + direction)
+    score = sum(int(score_values[name]) for name, passed in checks.items() if passed)
     mandatory = {
-        "new_5_session_high": new_high,
+        extreme_name: new_extreme,
         "price_rejection": price_rejection,
         "intraday_confirmation": intraday_confirmation,
     }
-    alert_threshold = int(rules["alert_score_threshold"])
-    watch_threshold = int(rules["watch_score_threshold"])
+    alert_threshold = int(direction_rules["alert_score_threshold"])
+    watch_threshold = int(direction_rules["watch_score_threshold"])
     if all(mandatory.values()) and score >= alert_threshold:
         status = "ALERT"
-    elif new_high and price_rejection and score >= watch_threshold:
+    elif new_extreme and price_rejection and score >= watch_threshold:
         status = "WATCH"
     else:
         status = "NO_ALERT"
@@ -390,6 +471,7 @@ def evaluate(metrics: Mapping[str, object], rules: Mapping[str, object]) -> dict
         "score": score,
         "alert_score_threshold": alert_threshold,
         "watch_score_threshold": watch_threshold,
+        "direction": direction,
         "mandatory_gates": mandatory,
         "score_checks": checks,
     }
@@ -401,26 +483,48 @@ def render_notification(result: Mapping[str, object]) -> str | None:
     metrics = result["metrics"]
     if not isinstance(metrics, Mapping):
         raise ReversalMonitorError("result metrics must be an object")
-    reasons = [name for name, passed in result["decision"]["score_checks"].items() if passed]
-    return (
-        "USDRUBF: кандидат на медвежий разворот по завершённой сессии "
-        + str(metrics["trade_date"])
-        + ". Score="
-        + str(result["decision"]["score"])
-        + "; high="
-        + format(float(metrics["high"]), ".4f")
-        + "; close="
-        + format(float(metrics["close"]), ".4f")
-        + "; RVOL="
-        + format(float(metrics["relative_volume_20"]), ".2f")
-        + "x; wick="
-        + format(100 * float(metrics["upper_wick_fraction"]), ".1f")
-        + "%; close_location="
-        + format(100 * float(metrics["close_location"]), ".1f")
-        + "%. Подтверждения: "
-        + ", ".join(reasons)
-        + ". Это исследовательское уведомление, без полномочий на сделку."
-    )
+    decisions = result.get("decisions")
+    if not isinstance(decisions, Mapping):
+        raise ReversalMonitorError("result decisions must be an object")
+    messages: list[str] = []
+    for direction in ("bearish", "bullish"):
+        decision = decisions.get(direction)
+        if not isinstance(decision, Mapping) or decision.get("status") != "ALERT":
+            continue
+        checks = decision.get("score_checks")
+        if not isinstance(checks, Mapping):
+            raise ReversalMonitorError("decision score_checks must be an object")
+        reasons = [name for name, passed in checks.items() if passed]
+        if direction == "bearish":
+            label = "кандидат на медвежий разворот после максимума"
+            extreme = "high=" + format(float(metrics["high"]), ".4f")
+            wick = float(metrics["upper_wick_fraction"])
+        else:
+            label = "кандидат на бычий разворот после минимума"
+            extreme = "low=" + format(float(metrics["low"]), ".4f")
+            wick = float(metrics["lower_wick_fraction"])
+        messages.append(
+            "USDRUBF: "
+            + label
+            + " по завершённой сессии "
+            + str(metrics["trade_date"])
+            + ". Score="
+            + str(decision["score"])
+            + "; "
+            + extreme
+            + "; close="
+            + format(float(metrics["close"]), ".4f")
+            + "; RVOL="
+            + format(float(metrics["relative_volume_20"]), ".2f")
+            + "x; wick="
+            + format(100 * wick, ".1f")
+            + "%; close_location="
+            + format(100 * float(metrics["close_location"]), ".1f")
+            + "%. Подтверждения: "
+            + ", ".join(reasons)
+            + ". Исследовательское уведомление, без полномочий на сделку."
+        )
+    return "\n".join(messages) if messages else None
 
 
 def _fetch_frames(
@@ -507,7 +611,7 @@ def run_monitor(
                 normalized,
                 target_date,
                 minimum_rows=int(rules["minimum_intraday_rows"]),
-                new_high_lookback_sessions=int(rules["new_high_lookback_sessions"]),
+                new_extreme_lookback_sessions=int(rules["new_extreme_lookback_sessions"]),
             )
             target_end = pd.Timestamp(metrics["last_bar_ts"])
             previous_rows = normalized.loc[normalized["trade_date"].eq(metrics["previous_trade_date"])]
@@ -521,7 +625,19 @@ def run_monitor(
                 maximum_age_minutes=int(rules["futoi_policy"]["maximum_endpoint_age_minutes"]),
             )
             metrics["fiz_long_change_pp"] = fiz_change
-            decision = evaluate(metrics, rules)
+            decisions = {
+                direction: evaluate(metrics, rules, direction)
+                for direction in ("bearish", "bullish")
+            }
+            alert_directions = [
+                direction for direction, decision in decisions.items()
+                if decision["status"] == "ALERT"
+            ]
+            watch_directions = [
+                direction for direction, decision in decisions.items()
+                if decision["status"] == "WATCH"
+            ]
+            status = "ALERT" if alert_directions else ("WATCH" if watch_directions else "NO_ALERT")
             result = {
                 "schema_version": SCHEMA_VERSION,
                 "rules_schema_version": rules["schema_version"],
@@ -531,11 +647,14 @@ def run_monitor(
                 "timeframe": "5m",
                 "generated_at_utc": now.isoformat(),
                 "trade_date": target_date,
-                "status": decision["status"],
-                "notify": decision["status"] == "ALERT",
+                "status": status,
+                "notify": bool(alert_directions),
+                "alert_directions": alert_directions,
+                "watch_directions": watch_directions,
                 "metrics": metrics,
                 "futoi_quality": futoi_quality,
-                "decision": decision,
+                "decisions": decisions,
+                "decision": decisions["bearish"],
                 "data_quality": {
                     "status": "PASS",
                     "source": "MOEX_ALGOPACK_APIM" if fetched else "SUPPLIED_TEST_FRAME",
@@ -571,7 +690,9 @@ def run_monitor(
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Evaluate a completed USDRUBF session for a bearish reversal-candle alert.")
+    parser = argparse.ArgumentParser(
+        description="Evaluate a completed USDRUBF session for bearish and bullish reversal-candle alerts."
+    )
     parser.add_argument("--trade-date", required=True)
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--state-root", default=None)
