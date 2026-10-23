@@ -77,3 +77,11 @@ blocking_conditions:
 - ordinary buildable contract has missing or invalid decision_source.
 - ordinary buildable contract has decision_source=unresolved.
 - perpetual instrument is assigned ordinary expiration without explicit override.
+
+retained_registry_resolution:
+- A required expired contract absent from the requested current normalized snapshot must be resolved by its own identity in retained normalized and raw ISS registry snapshots dated no later than the requested snapshot date.
+- Rebuild each retained candidate from its own raw_payload_json using the actual registry producer and its original snapshot date. Identity, source, normalization and expiration fields must agree; missing source bytes, duplicate identity or conflicting anchors block publication.
+- Required economic universe and excluded instruments remain unchanged. Contracts cannot be replaced by current instruments or silently omitted.
+- Cross-snapshot changes to descriptive names, lot size or price steps do not invalidate an otherwise verified stable economic identity and anchor. Unsupported first_trade_date cannot supply a roll boundary.
+- expiration_source_snapshot_date preserves the selected original source date. expiration_source_evidence_json records selected and corroborating normalized/raw paths and SHA-256 digests. registry_snapshot_date continues to identify this expiration-map publication.
+- These receipts establish consistency with retained ISS payloads, not historical point-in-time availability, complete price coverage or a future observed trading session. Roll-map admission remains independently mandatory.

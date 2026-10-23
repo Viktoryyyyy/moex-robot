@@ -17,6 +17,7 @@ except Exception:
 import pandas as pd
 from moex_data.futures import liquidity_history_metrics_probe as base
 from moex_data.futures import raw_5m_loader
+from moex_data.futures import raw_admission_versions as versions
 from moex_data.futures import refresh_forts_raw_5m_incremental as observed_date_source
 
 TZ_MSK = ZoneInfo("Europe/Moscow")
@@ -515,8 +516,7 @@ def main():
         chunk_id = "raw_5m_" + base.stable_id([registry_snapshot_id, fam, min(dates), max(dates), ",".join(frame["secid"].astype(str).tolist()), mode])
         chunk_out = paths(root, args.snapshot_date, chunk_id)
         manifest, quality = run_chunk(args, root, frame, dates, run_id, registry_snapshot_id, chunk_id)
-        write_parquet(chunk_out["quality_report"], quality)
-        dump_json(chunk_out["chunk_manifest"], manifest)
+        manifest = versions.publish_admission(root, chunk_out["quality_report"], quality, chunk_out["chunk_manifest"], manifest)
         report = aggregate(registry, eligibility, [manifest])
         report["date_source"] = {"status": OBSERVED_DATE_STATUS, "reference_secid": reference_secid, "source_id": observed_date_source.OBSERVED_DATE_SOURCE_ID, "endpoint": observed_date_source.observed_date_source_endpoint(reference_secid)}
         dump_json(chunk_out["aggregate_report"], report)

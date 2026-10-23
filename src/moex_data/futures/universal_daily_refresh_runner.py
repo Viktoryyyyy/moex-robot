@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import argparse
 import copy
+import hashlib
+import io
 import json
 import os
 import subprocess
@@ -114,8 +116,8 @@ STAGES = {
     },
     "quality_reports": {
         "component_id": "canonical_universal_quality_reports",
-        "script": "",
-        "kind": "metadata_gate",
+        "script": "src/moex_data/futures/continuous_quality_report.py",
+        "kind": "command",
     },
     "unified_manifest": {
         "component_id": "unified_manifest",
@@ -161,6 +163,10 @@ def validate_stage_name(value):
 def command_for_stage(root, stage_id, args):
     stage = STAGES[stage_id]
     cmd = [sys.executable, str(root / stage["script"])]
+    if stage_id == "quality_reports":
+        return cmd + ["--snapshot-date", args.snapshot_date, "--run-date", args.run_date,
+                      "--data-root", str(args.data_root_resolved), "--roll-policy-id", ROLL_POLICY_ID,
+                      "--adjustment-policy-id", ADJUSTMENT_POLICY_ID]
     if stage_id in {"registry_refresh", "all_universe_eligibility_snapshot", "raw_5m_refresh", "futoi_raw_refresh", "raw_d1_derivation", "expiration_map", "roll_map", "continuous_5m"}:
         cmd.extend(["--snapshot-date", args.snapshot_date])
     if stage_id not in {"continuous_eligibility_refinement", "quality_reports", "unified_manifest"}:
@@ -187,14 +193,14 @@ def command_for_stage(root, stage_id, args):
         cmd.extend(["--data-root", str(args.data_root_resolved)])
     if stage_id in {"registry_refresh", "all_universe_eligibility_snapshot", "raw_5m_refresh", "futoi_raw_refresh", "roll_map"}:
         cmd.extend(["--timeout", str(args.timeout)])
-    if stage_id in {"registry_refresh", "all_universe_eligibility_snapshot", "raw_5m_refresh", "roll_map"}:
+    if stage_id in {"registry_refresh", "all_universe_eligibility_snapshot", "raw_5m_refresh"}:
         cmd.extend(["--iss-base-url", args.iss_base_url])
     if stage_id == "registry_refresh":
         cmd.extend(["--validation-mode", "current_registry"])
         cmd.extend(["--availability-max-workers", str(args.availability_max_workers)])
     if stage_id in {"raw_5m_refresh", "futoi_raw_refresh"}:
         cmd.extend(["--apim-base-url", args.apim_base_url])
-    if stage_id in {"registry_refresh", "all_universe_eligibility_snapshot"}:
+    if stage_id in {"registry_refresh", "all_universe_eligibility_snapshot", "roll_map"}:
         cmd.extend(["--apim-base-url", args.apim_base_url])
     if stage_id in {"continuous_5m", "continuous_d1", "continuous_w1"}:
         cmd.extend(["--roll-policy-id", ROLL_POLICY_ID, "--adjustment-policy-id", ADJUSTMENT_POLICY_ID])
@@ -230,9 +236,106 @@ def run_command_stage(root, stage_id, args):
         item["failure_reason"] = "component_returncode_nonzero"
         item["validation_status"] = "fail"
         return item
+    if stage_id == "quality_reports":
+        try:
+            item["verified_artifacts"] = verify_quality_artifacts(root, args, proc.stdout, started_at, completed_at)
+        except (OSError, ValueError, TypeError, KeyError, RuntimeError) as exc:
+            item["failure_reason"] = "quality_artifact_validation_failed: " + str(exc)
+            item["validation_status"] = "fail"
+            return item
     item["status"] = "pass"
     item["validation_status"] = "pass"
     return item
+
+
+def verify_quality_artifacts(root, args, stdout, started_at, completed_at):
+    """A zero exit code cannot substitute for this child run's quality evidence."""
+    import pandas as pd
+    from moex_data.futures import continuous_quality_report as component
+    parsed = parse_json_line_output(stdout)
+    outputs = parsed.get("output_artifacts_created", {})
+    if not isinstance(outputs, dict):
+        raise RuntimeError("invalid quality output artifact mapping")
+    mp = component.resolve_contract_path(root, args.data_root_resolved, component.CONTRACT_MANIFEST, {"run_date": args.run_date})
+    qp = component.resolve_contract_path(root, args.data_root_resolved, component.CONTRACT_QUALITY_REPORT, {"run_date": args.run_date})
+    for name, path in (("manifest", mp), ("quality_report", qp)):
+        if outputs.get(name) != str(path) or not path.is_file() or path.is_symlink():
+            raise RuntimeError("missing or unexpected quality artifact: " + name)
+    mbytes, qbytes = mp.read_bytes(), qp.read_bytes()
+    manifest = json.loads(mbytes)
+    quality = pd.read_parquet(io.BytesIO(qbytes))
+    if not isinstance(manifest, dict):
+        raise RuntimeError("invalid quality manifest mapping")
+    for field in ("row_counts", "output_artifacts", "quality_status_counts",
+                  "usdrubf_identity_check", "source_lineage_check", "partial_chain_gap_summary"):
+        if not isinstance(manifest.get(field), dict):
+            raise RuntimeError("invalid quality manifest mapping: " + field)
+    roster = manifest.get("family_summaries")
+    if (not isinstance(roster, list) or not roster
+            or any(not isinstance(row, dict) or not isinstance(row.get("family_code"), str)
+                   or not row["family_code"].strip() for row in roster)):
+        raise RuntimeError("invalid quality manifest family roster")
+    families = {row["family_code"] for row in roster}
+    # These are the existing component's mandatory families, not a new universe.
+    if len(families) != len(roster) or not set(component.EXPECTED_CONTINUOUS_SYMBOLS) <= families:
+        raise RuntimeError("incomplete or duplicate quality family roster")
+    required_fields = {"quality_report_id", "run_id", "run_date", "snapshot_date", "family_code",
+                       "continuous_symbol", "check_id", "dataset_id", "schema_version", "roll_policy_id",
+                       "adjustment_policy_id", "calendar_status", "date_source_summary_json",
+                       "date_source_evidence_json", "check_status", "affected_source_secid", "affected_trade_date",
+                       "observed_value", "expected_value", "review_notes"}
+    if not required_fields <= set(quality.columns):
+        raise RuntimeError("incomplete quality artifact schema")
+    if (quality["family_code"].isna().any() or set(quality["family_code"]) != families
+            or quality["quality_report_id"].isna().any()
+            or quality.duplicated(["quality_report_id", "run_id", "family_code", "check_id"]).any()
+            or quality.duplicated(["family_code", "check_id"]).any()):
+        raise RuntimeError("quality family roster or unique checks disagree")
+    for family, rows in quality.groupby("family_code"):
+        if not set(component.REQUIRED_QUALITY_CHECKS) <= set(rows["check_id"]):
+            raise RuntimeError("missing required quality checks for family: " + family)
+    if (manifest["usdrubf_identity_check"].get("status") != "pass"
+            or manifest["source_lineage_check"].get("status") != "pass"
+            or manifest["partial_chain_gap_summary"].get("status") != "explicit_gap"):
+        raise RuntimeError("quality manifest mandatory summary contradicts success")
+    identity_checks = quality.loc[(quality["check_id"] == "usdrubf_identity_validation") & (quality["family_code"] == "USDRUBF")]
+    lineage_checks = quality.loc[quality["check_id"] == "continuous_output_row_source_lineage_completeness"]
+    gap_checks = quality.loc[(quality["check_id"] == "explicit_partial_chain_gap_for_excluded_SiH7_SiM7") & (quality["family_code"] == "Si")]
+    if (not identity_checks["check_status"].eq("pass").all()
+            or not lineage_checks["check_status"].eq("pass").all()
+            or not gap_checks["check_status"].eq("explicit_gap").all()):
+        raise RuntimeError("quality checks contradict mandatory manifest summaries")
+    identities = {"run_id": parsed.get("run_id"), "run_date": args.run_date,
+                  "snapshot_date": args.snapshot_date, "roll_policy_id": ROLL_POLICY_ID,
+                  "adjustment_policy_id": ADJUSTMENT_POLICY_ID}
+    if not identities["run_id"] or quality.empty:
+        raise RuntimeError("missing child run identity or empty quality")
+    for field, value in identities.items():
+        if manifest.get(field) != value or field not in quality or not quality[field].eq(value).all():
+            raise RuntimeError("quality/manifest child identity mismatch: " + field)
+    if (manifest.get("schema_version") != component.SCHEMA_MANIFEST
+            or "schema_version" not in quality or not quality["schema_version"].eq(component.SCHEMA_QUALITY_REPORT).all()
+            or "check_status" not in quality or not quality["check_status"].isin(["pass", "explicit_gap", "not_applicable"]).all()
+            or component.validation_blockers(quality)
+            or manifest.get("builder_result_verdict") != "pass" or manifest.get("blockers") != []
+            or manifest.get("quality_status_counts") != component.quality_status_counts(quality)
+            or manifest.get("row_counts", {}).get("quality_report") != len(quality)):
+        raise RuntimeError("quality/manifest status, schema or counts disagree")
+    times = []
+    for field in ("started_ts", "completed_ts"):
+        value = datetime.fromisoformat(str(manifest.get(field, "")).replace("Z", "+00:00"))
+        if value.tzinfo is None:
+            raise RuntimeError("quality timestamp lacks timezone")
+        times.append(value.timestamp())
+    if not int(started_at) <= times[0] <= times[1] <= completed_at:
+        raise RuntimeError("quality artifacts belong to another invocation")
+    if (manifest.get("output_artifacts", {}).get("manifest") != str(mp)
+            or manifest.get("output_artifacts", {}).get("quality_report") != str(qp)
+            or mp.read_bytes() != mbytes or qp.read_bytes() != qbytes):
+        raise RuntimeError("quality artifact references or bytes changed")
+    return {"run_id": identities["run_id"], "manifest": str(mp), "manifest_sha256": hashlib.sha256(mbytes).hexdigest(),
+            "quality_report": str(qp), "quality_sha256": hashlib.sha256(qbytes).hexdigest(),
+            "quality_rows": len(quality), "quality_status_counts": component.quality_status_counts(quality)}
 
 
 def parse_json_line_output(text):
@@ -403,6 +506,8 @@ def run_family_command_stage(root, stage_id, args, items):
 
 def metadata_gate(stage_id):
     stage = STAGES[stage_id]
+    if stage["kind"] not in {"metadata_gate", "manifest_write"}:
+        raise RuntimeError("command stage requires execution and artifact validation: " + stage_id)
     return {
         "stage_id": stage_id,
         "component_id": stage["component_id"],
