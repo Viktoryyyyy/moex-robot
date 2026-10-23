@@ -1,5 +1,9 @@
 # USDRUBF completed-session reversal candle monitor v1
 
+Superseded operationally by `USDRUBF_REVERSAL_CANDLE_MONITOR_V2.md`, which
+preserves this bearish rule and adds the independently studied bullish rule
+after a session minimum.
+
 ## Purpose and authority
 
 The monitor evaluates the last completed Moscow trading date at 00:20 MSK from

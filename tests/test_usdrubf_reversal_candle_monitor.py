@@ -37,6 +37,26 @@ def _alert_metrics() -> dict[str, object]:
     }
 
 
+def _bullish_alert_metrics() -> dict[str, object]:
+    return {
+        "trade_date": "2026-04-28",
+        "low": 76.31,
+        "close": 77.42,
+        "relative_volume_20": 2.1,
+        "volume_vs_previous": 1.5,
+        "daily_flow_pct": -3.0,
+        "daily_oi_pct": -2.0,
+        "close_location": 0.82,
+        "lower_wick_fraction": 0.52,
+        "close_above_session_vwap": True,
+        "low_to_close_atr": 0.8,
+        "new_5_session_low": True,
+        "previous_session_down": True,
+        "previous_session_close_location": 0.12,
+        "break_previous_6_bar_high_with_positive_delta_within_60m": True,
+    }
+
+
 def test_reference_case_alerts_without_bearish_futoi_or_daily_flow() -> None:
     decision = monitor.evaluate(_alert_metrics(), _rules())
     assert decision["status"] == "ALERT"
@@ -64,6 +84,63 @@ def test_negative_flow_without_price_rejection_never_alerts() -> None:
     assert decision["score"] >= decision["alert_score_threshold"]
     assert decision["mandatory_gates"]["price_rejection"] is False
     assert decision["status"] == "NO_ALERT"
+
+
+def test_bullish_minimum_requires_rejection_transition_and_score() -> None:
+    decision = monitor.evaluate(_bullish_alert_metrics(), _rules(), "bullish")
+    assert decision["status"] == "ALERT"
+    assert decision["mandatory_gates"] == {
+        "new_5_session_low": True,
+        "price_rejection": True,
+        "intraday_confirmation": True,
+    }
+    assert decision["score"] >= decision["alert_score_threshold"]
+    assert "fiz_long_change_pp_gte_1" not in decision["score_checks"]
+
+
+def test_bullish_capitulation_without_lower_wick_never_alerts() -> None:
+    metrics = _bullish_alert_metrics()
+    metrics.update(lower_wick_fraction=0.1, close_location=0.4)
+    decision = monitor.evaluate(metrics, _rules(), "bullish")
+    assert decision["mandatory_gates"]["price_rejection"] is False
+    assert decision["status"] == "NO_ALERT"
+
+
+def test_bullish_notification_identifies_low_direction() -> None:
+    bullish = monitor.evaluate(_bullish_alert_metrics(), _rules(), "bullish")
+    bearish = {**bullish, "direction": "bearish", "status": "NO_ALERT"}
+    result = {
+        "status": "ALERT",
+        "metrics": _bullish_alert_metrics(),
+        "decisions": {"bearish": bearish, "bullish": bullish},
+    }
+    notification = monitor.render_notification(result)
+    assert notification is not None
+    assert "бычий разворот после минимума" in notification
+    assert "low=76.3100" in notification
+
+
+def test_intraday_features_detect_bullish_six_bar_break_after_low() -> None:
+    timestamps = pd.date_range("2026-04-28 07:00:00", periods=13, freq="5min")
+    rows = []
+    for index, timestamp in enumerate(timestamps):
+        breakout = index == 6
+        rows.append(
+            {
+                "ts": timestamp,
+                "publication_ts": timestamp + pd.Timedelta(seconds=5),
+                "pr_high": 101.2 if breakout else 100.2,
+                "pr_low": 99.0 if index == 0 else 99.2,
+                "pr_close": 101.0 if breakout else 99.8,
+                "vol": 100,
+                "delta": 60 if breakout else -10,
+            }
+        )
+    features = monitor.intraday_features(pd.DataFrame(rows))
+    assert features["trough_time"] == "07:00:00"
+    assert features["post_trough_60m_complete"] is True
+    assert features["break_previous_6_bar_high_with_positive_delta_within_60m"] is True
+    assert features["first_break_high"]["delay_minutes"] == 30.0
 
 
 def test_futoi_requires_balanced_recent_endpoints() -> None:
