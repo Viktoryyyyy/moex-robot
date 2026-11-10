@@ -1,0 +1,12 @@
+scope,model_or_mode,trades,net_r,max_drawdown_r,false_signals,mae_r_mean,mfe_r_mean,without_best_r
+walk_forward,multiday_best_ranked,67,0.725674,9.561909,35,-0.716123,0.871162,-2.519378
+walk_forward,one_day_monitor_v2,13,0.985431,3.109965,7,-0.711395,1.142942,-1.406099
+walk_forward,frozen_ema_3_38,17,36.741745,3.667999,7,-0.601741,3.371757,28.031785
+holdout,multiday_best_ranked,5,-3.344184,3.344184,4,-0.594355,0.442379,-3.513451
+holdout,one_day_monitor_v2,1,0.953904,0.000000,0,-0.638298,1.372340,0.000000
+holdout,frozen_ema_3_38,2,1.427970,1.357319,1,-0.602800,2.159311,-0.797371
+walk_forward,bar_close_setup_extreme,67,0.725674,9.561909,35,-0.716123,0.871162,-2.519378
+walk_forward,bar_close_extreme_delta,67,0.585853,9.559460,,,,-2.659199
+walk_forward,touch_setup_extreme,73,-2.812192,11.277335,,,,-6.057243
+walk_forward,session_close_extreme_vwap,42,-2.433559,5.281850,,,,-4.677937
+walk_forward,session_close_multifactor,9,-3.004910,3.004910,,,,-3.660901
