@@ -1,0 +1,2 @@
+variant,side,setup_date,formation_start_date,confirmation_date,confirmation_ts,status
+two_close_turn|formation=5|confirm=price_vwap_flow|life=5|buffer=0.1|exit=atr_trailing|trail=1.5|structure=0,long,2026-10-27,2026-10-21,2026-10-29,2026-10-29 18:05:00,entered

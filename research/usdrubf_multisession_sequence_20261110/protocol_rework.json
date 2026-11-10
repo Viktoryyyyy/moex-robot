@@ -1,0 +1,42 @@
+{
+  "schema_version": "usdrubf_multisession_rework_protocol.v1",
+  "status": "REWORK_REQUIRED_RESEARCH_ONLY",
+  "decision": "Keep as a research prototype and return for refinement.",
+  "fixed_time_exit": false,
+  "exit_families": {
+    "atr_trailing": [1.5, 2.5],
+    "structure": [1, 2],
+    "hybrid": {"atr": 2.0, "structure_sessions": 2}
+  },
+  "execution_costs_points_per_side": {
+    "commission": 0.005,
+    "half_spread": 0.01,
+    "slippage": 0.01,
+    "all_in": 0.025
+  },
+  "stress_costs_points_per_side": {
+    "commission": 0.005,
+    "half_spread": 0.01,
+    "slippage": 0.035,
+    "all_in": 0.05
+  },
+  "walk_forward": [
+    {"select_using_data_through": "2024-12-31", "validate": ["2025-01-01", "2025-12-31"]},
+    {"select_using_data_through": "2025-12-31", "validate": ["2026-01-01", "2026-06-30"]},
+    {"select_using_data_through": "2026-06-30", "validate": ["2026-07-01", "2026-09-30"]}
+  ],
+  "historic_holdout": ["2026-10-01", "2026-11-09"],
+  "future_holdout": {
+    "start": "2026-11-10",
+    "minimum_closed_trades": 20,
+    "minimum_each_direction": 5,
+    "requires_positive_without_best_trade": true,
+    "promotion_allowed_before_gate": false
+  },
+  "operational_isolation": {
+    "change_ema_signals": false,
+    "change_nightly_reversal_monitor": false,
+    "change_existing_automations": false,
+    "send_operational_alerts": false
+  }
+}

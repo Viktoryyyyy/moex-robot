@@ -1,0 +1,23 @@
+{
+  "schema_version": "usdrubf_multisession_future_holdout_gate.v1",
+  "status": "COLLECTING_NOT_ELIGIBLE",
+  "frozen_candidate": {
+    "pattern": "two_close_turn",
+    "formation": 5,
+    "confirmation": "price_vwap_flow",
+    "life": 5,
+    "stop_buffer": 0.1,
+    "exit_mode": "atr_trailing",
+    "trail_atr": 1.5,
+    "structure_lookback": 0
+  },
+  "frozen_candidate_key": "two_close_turn|formation=5|confirm=price_vwap_flow|life=5|buffer=0.1|exit=atr_trailing|trail=1.5|structure=0",
+  "start": "2026-11-10",
+  "observed_closed_trades": 0,
+  "minimum_closed_trades": 20,
+  "minimum_each_direction": 5,
+  "requires_positive_without_best_trade": true,
+  "may_change_ema_signals": false,
+  "may_change_nightly_reversal_monitor": false,
+  "promotion_allowed": false
+}
