@@ -1,0 +1,81 @@
+{
+  "schema_version": "usdrubf_multiday_reversal_protocol.v1",
+  "project": "MOEX_Bot",
+  "status": "RESEARCH_ONLY",
+  "instrument": "USDRUBF",
+  "timeframe": "AlgoPack 5m aggregated to observed-session D",
+  "analysis_start": "2022-04-26",
+  "analysis_end": "2026-11-09",
+  "final_holdout": ["2026-10-01", "2026-11-09"],
+  "setup": {
+    "lookback_observed_sessions": 5,
+    "bullish": "session low below or equal to the prior five observed-session lows",
+    "bearish": "session high above or equal to the prior five observed-session highs",
+    "confirmation_must_be_later_session": true,
+    "replacement": "a fresh same-direction five-session extreme cancels and replaces the pending setup",
+    "opposite_setups": "tracked independently; simultaneous opposite entries are skipped"
+  },
+  "confirmation_modes": [
+    "touch_setup_extreme",
+    "bar_close_setup_extreme",
+    "bar_close_extreme_delta",
+    "session_close_extreme_vwap",
+    "session_close_multifactor"
+  ],
+  "variant_grid": {
+    "setup_life_sessions": [3, 5],
+    "stop_atr_buffer": [0.1, 0.25],
+    "maximum_holding_sessions": [3, 5]
+  },
+  "execution": {
+    "intraday_confirmation_entry": "next available 5m open after the confirming bar",
+    "session_close_confirmation_entry": "first available 5m open of the next observed session",
+    "stop_ordering": "adverse stop or setup invalidation wins when a 5m bar is ambiguous",
+    "maximum_entry_to_stop_atr": 3.0,
+    "tick_size": 0.01,
+    "contract_multiplier": 1000,
+    "one_position": true,
+    "pyramiding": false,
+    "time_exit": "last 5m close of the configured observed-session holding horizon"
+  },
+  "costs": {
+    "base_all_in_points_per_side": 0.025,
+    "stress_all_in_points_per_side": 0.05,
+    "base_description": "frozen EMA 3/38 comparison convention: commission, one-tick slippage and spread allowance combined",
+    "funding": "signed official daily SWAPRATE times one USDRUBF contract; positive rate debits longs and credits shorts",
+    "missing_funding": "explicit adverse 0.0035 times entry price per required clearing; never zero-filled"
+  },
+  "walk_forward": [
+    {"train_end": "2024-12-31", "validate": ["2025-01-01", "2025-12-31"]},
+    {"train_end": "2025-12-31", "validate": ["2026-01-01", "2026-06-30"]},
+    {"train_end": "2026-06-30", "validate": ["2026-07-01", "2026-09-30"]}
+  ],
+  "selection": {
+    "holdout_excluded": true,
+    "recency_weights": {"2025": 1, "2026_h1": 2, "2026_q3": 3},
+    "minimum_combined_trades": 15,
+    "minimum_each_direction": 3,
+    "require_positive_without_best_trade": true,
+    "maximum_top3_positive_profit_share": 0.7,
+    "minimum_positive_direct_neighbor_fraction": 0.5
+  },
+  "benchmarks": {
+    "one_day_monitor": "operational v2 price/volume/OI rules with FUTOI omitted when unavailable; next-session entry and common 5-session exit for return comparison",
+    "ema_3_38": "frozen USDRUBF_D_EMA3_38_mixedATR2_candidate_20261007 executed by an adapter against an untouched copy of its reproducibility code"
+  },
+  "anti_lookahead": [
+    "setup is created only after its session closes",
+    "running VWAP and delta use rows no later than the confirming 5m bar",
+    "all entries occur after confirmation",
+    "ATR and relative-volume baselines use earlier completed sessions",
+    "the final 2026-10-01 through 2026-11-09 holdout is not used for parameter selection",
+    "fold trades must exit inside their evaluation interval"
+  ],
+  "protected_scope": [
+    "frozen EMA strategy and reproducibility artifacts",
+    "EMA paper pilot and journal",
+    "repository manifests",
+    "systemd and Codex automations",
+    "operational one-day reversal monitor"
+  ]
+}

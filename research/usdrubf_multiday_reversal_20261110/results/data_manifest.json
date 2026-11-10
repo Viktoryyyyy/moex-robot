@@ -1,0 +1,18 @@
+{
+  "schema_version": "usdrubf_multiday_reversal_data_manifest.v1",
+  "inputs": {
+    "base_tradestats_csv": "9b68fb158b5350d4a2a91c6add1113bca79f816ff25e1afcdd01e34c25474259",
+    "extension_tradestats_csv": "f2f5a97b335efe1e16f976bd9ebfd15560d61c926eb60683c86d8cb987905a9e",
+    "base_history_json": "2aa3c464652a947708a45daaf003eafb16641356fff57a8184a1c92c44b88e16",
+    "extension_history_json": "a66fd87c3734a09f7a5f57d0b29b885a5689908771dd44dcb0f03779b5bb3b03",
+    "one_day_rules_json": "ced307d471a71346a70718f263d73e836b8c1cde947b24343ccdc193a1a21f4f",
+    "frozen_ema_engine_py": "f8fd688561d3e561ef16d698db2b2df74288bb78673d6e0746ef63ac21c7d962"
+  },
+  "private_result_artifacts": {
+    "study_summary_json": "280339695215d893e8d9846e0f24d5b6f73d5a5c7ebef3b9b69ff9433b2dda47",
+    "variant_fold_metrics_csv": "22106345fac42ebfdb908ea4dac85d2efeea491009b1cfcbe34e7bda1a154a1a",
+    "best_variant_trades_csv": "923ebf52e2db60352f6707c1a37959de675d6629c94b71e03e3e4884d02807f0",
+    "ema_summary_json": "d5ab40215e556ff89ca77521f53079e9e1bb646b83074b978f9d7e04b1e02459"
+  },
+  "raw_market_arrays_committed": false
+}

@@ -1,0 +1,32 @@
+{
+  "schema_version": "usdrubf_multiday_reversal_public_summary.v1",
+  "status": "RESEARCH_ONLY",
+  "decision": "REJECT_FORWARD_PILOT",
+  "data": {
+    "first_bar": "2022-04-26 10:05:00",
+    "last_bar": "2026-11-09 23:50:00",
+    "bars": 195068,
+    "sessions": 1180,
+    "holdout": ["2026-10-01", "2026-11-09"],
+    "holdout_used_in_selection": false
+  },
+  "grid_variants": 40,
+  "eligible_variants": 0,
+  "best_ranked_variant": {
+    "mode": "bar_close_setup_extreme",
+    "setup_life_sessions": 5,
+    "stop_atr_buffer": 0.1,
+    "maximum_holding_sessions": 5,
+    "eligible": false
+  },
+  "walk_forward": {
+    "multiday": {"trades": 67, "net_r": 0.725674, "max_drawdown_r": 9.561909, "false_signals": 35, "without_best_r": -2.519378},
+    "one_day_monitor_v2": {"trades": 13, "net_r": 0.985431, "max_drawdown_r": 3.109965, "false_signals": 7, "without_best_r": -1.406099},
+    "frozen_ema_3_38": {"trades": 17, "net_r": 36.741745, "max_drawdown_r": 3.667999, "false_signals": 7, "without_best_r": 28.031785}
+  },
+  "holdout": {
+    "multiday": {"trades": 5, "net_r": -3.344184, "max_drawdown_r": 3.344184, "false_signals": 4},
+    "one_day_monitor_v2": {"trades": 1, "net_r": 0.953904, "max_drawdown_r": 0.0, "false_signals": 0},
+    "frozen_ema_3_38": {"trades": 2, "net_r": 1.427970, "max_drawdown_r": 1.357319, "false_signals": 1}
+  }
+}
