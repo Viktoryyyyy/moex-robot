@@ -1,0 +1,57 @@
+{
+  "schema_version": "usdrubf_multisession_sequence_protocol.v1",
+  "status": "RESEARCH_ONLY",
+  "instrument": "USDRUBF",
+  "timeframe": "AlgoPack 5m aggregated to observed-session D",
+  "correction": "A multi-session reversal is a sequence of daily candles, not a setup conditioned on a new five-session extreme.",
+  "formation": {
+    "lengths": [3, 4, 5],
+    "drive": "excursion from the first session open toward the recent edge is at least 0.75 ATR20",
+    "recent_edge": "the formation edge occurs in one of the last two sessions",
+    "stall": "additional progress in the final session is no more than 0.35 ATR20",
+    "recovery": "the last close recovers at least 55% of the final two-session range",
+    "patterns": {
+      "stall_turn": "the final close improves against the preceding drive",
+      "two_close_turn": "both final closes improve against the preceding drive"
+    },
+    "rolling_extreme_required": false
+  },
+  "confirmation": {
+    "must_be_later_session": true,
+    "valid_for_sessions": [3, 5],
+    "trigger": "5m close beyond the high/low of the final two formation sessions plus/minus one tick",
+    "modes": [
+      "price",
+      "price_delta",
+      "price_vwap_flow",
+      "session_multifactor"
+    ],
+    "session_multifactor": "session close beyond trigger and on the reversal side of VWAP, correct daily delta, RVOL20 >= 1.1, OI contraction <= -0.5%"
+  },
+  "execution": {
+    "entry": "next available 5m open after confirmation",
+    "stop": "beyond the full formation extreme by 0.10 or 0.25 ATR20",
+    "invalidation": "cancel before entry if the protective stop level is touched",
+    "maximum_entry_to_stop_atr": 3.0,
+    "maximum_holding_sessions": [3, 5],
+    "one_position": true,
+    "pyramiding": false
+  },
+  "costs": {
+    "base_all_in_points_per_side": 0.025,
+    "stress_all_in_points_per_side": 0.05,
+    "funding": "actual signed SWAPRATE with adverse fallback when missing"
+  },
+  "walk_forward": [
+    {"train_end": "2024-12-31", "validate": ["2025-01-01", "2025-12-31"]},
+    {"train_end": "2025-12-31", "validate": ["2026-01-01", "2026-06-30"]},
+    {"train_end": "2026-06-30", "validate": ["2026-07-01", "2026-09-30"]}
+  ],
+  "locked_holdout": ["2026-10-01", "2026-11-09"],
+  "protected_scope": [
+    "frozen EMA strategy",
+    "EMA pilot and journal",
+    "operational reversal monitor",
+    "manifests and automations"
+  ]
+}

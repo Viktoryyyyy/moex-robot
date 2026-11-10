@@ -1,0 +1,20 @@
+{
+  "schema_version": "usdrubf_multisession_sequence_data_manifest.v1",
+  "bars": 195068,
+  "sessions": 1180,
+  "first_bar": "2022-04-26 10:05:00",
+  "last_bar": "2026-11-09 23:50:00",
+  "holdout": [
+    "2026-10-01",
+    "2026-11-09"
+  ],
+  "holdout_used_in_selection": false,
+  "rolling_extreme_used_for_setup": false,
+  "inputs": {
+    "tradestats.csv": "9b68fb158b5350d4a2a91c6add1113bca79f816ff25e1afcdd01e34c25474259",
+    "tradestats_extension.csv": "f2f5a97b335efe1e16f976bd9ebfd15560d61c926eb60683c86d8cb987905a9e",
+    "history_all.json": "2aa3c464652a947708a45daaf003eafb16641356fff57a8184a1c92c44b88e16",
+    "history_extension.json": "a66fd87c3734a09f7a5f57d0b29b885a5689908771dd44dcb0f03779b5bb3b03",
+    "usdrubf_reversal_candle_v2.json": "ced307d471a71346a70718f263d73e836b8c1cde947b24343ccdc193a1a21f4f"
+  }
+}
