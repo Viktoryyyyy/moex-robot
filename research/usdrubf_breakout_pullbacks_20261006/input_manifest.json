@@ -1,0 +1,21 @@
+{
+  "source_workbook_sha256": "15775bac8589b506ca24b2b6ceb303c05c167e98dd5fa654fe8a5b4f4ee4168a",
+  "inputs": {
+    "update_oct06_rows.json": {
+      "sha256": "53c56007a2ad05c9f592334e73474ab9ae7cb8e8e90036146a79c339d117d39b",
+      "bytes": 3382706
+    },
+    "pullback_bars.json": {
+      "sha256": "9be23defb0706694cc5f245a7130e07748dd686be6a9e696724262ae1a530529",
+      "bytes": 10123564
+    },
+    "pullback_funding.json": {
+      "sha256": "624e86fc23cd2d26bfa016ad1b9d0f99508db6b1d8096cabb50860456252c125",
+      "bytes": 117710
+    }
+  },
+  "source": "Established MOEX project reader; native AlgoPack TradeStats and official history SwapRate",
+  "raw_inputs_published": false,
+  "historical_asof": "2026-10-05",
+  "private_results_sha256": "78f0353c5369730dd82591872178a7bffa3c0d2f3b19040c058370a3d555e03a"
+}
