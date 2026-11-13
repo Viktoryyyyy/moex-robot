@@ -72,3 +72,9 @@ forbidden_scope:
 - no continuous build
 - no W1 implementation
 - no strategy, research, runtime trading, Telegram, or notification changes
+
+raw_producer_evidence_versioning:
+- The existing raw backfill producer additionally freezes each publication cohort in futures/raw_5m_admission. This evidence does not grant registry candidates eligibility or change snapshot membership.
+- The chunk manifest raw_partition_versions maps its complete distinct output_partitions to exact SHA-256 byte versions, with admission_version_scope=publication_bytes_not_historical_PIT. An immutable receipt binds that manifest and its quality report.
+- Existing per-instrument quality, full chunk roster, eligibility identity, source label, ingest chronology and partition membership checks remain required. Current report aliases must honor recorded byte versions too.
+- Historical recovery in task futures_daily_history_expiry_recovery_v1 is separately authorized for the existing scheduler scope; the first-slice limits above do not grant general future onboarding or historical PIT acceptance.

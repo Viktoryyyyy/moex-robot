@@ -116,11 +116,17 @@ validation_rules:
 - Missing canonical family discovery for W1 must be reported as blocker; the runner must not silently infer families from ad hoc latest-file discovery.
 - Previous valid artifacts must remain available if the current run fails.
 - No global cleanup is allowed.
+- quality_reports must execute the existing continuous_quality_report component with the same snapshot/run dates, data root and unchanged roll/adjustment policy; a metadata-only PASS is forbidden.
+- Successful quality execution additionally requires current-child run identity, mandatory checks, matching quality/manifest schemas, status counts, row counts, paths and invocation timestamps. The universal child receipt records exact quality/manifest SHA-256 digests.
+- A nonzero quality component return code or missing, stale, contradictory or changed quality artifact must fail the universal run and prevent downstream success. This gate does not waive independent source coverage, roll eligibility or W1 requirements.
 
 legacy_boundary:
 - src/moex_data/futures/daily_refresh_runner.py remains compatibility-only.
 - The scheduler canonical entrypoint must point to moex_data.futures.universal_daily_refresh_runner.
 - Legacy futures_daily_data_refresh_manifest.v1 may remain for compatibility but must not define the future canonical universe scope.
+
+source_argument_binding:
+- The roll_map command receives the configured APIM base through --apim-base-url for its observed TradeStats source; the registry ISS base must not replace that source.
 
 forbidden_scope:
 - no strategy changes

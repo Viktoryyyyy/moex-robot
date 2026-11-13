@@ -68,3 +68,10 @@ date_source_read_compatibility:
 - The old raw_5m_loader and all_universe_raw_5m_backfill evidence layouts retain their original meanings; this extension does not authorize new legacy ingestion.
 - Mixed histories across dates are valid; contradictory labels within one secid/trade_date are rejected. Observed dates never establish a complete exchange calendar.
 - Missing retained evidence is a blocker. Readers do not repair labels, rewrite raw, fabricate receipts or fetch replacement history.
+
+recovery_versioning:
+- Task futures_daily_history_expiry_recovery_v1 explicitly authorizes targeted recovery through the existing producer for the full existing scheduler scope; this does not authorize a new collector, universe expansion or canonical accepted pointers.
+- Before replacing any current raw partition, the producer preserves both previous and new exact bytes in futures/raw_5m_admission/objects/{sha256}, with immutable logical-path/version records. A failed publication must retain the previous version.
+- Successful producer cohorts retain their complete partition version mapping and immutable quality/manifest pair. Both current aliases and retained witnesses must match the exact recorded raw version; matching timestamps and counts alone are insufficient.
+- Old unversioned witnesses retain strict full-cohort checks. Lost historical versions cannot be reconstructed by accepting a mixture of current partitions. Such history requires explicit new source acquisition and admission, with originals retained.
+- Reacquisition records its actual ingest timestamp and observed date-source status. Current publication receipts do not establish historical point-in-time availability, completeness of the exchange calendar, or a forecast evaluation right.

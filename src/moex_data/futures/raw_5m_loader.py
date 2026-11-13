@@ -8,6 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path.cwd() / "src"))
 
 import pandas as pd
+from moex_data.futures import raw_admission_versions as versions
 
 from moex_data.futures import liquidity_history_metrics_probe as base
 
@@ -322,7 +323,7 @@ def write_partitions(frame, data_root, family_code, secid):
     for trade_date, part in frame.groupby("trade_date"):
         path = partition_path(data_root, str(trade_date), family_code, secid)
         path.parent.mkdir(parents=True, exist_ok=True)
-        part.sort_values(["ts", "secid"]).to_parquet(path, index=False)
+        versions.publish_partition(data_root, path, part.sort_values(["ts", "secid"]))
         paths.append(str(path))
     return paths
 
@@ -447,8 +448,6 @@ def main():
         summaries[secid] = {"requested_from": start, "requested_till": end, "rows": counts.get("rows"), "trade_dates": counts.get("trade_dates"), "partition_count": len(paths), "quality_status": quality_status, "short_history_flag": short_history_flag, "review_notes": notes, "source_identity_status": meta.get("source_identity_status"), "source_identity_filtered_out_rows": meta.get("source_identity_filtered_out_rows"), "observed_source_secids": meta.get("observed_source_secids") or [], "exact_duplicate_full_row_count": duplicate_diag.get("exact_duplicate_full_row_count"), "source_session_duplicate_timestamp_row_count": duplicate_diag.get("source_session_duplicate_timestamp_row_count"), "conflicting_duplicate_timestamp_row_count": duplicate_diag.get("conflicting_duplicate_timestamp_row_count")}
 
     quality = pd.DataFrame(quality_rows)
-    Path(outputs["quality_report"]).parent.mkdir(parents=True, exist_ok=True)
-    quality.to_parquet(outputs["quality_report"], index=False)
     quality_status_counts = {str(k): int(v) for k, v in quality["quality_status"].astype(str).value_counts(dropna=False).to_dict().items()}
     duplicate_summary = {
         "exact_duplicate_full_rows_dropped": int(quality["exact_duplicate_full_row_count"].fillna(0).sum()) if "exact_duplicate_full_row_count" in quality.columns else 0,
@@ -479,8 +478,7 @@ def main():
         "short_history_handling": {"SiU7": summaries.get("SiU7")},
         "loader_result_verdict": "pass" if quality_status_counts.get("fail", 0) == 0 else "fail",
     }
-    Path(outputs["manifest"]).parent.mkdir(parents=True, exist_ok=True)
-    Path(outputs["manifest"]).write_text(json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+    manifest = versions.publish_admission(data_root, outputs["quality_report"], quality, outputs["manifest"], manifest)
 
     print_json_line("loader_whitelist_applied", whitelist)
     print_json_line("excluded_instruments_confirmed", excluded)
